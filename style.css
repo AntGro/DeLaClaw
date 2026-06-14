@@ -1722,3 +1722,4 @@ body.demo-mode .app-header{top:var(--demo-banner-h,36px);}
   .habit-cal-week-items .habit-cal-item{font-size:0.78rem;padding:3px 8px;-webkit-line-clamp:1;white-space:normal;word-break:break-word;max-width:100%;}
   .habit-cal-week-empty{margin-top:0;}
 }
+.env-badge{position:fixed;top:44px;left:14px;z-index:99;padding:2px 8px;border-radius:4px;font-size:0.65rem;font-weight:700;font-family:'DM Mono',monospace;letter-spacing:0.08em;opacity:0.7;pointer-events:none;background:var(--accent);color:#fff;}

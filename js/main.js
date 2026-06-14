@@ -2551,3 +2551,16 @@ window.toggleTheme = toggleTheme;
 window.disconnect = disconnect;
 window.toggleSearch = toggleSearch;
 window.clearPageSearch = clearPageSearch;
+
+// --- Environment badge ---
+(function() {
+  const h = location.hostname;
+  let env = null;
+  if (h.startsWith('dev.') || h.includes('dev.delaclaw')) env = 'DEV';
+  else if (h === 'localhost' || h === '127.0.0.1') env = 'LOCAL';
+  if (!env) return;
+  const badge = document.createElement('div');
+  badge.className = 'env-badge';
+  badge.textContent = env;
+  document.body.appendChild(badge);
+})();

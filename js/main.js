@@ -2371,8 +2371,33 @@ function importBackup() {
         } catch (e) { console.warn(`Failed to restore ${table}:`, e.message); }
       }
       showToast(t('menu.settings_restore_done', totalRows));
-      // Reload to reflect new data
-      setTimeout(() => location.reload(), 1200);
+      // In demo mode, reseed the in-memory adapter instead of reloading
+      // (reload would re-create the adapter with default demo data)
+      if (state.demoMode && state.demoAdapter) {
+        const reseedData = {};
+        for (const table of (backup._meta.tables || [])) {
+          reseedData[table] = backup[table] || [];
+        }
+        state.demoAdapter.reseed(reseedData);
+        setDemoCategoriesFromData(reseedData);
+        await loadProjects();
+        buildProjectCards();
+        initProjectDragDrop();
+        updateArchiveToggleBtn();
+        renderArchivedProjects();
+        await refreshAll();
+        await refreshTodos();
+        await refreshHabits();
+        await refreshBirthdays();
+        await refreshVestiaire();
+        await refreshFlashcards();
+        await refreshLists();
+        refreshWelcome();
+        closeSettings();
+      } else {
+        // Reload to reflect new data
+        setTimeout(() => location.reload(), 1200);
+      }
     } catch (e) {
       console.error('Import failed:', e);
       showToast(t('menu.settings_restore_error'));

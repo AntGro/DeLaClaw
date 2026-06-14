@@ -1616,10 +1616,18 @@ function openSettings() {
   updateMenuThemeItem();
   hydrateIcons();
   document.getElementById('settingsModal').classList.add('visible');
+  const scrollY = window.scrollY;
+  document.body.classList.add('no-scroll');
+  document.body.style.top = `-${scrollY}px`;
+  document.body.dataset.scrollY = scrollY;
 }
 
 function closeSettings() {
   document.getElementById('settingsModal').classList.remove('visible');
+  document.body.classList.remove('no-scroll');
+  const scrollY = parseInt(document.body.dataset.scrollY || '0', 10);
+  document.body.style.top = '';
+  window.scrollTo(0, scrollY);
 }
 
 function switchSettingsPane(paneKey) {

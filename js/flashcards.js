@@ -994,7 +994,7 @@ function startPractice(deckFilter) {
   const now = new Date();
   let pool = allCards.filter(c => !c.last_review || !c.next_review || new Date(c.next_review) <= now);
   if (deckFilter && deckFilter !== '__all') pool = pool.filter(c => c.deck === deckFilter);
-  if (pool.length === 0) { showToast(t('flashcards.no_cards_due')); return; }
+  if (pool.length === 0) { showAllCaughtUp('cards'); return; }
 
   sessionDeck = deckFilter || null;
 
@@ -1157,6 +1157,26 @@ function showSessionSummary() {
       </div>
       <div class="practice-summary-actions">
         ${continueBtn}
+        <button class="btn practice-done-btn" onclick="endPractice()">${t('common.close')}</button>
+      </div>
+    </div>`;
+}
+
+// Show "all caught up" overlay when no cards/texts are due
+function showAllCaughtUp(kind) {
+  showPracticeOverlay();
+  const overlay = document.getElementById('practiceOverlay');
+  if (!overlay) return;
+  const subtitle = kind === 'texts'
+    ? t('text_revision.all_caught_up_texts')
+    : t('flashcards.all_caught_up_cards');
+  overlay.innerHTML = `
+    <div class="practice-summary">
+      ${practiceSummaryLogo()}
+      <div class="practice-summary-emoji">${lucideIcon('circle-check', 32, '#22c55e')}</div>
+      <h2>${t('flashcards.all_caught_up')}</h2>
+      <p class="all-caught-up-detail">${subtitle}</p>
+      <div class="practice-summary-actions">
         <button class="btn practice-done-btn" onclick="endPractice()">${t('common.close')}</button>
       </div>
     </div>`;
@@ -1391,7 +1411,7 @@ function startTextPractice(deckFilter) {
     }
   }
 
-  if (pool.length === 0) { showToast(t('text_revision.no_chunks_due')); return; }
+  if (pool.length === 0) { showAllCaughtUp('texts'); return; }
 
   // Pick the single most due chunk (one revision per session)
   // Among chunks with the same priority, pick randomly

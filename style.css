@@ -1421,6 +1421,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .practice-continue-alt:hover { filter:none; background:var(--bg-offset); }
 .practice-summary-actions .practice-done-btn { background:transparent; color:var(--text-secondary); border:1px solid var(--border); }
 .practice-summary-actions .practice-done-btn:hover { filter:none; background:var(--bg-offset); }
+.all-caught-up-detail { color:var(--text-secondary); font-size:0.92rem; margin:-4px 0 8px; }
 
 @media (max-width:600px) {
   .practice-card-area { max-width:95vw; }

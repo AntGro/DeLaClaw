@@ -2552,7 +2552,7 @@ window.disconnect = disconnect;
 window.toggleSearch = toggleSearch;
 window.clearPageSearch = clearPageSearch;
 
-// --- Environment badge + dev favicon/manifest ---
+// --- Environment badge + dev favicon ---
 (function() {
   const h = location.hostname;
   let env = null;
@@ -2566,7 +2566,4 @@ window.clearPageSearch = clearPageSearch;
   // Swap favicon
   const favLink = document.querySelector('link[rel="icon"]');
   if (favLink) favLink.href = 'icons/favicon-dev.png';
-  // Swap manifest for dev PWA icon + name
-  const manLink = document.querySelector('link[rel="manifest"]');
-  if (manLink) manLink.href = 'manifest-dev.json';
 })();

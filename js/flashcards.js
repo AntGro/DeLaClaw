@@ -984,7 +984,7 @@ window.saveNewFlashDeck = function() {
 };
 
 function closeAllFlashModals() {
-  ['addFlashcardModal', 'editFlashcardModal', 'addDraftModal', 'addFlashDeckModal', 'addTextModal', 'editTextModal'].forEach(id => {
+  ['addFlashcardModal', 'editFlashcardModal', 'addDraftModal', 'addFlashDeckModal', 'addTextModal', 'editTextModal', 'importFlashModal'].forEach(id => {
     const m = document.getElementById(id); if (m) m.remove();
   });
 }
@@ -1705,6 +1705,389 @@ document.addEventListener('keydown', (e) => {
 // EXPORTS
 // ===================================================================
 function initFlashcardModals() {}
+
+// ── Bulk Import ──
+
+function buildImportPrompt(mode, deck, deckType) {
+  if (deckType === 'text') {
+    if (mode === 'convert') {
+      return `I want to convert existing texts into a structured JSON format for import into a flashcard/text-revision app.
+
+Output a JSON array. Each element must have:
+- "title": string (the text's title)
+- "author": string or null
+- "content": string (the full text, with line breaks as \\n)
+
+Example:
+[
+  {
+    "title": "Le Lac",
+    "author": "Alphonse de Lamartine",
+    "content": "Ainsi, toujours poussés vers de nouveaux rivages,\\nDans la nuit éternelle emportés sans retour,\\nNe pourrons-nous jamais sur l'océan des âges\\nJeter l'ancre un seul jour ?"
+  }
+]
+
+Output ONLY valid JSON, no markdown fences, no commentary.
+Paste your texts below and I will convert them:`;
+    }
+    // generate
+    const existing = allTexts.filter(tx => tx.deck === deck);
+    let ctx = '';
+    if (existing.length > 0) {
+      const samples = existing.slice(0, 3).map(tx =>
+        `  - "${tx.title}"${tx.author ? ` by ${tx.author}` : ''}`
+      ).join('\n');
+      ctx = `\n\nExisting texts in "${deck}" deck:\n${samples}\n\nGenerate texts that complement this collection.`;
+    }
+    return `Generate texts for a text-revision/memorisation app, for the "${deck}" deck.${ctx}
+
+Output a JSON array. Each element must have:
+- "title": string
+- "author": string or null
+- "content": string (the full text, line breaks as \\n)
+
+Output ONLY valid JSON, no markdown fences, no commentary.`;
+  }
+
+  // Flashcard mode
+  if (mode === 'convert') {
+    return `I want to convert existing flashcards into a structured JSON format for import.
+
+Output a JSON array of objects, each with:
+- "front": string (the question)
+- "back": string (the answer)
+
+Example:
+[
+  { "front": "What is the capital of France?", "back": "Paris" },
+  { "front": "H₂O is the formula for?", "back": "Water" }
+]
+
+Output ONLY valid JSON, no markdown fences, no commentary.
+Paste your flashcards below and I will convert them:`;
+  }
+
+  // generate
+  const existing = allCards.filter(c => c.deck === deck);
+  let ctx = '';
+  if (existing.length > 0) {
+    const samples = existing.slice(0, 8).map(c =>
+      `  - Q: "${c.front}" → A: "${c.back}"`
+    ).join('\n');
+    ctx = `\n\nExisting cards in "${deck}" deck (${existing.length} total):\n${samples}${existing.length > 8 ? `\n  ... and ${existing.length - 8} more` : ''}\n\nGenerate cards that complement this collection — avoid duplicates, match the style and depth.`;
+  }
+  return `Generate flashcards for a spaced-repetition app, for the "${deck}" deck.${ctx}
+
+Output a JSON array of objects, each with:
+- "front": string (the question)
+- "back": string (the answer)
+
+Output ONLY valid JSON, no markdown fences, no commentary.`;
+}
+
+function parseImportJSON(raw, deckType) {
+  let text = raw.trim();
+  // Strip markdown fences if present
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
+  let arr;
+  try { arr = JSON.parse(text); } catch (e) { throw new Error('Invalid JSON: ' + e.message); }
+  if (!Array.isArray(arr)) throw new Error('Expected a JSON array');
+  if (arr.length === 0) throw new Error('Array is empty');
+  for (let i = 0; i < arr.length; i++) {
+    const item = arr[i];
+    if (deckType === 'text') {
+      if (!item.title || typeof item.title !== 'string') throw new Error(`Item ${i + 1}: missing "title"`);
+      if (!item.content || typeof item.content !== 'string') throw new Error(`Item ${i + 1}: missing "content"`);
+    } else {
+      if (!item.front || typeof item.front !== 'string') throw new Error(`Item ${i + 1}: missing "front"`);
+      if (!item.back || typeof item.back !== 'string') throw new Error(`Item ${i + 1}: missing "back"`);
+    }
+  }
+  return arr;
+}
+
+window.openImportModal = async function(presetDeck) {
+  closeAllFlashModals();
+  const { LLM_SERVICES, escHtml } = await import('./demo-chooser.js');
+
+  const cardDecks = [...new Set(allCards.map(c => c.deck))].sort();
+  const textDecks = [...new Set(allTexts.map(c => c.deck))].sort();
+  const allDecks = [...new Set([...cardDecks, ...textDecks])].sort();
+
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const serviceButtons = LLM_SERVICES.map(s => {
+    const href = isMobile && s.appUrl ? s.appUrl : s.url;
+    return `<a href="${href}" target="_blank" rel="noopener" class="dc-llm-btn">${s.svg}<span>${s.name}</span></a>`;
+  }).join('');
+
+  const deckOptions = allDecks.map(d =>
+    `<option value="${esc(d)}" ${d === presetDeck ? 'selected' : ''}>${esc(d)}</option>`
+  ).join('');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay visible';
+  overlay.id = 'importFlashModal';
+
+  overlay.innerHTML = `
+    <div class="dc-container">
+      <div class="dc-header">
+        <h2>${lucideIcon('upload', 20, 'var(--accent)')} Import</h2>
+        <p class="dc-subtitle">Bulk-add flashcards or texts with the help of an LLM</p>
+      </div>
+
+      <div id="importOptions" class="dc-options">
+        <button class="dc-card" id="importConvertCard">
+          <div class="dc-card-icon">${lucideIcon('file-text', 28)}</div>
+          <div class="dc-card-title">Convert existing</div>
+          <div class="dc-card-desc">Paste your flashcards in any format — an LLM will restructure them</div>
+        </button>
+        <button class="dc-card" id="importGenerateCard">
+          <div class="dc-card-icon">${lucideIcon('sparkles', 28)}</div>
+          <div class="dc-card-title">Generate new</div>
+          <div class="dc-card-desc">Ask an LLM to create flashcards — your existing cards are included as context</div>
+        </button>
+      </div>
+
+      <div class="dc-custom-flow" id="importFlow" style="display:none">
+        <div class="import-config">
+          <label class="import-config-label">Deck
+            <select id="importDeckSelect" class="page-sort">${deckOptions}
+              <option value="__new">+ New deck</option>
+            </select>
+          </label>
+          <label class="import-config-label">Type
+            <select id="importTypeSelect" class="page-sort">
+              <option value="flashcard">Flashcards</option>
+              <option value="text">Texts</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="dc-step">
+          <div class="dc-step-header">
+            <span class="dc-step-num">1</span>
+            <span>Copy this prompt</span>
+          </div>
+          <div class="dc-prompt-box">
+            <pre class="dc-prompt-text" id="importPromptText"></pre>
+            <button class="dc-copy-btn" id="importCopyBtn">
+              <span class="import-copy-icon">${lucideIcon('copy', 15)}</span>
+              <span id="importCopyLabel">Copy</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="dc-step">
+          <div class="dc-step-header">
+            <span class="dc-step-num">2</span>
+            <span>Open your LLM</span>
+          </div>
+          <div class="dc-llm-links">${serviceButtons}</div>
+        </div>
+
+        <div class="dc-step">
+          <div class="dc-step-header">
+            <span class="dc-step-num">3</span>
+            <span>Paste the result</span>
+          </div>
+          <textarea class="dc-paste-area" id="importPasteArea" rows="8" placeholder="Paste the JSON array here…"></textarea>
+          <div id="importPreview" class="import-preview" style="display:none"></div>
+          <div class="dc-error" id="importError" style="display:none"></div>
+          <div class="dc-flow-actions">
+            <button class="dc-btn-secondary" id="importBackBtn">Back</button>
+            <button class="dc-btn-primary" id="importLoadBtn" disabled>
+              ${lucideIcon('check', 15)}
+              Import
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // DOM refs
+  const optionsDiv = overlay.querySelector('#importOptions');
+  const flowDiv = overlay.querySelector('#importFlow');
+  const deckSelect = overlay.querySelector('#importDeckSelect');
+  const typeSelect = overlay.querySelector('#importTypeSelect');
+  const promptPre = overlay.querySelector('#importPromptText');
+  const copyBtn = overlay.querySelector('#importCopyBtn');
+  const copyLabel = overlay.querySelector('#importCopyLabel');
+  const copyIcon = overlay.querySelector('.import-copy-icon');
+  const pasteArea = overlay.querySelector('#importPasteArea');
+  const loadBtn = overlay.querySelector('#importLoadBtn');
+  const backBtn = overlay.querySelector('#importBackBtn');
+  const errorDiv = overlay.querySelector('#importError');
+  const previewDiv = overlay.querySelector('#importPreview');
+
+  let importMode = null; // 'convert' | 'generate'
+
+  function selectedDeck() {
+    return deckSelect.value === '__new' ? null : deckSelect.value;
+  }
+  function selectedType() { return typeSelect.value; }
+
+  function updatePrompt() {
+    const deck = selectedDeck() || 'General';
+    const type = selectedType();
+    promptPre.textContent = buildImportPrompt(importMode, deck, type);
+  }
+
+  // Auto-detect type from selected deck
+  function autoDetectType() {
+    const deck = selectedDeck();
+    if (!deck) return;
+    const hasCards = allCards.some(c => c.deck === deck);
+    const hasTexts = allTexts.some(tx => tx.deck === deck);
+    if (hasTexts && !hasCards) typeSelect.value = 'text';
+    else typeSelect.value = 'flashcard';
+  }
+
+  function showFlow(mode) {
+    importMode = mode;
+    optionsDiv.style.display = 'none';
+    flowDiv.style.display = '';
+    overlay.querySelector('.dc-subtitle').style.display = 'none';
+    autoDetectType();
+    updatePrompt();
+  }
+
+  // Card clicks
+  overlay.querySelector('#importConvertCard').addEventListener('click', () => showFlow('convert'));
+  overlay.querySelector('#importGenerateCard').addEventListener('click', () => showFlow('generate'));
+
+  // Deck/type change → regenerate prompt
+  deckSelect.addEventListener('change', () => {
+    if (deckSelect.value === '__new') {
+      const name = prompt('New deck name:');
+      if (name && name.trim()) {
+        const opt = document.createElement('option');
+        opt.value = name.trim();
+        opt.textContent = name.trim();
+        opt.selected = true;
+        deckSelect.insertBefore(opt, deckSelect.querySelector('[value="__new"]'));
+      } else {
+        deckSelect.value = allDecks[0] || 'General';
+      }
+    }
+    autoDetectType();
+    updatePrompt();
+  });
+  typeSelect.addEventListener('change', updatePrompt);
+
+  // Copy prompt
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(promptPre.textContent);
+      copyLabel.textContent = 'Copied!';
+      copyIcon.innerHTML = lucideIcon('clipboard-check', 15);
+      setTimeout(() => {
+        copyLabel.textContent = 'Copy';
+        copyIcon.innerHTML = lucideIcon('copy', 15);
+      }, 2000);
+    } catch {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(promptPre);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  });
+
+  // Validate paste
+  pasteArea.addEventListener('input', () => {
+    const raw = pasteArea.value.trim();
+    errorDiv.style.display = 'none';
+    previewDiv.style.display = 'none';
+    if (!raw) { loadBtn.disabled = true; return; }
+    try {
+      const items = parseImportJSON(raw, selectedType());
+      loadBtn.disabled = false;
+      // Show preview
+      const type = selectedType();
+      const count = items.length;
+      const sample = items.slice(0, 3).map(item => {
+        if (type === 'text') return `<div class="import-preview-item">${lucideIcon('book-open', 14, 'var(--muted)')} ${esc(item.title)}${item.author ? ` — ${esc(item.author)}` : ''}</div>`;
+        return `<div class="import-preview-item">${lucideIcon('brain', 14, 'var(--muted)')} <strong>${esc(item.front)}</strong> → ${esc(item.back)}</div>`;
+      }).join('');
+      previewDiv.innerHTML = `<div class="import-preview-header">${count} ${type === 'text' ? 'text' : 'card'}${count !== 1 ? 's' : ''} ready to import</div>${sample}${count > 3 ? `<div class="import-preview-more">…and ${count - 3} more</div>` : ''}`;
+      previewDiv.style.display = '';
+    } catch (e) {
+      loadBtn.disabled = true;
+      errorDiv.textContent = e.message;
+      errorDiv.style.display = '';
+    }
+  });
+
+  // Back
+  backBtn.addEventListener('click', () => {
+    flowDiv.style.display = 'none';
+    optionsDiv.style.display = '';
+    overlay.querySelector('.dc-subtitle').style.display = '';
+    errorDiv.style.display = 'none';
+    previewDiv.style.display = 'none';
+    pasteArea.value = '';
+    loadBtn.disabled = true;
+    importMode = null;
+  });
+
+  // Import
+  loadBtn.addEventListener('click', async () => {
+    const type = selectedType();
+    let items;
+    try { items = parseImportJSON(pasteArea.value, type); } catch (e) {
+      errorDiv.textContent = e.message;
+      errorDiv.style.display = '';
+      return;
+    }
+    let deck = selectedDeck();
+    if (!deck) {
+      showToast('Please select or create a deck');
+      return;
+    }
+    if (!state.db.connected) { showToast('Not connected'); return; }
+
+    loadBtn.disabled = true;
+    loadBtn.textContent = 'Importing…';
+
+    try {
+      if (type === 'text') {
+        for (const item of items) {
+          const linesPerChunk = 4;
+          const { data: inserted } = await state.db.from('texts').insert({
+            deck, title: item.title, author: item.author || null,
+            content: item.content, lines_per_chunk: linesPerChunk, context_lines: 3
+          }).select('*');
+          if (inserted && inserted.length > 0) {
+            const textRow = inserted[0];
+            const chunks = splitTextIntoChunks(item.content, linesPerChunk);
+            const chunkRows = chunks.map((_, idx) => ({ text_id: textRow.id, chunk_index: idx }));
+            if (chunkRows.length > 0) await state.db.from('text_line_progress').insert(chunkRows);
+          }
+        }
+      } else {
+        const rows = items.map(item => ({ deck, front: item.front, back: item.back }));
+        await state.db.from('flashcards').insert(rows);
+      }
+      overlay.remove();
+      await refreshFlashcards();
+      showToast(`Imported ${items.length} ${type === 'text' ? 'text' : 'card'}${items.length !== 1 ? 's' : ''}`);
+    } catch (e) {
+      errorDiv.textContent = 'Import failed: ' + e.message;
+      errorDiv.style.display = '';
+      loadBtn.disabled = false;
+      loadBtn.innerHTML = `${lucideIcon('check', 15)} Import`;
+    }
+  });
+
+  // Dismiss by clicking overlay
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+};
+
 function getFlashcardCounts() {
   return { cards: allCards.length, drafts: allDrafts.length, texts: allTexts.length };
 }

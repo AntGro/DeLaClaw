@@ -234,7 +234,7 @@ function normalizeCustomData(data) {
 
 // ── LLM service buttons ──────────────────────────────────────────
 
-const LLM_SERVICES = [
+export const LLM_SERVICES = [
   {
     name: 'ChatGPT',
     url: 'https://chatgpt.com',
@@ -263,7 +263,7 @@ const LLM_SERVICES = [
 
 // ── Escape helper (avoids HTML entity literals in source) ─────────
 
-function escHtml(s) {
+export function escHtml(s) {
   const el = document.createElement('span');
   el.textContent = s;
   return el.innerHTML;

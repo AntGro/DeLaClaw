@@ -1607,6 +1607,16 @@ body.demo-mode .app-header{top:var(--demo-banner-h,36px);}
   .dc-prompt-text{max-height:120px;font-size:0.72rem;}
 }
 
+/* ─── Import modal ─── */
+.import-config{display:flex;gap:14px;flex-wrap:wrap;}
+.import-config-label{display:flex;flex-direction:column;gap:4px;font-size:0.8rem;font-weight:500;color:var(--muted);flex:1;min-width:120px;}
+.import-config-label select{font-size:0.86rem;}
+.import-preview{margin-top:8px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:0.82rem;}
+.import-preview-header{font-weight:600;color:var(--accent);margin-bottom:8px;font-size:0.82rem;}
+.import-preview-item{display:flex;align-items:baseline;gap:6px;color:var(--text);padding:3px 0;line-height:1.4;font-size:0.8rem;}
+.import-preview-item strong{font-weight:600;}
+.import-preview-more{color:var(--muted);font-size:0.76rem;margin-top:4px;}
+
 
 /* ─── Welcome Calendar Widget ─── */
 .welcome-calendar-strip{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:6px;}

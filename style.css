@@ -364,7 +364,7 @@ input,select,button{font-family:inherit;}
 .tab-config-item.locked{cursor:default;opacity:0.55;}
 .tab-config-item.locked .tab-config-toggle{background:var(--accent);pointer-events:none;}
 .tab-config-item.locked .tab-config-drag{visibility:hidden;}
-.tab-config-item .tab-config-drag{display:inline-flex;align-items:center;cursor:grab;opacity:0.5;transition:opacity 0.15s;flex-shrink:0;}
+.tab-config-item .tab-config-drag{display:inline-flex;align-items:center;cursor:grab;opacity:0.5;transition:opacity 0.15s;flex-shrink:0;touch-action:none;}
 .tab-config-item .tab-config-drag:hover{opacity:1;}
 .tab-config-item.dragging{opacity:0.4;border:1px dashed var(--accent);}
 .tab-config-item.drag-over{border-top:2px solid var(--accent);}

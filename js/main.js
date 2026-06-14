@@ -1669,7 +1669,6 @@ function initTabConfigToggle(list) {
 function initTabConfigDrag(list) {
   let dragState = null;
   list.querySelectorAll('.tab-config-item').forEach(item => {
-    item.style.touchAction = 'none';
     item.addEventListener('pointerdown', e => {
       // Only initiate drag from the drag handle
       if (!e.target.closest('.tab-config-drag')) return;

@@ -1,0 +1,20 @@
+{
+  "name": "DeLaClaw DEV",
+  "short_name": "DLC Dev",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#08090d",
+  "theme_color": "#08090d",
+  "icons": [
+    {
+      "src": "icons/icon-192-dev.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512-dev.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

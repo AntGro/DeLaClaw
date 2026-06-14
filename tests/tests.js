@@ -1113,12 +1113,14 @@ async function importFlashcardsIntegrationTest() {
       assert(previewVisible, 'Preview should be visible');
     });
 
-    const importEnabled = await page.$eval('#importLoadBtn', el => !el.disabled);
-    test('Import: import button enabled after valid JSON', () => {
-      assert(importEnabled, 'Import button should be enabled');
+    const reviewEnabled = await page.$eval('#importReviewBtn', el => !el.disabled);
+    test('Import: review button enabled after valid JSON', () => {
+      assert(reviewEnabled, 'Review button should be enabled');
     });
 
-    await page.click('#importLoadBtn');
+    await page.click('#importReviewBtn');
+    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
+    await page.click('#importConfirmBtn');
     await page.waitForTimeout(1000);
 
     const modalGone = await page.$('#importFlashModal') === null;
@@ -1156,7 +1158,9 @@ async function importFlashcardsIntegrationTest() {
     ]);
     await page.fill('#importPasteArea', geoJSON);
     await page.waitForTimeout(300);
-    await page.click('#importLoadBtn');
+    await page.click('#importReviewBtn');
+    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
+    await page.click('#importConfirmBtn');
     await page.waitForTimeout(1000);
 
     const geoResp = await fetch(`${BASE}/flashcards?deck=eq.Geographie`);
@@ -1196,7 +1200,9 @@ async function importFlashcardsIntegrationTest() {
     ]);
     await page.fill('#importPasteArea', textJSON);
     await page.waitForTimeout(300);
-    await page.click('#importLoadBtn');
+    await page.click('#importReviewBtn');
+    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
+    await page.click('#importConfirmBtn');
     await page.waitForTimeout(1000);
 
     const textsResp = await fetch(`${BASE}/texts?deck=eq.Poesie`);
@@ -1284,12 +1290,78 @@ async function importFlashcardsIntegrationTest() {
     await page.waitForTimeout(300);
 
     const errorVisible = await page.$eval('#importError', el => el.style.display !== 'none');
-    const importDisabled = await page.$eval('#importLoadBtn', el => el.disabled);
+    const reviewDisabled = await page.$eval('#importReviewBtn', el => el.disabled);
     test('Import: invalid JSON shows error and disables button', () => {
-      assert(errorVisible && importDisabled, 'Error should show and button should be disabled');
+      assert(errorVisible && reviewDisabled, 'Error should show and review button should be disabled');
     });
 
-    // ── Test 8: No JS errors during all import flows ──
+    // Clean up invalid JSON modal
+    await page.evaluate(() => document.querySelector('#importFlashModal')?.remove());
+
+    // ── Test 8: Review step — exclude cards ──
+    await page.evaluate(() => window.openImportModal('Histoire'));
+    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
+    await page.click('#importConvertCard');
+    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
+
+    const excludeJSON = JSON.stringify([
+      { front: 'Card to keep', back: 'Keep answer' },
+      { front: 'Card to exclude', back: 'Exclude answer' },
+    ]);
+    await page.fill('#importPasteArea', excludeJSON);
+    await page.waitForTimeout(300);
+    await page.click('#importReviewBtn');
+    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
+
+    // Verify all review cards are shown
+    const reviewCardCount = await page.$$eval('.import-review-card', els => els.length);
+    test('Import: review step shows all cards', () => {
+      assert(reviewCardCount === 2, `Expected 2 review cards, got ${reviewCardCount}`);
+    });
+
+    // Uncheck the second card
+    await page.click('.import-review-check[data-idx="1"]');
+    await page.waitForTimeout(200);
+
+    // Confirm import — only 1 card should be imported
+    const prevCount = await fetch(`${BASE}/flashcards?deck=eq.Histoire`).then(r => r.json()).then(d => d.length);
+    await page.click('#importConfirmBtn');
+    await page.waitForTimeout(1000);
+
+    const afterResp = await fetch(`${BASE}/flashcards?deck=eq.Histoire`);
+    const afterCards = await afterResp.json();
+    test('Import: excluding a card in review prevents its import', () => {
+      assert(afterCards.length === prevCount + 1, `Expected ${prevCount + 1} cards (one excluded), got ${afterCards.length}`);
+    });
+
+    // ── Test 9: Review step — edit card before import ──
+    await page.evaluate(() => window.openImportModal('Histoire'));
+    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
+    await page.click('#importConvertCard');
+    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
+
+    const editJSON = JSON.stringify([
+      { front: 'Original question', back: 'Original answer' },
+    ]);
+    await page.fill('#importPasteArea', editJSON);
+    await page.waitForTimeout(300);
+    await page.click('#importReviewBtn');
+    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
+
+    // Edit the front field
+    await page.fill('.import-review-field-input[data-field="front"]', 'Edited question');
+    await page.waitForTimeout(100);
+
+    await page.click('#importConfirmBtn');
+    await page.waitForTimeout(1000);
+
+    const editResp = await fetch(`${BASE}/flashcards?front=eq.Edited question`);
+    const editedCards = await editResp.json();
+    test('Import: editing a card in review applies the edit', () => {
+      assert(editedCards.length === 1, `Expected 1 card with edited front, got ${editedCards.length}`);
+    });
+
+    // ── Test 10: No JS errors during all import flows ──
     test('Import: no JS errors during import flows', () => {
       const real = jsErrors.filter(e => !e.includes('favicon') && !e.includes('supabase') && !e.includes('fetch'));
       assert(real.length === 0, `JS errors: ${real.join('; ')}`);

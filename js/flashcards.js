@@ -1900,13 +1900,25 @@ window.openImportModal = async function(presetDeck) {
           <textarea class="dc-paste-area" id="importPasteArea" rows="8" placeholder="${t('flashcards.import_paste_placeholder')}"></textarea>
           <div id="importPreview" class="import-preview" style="display:none"></div>
           <div class="dc-error" id="importError" style="display:none"></div>
-          <div class="dc-flow-actions">
+          <div class="dc-flow-actions" id="importPasteActions">
             <button class="dc-btn-secondary" id="importBackBtn">${t('flashcards.import_back')}</button>
-            <button class="dc-btn-primary" id="importLoadBtn" disabled>
-              ${lucideIcon('check', 15)}
-              ${t('flashcards.import_btn')}
+            <button class="dc-btn-primary" id="importReviewBtn" disabled>
+              ${lucideIcon('eye', 15)}
+              ${t('flashcards.import_review')}
             </button>
           </div>
+        </div>
+      </div>
+
+      <div id="importReviewStep" style="display:none">
+        <div id="importReviewContainer" class="import-review"></div>
+        <div class="dc-error" id="importReviewError" style="display:none"></div>
+        <div class="dc-flow-actions">
+          <button class="dc-btn-secondary" id="importReviewBackBtn">${t('flashcards.import_back_to_paste')}</button>
+          <button class="dc-btn-primary" id="importConfirmBtn" disabled>
+            ${lucideIcon('check', 15)}
+            ${t('flashcards.import_btn')}
+          </button>
         </div>
       </div>
     </div>
@@ -1924,12 +1936,20 @@ window.openImportModal = async function(presetDeck) {
   const copyLabel = overlay.querySelector('#importCopyLabel');
   const copyIcon = overlay.querySelector('.import-copy-icon');
   const pasteArea = overlay.querySelector('#importPasteArea');
-  const loadBtn = overlay.querySelector('#importLoadBtn');
+  const reviewBtn = overlay.querySelector('#importReviewBtn');
   const backBtn = overlay.querySelector('#importBackBtn');
   const errorDiv = overlay.querySelector('#importError');
   const previewDiv = overlay.querySelector('#importPreview');
+  const pasteActions = overlay.querySelector('#importPasteActions');
+  const reviewStep = overlay.querySelector('#importReviewStep');
+  const reviewContainer = overlay.querySelector('#importReviewContainer');
+  const reviewError = overlay.querySelector('#importReviewError');
+  const reviewBackBtn = overlay.querySelector('#importReviewBackBtn');
+  const confirmBtn = overlay.querySelector('#importConfirmBtn');
 
   let importMode = null; // 'convert' | 'generate'
+  let parsedItems = []; // items currently in review
+  let itemStates = []; // {included: bool} per item
 
   function selectedDeck() {
     return deckSelect.value === '__new' ? null : deckSelect.value;
@@ -2008,10 +2028,10 @@ window.openImportModal = async function(presetDeck) {
     const raw = pasteArea.value.trim();
     errorDiv.style.display = 'none';
     previewDiv.style.display = 'none';
-    if (!raw) { loadBtn.disabled = true; return; }
+    if (!raw) { reviewBtn.disabled = true; return; }
     try {
       const items = parseImportJSON(raw, selectedType());
-      loadBtn.disabled = false;
+      reviewBtn.disabled = false;
       // Show preview
       const type = selectedType();
       const count = items.length;
@@ -2022,13 +2042,13 @@ window.openImportModal = async function(presetDeck) {
       previewDiv.innerHTML = `<div class="import-preview-header">${t('flashcards.import_cards_ready', count, type === 'text' ? (count !== 1 ? t('flashcards.import_text_plural') : t('flashcards.import_text_singular')) : (count !== 1 ? t('flashcards.import_card_plural') : t('flashcards.import_card_singular')))}</div>${sample}${count > 3 ? `<div class="import-preview-more">${t('flashcards.import_and_more', count - 3)}</div>` : ''}`;
       previewDiv.style.display = '';
     } catch (e) {
-      loadBtn.disabled = true;
+      reviewBtn.disabled = true;
       errorDiv.textContent = e.message;
       errorDiv.style.display = '';
     }
   });
 
-  // Back
+  // Back from paste to options
   backBtn.addEventListener('click', () => {
     flowDiv.style.display = 'none';
     optionsDiv.style.display = '';
@@ -2036,19 +2056,155 @@ window.openImportModal = async function(presetDeck) {
     errorDiv.style.display = 'none';
     previewDiv.style.display = 'none';
     pasteArea.value = '';
-    loadBtn.disabled = true;
+    reviewBtn.disabled = true;
     importMode = null;
   });
 
-  // Import
-  loadBtn.addEventListener('click', async () => {
+  // --- Review Step ---
+  function updateConfirmBtn() {
+    const selectedCount = itemStates.filter(s => s.included).length;
     const type = selectedType();
-    let items;
-    try { items = parseImportJSON(pasteArea.value, type); } catch (e) {
+    const label = type === 'text'
+      ? (selectedCount !== 1 ? t('flashcards.import_text_plural') : t('flashcards.import_text_singular'))
+      : (selectedCount !== 1 ? t('flashcards.import_card_plural') : t('flashcards.import_card_singular'));
+    confirmBtn.innerHTML = `${lucideIcon('check', 15)} ${t('flashcards.import_confirm', selectedCount, label)}`;
+    confirmBtn.disabled = selectedCount === 0;
+  }
+
+  function updateReviewCount() {
+    const countEl = reviewContainer.querySelector('.import-review-count');
+    if (!countEl) return;
+    const selectedCount = itemStates.filter(s => s.included).length;
+    countEl.textContent = t('flashcards.import_selected_count', selectedCount, parsedItems.length);
+  }
+
+  function renderReview() {
+    const type = selectedType();
+    const total = parsedItems.length;
+    const label = type === 'text'
+      ? (total !== 1 ? t('flashcards.import_text_plural') : t('flashcards.import_text_singular'))
+      : (total !== 1 ? t('flashcards.import_card_plural') : t('flashcards.import_card_singular'));
+
+    let html = `<div class="import-review-toolbar">
+      <div class="import-review-toolbar-left">
+        <strong>${t('flashcards.import_review_header', total, label)}</strong>
+        <button class="import-review-toggle" id="importToggleAll">${t('flashcards.import_deselect_all')}</button>
+      </div>
+      <span class="import-review-count">${t('flashcards.import_selected_count', total, total)}</span>
+    </div><div class="import-review-list">`;
+
+    parsedItems.forEach((item, i) => {
+      const checked = itemStates[i].included ? 'checked' : '';
+      const excluded = itemStates[i].included ? '' : ' excluded';
+      if (type === 'text') {
+        html += `<div class="import-review-card${excluded}" data-idx="${i}">
+          <span class="import-review-num">${i + 1}</span>
+          <input type="checkbox" class="import-review-check" data-idx="${i}" ${checked}>
+          <div class="import-review-fields">
+            <div class="import-review-field">
+              <span class="import-review-field-label">${t('flashcards.import_edit_title')}</span>
+              <input class="import-review-field-input" data-idx="${i}" data-field="title" value="${esc(item.title)}">
+            </div>
+            <div class="import-review-field">
+              <span class="import-review-field-label">${t('flashcards.import_edit_author')}</span>
+              <input class="import-review-field-input" data-idx="${i}" data-field="author" value="${esc(item.author || '')}">
+            </div>
+          </div>
+        </div>`;
+      } else {
+        html += `<div class="import-review-card${excluded}" data-idx="${i}">
+          <span class="import-review-num">${i + 1}</span>
+          <input type="checkbox" class="import-review-check" data-idx="${i}" ${checked}>
+          <div class="import-review-fields">
+            <div class="import-review-field">
+              <span class="import-review-field-label">${t('flashcards.import_edit_front')}</span>
+              <input class="import-review-field-input" data-idx="${i}" data-field="front" value="${esc(item.front)}">
+            </div>
+            <div class="import-review-field">
+              <span class="import-review-field-label">${t('flashcards.import_edit_back')}</span>
+              <input class="import-review-field-input" data-idx="${i}" data-field="back" value="${esc(item.back)}">
+            </div>
+          </div>
+        </div>`;
+      }
+    });
+
+    html += '</div>';
+    reviewContainer.innerHTML = html;
+    updateConfirmBtn();
+
+    // Toggle all
+    const toggleBtn = reviewContainer.querySelector('#importToggleAll');
+    toggleBtn.addEventListener('click', () => {
+      const allIncluded = itemStates.every(s => s.included);
+      const newState = !allIncluded;
+      itemStates.forEach(s => s.included = newState);
+      reviewContainer.querySelectorAll('.import-review-check').forEach(cb => cb.checked = newState);
+      reviewContainer.querySelectorAll('.import-review-card').forEach(card => {
+        card.classList.toggle('excluded', !newState);
+      });
+      toggleBtn.textContent = newState ? t('flashcards.import_deselect_all') : t('flashcards.import_select_all');
+      updateConfirmBtn();
+      updateReviewCount();
+    });
+
+    // Individual checkboxes
+    reviewContainer.querySelectorAll('.import-review-check').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const idx = parseInt(cb.dataset.idx);
+        itemStates[idx].included = cb.checked;
+        const card = reviewContainer.querySelector(`.import-review-card[data-idx="${idx}"]`);
+        card.classList.toggle('excluded', !cb.checked);
+        // Update toggle button text
+        const allIncluded = itemStates.every(s => s.included);
+        const noneIncluded = itemStates.every(s => !s.included);
+        toggleBtn.textContent = allIncluded ? t('flashcards.import_deselect_all') : t('flashcards.import_select_all');
+        updateConfirmBtn();
+        updateReviewCount();
+      });
+    });
+
+    // Inline edit fields
+    reviewContainer.querySelectorAll('.import-review-field-input').forEach(input => {
+      input.addEventListener('input', () => {
+        const idx = parseInt(input.dataset.idx);
+        const field = input.dataset.field;
+        parsedItems[idx][field] = input.value;
+      });
+    });
+  }
+
+  // Review button → show review step
+  reviewBtn.addEventListener('click', () => {
+    const type = selectedType();
+    try {
+      parsedItems = parseImportJSON(pasteArea.value, type);
+    } catch (e) {
       errorDiv.textContent = e.message;
       errorDiv.style.display = '';
       return;
     }
+    itemStates = parsedItems.map(() => ({ included: true }));
+
+    // Hide paste step, show review step
+    flowDiv.style.display = 'none';
+    reviewStep.style.display = '';
+    renderReview();
+  });
+
+  // Back from review to paste
+  reviewBackBtn.addEventListener('click', () => {
+    reviewStep.style.display = 'none';
+    flowDiv.style.display = '';
+    reviewError.style.display = 'none';
+  });
+
+  // Confirm import
+  confirmBtn.addEventListener('click', async () => {
+    const type = selectedType();
+    const selectedItems = parsedItems.filter((_, i) => itemStates[i].included);
+    if (selectedItems.length === 0) return;
+
     let deck = selectedDeck();
     if (!deck) {
       showToast(t('flashcards.import_no_deck'));
@@ -2056,12 +2212,12 @@ window.openImportModal = async function(presetDeck) {
     }
     if (!state.db.connected) { showToast('Not connected'); return; }
 
-    loadBtn.disabled = true;
-    loadBtn.textContent = t('flashcards.import_importing');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = t('flashcards.import_importing');
 
     try {
       if (type === 'text') {
-        for (const item of items) {
+        for (const item of selectedItems) {
           const linesPerChunk = 4;
           const { data: inserted } = await state.db.from('texts').insert({
             deck, title: item.title, author: item.author || null,
@@ -2075,17 +2231,17 @@ window.openImportModal = async function(presetDeck) {
           }
         }
       } else {
-        const rows = items.map(item => ({ deck, front: item.front, back: item.back }));
+        const rows = selectedItems.map(item => ({ deck, front: item.front, back: item.back }));
         await state.db.from('flashcards').insert(rows);
       }
       overlay.remove();
       await refreshFlashcards();
-      showToast(t('flashcards.import_success', items.length, type === 'text' ? (items.length !== 1 ? t('flashcards.import_text_plural') : t('flashcards.import_text_singular')) : (items.length !== 1 ? t('flashcards.import_card_plural') : t('flashcards.import_card_singular'))));
+      showToast(t('flashcards.import_success', selectedItems.length, type === 'text' ? (selectedItems.length !== 1 ? t('flashcards.import_text_plural') : t('flashcards.import_text_singular')) : (selectedItems.length !== 1 ? t('flashcards.import_card_plural') : t('flashcards.import_card_singular'))));
     } catch (e) {
-      errorDiv.textContent = t('flashcards.import_failed') + e.message;
-      errorDiv.style.display = '';
-      loadBtn.disabled = false;
-      loadBtn.innerHTML = `${lucideIcon('check', 15)} ${t('flashcards.import_btn')}`;
+      reviewError.textContent = t('flashcards.import_failed') + e.message;
+      reviewError.style.display = '';
+      confirmBtn.disabled = false;
+      confirmBtn.innerHTML = `${lucideIcon('check', 15)} ${t('flashcards.import_btn')}`;
     }
   });
 

@@ -1,0 +1,21 @@
+# DeLaClaw Version
+#
+# Format: X.YYY (e.g. 1.000, 1.001, 2.000)
+#
+# latest              — app version, must be bumped on every commit
+# latest_compat       — minimum DB version for full feature support
+# latest_compat_deprec — minimum DB version that won't break the app (some features may be missing)
+#
+# DB version is stored in the `settings` table (key = 'schema_version') and
+# bumped by each migration that alters the schema.
+#
+# Invariant: latest_compat_deprec <= latest_compat <= latest
+#
+# Banner behaviour:
+#   DB < latest_compat_deprec  →  RED    "Database too old — DeLaClaw may not work."
+#   DB < latest_compat         →  AMBER  "Some features unavailable — run migrations for full support."
+#   DB >= latest_compat        →  (none)
+
+latest=1.098
+latest_compat=1.000
+latest_compat_deprec=1.000

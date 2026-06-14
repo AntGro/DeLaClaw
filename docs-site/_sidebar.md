@@ -1,0 +1,17 @@
+- [Home](/)
+- **Getting Started**
+  - [Setup Guide](setup.md)
+  - [Demo Mode](setup.md?id=demo-mode)
+- **Reference**
+  - [Architecture](architecture.md)
+  - [Browser Support](browser-support.md)
+  - [Performance](performance.md)
+  - [Accessibility](accessibility.md)
+  - [Offline Support](architecture.md?id=offline-cache)
+- **Contributing**
+  - [How to Contribute](contributing.md)
+  - [Issue Templates](contributing.md?id=submitting-issues)
+- **Legal**
+  - [Privacy](privacy.md)
+  - [Attributions](attributions.md)
+  - [License (AGPL-3.0)](https://github.com/AntGro/DeLaClaw/blob/main/LICENSE)

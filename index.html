@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>DeLaClaw</title>
+<link rel="icon" type="image/png" href="icons/favicon.png">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#08090d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+</head>
+<body>
+
+<!-- ===== HERO ===== -->
+<div id="hero" style="display:none;">
+  <!-- Ambient glow behind storm -->
+  <div class="hero-glow" id="heroGlow"></div>
+
+  <div class="hero-storm-wrap" id="heroStormBg">
+    <svg id="heroStorm" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"></svg>
+    <canvas id="heroStorm3d"></canvas>
+    <button type="button" class="hero-demo-btn" id="heroDemoBtn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      <span>Demo</span>
+    </button>
+  </div>
+
+  <!-- Panel 1: Title + tagline -->
+  <div class="hero-panel hero-name-panel">
+    <h2 class="hero-name" id="heroName">DeLaClaw</h2>
+    <p class="hero-tagline" data-fade="0.04,0.12,0.22,0.28">Your personal command center.</p>
+  </div>
+
+  <!-- Panel 2: Features -->
+  <div class="hero-panel hero-feat-panel" data-fade="0.30,0.38,0.58,0.66">
+    <div class="hero-feat">
+      <span data-i18n="hero.projects">Projects</span>
+      <span data-i18n="hero.todos">TODOs</span>
+      <span data-i18n="hero.habits">Habits</span>
+      <span data-i18n="hero.flashcards">Flashcards</span>
+      <span data-i18n="hero.wardrobe">Wardrobe</span>
+      <span data-i18n="hero.birthdays">Birthdays</span>
+      <span data-i18n="hero.lists">Lists</span>
+    </div>
+    <p class="hero-subtitle" data-i18n="hero.subtitle">One place for everything you track.</p>
+  </div>
+
+  <a class="hero-skip" id="heroSkip" href="#login">Connect</a>
+  <div class="hero-scroll-ind" id="heroScrollInd">
+    <svg width="16" height="28" viewBox="0 0 16 28" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><line x1="8" y1="0" x2="8" y2="24"/><polyline points="3,19 8,24 13,19"/></svg>
+  </div>
+  <div class="hero-spacer"></div>
+</div>
+
+<!-- ===== GATE TOOLBAR (fixed, visible during hero + gate) ===== -->
+<div class="gate-toolbar" id="gateToolbar">
+  <div class="gate-lang-pills" id="gateLangPills">
+    <button class="gate-lang-btn" data-lang="en">EN</button>
+    <button class="gate-lang-btn" data-lang="fr">FR</button>
+    <button class="gate-lang-btn" data-lang="es">ES</button>
+  </div>
+  <button class="gate-theme-btn" id="gateThemeBtn" type="button" title="Toggle theme">
+    <span data-icon="moon" data-size="16"></span>
+  </button>
+</div>
+
+<!-- ===== GATE ===== -->
+<div id="gate">
+  <div class="gate-box">
+    <div class="logo" id="gateLogo"></div>
+    <h1 id="gateTitle">DeLaClaw</h1>
+
+    <form id="loginForm" method="post" action="https://antgro.github.io/command-center/" style="display:none;">
+      <div class="backend-picker" id="backendPicker">
+        <button type="button" class="backend-option active" data-mode="supabase">
+          <svg width="18" height="19" viewBox="0 0 109 113" fill="none"><path d="M63.7076 110.284C60.8481 113.885 55.0502 111.912 54.9813 107.314L53.9738 40.0627H99.1935C107.384 40.0627 111.952 49.5228 106.859 55.9374L63.7076 110.284Z" fill="#249361"/><path d="M45.317 2.07103C48.1765-1.53037 53.9745 0.442937 54.0434 5.041L54.4849 72.2922H9.83113C1.64038 72.2922-2.92775 62.8321 2.16513 56.4175L45.317 2.07103Z" fill="#3ECF8E"/></svg>
+          <span>Supabase</span>
+        </button>
+        <button type="button" class="backend-option" data-mode="local">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          <span>Local</span>
+        </button>
+        <button type="button" class="backend-option" data-mode="demo">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span>Demo</span>
+        </button>
+      </div>
+      <div class="gate-fields" id="gateFields">
+        <p class="hint" id="loginHint">Connect to your Supabase project.</p>
+        <label for="username" class="gate-label" id="urlLabel"><a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener" id="urlLabelLink" data-tooltip="Find the URL by connecting to your Supabase project">Project URL</a></label>
+        <input type="text" id="username" name="username" placeholder="https://xyz.supabase.co" autocomplete="username">
+        <div id="keyField">
+          <label for="password" class="gate-label" id="keyLabel"><a target="_blank" rel="noopener" id="keyLabelLink">API Key</a></label>
+          <input type="password" id="password" name="password" placeholder="eyJhbG..." autocomplete="current-password">
+        </div>
+      </div>
+      <label class="stay-connected-label">
+        <input type="checkbox" id="stayConnected" checked>
+        <span>Stay connected on this device</span>
+      </label>
+      <button type="submit" class="btn-primary">Connect</button>
+      <p class="error" id="loginError"></p>
+    </form>
+    <a class="gate-guide-link" id="gateGuideLink" href="#setup">New here? Get started</a>
+  </div>
+
+  <!-- ===== SETUP GUIDE (replaces gate-box) ===== -->
+  <div class="setup-guide" id="setupGuide" style="display:none;">
+    <button class="setup-back" id="setupBack" type="button">&larr; <span id="setupBackLabel">Back to login</span></button>
+    <h2 class="setup-title" id="setupTitle">Get Started</h2>
+    <p class="setup-subtitle" id="setupSubtitle">Choose how you want to store your data.</p>
+
+    <div class="setup-paths">
+      <button class="setup-path-card" id="setupPathCloud" type="button">
+        <span class="setup-path-icon">
+          <svg width="22" height="23" viewBox="0 0 109 113" fill="none"><path d="M63.7076 110.284C60.8481 113.885 55.0502 111.912 54.9813 107.314L53.9738 40.0627H99.1935C107.384 40.0627 111.952 49.5228 106.859 55.9374L63.7076 110.284Z" fill="#249361"/><path d="M45.317 2.07103C48.1765-1.53037 53.9745 0.442937 54.0434 5.041L54.4849 72.2922H9.83113C1.64038 72.2922-2.92775 62.8321 2.16513 56.4175L45.317 2.07103Z" fill="#3ECF8E"/></svg>
+        </span>
+        <span class="setup-path-name" id="setupCloudName">Cloud</span>
+        <span class="setup-path-desc" id="setupCloudDesc">Free, no install, works everywhere.</span>
+        <span class="setup-path-badge" id="setupCloudBadge">Recommended</span>
+      </button>
+      <button class="setup-path-card" id="setupPathLocal" type="button">
+        <span class="setup-path-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </span>
+        <span class="setup-path-name" id="setupLocalName">Local</span>
+        <span class="setup-path-desc" id="setupLocalDesc">Your machine, your data. For developers.</span>
+      </button>
+    </div>
+
+    <!-- Cloud steps (Supabase) -->
+    <div class="setup-steps" id="setupCloudSteps" style="display:none;">
+      <div class="setup-progress" id="setupCloudProgress">
+        <div class="setup-progress-step active" data-step="1">1</div>
+        <div class="setup-progress-line"></div>
+        <div class="setup-progress-step" data-step="2">2</div>
+        <div class="setup-progress-line"></div>
+        <div class="setup-progress-step" data-step="3">3</div>
+      </div>
+      <div class="setup-step" data-step="1">
+        <span class="setup-step-num">1</span>
+        <div class="setup-step-body">
+          <h3 id="setupCloud1Title">Create a free Supabase project</h3>
+          <div id="setupCloud1Desc"><ol class="setup-substeps"><li>Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noopener">supabase.com/dashboard</a> and <strong>create a free account</strong> (GitHub or email).</li><li>Once logged in, create an <strong>organization</strong> (any name), then click <strong>New Project</strong> &mdash; pick a name and choose a region.</li></ol></div>
+          <div class="setup-url-input-wrap">
+            <label for="setupProjectUrl" id="setupProjectUrlLabel">Paste your project URL</label>
+            <p class="setup-url-hint" id="setupProjectUrlHint">Copy the URL from your browser's address bar after creating the project.</p>
+            <input type="url" id="setupProjectUrl" class="setup-url-input" placeholder="https://xyz.supabase.co or https://supabase.com/dashboard/project/xyz">
+            <p class="setup-url-error" id="setupProjectUrlError">Please enter a valid Supabase project URL</p>
+          </div>
+        </div>
+      </div>
+      <div class="setup-step" data-step="2">
+        <span class="setup-step-num">2</span>
+        <div class="setup-step-body">
+          <h3 id="setupCloud2Title">Run the database schema</h3>
+          <p id="setupCloud2Desc">In your Supabase dashboard, open the <a href="https://supabase.com/dashboard/project/_/sql" target="_blank" rel="noopener"><strong>SQL Editor</strong></a>, paste the schema below, and click <strong>Run</strong>. If prompted about Row Level Security, choose <strong>Run without RLS</strong> — it is enabled later in the script.</p>
+          <div class="setup-schema-wrap">
+            <button class="setup-schema-toggle" id="setupSchemaToggle" type="button"><span class="chevron">&#9654;</span> <span id="setupSchemaToggleLabel">Show schema</span></button>
+            <div class="setup-schema-box" id="setupSchemaBox">
+              <pre class="setup-schema-sql" id="setupSchemaSql"></pre>
+            </div>
+            <button class="setup-copy-btn" id="setupCopySchema" type="button"><span id="setupCopyLabel">Copy schema</span></button>
+          </div>
+        </div>
+      </div>
+      <div class="setup-step" data-step="3">
+        <span class="setup-step-num">3</span>
+        <div class="setup-step-body">
+          <h3 id="setupCloud3Title">Connect</h3>
+          <p id="setupCloud3Desc">In your Supabase dashboard, go to <a href="https://supabase.com/dashboard/project/_/settings/api-keys" target="_blank" rel="noopener"><strong>Settings &rarr; API Keys</strong></a>. Copy the <strong>anon (public) key</strong> and paste it below.</p>
+          <form id="setupLoginForm" method="post" action="https://antgro.github.io/command-center/">
+            <label for="setupLoginUrl" class="gate-label" id="setupLoginUrlLabel">Project URL</label>
+            <input type="text" id="setupLoginUrl" name="username" placeholder="https://xyz.supabase.co" autocomplete="username">
+            <label for="setupLoginKey" class="gate-label" id="setupLoginKeyLabel"><a target="_blank" rel="noopener" id="setupKeyLabelLink">API Key (anon)</a></label>
+            <input type="password" id="setupLoginKey" name="password" placeholder="eyJhbG..." autocomplete="current-password">
+            <p class="error" id="setupLoginError"></p>
+            <label class="stay-connected-label">
+              <input type="checkbox" id="setupStayConnected" checked>
+              <span id="setupStayConnectedLabel">Stay connected on this device</span>
+            </label>
+            <button type="submit" class="setup-done-btn" id="setupLoginBtn">Connect</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Local steps -->
+    <div class="setup-steps" id="setupLocalSteps" style="display:none;">
+      <div class="setup-progress" id="setupLocalProgress">
+        <div class="setup-progress-step active" data-step="1">1</div>
+        <div class="setup-progress-line"></div>
+        <div class="setup-progress-step" data-step="2">2</div>
+        <div class="setup-progress-line"></div>
+        <div class="setup-progress-step" data-step="3">3</div>
+      </div>
+      <div class="setup-step setup-step-warn" data-step="1">
+        <span class="setup-step-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </span>
+        <p class="setup-warn-text" id="setupLocalWarn">This path requires a terminal and basic command-line knowledge.</p>
+      </div>
+      <div class="setup-step" data-step="1">
+        <span class="setup-step-num">1</span>
+        <div class="setup-step-body">
+          <h3 id="setupLocal1Title">Install Bun</h3>
+          <p id="setupLocal1Desc">Open a terminal and run:</p>
+          <pre class="setup-code">curl -fsSL https://bun.sh/install | bash</pre>
+        </div>
+      </div>
+      <div class="setup-step" data-step="2">
+        <span class="setup-step-num">2</span>
+        <div class="setup-step-body">
+          <h3 id="setupLocal2Title">Clone and start the server</h3>
+          <pre class="setup-code">git clone https://github.com/AntGro/DeLaClaw.git
+cd DeLaClaw/server
+bun run server.js</pre>
+          <p id="setupLocal2Desc">The database is created automatically on first run. Default port: <code>3737</code>.</p>
+        </div>
+      </div>
+      <div class="setup-step" data-step="3">
+        <span class="setup-step-num">3</span>
+        <div class="setup-step-body">
+          <h3 id="setupLocal3Title">Connect</h3>
+          <p id="setupLocal3Desc">Open <code>http://localhost:3737</code>, select <strong>Local</strong>, and enter the server URL. No API key needed.</p>
+        </div>
+      </div>
+      <button class="setup-done-btn" id="setupLocalDone" type="button">Go to login</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== APP ===== -->
+<div id="app">
+  <header class="app-header">
+    <h1 class="app-title" onclick="switchView('welcome')" style="cursor:pointer;" title="Go to Today"><svg class="storm-logo header-logo" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"></svg><span class="app-title-text">DeLaClaw</span></h1>
+    <div class="view-switcher">
+      <button class="view-tab" id="tabWelcome" onclick="switchView('welcome')"><span data-icon="home" data-size="18" data-color="currentColor"></span> <span class="tab-label">Today</span></button>
+      <button class="view-tab active" id="tabProjects" onclick="switchView('projects')"><span data-icon="layout-grid" data-size="18" data-color="currentColor"></span> <span class="tab-label">Projects</span></button>
+      <button class="view-tab" id="tabTodos" onclick="switchView('todos')"><span data-icon="list-checks" data-size="18" data-color="currentColor"></span> <span class="tab-label">TODOs</span></button>
+      <button class="view-tab" id="tabHabits" onclick="switchView('habits')"><span data-icon="repeat" data-size="18" data-color="currentColor"></span> <span class="tab-label">Habits</span></button>
+      <button class="view-tab" id="tabBirthdays" onclick="switchView('birthdays')"><span data-icon="cake" data-size="18" data-color="currentColor"></span> <span class="tab-label">Birthdays</span></button>
+      <button class="view-tab" id="tabVestiaire" onclick="switchView('vestiaire')"><span data-icon="shirt" data-size="18" data-color="currentColor"></span> <span class="tab-label">Wardrobe</span></button>
+      <button class="view-tab" id="tabFlashcards" onclick="switchView('flashcards')"><span data-icon="brain" data-size="18" data-color="currentColor"></span> <span class="tab-label">Memory</span></button>
+      <button class="view-tab" id="tabLists" onclick="switchView('lists')"><span data-icon="list" data-size="18" data-color="currentColor"></span> <span class="tab-label">Lists</span></button>
+    </div>
+    <div class="header-actions">
+      <div class="header-menu" id="headerMenu">
+        <button class="btn" id="headerMenuToggle" title="Menu"><span data-icon="more-vertical" data-size="16"></span></button>
+        <div class="header-menu-dropdown" id="headerMenuDropdown">
+          <div class="header-menu-section">
+            <div class="header-menu-label" id="menuLangLabel">Language</div>
+            <div class="header-menu-lang-options" id="menuLangOptions">
+              <button class="header-menu-lang-btn" data-lang="en">EN</button>
+              <button class="header-menu-lang-btn" data-lang="fr">FR</button>
+              <button class="header-menu-lang-btn" data-lang="es">ES</button>
+            </div>
+          </div>
+          <button class="header-menu-item" id="menuThemeToggle"><span class="header-menu-icon" id="menuThemeIcon"></span><span id="menuThemeLabel">Toggle theme</span></button>
+          <button class="header-menu-item" id="menuSettings"><span class="header-menu-icon" data-icon="settings" data-size="16"></span><span id="menuSettingsLabel">Settings</span></button>
+          <div class="header-menu-divider"></div>
+          <button class="header-menu-item header-menu-disconnect" id="menuDisconnect"><span class="header-menu-icon" data-icon="log-out" data-size="16"></span><span id="menuDisconnectLabel">Disconnect</span></button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== WELCOME VIEW ===== -->
+  <div id="welcomeView" class="welcome-container" style="display:none;"></div>
+
+  <!-- ===== PROJECTS VIEW ===== -->
+  <div id="projectsView" style="display:none;">
+    <div class="page-toolbar">
+      <div class="page-toolbar-left">
+        <div class="page-filters" id="projectFilters">
+          <button class="filter-btn active" data-filter="active" onclick="setProjectFilter('active')">Active</button>
+          <button class="filter-btn" data-filter="all" onclick="setProjectFilter('all')">All</button>
+          <select id="projectSortBy" class="page-sort" onchange="renderProjectGrid()">
+            <option value="manual">Manual order</option>
+            <option value="name">Name</option>
+            <option value="tasks">Task count</option>
+          </select>
+        </div>
+      </div>
+      <div class="page-toolbar-right">
+        <button class="btn" onclick="openPromptEditor()" title="Edit task-pickup prompt"><span data-icon="file-text" data-size="16"></span></button>
+        <button class="btn" onclick="toggleShowArchived()" id="archiveToggleBtn" title="Toggle archived"><span data-icon="package" data-size="16"></span></button>
+        <button class="btn" onclick="openAddProjectModal()" title="Add project"><span data-icon="folder-plus" data-size="16"></span></button>
+        <div class="search-wrapper">
+          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search tasks…" oninput="filterProjects(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+        </div>
+      </div>
+    </div>
+    <div class="category-nav-buttons" id="projectNavButtons"></div>
+    <div class="main-content">
+      <div class="project-grid" id="projectGrid"></div>
+      <div class="archived-projects-section" id="archivedProjectsSection" style="display:none;">
+        <div class="section-title"><span data-icon="package" data-size="16"></span> Archived Projects</div>
+        <div id="archivedProjectsList"></div>
+      </div>
+    </div>
+  </div><!-- end projectsView -->
+
+  <!-- ===== TODOS VIEW ===== -->
+  <div id="todosView" style="display:none;">
+    <div class="page-toolbar">
+      <div class="page-toolbar-left">
+        <div class="page-filters" id="todoFilters">
+          <button class="filter-btn active" data-filter="pending" onclick="setTodoFilter('pending')">Pending</button>
+          <button class="filter-btn" data-filter="done" onclick="setTodoFilter('done')">Done</button>
+          <button class="filter-btn" data-filter="all" onclick="setTodoFilter('all')">All</button>
+          <button class="filter-btn" data-filter="flagged" onclick="setTodoFilter('flagged')"><span data-icon="flag" data-size="14"></span> Flagged</button>
+          <button class="filter-btn" data-filter="outdated" onclick="setTodoFilter('outdated')"><span data-icon="hourglass" data-size="14"></span> Outdated</button>
+          <select id="todoSortBy" class="page-sort" onchange="renderTodos()">
+            <option value="manual">Manual order</option>
+            <option value="due">Due date</option>
+            <option value="priority">Priority</option>
+            <option value="created">Created</option>
+          </select>
+        </div>
+      </div>
+      <div class="page-toolbar-right">
+        <button class="btn" onclick="openAddCategoryModal()" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
+        <div class="search-wrapper">
+          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search todos…" oninput="filterTodos(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+        </div>
+      </div>
+    </div>
+    <div class="category-nav-buttons" id="todoNavButtons"></div>
+    <div class="main-content">
+      <div class="project-grid" id="todoCategoryGrid"></div>
+    </div>
+  </div>
+
+  <!-- ===== HABITS VIEW ===== -->
+  <div id="habitsView" style="display:none;">
+    <div class="page-toolbar">
+      <div class="page-toolbar-left">
+        <div class="page-filters" id="habitFilters">
+          <button class="filter-btn active" data-filter="all" onclick="setHabitFilter('all')">All</button>
+          <button class="filter-btn" data-filter="overdue" onclick="setHabitFilter('overdue')">Overdue</button>
+          <button class="filter-btn" data-filter="today" onclick="setHabitFilter('today')">Today</button>
+          <button class="filter-btn" data-filter="tomorrow" onclick="setHabitFilter('tomorrow')">Tomorrow</button>
+          <select id="habitSortBy" class="page-sort" onchange="renderHabits()">
+            <option value="due">Next due</option>
+            <option value="name">Name</option>
+            <option value="last-done">Last done</option>
+          </select>
+        </div>
+      </div>
+      <div class="page-toolbar-right">
+        <div class="habit-view-toggle" id="habitViewToggle">
+          <button class="active" data-view="list" onclick="setHabitViewMode('list')"><span data-icon="list" data-size="14"></span></button>
+          <button data-view="calendar" onclick="setHabitViewMode('calendar')"><span data-icon="calendar" data-size="14"></span></button>
+        </div>
+        <button class="btn" onclick="openAddHabitModal()" title="Add habit"><span data-icon="plus" data-size="16"></span></button>
+        <button class="btn" onclick="openAddHabitCategoryModal()" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
+        <div class="search-wrapper">
+          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search habits…" oninput="filterHabits(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+        </div>
+      </div>
+    </div>
+    <div class="category-nav-buttons" id="habitNavButtons"></div>
+    <div class="main-content">
+      <div class="project-grid" id="habitCategoryGrid"></div>
+      <div class="habit-calendar-container" id="habitCalendarContainer" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- ===== BIRTHDAYS VIEW ===== -->
+  <div id="birthdaysView" style="display:none;">
+    <div class="page-toolbar">
+      <div class="page-toolbar-left">
+        <div class="page-filters" id="birthdayFilters">
+          <button class="filter-btn active" data-filter="all" onclick="setBirthdayFilter('all')">All</button>
+          <button class="filter-btn" data-filter="upcoming" onclick="setBirthdayFilter('upcoming')">Upcoming</button>
+          <button class="filter-btn" data-filter="this-month" onclick="setBirthdayFilter('this-month')">This Month</button>
+          <select id="birthdaySortBy" class="page-sort" onchange="renderBirthdays()">
+            <option value="upcoming">Next birthday</option>
+            <option value="name">Name</option>
+            <option value="age">Age</option>
+          </select>
+        </div>
+      </div>
+      <div class="page-toolbar-right">
+        <button class="btn" onclick="openAddBirthdayModal()" title="Add birthday"><span data-icon="plus" data-size="16"></span></button>
+        <div class="search-wrapper">
+          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search birthdays…" oninput="filterBirthdays(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+        </div>
+      </div>
+    </div>
+    <div class="category-nav-buttons" id="birthdayNavButtons"></div>
+    <div class="main-content">
+      <div class="project-grid" id="birthdayGrid"></div>
+    </div>
+  </div>
+
+  <!-- ===== VESTIAIRE VIEW ===== -->
+  <div id="vestiaireView" style="display:none;">
+    <div class="page-toolbar">
+      <div class="page-toolbar-left">
+        <div class="page-filters" id="vestiaireFilters">
+          <button class="filter-btn active" data-filter="all" onclick="setVestiaireFilter('all')">All</button>
+          <button class="filter-btn" data-filter="owned" onclick="setVestiaireFilter('owned')">Owned</button>
+          <button class="filter-btn" data-filter="tried" onclick="setVestiaireFilter('tried')">Tried</button>
+          <button class="filter-btn" data-filter="wishlist" onclick="setVestiaireFilter('wishlist')">Wishlist</button>
+          <select id="vestiaireSortBy" class="page-sort" onchange="renderVestiaire()">
+            <option value="manual">Manual order</option>
+            <option value="name">Name</option>
+            <option value="brand">Brand</option>
+          </select>
+        </div>
+      </div>
+      <div class="page-toolbar-right">
+        <button class="btn" onclick="openAddVestiaireModal()" title="Add item"><span data-icon="plus" data-size="16"></span></button>
+        <button class="btn" onclick="openAddVestiaireCategoryModal()" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
+        <div class="search-wrapper">
+          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search wardrobe…" oninput="filterVestiaire(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+        </div>
+      </div>
+    </div>
+    <div class="category-nav-buttons" id="vestiaireNavButtons"></div>
+    <div class="main-content">
+      <div class="project-grid" id="vestiaireGrid"></div>
+    </div>
+  </div>
+
+  <!-- ===== FLASHCARDS VIEW ===== -->
+  <div id="flashcardsView" style="display:none;">
+    <div class="page-toolbar">
+      <div class="page-toolbar-left">
+        <div class="page-filters" id="flashcardFilters">
+          <button class="filter-btn active" data-filter="all" onclick="setFlashcardFilter('all')">All</button>
+          <button class="filter-btn" data-filter="due" onclick="setFlashcardFilter('due')">Due</button>
+          <button class="filter-btn" data-filter="new" onclick="setFlashcardFilter('new')">New</button>
+          <button class="filter-btn" data-filter="mastered" onclick="setFlashcardFilter('mastered')">Mastered</button>
+          <select id="flashcardSortBy" class="page-sort" onchange="renderFlashcards()">
+            <option value="default">Default</option>
+            <option value="strength">Strength</option>
+            <option value="last-reviewed">Last reviewed</option>
+          </select>
+        </div>
+      </div>
+      <div class="page-toolbar-right">
+        <button class="btn btn-labeled" id="flashcardPracticeAllBtn" onclick="startPractice('__all')"><span data-icon="play" data-size="14"></span> <span class="btn-label">Flashcards</span></button>
+        <button class="btn btn-labeled" id="flashcardTextPracticeAllBtn" onclick="startTextPractice('__all')" title="Revise texts"><span data-icon="book-open" data-size="14"></span> <span class="btn-label">Texts</span></button>
+        <button class="btn" onclick="openAddFlashDeckModal()" title="New deck"><span data-icon="folder-plus" data-size="16"></span></button>
+        <div class="search-wrapper">
+          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search…" oninput="filterFlashcards(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+        </div>
+      </div>
+    </div>
+    <div class="category-nav-buttons" id="flashcardNavButtons"></div>
+    <div class="main-content">
+      <div id="flashcardGrid" class="project-grid"></div>
+    </div>
+  </div>
+
+  <!-- ===== LISTS VIEW ===== -->
+  <div id="listsView" style="display:none;">
+    <div class="page-toolbar">
+      <div class="page-toolbar-left">
+        <select id="listsSortBy" class="page-sort" onchange="renderLists()">
+          <option value="manual">Manual order</option>
+          <option value="name">Name</option>
+        </select>
+      </div>
+      <div class="page-toolbar-right">
+        <button class="btn" onclick="openAddListModal()" title="Add list"><span data-icon="folder-plus" data-size="16"></span></button>
+        <div class="search-wrapper">
+          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search items…" oninput="filterLists(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+        </div>
+      </div>
+    </div>
+    <div class="category-nav-buttons" id="listsNavButtons"></div>
+    <div class="main-content">
+      <div class="project-grid" id="listsGrid"></div>
+    </div>
+  </div>
+
+  <!-- Snooze Modal is created dynamically by js/todos.js -->
+
+  <!-- Footer Stats -->
+  <div class="footer-stats" id="footerStats">
+    <div class="db-stats" id="dbStatsContainer"></div>
+    <div><span id="lastUpdatedLabel" class="db-stat"></span></div>
+    <div><a href="" id="supabaseDashLink" target="_blank">Supabase Dashboard ↗</a></div>
+    <div class="footer-copyright">© 2026 DeLaClaw</div>
+  </div>
+
+  <!-- Add Project Modal -->
+  <div class="modal-overlay" id="addProjectModal">
+    <div class="modal">
+      <h2><span data-icon="plus" data-size="20"></span> Add Project</h2>
+      <label>ID (slug, no spaces)</label>
+      <input type="text" id="newProjectId" placeholder="my-project">
+      <label>Name</label>
+      <input type="text" id="newProjectName" placeholder="My Project">
+      <label>Short Name (optional, for nav buttons)</label>
+      <input type="text" id="newProjectShortname" placeholder="e.g. CC, Tarot, F2P" maxlength="20">
+      <label>Color</label>
+      <input type="color" id="newProjectColor" value="#646cff">
+      <label>Tech Stack</label>
+      <input type="text" id="newProjectTech" placeholder="e.g. React · Node · Vercel">
+      <label>GitHub URL (optional)</label>
+      <input type="url" id="newProjectGithub" placeholder="https://github.com/...">
+      <label>Live URL (optional)</label>
+      <input type="url" id="newProjectLive" placeholder="https://...">
+      <div class="modal-actions">
+        <button class="modal-cancel" onclick="closeAddProjectModal()">Cancel</button>
+        <button class="modal-save" onclick="saveNewProject()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Revision Feedback Modal -->
+  <div class="modal-overlay" id="revisionModal">
+    <div class="modal modal-wide revision-modal">
+      <h2><span data-icon="refresh-cw" data-size="20"></span> Request Revision</h2>
+      <p class="modal-hint">Explain what needs to change — Claw will see this when picking up the revision.</p>
+      <textarea id="revisionFeedback" placeholder="What needs to change... (Enter to submit, Shift+Enter for new line)"></textarea>
+      <input type="hidden" id="revisionTaskId">
+      <div class="modal-actions">
+        <button class="modal-cancel" onclick="closeRevisionModal()">Cancel</button>
+        <button class="modal-save" onclick="submitRevision()">Submit Revision</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prompt Editor Modal (Global) -->
+  <div class="modal-overlay" id="promptEditorModal">
+    <div class="modal prompt-modal">
+      <h2><span data-icon="file-text" data-size="20"></span> Global Task-Pickup Prompt</h2>
+      <p class="prompt-hint">This prompt applies to all projects when Claw picks up tasks. Use it for general coding rules, style preferences, etc.</p>
+      <textarea id="promptGlobalText" placeholder="e.g. Always create feature branches. Run tests before pushing. Prefer functional style..."></textarea>
+      <div class="modal-actions">
+        <button class="modal-cancel" onclick="closePromptEditor()">Cancel</button>
+        <button class="modal-save" onclick="saveGlobalPrompt()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prompt Editor Modal (Per-Project) -->
+  <div class="modal-overlay" id="projectPromptModal">
+    <div class="modal prompt-modal">
+      <h2 id="projectPromptTitle"><span data-icon="file-text" data-size="20"></span> Project Prompt</h2>
+      <p class="prompt-hint">This prompt applies only to tasks in this project. It supplements the global prompt.</p>
+      <textarea id="promptProjectText" placeholder="Rules specific to this project..."></textarea>
+      <input type="hidden" id="promptProjectId">
+      <div class="modal-actions">
+        <button class="modal-cancel" onclick="closeProjectPrompt()">Cancel</button>
+        <button class="modal-save" onclick="saveProjectPrompt()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Project Modal -->
+  <div class="modal-overlay" id="editProjectModal">
+    <div class="modal">
+      <h2><span data-icon="pencil" data-size="20"></span> Edit Project</h2>
+      <input type="hidden" id="editProjectId">
+      <label>Name</label>
+      <input type="text" id="editProjectName">
+      <label>Short Name (optional, for nav buttons)</label>
+      <input type="text" id="editProjectShortname" maxlength="20">
+      <label>Color</label>
+      <input type="color" id="editProjectColor">
+      <label>Tech Stack</label>
+      <input type="text" id="editProjectTech">
+      <label>GitHub URL</label>
+      <input type="url" id="editProjectGithub" placeholder="https://github.com/...">
+      <label>Live URL</label>
+      <input type="url" id="editProjectLive" placeholder="https://...">
+      <div class="modal-actions">
+        <button class="modal-cancel" onclick="closeEditProjectModal()">Cancel</button>
+        <button class="modal-save" onclick="saveEditProject()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Expanded Task Modal -->
+  <div class="modal-overlay" id="taskExpandModal">
+    <div class="modal task-modal" id="taskExpandContent"></div>
+  </div>
+
+  <!-- Add Category Modal is created dynamically by js/todos.js -->
+
+  <!-- Delete Confirmation Modal -->
+  <div class="modal-overlay" id="editCategoryModal">
+    <div class="modal">
+      <h2><span data-icon="pencil" data-size="20"></span> Edit Category</h2>
+      <input type="hidden" id="editCategoryOldName">
+      <label>Category Name</label>
+      <input type="text" id="editCategoryName" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditCategory();}">
+      <label>Short Name (for nav buttons)</label>
+      <input type="text" id="editCategoryShortname" maxlength="20" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditCategory();}">
+      <div class="modal-actions">
+        <button class="modal-cancel" onclick="closeEditCategoryModal()">Cancel</button>
+        <button class="modal-save" onclick="saveEditCategory()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Confirmation Modal -->
+  <div class="modal-overlay" id="deleteConfirmModal">
+    <div class="modal delete-confirm-modal">
+      <div class="delete-confirm-icon-wrap">
+        <svg class="delete-confirm-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+      </div>
+      <h2 id="deleteConfirmTitle">Confirm Delete</h2>
+      <p id="deleteConfirmMessage" class="delete-confirm-msg"></p>
+      <div id="deleteConfirmDetail" class="delete-confirm-detail" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="modal-cancel" id="deleteConfirmCancelBtn" onclick="closeDeleteConfirm()">Cancel</button>
+        <button class="modal-save delete-confirm-btn" id="deleteConfirmBtn" onclick="executeDeleteConfirm()">
+          <svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+          <span id="deleteConfirmBtnText">Delete</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Habit modals are created dynamically by js/habits.js -->
+
+  <!-- Habit Done Modal (with optional note) -->
+
+  <!-- Habit History Modal is created dynamically by js/habits.js -->
+
+  <!-- Add Habit Category Modal is created dynamically by js/habits.js -->
+
+  <!-- Edit Habit Category Modal is created dynamically by js/habits.js -->
+
+  <!-- Tab Config Modal -->
+  <div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettings()">
+    <div class="settings-container">
+      <button class="settings-close" onclick="closeSettings()"><span data-icon="x" data-size="18"></span></button>
+      <div class="settings-sidebar">
+        <h2 id="settingsTitle">Settings</h2>
+        <nav>
+          <button class="settings-nav-btn active" data-pane="general" onclick="switchSettingsPane('general')">
+            <span data-icon="settings" data-size="16"></span>
+            <span id="settingsNavGeneral">General</span>
+          </button>
+          <button class="settings-nav-btn" data-pane="ai" onclick="switchSettingsPane('ai')">
+            <span data-icon="sparkles" data-size="16"></span>
+            <span id="settingsNavAi">AI</span>
+          </button>
+          <button class="settings-nav-btn" data-pane="data" onclick="switchSettingsPane('data')">
+            <span data-icon="hard-drive" data-size="16"></span>
+            <span id="settingsNavData">Data</span>
+          </button>
+          <button class="settings-nav-btn" data-pane="stats" onclick="switchSettingsPane('stats')">
+            <span data-icon="bar-chart-3" data-size="16"></span>
+            <span id="settingsNavStats">Stats</span>
+          </button>
+        </nav>
+      </div>
+      <div class="settings-content">
+        <div class="settings-pane active" id="settingsPane-general">
+          <h3 id="settingsPaneGeneralTitle">General</h3>
+          <div class="setting-group">
+            <div class="setting-group-label" id="settingsTabsLabel">Tabs</div>
+            <p class="setting-hint" id="settingsTabsHint">Choose which tabs to display. At least one tab must remain visible.</p>
+            <div id="tabConfigList" class="tab-config-list"></div>
+          </div>
+          <div class="setting-group">
+            <div class="setting-group-label" id="settingsLanguageLabel">Language</div>
+            <div class="settings-lang-picker" id="settingsLangPicker">
+              <button class="settings-lang-btn" data-lang="en">English</button>
+              <button class="settings-lang-btn" data-lang="fr">Français</button>
+              <button class="settings-lang-btn" data-lang="es">Español</button>
+            </div>
+          </div>
+          <div class="setting-group">
+            <div class="setting-group-label" id="settingsDisplayLabel">Display</div>
+            <div class="setting-toggle-row" id="themeToggle" onclick="toggleTheme()">
+              <span class="setting-toggle-icon"><span data-icon="moon" data-size="16"></span></span>
+              <span class="setting-toggle-text" id="settingsThemeLabel">Toggle theme</span>
+              <span class="setting-toggle-switch" id="themeSwitch"></span>
+            </div>
+
+          </div>
+        </div>
+        <div class="settings-pane" id="settingsPane-ai">
+          <h3 id="settingsPaneAiTitle">AI</h3>
+          <div class="setting-group">
+            <div class="setting-group-label">
+              <svg class="nvidia-logo" viewBox="0 0 164 30" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M96.374,5.707L96.376,25.367L101.928,25.367L101.928,5.707L96.374,5.707ZM52.697,5.681L52.697,25.367L58.3,25.367L58.3,10.086L62.67,10.1C64.107,10.1 65.1,10.445 65.793,11.184C66.672,12.12 67.03,13.628 67.03,16.389L67.03,25.367L72.457,25.367L72.457,14.49C72.457,6.727 67.509,5.68 62.668,5.68L52.698,5.68L52.697,5.681ZM105.314,5.708L105.314,25.367L114.32,25.367C119.118,25.367 120.684,24.569 122.377,22.78C123.575,21.524 124.348,18.766 124.348,15.753C124.348,12.99 123.693,10.525 122.551,8.99C120.494,6.245 117.531,5.708 113.106,5.708L105.314,5.708ZM110.822,9.988L113.209,9.988C116.672,9.988 118.912,11.544 118.912,15.579C118.912,19.616 116.672,21.171 113.209,21.171L110.822,21.171L110.822,9.988ZM88.369,5.708L83.735,21.288L79.295,5.709L73.302,5.708L79.642,25.367L87.645,25.367L94.036,5.708L88.369,5.708ZM126.932,25.367L132.485,25.367L132.485,5.709L126.93,5.708L126.932,25.367ZM142.496,5.715L134.743,25.36L140.218,25.36L141.445,21.888L150.62,21.888L151.781,25.36L157.725,25.36L149.913,5.714L142.496,5.715ZM146.1,9.3L149.464,18.504L142.631,18.504L146.101,9.3L146.1,9.3Z" fill="currentColor"/><path d="M16.889,8.985L16.889,6.28C17.151,6.26 17.417,6.247 17.687,6.238C25.087,6.006 29.942,12.597 29.942,12.597C29.942,12.597 24.698,19.879 19.076,19.879C18.333,19.882 17.594,19.764 16.889,19.529L16.889,11.325C19.769,11.673 20.349,12.945 22.081,15.833L25.933,12.585C25.933,12.585 23.121,8.897 18.381,8.897C17.866,8.897 17.373,8.933 16.889,8.985ZM16.889,0.047L16.889,4.09C17.154,4.069 17.42,4.052 17.687,4.042C27.977,3.696 34.682,12.482 34.682,12.482C34.682,12.482 26.982,21.846 18.959,21.846C18.224,21.846 17.535,21.778 16.889,21.663L16.889,24.161C17.442,24.231 18.015,24.273 18.613,24.273C26.078,24.273 31.477,20.461 36.705,15.948C37.572,16.642 41.121,18.331 41.85,19.071C36.879,23.231 25.295,26.586 18.727,26.586C18.113,26.584 17.5,26.552 16.889,26.49L16.889,30L45.264,30L45.264,0.047L16.889,0.047ZM16.889,19.529L16.889,21.662C9.984,20.432 8.067,13.254 8.067,13.254C8.067,13.254 11.383,9.58 16.889,8.985L16.889,11.325L16.878,11.324C13.988,10.977 11.731,13.677 11.731,13.677C11.731,13.677 12.996,18.221 16.889,19.529ZM4.625,12.943C4.625,12.943 8.717,6.903 16.889,6.28L16.889,4.088C7.838,4.815 0,12.48 0,12.48C0,12.48 4.439,25.313 16.889,26.488L16.889,24.16C7.753,23.011 4.625,12.943 4.625,12.943Z" fill="#76b900"/></svg>
+            </div>
+            <div class="setting-item">
+              <label for="settingsNvidiaKey" id="settingsNvidiaKeyLabel">API Key</label>
+              <div class="settings-api-key-row">
+                <input type="password" id="settingsNvidiaKey" placeholder="nvapi-..." autocomplete="off" spellcheck="false">
+                <button type="button" class="settings-key-btn" id="settingsToggleVis" onclick="toggleNvidiaKeyVisibility()" title="Show/Hide">
+                  <span data-icon="eye" data-size="16"></span>
+                </button>
+                <button type="button" class="settings-key-btn settings-key-save" id="settingsSaveKey" onclick="saveNvidiaKey()">
+                  <span data-icon="check" data-size="16"></span>
+                </button>
+              </div>
+              <p class="setting-hint" id="settingsNvidiaKeyHint">Used for AI-powered features. Stored in your database.</p>
+            </div>
+            <div class="setting-item">
+              <label for="settingsNvidiaModel" id="settingsNvidiaModelLabel">Model</label>
+              <select id="settingsNvidiaModel" class="settings-select" onchange="handleModelChange()">
+                <option value="meta/llama-3.1-8b-instruct">meta/llama-3.1-8b-instruct</option>
+              </select>
+              <div id="settingsCustomModelRow" class="settings-api-key-row" style="display:none;margin-top:6px">
+                <input type="text" id="settingsCustomModel" class="settings-select" placeholder="org/model-name" spellcheck="false">
+                <button type="button" class="settings-key-btn settings-key-save" onclick="applyCustomModel()">
+                  <span data-icon="check" data-size="16"></span>
+                </button>
+              </div>
+            </div>
+            <div class="setting-item nvidia-test-section">
+              <label id="settingsTestLabel">Test</label>
+              <textarea id="settingsTestPrompt" class="settings-textarea" rows="2">What is the capital of France?</textarea>
+              <div class="settings-test-actions">
+                <button type="button" class="settings-test-btn" onclick="testNvidiaApi()" id="settingsTestBtn">
+                  <span data-icon="play" data-size="14"></span>
+                  <span id="settingsTestBtnLabel">Query</span>
+                </button>
+              </div>
+              <div id="settingsTestResult" class="settings-test-result" style="display:none"></div>
+            </div>
+            <div class="setting-item nvidia-usage-section">
+              <label id="settingsUsageLabel">Usage (24h)</label>
+              <div id="nvidiaUsageStats" class="nvidia-usage-stats"></div>
+              <button type="button" class="settings-usage-toggle" id="nvidiaUsageToggle" onclick="toggleNvidiaUsageDetail()" style="display:none">
+                <span data-icon="chevron-down" data-size="14"></span>
+                <span id="nvidiaUsageToggleLabel">By model</span>
+              </button>
+              <div id="nvidiaUsageDetail" class="nvidia-usage-detail" style="display:none"></div>
+            </div>
+          </div>
+        </div>
+        <div class="settings-pane" id="settingsPane-data">
+          <h3 id="settingsPaneDataTitle">Data</h3>
+          <div class="setting-group">
+            <div class="setting-group-label" id="settingsBackupLabel">Backup</div>
+            <p class="setting-hint" id="settingsBackupHint">Export all your data as a JSON file. Works with any setup.</p>
+            <button type="button" class="settings-data-btn" onclick="exportBackup()">
+              <span data-icon="download" data-size="16"></span>
+              <span id="settingsExportBtn">Export backup</span>
+            </button>
+          </div>
+          <div class="setting-group">
+            <div class="setting-group-label" id="settingsRestoreLabel">Restore</div>
+            <p class="setting-hint" id="settingsRestoreHint">Import a previously exported backup. This replaces all current data.</p>
+            <button type="button" class="settings-data-btn" onclick="importBackup()">
+              <span data-icon="upload" data-size="16"></span>
+              <span id="settingsImportBtn">Import backup</span>
+            </button>
+            <input type="file" id="backupFileInput" accept=".json" style="display:none">
+          </div>
+        </div>
+        <div class="settings-pane" id="settingsPane-stats">
+          <h3 id="settingsPaneStatsTitle">Stats</h3>
+          <div class="setting-group">
+            <div id="usageStatsContainer" class="usage-stats-container"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+<script>
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').then(function(reg){
+    // Force update check on every page load
+    reg.update();
+  });
+  // Auto-reload when a new service worker takes control (deploy update)
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if(!refreshing){ refreshing = true; location.reload(); }
+  });
+}
+</script>
+</body>
+</html>

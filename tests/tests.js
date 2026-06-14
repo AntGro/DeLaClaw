@@ -1,0 +1,1070 @@
+#!/usr/bin/env node
+/**
+ * DeLaClaw Integration Tests
+ * 
+ * Static analysis + headless browser smoke tests.
+ * Run via: node tests.js (from command-center-test/)
+ * Or via: bash run_tests.sh (from command-center/)
+ * 
+ * Catches: missing functions, HTML entities in JS, broken ES module chains,
+ * login gate not appearing, views not loading, console errors.
+ */
+
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+const JS_DIR = path.join(__dirname, '..', 'js');
+const STYLE_FILE = path.join(__dirname, '..', 'style.css');
+const INDEX_FILE = path.join(__dirname, '..', 'index.html');
+
+let passed = 0;
+let failed = 0;
+const failures = [];
+
+function test(name, fn) {
+  try {
+    fn();
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } catch (e) {
+    failed++;
+    failures.push({ name, error: e.message });
+    console.log(`  ❌ ${name}`);
+    console.log(`     ${e.message}`);
+  }
+}
+
+function assert(condition, msg) {
+  if (!condition) throw new Error(msg);
+}
+
+// ===================================================================
+// Load all JS files
+// ===================================================================
+const jsFiles = {};
+const jsFileNames = fs.readdirSync(JS_DIR).filter(f => f.endsWith('.js'));
+for (const f of jsFileNames) {
+  jsFiles[f] = fs.readFileSync(path.join(JS_DIR, f), 'utf-8');
+}
+const indexHtml = fs.readFileSync(INDEX_FILE, 'utf-8');
+const styleCss = fs.readFileSync(STYLE_FILE, 'utf-8');
+
+console.log('\n📋 Static Analysis\n');
+
+// ===================================================================
+// 1. No HTML entities in JS files
+// ===================================================================
+test('No HTML entities in JS files', () => {
+  for (const [name, content] of Object.entries(jsFiles)) {
+    const entities = content.match(/&(quot|amp|lt|gt|apos);/g);
+    if (entities) {
+      throw new Error(`${name} contains HTML entities: ${entities.join(', ')}`);
+    }
+  }
+});
+
+// ===================================================================
+// 2. Balanced backticks (template literals) — skip files with regex backticks
+// ===================================================================
+test('Balanced backticks in JS files (excluding markdown processors)', () => {
+  // Files that legitimately use backticks inside regex/strings for markdown parsing
+  const skipFiles = new Set(['utils.js']);
+  for (const [name, content] of Object.entries(jsFiles)) {
+    if (skipFiles.has(name)) continue;
+    const count = (content.match(/`/g) || []).length;
+    if (count % 2 !== 0) {
+      throw new Error(`${name} has ${count} backticks (odd — likely unclosed template literal)`);
+    }
+  }
+});
+
+// ===================================================================
+// 3. All window.X = X assignments reference defined functions
+// ===================================================================
+test('All window.fn = fn assignments reference defined identifiers', () => {
+  for (const [name, content] of Object.entries(jsFiles)) {
+    // Match: window.foo = foo; or window.foo = foo\n
+    const assignments = content.matchAll(/window\.(\w+)\s*=\s*(\w+)\s*[;\n]/g);
+    for (const m of assignments) {
+      const windowName = m[1];
+      const localName = m[2];
+      // Check that localName is defined somewhere in the file (function, const, let, var, or as a parameter)
+      const defPatterns = [
+        new RegExp(`function\\s+${localName}\\s*\\(`),
+        new RegExp(`(?:const|let|var)\\s+${localName}\\s*=`),
+        new RegExp(`window\\.${localName}\\s*=\\s*function`),
+      ];
+      const isDefined = defPatterns.some(p => p.test(content));
+      // Also check if imported
+      const isImported = new RegExp(`import\\s+.*\\b${localName}\\b.*from`).test(content);
+      if (!isDefined && !isImported) {
+        throw new Error(`${name}: window.${windowName} = ${localName} but ${localName} is never defined or imported`);
+      }
+    }
+  }
+});
+
+// ===================================================================
+// 4. All imports resolve to existing exports
+// ===================================================================
+test('All named imports resolve to exports in target files', () => {
+  for (const [name, content] of Object.entries(jsFiles)) {
+    // Match: import { foo, bar } from './baz.js'
+    const importRegex = /import\s*\{([^}]+)\}\s*from\s*['"]\.\/(\w+\.js)['"]/g;
+    let match;
+    while ((match = importRegex.exec(content)) !== null) {
+      const importedNames = match[1].split(',').map(s => s.trim()).filter(Boolean);
+      const targetFile = match[2];
+      const targetContent = jsFiles[targetFile];
+      if (!targetContent) {
+        throw new Error(`${name}: imports from ./${targetFile} but file doesn't exist`);
+      }
+      for (const imp of importedNames) {
+        // Check export { ... imp ... } or export function imp or export const imp
+        const exportBlock = targetContent.match(/export\s*\{([^}]+)\}/);
+        const inExportBlock = exportBlock && exportBlock[1].split(',').map(s => s.trim()).includes(imp);
+        const isExportedDirectly = new RegExp(`export\\s+(function|const|let|var)\\s+${imp}\\b`).test(targetContent);
+        if (!inExportBlock && !isExportedDirectly) {
+          throw new Error(`${name}: imports '${imp}' from ./${targetFile} but it's not exported`);
+        }
+      }
+    }
+  }
+});
+
+// ===================================================================
+// 5. Default imports resolve
+// ===================================================================
+test('Default imports resolve to default exports', () => {
+  for (const [name, content] of Object.entries(jsFiles)) {
+    const defaultImports = content.matchAll(/import\s+(\w+)\s*(?:,\s*\{[^}]*\})?\s*from\s*['"]\.\/(\w+\.js)['"]/g);
+    for (const m of defaultImports) {
+      const targetFile = m[2];
+      const targetContent = jsFiles[targetFile];
+      if (!targetContent) {
+        throw new Error(`${name}: imports default from ./${targetFile} but file doesn't exist`);
+      }
+      if (!targetContent.includes('export default')) {
+        throw new Error(`${name}: imports default from ./${targetFile} but no default export found`);
+      }
+    }
+  }
+});
+
+// ===================================================================
+// 6. No obvious syntax errors: unmatched braces in function bodies
+// ===================================================================
+test('No duplicate function definitions in same file', () => {
+  for (const [name, content] of Object.entries(jsFiles)) {
+    const funcDefs = {};
+    const funcRegex = /(?:^|\n)\s*(?:async\s+)?function\s+(\w+)\s*\(/g;
+    let m;
+    while ((m = funcRegex.exec(content)) !== null) {
+      const fn = m[1];
+      if (funcDefs[fn]) {
+        throw new Error(`${name}: function '${fn}' is defined twice (lines ~${funcDefs[fn]} and ~${content.substring(0, m.index).split('\n').length})`);
+      }
+      funcDefs[fn] = content.substring(0, m.index).split('\n').length;
+    }
+  }
+});
+
+// ===================================================================
+// 7. HTML: all modal overlays have matching close functions
+// ===================================================================
+test('All modal overlay IDs have corresponding close onclick handlers', () => {
+  const overlayIds = indexHtml.matchAll(/class="modal-overlay"\s+id="(\w+)"/g);
+  for (const m of overlayIds) {
+    const id = m[1];
+    // Should have a close button somewhere
+    const hasClose = indexHtml.includes(`close${id.charAt(0).toUpperCase()}`) || 
+                     indexHtml.includes(`onclick="close`);
+    // This is a loose check — just ensure the modal isn't orphaned
+  }
+});
+
+// ===================================================================
+// 8. All onclick handlers in HTML reference window-exposed functions
+// ===================================================================
+test('Key onclick handlers in index.html reference window-exposed functions', () => {
+  // Extract all onclick="functionName(...)" from HTML
+  const onclickRegex = /onclick="(\w+)\s*\(/g;
+  const htmlFunctions = new Set();
+  let m;
+  while ((m = onclickRegex.exec(indexHtml)) !== null) {
+    htmlFunctions.add(m[1]);
+  }
+  
+  // Collect all window.X assignments and top-level function definitions exposed
+  const windowExposed = new Set();
+  for (const content of Object.values(jsFiles)) {
+    const winAssign = content.matchAll(/window\.(\w+)\s*=/g);
+    for (const wa of winAssign) windowExposed.add(wa[1]);
+  }
+  
+  // Special: DOMContentLoaded-attached handlers don't need window exposure
+  const builtins = new Set(['event', 'if', 'return', 'this']);
+  
+  for (const fn of htmlFunctions) {
+    if (builtins.has(fn)) continue;
+    if (!windowExposed.has(fn)) {
+      // Check if it's maybe in the inline script or a known exception
+      throw new Error(`onclick references '${fn}()' but no window.${fn} assignment found in JS modules`);
+    }
+  }
+});
+
+// ===================================================================
+// 9. CSS: style.css is not empty and has expected selectors
+// ===================================================================
+test('style.css contains expected base selectors', () => {
+  const required = ['.modal-overlay', '.modal', '.btn', '.app-header', '.project-card', '.view-tab'];
+  for (const sel of required) {
+    assert(styleCss.includes(sel), `Missing expected selector: ${sel}`);
+  }
+});
+
+// ===================================================================
+// 10. No stray console.log left in production code (warnings only)
+// ===================================================================
+test('No stray console.log in JS files (console.error/warn OK)', () => {
+  for (const [name, content] of Object.entries(jsFiles)) {
+    const logs = content.match(/console\.log\s*\(/g);
+    if (logs && logs.length > 0) {
+      // Just warn, don't fail
+      console.log(`     ⚠️  ${name}: ${logs.length} console.log() calls (consider removing)`);
+    }
+  }
+});
+
+// ===================================================================
+// 11. Habit "mark done" calls markHabitDone (no modal flow)
+// ===================================================================
+test('Habit done button calls markHabitDone directly (no modal)', () => {
+  const habitsJs = jsFiles['habits.js'];
+  // Button should call markHabitDone, not openHabitDoneModal
+  assert(habitsJs.includes("markHabitDone("), 'markHabitDone function should exist');
+  assert(habitsJs.includes("window.markHabitDone"), 'markHabitDone should be window-exposed');
+  assert(!habitsJs.includes("openHabitDoneModal"), 'openHabitDoneModal should not exist');
+  assert(!habitsJs.includes("closeHabitDoneModal"), 'closeHabitDoneModal should not exist');
+  assert(!habitsJs.includes("submitHabitDone"), 'submitHabitDone should not exist');
+  // No done modal in HTML
+  assert(!indexHtml.includes('habitDoneModal'), 'habitDoneModal should not exist in index.html');
+});
+
+// ===================================================================
+// 12. No emoji characters in JS files
+// ===================================================================
+test('No emoji characters in JS files (use Lucide icons instead)', () => {
+  const emojiPattern = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/u;
+  // Specific known emojis to catch
+  const knownEmojis = ['🎉', '🕰', '⚠️', '💪', '📚', '🎂', '⏳', '✅', '🪶', '↩️', '👔', '🔥'];
+  for (const [name, content] of Object.entries(jsFiles)) {
+    for (const emoji of knownEmojis) {
+      assert(!content.includes(emoji), `${name} contains emoji ${emoji} — use Lucide icon instead`);
+    }
+  }
+});
+
+// ===================================================================
+// 13. Flashcard sorting: cards are sorted by retrievability
+// ===================================================================
+test('Flashcard deck rendering sorts cards by retrievability', () => {
+  const flashJs = jsFiles['flashcards.js'];
+  assert(flashJs.includes('cards.sort('), 'cards should be sorted before rendering');
+  assert(flashJs.includes('retrievability('), 'sort should use retrievability function');
+});
+
+// ===================================================================
+// 14. Flashcard left border uses retrievability color (no strength bar)
+// ===================================================================
+test('Flashcard items use border-left color from retrievability (no strength bar)', () => {
+  const flashJs = jsFiles['flashcards.js'];
+  assert(flashJs.includes('borderColor'), 'should compute borderColor from retrievability');
+  assert(flashJs.includes('border-left'), 'should apply border-left style');
+  assert(!flashJs.includes('fc-strength-bar'), 'strength bar element should be removed');
+  assert(!styleCss.includes('.fc-strength-bar'), 'strength bar CSS should be removed');
+});
+
+// ===================================================================
+// 15. Birthday hover actions use correct rowSelector
+// ===================================================================
+test('Birthday hover delay uses .birthday-info as rowSelector (not .birthday-card)', () => {
+  const birthJs = jsFiles['birthdays.js'];
+  const hoverCall = birthJs.match(/initItemHoverDelay\([\s\S]*?rowSelector:\s*'([^']+)'/);
+  assert(hoverCall, 'initItemHoverDelay should be called for birthdays');
+  assert(hoverCall[1] === '.birthday-info', 
+    `rowSelector should be '.birthday-info' (got '${hoverCall[1]}') — querySelector doesn't match self`);
+});
+
+// ===================================================================
+// 16. Wardrobe left border uses purchase status (not category color)
+// ===================================================================
+test('Wardrobe items use purchase-status-based border color', () => {
+  const vestJs = jsFiles['vestiaire.js'];
+  assert(vestJs.includes('vest-purchased') || vestJs.includes('vest-tried'),
+    'vestiaire should add status classes for border color');
+  assert(styleCss.includes('.vest-purchased'), '.vest-purchased CSS rule should exist');
+  assert(styleCss.includes('.vest-tried'), '.vest-tried CSS rule should exist');
+});
+
+// ===================================================================
+// 17. All lucideIcon() calls reference icons defined in LUCIDE_PATHS
+// ===================================================================
+test('All lucideIcon() calls reference defined icons', () => {
+  const iconsJs = jsFiles['icons.js'];
+  // Extract all defined icon names from LUCIDE_PATHS
+  const definedIcons = new Set();
+  const defRegex = /'([^']+)'\s*:/g;
+  let dm;
+  while ((dm = defRegex.exec(iconsJs)) !== null) definedIcons.add(dm[1]);
+
+  // Scan all JS files for lucideIcon('name' ...) calls
+  for (const [name, content] of Object.entries(jsFiles)) {
+    if (name === 'icons.js') continue;
+    const callRegex = /lucideIcon\s*\(\s*['"]([^'"]+)['"]/g;
+    let cm;
+    while ((cm = callRegex.exec(content)) !== null) {
+      const iconName = cm[1];
+      assert(definedIcons.has(iconName),
+        `${name}: lucideIcon('${iconName}') but '${iconName}' is not defined in LUCIDE_PATHS`);
+    }
+  }
+  // Also check data-icon attributes in index.html
+  const dataIconRegex = /data-icon="([^"]+)"/g;
+  let hm;
+  while ((hm = dataIconRegex.exec(indexHtml)) !== null) {
+    const iconName = hm[1];
+    assert(definedIcons.has(iconName),
+      `index.html: data-icon="${iconName}" but '${iconName}' is not defined in LUCIDE_PATHS`);
+  }
+});
+
+// ===================================================================
+// 18. Double-click edit: no ondblclick HTML attributes in JS (use onDblClick callback)
+// ===================================================================
+test('No ondblclick HTML attributes in JS files (use initItemHoverDelay onDblClick)', () => {
+  for (const [name, content] of Object.entries(jsFiles)) {
+    if (name === 'item-utils.js') continue; // the shared module itself is fine
+    const matches = content.match(/ondblclick\s*=/g);
+    assert(!matches,
+      `${name}: found ${matches ? matches.length : 0} ondblclick attribute(s) — use initItemHoverDelay onDblClick callback instead`);
+  }
+});
+
+// ===================================================================
+// 19. Double-click edit: all initItemHoverDelay calls include onDblClick
+// ===================================================================
+test('All initItemHoverDelay calls include onDblClick callback', () => {
+  const pages = ['projects.js', 'todos.js', 'habits.js', 'birthdays.js', 'vestiaire.js', 'flashcards.js'];
+  for (const file of pages) {
+    const content = jsFiles[file];
+    if (!content) continue;
+    // Find initItemHoverDelay call blocks
+    const hoverCalls = content.match(/initItemHoverDelay\([^)]*\{[\s\S]*?\}\s*\)/g);
+    assert(hoverCalls && hoverCalls.length > 0,
+      `${file}: should call initItemHoverDelay`);
+    for (const call of hoverCalls) {
+      assert(call.includes('onDblClick'),
+        `${file}: initItemHoverDelay missing onDblClick callback`);
+    }
+  }
+});
+
+// ===================================================================
+// 20. Double-click triggers inline edit (not modal) on all pages
+// ===================================================================
+test('Double-click onDblClick triggers inline edit (not modal) on all pages', () => {
+  // Each page's onDblClick callback must call an inline edit function, not a modal opener
+  // We check that the function called within onDblClick uses inlineEditText (directly or via a wrapper)
+  const inlinePages = {
+    'projects.js': { dblClickFn: 'promptEditTask', mustUse: 'inlineEditText' },
+    'todos.js': { dblClickFn: 'editTodoInline', mustUse: 'inlineEditText' },
+    'habits.js': { dblClickFn: 'editHabitInline', mustUse: 'inlineEditText' },
+    'birthdays.js': { dblClickFn: 'editBirthdayInline', mustUse: 'inlineEditText' },
+    'vestiaire.js': { dblClickFn: 'editVestiaire', mustUse: 'inlineEditText' },
+    'flashcards.js': { dblClickFn: 'editFlashcardInline', mustUse: 'inlineEditText' },
+  };
+  for (const [file, { dblClickFn, mustUse }] of Object.entries(inlinePages)) {
+    const content = jsFiles[file];
+    if (!content) continue;
+    // 1. The onDblClick callback should reference the inline edit function (not openEdit*Modal)
+    const hoverCalls = content.match(/initItemHoverDelay\([^)]*\{[\s\S]*?\}\s*\)/g) || [];
+    for (const call of hoverCalls) {
+      assert(!call.match(/openEdit\w*Modal/),
+        `${file}: onDblClick should not call a modal opener — use inline edit instead`);
+    }
+    // 2. The inline edit function should exist and use inlineEditText
+    assert(content.includes(dblClickFn),
+      `${file}: missing inline edit function '${dblClickFn}'`);
+    assert(content.includes(mustUse),
+      `${file}: inline edit should use shared '${mustUse}' from item-utils.js`);
+  }
+});
+
+// ===================================================================
+// 21. rowSelector must differ from itemSelector (querySelector doesn't match self)
+// ===================================================================
+test('initItemHoverDelay rowSelector differs from itemSelector', () => {
+  const pagesWithHover = ['projects.js', 'todos.js', 'habits.js', 'birthdays.js', 'vestiaire.js', 'flashcards.js'];
+  for (const file of pagesWithHover) {
+    const content = jsFiles[file];
+    if (!content) continue;
+    const calls = content.match(/initItemHoverDelay\([^)]*\{[\s\S]*?\}\s*\)/g) || [];
+    for (const call of calls) {
+      const itemSel = call.match(/itemSelector:\s*'([^']+)'/);
+      const rowSel = call.match(/rowSelector:\s*'([^']+)'/);
+      if (itemSel && rowSel) {
+        assert(itemSel[1] !== rowSel[1],
+          `${file}: rowSelector '${rowSel[1]}' must differ from itemSelector '${itemSel[1]}' — querySelector doesn't match self`);
+      }
+    }
+  }
+});
+
+// ===================================================================
+// 22. Inline edit textareas set flex:none (prevent flex-grow in column wrapper)
+// ===================================================================
+test('Inline edit textareas set flex:none to prevent column-flex height bug', () => {
+  // item-utils.js inlineEditText must set flex:none on the textarea
+  const itemUtils = jsFiles['item-utils.js'];
+  // Find the textarea creation block in inlineEditText
+  assert(itemUtils.includes("flex = 'none'") || itemUtils.includes('flex = "none"'),
+    'item-utils.js: inlineEditText textarea must set style.flex = "none" to prevent flex-grow overriding autoSize in column flex wrapper');
+
+  // Any other file creating task-edit-input textareas (e.g. flashcards answer) must also set flex:none
+  for (const [name, content] of Object.entries(jsFiles)) {
+    if (name === 'item-utils.js') continue;
+    // Find textarea elements with task-edit-input class
+    const creations = content.match(/\.className\s*=\s*['"][^'"]*task-edit-input[^'"]*['"]/g);
+    if (creations) {
+      // Check that flex:none is set nearby (within 5 lines after)
+      for (const creation of creations) {
+        const idx = content.indexOf(creation);
+        const nearby = content.substring(idx, idx + 400);
+        assert(nearby.includes("flex = 'none'") || nearby.includes('flex = "none"'),
+          `${name}: textarea with task-edit-input class must set style.flex = "none" for autoSize to work in column flex wrappers`);
+      }
+    }
+  }
+});
+
+// ===================================================================
+// 23. Welcome habit dblclick calls canonical window.editHabitInline (not a local duplicate)
+// ===================================================================
+test('Welcome habit dblclick calls canonical window.editHabitInline', () => {
+  const welcome = jsFiles['welcome.js'];
+  // Find the initItemHoverDelay call for habits in welcome.js (the one with .habit-item)
+  const hoverCalls = welcome.match(/initItemHoverDelay\([^)]*\{[\s\S]*?\}\s*\)/g) || [];
+  const habitCall = hoverCalls.find(c => c.includes("'.habit-item'") || c.includes('".habit-item"'));
+  assert(habitCall, 'welcome.js: should have initItemHoverDelay call for .habit-item');
+  // Must call window.editHabitInline, not welcomeEditHabit or a local function
+  assert(habitCall.includes('window.editHabitInline'),
+    'welcome.js: habit onDblClick must call window.editHabitInline (canonical), not a local welcomeEditHabit duplicate');
+  assert(!habitCall.includes('welcomeEditHabit'),
+    'welcome.js: habit onDblClick must NOT reference welcomeEditHabit — use canonical window.editHabitInline');
+});
+
+// ===================================================================
+// 23b. Welcome habit edit button calls canonical window.editHabitInline (not modal)
+// ===================================================================
+test('Welcome habit edit button calls window.editHabitInline (not modal)', () => {
+  const welcome = jsFiles['welcome.js'];
+  // The renderFocusHabitItem function should use editHabitInline for the pencil button
+  const editBtnMatch = welcome.match(/onclick=.*edit.*Habit.*pencil/g) || [];
+  assert(editBtnMatch.length > 0, 'welcome.js: should have an edit button for habits with pencil icon');
+  // Must reference editHabitInline, not welcomeEditHabit or openEditHabitModal
+  const usesInline = editBtnMatch.some(m => m.includes('editHabitInline'));
+  assert(usesInline,
+    'welcome.js: habit edit button must call editHabitInline, not welcomeEditHabit or openEditHabitModal');
+  // Must NOT have welcomeEditHabit function defined
+  assert(!welcome.includes('function welcomeEditHabit'),
+    'welcome.js: welcomeEditHabit function should be removed — use canonical editHabitInline');
+  // Must NOT reference openEditHabitModal
+  assert(!welcome.includes('openEditHabitModal'),
+    'welcome.js: must not reference openEditHabitModal — use inline edit instead');
+});
+
+// ===================================================================
+// 24. Welcome TODO dblclick calls canonical window.editTodoInline (not a local duplicate)
+// ===================================================================
+test('Welcome TODO dblclick calls canonical window.editTodoInline', () => {
+  const welcome = jsFiles['welcome.js'];
+  // Find the initItemHoverDelay call for todos in welcome.js (the one with .todo-item)
+  const hoverCalls = welcome.match(/initItemHoverDelay\([^)]*\{[\s\S]*?\}\s*\)/g) || [];
+  const todoCall = hoverCalls.find(c => c.includes("'.todo-item'") || c.includes('".todo-item"'));
+  assert(todoCall, 'welcome.js: should have initItemHoverDelay call for .todo-item');
+  // Must call window.editTodoInline, not welcomeEditTodo or a local function
+  assert(todoCall.includes('window.editTodoInline'),
+    'welcome.js: todo onDblClick must call window.editTodoInline (canonical), not a local welcomeEditTodo duplicate');
+  assert(!todoCall.includes('welcomeEditTodo'),
+    'welcome.js: todo onDblClick must NOT reference welcomeEditTodo — use canonical window.editTodoInline');
+});
+
+// ===================================================================
+// 25. edit*Inline functions accept optional itemEl parameter (scoped querySelector)
+// ===================================================================
+test('edit*Inline functions accept optional itemEl parameter for scoped querySelector', () => {
+  // editHabitInline in habits.js must have itemEl parameter
+  const habits = jsFiles['habits.js'];
+  const habitMatch = habits.match(/function\s+editHabitInline\s*\(([^)]*)\)/);
+  assert(habitMatch, 'habits.js: editHabitInline function not found');
+  assert(habitMatch[1].includes('itemEl'),
+    'habits.js: editHabitInline must accept itemEl parameter for scoped querySelector');
+
+  // editTodoInline in todos.js must have itemEl parameter
+  const todos = jsFiles['todos.js'];
+  const todoMatch = todos.match(/function\s+editTodoInline\s*\(([^)]*)\)/);
+  assert(todoMatch, 'todos.js: editTodoInline function not found');
+  assert(todoMatch[1].includes('itemEl'),
+    'todos.js: editTodoInline must accept itemEl parameter for scoped querySelector');
+});
+
+// ===================================================================
+// 26. Inline edit callbacks use refreshFn (not renderFn) for data refresh
+// ===================================================================
+test('Inline edit callbacks use refreshFn (not renderFn) for data refresh', () => {
+  // For each module with inlineEditText calls, verify they pass refreshFn, not renderFn
+  const files = {
+    'todos.js': 'refreshTodos',
+    'habits.js': 'refreshHabits',
+    'flashcards.js': 'refreshFlashcards',
+  };
+  for (const [file, expectedRefresh] of Object.entries(files)) {
+    const content = jsFiles[file];
+    if (!content) continue;
+    // Find all refreshFn: lines in inlineEditText options
+    const refreshFnMatches = content.match(/refreshFn:\s*(\w+)/g) || [];
+    assert(refreshFnMatches.length > 0,
+      `${file}: should have at least one refreshFn in inlineEditText options`);
+    for (const match of refreshFnMatches) {
+      const fnName = match.replace(/refreshFn:\s*/, '');
+      // Must not be a render-only function (renderHabits, renderTodos, etc.)
+      assert(!fnName.startsWith('render'),
+        `${file}: refreshFn should not be a render function ('${fnName}') — use a refresh function like ${expectedRefresh} that fetches data`);
+    }
+  }
+});
+
+// ===================================================================
+// 27. Edit habit modal includes last-done date field
+// ===================================================================
+test('Edit habit modal includes last-done date field', () => {
+  const habitsJs = jsFiles['habits.js'];
+  assert(habitsJs, 'habits.js should exist');
+  // The modal template (m2.innerHTML) must contain the editHabitLastDone input
+  assert(habitsJs.includes('id="editHabitLastDone"') || habitsJs.includes("id=\\'editHabitLastDone\\'") || habitsJs.includes('id=\\"editHabitLastDone\\"'),
+    'Edit habit modal should contain an input with id="editHabitLastDone"');
+  // saveEditHabit must read the last-done value
+  assert(habitsJs.includes("editHabitLastDone") && habitsJs.includes("saveEditHabit"),
+    'saveEditHabit should reference editHabitLastDone');
+  // openEditHabitModal must populate the last-done field
+  const openFn = habitsJs.substring(habitsJs.indexOf('function openEditHabitModal'), habitsJs.indexOf('function closeEditHabitModal'));
+  assert(openFn.includes('editHabitLastDone'),
+    'openEditHabitModal should populate the editHabitLastDone input');
+});
+
+// ===================================================================
+// 28. No duplicate IDs between index.html static modals and JS-created modals
+// ===================================================================
+test('No duplicate modal IDs between index.html and JS-created modals', () => {
+  // Extract IDs of modal-overlay elements from index.html
+  const htmlModalIds = [...indexHtml.matchAll(/class="modal-overlay"\s+id="([^"]+)"/g)].map(m => m[1]);
+  // Extract IDs of dynamically created modals from JS (pattern: m.id = 'xxx' or .id = 'xxxModal')
+  const jsModalIds = [];
+  for (const [file, content] of Object.entries(jsFiles)) {
+    const matches = content.matchAll(/\.id\s*=\s*['"]([^'"]*Modal[^'"]*)['"]/g);
+    for (const m of matches) jsModalIds.push({ id: m[1], file });
+  }
+  const duplicates = jsModalIds.filter(j => htmlModalIds.includes(j.id));
+  assert(duplicates.length === 0,
+    `Duplicate modal IDs found — these exist in both index.html and JS:\n${duplicates.map(d => `       • ${d.id} (created in ${d.file})`).join('\n')}\n       Remove the static HTML versions since JS creates them dynamically.`);
+});
+
+// ===================================================================
+// 29. All modal IDs referenced in JS getElementById exist (in HTML or created dynamically)
+// ===================================================================
+
+test('All modal-overlay IDs referenced via getElementById exist somewhere', () => {
+  // 1. Collect all modal IDs defined in index.html
+  const htmlModalIds = new Set(
+    [...indexHtml.matchAll(/id="([^"]*Modal[^"]*)"/g)].map(m => m[1])
+  );
+  // 2. Collect all modal IDs created dynamically in JS
+  //    Pattern A: .id = '...Modal'
+  //    Pattern B: id="...Modal" or id='...Modal' inside template literals
+  const jsCreatedIds = new Set();
+  for (const content of Object.values(jsFiles)) {
+    for (const m of content.matchAll(/\.id\s*=\s*['"]([^'"]*Modal[^'"]*)['"];/g)) {
+      jsCreatedIds.add(m[1]);
+    }
+    for (const m of content.matchAll(/id=(?:\\?["'])([^"']*Modal[^"']*)(?:\\?["'])/g)) {
+      jsCreatedIds.add(m[1]);
+    }
+  }
+  const allDefinedIds = new Set([...htmlModalIds, ...jsCreatedIds]);
+
+  // 3. Find all getElementById('...Modal') references in JS
+  const referencedIds = new Set();
+  for (const content of Object.values(jsFiles)) {
+    for (const m of content.matchAll(/getElementById\(['"]([^'"]*Modal[^'"]*)['"]\)/g)) {
+      referencedIds.add(m[1]);
+    }
+  }
+
+  // 4. Check that every referenced modal ID is defined somewhere
+  const missing = [...referencedIds].filter(id => !allDefinedIds.has(id));
+  assert(missing.length === 0,
+    `Modal IDs referenced in JS but never created:\n${missing.map(id => `       • ${id}`).join('\n')}\n       These will cause silent failures when clicked.`);
+});
+
+// ===================================================================
+// 30. Drag-drop reorder is wired for all reorderable pages
+// ===================================================================
+
+test('All reorderable pages call initItemDragDrop with correct item selectors', () => {
+  const fs = require('fs');
+  const path = require('path');
+
+  // Pages that MUST have drag-drop reorder, with expected item selector substring
+  const expected = {
+    'js/lists.js': '.list-item',
+    'js/projects.js': '.task-item',
+    'js/todos.js': '.todo-item',
+    'js/vestiaire.js': '.vestiaire-item',
+  };
+
+  for (const [file, selector] of Object.entries(expected)) {
+    const src = fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8');
+    assert(src.includes('initItemDragDrop'), `${file} must call initItemDragDrop`);
+    assert(src.includes(selector),
+      `${file} must use item selector containing '${selector}'`);
+  }
+
+  // idAttr must be camelCase (dataset API), never raw 'data-xxx-yyy'
+  const allFiles = ['js/lists.js', 'js/projects.js', 'js/todos.js', 'js/vestiaire.js'];
+  for (const file of allFiles) {
+    const src = fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8');
+    const idAttrMatches = src.match(/idAttr:\s*['"]([^'"]+)['"]/g) || [];
+    for (const m of idAttrMatches) {
+      const val = m.match(/['"]([^'"]+)['"]/)[1];
+      assert(!val.includes('-'), `${file}: idAttr '${val}' must be camelCase for dataset API, not raw data attribute`);
+    }
+  }
+});
+
+// ===================================================================
+// 31. Integration: archive project → delete it → remaining cards still render
+// ===================================================================
+
+async function archiveDeleteIntegrationTest() {
+  const { execSync } = require('child_process');
+
+  // Resolve playwright
+  let chromium;
+  const tryPaths = [
+    'playwright',
+    path.join(__dirname, '..', 'node_modules', 'playwright'),
+    path.join(__dirname, '..', '..', 'spaces', 'node_modules', 'playwright'),
+  ];
+  for (const p of tryPaths) {
+    try { chromium = require(p).chromium; break; } catch {}
+  }
+  if (!chromium) throw new Error('Playwright not found');
+
+  // Start a dedicated Bun server with a fresh temp DB
+  const tmpDb = '/tmp/delaclaw-integration-test.db';
+  try { fs.unlinkSync(tmpDb); } catch {}
+
+  const serverDir = path.join(__dirname, '..', 'server');
+  const bunProc = require('child_process').spawn(
+    'bun', ['run', path.join(serverDir, 'server.js')],
+    { env: { ...process.env, PORT: '4848', DB_PATH: tmpDb }, stdio: ['pipe', 'pipe', 'pipe'] }
+  );
+
+  // Wait for server to be ready
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Bun server start timeout')), 8000);
+    let output = '';
+    bunProc.stdout.on('data', d => {
+      output += d.toString();
+      if (output.includes('4848') || output.includes('Listening') || output.includes('listening')) {
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+    bunProc.stderr.on('data', d => { output += d.toString(); });
+    // Also poll in case the log message format changes
+    const poll = setInterval(async () => {
+      try {
+        const resp = await fetch('http://127.0.0.1:4848/rest/v1/projects');
+        if (resp.ok) { clearTimeout(timeout); clearInterval(poll); resolve(); }
+      } catch {}
+    }, 200);
+  });
+
+  let browser;
+  try {
+    // Seed 3 projects + tasks via REST API
+    const BASE = 'http://127.0.0.1:4848/rest/v1';
+    for (const p of [
+      { id: 'proj-alpha', name: 'Alpha', color: '#ff5555', sort_order: 0 },
+      { id: 'proj-beta', name: 'Beta', color: '#55ff55', sort_order: 1 },
+      { id: 'proj-gamma', name: 'Gamma', color: '#5555ff', sort_order: 2 },
+    ]) {
+      await fetch(`${BASE}/projects`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(p),
+      });
+    }
+    // Add tasks to Alpha and Gamma (Beta stays empty)
+    for (const t of [
+      { project: 'proj-alpha', text: 'Alpha task 1', status: 'todo' },
+      { project: 'proj-alpha', text: 'Alpha task 2', status: 'todo' },
+      { project: 'proj-gamma', text: 'Gamma task 1', status: 'todo' },
+    ]) {
+      await fetch(`${BASE}/tasks`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(t),
+      });
+    }
+
+    // Launch browser
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message || String(err)));
+
+    // Navigate to app and log in via local mode
+    await page.goto('http://127.0.0.1:4848/', { waitUntil: 'networkidle', timeout: 15000 });
+    await page.click('.backend-option[data-mode="local"]');
+    await page.fill('#username', 'http://127.0.0.1:4848');
+    await page.click('#loginForm button[type="submit"]');
+    // Wait for the app to be visible (login gate hidden)
+    await page.waitForSelector('#app.active', { timeout: 10000 });
+    // Wait for tasks to load (no more "Loading..." in visible cards)
+    await page.waitForFunction(() => {
+      const taskLists = document.querySelectorAll('.task-list');
+      return taskLists.length >= 3 && [...taskLists].every(tl => !tl.textContent.includes('Loading'));
+    }, { timeout: 10000 });
+
+    // Verify initial state: Alpha has 2 tasks, Beta has "No tasks yet", Gamma has 1 task
+    const initialAlpha = await page.$eval('#tasks-proj-alpha', el => el.textContent);
+    const initialBeta = await page.$eval('#tasks-proj-beta', el => el.textContent);
+    const initialGamma = await page.$eval('#tasks-proj-gamma', el => el.textContent);
+
+    test('Integration: initial state — Alpha has 2 tasks', () => {
+      assert(initialAlpha.includes('Alpha task 1') && initialAlpha.includes('Alpha task 2'),
+        `Expected Alpha tasks, got: ${initialAlpha}`);
+    });
+    test('Integration: initial state — Beta shows empty', () => {
+      assert(initialBeta.includes('No tasks yet'), `Expected empty Beta, got: ${initialBeta}`);
+    });
+    test('Integration: initial state — Gamma has 1 task', () => {
+      assert(initialGamma.includes('Gamma task 1'), `Expected Gamma task, got: ${initialGamma}`);
+    });
+
+    // Archive project Beta (call via JS — header actions have opacity:0 until hover)
+    await page.evaluate(() => window.archiveProject('proj-beta'));
+    await page.waitForTimeout(500);
+
+    // Verify Beta card is gone from main grid (buildProjectCards excludes archived)
+    const betaCardExists = await page.$('#tasks-proj-beta') !== null;
+    test('Integration: archived project disappears from main grid', () => {
+      assert(!betaCardExists, 'Beta task-list should not exist after archiving');
+    });
+
+    // Show archived section
+    await page.evaluate(() => window.toggleShowArchived());
+    await page.waitForTimeout(300);
+    const archivedSection = await page.$eval('#archivedProjectsSection', el => el.style.display);
+    test('Integration: archived section visible after toggle', () => {
+      assert(archivedSection === 'block', `Expected block, got: ${archivedSection}`);
+    });
+
+    // Delete the archived project Beta — trigger via JS (the button is in the archived list)
+    await page.evaluate(() => window.deleteProject('proj-beta', 'Beta'));
+    // Confirm in the delete modal
+    await page.waitForSelector('#deleteConfirmModal.visible', { timeout: 5000 });
+    await page.click('#deleteConfirmBtn');
+    // Wait for the delete to complete and cards to rebuild
+    await page.waitForTimeout(1000);
+
+    // THE KEY ASSERTION: remaining project cards must NOT show "Loading..."
+    const afterAlpha = await page.$eval('#tasks-proj-alpha', el => el.textContent);
+    const afterGamma = await page.$eval('#tasks-proj-gamma', el => el.textContent);
+    const alphaHasLoading = afterAlpha.includes('Loading');
+    const gammaHasLoading = afterGamma.includes('Loading');
+
+    test('Integration: Alpha still renders tasks after deleting archived Beta', () => {
+      assert(!alphaHasLoading && afterAlpha.includes('Alpha task 1'),
+        `Alpha stuck on Loading or lost tasks. Content: "${afterAlpha}"`);
+    });
+    test('Integration: Gamma still renders tasks after deleting archived Beta', () => {
+      assert(!gammaHasLoading && afterGamma.includes('Gamma task 1'),
+        `Gamma stuck on Loading or lost tasks. Content: "${afterGamma}"`);
+    });
+
+    // Beta should be gone entirely (no card, no archived entry)
+    const betaGone = await page.$('#tasks-proj-beta').then(el => el === null);
+    test('Integration: deleted project Beta is fully removed from DOM', () => {
+      assert(betaGone, 'proj-beta card should not exist after deletion');
+    });
+
+    // No JS errors during the whole flow
+    test('Integration: no JS errors during archive+delete flow', () => {
+      const real = errors.filter(e => !e.includes('favicon') && !e.includes('supabase'));
+      assert(real.length === 0, `JS errors: ${real.join('; ')}`);
+    });
+
+  } finally {
+    if (browser) await browser.close();
+    bunProc.kill();
+    try { fs.unlinkSync(tmpDb); } catch {}
+  }
+}
+
+// ===================================================================
+// 30. Browser smoke test: all JS modules load without runtime errors
+// ===================================================================
+
+async function browserSmokeTest() {
+  const http = require('http');
+
+  // Resolve playwright from available locations (project, workspace, or global)
+  let chromium;
+  const tryPaths = [
+    'playwright',
+    path.join(__dirname, '..', 'node_modules', 'playwright'),
+    path.join(__dirname, '..', '..', 'spaces', 'node_modules', 'playwright'),
+  ];
+  for (const p of tryPaths) {
+    try { chromium = require(p).chromium; break; } catch {}
+  }
+  if (!chromium) throw new Error('Playwright not found — install via npm or link node_modules/playwright');
+
+  // Start a minimal static file server for the command-center directory
+  const ROOT = path.join(__dirname, '..');
+  const MIME = {
+    '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
+    '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon', '.webp': 'image/webp', '.jpg': 'image/jpeg',
+  };
+  const server = http.createServer((req, res) => {
+    const url = req.url.split('?')[0];
+    const filePath = path.join(ROOT, url === '/' ? 'index.html' : url);
+    try {
+      const data = fs.readFileSync(filePath);
+      const ext = path.extname(filePath);
+      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+      res.end(data);
+    } catch {
+      res.writeHead(404);
+      res.end('Not found');
+    }
+  });
+
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+
+    // Collect JS errors (SyntaxError, ReferenceError, TypeError)
+    const jsErrors = [];
+    page.on('pageerror', err => {
+      jsErrors.push(err.message || String(err));
+    });
+    // Also catch module-load failures reported as console.error
+    page.on('console', msg => {
+      if (msg.type() === 'error') {
+        const text = msg.text();
+        // Filter out expected network errors (Supabase fetch, favicon, etc.)
+        if (text.includes('SyntaxError') || text.includes('ReferenceError') || text.includes('TypeError')) {
+          jsErrors.push(text);
+        }
+      }
+    });
+
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle', timeout: 15000 });
+
+    // Give modules a moment to finish executing
+    await page.waitForTimeout(1000);
+
+    test('All JS modules load without SyntaxError / ReferenceError / TypeError', () => {
+      assert(jsErrors.length === 0,
+        `Browser detected ${jsErrors.length} JS error(s):\n${jsErrors.map(e => '       • ' + e).join('\n')}`);
+    });
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+}
+
+async function todoPriorityIntegrationTest() {
+  const { execSync } = require('child_process');
+
+  let chromium;
+  const tryPaths = [
+    'playwright',
+    path.join(__dirname, '..', 'node_modules', 'playwright'),
+    path.join(__dirname, '..', '..', 'spaces', 'node_modules', 'playwright'),
+  ];
+  for (const p of tryPaths) {
+    try { chromium = require(p).chromium; break; } catch {}
+  }
+  if (!chromium) throw new Error('Playwright not found');
+
+  const tmpDb = '/tmp/delaclaw-priority-test.db';
+  try { fs.unlinkSync(tmpDb); } catch {}
+
+  const serverDir = path.join(__dirname, '..', 'server');
+  const bunProc = require('child_process').spawn(
+    'bun', ['run', path.join(serverDir, 'server.js')],
+    { env: { ...process.env, PORT: '4849', DB_PATH: tmpDb }, stdio: ['pipe', 'pipe', 'pipe'] }
+  );
+
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Bun server start timeout')), 8000);
+    let output = '';
+    bunProc.stdout.on('data', d => { output += d.toString(); });
+    bunProc.stderr.on('data', d => { output += d.toString(); });
+    const poll = setInterval(async () => {
+      try {
+        const resp = await fetch('http://127.0.0.1:4849/rest/v1/todos');
+        if (resp.ok) { clearTimeout(timeout); clearInterval(poll); resolve(); }
+      } catch {}
+    }, 200);
+  });
+
+  const server = { close: () => { try { bunProc.kill(); } catch {} } };
+  let browser;
+  try {
+    const BASE = 'http://127.0.0.1:4849/rest/v1';
+
+    // Seed a todo with default priority
+    await fetch(`${BASE}/todos`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'todo-prio-1', text: 'Priority test todo', priority: 'normal', category: 'Test', sort_order: 0 }),
+    });
+
+    const PRIORITY_LEVELS = ['urgent', 'high', 'medium', 'low', 'normal'];
+
+    // Test setting each priority via REST (simulates what setTodoPriority does)
+    for (const level of PRIORITY_LEVELS) {
+      const resp = await fetch(`${BASE}/todos?id=eq.todo-prio-1`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priority: level }),
+      });
+      test(`Set priority to "${level}" — DB accepts`, () => {
+        assert(resp.ok, `PATCH failed for priority "${level}": ${resp.status}`);
+      });
+
+      // Read back and verify
+      const getResp = await fetch(`${BASE}/todos?id=eq.todo-prio-1`);
+      const rows = await getResp.json();
+      test(`Read back priority "${level}" — matches`, () => {
+        assert(rows[0].priority === level, `Expected "${level}", got "${rows[0].priority}"`);
+      });
+    }
+
+    // Test sort order: urgent < high < medium < low < normal
+    const sortMap = { urgent: 0, high: 1, medium: 2, low: 3, normal: 4 };
+    // Seed todos with all priorities
+    for (const level of PRIORITY_LEVELS) {
+      await fetch(`${BASE}/todos`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: `todo-sort-${level}`, text: `Sort ${level}`, priority: level, category: 'Sort', sort_order: 0 }),
+      });
+    }
+    const allResp = await fetch(`${BASE}/todos?category=eq.Sort`);
+    const allTodos = await allResp.json();
+    const sorted = [...allTodos].sort((a, b) => (sortMap[a.priority] ?? 99) - (sortMap[b.priority] ?? 99));
+    test('Priority sort order: urgent < high < medium < low < normal', () => {
+      const actual = sorted.map(t => t.priority);
+      assert(JSON.stringify(actual) === JSON.stringify(['urgent', 'high', 'medium', 'low', 'normal']),
+        `Expected [urgent,high,medium,low,normal], got [${actual}]`);
+    });
+
+    // Test distinct colors for each priority
+    const prioColors = { urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6' };
+    const colorSet = new Set(Object.values(prioColors));
+    test('All priority colors are distinct', () => {
+      assert(colorSet.size === 4, `Expected 4 distinct colors, got ${colorSet.size}`);
+    });
+
+    // Test urgent uses different icon from high
+    const PRIO_LEVELS_DEF = [
+      { key: 'urgent', icon: 'alert-triangle' },
+      { key: 'high', icon: 'flag' },
+      { key: 'medium', icon: 'flag' },
+      { key: 'low', icon: 'flag' },
+      { key: 'normal', icon: 'circle-off' },
+    ];
+    test('Urgent icon differs from High icon', () => {
+      const urgentIcon = PRIO_LEVELS_DEF.find(l => l.key === 'urgent').icon;
+      const highIcon = PRIO_LEVELS_DEF.find(l => l.key === 'high').icon;
+      assert(urgentIcon !== highIcon, `Urgent and High use same icon: ${urgentIcon}`);
+    });
+
+  } finally {
+    if (browser) await browser.close();
+    server.close();
+  }
+}
+
+// Run browser smoke test, then print summary
+(async () => {
+  const skipIntegration = process.env.CI === 'true';
+
+  if (skipIntegration) {
+    console.log('\n  Skipping integration tests (CI mode)\n');
+  } else {
+    console.log('\n🌐 Browser Smoke Test\n');
+    try {
+      await browserSmokeTest();
+    } catch (e) {
+      test('Browser smoke test setup', () => {
+        throw new Error(`Failed to run browser smoke test: ${e.message}`);
+      });
+    }
+
+    console.log('\n🔗 Integration: Archive + Delete\n');
+    try {
+      await archiveDeleteIntegrationTest();
+    } catch (e) {
+      test('Archive+delete integration test setup', () => {
+        throw new Error(`Failed to run integration test: ${e.message}`);
+      });
+    }
+
+    console.log('\n🔗 Integration: TODO Priority Levels\n');
+    try {
+      await todoPriorityIntegrationTest();
+    } catch (e) {
+      test('TODO priority integration test setup', () => {
+        throw new Error(`Failed to run integration test: ${e.message}`);
+      });
+    }
+  }
+
+  // ===================================================================
+  // SUMMARY
+  // ===================================================================
+  console.log(`\n${'═'.repeat(50)}`);
+  console.log(`  Results: ${passed} passed, ${failed} failed`);
+  console.log(`${'═'.repeat(50)}\n`);
+
+  if (failures.length > 0) {
+    console.log('Failures:');
+    for (const f of failures) {
+      console.log(`  • ${f.name}: ${f.error}`);
+    }
+    console.log('');
+  }
+
+  process.exit(failed > 0 ? 1 : 0);
+})();

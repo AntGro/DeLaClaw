@@ -1,0 +1,51 @@
+name: Feature request
+description: Suggest a new feature or improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What would you like to see?
+      placeholder: A clear description of the feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: Why is this useful? What problem does it solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed solution
+      description: How do you think this should work? (optional)
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Have you tried any workarounds?
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: Which part of the app does this affect?
+      options:
+        - Today dashboard
+        - Projects
+        - TODOs
+        - Habits
+        - Flashcards
+        - Birthdays
+        - Wardrobe
+        - Lists
+        - Settings
+        - Login / backend
+        - Offline mode
+        - Other

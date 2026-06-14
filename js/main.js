@@ -2217,6 +2217,53 @@ function getGoogleAccessToken() {
   });
 }
 
+const DRIVE_FOLDER_NAME = 'DeLaClaw Backups';
+
+async function getOrCreateDriveFolder(token) {
+  // Check settings for cached folder ID
+  if (state.db.connected) {
+    const { data } = await state.db.from('settings').select('value').eq('key', 'drive_backup_folder_id').maybeSingle();
+    if (data && data.value) {
+      // Verify folder still exists
+      const check = await fetch(`https://www.googleapis.com/drive/v3/files/${data.value}?fields=id,trashed`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (check.ok) {
+        const f = await check.json();
+        if (!f.trashed) return data.value;
+      }
+    }
+  }
+
+  // Search for existing folder
+  const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const search = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  if (search.ok) {
+    const { files } = await search.json();
+    if (files && files.length > 0) {
+      const folderId = files[0].id;
+      if (state.db.connected) await state.db.from('settings').upsert({ key: 'drive_backup_folder_id', value: folderId });
+      return folderId;
+    }
+  }
+
+  // Create folder
+  const create = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ name: DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
+  });
+  if (!create.ok) throw new Error('Failed to create Drive folder');
+  const folder = await create.json();
+  if (state.db.connected) await state.db.from('settings').upsert({ key: 'drive_backup_folder_id', value: folder.id });
+  return folder.id;
+}
+
 async function exportToGoogleDrive() {
   const btn = document.querySelector('.settings-data-btn[onclick="exportToGoogleDrive()"]');
   const label = document.getElementById('settingsDriveExportBtn');
@@ -2230,8 +2277,10 @@ async function exportToGoogleDrive() {
     const date = new Date().toISOString().slice(0, 10);
     const fileName = `delaclaw-backup-${date}.json`;
 
+    const folderId = await getOrCreateDriveFolder(token);
+
     // Multipart upload: metadata + file content
-    const metadata = { name: fileName, mimeType: 'application/json' };
+    const metadata = { name: fileName, mimeType: 'application/json', parents: [folderId] };
     const boundary = '---delaclaw-backup-boundary';
     const body = [
       `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}`,
@@ -2254,7 +2303,7 @@ async function exportToGoogleDrive() {
     }
 
     const result = await resp.json();
-    showToast(`Saved to Google Drive: ${result.name}`);
+    showToast(`Saved to Google Drive: ${DRIVE_FOLDER_NAME}/${result.name}`);
   } catch (e) {
     if (e.message === 'Google Identity Services not loaded') {
       showToast('Google sign-in not available — check your connection');

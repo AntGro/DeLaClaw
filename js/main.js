@@ -2552,7 +2552,7 @@ window.disconnect = disconnect;
 window.toggleSearch = toggleSearch;
 window.clearPageSearch = clearPageSearch;
 
-// --- Environment badge ---
+// --- Environment badge + dev favicon ---
 (function() {
   const h = location.hostname;
   let env = null;
@@ -2563,4 +2563,18 @@ window.clearPageSearch = clearPageSearch;
   badge.className = 'env-badge';
   badge.textContent = env;
   document.body.appendChild(badge);
+  // Recolor favicon: hue-rotate the production icon to orange
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.src = 'icons/favicon.png';
+  img.onload = () => {
+    const s = img.width || 256;
+    const c = document.createElement('canvas');
+    c.width = s; c.height = s;
+    const ctx = c.getContext('2d');
+    ctx.filter = 'hue-rotate(160deg) saturate(1.3)';
+    ctx.drawImage(img, 0, 0, s, s);
+    const link = document.querySelector('link[rel="icon"]');
+    if (link) link.href = c.toDataURL('image/png');
+  };
 })();

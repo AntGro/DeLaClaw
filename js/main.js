@@ -1322,6 +1322,8 @@ function updateStaticLabels() {
   if (settingsBackupHint) settingsBackupHint.textContent = t('menu.settings_backup_hint');
   const settingsExportBtn = document.getElementById('settingsExportBtn');
   if (settingsExportBtn) settingsExportBtn.textContent = t('menu.settings_export_btn');
+  const settingsDriveExportBtn = document.getElementById('settingsDriveExportBtn');
+  if (settingsDriveExportBtn) settingsDriveExportBtn.textContent = t('menu.settings_drive_export_btn');
   const settingsRestoreLabel = document.getElementById('settingsRestoreLabel');
   if (settingsRestoreLabel) settingsRestoreLabel.textContent = t('menu.settings_restore');
   const settingsRestoreHint = document.getElementById('settingsRestoreHint');
@@ -2160,19 +2162,24 @@ const BACKUP_TABLES = [
   'settings', 'prompts', 'nvidia_usage', 'daily_visits',
 ];
 
+async function generateBackupJSON() {
+  const backup = { _meta: { version: 1, exported_at: new Date().toISOString(), tables: [] } };
+  for (const table of BACKUP_TABLES) {
+    try {
+      const { data, error } = await state.db.from(table).select('*');
+      if (error) { console.warn(`Skipping ${table}:`, error.message); continue; }
+      backup[table] = data || [];
+      backup._meta.tables.push(table);
+    } catch (e) { console.warn(`Skipping ${table}:`, e.message); }
+  }
+  return backup;
+}
+
 async function exportBackup() {
   const btn = document.querySelector('.settings-data-btn[onclick="exportBackup()"]');
   if (btn) btn.disabled = true;
   try {
-    const backup = { _meta: { version: 1, exported_at: new Date().toISOString(), tables: [] } };
-    for (const table of BACKUP_TABLES) {
-      try {
-        const { data, error } = await state.db.from(table).select('*');
-        if (error) { console.warn(`Skipping ${table}:`, error.message); continue; }
-        backup[table] = data || [];
-        backup._meta.tables.push(table);
-      } catch (e) { console.warn(`Skipping ${table}:`, e.message); }
-    }
+    const backup = await generateBackupJSON();
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2188,6 +2195,82 @@ async function exportBackup() {
     if (btn) btn.disabled = false;
   }
 }
+
+const GOOGLE_CLIENT_ID = '883846698493-5v6hfn0vvnq7mn5gua454cgvibbgqt8i.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+function getGoogleAccessToken() {
+  return new Promise((resolve, reject) => {
+    if (typeof google === 'undefined' || !google.accounts) {
+      reject(new Error('Google Identity Services not loaded'));
+      return;
+    }
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: DRIVE_SCOPE,
+      callback: (resp) => {
+        if (resp.error) reject(new Error(resp.error));
+        else resolve(resp.access_token);
+      },
+    });
+    client.requestAccessToken();
+  });
+}
+
+async function exportToGoogleDrive() {
+  const btn = document.querySelector('.settings-data-btn[onclick="exportToGoogleDrive()"]');
+  const label = document.getElementById('settingsDriveExportBtn');
+  if (btn) btn.disabled = true;
+  if (label) label.textContent = 'Authenticating…';
+  try {
+    const token = await getGoogleAccessToken();
+    if (label) label.textContent = 'Exporting…';
+    const backup = await generateBackupJSON();
+    const json = JSON.stringify(backup, null, 2);
+    const date = new Date().toISOString().slice(0, 10);
+    const fileName = `delaclaw-backup-${date}.json`;
+
+    // Multipart upload: metadata + file content
+    const metadata = { name: fileName, mimeType: 'application/json' };
+    const boundary = '---delaclaw-backup-boundary';
+    const body = [
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}`,
+      `--${boundary}\r\nContent-Type: application/json\r\n\r\n${json}`,
+      `--${boundary}--`
+    ].join('\r\n');
+
+    const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+      },
+      body,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`Drive API error ${resp.status}: ${err}`);
+    }
+
+    const result = await resp.json();
+    showToast(`Saved to Google Drive: ${result.name}`);
+  } catch (e) {
+    if (e.message === 'Google Identity Services not loaded') {
+      showToast('Google sign-in not available — check your connection');
+    } else if (e.message === 'popup_closed_by_user') {
+      // User cancelled — no toast needed
+    } else {
+      console.error('Drive export failed:', e);
+      showToast('Drive export failed: ' + e.message);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+    if (label) label.textContent = t('menu.settings_drive_export_btn') || 'Save to Google Drive';
+  }
+}
+
+window.exportToGoogleDrive = exportToGoogleDrive;
 
 function importBackup() {
   const input = document.getElementById('backupFileInput');

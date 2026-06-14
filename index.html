@@ -7,6 +7,7 @@
 <link rel="icon" type="image/png" href="icons/favicon.png">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script type="importmap">
 {
   "imports": {
@@ -765,6 +766,10 @@ bun run server.js</pre>
             <button type="button" class="settings-data-btn" onclick="exportBackup()">
               <span data-icon="download" data-size="16"></span>
               <span id="settingsExportBtn">Export backup</span>
+            </button>
+            <button type="button" class="settings-data-btn" onclick="exportToGoogleDrive()">
+              <span data-icon="cloud-upload" data-size="16"></span>
+              <span id="settingsDriveExportBtn">Save to Google Drive</span>
             </button>
           </div>
           <div class="setting-group">

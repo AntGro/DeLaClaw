@@ -1016,6 +1016,292 @@ async function todoPriorityIntegrationTest() {
   }
 }
 
+// ===================================================================
+// Integration: Import Flashcards (language-aware, new/existing deck, convert/generate)
+// ===================================================================
+
+async function importFlashcardsIntegrationTest() {
+  let chromium;
+  const tryPaths = [
+    'playwright',
+    path.join(__dirname, '..', 'node_modules', 'playwright'),
+    path.join(__dirname, '..', '..', 'spaces', 'node_modules', 'playwright'),
+  ];
+  for (const p of tryPaths) {
+    try { chromium = require(p).chromium; break; } catch {}
+  }
+  if (!chromium) throw new Error('Playwright not found');
+
+  const tmpDb = '/tmp/delaclaw-import-test.db';
+  try { fs.unlinkSync(tmpDb); } catch {}
+
+  const serverDir = path.join(__dirname, '..', 'server');
+  const bunProc = require('child_process').spawn(
+    'bun', ['run', path.join(serverDir, 'server.js')],
+    { env: { ...process.env, PORT: '4850', DB_PATH: tmpDb }, stdio: ['pipe', 'pipe', 'pipe'] }
+  );
+
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Bun server start timeout')), 8000);
+    bunProc.stdout.on('data', () => {});
+    bunProc.stderr.on('data', () => {});
+    const poll = setInterval(async () => {
+      try {
+        const resp = await fetch('http://127.0.0.1:4850/rest/v1/flashcards');
+        if (resp.ok) { clearTimeout(timeout); clearInterval(poll); resolve(); }
+      } catch {}
+    }, 200);
+  });
+
+  let browser;
+  try {
+    const BASE = 'http://127.0.0.1:4850/rest/v1';
+
+    // Seed an existing deck with 2 flashcards
+    await fetch(`${BASE}/flashcards`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([
+        { deck: 'Histoire', front: 'Quelle annee la Bastille a ete prise ?', back: '1789' },
+        { deck: 'Histoire', front: 'Qui etait le Roi-Soleil ?', back: 'Louis XIV' },
+      ]),
+    });
+
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    const jsErrors = [];
+    page.on('pageerror', err => jsErrors.push(err.message || String(err)));
+
+    await page.goto('http://127.0.0.1:4850/', { waitUntil: 'networkidle', timeout: 15000 });
+    await page.click('.backend-option[data-mode="local"]');
+    await page.fill('#username', 'http://127.0.0.1:4850');
+    await page.click('#loginForm button[type="submit"]');
+    await page.waitForSelector('#app.active', { timeout: 10000 });
+
+    // Navigate to flashcards page
+    await page.evaluate(() => {
+      const navBtn = document.querySelector('[data-page="flashcards"]');
+      if (navBtn) navBtn.click();
+    });
+    await page.waitForTimeout(1000);
+
+    // ── Test 1: Import new flashcards into an existing deck ──
+    await page.evaluate(() => window.openImportModal('Histoire'));
+    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
+    await page.click('#importConvertCard');
+    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
+
+    const selectedDeck = await page.$eval('#importDeckSelect', el => el.value);
+    test('Import: existing deck pre-selected', () => {
+      assert(selectedDeck === 'Histoire', `Expected 'Histoire', got '${selectedDeck}'`);
+    });
+
+    const promptText = await page.$eval('#importPromptText', el => el.textContent);
+    test('Import: convert prompt contains JSON instruction', () => {
+      assert(promptText.includes('JSON array') && promptText.includes('"front"'),
+        'Prompt should mention JSON array and front field');
+    });
+
+    const importJSON = JSON.stringify([
+      { front: 'Qui a proclame la Republique ?', back: 'La Convention nationale, le 22 septembre 1792' },
+      { front: 'En quelle annee Napoleon a-t-il ete sacre empereur ?', back: '1804' },
+    ]);
+    await page.fill('#importPasteArea', importJSON);
+    await page.waitForTimeout(300);
+
+    const previewVisible = await page.$eval('#importPreview', el => el.style.display !== 'none');
+    test('Import: preview shown after valid JSON paste', () => {
+      assert(previewVisible, 'Preview should be visible');
+    });
+
+    const importEnabled = await page.$eval('#importLoadBtn', el => !el.disabled);
+    test('Import: import button enabled after valid JSON', () => {
+      assert(importEnabled, 'Import button should be enabled');
+    });
+
+    await page.click('#importLoadBtn');
+    await page.waitForTimeout(1000);
+
+    const modalGone = await page.$('#importFlashModal') === null;
+    test('Import: modal closes after successful import', () => {
+      assert(modalGone, 'Modal should be removed after import');
+    });
+
+    const cardsResp = await fetch(`${BASE}/flashcards?deck=eq.Histoire`);
+    const allCards = await cardsResp.json();
+    test('Import: cards added to existing deck (2 original + 2 imported = 4)', () => {
+      assert(allCards.length === 4, `Expected 4 cards in Histoire, got ${allCards.length}`);
+    });
+
+    // ── Test 2: Import flashcards into a new deck ──
+    await page.evaluate(() => window.openImportModal());
+    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
+    await page.click('#importConvertCard');
+    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
+
+    await page.evaluate(() => {
+      const deckSelect = document.querySelector('#importDeckSelect');
+      const opt = document.createElement('option');
+      opt.value = 'Geographie';
+      opt.textContent = 'Geographie';
+      opt.selected = true;
+      deckSelect.insertBefore(opt, deckSelect.querySelector('[value="__new"]'));
+      deckSelect.dispatchEvent(new Event('change'));
+    });
+    await page.waitForTimeout(200);
+
+    const geoJSON = JSON.stringify([
+      { front: 'Quelle est la capitale de la France ?', back: 'Paris' },
+      { front: 'Quel est le plus long fleuve de France ?', back: 'La Loire (1 012 km)' },
+      { front: 'Combien de regions en France metropolitaine ?', back: '13 regions' },
+    ]);
+    await page.fill('#importPasteArea', geoJSON);
+    await page.waitForTimeout(300);
+    await page.click('#importLoadBtn');
+    await page.waitForTimeout(1000);
+
+    const geoResp = await fetch(`${BASE}/flashcards?deck=eq.Geographie`);
+    const geoCards = await geoResp.json();
+    test('Import: cards added to new deck (Geographie, 3 cards)', () => {
+      assert(geoCards.length === 3, `Expected 3 cards in Geographie, got ${geoCards.length}`);
+    });
+
+    // ── Test 3: Import texts (convert mode) into a new deck ──
+    await page.evaluate(() => window.openImportModal());
+    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
+    await page.click('#importConvertCard');
+    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
+
+    // Create a new text deck
+    await page.evaluate(() => {
+      const deckSelect = document.querySelector('#importDeckSelect');
+      const opt = document.createElement('option');
+      opt.value = 'Poesie';
+      opt.textContent = 'Poesie';
+      opt.selected = true;
+      deckSelect.insertBefore(opt, deckSelect.querySelector('[value="__new"]'));
+      deckSelect.dispatchEvent(new Event('change'));
+    });
+
+    await page.selectOption('#importTypeSelect', 'text');
+    await page.waitForTimeout(200);
+
+    const textPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    test('Import: text convert prompt mentions title/content fields', () => {
+      assert(textPrompt.includes('"title"') && textPrompt.includes('"content"'),
+        'Text prompt should mention title and content');
+    });
+
+    const textJSON = JSON.stringify([
+      { title: 'Demain, des l aube', author: 'Victor Hugo', content: 'Demain, des l aube, a l heure ou blanchit la campagne,\nJe partirai.' },
+    ]);
+    await page.fill('#importPasteArea', textJSON);
+    await page.waitForTimeout(300);
+    await page.click('#importLoadBtn');
+    await page.waitForTimeout(1000);
+
+    const textsResp = await fetch(`${BASE}/texts?deck=eq.Poesie`);
+    const allTexts = await textsResp.json();
+    test('Import: text added to new deck (Poesie, 1 text)', () => {
+      assert(allTexts.length === 1, `Expected 1 text in Poesie, got ${allTexts.length}`);
+    });
+
+    // ── Test 4: Language-aware prompt — French ──
+    await page.evaluate(() => localStorage.setItem('cc-lang', 'fr'));
+    await page.reload({ waitUntil: 'networkidle', timeout: 15000 });
+    await page.evaluate(() => { const b = document.querySelector('[data-page="flashcards"]'); if (b) b.click(); });
+    await page.waitForTimeout(1000);
+
+    await page.evaluate(() => window.openImportModal('Histoire'));
+    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
+    await page.click('#importGenerateCard');
+    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
+
+    const frPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    test('Import: French prompt includes French language instruction', () => {
+      assert(frPrompt.includes('French'),
+        'French prompt should contain "French" language instruction');
+    });
+    test('Import: generate prompt includes existing cards as context', () => {
+      assert(frPrompt.includes('Histoire') && frPrompt.includes('Existing cards'),
+        'Generate prompt should reference the deck and show existing cards');
+    });
+
+    // ── Test 5: Language-aware prompt — English (no extra instruction) ──
+    await page.evaluate(() => {
+      document.querySelector('#importFlashModal')?.remove();
+      localStorage.setItem('cc-lang', 'en');
+    });
+    await page.reload({ waitUntil: 'networkidle', timeout: 15000 });
+    await page.evaluate(() => { const b = document.querySelector('[data-page="flashcards"]'); if (b) b.click(); });
+    await page.waitForTimeout(1000);
+
+    await page.evaluate(() => window.openImportModal('Histoire'));
+    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
+    await page.click('#importGenerateCard');
+    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
+
+    const enPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    test('Import: English prompt has no language instruction', () => {
+      assert(!enPrompt.includes('IMPORTANT: Generate ALL content'),
+        'English prompt should not have language instruction');
+    });
+
+    // ── Test 6: Language-aware prompt — Spanish ──
+    await page.evaluate(() => {
+      document.querySelector('#importFlashModal')?.remove();
+      localStorage.setItem('cc-lang', 'es');
+    });
+    await page.reload({ waitUntil: 'networkidle', timeout: 15000 });
+    await page.evaluate(() => { const b = document.querySelector('[data-page="flashcards"]'); if (b) b.click(); });
+    await page.waitForTimeout(1000);
+
+    await page.evaluate(() => window.openImportModal('Histoire'));
+    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
+    await page.click('#importGenerateCard');
+    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
+
+    const esPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    test('Import: Spanish prompt includes Spanish language instruction', () => {
+      assert(esPrompt.includes('Spanish'),
+        'Spanish prompt should contain "Spanish" language instruction');
+    });
+
+    // ── Test 7: Invalid JSON shows error ──
+    await page.evaluate(() => {
+      document.querySelector('#importFlashModal')?.remove();
+      localStorage.setItem('cc-lang', 'en');
+    });
+    await page.reload({ waitUntil: 'networkidle', timeout: 15000 });
+    await page.evaluate(() => { const b = document.querySelector('[data-page="flashcards"]'); if (b) b.click(); });
+    await page.waitForTimeout(1000);
+
+    await page.evaluate(() => window.openImportModal('Histoire'));
+    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
+    await page.click('#importConvertCard');
+    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
+
+    await page.fill('#importPasteArea', 'not valid json');
+    await page.waitForTimeout(300);
+
+    const errorVisible = await page.$eval('#importError', el => el.style.display !== 'none');
+    const importDisabled = await page.$eval('#importLoadBtn', el => el.disabled);
+    test('Import: invalid JSON shows error and disables button', () => {
+      assert(errorVisible && importDisabled, 'Error should show and button should be disabled');
+    });
+
+    // ── Test 8: No JS errors during all import flows ──
+    test('Import: no JS errors during import flows', () => {
+      const real = jsErrors.filter(e => !e.includes('favicon') && !e.includes('supabase') && !e.includes('fetch'));
+      assert(real.length === 0, `JS errors: ${real.join('; ')}`);
+    });
+
+  } finally {
+    if (browser) await browser.close();
+    bunProc.kill();
+    try { fs.unlinkSync(tmpDb); } catch {}
+  }
+}
+
 // Run browser smoke test, then print summary
 (async () => {
   const skipIntegration = process.env.CI === 'true';
@@ -1046,6 +1332,15 @@ async function todoPriorityIntegrationTest() {
       await todoPriorityIntegrationTest();
     } catch (e) {
       test('TODO priority integration test setup', () => {
+        throw new Error(`Failed to run integration test: ${e.message}`);
+      });
+    }
+
+    console.log('\n🔗 Integration: Import Flashcards\n');
+    try {
+      await importFlashcardsIntegrationTest();
+    } catch (e) {
+      test('Import flashcards integration test setup', () => {
         throw new Error(`Failed to run integration test: ${e.message}`);
       });
     }

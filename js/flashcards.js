@@ -1,5 +1,5 @@
 import { lucideIcon } from './icons.js';
-import { t } from './i18n.js';
+import { t, getLang } from './i18n.js';
 import state from './supabase.js';
 import { esc, escQ, showToast, showDeleteConfirm, balanceGrid } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
@@ -1709,6 +1709,13 @@ function initFlashcardModals() {}
 // ── Bulk Import ──
 
 function buildImportPrompt(mode, deck, deckType) {
+  const lang = getLang();
+  const LANG_NAMES = { en: 'English', fr: 'French', es: 'Spanish' };
+  const langName = LANG_NAMES[lang] || 'English';
+  const langInstruction = lang !== 'en'
+    ? `\n\nIMPORTANT: Generate ALL content (titles, questions, answers, text) in ${langName}.`
+    : '';
+
   if (deckType === 'text') {
     if (mode === 'convert') {
       return `I want to convert existing texts into a structured JSON format for import into a flashcard/text-revision app.
@@ -1727,7 +1734,7 @@ Example:
   }
 ]
 
-Output ONLY valid JSON, no markdown fences, no commentary.
+Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}
 Paste your texts below and I will convert them:`;
     }
     // generate
@@ -1746,7 +1753,7 @@ Output a JSON array. Each element must have:
 - "author": string or null
 - "content": string (the full text, line breaks as \\n)
 
-Output ONLY valid JSON, no markdown fences, no commentary.`;
+Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}`;
   }
 
   // Flashcard mode
@@ -1763,7 +1770,7 @@ Example:
   { "front": "H₂O is the formula for?", "back": "Water" }
 ]
 
-Output ONLY valid JSON, no markdown fences, no commentary.
+Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}
 Paste your flashcards below and I will convert them:`;
   }
 
@@ -1782,7 +1789,7 @@ Output a JSON array of objects, each with:
 - "front": string (the question)
 - "back": string (the answer)
 
-Output ONLY valid JSON, no markdown fences, no commentary.`;
+Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}`;
 }
 
 function parseImportJSON(raw, deckType) {
@@ -1831,34 +1838,34 @@ window.openImportModal = async function(presetDeck) {
   overlay.innerHTML = `
     <div class="dc-container">
       <div class="dc-header">
-        <h2>${lucideIcon('upload', 20, 'var(--accent)')} Import</h2>
-        <p class="dc-subtitle">Bulk-add flashcards or texts with the help of an LLM</p>
+        <h2>${lucideIcon('upload', 20, 'var(--accent)')} ${t('flashcards.import_title')}</h2>
+        <p class="dc-subtitle">${t('flashcards.import_subtitle')}</p>
       </div>
 
       <div id="importOptions" class="dc-options">
         <button class="dc-card" id="importConvertCard">
           <div class="dc-card-icon">${lucideIcon('file-text', 28)}</div>
-          <div class="dc-card-title">Convert existing</div>
-          <div class="dc-card-desc">Paste your flashcards in any format — an LLM will restructure them</div>
+          <div class="dc-card-title">${t('flashcards.import_convert_title')}</div>
+          <div class="dc-card-desc">${t('flashcards.import_convert_desc')}</div>
         </button>
         <button class="dc-card" id="importGenerateCard">
           <div class="dc-card-icon">${lucideIcon('sparkles', 28)}</div>
-          <div class="dc-card-title">Generate new</div>
-          <div class="dc-card-desc">Ask an LLM to create flashcards — your existing cards are included as context</div>
+          <div class="dc-card-title">${t('flashcards.import_generate_title')}</div>
+          <div class="dc-card-desc">${t('flashcards.import_generate_desc')}</div>
         </button>
       </div>
 
       <div class="dc-custom-flow" id="importFlow" style="display:none">
         <div class="import-config">
-          <label class="import-config-label">Deck
+          <label class="import-config-label">${t('flashcards.import_deck')}
             <select id="importDeckSelect" class="page-sort">${deckOptions}
-              <option value="__new">+ New deck</option>
+              <option value="__new">+ ${t('flashcards.new_deck')}</option>
             </select>
           </label>
-          <label class="import-config-label">Type
+          <label class="import-config-label">${t('flashcards.import_type')}
             <select id="importTypeSelect" class="page-sort">
-              <option value="flashcard">Flashcards</option>
-              <option value="text">Texts</option>
+              <option value="flashcard">${t('flashcards.import_flashcards')}</option>
+              <option value="text">${t('flashcards.import_texts')}</option>
             </select>
           </label>
         </div>
@@ -1866,13 +1873,13 @@ window.openImportModal = async function(presetDeck) {
         <div class="dc-step">
           <div class="dc-step-header">
             <span class="dc-step-num">1</span>
-            <span>Copy this prompt</span>
+            <span>${t('flashcards.import_step1')}</span>
           </div>
           <div class="dc-prompt-box">
             <pre class="dc-prompt-text" id="importPromptText"></pre>
             <button class="dc-copy-btn" id="importCopyBtn">
               <span class="import-copy-icon">${lucideIcon('copy', 15)}</span>
-              <span id="importCopyLabel">Copy</span>
+              <span id="importCopyLabel">${t('flashcards.import_copy')}</span>
             </button>
           </div>
         </div>
@@ -1880,7 +1887,7 @@ window.openImportModal = async function(presetDeck) {
         <div class="dc-step">
           <div class="dc-step-header">
             <span class="dc-step-num">2</span>
-            <span>Open your LLM</span>
+            <span>${t('flashcards.import_step2')}</span>
           </div>
           <div class="dc-llm-links">${serviceButtons}</div>
         </div>
@@ -1888,16 +1895,16 @@ window.openImportModal = async function(presetDeck) {
         <div class="dc-step">
           <div class="dc-step-header">
             <span class="dc-step-num">3</span>
-            <span>Paste the result</span>
+            <span>${t('flashcards.import_step3')}</span>
           </div>
-          <textarea class="dc-paste-area" id="importPasteArea" rows="8" placeholder="Paste the JSON array here…"></textarea>
+          <textarea class="dc-paste-area" id="importPasteArea" rows="8" placeholder="${t('flashcards.import_paste_placeholder')}"></textarea>
           <div id="importPreview" class="import-preview" style="display:none"></div>
           <div class="dc-error" id="importError" style="display:none"></div>
           <div class="dc-flow-actions">
-            <button class="dc-btn-secondary" id="importBackBtn">Back</button>
+            <button class="dc-btn-secondary" id="importBackBtn">${t('flashcards.import_back')}</button>
             <button class="dc-btn-primary" id="importLoadBtn" disabled>
               ${lucideIcon('check', 15)}
-              Import
+              ${t('flashcards.import_btn')}
             </button>
           </div>
         </div>
@@ -1961,7 +1968,7 @@ window.openImportModal = async function(presetDeck) {
   // Deck/type change → regenerate prompt
   deckSelect.addEventListener('change', () => {
     if (deckSelect.value === '__new') {
-      const name = prompt('New deck name:');
+      const name = prompt(t('flashcards.import_new_deck_prompt'));
       if (name && name.trim()) {
         const opt = document.createElement('option');
         opt.value = name.trim();
@@ -1981,10 +1988,10 @@ window.openImportModal = async function(presetDeck) {
   copyBtn.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(promptPre.textContent);
-      copyLabel.textContent = 'Copied!';
+      copyLabel.textContent = t('flashcards.import_copied');
       copyIcon.innerHTML = lucideIcon('clipboard-check', 15);
       setTimeout(() => {
-        copyLabel.textContent = 'Copy';
+        copyLabel.textContent = t('flashcards.import_copy');
         copyIcon.innerHTML = lucideIcon('copy', 15);
       }, 2000);
     } catch {
@@ -2012,7 +2019,7 @@ window.openImportModal = async function(presetDeck) {
         if (type === 'text') return `<div class="import-preview-item">${lucideIcon('book-open', 14, 'var(--muted)')} ${esc(item.title)}${item.author ? ` — ${esc(item.author)}` : ''}</div>`;
         return `<div class="import-preview-item">${lucideIcon('brain', 14, 'var(--muted)')} <strong>${esc(item.front)}</strong> → ${esc(item.back)}</div>`;
       }).join('');
-      previewDiv.innerHTML = `<div class="import-preview-header">${count} ${type === 'text' ? 'text' : 'card'}${count !== 1 ? 's' : ''} ready to import</div>${sample}${count > 3 ? `<div class="import-preview-more">…and ${count - 3} more</div>` : ''}`;
+      previewDiv.innerHTML = `<div class="import-preview-header">${t('flashcards.import_cards_ready', count, type === 'text' ? (count !== 1 ? t('flashcards.import_text_plural') : t('flashcards.import_text_singular')) : (count !== 1 ? t('flashcards.import_card_plural') : t('flashcards.import_card_singular')))}</div>${sample}${count > 3 ? `<div class="import-preview-more">${t('flashcards.import_and_more', count - 3)}</div>` : ''}`;
       previewDiv.style.display = '';
     } catch (e) {
       loadBtn.disabled = true;
@@ -2044,13 +2051,13 @@ window.openImportModal = async function(presetDeck) {
     }
     let deck = selectedDeck();
     if (!deck) {
-      showToast('Please select or create a deck');
+      showToast(t('flashcards.import_no_deck'));
       return;
     }
     if (!state.db.connected) { showToast('Not connected'); return; }
 
     loadBtn.disabled = true;
-    loadBtn.textContent = 'Importing…';
+    loadBtn.textContent = t('flashcards.import_importing');
 
     try {
       if (type === 'text') {
@@ -2073,12 +2080,12 @@ window.openImportModal = async function(presetDeck) {
       }
       overlay.remove();
       await refreshFlashcards();
-      showToast(`Imported ${items.length} ${type === 'text' ? 'text' : 'card'}${items.length !== 1 ? 's' : ''}`);
+      showToast(t('flashcards.import_success', items.length, type === 'text' ? (items.length !== 1 ? t('flashcards.import_text_plural') : t('flashcards.import_text_singular')) : (items.length !== 1 ? t('flashcards.import_card_plural') : t('flashcards.import_card_singular'))));
     } catch (e) {
-      errorDiv.textContent = 'Import failed: ' + e.message;
+      errorDiv.textContent = t('flashcards.import_failed') + e.message;
       errorDiv.style.display = '';
       loadBtn.disabled = false;
-      loadBtn.innerHTML = `${lucideIcon('check', 15)} Import`;
+      loadBtn.innerHTML = `${lucideIcon('check', 15)} ${t('flashcards.import_btn')}`;
     }
   });
 

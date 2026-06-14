@@ -347,6 +347,9 @@ input,select,button{font-family:inherit;}
 .settings-data-btn{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:0.88rem;font-weight:500;cursor:pointer;transition:background 0.15s;}
 .settings-data-btn:hover{background:var(--surface2);}
 .settings-data-btn:disabled{opacity:0.5;cursor:not-allowed;}
+.drive-backup-link{display:flex;align-items:center;gap:6px;font-size:0.82rem;margin-top:6px;}
+.drive-backup-link a{color:var(--accent);text-decoration:none;font-weight:500;}
+.drive-backup-link a:hover{text-decoration:underline;}
 .usage-stats-container{display:flex;gap:12px;flex-wrap:wrap;}
 .usage-stat-card{flex:1;min-width:100px;padding:12px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--border);}
 .usage-stat-value{font-size:1.4rem;font-weight:700;color:var(--text);line-height:1.2;}

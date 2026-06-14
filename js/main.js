@@ -2304,6 +2304,12 @@ async function exportToGoogleDrive() {
 
     const result = await resp.json();
     showToast(`Saved to Google Drive: ${DRIVE_FOLDER_NAME}/${result.name}`);
+    // Show link to folder
+    const linkEl = document.getElementById('driveBackupLink');
+    if (linkEl) {
+      linkEl.innerHTML = `${lucideIcon('external-link', 14, 'var(--accent)')} <a href="https://drive.google.com/drive/folders/${folderId}" target="_blank" rel="noopener">Open ${DRIVE_FOLDER_NAME}</a>`;
+      linkEl.style.display = '';
+    }
   } catch (e) {
     if (e.message === 'Google Identity Services not loaded') {
       showToast('Google sign-in not available — check your connection');

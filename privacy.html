@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy — DeLaClaw</title>
+<style>
+  :root { --bg: #08090d; --text: #e4e4ec; --muted: #9a9aa8; --accent: oklch(0.65 0.15 264); --surface: rgba(17,19,24,0.85); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'DM Sans', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; padding: 3rem 1.5rem; }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); font-size: 0.88rem; margin-bottom: 2.5rem; }
+  h2 { font-size: 1.05rem; font-weight: 600; margin: 2rem 0 0.5rem; }
+  p, li { font-size: 0.92rem; color: var(--muted); }
+  ul { padding-left: 1.25rem; margin: 0.5rem 0; }
+  li { margin-bottom: 0.35rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .back { display: inline-block; margin-bottom: 2rem; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a href="/" class="back">← DeLaClaw</a>
+  <h1>Privacy Policy</h1>
+  <p class="subtitle">Last updated: 15 June 2026</p>
+
+  <h2>What DeLaClaw is</h2>
+  <p>DeLaClaw is a personal productivity app — a self-hosted command center for tasks, habits, flashcards, and other personal data. It runs entirely in your browser.</p>
+
+  <h2>Data you own</h2>
+  <p>All your data (tasks, projects, habits, flashcards, wardrobe, birthdays, and settings) is stored in your own Supabase database instance or local backend. DeLaClaw has no central server and does not collect, store, or transmit your data to any third party.</p>
+
+  <h2>Google Drive integration</h2>
+  <p>DeLaClaw offers an optional backup feature that saves your data to Google Drive. When you use it:</p>
+  <ul>
+    <li>The app requests the <code>drive.file</code> scope, which limits access strictly to files and folders that DeLaClaw itself creates.</li>
+    <li>DeLaClaw cannot read, modify, or delete any other files in your Google Drive.</li>
+    <li>Authentication happens directly between your browser and Google's servers via OAuth 2.0. DeLaClaw never sees or stores your Google password.</li>
+    <li>Access tokens are held in browser memory only for the duration of the export and are not persisted.</li>
+  </ul>
+
+  <h2>Cookies and analytics</h2>
+  <p>DeLaClaw does not use cookies, tracking pixels, analytics services, or any form of telemetry.</p>
+
+  <h2>Third-party services</h2>
+  <p>The only external services DeLaClaw communicates with are:</p>
+  <ul>
+    <li><strong>Your Supabase instance</strong> — for data storage (configured by you).</li>
+    <li><strong>Google Drive API</strong> — only when you explicitly trigger a backup.</li>
+  </ul>
+
+  <h2>Data sharing</h2>
+  <p>DeLaClaw does not sell, share, or transfer any user data to third parties for any purpose, including advertising, analytics, or AI training.</p>
+
+  <h2>Contact</h2>
+  <p>For questions about this policy, open an issue on the <a href="https://github.com/AntGro/DeLaClaw">GitHub repository</a>.</p>
+</main>
+</body>
+</html>

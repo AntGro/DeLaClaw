@@ -1322,6 +1322,8 @@ function updateStaticLabels() {
   if (settingsBackupHint) settingsBackupHint.textContent = t('menu.settings_backup_hint');
   const settingsExportBtn = document.getElementById('settingsExportBtn');
   if (settingsExportBtn) settingsExportBtn.textContent = t('menu.settings_export_btn');
+  const settingsDriveExportBtn = document.getElementById('settingsDriveExportBtn');
+  if (settingsDriveExportBtn) settingsDriveExportBtn.textContent = t('menu.settings_drive_export_btn');
   const settingsRestoreLabel = document.getElementById('settingsRestoreLabel');
   if (settingsRestoreLabel) settingsRestoreLabel.textContent = t('menu.settings_restore');
   const settingsRestoreHint = document.getElementById('settingsRestoreHint');
@@ -1616,10 +1618,18 @@ function openSettings() {
   updateMenuThemeItem();
   hydrateIcons();
   document.getElementById('settingsModal').classList.add('visible');
+  const scrollY = window.scrollY;
+  document.body.classList.add('no-scroll');
+  document.body.style.top = `-${scrollY}px`;
+  document.body.dataset.scrollY = scrollY;
 }
 
 function closeSettings() {
   document.getElementById('settingsModal').classList.remove('visible');
+  document.body.classList.remove('no-scroll');
+  const scrollY = parseInt(document.body.dataset.scrollY || '0', 10);
+  document.body.style.top = '';
+  window.scrollTo(0, scrollY);
 }
 
 function switchSettingsPane(paneKey) {
@@ -1669,7 +1679,6 @@ function initTabConfigToggle(list) {
 function initTabConfigDrag(list) {
   let dragState = null;
   list.querySelectorAll('.tab-config-item').forEach(item => {
-    item.style.touchAction = 'none';
     item.addEventListener('pointerdown', e => {
       // Only initiate drag from the drag handle
       if (!e.target.closest('.tab-config-drag')) return;
@@ -2153,19 +2162,24 @@ const BACKUP_TABLES = [
   'settings', 'prompts', 'nvidia_usage', 'daily_visits',
 ];
 
+async function generateBackupJSON() {
+  const backup = { _meta: { version: 1, exported_at: new Date().toISOString(), tables: [] } };
+  for (const table of BACKUP_TABLES) {
+    try {
+      const { data, error } = await state.db.from(table).select('*');
+      if (error) { console.warn(`Skipping ${table}:`, error.message); continue; }
+      backup[table] = data || [];
+      backup._meta.tables.push(table);
+    } catch (e) { console.warn(`Skipping ${table}:`, e.message); }
+  }
+  return backup;
+}
+
 async function exportBackup() {
   const btn = document.querySelector('.settings-data-btn[onclick="exportBackup()"]');
   if (btn) btn.disabled = true;
   try {
-    const backup = { _meta: { version: 1, exported_at: new Date().toISOString(), tables: [] } };
-    for (const table of BACKUP_TABLES) {
-      try {
-        const { data, error } = await state.db.from(table).select('*');
-        if (error) { console.warn(`Skipping ${table}:`, error.message); continue; }
-        backup[table] = data || [];
-        backup._meta.tables.push(table);
-      } catch (e) { console.warn(`Skipping ${table}:`, e.message); }
-    }
+    const backup = await generateBackupJSON();
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2181,6 +2195,137 @@ async function exportBackup() {
     if (btn) btn.disabled = false;
   }
 }
+
+const GOOGLE_CLIENT_ID = '883846698493-5v6hfn0vvnq7mn5gua454cgvibbgqt8i.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+function getGoogleAccessToken() {
+  return new Promise((resolve, reject) => {
+    if (typeof google === 'undefined' || !google.accounts) {
+      reject(new Error('Google Identity Services not loaded'));
+      return;
+    }
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: DRIVE_SCOPE,
+      callback: (resp) => {
+        if (resp.error) reject(new Error(resp.error));
+        else resolve(resp.access_token);
+      },
+    });
+    client.requestAccessToken();
+  });
+}
+
+const DRIVE_FOLDER_NAME = 'DeLaClaw Backups';
+
+async function getOrCreateDriveFolder(token) {
+  // Check settings for cached folder ID
+  if (state.db.connected) {
+    const { data } = await state.db.from('settings').select('value').eq('key', 'drive_backup_folder_id').maybeSingle();
+    if (data && data.value) {
+      // Verify folder still exists
+      const check = await fetch(`https://www.googleapis.com/drive/v3/files/${data.value}?fields=id,trashed`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (check.ok) {
+        const f = await check.json();
+        if (!f.trashed) return data.value;
+      }
+    }
+  }
+
+  // Search for existing folder
+  const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const search = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  if (search.ok) {
+    const { files } = await search.json();
+    if (files && files.length > 0) {
+      const folderId = files[0].id;
+      if (state.db.connected) await state.db.from('settings').upsert({ key: 'drive_backup_folder_id', value: folderId });
+      return folderId;
+    }
+  }
+
+  // Create folder
+  const create = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ name: DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
+  });
+  if (!create.ok) throw new Error('Failed to create Drive folder');
+  const folder = await create.json();
+  if (state.db.connected) await state.db.from('settings').upsert({ key: 'drive_backup_folder_id', value: folder.id });
+  return folder.id;
+}
+
+async function exportToGoogleDrive() {
+  const btn = document.querySelector('.settings-data-btn[onclick="exportToGoogleDrive()"]');
+  const label = document.getElementById('settingsDriveExportBtn');
+  if (btn) btn.disabled = true;
+  if (label) label.textContent = 'Authenticating…';
+  try {
+    const token = await getGoogleAccessToken();
+    if (label) label.textContent = 'Exporting…';
+    const backup = await generateBackupJSON();
+    const json = JSON.stringify(backup, null, 2);
+    const date = new Date().toISOString().slice(0, 10);
+    const fileName = `delaclaw-backup-${date}.json`;
+
+    const folderId = await getOrCreateDriveFolder(token);
+
+    // Multipart upload: metadata + file content
+    const metadata = { name: fileName, mimeType: 'application/json', parents: [folderId] };
+    const boundary = '---delaclaw-backup-boundary';
+    const body = [
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}`,
+      `--${boundary}\r\nContent-Type: application/json\r\n\r\n${json}`,
+      `--${boundary}--`
+    ].join('\r\n');
+
+    const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+      },
+      body,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`Drive API error ${resp.status}: ${err}`);
+    }
+
+    const result = await resp.json();
+    showToast(`Saved to Google Drive: ${DRIVE_FOLDER_NAME}/${result.name}`);
+    // Show link to folder
+    const linkEl = document.getElementById('driveBackupLink');
+    if (linkEl) {
+      linkEl.innerHTML = `${lucideIcon('external-link', 14, 'var(--accent)')} <a href="https://drive.google.com/drive/folders/${folderId}" target="_blank" rel="noopener">Open ${DRIVE_FOLDER_NAME}</a>`;
+      linkEl.style.display = '';
+    }
+  } catch (e) {
+    if (e.message === 'Google Identity Services not loaded') {
+      showToast('Google sign-in not available — check your connection');
+    } else if (e.message === 'popup_closed_by_user') {
+      // User cancelled — no toast needed
+    } else {
+      console.error('Drive export failed:', e);
+      showToast('Drive export failed: ' + e.message);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+    if (label) label.textContent = t('menu.settings_drive_export_btn') || 'Save to Google Drive';
+  }
+}
+
+window.exportToGoogleDrive = exportToGoogleDrive;
 
 function importBackup() {
   const input = document.getElementById('backupFileInput');
@@ -2226,8 +2371,33 @@ function importBackup() {
         } catch (e) { console.warn(`Failed to restore ${table}:`, e.message); }
       }
       showToast(t('menu.settings_restore_done', totalRows));
-      // Reload to reflect new data
-      setTimeout(() => location.reload(), 1200);
+      // In demo mode, reseed the in-memory adapter instead of reloading
+      // (reload would re-create the adapter with default demo data)
+      if (state.demoMode && state.demoAdapter) {
+        const reseedData = {};
+        for (const table of (backup._meta.tables || [])) {
+          reseedData[table] = backup[table] || [];
+        }
+        state.demoAdapter.reseed(reseedData);
+        setDemoCategoriesFromData(reseedData);
+        await loadProjects();
+        buildProjectCards();
+        initProjectDragDrop();
+        updateArchiveToggleBtn();
+        renderArchivedProjects();
+        await refreshAll();
+        await refreshTodos();
+        await refreshHabits();
+        await refreshBirthdays();
+        await refreshVestiaire();
+        await refreshFlashcards();
+        await refreshLists();
+        refreshWelcome();
+        closeSettings();
+      } else {
+        // Reload to reflect new data
+        setTimeout(() => location.reload(), 1200);
+      }
     } catch (e) {
       console.error('Import failed:', e);
       showToast(t('menu.settings_restore_error'));
@@ -2544,3 +2714,19 @@ window.toggleTheme = toggleTheme;
 window.disconnect = disconnect;
 window.toggleSearch = toggleSearch;
 window.clearPageSearch = clearPageSearch;
+
+// --- Environment badge + dev favicon ---
+(function() {
+  const h = location.hostname;
+  let env = null;
+  if (h.startsWith('dev.') || h.includes('dev.delaclaw')) env = 'DEV';
+  else if (h === 'localhost' || h === '127.0.0.1') env = 'LOCAL';
+  if (!env) return;
+  const badge = document.createElement('div');
+  badge.className = 'env-badge';
+  badge.textContent = env;
+  document.body.appendChild(badge);
+  // Swap favicon
+  const favLink = document.querySelector('link[rel="icon"]');
+  if (favLink) favLink.href = 'icons/favicon-dev.png';
+})();

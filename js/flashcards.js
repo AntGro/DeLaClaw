@@ -1,5 +1,5 @@
 import { lucideIcon } from './icons.js';
-import { t } from './i18n.js';
+import { t, getLang } from './i18n.js';
 import state from './supabase.js';
 import { esc, escQ, showToast, showDeleteConfirm, balanceGrid } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
@@ -984,7 +984,7 @@ window.saveNewFlashDeck = function() {
 };
 
 function closeAllFlashModals() {
-  ['addFlashcardModal', 'editFlashcardModal', 'addDraftModal', 'addFlashDeckModal', 'addTextModal', 'editTextModal'].forEach(id => {
+  ['addFlashcardModal', 'editFlashcardModal', 'addDraftModal', 'addFlashDeckModal', 'addTextModal', 'editTextModal', 'importFlashModal'].forEach(id => {
     const m = document.getElementById(id); if (m) m.remove();
   });
 }
@@ -994,7 +994,7 @@ function startPractice(deckFilter) {
   const now = new Date();
   let pool = allCards.filter(c => !c.last_review || !c.next_review || new Date(c.next_review) <= now);
   if (deckFilter && deckFilter !== '__all') pool = pool.filter(c => c.deck === deckFilter);
-  if (pool.length === 0) { showToast(t('flashcards.no_cards_due')); return; }
+  if (pool.length === 0) { showAllCaughtUp('cards'); return; }
 
   sessionDeck = deckFilter || null;
 
@@ -1157,6 +1157,26 @@ function showSessionSummary() {
       </div>
       <div class="practice-summary-actions">
         ${continueBtn}
+        <button class="btn practice-done-btn" onclick="endPractice()">${t('common.close')}</button>
+      </div>
+    </div>`;
+}
+
+// Show "all caught up" overlay when no cards/texts are due
+function showAllCaughtUp(kind) {
+  showPracticeOverlay();
+  const overlay = document.getElementById('practiceOverlay');
+  if (!overlay) return;
+  const subtitle = kind === 'texts'
+    ? t('text_revision.all_caught_up_texts')
+    : t('flashcards.all_caught_up_cards');
+  overlay.innerHTML = `
+    <div class="practice-summary">
+      ${practiceSummaryLogo()}
+      <div class="practice-summary-emoji">${lucideIcon('circle-check', 32, '#22c55e')}</div>
+      <h2>${t('flashcards.all_caught_up')}</h2>
+      <p class="all-caught-up-detail">${subtitle}</p>
+      <div class="practice-summary-actions">
         <button class="btn practice-done-btn" onclick="endPractice()">${t('common.close')}</button>
       </div>
     </div>`;
@@ -1391,7 +1411,7 @@ function startTextPractice(deckFilter) {
     }
   }
 
-  if (pool.length === 0) { showToast(t('text_revision.no_chunks_due')); return; }
+  if (pool.length === 0) { showAllCaughtUp('texts'); return; }
 
   // Pick the single most due chunk (one revision per session)
   // Among chunks with the same priority, pick randomly
@@ -1705,6 +1725,552 @@ document.addEventListener('keydown', (e) => {
 // EXPORTS
 // ===================================================================
 function initFlashcardModals() {}
+
+// ── Bulk Import ──
+
+function buildImportPrompt(mode, deck, deckType) {
+  const lang = getLang();
+  const LANG_NAMES = { en: 'English', fr: 'French', es: 'Spanish' };
+  const langName = LANG_NAMES[lang] || 'English';
+  const langInstruction = lang !== 'en'
+    ? `\n\nIMPORTANT: Generate ALL content (titles, questions, answers, text) in ${langName}.`
+    : '';
+
+  if (deckType === 'text') {
+    if (mode === 'convert') {
+      return `I want to convert existing texts into a structured JSON format for import into a flashcard/text-revision app.
+
+Output a JSON array. Each element must have:
+- "title": string (the text's title)
+- "author": string or null
+- "content": string (the full text, with line breaks as \\n)
+
+Example:
+[
+  {
+    "title": "Le Lac",
+    "author": "Alphonse de Lamartine",
+    "content": "Ainsi, toujours poussés vers de nouveaux rivages,\\nDans la nuit éternelle emportés sans retour,\\nNe pourrons-nous jamais sur l'océan des âges\\nJeter l'ancre un seul jour ?"
+  }
+]
+
+Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}
+Paste your texts below and I will convert them:`;
+    }
+    // generate
+    const existing = allTexts.filter(tx => tx.deck === deck);
+    let ctx = '';
+    if (existing.length > 0) {
+      const samples = existing.slice(0, 3).map(tx =>
+        `  - "${tx.title}"${tx.author ? ` by ${tx.author}` : ''}`
+      ).join('\n');
+      ctx = `\n\nExisting texts in "${deck}" deck:\n${samples}\n\nGenerate texts that complement this collection.`;
+    }
+    return `Generate texts for a text-revision/memorisation app, for the "${deck}" deck.${ctx}
+
+Output a JSON array. Each element must have:
+- "title": string
+- "author": string or null
+- "content": string (the full text, line breaks as \\n)
+
+Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}`;
+  }
+
+  // Flashcard mode
+  if (mode === 'convert') {
+    return `I want to convert existing flashcards into a structured JSON format for import.
+
+Output a JSON array of objects, each with:
+- "front": string (the question)
+- "back": string (the answer)
+
+Example:
+[
+  { "front": "What is the capital of France?", "back": "Paris" },
+  { "front": "H₂O is the formula for?", "back": "Water" }
+]
+
+Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}
+Paste your flashcards below and I will convert them:`;
+  }
+
+  // generate
+  const existing = allCards.filter(c => c.deck === deck);
+  let ctx = '';
+  if (existing.length > 0) {
+    const samples = existing.slice(0, 8).map(c =>
+      `  - Q: "${c.front}" → A: "${c.back}"`
+    ).join('\n');
+    ctx = `\n\nExisting cards in "${deck}" deck (${existing.length} total):\n${samples}${existing.length > 8 ? `\n  ... and ${existing.length - 8} more` : ''}\n\nGenerate cards that complement this collection — avoid duplicates, match the style and depth.`;
+  }
+  return `Generate flashcards for a spaced-repetition app, for the "${deck}" deck.${ctx}
+
+Output a JSON array of objects, each with:
+- "front": string (the question)
+- "back": string (the answer)
+
+Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}`;
+}
+
+function parseImportJSON(raw, deckType) {
+  let text = raw.trim();
+  // Strip markdown fences if present
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
+  let arr;
+  try { arr = JSON.parse(text); } catch (e) { throw new Error('Invalid JSON: ' + e.message); }
+  if (!Array.isArray(arr)) throw new Error('Expected a JSON array');
+  if (arr.length === 0) throw new Error('Array is empty');
+  for (let i = 0; i < arr.length; i++) {
+    const item = arr[i];
+    if (deckType === 'text') {
+      if (!item.title || typeof item.title !== 'string') throw new Error(`Item ${i + 1}: missing "title"`);
+      if (!item.content || typeof item.content !== 'string') throw new Error(`Item ${i + 1}: missing "content"`);
+    } else {
+      if (!item.front || typeof item.front !== 'string') throw new Error(`Item ${i + 1}: missing "front"`);
+      if (!item.back || typeof item.back !== 'string') throw new Error(`Item ${i + 1}: missing "back"`);
+    }
+  }
+  return arr;
+}
+
+window.openImportModal = async function(presetDeck) {
+  closeAllFlashModals();
+  const { LLM_SERVICES, escHtml } = await import('./demo-chooser.js');
+
+  const cardDecks = [...new Set(allCards.map(c => c.deck))].sort();
+  const textDecks = [...new Set(allTexts.map(c => c.deck))].sort();
+  const allDecks = [...new Set([...cardDecks, ...textDecks])].sort();
+
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const serviceButtons = LLM_SERVICES.map(s => {
+    const href = isMobile && s.appUrl ? s.appUrl : s.url;
+    return `<a href="${href}" target="_blank" rel="noopener" class="dc-llm-btn">${s.svg}<span>${s.name}</span></a>`;
+  }).join('');
+
+  const deckOptions = allDecks.map(d =>
+    `<option value="${esc(d)}" ${d === presetDeck ? 'selected' : ''}>${esc(d)}</option>`
+  ).join('');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay visible';
+  overlay.id = 'importFlashModal';
+
+  overlay.innerHTML = `
+    <div class="dc-container">
+      <div class="dc-header">
+        <h2>${lucideIcon('upload', 20, 'var(--accent)')} ${t('flashcards.import_title')}</h2>
+        <p class="dc-subtitle">${t('flashcards.import_subtitle')}</p>
+      </div>
+
+      <div id="importOptions" class="dc-options">
+        <button class="dc-card" id="importConvertCard">
+          <div class="dc-card-icon">${lucideIcon('file-text', 28)}</div>
+          <div class="dc-card-title">${t('flashcards.import_convert_title')}</div>
+          <div class="dc-card-desc">${t('flashcards.import_convert_desc')}</div>
+        </button>
+        <button class="dc-card" id="importGenerateCard">
+          <div class="dc-card-icon">${lucideIcon('sparkles', 28)}</div>
+          <div class="dc-card-title">${t('flashcards.import_generate_title')}</div>
+          <div class="dc-card-desc">${t('flashcards.import_generate_desc')}</div>
+        </button>
+      </div>
+
+      <div class="dc-custom-flow" id="importFlow" style="display:none">
+        <div class="import-config">
+          <label class="import-config-label">${t('flashcards.import_deck')}
+            <select id="importDeckSelect" class="page-sort">${deckOptions}
+              <option value="__new">+ ${t('flashcards.new_deck')}</option>
+            </select>
+          </label>
+          <label class="import-config-label">${t('flashcards.import_type')}
+            <select id="importTypeSelect" class="page-sort">
+              <option value="flashcard">${t('flashcards.import_flashcards')}</option>
+              <option value="text">${t('flashcards.import_texts')}</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="dc-step">
+          <div class="dc-step-header">
+            <span class="dc-step-num">1</span>
+            <span>${t('flashcards.import_step1')}</span>
+          </div>
+          <div class="dc-prompt-box">
+            <pre class="dc-prompt-text" id="importPromptText"></pre>
+            <button class="dc-copy-btn" id="importCopyBtn">
+              <span class="import-copy-icon">${lucideIcon('copy', 15)}</span>
+              <span id="importCopyLabel">${t('flashcards.import_copy')}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="dc-step">
+          <div class="dc-step-header">
+            <span class="dc-step-num">2</span>
+            <span>${t('flashcards.import_step2')}</span>
+          </div>
+          <div class="dc-llm-links">${serviceButtons}</div>
+        </div>
+
+        <div class="dc-step">
+          <div class="dc-step-header">
+            <span class="dc-step-num">3</span>
+            <span>${t('flashcards.import_step3')}</span>
+          </div>
+          <textarea class="dc-paste-area" id="importPasteArea" rows="8" placeholder="${t('flashcards.import_paste_placeholder')}"></textarea>
+          <div id="importPreview" class="import-preview" style="display:none"></div>
+          <div class="dc-error" id="importError" style="display:none"></div>
+          <div class="dc-flow-actions" id="importPasteActions">
+            <button class="dc-btn-secondary" id="importBackBtn">${t('flashcards.import_back')}</button>
+            <button class="dc-btn-primary" id="importReviewBtn" disabled>
+              ${lucideIcon('eye', 15)}
+              ${t('flashcards.import_review')}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="importReviewStep" style="display:none">
+        <div id="importReviewContainer" class="import-review"></div>
+        <div class="dc-error" id="importReviewError" style="display:none"></div>
+        <div class="dc-flow-actions">
+          <button class="dc-btn-secondary" id="importReviewBackBtn">${t('flashcards.import_back_to_paste')}</button>
+          <button class="dc-btn-primary" id="importConfirmBtn" disabled>
+            ${lucideIcon('check', 15)}
+            ${t('flashcards.import_btn')}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // DOM refs
+  const optionsDiv = overlay.querySelector('#importOptions');
+  const flowDiv = overlay.querySelector('#importFlow');
+  const deckSelect = overlay.querySelector('#importDeckSelect');
+  const typeSelect = overlay.querySelector('#importTypeSelect');
+  const promptPre = overlay.querySelector('#importPromptText');
+  const copyBtn = overlay.querySelector('#importCopyBtn');
+  const copyLabel = overlay.querySelector('#importCopyLabel');
+  const copyIcon = overlay.querySelector('.import-copy-icon');
+  const pasteArea = overlay.querySelector('#importPasteArea');
+  const reviewBtn = overlay.querySelector('#importReviewBtn');
+  const backBtn = overlay.querySelector('#importBackBtn');
+  const errorDiv = overlay.querySelector('#importError');
+  const previewDiv = overlay.querySelector('#importPreview');
+  const pasteActions = overlay.querySelector('#importPasteActions');
+  const reviewStep = overlay.querySelector('#importReviewStep');
+  const reviewContainer = overlay.querySelector('#importReviewContainer');
+  const reviewError = overlay.querySelector('#importReviewError');
+  const reviewBackBtn = overlay.querySelector('#importReviewBackBtn');
+  const confirmBtn = overlay.querySelector('#importConfirmBtn');
+
+  let importMode = null; // 'convert' | 'generate'
+  let parsedItems = []; // items currently in review
+  let itemStates = []; // {included: bool} per item
+
+  function selectedDeck() {
+    return deckSelect.value === '__new' ? null : deckSelect.value;
+  }
+  function selectedType() { return typeSelect.value; }
+
+  function updatePrompt() {
+    const deck = selectedDeck() || 'General';
+    const type = selectedType();
+    promptPre.textContent = buildImportPrompt(importMode, deck, type);
+  }
+
+  // Auto-detect type from selected deck
+  function autoDetectType() {
+    const deck = selectedDeck();
+    if (!deck) return;
+    const hasCards = allCards.some(c => c.deck === deck);
+    const hasTexts = allTexts.some(tx => tx.deck === deck);
+    if (hasTexts && !hasCards) typeSelect.value = 'text';
+    else typeSelect.value = 'flashcard';
+  }
+
+  function showFlow(mode) {
+    importMode = mode;
+    optionsDiv.style.display = 'none';
+    flowDiv.style.display = '';
+    overlay.querySelector('.dc-subtitle').style.display = 'none';
+    autoDetectType();
+    updatePrompt();
+  }
+
+  // Card clicks
+  overlay.querySelector('#importConvertCard').addEventListener('click', () => showFlow('convert'));
+  overlay.querySelector('#importGenerateCard').addEventListener('click', () => showFlow('generate'));
+
+  // Deck/type change → regenerate prompt
+  deckSelect.addEventListener('change', () => {
+    if (deckSelect.value === '__new') {
+      const name = prompt(t('flashcards.import_new_deck_prompt'));
+      if (name && name.trim()) {
+        const opt = document.createElement('option');
+        opt.value = name.trim();
+        opt.textContent = name.trim();
+        opt.selected = true;
+        deckSelect.insertBefore(opt, deckSelect.querySelector('[value="__new"]'));
+      } else {
+        deckSelect.value = allDecks[0] || 'General';
+      }
+    }
+    autoDetectType();
+    updatePrompt();
+  });
+  typeSelect.addEventListener('change', updatePrompt);
+
+  // Copy prompt
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(promptPre.textContent);
+      copyLabel.textContent = t('flashcards.import_copied');
+      copyIcon.innerHTML = lucideIcon('clipboard-check', 15);
+      setTimeout(() => {
+        copyLabel.textContent = t('flashcards.import_copy');
+        copyIcon.innerHTML = lucideIcon('copy', 15);
+      }, 2000);
+    } catch {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(promptPre);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  });
+
+  // Validate paste
+  pasteArea.addEventListener('input', () => {
+    const raw = pasteArea.value.trim();
+    errorDiv.style.display = 'none';
+    previewDiv.style.display = 'none';
+    if (!raw) { reviewBtn.disabled = true; return; }
+    try {
+      const items = parseImportJSON(raw, selectedType());
+      reviewBtn.disabled = false;
+      // Show preview
+      const type = selectedType();
+      const count = items.length;
+      const sample = items.slice(0, 3).map(item => {
+        if (type === 'text') return `<div class="import-preview-item">${lucideIcon('book-open', 14, 'var(--muted)')} ${esc(item.title)}${item.author ? ` — ${esc(item.author)}` : ''}</div>`;
+        return `<div class="import-preview-item">${lucideIcon('brain', 14, 'var(--muted)')} <strong>${esc(item.front)}</strong> → ${esc(item.back)}</div>`;
+      }).join('');
+      previewDiv.innerHTML = `<div class="import-preview-header">${t('flashcards.import_cards_ready', count, type === 'text' ? (count !== 1 ? t('flashcards.import_text_plural') : t('flashcards.import_text_singular')) : (count !== 1 ? t('flashcards.import_card_plural') : t('flashcards.import_card_singular')))}</div>${sample}${count > 3 ? `<div class="import-preview-more">${t('flashcards.import_and_more', count - 3)}</div>` : ''}`;
+      previewDiv.style.display = '';
+    } catch (e) {
+      reviewBtn.disabled = true;
+      errorDiv.textContent = e.message;
+      errorDiv.style.display = '';
+    }
+  });
+
+  // Back from paste to options
+  backBtn.addEventListener('click', () => {
+    flowDiv.style.display = 'none';
+    optionsDiv.style.display = '';
+    overlay.querySelector('.dc-subtitle').style.display = '';
+    errorDiv.style.display = 'none';
+    previewDiv.style.display = 'none';
+    pasteArea.value = '';
+    reviewBtn.disabled = true;
+    importMode = null;
+  });
+
+  // --- Review Step ---
+  function updateConfirmBtn() {
+    const selectedCount = itemStates.filter(s => s.included).length;
+    const type = selectedType();
+    const label = type === 'text'
+      ? (selectedCount !== 1 ? t('flashcards.import_text_plural') : t('flashcards.import_text_singular'))
+      : (selectedCount !== 1 ? t('flashcards.import_card_plural') : t('flashcards.import_card_singular'));
+    confirmBtn.innerHTML = `${lucideIcon('check', 15)} ${t('flashcards.import_confirm', selectedCount, label)}`;
+    confirmBtn.disabled = selectedCount === 0;
+  }
+
+  function updateReviewCount() {
+    const countEl = reviewContainer.querySelector('.import-review-count');
+    if (!countEl) return;
+    const selectedCount = itemStates.filter(s => s.included).length;
+    countEl.textContent = t('flashcards.import_selected_count', selectedCount, parsedItems.length);
+  }
+
+  function renderReview() {
+    const type = selectedType();
+    const total = parsedItems.length;
+    const label = type === 'text'
+      ? (total !== 1 ? t('flashcards.import_text_plural') : t('flashcards.import_text_singular'))
+      : (total !== 1 ? t('flashcards.import_card_plural') : t('flashcards.import_card_singular'));
+
+    let html = `<div class="import-review-toolbar">
+      <div class="import-review-toolbar-left">
+        <strong>${t('flashcards.import_review_header', total, label)}</strong>
+        <button class="import-review-toggle" id="importToggleAll">${t('flashcards.import_deselect_all')}</button>
+      </div>
+      <span class="import-review-count">${t('flashcards.import_selected_count', total, total)}</span>
+    </div><div class="import-review-list">`;
+
+    parsedItems.forEach((item, i) => {
+      const checked = itemStates[i].included ? 'checked' : '';
+      const excluded = itemStates[i].included ? '' : ' excluded';
+      if (type === 'text') {
+        html += `<div class="import-review-card${excluded}" data-idx="${i}">
+          <span class="import-review-num">${i + 1}</span>
+          <input type="checkbox" class="import-review-check" data-idx="${i}" ${checked}>
+          <div class="import-review-fields">
+            <div class="import-review-field">
+              <span class="import-review-field-label">${t('flashcards.import_edit_title')}</span>
+              <input class="import-review-field-input" data-idx="${i}" data-field="title" value="${esc(item.title)}">
+            </div>
+            <div class="import-review-field">
+              <span class="import-review-field-label">${t('flashcards.import_edit_author')}</span>
+              <input class="import-review-field-input" data-idx="${i}" data-field="author" value="${esc(item.author || '')}">
+            </div>
+          </div>
+        </div>`;
+      } else {
+        html += `<div class="import-review-card${excluded}" data-idx="${i}">
+          <span class="import-review-num">${i + 1}</span>
+          <input type="checkbox" class="import-review-check" data-idx="${i}" ${checked}>
+          <div class="import-review-fields">
+            <div class="import-review-field">
+              <span class="import-review-field-label">${t('flashcards.import_edit_front')}</span>
+              <input class="import-review-field-input" data-idx="${i}" data-field="front" value="${esc(item.front)}">
+            </div>
+            <div class="import-review-field">
+              <span class="import-review-field-label">${t('flashcards.import_edit_back')}</span>
+              <input class="import-review-field-input" data-idx="${i}" data-field="back" value="${esc(item.back)}">
+            </div>
+          </div>
+        </div>`;
+      }
+    });
+
+    html += '</div>';
+    reviewContainer.innerHTML = html;
+    updateConfirmBtn();
+
+    // Toggle all
+    const toggleBtn = reviewContainer.querySelector('#importToggleAll');
+    toggleBtn.addEventListener('click', () => {
+      const allIncluded = itemStates.every(s => s.included);
+      const newState = !allIncluded;
+      itemStates.forEach(s => s.included = newState);
+      reviewContainer.querySelectorAll('.import-review-check').forEach(cb => cb.checked = newState);
+      reviewContainer.querySelectorAll('.import-review-card').forEach(card => {
+        card.classList.toggle('excluded', !newState);
+      });
+      toggleBtn.textContent = newState ? t('flashcards.import_deselect_all') : t('flashcards.import_select_all');
+      updateConfirmBtn();
+      updateReviewCount();
+    });
+
+    // Individual checkboxes
+    reviewContainer.querySelectorAll('.import-review-check').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const idx = parseInt(cb.dataset.idx);
+        itemStates[idx].included = cb.checked;
+        const card = reviewContainer.querySelector(`.import-review-card[data-idx="${idx}"]`);
+        card.classList.toggle('excluded', !cb.checked);
+        // Update toggle button text
+        const allIncluded = itemStates.every(s => s.included);
+        const noneIncluded = itemStates.every(s => !s.included);
+        toggleBtn.textContent = allIncluded ? t('flashcards.import_deselect_all') : t('flashcards.import_select_all');
+        updateConfirmBtn();
+        updateReviewCount();
+      });
+    });
+
+    // Inline edit fields
+    reviewContainer.querySelectorAll('.import-review-field-input').forEach(input => {
+      input.addEventListener('input', () => {
+        const idx = parseInt(input.dataset.idx);
+        const field = input.dataset.field;
+        parsedItems[idx][field] = input.value;
+      });
+    });
+  }
+
+  // Review button → show review step
+  reviewBtn.addEventListener('click', () => {
+    const type = selectedType();
+    try {
+      parsedItems = parseImportJSON(pasteArea.value, type);
+    } catch (e) {
+      errorDiv.textContent = e.message;
+      errorDiv.style.display = '';
+      return;
+    }
+    itemStates = parsedItems.map(() => ({ included: true }));
+
+    // Hide paste step, show review step
+    flowDiv.style.display = 'none';
+    reviewStep.style.display = '';
+    renderReview();
+  });
+
+  // Back from review to paste
+  reviewBackBtn.addEventListener('click', () => {
+    reviewStep.style.display = 'none';
+    flowDiv.style.display = '';
+    reviewError.style.display = 'none';
+  });
+
+  // Confirm import
+  confirmBtn.addEventListener('click', async () => {
+    const type = selectedType();
+    const selectedItems = parsedItems.filter((_, i) => itemStates[i].included);
+    if (selectedItems.length === 0) return;
+
+    let deck = selectedDeck();
+    if (!deck) {
+      showToast(t('flashcards.import_no_deck'));
+      return;
+    }
+    if (!state.db.connected) { showToast('Not connected'); return; }
+
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = t('flashcards.import_importing');
+
+    try {
+      if (type === 'text') {
+        for (const item of selectedItems) {
+          const linesPerChunk = 4;
+          const { data: inserted } = await state.db.from('texts').insert({
+            deck, title: item.title, author: item.author || null,
+            content: item.content, lines_per_chunk: linesPerChunk, context_lines: 3
+          }).select('*');
+          if (inserted && inserted.length > 0) {
+            const textRow = inserted[0];
+            const chunks = splitTextIntoChunks(item.content, linesPerChunk);
+            const chunkRows = chunks.map((_, idx) => ({ text_id: textRow.id, chunk_index: idx }));
+            if (chunkRows.length > 0) await state.db.from('text_line_progress').insert(chunkRows);
+          }
+        }
+      } else {
+        const rows = selectedItems.map(item => ({ deck, front: item.front, back: item.back }));
+        await state.db.from('flashcards').insert(rows);
+      }
+      overlay.remove();
+      await refreshFlashcards();
+      showToast(t('flashcards.import_success', selectedItems.length, type === 'text' ? (selectedItems.length !== 1 ? t('flashcards.import_text_plural') : t('flashcards.import_text_singular')) : (selectedItems.length !== 1 ? t('flashcards.import_card_plural') : t('flashcards.import_card_singular'))));
+    } catch (e) {
+      reviewError.textContent = t('flashcards.import_failed') + e.message;
+      reviewError.style.display = '';
+      confirmBtn.disabled = false;
+      confirmBtn.innerHTML = `${lucideIcon('check', 15)} ${t('flashcards.import_btn')}`;
+    }
+  });
+
+  // Dismiss by clicking overlay
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+};
+
 function getFlashcardCounts() {
   return { cards: allCards.length, drafts: allDrafts.length, texts: allTexts.length };
 }

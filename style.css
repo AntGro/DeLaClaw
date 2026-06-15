@@ -170,7 +170,7 @@ input,select,button{font-family:inherit;}
 .backend-option svg{flex-shrink:0;}
 .backend-option .backend-icon-img{width:20px;height:20px;object-fit:contain;}
 .backend-option.hero-arriving>svg,.backend-option.hero-arriving>.backend-icon-img{visibility:hidden;}
-.backend-picker-label{text-align:center;font-size:0.7rem;font-weight:500;color:var(--muted);margin:4px 0 12px;letter-spacing:0.04em;opacity:0.7;}
+.backend-picker-label{text-align:center;font-size:0.82rem;font-weight:600;color:var(--text);margin:6px 0 14px;letter-spacing:0.03em;}
 
 /* Stay Connected Checkbox */
 .stay-connected-label{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.82rem;color:var(--muted);margin:10px 0 4px;justify-content:center;user-select:none;}

@@ -228,6 +228,12 @@ function switchBackendMode(mode) {
   document.querySelectorAll('.backend-option').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
+  // Update picker label
+  const labelEl = document.getElementById('backendPickerLabel');
+  if (labelEl) {
+    const labels = { googledrive: 'Google Drive', supabase: 'Supabase', local: 'Local', demo: 'Demo' };
+    labelEl.textContent = labels[mode] || mode;
+  }
   const keyField = document.getElementById('keyField');
   const urlField = document.getElementById('username');
   const urlLabel = document.getElementById('urlLabel');
@@ -287,7 +293,7 @@ function initGate() {
   const saved = getStayConnectedCreds();
   if (saved) {
     // Restore backend mode
-    switchBackendMode(saved.mode || 'supabase');
+    switchBackendMode(saved.mode || 'googledrive');
     // Inject static logo (hero is skipped)
     injectGateLogo();
     // Show a brief connecting message, then auto-connect

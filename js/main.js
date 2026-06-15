@@ -244,6 +244,12 @@ function switchBackendMode(mode) {
     if (urlLabel) urlLabel.style.visibility = 'hidden';
     if (hintEl) hintEl.textContent = t('login.hint_demo');
     if (submitBtn) submitBtn.textContent = t('login.btn_demo');
+  } else if (mode === 'googledrive') {
+    if (keyField) keyField.style.visibility = 'hidden';
+    if (urlField) urlField.style.visibility = 'hidden';
+    if (urlLabel) urlLabel.style.visibility = 'hidden';
+    if (hintEl) hintEl.textContent = t('login.hint_googledrive');
+    if (submitBtn) submitBtn.textContent = t('login.btn_googledrive');
   } else if (mode === 'local') {
     if (keyField) keyField.style.visibility = 'hidden';
     if (urlField) { urlField.style.visibility = ''; urlField.placeholder = 'http://localhost:3737'; }
@@ -344,6 +350,7 @@ function getStayConnectedCreds() {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && parsed.mode === 'demo') return parsed;
+    if (parsed && parsed.mode === 'googledrive') return parsed;
     if (parsed && parsed.url && (parsed.key || parsed.mode === 'local')) return parsed;
     return null;
   } catch { return null; }
@@ -357,7 +364,11 @@ function clearStayConnectedCreds() {
   localStorage.removeItem(STAY_CONNECTED_KEY);
 }
 
-function disconnect() {
+async function disconnect() {
+  // Force-save Drive data before disconnecting
+  if (state.driveMode && state.driveAdapter) {
+    try { await state.driveAdapter.forceSave(); } catch {}
+  }
   clearStayConnectedCreds();
   location.reload();
 }
@@ -375,7 +386,7 @@ async function doLogin() {
   const stayConnected = document.getElementById('stayConnected').checked;
   const err = document.getElementById('loginError');
   const mode = getSelectedMode();
-  if (mode !== 'demo' && (!url || (!key && mode !== 'local'))) { err.textContent = t('toast.enter_name'); return; }
+  if (mode !== 'demo' && mode !== 'googledrive' && (!url || (!key && mode !== 'local'))) { err.textContent = t('toast.enter_name'); return; }
   // Detect org URL
   if (/supabase\.com\/dashboard\/org\//i.test(url)) {
     err.innerHTML = t('toast.org_url_tip');
@@ -405,6 +416,10 @@ async function doLogin() {
   } catch (e) {
     if (e.message === 'project_paused') {
       err.innerHTML = `${t('toast.project_paused')} <a href="${e.dashboardUrl}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;">Check on Supabase ↗</a>`;
+    } else if (e.message === 'google_not_loaded') {
+      err.textContent = t('login.drive_gis_blocked') || 'Google sign-in is blocked. Disable your ad blocker or allow third-party scripts.';
+    } else if (e.message === 'popup_closed_by_user' || e.message === 'access_denied') {
+      err.textContent = t('login.drive_cancelled') || 'Google sign-in was cancelled.';
     } else {
       err.textContent = t('toast.connection_failed');
     }
@@ -443,6 +458,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const setupBack = document.getElementById('setupBack');
   const setupCloudDone = document.getElementById('setupCloudDone');
   const setupLocalDone = document.getElementById('setupLocalDone');
+  const setupDriveDone = document.getElementById('setupDriveDone');
 
   function showGuide() {
     if (gateBox) gateBox.style.display = 'none';
@@ -459,14 +475,18 @@ document.addEventListener('DOMContentLoaded', () => {
   function showSteps(path) {
     const cloud = document.getElementById('setupCloudSteps');
     const local = document.getElementById('setupLocalSteps');
+    const drive = document.getElementById('setupDriveSteps');
     const cardCloud = document.getElementById('setupPathCloud');
     const cardLocal = document.getElementById('setupPathLocal');
+    const cardDrive = document.getElementById('setupPathDrive');
+    [cloud, local, drive].forEach(el => el && (el.style.display = 'none'));
+    [cardCloud, cardLocal, cardDrive].forEach(el => el?.classList.remove('active'));
     if (path === 'cloud') {
-      cloud.style.display = ''; local.style.display = 'none';
-      cardCloud.classList.add('active'); cardLocal.classList.remove('active');
+      cloud.style.display = ''; cardCloud.classList.add('active');
+    } else if (path === 'drive') {
+      drive.style.display = ''; cardDrive.classList.add('active');
     } else {
-      local.style.display = ''; cloud.style.display = 'none';
-      cardLocal.classList.add('active'); cardCloud.classList.remove('active');
+      local.style.display = ''; cardLocal.classList.add('active');
     }
   }
 
@@ -474,8 +494,10 @@ document.addEventListener('DOMContentLoaded', () => {
   if (setupBack) setupBack.addEventListener('click', hideGuide);
   if (setupCloudDone) setupCloudDone.addEventListener('click', hideGuide);
   if (setupLocalDone) setupLocalDone.addEventListener('click', hideGuide);
+  if (setupDriveDone) setupDriveDone.addEventListener('click', hideGuide);
   document.getElementById('setupPathCloud')?.addEventListener('click', () => showSteps('cloud'));
   document.getElementById('setupPathLocal')?.addEventListener('click', () => showSteps('local'));
+  document.getElementById('setupPathDrive')?.addEventListener('click', () => showSteps('drive'));
 
   // ── Schema copy + toggle ──
   let SUPABASE_SCHEMA = '';
@@ -750,6 +772,18 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
     state.demoAdapter = adapter;
     state.demoMode = true;
     setDemoCategoriesFromData(demoData);
+  } else if (mode === 'googledrive') {
+    const { createDriveAdapter } = await import('./adapters/drive.js');
+    const errEl = document.getElementById('loginError');
+    adapter = await createDriveAdapter(GOOGLE_CLIENT_ID, (status) => {
+      if (errEl) {
+        if (status === 'authenticating') errEl.textContent = t('login.drive_authenticating') || 'Signing in to Google…';
+        else if (status === 'loading') errEl.textContent = t('login.drive_loading') || 'Loading from Drive…';
+        else errEl.textContent = '';
+      }
+    });
+    state.driveAdapter = adapter;
+    state.driveMode = true;
   } else if (mode === 'local') {
     adapter = createRestAdapter(url);
     // Test connection with raw adapter BEFORE wrapping with offline cache
@@ -777,6 +811,13 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
   }
   db.setAdapter(adapter);
 
+  // Flush pending Drive saves on page close
+  if (mode === 'googledrive' && adapter.forceSave) {
+    window.addEventListener('beforeunload', () => {
+      adapter.forceSave().catch(() => {});
+    });
+  }
+
   document.getElementById('gate').style.display = 'none';
   document.getElementById('gateToolbar').style.display = 'none';
   hideHero();
@@ -787,7 +828,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
 
   // Set Supabase dashboard link (hide in local/demo mode)
   const dashLink = document.getElementById('supabaseDashLink');
-  if (mode === 'local' || mode === 'demo') {
+  if (mode === 'local' || mode === 'demo' || mode === 'googledrive') {
     dashLink.style.display = 'none';
   } else {
     const projectRef = url.replace('https://', '').replace('.supabase.co', '');
@@ -830,8 +871,8 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
   // Clean up any legacy localStorage ideas (one-time)
   localStorage.removeItem(IDEAS_KEY);
 
-  // Realtime subscription (skip for demo — no backend)
-  if (mode !== 'demo') {
+  // Realtime subscription (skip for demo/googledrive — no Postgres backend)
+  if (mode !== 'demo' && mode !== 'googledrive') {
     state.db.channel('tasks-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => { if (!isEditing()) { refreshAll().then(() => markLastUpdated()); } })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, async () => { if (isEditing()) return; await loadProjects(); buildProjectCards(); initProjectDragDrop(); await refreshAll(); markLastUpdated(); })
@@ -1257,6 +1298,19 @@ function updateStaticLabels() {
   if (setupLocal3T) setupLocal3T.textContent = t('setup.local_3_title');
   const setupLocal3D = document.getElementById('setupLocal3Desc');
   if (setupLocal3D) setupLocal3D.innerHTML = t('setup.local_3_desc');
+  // Drive setup guide
+  const setupDriveName = document.getElementById('setupDriveName');
+  if (setupDriveName) setupDriveName.textContent = t('setup.drive_name');
+  const setupDriveDesc = document.getElementById('setupDriveDesc');
+  if (setupDriveDesc) setupDriveDesc.textContent = t('setup.drive_desc');
+  const setupDrive1T = document.getElementById('setupDrive1Title');
+  if (setupDrive1T) setupDrive1T.textContent = t('setup.drive_1_title');
+  const setupDrive1D = document.getElementById('setupDrive1Desc');
+  if (setupDrive1D) setupDrive1D.innerHTML = t('setup.drive_1_desc');
+  const setupDrive2T = document.getElementById('setupDrive2Title');
+  if (setupDrive2T) setupDrive2T.textContent = t('setup.drive_2_title');
+  const setupDrive2D = document.getElementById('setupDrive2Desc');
+  if (setupDrive2D) setupDrive2D.innerHTML = t('setup.drive_2_desc');
   document.querySelectorAll('.setup-done-btn:not(#setupLoginBtn)').forEach(btn => btn.textContent = t('setup.done_btn'));
   // Footer
   const dashLink = document.getElementById('supabaseDashLink');
@@ -1853,7 +1907,7 @@ function cmpVer(a, b) {
 }
 
 function checkSchemaVersion() {
-  if (state.demoMode) return;
+  if (state.demoMode || state.driveMode) return;
   const dbVer = state.dbSchemaVersion || '0.00';
   if (cmpVer(dbVer, LATEST_COMPAT) >= 0) return;
 
@@ -2371,14 +2425,16 @@ function importBackup() {
         } catch (e) { console.warn(`Failed to restore ${table}:`, e.message); }
       }
       showToast(t('menu.settings_restore_done', totalRows));
-      // In demo mode, reseed the in-memory adapter instead of reloading
-      // (reload would re-create the adapter with default demo data)
-      if (state.demoMode && state.demoAdapter) {
+      // In demo/drive mode, reseed the in-memory adapter instead of reloading
+      // (reload would re-create the adapter with default/empty data)
+      const inMemAdapter = (state.demoMode && state.demoAdapter) ? state.demoAdapter
+        : (state.driveMode && state.driveAdapter) ? state.driveAdapter : null;
+      if (inMemAdapter) {
         const reseedData = {};
         for (const table of (backup._meta.tables || [])) {
           reseedData[table] = backup[table] || [];
         }
-        state.demoAdapter.reseed(reseedData);
+        inMemAdapter.reseed(reseedData);
         setDemoCategoriesFromData(reseedData);
         await loadProjects();
         buildProjectCards();

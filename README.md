@@ -29,7 +29,7 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 
 ### Capabilities
 
-- **Three backend modes**: Supabase (cloud PostgreSQL), local REST server (Bun + SQLite), in-memory demo
+- **Four backend modes**: Supabase (cloud PostgreSQL), Google Drive (JSON file in your Drive), local REST server (Bun + SQLite), in-memory demo
 - **Offline-first**: IndexedDB cache serves read-only data when the network is down, with automatic recovery
 - **PWA**: installable on mobile and desktop via service worker with network-first caching
 - **Dark and light themes** with automatic OS preference detection
@@ -46,13 +46,20 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 
 ## Quick start
 
-DeLaClaw supports three backend modes. Pick one:
+DeLaClaw supports four backend modes. Pick one:
 
 ### Demo (no setup)
 
 1. Open [delaclaw.com](https://delaclaw.com)
 2. Click "Demo" and choose a dataset
 3. All data lives in memory and resets on refresh
+
+### Google Drive
+
+1. Open [delaclaw.com](https://delaclaw.com)
+2. Select "Drive" and click "Connect with Google"
+3. Sign in with your Google account — DeLaClaw creates a `DeLaClaw/` folder in your Drive with a single `delaclaw-data.json` file
+4. All data syncs automatically; no API keys or database setup needed
 
 ### Supabase (cloud)
 
@@ -89,6 +96,7 @@ js/
     supabase.js         Supabase PostgREST adapter
     rest.js             Local Bun+SQLite REST adapter
     demo.js             In-memory adapter with sample data
+    drive.js            Google Drive adapter (in-memory + JSON file persistence)
     offline-cache.js    IndexedDB caching layer (wraps any adapter)
   welcome.js            Today dashboard
   projects.js           Project boards and task management

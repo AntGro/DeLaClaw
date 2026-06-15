@@ -1,6 +1,6 @@
 # Setup Guide
 
-DeLaClaw supports three backend modes. Each stores data differently but provides the same user experience.
+DeLaClaw supports four backend modes. Each stores data differently but provides the same user experience.
 
 ## Demo mode (no setup)
 
@@ -9,6 +9,28 @@ DeLaClaw supports three backend modes. Each stores data differently but provides
 3. Choose a sample dataset (or start empty)
 
 Data lives in memory only. It resets when you close or refresh the page. Good for trying out the app before committing to a backend.
+
+## Google Drive
+
+The simplest persistent backend — no database, no API keys.
+
+### How it works
+
+1. Open [delaclaw.com](https://delaclaw.com) or serve `index.html` locally
+2. Select **Drive** in the backend picker and click **Connect with Google**
+3. Sign in with your Google account and grant the `drive.file` scope (lets DeLaClaw access only files it creates)
+4. DeLaClaw creates a `DeLaClaw/` folder in your Google Drive containing a single `delaclaw-data.json` file
+
+All data loads into memory on connect and writes back to Drive with a 2-second debounce after each mutation. The JSON file is a plain export of all tables — you can download, inspect, or delete it from Drive at any time.
+
+### OAuth testing mode
+
+The OAuth client ID is configured for **Testing** mode in Google Cloud Console, which means:
+
+- Only test users added to the consent screen can sign in
+- Refresh tokens expire after 7 days — you'll need to re-authenticate
+
+To remove these restrictions, submit the app for Google verification (requires a privacy policy and domain ownership).
 
 ## Supabase (cloud PostgreSQL)
 

@@ -96,6 +96,10 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
           <span>Local</span>
         </button>
+        <button type="button" class="backend-option" data-mode="googledrive">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2L2.5 17h7L12 12l2.5 5h7L12 2z" fill="#4285F4"/><path d="M2.5 17l2.5 4.5h14l2.5-4.5H2.5z" fill="#0066DA"/><path d="M9.5 17L7 12.5 12 2l5 10.5-2.5 4.5h-5z" fill="#00AC47" opacity="0.8"/></svg>
+          <span>Drive</span>
+        </button>
         <button type="button" class="backend-option" data-mode="demo">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           <span>Demo</span>
@@ -135,6 +139,13 @@
         <span class="setup-path-desc" id="setupCloudDesc">Free, no install, works everywhere.</span>
         <span class="setup-path-badge" id="setupCloudBadge">Recommended</span>
       </button>
+      <button class="setup-path-card" id="setupPathDrive" type="button">
+        <span class="setup-path-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 2L2.5 17h7L12 12l2.5 5h7L12 2z" fill="#4285F4"/><path d="M2.5 17l2.5 4.5h14l2.5-4.5H2.5z" fill="#0066DA"/><path d="M9.5 17L7 12.5 12 2l5 10.5-2.5 4.5h-5z" fill="#00AC47" opacity="0.8"/></svg>
+        </span>
+        <span class="setup-path-name" id="setupDriveName">Google Drive</span>
+        <span class="setup-path-desc" id="setupDriveDesc">Sign in with Google. Data stored in your Drive.</span>
+      </button>
       <button class="setup-path-card" id="setupPathLocal" type="button">
         <span class="setup-path-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
@@ -142,6 +153,25 @@
         <span class="setup-path-name" id="setupLocalName">Local</span>
         <span class="setup-path-desc" id="setupLocalDesc">Your machine, your data. For developers.</span>
       </button>
+    </div>
+
+    <!-- Google Drive steps -->
+    <div class="setup-steps" id="setupDriveSteps" style="display:none;">
+      <div class="setup-step" data-step="1">
+        <span class="setup-step-num">1</span>
+        <div class="setup-step-body">
+          <h3 id="setupDrive1Title">Sign in with Google</h3>
+          <p id="setupDrive1Desc">Click <strong>Connect</strong> on the login screen and sign in with your Google account. DeLaClaw will create a <code>DeLaClaw/</code> folder in your Drive to store a single <code>delaclaw-data.json</code> file.</p>
+        </div>
+      </div>
+      <div class="setup-step" data-step="2">
+        <span class="setup-step-num">2</span>
+        <div class="setup-step-body">
+          <h3 id="setupDrive2Title">That's it</h3>
+          <p id="setupDrive2Desc">No API keys, no database setup. Your data lives in your Google Drive as a plain JSON file you can export or delete at any time.</p>
+        </div>
+      </div>
+      <button class="setup-done-btn" id="setupDriveDone" type="button">Go to login</button>
     </div>
 
     <!-- Cloud steps (Supabase) -->

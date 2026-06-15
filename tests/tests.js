@@ -1095,7 +1095,7 @@ async function importFlashcardsIntegrationTest() {
       assert(selectedDeck === 'Histoire', `Expected 'Histoire', got '${selectedDeck}'`);
     });
 
-    const promptText = await page.$eval('#importPromptText', el => el.textContent);
+    const promptText = await page.$eval('#importPromptText', el => el.value || el.textContent);
     test('Import: convert prompt contains JSON instruction', () => {
       assert(promptText.includes('JSON array') && promptText.includes('"front"'),
         'Prompt should mention JSON array and front field');
@@ -1189,7 +1189,7 @@ async function importFlashcardsIntegrationTest() {
     await page.selectOption('#importTypeSelect', 'text');
     await page.waitForTimeout(200);
 
-    const textPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    const textPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
     test('Import: text convert prompt mentions title/content fields', () => {
       assert(textPrompt.includes('"title"') && textPrompt.includes('"content"'),
         'Text prompt should mention title and content');
@@ -1222,7 +1222,7 @@ async function importFlashcardsIntegrationTest() {
     await page.click('#importGenerateCard');
     await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
 
-    const frPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    const frPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
     test('Import: French prompt includes French language instruction', () => {
       assert(frPrompt.includes('French'),
         'French prompt should contain "French" language instruction');
@@ -1246,7 +1246,7 @@ async function importFlashcardsIntegrationTest() {
     await page.click('#importGenerateCard');
     await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
 
-    const enPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    const enPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
     test('Import: English prompt has no language instruction', () => {
       assert(!enPrompt.includes('IMPORTANT: Generate ALL content'),
         'English prompt should not have language instruction');
@@ -1266,7 +1266,7 @@ async function importFlashcardsIntegrationTest() {
     await page.click('#importGenerateCard');
     await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
 
-    const esPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    const esPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
     test('Import: Spanish prompt includes Spanish language instruction', () => {
       assert(esPrompt.includes('Spanish'),
         'Spanish prompt should contain "Spanish" language instruction');

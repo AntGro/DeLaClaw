@@ -307,8 +307,8 @@ function initGate() {
   // Set login hash (user is on the login page)
   history.replaceState(null, '', '#login');
   showHero();
+  switchBackendMode('googledrive');
   document.getElementById('loginForm').style.display = 'block';
-  document.getElementById('username').focus();
   // Update API Key link when project URL changes
   const _urlInput = document.getElementById('username');
   const _keyLink = document.getElementById('keyLabelLink');

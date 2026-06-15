@@ -163,13 +163,14 @@ input,select,button{font-family:inherit;}
 #urlLabelLink[href]:hover::before{content:attr(data-tooltip);position:absolute;left:50%;transform:translateX(-50%);bottom:calc(100% + 6px);white-space:nowrap;font-size:0.72rem;font-weight:400;color:#fff;background:#333;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:10;}
 
 /* Backend Picker */
-.backend-picker{display:flex;gap:2px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:3px;justify-content:center;}
-.backend-option{display:flex;align-items:center;justify-content:center;padding:10px 14px;border:none;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;transition:all 0.2s;font-family:inherit;}
-.backend-option:hover{color:var(--text);}
-.backend-option.active{background:var(--surface);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,0.12);}
+.backend-picker{display:flex;gap:4px;justify-content:center;padding:2px;margin-bottom:4px;}
+.backend-option{display:flex;align-items:center;justify-content:center;width:42px;height:42px;padding:0;border:2px solid transparent;border-radius:10px;background:transparent;color:var(--muted);cursor:pointer;transition:all 0.2s;font-family:inherit;}
+.backend-option:hover{color:var(--text);border-color:var(--border);}
+.backend-option.active{background:var(--surface);color:var(--text);border-color:var(--border);box-shadow:0 1px 4px rgba(0,0,0,0.10);}
 .backend-option svg{flex-shrink:0;}
-.backend-option.hero-arriving>svg{visibility:hidden;}
-.backend-picker-label{text-align:center;font-size:0.8rem;font-weight:500;color:var(--muted);margin:-10px 0 16px;letter-spacing:0.02em;}
+.backend-option .backend-icon-img{width:22px;height:22px;object-fit:contain;}
+.backend-option.hero-arriving>svg,.backend-option.hero-arriving>.backend-icon-img{visibility:hidden;}
+.backend-picker-label{text-align:center;font-size:0.75rem;font-weight:500;color:var(--muted);margin-bottom:14px;letter-spacing:0.03em;}
 
 /* Stay Connected Checkbox */
 .stay-connected-label{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.82rem;color:var(--muted);margin:10px 0 4px;justify-content:center;user-select:none;}

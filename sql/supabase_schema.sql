@@ -885,8 +885,15 @@ ALTER TABLE "public"."vestiaire" ENABLE ROW LEVEL SECURITY;
 
 -- ===== SEED DATA =====
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.000')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.000', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.099')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.099', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;
+
+-- ===== REALTIME =====
+-- Enable Supabase Realtime for cross-device live sync
+ALTER PUBLICATION supabase_realtime ADD TABLE
+  tasks, projects, todos, habits, habit_completions,
+  birthdays, vestiaire, flashcards, flashcard_notes,
+  prompts, settings;

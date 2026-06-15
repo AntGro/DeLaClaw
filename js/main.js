@@ -332,7 +332,7 @@ function initGate() {
 
 async function autoConnect(url, key, mode) {
   try {
-    await connect(url, key, mode, /* skipDemoChooser */ true);
+    await connect(url, key, mode, /* skipDemoChooser */ true, { silentAuth: mode === 'googledrive' });
   } catch (e) {
     // Stored credentials are stale — clear them and show the form
     clearStayConnectedCreds();
@@ -736,7 +736,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ===================================================================
 // UNLOCK & INIT APP
 // ===================================================================
-async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
+async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { silentAuth = false } = {}) {
   state.supabaseUrl = url;
   state.supabaseKey = key;
 
@@ -781,7 +781,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
         else if (status === 'loading') errEl.textContent = t('login.drive_loading') || 'Loading from Drive…';
         else errEl.textContent = '';
       }
-    });
+    }, { silent: silentAuth });
     state.driveAdapter = adapter;
     state.driveMode = true;
   } else if (mode === 'local') {

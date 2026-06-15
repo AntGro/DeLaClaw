@@ -150,11 +150,11 @@ async function uploadDataFile(token, folderId, fileId, data) {
 
 // ── Drive Adapter ───────────────────────────────────────────────
 
-export async function createDriveAdapter(clientId, onStatus) {
+export async function createDriveAdapter(clientId, onStatus, { silent = false } = {}) {
   if (onStatus) onStatus('authenticating');
 
-  // 1. Authenticate
-  const token = await getGoogleAccessToken(clientId);
+  // 1. Authenticate (silent = no popup, for auto-reconnect)
+  const token = await getGoogleAccessToken(clientId, !silent);
 
   if (onStatus) onStatus('loading');
 

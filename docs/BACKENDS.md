@@ -9,7 +9,7 @@ DeLaClaw supports four backend adapters. This document is the single source of t
 | Backend | Storage | Auth | Sync | Offline | Agent support |
 |---------|---------|------|------|---------|---------------|
 | **Supabase** | Postgres (cloud) | Anon key | Realtime (websocket) | IndexedDB cache | ✅ Full (REST API) |
-| **Google Drive** | Single JSON file | OAuth 2.0 | None (single-device) | In-memory only | ❌ |
+| **Google Drive** | Single JSON file | OAuth 2.0 | None (single-device) | In-memory only | ⚠️ Via JSON blob (see §8) |
 | **Local** | SQLite (Bun server) | None | None (single-device) | N/A (is local) | ⚠️ Possible via REST |
 | **Demo** | In-memory | None | None | N/A | ❌ |
 
@@ -117,7 +117,7 @@ These **must stay in sync**. The `draft` status bug (v1.105) was caused by the d
 
 **Offline:** No offline support. If the initial Drive fetch fails, connect fails. If a flush fails mid-session, changes are lost on reload.
 
-**Agent support:** Not supported. The agent cannot authenticate with Google OAuth.
+**Agent support:** Possible with caveats. The agent can read/write `DeLaClaw/delaclaw-data.json` via the Google Drive API, but operates on the whole JSON blob rather than individual rows. No Realtime notification — the app won't detect agent changes until reload. Risk of overwriting in-flight changes if the user and agent flush concurrently.
 
 **Storage limits:** Google Drive free tier: 15 GB shared across Gmail, Drive, and Photos. DeLaClaw's JSON file is typically < 1 MB.
 
@@ -270,9 +270,16 @@ When the agent writes to Supabase, the Realtime subscription fires on all connec
 
 The agent polls on heartbeat interval (~30 min). No push notification from app to agent.
 
-### Non-Supabase limitations
+### Other backends
 
-Agent support is Supabase-only. The agent has no way to authenticate with Google Drive or connect to a user's local Bun server.
+**Google Drive:** The agent can access `delaclaw-data.json` via the Google Drive API (OAuth handled by the Hatch connector). However:
+- **Whole-blob read/write** — no granular row operations; the agent downloads the full JSON, modifies it, and uploads the replacement.
+- **No conflict safety** — if the app and agent flush concurrently, the last write wins and the other's changes are lost.
+- **No change notification** — the app won't detect agent changes until the user reloads.
+
+**Local:** The agent could in theory hit the REST API (same shape as Supabase PostgREST), but has no way to reach the user's local server unless it's exposed via a tunnel.
+
+**Demo:** N/A — ephemeral in-memory data.
 
 ---
 

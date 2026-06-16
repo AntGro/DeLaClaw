@@ -252,8 +252,6 @@ function getFilteredTodosForCategory(category) {
     filtered = filtered.filter(t => !t.done && (!t.snooze_until || new Date(t.snooze_until) <= now));
   } else if (todoFilter === 'done') {
     filtered = filtered.filter(t => t.done);
-  } else if (todoFilter === 'flagged') {
-    filtered = filtered.filter(t => !t.done && t.priority && t.priority !== 'normal');
   } else if (todoFilter === 'outdated') {
     filtered = filtered.filter(t => isTodoOutdated(t));
   }

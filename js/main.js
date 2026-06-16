@@ -1179,8 +1179,7 @@ function updateStaticLabels() {
   const todoFilterMap = { pending: 'todos.pending', done: 'todos.done', all: 'todos.all' };
   document.querySelectorAll('#todoFilters .filter-btn').forEach(btn => {
     const f = btn.dataset.filter;
-    if (f === 'flagged') { const svg = btn.querySelector('svg'); btn.innerHTML = (svg ? svg.outerHTML : '') + ' ' + t('todos.flagged'); }
-    else if (f === 'outdated') { const svg = btn.querySelector('svg'); btn.innerHTML = (svg ? svg.outerHTML : '') + ' ' + t('todos.outdated'); }
+    if (f === 'outdated') { const svg = btn.querySelector('svg'); btn.innerHTML = (svg ? svg.outerHTML : '') + ' ' + t('todos.outdated'); }
     else if (todoFilterMap[f]) btn.textContent = t(todoFilterMap[f]);
   });
   // Todo sort

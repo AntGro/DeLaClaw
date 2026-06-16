@@ -204,7 +204,7 @@ const T = {
     },
     // ── TODOs ──
     todos: {
-      pending: 'Pending', done: 'Done', all: 'All', flagged: 'Flagged', outdated: 'Outdated',
+      pending: 'Pending', done: 'Done', all: 'All', outdated: 'Outdated',
       sort_manual: 'Manual order', sort_due: 'Due date', sort_priority: 'Priority', sort_created: 'Created',
       add_category: 'Add category', add_todo_placeholder: 'Add a TODO...',
       all_caught_up: 'All caught up!', no_items: 'No items yet',
@@ -1026,7 +1026,7 @@ const T = {
       empty_cta: 'Crear primer proyecto',
     },
     todos: {
-      pending: 'Pendientes', done: 'Hecho', all: 'Todos', flagged: 'Marcados', outdated: 'Desactualizado',
+      pending: 'Pendientes', done: 'Hecho', all: 'Todos', outdated: 'Desactualizado',
       sort_manual: 'Orden manual', sort_due: 'Fecha límite', sort_priority: 'Prioridad', sort_created: 'Creación',
       add_category: 'Añadir categoría', add_todo_placeholder: 'Añadir tarea...',
       all_caught_up: '¡Todo al día!', no_items: 'Sin elementos',

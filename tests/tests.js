@@ -1361,7 +1361,50 @@ async function importFlashcardsIntegrationTest() {
       assert(editedCards.length === 1, `Expected 1 card with edited front, got ${editedCards.length}`);
     });
 
-    // ── Test 10: No JS errors during all import flows ──
+    // ── Test 10: Import with zero existing decks ──
+    // Delete all flashcards and texts so no decks exist
+    await fetch(`${BASE}/flashcards?id=not.is.null`, { method: 'DELETE' });
+    await fetch(`${BASE}/texts?id=not.is.null`, { method: 'DELETE' });
+    // Refresh data in the app
+    await page.evaluate(() => window.refreshFlashcards());
+    await page.waitForTimeout(500);
+
+    await page.evaluate(() => window.openImportModal());
+    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
+    await page.click('#importConvertCard');
+    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
+
+    const noDecksSelectVal = await page.$eval('#importDeckSelect', el => el.value);
+    const newDeckWrapVisible = await page.$eval('#importNewDeckWrap', el => el.style.display !== 'none');
+    test('Import: zero decks — __new auto-selected and new deck input visible', () => {
+      assert(noDecksSelectVal === '__new', `Expected __new selected, got '${noDecksSelectVal}'`);
+      assert(newDeckWrapVisible, 'New deck input should be visible when no decks exist');
+    });
+
+    // Type a new deck name and verify it reads back correctly
+    await page.fill('#importNewDeckName', 'MathDeck');
+    await page.waitForTimeout(200);
+    const noDecksNewName = await page.$eval('#importNewDeckName', el => el.value);
+    test('Import: zero decks — new deck name input functional', () => {
+      assert(noDecksNewName === 'MathDeck', `Expected 'MathDeck', got '${noDecksNewName}'`);
+    });
+
+    // Actually import a card to this new deck
+    const newDeckJSON = JSON.stringify([{ front: 'What is 2+2?', back: '4' }]);
+    await page.fill('#importPasteArea', newDeckJSON);
+    await page.waitForTimeout(300);
+    await page.click('#importReviewBtn');
+    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
+    await page.click('#importConfirmBtn');
+    await page.waitForTimeout(1000);
+
+    const mathResp = await fetch(`${BASE}/flashcards?deck=eq.MathDeck`);
+    const mathCards = await mathResp.json();
+    test('Import: zero decks — card imported to brand-new deck', () => {
+      assert(mathCards.length === 1, `Expected 1 card in MathDeck, got ${mathCards.length}`);
+    });
+
+    // ── Test 11: No JS errors during all import flows ──
     test('Import: no JS errors during import flows', () => {
       const real = jsErrors.filter(e => !e.includes('favicon') && !e.includes('supabase') && !e.includes('fetch'));
       assert(real.length === 0, `JS errors: ${real.join('; ')}`);

@@ -2006,6 +2006,11 @@ window.openImportModal = async function(presetDeck) {
     optionsDiv.style.display = 'none';
     flowDiv.style.display = '';
     overlay.querySelector('.dc-subtitle').style.display = 'none';
+    // If no existing decks, __new is auto-selected — show the input immediately
+    if (deckSelect.value === '__new') {
+      newDeckWrap.style.display = '';
+      newDeckInput.focus();
+    }
     autoDetectType();
     updatePrompt();
   }

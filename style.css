@@ -587,7 +587,7 @@ input,select,button{font-family:inherit;}
 .archive-toggle:hover{color:var(--text);}
 .archive-toggle .arrow{transition:transform 0.2s;display:inline-block;}
 .archive-toggle .arrow.open{transform:rotate(90deg);}
-.delete-all-archived-btn{margin-left:auto;background:none;border:1px solid var(--red);color:var(--red);padding:2px 8px;border-radius:4px;font-size:0.72rem;cursor:pointer;opacity:0;transition:opacity 0.2s;}
+.delete-all-archived-btn{margin-left:auto;background:none;border:1px solid var(--red);color:var(--red);padding:4px;border-radius:4px;font-size:0.72rem;cursor:pointer;opacity:0;transition:opacity 0.2s;display:inline-flex;align-items:center;justify-content:center;line-height:0;}
 .archive-toggle:hover .delete-all-archived-btn{opacity:1;}
 .delete-all-archived-btn:hover{background:var(--red);color:#fff;}
 .delete-all-archived-btn:hover svg{stroke:#fff;}

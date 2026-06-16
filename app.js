@@ -390,7 +390,7 @@ function buildProjectCards() {
       <div class="task-list" id="tasks-${p.id}"><p class="empty-msg">Loading...</p></div>
       <div class="archive-toggle" onclick="toggleArchivedTasks('${p.id}')" id="archive-toggle-${p.id}" style="display:none;">
         <span class="arrow" id="archive-arrow-${p.id}">▶</span> Archived tasks (<span id="archive-count-${p.id}">0</span>)
-        <button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllArchivedTasks('${p.id}')" title="Delete all archived tasks">${lucideIcon("trash-2",16)} Delete all</button>
+        <button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllArchivedTasks('${p.id}')" title="Delete all archived tasks">${lucideIcon("trash-2",16)}</button>
       </div>
       <div class="archived-tasks" id="archived-tasks-${p.id}"></div>
       <div class="add-task">
@@ -1751,7 +1751,7 @@ function renderCategoryCard(category) {
   // Done toggle (collapsible, like archived tasks in projects)
   let doneToggle = '';
   if (doneCount > 0 && todoFilter !== 'done') {
-    const deleteAllBtn = `<button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllDoneTodos('${escapedCat}')" title="Delete all done">${lucideIcon("trash-2",16)} Delete all</button>`;
+    const deleteAllBtn = `<button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllDoneTodos('${escapedCat}')" title="Delete all done">${lucideIcon("trash-2",16)}</button>`;
     doneToggle = `
       <div class="archive-toggle" onclick="toggleDoneTodos('${catId}')" id="done-toggle-${catId}">
         <span class="arrow" id="done-arrow-${catId}">▶</span> Done (${doneCount})

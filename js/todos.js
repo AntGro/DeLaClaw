@@ -413,7 +413,7 @@ function renderCategoryCard(category) {
   // Done toggle (collapsible, like archived tasks in projects)
   let doneToggle = '';
   if (doneCount > 0 && todoFilter !== 'done') {
-    const deleteAllBtn = `<button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllDoneTodos('${escapedCat}')" title="${t('todos.delete_all_done')}">${lucideIcon("trash-2",16)} ${t('todos.delete_all_done')}</button>`;
+    const deleteAllBtn = `<button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllDoneTodos('${escapedCat}')" title="${t('todos.delete_all_done')}">${lucideIcon("trash-2",16)}</button>`;
     doneToggle = `
       <div class="archive-toggle" onclick="toggleDoneTodos('${catId}')" id="done-toggle-${catId}">
         <span class="arrow" id="done-arrow-${catId}">▶</span> ${t('todos.done')} (${doneCount})

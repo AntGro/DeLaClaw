@@ -655,29 +655,76 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
 });
 
 // ===================================================================
-// 31. Demo adapter CHECK constraints match Supabase schema
+// 31. CHECK constraint parity across all backends (Supabase ↔ Demo ↔ SQLite)
 // ===================================================================
 
-test('Demo adapter CHECK_CONSTRAINTS match Supabase schema constraints', () => {
+test('CHECK constraints match across Supabase, Demo adapter, and SQLite schema', () => {
   const demoSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'adapters', 'demo.js'), 'utf8');
-  const schemaSrc = fs.readFileSync(path.resolve(__dirname, '..', 'sql', 'supabase_schema.sql'), 'utf8');
+  const supabaseSrc = fs.readFileSync(path.resolve(__dirname, '..', 'sql', 'supabase_schema.sql'), 'utf8');
+  const sqliteSrc = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'schema.sql'), 'utf8');
 
-  // Extract demo CHECK_CONSTRAINTS for tasks.status
-  const demoMatch = demoSrc.match(/tasks:\s*\{\s*status:\s*\[([^\]]+)\]/);
-  assert(demoMatch, 'Demo adapter must define CHECK_CONSTRAINTS for tasks.status');
-  const demoStatuses = demoMatch[1].match(/'([^']+)'/g).map(s => s.replace(/'/g, '')).sort();
+  // --- Helper: extract sorted values from a regex match group ---
+  function extractValues(match, label) {
+    assert(match, `Could not find ${label}`);
+    const vals = match[1].match(/'([^']+)'/g).map(s => s.replace(/'/g, ''));
+    return vals.sort();
+  }
 
-  // Extract Supabase CHECK constraint for tasks.status
-  const pgMatch = schemaSrc.match(/tasks_status_check.*?CHECK.*?ARRAY\[([^\]]+)\]/);
-  assert(pgMatch, 'Supabase schema must define tasks_status_check constraint');
-  const pgStatuses = pgMatch[1].match(/'([^']+)'/g).map(s => s.replace(/'/g, '')).sort();
+  // --- Helper: compare two sorted arrays ---
+  function assertSameValues(a, b, labelA, labelB) {
+    const jsonA = JSON.stringify(a), jsonB = JSON.stringify(b);
+    assert(jsonA === jsonB, `${labelA} ${jsonA} must match ${labelB} ${jsonB}`);
+  }
 
-  // They must match
-  assert(JSON.stringify(demoStatuses) === JSON.stringify(pgStatuses),
-    `Demo adapter statuses ${JSON.stringify(demoStatuses)} must match Supabase ${JSON.stringify(pgStatuses)}`);
+  // ── 1. tasks.status ──
 
-  // Draft must be included (regression guard)
-  assert(demoStatuses.includes('draft'), 'tasks.status must include "draft" for draft task creation');
+  const demoTaskStatus = extractValues(
+    demoSrc.match(/tasks:\s*\{\s*status:\s*\[([^\]]+)\]/),
+    'Demo CHECK_CONSTRAINTS tasks.status');
+
+  const pgTaskStatus = extractValues(
+    supabaseSrc.match(/tasks_status_check.*?CHECK.*?ARRAY\[([^\]]+)\]/),
+    'Supabase tasks_status_check');
+
+  const sqliteTaskStatus = extractValues(
+    sqliteSrc.match(/tasks[\s\S]*?status\s+TEXT[^,]*CHECK\s*\(\s*status\s+IN\s*\(([^)]+)\)/i),
+    'SQLite tasks.status CHECK');
+
+  assertSameValues(demoTaskStatus, pgTaskStatus, 'Demo tasks.status', 'Supabase tasks.status');
+  assertSameValues(sqliteTaskStatus, pgTaskStatus, 'SQLite tasks.status', 'Supabase tasks.status');
+
+  // Regression guard: draft must be present
+  assert(demoTaskStatus.includes('draft'), 'tasks.status must include "draft" for draft task creation');
+
+  // ── 2. todos.priority ──
+
+  const demoTodoPriority = extractValues(
+    demoSrc.match(/todos:\s*\{\s*priority:\s*\[([^\]]+)\]/),
+    'Demo CHECK_CONSTRAINTS todos.priority');
+
+  const pgTodoPriority = extractValues(
+    supabaseSrc.match(/todos_priority_check.*?CHECK.*?ARRAY\[([^\]]+)\]/),
+    'Supabase todos_priority_check');
+
+  const sqliteTodoPriority = extractValues(
+    sqliteSrc.match(/todos[\s\S]*?priority\s+TEXT[^,]*CHECK\s*\(\s*priority\s+IN\s*\(([^)]+)\)/i),
+    'SQLite todos.priority CHECK');
+
+  assertSameValues(demoTodoPriority, pgTodoPriority, 'Demo todos.priority', 'Supabase todos.priority');
+  assertSameValues(sqliteTodoPriority, pgTodoPriority, 'SQLite todos.priority', 'Supabase todos.priority');
+
+  // ── 3. flashcard_notes.proposal_status (Demo + SQLite only — no Supabase CHECK) ──
+
+  const demoProposalStatus = extractValues(
+    demoSrc.match(/flashcard_notes:\s*\{\s*proposal_status:\s*\[([^\]]+)\]/),
+    'Demo CHECK_CONSTRAINTS flashcard_notes.proposal_status');
+
+  const sqliteProposalStatus = extractValues(
+    sqliteSrc.match(/flashcard_notes[\s\S]*?proposal_status\s+TEXT[^,]*CHECK\s*\(\s*proposal_status\s+IN\s*\(([^)]+)\)/i),
+    'SQLite flashcard_notes.proposal_status CHECK');
+
+  assertSameValues(demoProposalStatus, sqliteProposalStatus,
+    'Demo flashcard_notes.proposal_status', 'SQLite flashcard_notes.proposal_status');
 });
 
 // ===================================================================

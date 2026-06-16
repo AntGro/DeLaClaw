@@ -1927,8 +1927,25 @@ function checkSchemaVersion() {
   const label = isCritical
     ? `Database v${dbVer} is too old — DeLaClaw may not work correctly. Run pending migrations.`
     : `Some features are unavailable (DB v${dbVer}, full support needs v${LATEST_COMPAT}). Run pending migrations.`;
-  banner.innerHTML = `${icon}<span>${label}</span><button onclick="this.parentElement.remove()">Dismiss</button>`;
+  banner.innerHTML = `${icon}<span>${label}</span><button onclick="dismissSchemaBanner()">Dismiss</button>`;
   document.body.prepend(banner);
+  // Measure actual banner height and expose as CSS variable (handles multi-line text on mobile)
+  const updateSchemaH = () => {
+    if (banner.isConnected) document.body.style.setProperty('--schema-banner-h', banner.offsetHeight + 'px');
+  };
+  requestAnimationFrame(updateSchemaH);
+  const ro = new ResizeObserver(updateSchemaH);
+  ro.observe(banner);
+  banner._schemaRO = ro;
+}
+
+function dismissSchemaBanner() {
+  const banner = document.getElementById('schema-banner');
+  if (banner) {
+    banner._schemaRO?.disconnect();
+    banner.remove();
+  }
+  document.body.style.removeProperty('--schema-banner-h');
 }
 
 async function saveNvidiaKey() {

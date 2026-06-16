@@ -655,7 +655,33 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
 });
 
 // ===================================================================
-// 31. Integration: archive project → delete it → remaining cards still render
+// 31. Demo adapter CHECK constraints match Supabase schema
+// ===================================================================
+
+test('Demo adapter CHECK_CONSTRAINTS match Supabase schema constraints', () => {
+  const demoSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'adapters', 'demo.js'), 'utf8');
+  const schemaSrc = fs.readFileSync(path.resolve(__dirname, '..', 'sql', 'supabase_schema.sql'), 'utf8');
+
+  // Extract demo CHECK_CONSTRAINTS for tasks.status
+  const demoMatch = demoSrc.match(/tasks:\s*\{\s*status:\s*\[([^\]]+)\]/);
+  assert(demoMatch, 'Demo adapter must define CHECK_CONSTRAINTS for tasks.status');
+  const demoStatuses = demoMatch[1].match(/'([^']+)'/g).map(s => s.replace(/'/g, '')).sort();
+
+  // Extract Supabase CHECK constraint for tasks.status
+  const pgMatch = schemaSrc.match(/tasks_status_check.*?CHECK.*?ARRAY\[([^\]]+)\]/);
+  assert(pgMatch, 'Supabase schema must define tasks_status_check constraint');
+  const pgStatuses = pgMatch[1].match(/'([^']+)'/g).map(s => s.replace(/'/g, '')).sort();
+
+  // They must match
+  assert(JSON.stringify(demoStatuses) === JSON.stringify(pgStatuses),
+    `Demo adapter statuses ${JSON.stringify(demoStatuses)} must match Supabase ${JSON.stringify(pgStatuses)}`);
+
+  // Draft must be included (regression guard)
+  assert(demoStatuses.includes('draft'), 'tasks.status must include "draft" for draft task creation');
+});
+
+// ===================================================================
+// 32. Integration: archive project → delete it → remaining cards still render
 // ===================================================================
 
 async function archiveDeleteIntegrationTest() {

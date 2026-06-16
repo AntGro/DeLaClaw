@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   project TEXT REFERENCES projects(id) ON DELETE CASCADE,
   text TEXT,
-  status TEXT DEFAULT 'todo' CHECK (status IN ('todo', 'in-progress', 'review', 'approved', 'revision')),
+  status TEXT DEFAULT 'todo' CHECK (status IN ('draft', 'todo', 'in-progress', 'review', 'approved', 'revision', 'idea', 'idea-shipped', 'idea-plan-requested')),
   plan_note TEXT,
   hatch_response TEXT,
   context TEXT,

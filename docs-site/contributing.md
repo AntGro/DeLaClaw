@@ -50,12 +50,13 @@ DeLaClaw is vanilla JavaScript by design. No frameworks, no build step, no trans
 ### Commits
 
 - Keep commit messages short and factual. No emoji, no conventional-commit prefixes required (though `fix:`, `feat:`, `docs:` are fine).
-- Every commit to `main` must bump the `latest` field in `VERSION` (the pre-commit hook enforces this).
+- Every commit must bump the `latest` field in `VERSION` (the pre-commit hook enforces this).
+- Every commit must include a `Checked:` trailer listing the impact areas reviewed (the commit-msg hook enforces this). See [COMMIT_CHECKLIST.md](/COMMIT_CHECKLIST.md) for the full list.
 
 ### Pull requests
 
 - One logical change per PR.
-- All tests must pass (`node tests/tests.js` -- 54 tests currently).
+- All tests must pass (`node tests/tests.js` -- 76 tests currently).
 - The PR description should explain *what* changed and *why*.
 - Screenshots or before/after comparisons for UI changes.
 

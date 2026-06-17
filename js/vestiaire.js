@@ -433,7 +433,7 @@ async function editVestiaireInline(id) {
       v.name = newName;
       showToast(t('toast.renamed'), 'success');
     },
-    refreshFn: renderVestiaire,
+    refreshFn: refreshVestiaire,
   });
 }
 /** Inline-edit the brand via click on brand badge */
@@ -454,7 +454,7 @@ async function editVestiaireBrandInline(id) {
       v.brand = newBrand || null;
       showToast(t('toast.updated'), 'success');
     },
-    refreshFn: renderVestiaire,
+    refreshFn: refreshVestiaire,
   });
 }
 
@@ -516,10 +516,16 @@ function editVestiaireInlineFull(id) {
         updates.updated_at = new Date().toISOString();
         const { error } = await state.db.from('vestiaire').update(updates).eq('id', id);
         if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+        // Update local state so re-render shows new values immediately
+        if (updates.name !== undefined) v.name = updates.name;
+        if (updates.brand !== undefined) v.brand = updates.brand;
+        if (updates.size !== undefined) v.size = updates.size;
+        if (updates.color !== undefined) v.color = updates.color;
+        if (updates.note !== undefined) v.note = updates.note;
         showToast(t('toast.updated'), 'success');
       }
     },
-    refreshFn: renderVestiaire,
+    refreshFn: refreshVestiaire,
   });
 }
 

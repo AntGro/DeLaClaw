@@ -896,4 +896,4 @@ ON CONFLICT ("key") DO NOTHING;
 ALTER PUBLICATION supabase_realtime ADD TABLE
   tasks, projects, todos, habits, habit_completions,
   birthdays, vestiaire, flashcards, flashcard_notes,
-  prompts, settings;
+  prompts, settings, lists, list_items, daily_visits;

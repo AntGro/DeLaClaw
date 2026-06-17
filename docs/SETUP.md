@@ -23,15 +23,6 @@ The simplest persistent backend — no database, no API keys.
 
 All data loads into memory on connect and writes back to Drive with a 2-second debounce after each mutation. The JSON file is a plain export of all tables — you can download, inspect, or delete it from Drive at any time.
 
-### OAuth testing mode
-
-The OAuth client ID is configured for **Testing** mode in Google Cloud Console, which means:
-
-- Only test users added to the consent screen can sign in
-- Refresh tokens expire after 7 days — you'll need to re-authenticate
-
-To remove these restrictions, submit the app for Google verification (requires a privacy policy and domain ownership).
-
 ## Supabase (cloud PostgreSQL)
 
 ### 1. Create a Supabase project

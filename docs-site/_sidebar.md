@@ -1,7 +1,7 @@
 - [Home](/)
 - **Getting Started**
   - [Setup Guide](setup.md)
-  - [Demo Mode](setup.md?id=demo-mode)
+  - [Demo Mode](setup.md?id=demo-mode-no-setup)
 - **Reference**
   - [Architecture](architecture.md)
   - [Browser Support](browser-support.md)

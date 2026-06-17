@@ -917,6 +917,13 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   initListModals();
   await refreshLists();
 
+  // Re-render Welcome now that all data (birthdays, habits, flashcards…) is loaded.
+  // The initial switchView() call above rendered Welcome before async data was ready.
+  if (state.currentView === 'welcome') {
+    await refreshWelcome();
+    renderWelcome();
+  }
+
   markLastUpdated();
 
   // Show demo banner if in demo mode

@@ -1,6 +1,6 @@
 // Service Worker for DeLaClaw (PWA)
 // CACHE_VERSION is updated by the pre-commit hook from VERSION file
-const CACHE_VERSION = 'last-70d2b91f';
+const CACHE_VERSION = 'last-6a513367';
 
 const PRECACHE_URLS = [
   './',

@@ -758,12 +758,37 @@ async function editTodoInline(id, itemEl) {
   deadlineRow.appendChild(deadlineInput);
   deadlineRow.appendChild(clearBtn);
 
+  // Category row
+  const catRow = document.createElement('div');
+  catRow.className = 'inline-edit-row';
+  const catLabel = document.createElement('label');
+  catLabel.className = 'inline-edit-label';
+  catLabel.textContent = t('common.category');
+  const catSelect = document.createElement('select');
+  catSelect.className = 'inline-edit-input';
+  const cats = ['', ...getCategories()];
+  cats.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = c || 'General';
+    if (c === (todo.category || '')) opt.selected = true;
+    catSelect.appendChild(opt);
+  });
+  catRow.appendChild(catLabel);
+  catRow.appendChild(catSelect);
+
+  // Wrap deadline + category in extras container
+  const extras = document.createElement('div');
+  extras.className = 'inline-edit-extras';
+  extras.appendChild(deadlineRow);
+  extras.appendChild(catRow);
+
   inlineEditText(textEl, todo.text, {
     maxLength: 2000,
-    extraEl: deadlineRow,
+    extraEl: extras,
     collectExtra: () => {
       const newDeadline = deadlineInput.value ? new Date(deadlineInput.value).toISOString() : null;
-      return { due_date: newDeadline };
+      return { due_date: newDeadline, category: catSelect.value };
     },
     saveFn: async (newText, extra) => {
       const updates = {};
@@ -771,6 +796,8 @@ async function editTodoInline(id, itemEl) {
       if (extra) {
         const oldDeadline = todo.due_date || null;
         if (extra.due_date !== oldDeadline) updates.due_date = extra.due_date;
+        const oldCategory = todo.category || '';
+        if (extra.category !== oldCategory) updates.category = extra.category;
       }
       if (Object.keys(updates).length > 0) {
         const { error } = await state.db.from('todos').update(updates).eq('id', id);

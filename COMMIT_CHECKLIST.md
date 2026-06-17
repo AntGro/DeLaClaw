@@ -11,13 +11,13 @@ feat: add foo bar
 
 Description of changes.
 
-Checked: versioning, i18n, docs, readme, checklist, tests, welcome, prompts, xss, no-emoji
+Checked: versioning, i18n, docs, readme, checklist, tests, welcome, prompts, xss
 ```
 
 Items not relevant to this commit:
 
 ```
-Checked: versioning, i18n, docs [~], readme [~], checklist [~], tests, welcome [~], prompts [~], xss, no-emoji
+Checked: versioning, i18n, docs [~], readme [~], checklist [~], tests, welcome [~], prompts [~], xss
 ```
 
 ## Checklist items
@@ -33,7 +33,6 @@ Checked: versioning, i18n, docs [~], readme [~], checklist [~], tests, welcome [
 | **welcome** | Does this change affect data shown on the Welcome page (birthdays, habits, flashcards, projects, stats)? If so, verify `renderWelcome()` / `refreshWelcome()` still render correctly with the change. |
 | **prompts** | Does this change affect how tasks, habits, or flashcards behave? If so, check `prompts` table entries and `CLAW.md` (when added) for alignment — the AI agent reads those to understand what to do. |
 | **xss** | All user-sourced data (`name`, `text`, `note`, `brand`, `frequency_rule`, etc.) must be wrapped in `esc()` when interpolated into `innerHTML` / template literals. `renderMd()` and `truncateWithShowMore()` already call `esc()` internally — no double-wrapping for fields passed through those. `showDeleteConfirm` uses `.textContent` and is safe without `esc()`. |
-| **no-emoji** | No emoji in UI elements. Use Lucide icons via `lucideIcon()` in `js/icons.js`. The pre-commit hook catches pictographic emoji automatically — this item is about reviewing intent (did you reach for an emoji where a Lucide icon should go?). |
 
 ## Skipping the hook
 

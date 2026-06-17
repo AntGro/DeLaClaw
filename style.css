@@ -533,8 +533,8 @@ input,select,button{font-family:inherit;}
 .task-row{display:flex;align-items:center;gap:9px;}
 .task-text{flex:1;font-size:0.88rem;line-height:1.35;cursor:default;}
 .task-text[ondblclick]{cursor:text;}
-.task-actions{display:flex;align-items:center;gap:2px;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;flex-shrink:0;}
-.task-actions.visible{max-width:200px;opacity:1;pointer-events:auto;}
+.task-actions{display:grid;grid-template-columns:auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
+.task-actions.visible{max-width:80px;opacity:1;pointer-events:auto;}
 .task-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;}
 .task-actions button:hover{background:var(--surface2);}
 .task-meta{margin-top:5px;padding-left:18px;display:flex;flex-direction:column;gap:3px;}
@@ -562,9 +562,8 @@ input,select,button{font-family:inherit;}
 .draft-slider:hover .draft-slider-track{border-color:var(--accent);}
 .promote-btn{font-size:0.78rem;padding:4px 10px;background:var(--accent) !important;color:#fff !important;border:none;border-radius:4px;cursor:pointer;font-weight:600;opacity:1;transition:all 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.15);letter-spacing:0.02em;flex-shrink:0;}
 .promote-btn:hover{opacity:0.9;transform:scale(1.05);box-shadow:0 2px 6px rgba(0,0,0,0.2);}
-.task-draft .task-actions{flex-wrap:wrap;gap:3px;}
-.task-draft .task-actions .promote-btn{flex:0 0 100%;box-sizing:border-box;}
-.task-draft .task-actions button:not(.promote-btn){flex:1 1 0;min-width:0;}
+.task-draft .task-actions{gap:3px;}
+.task-draft .task-actions .promote-btn{grid-column:1/-1;box-sizing:border-box;}
 
 /* ===== TOAST ===== */
 .toast{position:fixed;bottom:20px;right:20px;padding:11px 20px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:0.84rem;z-index:999;opacity:0;transform:translateY(8px);transition:all 0.3s;pointer-events:none;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 4px 20px rgba(0,0,0,0.2);}

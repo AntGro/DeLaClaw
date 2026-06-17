@@ -40,28 +40,11 @@ Sign up at [supabase.com](https://supabase.com) and create a new project. Note y
 
 ### 2. Create the database schema
 
-You need to run the base schema and all migrations in order. Open the **SQL Editor** in your Supabase dashboard.
+Open the **SQL Editor** in your Supabase dashboard.
 
-**Base schema**: There is no single `000_initial_schema.sql` yet (tracked as a launch item). For now, create the tables manually by adapting `server/schema.sql` to PostgreSQL syntax. The main differences:
+**New installs**: run `sql/supabase_schema.sql`. This is the complete current schema with all migrations folded in. It sets `schema_version` automatically.
 
-- Replace `TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16))))` with `TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text`
-- Replace `INTEGER DEFAULT 0` (for booleans) with `BOOLEAN DEFAULT false`
-- Replace `datetime('now')` with `now()`
-- Add `ALTER TABLE <table> ENABLE ROW LEVEL SECURITY` and a permissive policy for each table
-
-Then run the migrations in order:
-
-```
-migrations/001_enable_rls.sql
-migrations/002_text_revision.sql
-migrations/003_birthday_avatars.sql
-migrations/004_rename_chores_to_habits.sql
-migrations/005_lists.sql
-migrations/006_todo_priority_levels.sql
-migrations/007_schema_version.sql
-```
-
-Each migration is idempotent and safe to re-run. See `migrations/MIGRATION_GUIDE.md` for the template used when adding new tables.
+**Existing installs**: run any pending migrations in `migrations/` in order (files are named by target version, e.g. `1.099_enable_realtime.sql`). See `migrations/MIGRATION_GUIDE.md` for the full versioning system.
 
 ### 3. Connect the app
 
@@ -75,6 +58,7 @@ Each migration is idempotent and safe to re-run. See `migrations/MIGRATION_GUIDE
 - Row Level Security (RLS) is enabled on all tables. The default policies allow all operations with the anon key. For multi-user setups, tighten the policies.
 - The app uses the Supabase JS client v2 loaded from CDN. No server-side code is needed.
 - Real-time subscriptions are enabled: changes from other tabs or devices appear automatically.
+- The app checks DB `schema_version` against the `VERSION` file and shows a banner if migrations are pending.
 
 ## Local mode (Bun + SQLite)
 
@@ -91,19 +75,19 @@ cd server
 bun run server.js
 ```
 
-The server starts on port 3000 by default. Override with the `PORT` environment variable:
+The server starts on port 3737 by default. Override with the `PORT` environment variable:
 
 ```bash
 PORT=8080 bun run server.js
 ```
 
-The SQLite database is created automatically at `server/last.db`. The schema (`server/schema.sql`) is applied on first run.
+The SQLite database is created automatically at `server/last.db`. The schema (`server/schema.sql`) is applied on first run — local users always get the latest schema automatically.
 
 ### 3. Connect the app
 
-1. Open `http://localhost:3000` in your browser (the server also serves the static files)
+1. Open `http://localhost:3737` in your browser (the server also serves the static files)
 2. Select **Local** on the login screen
-3. Enter the server URL (e.g. `http://localhost:3000`)
+3. Enter the server URL (e.g. `http://localhost:3737`)
 
 ### Notes
 

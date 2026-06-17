@@ -2792,6 +2792,7 @@ window.toggleTheme = toggleTheme;
 window.disconnect = disconnect;
 window.toggleSearch = toggleSearch;
 window.clearPageSearch = clearPageSearch;
+window.dismissSchemaBanner = dismissSchemaBanner;
 
 // --- Environment badge + dev favicon ---
 (function() {

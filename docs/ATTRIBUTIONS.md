@@ -16,7 +16,14 @@ DeLaClaw uses the following third-party software and assets. No npm dependencies
 - **License**: MIT
 - **Source**: https://github.com/mrdoob/three.js
 - **Loaded from**: `cdn.jsdelivr.net/npm/three@0.170.0`
-- **Purpose**: 3D particle effect on the landing/hero page
+- **Purpose**: 3D extruded heptagram on the landing/hero page
+
+### Google Identity Services
+- **Library**: GIS (`accounts.google.com/gsi/client`)
+- **License**: Google APIs Terms of Service
+- **Source**: https://developers.google.com/identity
+- **Loaded from**: `accounts.google.com/gsi/client`
+- **Purpose**: OAuth 2.0 token flow for Google Drive backend mode
 
 ## Fonts
 

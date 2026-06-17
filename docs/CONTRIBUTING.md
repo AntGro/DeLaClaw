@@ -69,11 +69,11 @@ node tests/tests.js
 
 Tests include:
 - Unit tests for core logic (version parsing, drag-and-drop, utilities)
-- Adapter compliance tests (all three backends implement the same interface)
+- Adapter compliance tests (all four backends implement the same interface)
 - REST server integration tests (requires Bun)
 - Browser-based end-to-end tests (requires Playwright -- `npx playwright install chromium`)
 
-All 54 tests must pass. If you add a new feature, add tests for it.
+All 76 tests must pass. If you add a new feature, add tests for it.
 
 ## What contributions are welcome
 

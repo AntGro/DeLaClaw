@@ -740,8 +740,12 @@ function renderWelcome() {
       const dayLabel = b.daysUntil === 0 ? t('welcome.today_birthday')
         : b.daysUntil === 1 ? t('welcome.tomorrow_birthday')
         : t('welcome.in_days', b.daysUntil);
+      const avatarHtml = b.avatar_url
+        ? `<img src="${b.avatar_url}" alt="${esc(b.name)}" class="welcome-birthday-avatar-img">`
+        : lucideIcon('user', 16);
       html += `<div class="welcome-item" onclick="switchView('birthdays')">`;
       html += `<div class="welcome-item-main">`;
+      html += `<span class="welcome-birthday-avatar${b.daysUntil === 0 ? ' birthday-today-avatar' : ''}">${avatarHtml}</span>`;
       html += `<span class="welcome-item-text">${esc(b.name)}</span>`;
       html += `<span class="welcome-badge birthday-badge">${esc(dayLabel)}</span>`;
       html += `</div>`;

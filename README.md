@@ -64,7 +64,7 @@ DeLaClaw supports four backend modes. Pick one:
 ### Supabase (cloud)
 
 1. Create a [Supabase](https://supabase.com) project
-2. Run the base schema and migrations in the SQL editor (see [Setup Guide](docs/SETUP.md))
+2. Run the base schema and migrations in the SQL editor (see [Setup Guide](docs-site/setup.md))
 3. Serve `index.html` with any static server, or use [delaclaw.com](https://delaclaw.com)
 4. Select "Supabase", enter your project URL and anon key
 
@@ -79,7 +79,7 @@ DeLaClaw supports four backend modes. Pick one:
 3. Open `http://localhost:3000` in a browser
 4. Select "Local" and enter the server URL
 
-See [docs/SETUP.md](docs/SETUP.md) for detailed instructions.
+See [docs-site/setup.md](docs-site/setup.md) for detailed instructions.
 
 ## Architecture
 
@@ -127,7 +127,7 @@ The adapter pattern (`db.js`) means the app logic never touches the backend dire
 
 16 database tables: `projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `nvidia_usage`.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
+See [docs-site/architecture.md](docs-site/architecture.md) for details.
 
 ## Testing
 
@@ -139,7 +139,7 @@ node tests/tests.js
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [Contributing](docs-site/contributing.md).
 
 ## License
 
@@ -154,4 +154,4 @@ DeLaClaw is free software. You can use, modify, and distribute it under the term
 - [Supabase JS](https://github.com/supabase/supabase-js) client (MIT License)
 - [Three.js](https://threejs.org) for hero animations (MIT License)
 
-See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for full details.
+See [Attributions](docs-site/attributions.md) for full details.

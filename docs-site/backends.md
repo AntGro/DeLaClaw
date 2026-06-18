@@ -85,81 +85,19 @@ These **must stay in sync**. The `draft` status bug (v1.105) was caused by the d
 
 ## 4. Per-Backend Details
 
-### 4.1 Supabase
-
-**Adapter:** `js/adapters/supabase.js` (31 lines — thin pass-through to `@supabase/supabase-js`)
-
-**Auth:** Anon key (`sb_publishable_*`) in both `apikey` and `Authorization: Bearer` headers. No user-level auth — the key grants full access scoped by RLS policies (currently open: `USING (true) WITH CHECK (true)`).
-
-**Session:** Stateless. The anon key doesn't expire. "Stay connected" saves `{ url, key, mode }` to localStorage and auto-reconnects on reload.
-
-**Realtime:** Supabase Realtime via `postgres_changes` websocket subscription. Requires tables to be added to the `supabase_realtime` publication (see migration `1.099_enable_realtime.sql`). Fires on INSERT/UPDATE/DELETE; the handler calls `refreshAll()` or the relevant `refresh*()` function. Edits in progress are protected by `isEditing()` guard.
-
-**Offline:** Wrapped by `js/adapters/offline-cache.js`. On network failure, cached data from IndexedDB is returned and an "Offline — read-only" banner appears. Writes fail silently in offline mode. Cache is scoped by `{mode}:{url}` to prevent cross-backend contamination. Tables in `EXCLUDE` set (`prompts`, `nvidia_usage`) are not cached.
-
-**Agent support:** Full. The Claw agent reads/writes tasks via the REST API using the same anon key. The heartbeat picks up `status=todo` and `status=revision` tasks, works on them, and sets `status=review`.
-
-**Storage limits:** Supabase free tier: 500 MB database, 1 GB file storage, 2 GB bandwidth/month, 50 MB max file upload. Row count unlimited but performance degrades at scale.
-
-**Security:** RLS enabled on all tables. Current policies are open (`USING (true)`). The anon key is visible in client JS — acceptable because DeLaClaw is a personal tool with no multi-tenant auth. The key should not be shared publicly.
-
-**Setup:** Run `sql/supabase_schema.sql` in the Supabase SQL Editor. Enter project URL + anon key in the login form.
-
-### 4.2 Google Drive
-
-**Adapter:** `js/adapters/drive.js` (268 lines) — wraps the demo adapter with Drive persistence.
-
-**Architecture:** On connect, pulls a single `delaclaw-data.json` file from a `DeLaClaw/` folder in the user's Drive. All reads/writes hit the in-memory store (instant). On mutation, a debounced write-back flushes to Drive after 2 seconds of inactivity.
-
-**Auth:** Google OAuth 2.0 via Google Identity Services. Scope: `drive.file` (access only to files created by the app). Token stored in memory; "Stay connected" saves the client ID and triggers silent re-auth on reload (`prompt: ''`). If silent auth fails (session expired, consent revoked), credentials are cleared and the user sees the login form with "Session expired" message.
-
-**Sync:** None. Drive is single-device — there's no mechanism to detect changes made by another device. If two devices are open, the last flush wins and the other device's in-memory state is stale until reload.
-
-**Offline:** No offline support. If the initial Drive fetch fails, connect fails. If a flush fails mid-session, changes are lost on reload.
-
-**Agent support:** Possible with caveats. The agent can read/write `DeLaClaw/delaclaw-data.json` via the Google Drive API, but operates on the whole JSON blob rather than individual rows. No Realtime notification — the app won't detect agent changes until reload. Risk of overwriting in-flight changes if the user and agent flush concurrently.
-
-**Storage limits:** Google Drive free tier: 15 GB shared across Gmail, Drive, and Photos. DeLaClaw's JSON file is typically < 1 MB.
-
-**Security:** Inherits Google account security. `drive.file` scope means DeLaClaw can only access files it created — no access to the user's other Drive files.
-
-**Setup:** Click "Connect with Google" on the login form. Authorize the app. DeLaClaw creates the folder and data file automatically.
-
-### 4.3 Local (Bun + SQLite)
-
-**Adapter:** `js/adapters/rest.js` (153 lines) — plain HTTP client with chainable PostgREST-like API.
-
-**Server:** `server/server.js` — Bun-powered REST server. Serves static files and a REST API backed by SQLite. Schema applied on startup via `CREATE TABLE IF NOT EXISTS`.
-
-**Auth:** None. No authentication or authorization. ⚠️ **The server binds to `0.0.0.0` by default**, exposing the API to the local network. Anyone on the same network can read/write all data.
-
-**Sync:** None. Single-server, single-device.
-
-**Offline:** N/A — the data is local. If the server process dies, the app shows connection errors.
-
-**Agent support:** Possible in theory — the REST API is the same shape as Supabase's PostgREST. Not currently wired.
-
-**Storage limits:** SQLite practical limit: ~281 TB. Effectively unlimited for personal use.
-
-**Security:** No auth, no encryption at rest. Suitable for trusted local networks only. **TODO:** bind to `127.0.0.1` by default; add optional auth token.
-
-**Setup:** `cd server && bun run server.js`. Enter `http://localhost:3737` in the login form.
-
-### 4.4 Demo
-
-**Adapter:** `js/adapters/demo.js` (292 lines) — full in-memory query builder with CHECK constraints.
-
-**Architecture:** Seeded with localized sample data from `js/demo-data.js` (EN/FR/ES). All operations run against an in-memory JavaScript object. Nothing persists across page refresh.
-
-**Auth:** None.
-
-**Sync:** N/A.
-
-**Offline:** N/A.
-
-**Agent support:** N/A.
-
-**Purpose:** Let users try DeLaClaw without connecting any backend. Also serves as the foundation for the Drive adapter's query engine.
+|  | **Supabase** | **Google Drive** | **Local (Bun + SQLite)** | **Demo** |
+|---|---|---|---|---|
+| **Adapter** | `supabase.js` (31 lines) — thin pass-through to `@supabase/supabase-js` | `drive.js` (268 lines) — wraps the demo adapter with Drive persistence | `rest.js` (153 lines) — plain HTTP client with chainable PostgREST-like API | `demo.js` (292 lines) — full in-memory query builder with CHECK constraints |
+| **Architecture** | Direct Postgres queries via Supabase JS client | Pulls `delaclaw-data.json` from a `DeLaClaw/` Drive folder on connect. Reads/writes hit in-memory store (instant). Debounced write-back flushes to Drive after 2s of inactivity | `server/server.js` — Bun REST server + static file server. SQLite schema applied on startup via `CREATE TABLE IF NOT EXISTS` | Seeded with localized sample data from `demo-data.js` (EN/FR/ES). All operations run against in-memory JS objects. Nothing persists across refresh |
+| **Auth** | Anon key (`sb_publishable_*`) in both `apikey` and `Authorization: Bearer` headers. No user-level auth — key grants full access scoped by RLS (currently open: `USING (true) WITH CHECK (true)`) | Google OAuth 2.0 via Google Identity Services. Scope: `drive.file` (only files created by the app). "Stay connected" triggers silent re-auth on reload (`prompt: ''`); clears credentials on failure | None. ⚠️ Server binds to `0.0.0.0` by default, exposing the API to the local network | None |
+| **Session** | Stateless. Anon key doesn't expire. "Stay connected" saves `{ url, key, mode }` to localStorage | Token in memory. "Stay connected" saves client ID to localStorage | N/A | N/A |
+| **Realtime / Sync** | `postgres_changes` websocket subscription. Fires on INSERT/UPDATE/DELETE → calls `refreshAll()` or specific `refresh*()`. Edits in progress protected by `isEditing()` guard. Requires `supabase_realtime` publication (migration `1.099`) | None. Single-device — no mechanism to detect external changes. Two devices open → last flush wins | None. Single-server, single-device | N/A |
+| **Offline** | `offline-cache.js` wrapper. Network failure → IndexedDB cache serves reads, writes fail silently, "Offline — read-only" banner. Cache scoped by `{mode}:{url}`. Tables in `EXCLUDE` set (`prompts`, `nvidia_usage`) not cached. No write queue — changes while offline are lost | None. Initial Drive fetch failure → connect fails. Mid-session flush failure → changes lost on reload | N/A — data is local. Server process dying → connection errors | N/A |
+| **Agent support** | ✅ Full. Claw agent reads/writes via REST API with same anon key. Heartbeat picks up `status=todo` / `status=revision` tasks | ⚠️ Possible. Agent accesses `delaclaw-data.json` via Drive API but operates on whole JSON blob. No realtime notification, risk of concurrent flush conflicts | ⚠️ Possible in theory — REST API matches PostgREST shape. Not currently wired | ❌ N/A |
+| **Storage limits** | Free tier: 500 MB DB, 1 GB file storage, 2 GB bandwidth/month, 50 MB max upload. Row count unlimited | Free tier: 15 GB shared across Gmail/Drive/Photos. DeLaClaw JSON typically < 1 MB | SQLite limit: ~281 TB. Effectively unlimited | N/A |
+| **Security** | RLS on all tables (currently open policies). Anon key visible in client JS — acceptable for personal single-user tool, should not be shared | Inherits Google account security. `drive.file` scope → no access to user's other Drive files | No auth, no encryption at rest. Trusted local networks only. **TODO:** bind to `127.0.0.1`; add optional auth token | N/A |
+| **Setup** | Run `sql/supabase_schema.sql` in Supabase SQL Editor. Enter project URL + anon key in login form | Click "Connect with Google" → authorize → folder and data file created automatically | `cd server && bun run server.js`. Enter `http://localhost:3737` in login form | Click "Demo" on login screen, choose a sample dataset or start empty |
+| **Purpose** | Primary backend for full-featured use with cross-device sync and agent integration | Simple persistent backend — no database, no API keys, just a Google account | Self-hosted option for privacy-conscious users on trusted networks | Try DeLaClaw without any backend. Also serves as the Drive adapter's query engine |
 
 ---
 

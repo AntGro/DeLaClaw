@@ -556,21 +556,21 @@ function renderWelcome() {
   html += `<div class="welcome-nav-shortcuts">`;
   // TODOs bucket
   const todoPending = wTodos.filter(td => !td.done).length;
-  html += `<button class="category-nav-btn" style="--cat-color:#22c55e" onclick="document.getElementById('welcome-bucket-todos')?.scrollIntoView({behavior:'smooth',block:'start'})" title="${esc(t('welcome.focus_todos'))}">${lucideIcon('list-checks', 12, '#22c55e')} ${esc(t('welcome.focus_todos'))}${todoPending > 0 ? ' (' + todoPending + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#22c55e" onclick="scrollToWelcomeBucket('welcome-bucket-todos')" title="${esc(t('welcome.focus_todos'))}">${lucideIcon('list-checks', 12, '#22c55e')} ${esc(t('welcome.focus_todos'))}${todoPending > 0 ? ' (' + todoPending + ')' : ''}</button>`;
   // Habits bucket
   const habitsDueNavCount = wHabits.filter(c => !c.is_draft && c.next_due && startOfDay(new Date(c.next_due)) <= todayStart).length;
-  html += `<button class="category-nav-btn" style="--cat-color:#ec4899" onclick="document.getElementById('welcome-bucket-habits')?.scrollIntoView({behavior:'smooth',block:'start'})" title="${esc(t('welcome.habits_due'))}">${lucideIcon('repeat', 12, '#ec4899')} ${esc(t('welcome.habits_due'))}${habitsDueNavCount > 0 ? ' (' + habitsDueNavCount + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#ec4899" onclick="scrollToWelcomeBucket('welcome-bucket-habits')" title="${esc(t('welcome.habits_due'))}">${lucideIcon('repeat', 12, '#ec4899')} ${esc(t('welcome.habits_due'))}${habitsDueNavCount > 0 ? ' (' + habitsDueNavCount + ')' : ''}</button>`;
   // Flashcards bucket
   const fcDueNav = wFlashcards.filter(c => c.last_review && (!c.next_review || new Date(c.next_review) <= now)).length;
   const fcNewNav = wFlashcards.filter(c => !c.last_review).length;
   const fcTotalNav = fcDueNav + fcNewNav;
-  html += `<button class="category-nav-btn" style="--cat-color:#06b6d4" onclick="document.getElementById('welcome-bucket-flashcards')?.scrollIntoView({behavior:'smooth',block:'start'})" title="${esc(t('welcome.flashcards'))}">${lucideIcon('brain', 12, '#06b6d4')} ${esc(t('welcome.flashcards'))}${fcTotalNav > 0 ? ' (' + fcTotalNav + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#06b6d4" onclick="scrollToWelcomeBucket('welcome-bucket-flashcards')" title="${esc(t('welcome.flashcards'))}">${lucideIcon('brain', 12, '#06b6d4')} ${esc(t('welcome.flashcards'))}${fcTotalNav > 0 ? ' (' + fcTotalNav + ')' : ''}</button>`;
   // Birthdays bucket
-  html += `<button class="category-nav-btn" style="--cat-color:#f97316" onclick="document.getElementById('welcome-bucket-birthdays')?.scrollIntoView({behavior:'smooth',block:'start'})" title="${esc(t('welcome.upcoming_birthdays'))}">${lucideIcon('cake', 12, '#f97316')} ${esc(t('welcome.upcoming_birthdays'))}${upcomingBDs.length > 0 ? ' (' + upcomingBDs.length + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#f97316" onclick="scrollToWelcomeBucket('welcome-bucket-birthdays')" title="${esc(t('welcome.upcoming_birthdays'))}">${lucideIcon('cake', 12, '#f97316')} ${esc(t('welcome.upcoming_birthdays'))}${upcomingBDs.length > 0 ? ' (' + upcomingBDs.length + ')' : ''}</button>`;
   // Stats bucket
-  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" onclick="document.getElementById('welcome-bucket-stats')?.scrollIntoView({behavior:'smooth',block:'start'})" title="${esc(t('welcome.stats'))}">${lucideIcon('bar-chart-3', 12, 'var(--accent)')} ${esc(t('welcome.stats'))}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" onclick="scrollToWelcomeBucket('welcome-bucket-stats')" title="${esc(t('welcome.stats'))}">${lucideIcon('bar-chart-3', 12, 'var(--accent)')} ${esc(t('welcome.stats'))}</button>`;
   // Calendar bucket
-  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" onclick="document.getElementById('welcome-bucket-calendar')?.scrollIntoView({behavior:'smooth',block:'start'})" title="${esc(t('welcome.coming_up'))}">${lucideIcon('calendar-days', 12, 'var(--accent)')} ${esc(t('welcome.coming_up'))}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" onclick="scrollToWelcomeBucket('welcome-bucket-calendar')" title="${esc(t('welcome.coming_up'))}">${lucideIcon('calendar-days', 12, 'var(--accent)')} ${esc(t('welcome.coming_up'))}</button>`;
   html += `</div>`;
 
   // Focus TODOs + Habits due — side by side
@@ -832,3 +832,19 @@ function goToRevise() {
   else window.switchView('flashcards');
 }
 window.goToRevise = goToRevise;
+
+// ── Header-offset-aware scroll for Welcome nav buttons ──
+function scrollToWelcomeBucket(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const header = document.querySelector('.app-header');
+  if (header) {
+    const headerBottom = header.getBoundingClientRect().bottom;
+    const elementTop = el.getBoundingClientRect().top;
+    const offset = elementTop - headerBottom - 8;
+    window.scrollBy({ top: offset, behavior: 'smooth' });
+  } else {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+window.scrollToWelcomeBucket = scrollToWelcomeBucket;

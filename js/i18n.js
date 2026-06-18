@@ -311,7 +311,7 @@ const T = {
       notes_placeholder: 'e.g. Slim fit, bought at...',
       category_placeholder: 'e.g. Sport, Formal...',
       color_optional: 'Color (optional)', notes_optional: 'Notes (optional)',
-      add_category: 'Add Category',
+      add_category: 'Add Category', edit_category: 'Edit Category', shortname: 'Shortname', shortname_placeholder: 'e.g. TOP',
       category_has_items: 'Can\'t delete "{0}" — it has {1} item(s). Move or delete them first.',
       filter_all: 'All', filter_owned: 'Owned', filter_tried: 'Tried', filter_wishlist: 'Wishlist',
       sort_manual: 'Manual order', sort_name: 'Name', sort_brand: 'Brand',

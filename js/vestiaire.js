@@ -280,7 +280,7 @@ function renderCategoryCard(cat, items) {
         <span style="font-size:0.78rem;opacity:0.75;">(${count})</span>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="todo-cat-shortname-btn" onclick="promptVestShortname('${escQ(cat)}')" title="${getVestShortname(cat) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
+        <button class="todo-cat-shortname-btn" onclick="openEditVestiaireCategoryModal('${escQ(cat)}')" title="${t('vestiaire.edit_category')}">${lucideIcon("pencil",14)}</button>
         <button class="archive-project-btn" onclick="openAddVestiaireModal('${escapedCat}')" title="Add to ${escapedCat}">
           ${lucideIcon('plus', 16)}
         </button>
@@ -630,6 +630,26 @@ function initVestiaireModals() {
     </div>
   </div>`;
   app.appendChild(m3);
+
+  // Edit Category Modal
+  const m4 = document.createElement('div');
+  m4.className = 'modal-overlay';
+  m4.id = 'editVestiaireCategoryModal';
+  m4.innerHTML = `<div class="modal">
+    <h2>${lucideIcon('pencil', 20)} ${t('vestiaire.edit_category')}</h2>
+    <input type="hidden" id="editVestiaireCategoryOldName">
+    <label>${t('common.name')}</label>
+    <input type="text" id="editVestiaireCategoryName" maxlength="40"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditVestiaireCategory();}">
+    <label>${t('vestiaire.shortname')}</label>
+    <input type="text" id="editVestiaireCategoryShortname" maxlength="20" placeholder="${t('vestiaire.shortname_placeholder')}"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditVestiaireCategory();}">
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeEditVestiaireCategoryModal()">${t('common.cancel')}</button>
+      <button class="modal-save" onclick="saveEditVestiaireCategory()">${t('common.save')}</button>
+    </div>
+  </div>`;
+  app.appendChild(m4);
 }
 
 function populateCategorySelect(selectId, preselect) {
@@ -775,6 +795,58 @@ function saveNewVestiaireCategory() {
   renderVestiaire();
 }
 
+function openEditVestiaireCategoryModal(cat) {
+  document.getElementById('editVestiaireCategoryOldName').value = cat;
+  document.getElementById('editVestiaireCategoryName').value = cat;
+  document.getElementById('editVestiaireCategoryShortname').value = getVestShortname(cat) || '';
+  document.getElementById('editVestiaireCategoryModal').classList.add('visible');
+  setTimeout(() => document.getElementById('editVestiaireCategoryName').focus(), 100);
+}
+
+function closeEditVestiaireCategoryModal() {
+  document.getElementById('editVestiaireCategoryModal').classList.remove('visible');
+}
+
+async function saveEditVestiaireCategory() {
+  const oldName = document.getElementById('editVestiaireCategoryOldName').value;
+  const newName = document.getElementById('editVestiaireCategoryName').value.trim();
+  const shortname = document.getElementById('editVestiaireCategoryShortname').value.trim();
+
+  if (!newName) { showToast(t('toast.enter_name'), 'error'); return; }
+
+  // Prevent duplicate category names
+  if (oldName !== newName) {
+    const cats = getVestiaireCategories();
+    if (cats.includes(newName)) { showToast(t('toast.name_taken') || 'Name already taken', 'error'); return; }
+  }
+
+  // Update shortname (move to new key if renamed)
+  if (oldName !== newName) {
+    // Rename category in localStorage list
+    const cats = getVestiaireCategories();
+    const idx = cats.indexOf(oldName);
+    if (idx >= 0) cats[idx] = newName;
+    saveVestiaireCategories(cats);
+
+    // Rename category on all vestiaire items in DB
+    const items = (state.allVestiaire || []).filter(v => v.category === oldName);
+    for (const item of items) {
+      await state.db.from('vestiaire').update({ category: newName, updated_at: new Date().toISOString() }).eq('id', item.id);
+    }
+
+    // Move shortname from old key to new key
+    const oldShortname = getVestShortname(oldName);
+    if (oldShortname) setVestShortname(oldName, '');
+    setVestShortname(newName, shortname);
+  } else {
+    setVestShortname(oldName, shortname);
+  }
+
+  closeEditVestiaireCategoryModal();
+  showToast(t('toast.updated'), 'success');
+  await refreshVestiaire();
+}
+
 function deleteVestiaireCategory(cat) {
   const items = (state.allVestiaire || []).filter(v => v.category === cat);
   if (items.length > 0) {
@@ -820,4 +892,7 @@ window.editVestiaireBrandInline = editVestiaireBrandInline;
 window.cycleVestiaireStatus = cycleVestiaireStatus;
 
 window.promptVestShortname = promptVestShortname;
+window.openEditVestiaireCategoryModal = openEditVestiaireCategoryModal;
+window.closeEditVestiaireCategoryModal = closeEditVestiaireCategoryModal;
+window.saveEditVestiaireCategory = saveEditVestiaireCategory;
 window.filterVestiaire = function(e) { vestSearchQuery = e.target.value; renderVestiaire(); };

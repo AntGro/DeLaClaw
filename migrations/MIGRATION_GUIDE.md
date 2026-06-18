@@ -32,7 +32,7 @@ The app checks `schema_version` on Supabase connect and shows:
 |---|---|---|---|
 | **Supabase** | `sql/supabase_schema.sql` (Postgres DDL) | Incremental `.sql` files in `migrations/`, run manually in the SQL Editor | Yes — run pending migration files in order |
 | **Local** | `server/schema.sql` (SQLite DDL) | `CREATE TABLE IF NOT EXISTS` on server startup. New columns need manual migration or DB reset | No for new tables. New columns on existing tables: yes |
-| **Google Drive** | Schemaless (JSON) | New fields appear as `undefined` on old records — app handles missing fields with defaults | No — automatic |
+| **Google Drive** | Per-table JSON files in Drive | JS migration functions run on connect when `schema_version` is behind. New fields handled gracefully (undefined + defaults) | No — automatic on connect |
 | **Demo** | Schemaless (in-memory) | Same as Drive — new fields are simply absent on old objects | No — automatic |
 
 ### Supabase
@@ -66,9 +66,28 @@ Auto-migration on server start is possible but not yet implemented.
 
 ### Google Drive & Demo
 
-These backends are schemaless — data is plain JSON objects. When the app adds a new field, old records simply have `undefined` for that field. The app must handle this gracefully with default values or conditional checks.
+Google Drive stores data as per-table JSON files in a `DeLaClaw/` folder. When the app adds a new field, old records have `undefined` for that field — the app handles this with default values or conditional checks, same as Demo.
 
-No migration files, no version bumps, no user action. The trade-off: there's no way to enforce constraints or validate data shape at the storage layer.
+For structural changes (new tables, renamed fields, table splits), Drive uses **JS migration functions** that run on connect when `schema_version` in `settings.json` is behind the app version. These are JavaScript transforms — not SQL — that read, transform, and write back the affected JSON files. Example:
+
+```js
+const migrations = {
+  '1.130': async (drive) => {
+    // New table: create empty file if missing
+    await drive.ensureFile('texts.json', []);
+  },
+  '1.135': async (drive) => {
+    // Rename field
+    const todos = await drive.readTable('todos.json');
+    todos.forEach(t => { t.priority = t.importance; delete t.importance; });
+    await drive.writeTable('todos.json', todos);
+  }
+};
+```
+
+After all pending migrations succeed, `schema_version` is updated in `settings.json`.
+
+Demo mode is truly schemaless with no migration mechanism — data doesn't persist across refresh, so there's nothing to migrate.
 
 ---
 

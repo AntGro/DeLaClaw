@@ -371,9 +371,10 @@ function clearStayConnectedCreds() {
 }
 
 async function disconnect() {
-  // Force-save Drive data before disconnecting
+  // Force-save and clean up Drive adapter before disconnecting
   if (state.driveMode && state.driveAdapter) {
     try { await state.driveAdapter.forceSave(); } catch {}
+    if (state.driveAdapter.destroy) state.driveAdapter.destroy();
   }
   clearStayConnectedCreds();
   location.reload();
@@ -817,9 +818,10 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   }
   db.setAdapter(adapter);
 
-  // Flush pending Drive saves on page close
+  // Flush pending Drive saves and stop polling on page close
   if (mode === 'googledrive' && adapter.forceSave) {
     window.addEventListener('beforeunload', () => {
+      if (adapter.destroy) adapter.destroy();
       adapter.forceSave().catch(() => {});
     });
   }

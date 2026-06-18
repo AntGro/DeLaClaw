@@ -5,8 +5,9 @@
 // ===================================================================
 
 import { Database } from "bun:sqlite";
-import { readFileSync, existsSync, statSync } from "fs";
+import { readFileSync, existsSync, statSync, copyFileSync } from "fs";
 import { join, dirname, extname } from "path";
+import { LOCAL_MIGRATIONS } from "../migrations/local-migrations.js";
 
 const PORT = parseInt(process.env.PORT || "3737");
 const DB_PATH = process.env.DB_PATH || join(dirname(import.meta.path), "last.db");
@@ -23,6 +24,44 @@ db.exec(`INSERT INTO settings (key, value) VALUES ('schema_version', '1.000')
   ON CONFLICT (key) DO NOTHING;`);
 db.exec(`INSERT INTO settings (key, value) VALUES ('db_created_at', '"' || datetime('now') || '"')
   ON CONFLICT (key) DO NOTHING;`);
+
+// ── Run pending migrations ──
+{
+  const pendingVersions = Object.keys(LOCAL_MIGRATIONS)
+    .sort((a, b) => parseFloat(a) - parseFloat(b));
+
+  if (pendingVersions.length > 0) {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'schema_version'").get();
+    const currentVersion = row ? String(row.value) : '0';
+    const toRun = pendingVersions.filter(v => v > currentVersion);
+
+    if (toRun.length > 0) {
+      // Backup the DB file before any migration
+      const backupPath = DB_PATH.replace(/\.db$/, `-backup-v${currentVersion}.db`);
+      try {
+        copyFileSync(DB_PATH, backupPath);
+        console.log(`Migration backup saved: ${backupPath}`);
+      } catch (e) {
+        console.warn(`Migration backup failed: ${e.message} — proceeding anyway`);
+      }
+
+      for (const version of toRun) {
+        try {
+          db.exec("BEGIN TRANSACTION;");
+          db.exec(LOCAL_MIGRATIONS[version]);
+          db.exec(`UPDATE settings SET value = '${version}', updated_at = datetime('now') WHERE key = 'schema_version';`);
+          db.exec("COMMIT;");
+          console.log(`Migration ${version} applied successfully`);
+        } catch (e) {
+          db.exec("ROLLBACK;");
+          console.error(`Migration ${version} failed: ${e.message}`);
+          console.error(`Database remains at schema_version ${currentVersion}. Backup at: ${backupPath}`);
+          break;
+        }
+      }
+    }
+  }
+}
 
 // ── Helpers ──
 function generateId() {

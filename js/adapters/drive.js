@@ -12,8 +12,8 @@
 // Change detection: polls Drive every POLL_INTERVAL_MS for modified
 // files and re-fetches only changed tables.
 //
-// Migration: detects the legacy single-file format (delaclaw-data.json)
-// and splits it into per-table files on first connect.
+// Migration: legacy single-file → per-table conversion and subsequent
+// schema migrations are handled by migrations/drive-migrations.js.
 //
 // Uses the demo adapter's DemoQueryBuilder under the hood — same
 // chainable .from().select().eq().insert() interface.
@@ -24,7 +24,6 @@ import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
 
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const DRIVE_FOLDER_NAME = 'DeLaClaw';
-const LEGACY_FILE_NAME = 'delaclaw-data.json';
 const DEBOUNCE_MS = 2000;
 const POLL_INTERVAL_MS = 30000;
 const MAX_RETRIES = 2;
@@ -241,31 +240,18 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   const dirtyTables = new Set();
   const saveTimers = {};
 
-  // ── Load: list files, detect legacy format, read all tables ──
+  // ── Load: list files, read data from whatever format exists ──
 
   const existingFiles = await listFolderFiles(token, folderId);
   const filesByName = new Map(existingFiles.map(f => [f.name, f]));
 
   let initialData = {};
 
-  // Check for legacy single-file format
-  const legacyFile = filesByName.get(LEGACY_FILE_NAME);
-  if (legacyFile) {
-    if (onStatus) onStatus('migrating');
-    const { data: legacyData } = await downloadFile(token, legacyFile.id);
+  // Check for per-table files first, fall back to legacy single-file
+  const hasPerTableFiles = DRIVE_TABLES.some(t => filesByName.has(`${t}.json`));
+  const legacyFile = filesByName.get('delaclaw-data.json');
 
-    // Write each table as its own file
-    for (const table of DRIVE_TABLES) {
-      const tableData = legacyData[table] || [];
-      const fileName = `${table}.json`;
-      const result = await uploadFile(token, folderId, null, fileName, tableData);
-      fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
-      initialData[table] = tableData;
-    }
-
-    // Delete legacy file
-    await deleteFile(token, legacyFile.id);
-  } else {
+  if (hasPerTableFiles) {
     // Normal load: read each per-table file in parallel
     const readPromises = DRIVE_TABLES.map(async (table) => {
       const fileName = `${table}.json`;
@@ -280,6 +266,20 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       }
     });
     await Promise.all(readPromises);
+  } else if (legacyFile) {
+    // Legacy format: read single file, populate initialData from it
+    if (onStatus) onStatus('migrating');
+    const { data: legacyData } = await downloadFile(token, legacyFile.id);
+    for (const table of DRIVE_TABLES) {
+      initialData[table] = legacyData[table] || [];
+      fileMeta[table] = { fileId: null, etag: null, modifiedTime: null };
+    }
+  } else {
+    // Fresh install: no files at all
+    for (const table of DRIVE_TABLES) {
+      initialData[table] = [];
+      fileMeta[table] = { fileId: null, etag: null, modifiedTime: null };
+    }
   }
 
   // ── Create in-memory adapter seeded with loaded data ──
@@ -311,6 +311,13 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     if (toRun.length > 0) {
       if (onStatus) onStatus('migrating');
 
+      // Context object for migrations that need Drive API access
+      const migrationCtx = {
+        token, folderId, fileMeta, filesByName,
+        getToken, DRIVE_TABLES,
+        uploadFile, downloadFile, deleteFile, listFolderFiles,
+      };
+
       // Save a full backup before any migration runs
       const backupData = {};
       for (const table of DRIVE_TABLES) {
@@ -328,7 +335,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
       // Run each migration, bump schema_version after each success
       for (const version of toRun) {
-        await DRIVE_MIGRATIONS[version](inner._store);
+        await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
 
         // Update schema_version in memory
         const entry = (inner._store.settings || []).find(s => s.key === 'schema_version');

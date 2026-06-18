@@ -68,24 +68,28 @@ Auto-migration on server start is possible but not yet implemented.
 
 Google Drive stores data as per-table JSON files in a `DeLaClaw/` folder. When the app adds a new field, old records have `undefined` for that field — the app handles this with default values or conditional checks, same as Demo.
 
-For structural changes (new tables, renamed fields, table splits), Drive uses **JS migration functions** that run on connect when `schema_version` in `settings.json` is behind the app version. These are JavaScript transforms — not SQL — that read, transform, and write back the affected JSON files. Example:
+For structural changes (new tables, renamed fields, table splits), Drive uses **JS migration functions** defined in `migrations/drive-migrations.js`. They run on connect when `schema_version` in `settings.json` is behind the app version. These are JavaScript transforms — not SQL — that modify the in-memory store. Example:
 
 ```js
-const migrations = {
-  '1.130': async (drive) => {
-    // New table: create empty file if missing
-    await drive.ensureFile('texts.json', []);
+export const DRIVE_MIGRATIONS = {
+  '1.140': async (store) => {
+    // New table
+    if (!store.texts) store.texts = [];
   },
-  '1.135': async (drive) => {
+  '1.145': async (store) => {
     // Rename field
-    const todos = await drive.readTable('todos.json');
-    todos.forEach(t => { t.priority = t.importance; delete t.importance; });
-    await drive.writeTable('todos.json', todos);
-  }
+    (store.todos || []).forEach(t => {
+      t.priority = t.importance;
+      delete t.importance;
+    });
+  },
 };
 ```
 
-After all pending migrations succeed, `schema_version` is updated in `settings.json`.
+Migration runner behaviour:
+1. **Backup first** — before any migration runs, all table data is saved to `backup-v{currentVersion}.json` in the DeLaClaw/ Drive folder. This is a full snapshot that can be used for manual recovery.
+2. **Sequential execution** — migrations run in version order. After each one succeeds, `schema_version` is bumped in `settings.json` and all tables are flushed to Drive.
+3. **Safe resume** — if a migration fails mid-batch, `schema_version` reflects the last fully-applied step. Next connect retries from where it stopped, and the backup is still intact.
 
 Demo mode is truly schemaless with no migration mechanism — data doesn't persist across refresh, so there's nothing to migrate.
 
@@ -101,7 +105,8 @@ Demo mode is truly schemaless with no migration mechanism — data doesn't persi
 6. Update `server/schema.sql` (SQLite equivalent) if applicable
 7. If the new field is used in app code, ensure it handles `undefined` / missing values for Drive and Demo backends
 8. If adding a new CHECK constraint, update `CHECK_CONSTRAINTS` in `js/adapters/demo.js` (test 31 enforces parity)
-9. Commit — the pre-commit and commit-msg hooks will verify
+9. If the change is structural (new table, renamed field, table split), add a matching entry in `migrations/drive-migrations.js`
+10. Commit — the pre-commit and commit-msg hooks will verify
 
 ### Migration Template
 

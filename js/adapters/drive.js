@@ -20,6 +20,7 @@
 // ===================================================================
 
 import { createDemoAdapter } from './demo.js';
+import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
 
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const DRIVE_FOLDER_NAME = 'DeLaClaw';
@@ -292,6 +293,63 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       return await getGoogleAccessToken(clientId, false);
     } catch {
       return _cachedToken;
+    }
+  }
+
+  // ── Run pending migrations ──
+
+  const pendingMigrations = Object.keys(DRIVE_MIGRATIONS)
+    .sort((a, b) => parseFloat(a) - parseFloat(b));
+
+  if (pendingMigrations.length > 0) {
+    const settings = inner._store.settings || [];
+    const svEntry = settings.find(s => s.key === 'schema_version');
+    const currentVersion = svEntry ? String(svEntry.value) : '0';
+
+    const toRun = pendingMigrations.filter(v => v > currentVersion);
+
+    if (toRun.length > 0) {
+      if (onStatus) onStatus('migrating');
+
+      // Save a full backup before any migration runs
+      const backupData = {};
+      for (const table of DRIVE_TABLES) {
+        backupData[table] = JSON.parse(JSON.stringify(inner._store[table] || []));
+      }
+      backupData._meta = {
+        backup_of: currentVersion,
+        created_at: new Date().toISOString(),
+        reason: `pre-migration (${toRun.length} pending: ${toRun.join(', ')})`,
+      };
+      const tok = await getToken();
+      if (tok) {
+        await uploadFile(tok, folderId, null, `backup-v${currentVersion}.json`, backupData);
+      }
+
+      // Run each migration, bump schema_version after each success
+      for (const version of toRun) {
+        await DRIVE_MIGRATIONS[version](inner._store);
+
+        // Update schema_version in memory
+        const entry = (inner._store.settings || []).find(s => s.key === 'schema_version');
+        if (entry) {
+          entry.value = version;
+        } else {
+          if (!inner._store.settings) inner._store.settings = [];
+          inner._store.settings.push({ key: 'schema_version', value: version });
+        }
+
+        // Flush all tables + settings to Drive
+        const flushTok = await getToken();
+        if (flushTok) {
+          for (const table of DRIVE_TABLES) {
+            const fileName = `${table}.json`;
+            const meta = fileMeta[table] || {};
+            const result = await uploadFile(flushTok, folderId, meta.fileId, fileName, inner._store[table] || []);
+            fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+          }
+        }
+      }
     }
   }
 

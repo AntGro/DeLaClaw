@@ -281,7 +281,15 @@ export async function reorderItems({
 // ===================================================================
 export function scrollToAndHighlight(element, color, durationMs = 1500) {
   if (!element) return;
-  element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const header = document.querySelector('.app-header');
+  if (header) {
+    const headerBottom = header.getBoundingClientRect().bottom;
+    const elementTop = element.getBoundingClientRect().top;
+    const offset = elementTop - headerBottom - 8;
+    window.scrollBy({ top: offset, behavior: 'smooth' });
+  } else {
+    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
   if (color) {
     element.style.boxShadow = `0 0 0 2px ${color}`;
     setTimeout(() => { element.style.boxShadow = ''; }, durationMs);

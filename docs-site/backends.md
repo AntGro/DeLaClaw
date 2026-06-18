@@ -334,35 +334,9 @@ Options:
 
 ---
 
-## 13. Setup Guides
+## 13. Setup
 
-### Supabase
-
-1. Create a free project at [supabase.com](https://supabase.com)
-2. Open the SQL Editor
-3. Paste and run `sql/supabase_schema.sql`
-4. Copy the project URL and anon key from Settings → API Keys
-5. Enter them in the DeLaClaw login form
-6. (Optional) Enable Realtime: run `migrations/1.099_enable_realtime.sql` for cross-device sync
-
-### Google Drive
-
-1. Click "Google Drive" in the backend picker
-2. Click "Connect with Google"
-3. Authorize with your Google account
-4. DeLaClaw creates `DeLaClaw/delaclaw-data.json` automatically
-
-### Local (Bun + SQLite)
-
-1. Install [Bun](https://bun.sh): `curl -fsSL https://bun.sh/install | bash`
-2. From the repo: `cd server && bun run server.js`
-3. Enter `http://localhost:3737` in the DeLaClaw login form
-
-### Demo
-
-1. Click "Demo" in the backend picker
-2. Choose "Sample data" or "Empty"
-3. Explore — nothing is saved
+See the [Setup Guide](setup.md) for step-by-step instructions for each backend.
 
 ---
 

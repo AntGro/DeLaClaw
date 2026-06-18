@@ -5,9 +5,7 @@
 DeLaClaw uses a **single version number** for both the app and the database schema, stored in two places:
 
 - **`VERSION`** file (repo root) — `latest` field is the app version
-- **`settings.schema_version`** (Supabase) — DB version, bumped by migrations
-
-These must stay in sync. The pre-commit hook blocks commits that change app files (`.js`, `.css`, `.html`, `.sql`) without bumping `latest` in `VERSION`.
+- **`settings.schema_version`** (Supabase / Local) — DB version, bumped by migrations
 
 ### Format
 
@@ -28,15 +26,18 @@ The app checks `schema_version` on Supabase connect and shows:
 
 ---
 
-## Schema Setup
+## How Migrations Work Per Backend
 
-### New Users → `sql/supabase_schema.sql`
+| Backend | Schema source | Migration strategy | User action required |
+|---|---|---|---|
+| **Supabase** | `sql/supabase_schema.sql` (Postgres DDL) | Incremental `.sql` files in `migrations/`, run manually in the SQL Editor | Yes — run pending migration files in order |
+| **Local** | `server/schema.sql` (SQLite DDL) | `CREATE TABLE IF NOT EXISTS` on server startup. New columns need manual migration or DB reset | No for new tables. New columns on existing tables: yes |
+| **Google Drive** | Schemaless (JSON) | New fields appear as `undefined` on old records — app handles missing fields with defaults | No — automatic |
+| **Demo** | Schemaless (in-memory) | Same as Drive — new fields are simply absent on old objects | No — automatic |
 
-Complete current schema including all migrations folded in. Run once in the Supabase SQL Editor. Sets `schema_version` to the latest version.
+### Supabase
 
-### Existing Users → `migrations/*.sql`
-
-Incremental migration files, named by the version they target:
+The primary migration path. Migration files live in `migrations/` and are named by target version:
 
 ```
 migrations/1.099_enable_realtime.sql
@@ -49,11 +50,25 @@ UPDATE settings SET value = 'X.YYY', updated_at = now()
 WHERE key = 'schema_version';
 ```
 
-Run pending migrations in order in the Supabase SQL Editor.
+**New installs:** run `sql/supabase_schema.sql` once — it includes all migrations folded in and sets `schema_version` to the latest version.
 
-### Local Backend
+**Existing installs:** run pending migration files in order in the Supabase SQL Editor.
 
-`server/schema.sql` is the SQLite equivalent. The Bun server applies it on startup with `CREATE TABLE IF NOT EXISTS` — local users always get the latest schema automatically.
+### Local (Bun + SQLite)
+
+`server/schema.sql` is the SQLite equivalent of the Supabase schema. The Bun server applies it on startup with `CREATE TABLE IF NOT EXISTS`, so new tables are created automatically.
+
+**Limitation:** `CREATE TABLE IF NOT EXISTS` doesn't add new columns to existing tables. If a migration adds a column, local users need to either:
+- Run the SQLite equivalent manually (`ALTER TABLE ... ADD COLUMN ...`)
+- Delete the SQLite DB file and let the server recreate it (loses data)
+
+Auto-migration on server start is possible but not yet implemented.
+
+### Google Drive & Demo
+
+These backends are schemaless — data is plain JSON objects. When the app adds a new field, old records simply have `undefined` for that field. The app must handle this gracefully with default values or conditional checks.
+
+No migration files, no version bumps, no user action. The trade-off: there's no way to enforce constraints or validate data shape at the storage layer.
 
 ---
 
@@ -65,7 +80,9 @@ Run pending migrations in order in the Supabase SQL Editor.
 4. If the migration adds required schema, bump `latest_compat` (or `latest_compat_deprec` if breaking)
 5. Update `sql/supabase_schema.sql` to include the change for new installs
 6. Update `server/schema.sql` (SQLite equivalent) if applicable
-7. Commit — the pre-commit hook will verify `VERSION` is staged
+7. If the new field is used in app code, ensure it handles `undefined` / missing values for Drive and Demo backends
+8. If adding a new CHECK constraint, update `CHECK_CONSTRAINTS` in `js/adapters/demo.js` (test 31 enforces parity)
+9. Commit — the pre-commit and commit-msg hooks will verify
 
 ### Migration Template
 
@@ -108,18 +125,18 @@ After creating the table, also add it to:
 
 ---
 
-## Pre-Commit Hook
+## Git Hooks
 
-Located at `hooks/pre-commit` (tracked in repo). Install with:
+Hooks live in `.githooks/` (tracked in the repo). Activate them with:
 
 ```sh
-cp hooks/pre-commit .git/hooks/pre-commit
-chmod +x .git/hooks/pre-commit
+git config core.hooksPath .githooks
 ```
 
-What it does:
-1. **VERSION guard** — blocks commits that change `.js`/`.css`/`.html`/`.sql` files without staging `VERSION`
-2. **SW cache bump** — auto-updates the service worker cache hash when JS/CSS changes
+| Hook | What it does |
+|---|---|
+| **pre-commit** | Blocks commits without a `VERSION` bump. Auto-regenerates `js/version.js` and updates `sw.js` cache version. Lints staged code for pictographic emoji. |
+| **commit-msg** | Enforces the `Checked:` trailer with impact review tags. See `COMMIT_CHECKLIST.md`. |
 
 ---
 

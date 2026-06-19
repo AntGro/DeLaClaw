@@ -268,7 +268,7 @@ function switchBackendMode(mode) {
     if (keyField) keyField.style.visibility = '';
     if (urlField) { urlField.style.visibility = ''; urlField.placeholder = 'https://xyz.supabase.co'; }
     if (urlLabel) urlLabel.style.visibility = '';
-    if (urlLabelLink) { urlLabelLink.textContent = t('login.url_label'); urlLabelLink.href = 'https://supabase.com/dashboard/projects'; }
+    if (urlLabelLink) { urlLabelLink.textContent = t('login.url_label'); urlLabelLink.href = 'https://supabase.com/dashboard/projects'; urlLabelLink.dataset.tooltip = t('toast.url_tooltip'); }
     if (hintEl) hintEl.textContent = t('login.hint_supabase');
     if (submitBtn) submitBtn.textContent = t('login.connect');
   }
@@ -1206,26 +1206,11 @@ function updateStaticLabels() {
       el.innerHTML = svgHtml + ' <span class="tab-label">' + t(key) + '</span>';
     }
   }
-  // Login — mode-aware labels
+  // Login — re-apply all mode-specific labels (hint, button, url/key labels, visibility)
   const loginMode = getSelectedMode();
-  const urlLabel = document.getElementById('urlLabel');
-  const keyLabel = document.getElementById('keyLabel');
-  const urlLabelLink = document.getElementById('urlLabelLink');
-  const keyLabelLink = document.getElementById('keyLabelLink');
-  const loginHint = document.getElementById('loginHint');
-  if (urlLabelLink) { urlLabelLink.textContent = t(loginMode === 'local' ? 'login.url_label_local' : 'login.url_label'); urlLabelLink.dataset.tooltip = t('toast.url_tooltip'); }
-  else if (urlLabel) urlLabel.textContent = t(loginMode === 'local' ? 'login.url_label_local' : 'login.url_label');
-  if (keyLabelLink) keyLabelLink.textContent = t('login.key_label');
-  else if (keyLabel) keyLabel.textContent = t('login.key_label');
-  if (loginMode === 'demo') {
-    if (loginHint) loginHint.textContent = t('login.hint_demo');
-  } else {
-    if (loginHint) loginHint.textContent = t(loginMode === 'local' ? 'login.hint_local' : 'login.hint_supabase');
-  }
+  switchBackendMode(loginMode);
   const stayLabel = document.querySelector('.stay-connected-label span');
   if (stayLabel) stayLabel.textContent = t('login.stay_connected');
-  const connectBtn = document.querySelector('#loginForm button[type="submit"]');
-  if (connectBtn) connectBtn.textContent = t(loginMode === 'demo' ? 'login.btn_demo' : 'login.connect');
   // Search inputs
   const searchMap = {
     'projectsView': 'common.search',

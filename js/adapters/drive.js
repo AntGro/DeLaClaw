@@ -444,9 +444,18 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
         if (meta.modifiedTime && file.modifiedTime > meta.modifiedTime) {
           const { data, etag } = await downloadFile(tok, file.id);
-          inner._store[tableName] = Array.isArray(data) ? data : [];
-          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
-          if (adapter._onExternalChange) adapter._onExternalChange(tableName);
+          const newData = Array.isArray(data) ? data : [];
+          const oldData = inner._store[tableName] || [];
+
+          // Only update + notify if data actually changed (skip our own writes)
+          if (JSON.stringify(newData) !== JSON.stringify(oldData)) {
+            inner._store[tableName] = newData;
+            fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+            if (adapter._onExternalChange) adapter._onExternalChange(tableName);
+          } else {
+            // Same data (our own flush reflected back) — update metadata only
+            fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+          }
         }
       }
     } catch (e) {

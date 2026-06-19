@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # commit-msg hook: enforce impact checklist in commit messages.
 # Every commit must include a "Checked:" trailer listing the impact areas
-# the committer reviewed. Items not relevant can be marked [~] (N/A).
+# the committer reviewed. Each item must be marked:
+#   [x] = diff touches this area
+#   [~] = diff does NOT touch this area
+# A bare item (no marker) means "not yet decided" and the hook rejects.
 #
 # Format (append after commit body, separated by a blank line):
 #
-#   Checked: versioning, i18n, docs, readme, tests, welcome, xss
+#   Checked: versioning [x], i18n [~], docs [~], readme [~],
+#     checklist [~], tests [~], welcome [~], prompts [~], xss [~]
 #
-# Or for partial relevance:
-#
-#   Checked: versioning, i18n, docs [~], readme [~], tests, welcome [~], xss
-#
-# The hook verifies every required tag appears (with or without [~]).
+# The hook verifies every required tag appears AND has a [x] or [~] marker.
 # To see the full checklist reference, run: cat COMMIT_CHECKLIST.md
 
 set -euo pipefail
@@ -47,11 +47,13 @@ if [ -z "$CHECKED_LINE" ]; then
   echo "" >&2
   echo "  Add a 'Checked:' trailer listing reviewed areas:" >&2
   echo "" >&2
-  echo "  Checked: versioning, i18n, docs, readme," >&2
-  echo "    checklist, tests, welcome, prompts, xss" >&2
+  echo "  Checked: versioning [x], i18n [~], docs [~]," >&2
+  echo "    readme [~], checklist [~], tests [~]," >&2
+  echo "    welcome [~], prompts [~], xss [~]" >&2
   echo "" >&2
-  echo "  Mark irrelevant items with [~]:" >&2
-  echo "    docs [~], welcome [~]" >&2
+  echo "  [x] = diff touches this area" >&2
+  echo "  [~] = diff does NOT touch this area" >&2
+  echo "  bare = not yet decided (rejected)" >&2
   echo "" >&2
   echo "  See COMMIT_CHECKLIST.md for the full reference." >&2
   echo "══════════════════════════════════════════════════" >&2
@@ -59,25 +61,39 @@ if [ -z "$CHECKED_LINE" ]; then
   exit 1
 fi
 
-# Normalize: lowercase, strip [~], collapse whitespace
-CHECKED_NORM=$(echo "$CHECKED_LINE" | tr '[:upper:]' '[:lower:]' | sed 's/\[~\]//g; s/checked://; s/,/ /g' | xargs)
-
+# Check for missing tags and unmarked (bare) tags
 MISSING=()
+UNMARKED=()
 for tag in "${REQUIRED_TAGS[@]}"; do
-  if ! echo " $CHECKED_NORM " | grep -qi " $tag "; then
+  # Check if tag appears at all (case-insensitive)
+  if ! echo "$CHECKED_LINE" | grep -qi "$tag"; then
     MISSING+=("$tag")
+  else
+    # Tag is present — check it has [x] or [~] immediately after
+    if ! echo "$CHECKED_LINE" | grep -qiE "$tag\s*\[(x|~)\]"; then
+      UNMARKED+=("$tag")
+    fi
   fi
 done
 
-if [ ${#MISSING[@]} -gt 0 ]; then
+if [ ${#MISSING[@]} -gt 0 ] || [ ${#UNMARKED[@]} -gt 0 ]; then
   echo "" >&2
   echo "══════════════════════════════════════════════════" >&2
-  echo "  Checklist incomplete. Missing:" >&2
-  for m in "${MISSING[@]}"; do
-    echo "    - $m" >&2
-  done
+  if [ ${#MISSING[@]} -gt 0 ]; then
+    echo "  Checklist incomplete. Missing:" >&2
+    for m in "${MISSING[@]}"; do
+      echo "    - $m" >&2
+    done
+  fi
+  if [ ${#UNMARKED[@]} -gt 0 ]; then
+    echo "  Unmarked items (need [x] or [~]):" >&2
+    for u in "${UNMARKED[@]}"; do
+      echo "    - $u" >&2
+    done
+  fi
   echo "" >&2
-  echo "  Add them to the 'Checked:' line (use [~] if N/A)." >&2
+  echo "  [x] = diff touches this area" >&2
+  echo "  [~] = diff does NOT touch this area" >&2
   echo "  See COMMIT_CHECKLIST.md for details." >&2
   echo "══════════════════════════════════════════════════" >&2
   echo "" >&2

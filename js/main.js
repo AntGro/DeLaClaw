@@ -905,6 +905,31 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       .subscribe();
   }
 
+  // Drive: wire poll-based change detection to the same refresh functions
+  if (mode === 'googledrive' && state.driveAdapter) {
+    const driveRefreshMap = {
+      tasks: () => refreshAll(),
+      projects: async () => { await loadProjects(); buildProjectCards(); initProjectDragDrop(); await refreshAll(); },
+      prompts: () => loadPrompts(),
+      todos: () => refreshTodos(),
+      habits: () => refreshHabits(),
+      habit_completions: () => refreshHabits(),
+      birthdays: () => refreshBirthdays(),
+      vestiaire: () => refreshVestiaire(),
+      flashcards: () => refreshFlashcards(),
+      flashcard_notes: () => refreshFlashcards(),
+      lists: () => refreshLists(),
+      list_items: () => refreshLists(),
+      settings: () => loadSettings(),
+    };
+    state.driveAdapter._onExternalChange = (table) => {
+      if (isEditing()) return;
+      const fn = driveRefreshMap[table];
+      if (fn) fn().then(() => markLastUpdated()).catch(e => console.warn('Drive refresh error:', e));
+      else markLastUpdated();
+    };
+  }
+
   // Initialize TODOs
   initTodoModals();
   await refreshTodos();

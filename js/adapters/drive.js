@@ -386,6 +386,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       const localData = inner._store[table] || [];
       const meta = fileMeta[table] || {};
       const fileName = `${table}.json`;
+      console.log(`Drive: flushing ${table} (${localData.length} rows, fileId=${meta.fileId})`);
 
       try {
         const result = await uploadFile(tok, folderId, meta.fileId, fileName, localData, meta.etag);
@@ -394,6 +395,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
           etag: result.etag,
           modifiedTime: new Date().toISOString(),
         };
+        console.log(`Drive: flush ${table} OK (id=${fileMeta[table].fileId})`);
       } catch (err) {
         if (err.code === 412 && retries < MAX_RETRIES) {
           console.warn(`Drive: ETag conflict on ${table}, merging (attempt ${retries + 1})`);
@@ -416,6 +418,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   function scheduleSave(table) {
     dirtyTables.add(table);
     if (saveTimers[table]) clearTimeout(saveTimers[table]);
+    console.log(`Drive: scheduleSave(${table}) — will flush in ${DEBOUNCE_MS}ms`);
     saveTimers[table] = setTimeout(() => {
       dirtyTables.delete(table);
       delete saveTimers[table];

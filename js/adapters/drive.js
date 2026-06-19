@@ -227,11 +227,16 @@ function mergeTable(tableName, local, remote) {
 // ── Drive Adapter ───────────────────────────────────────────────
 
 export async function createDriveAdapter(clientId, onStatus, { silent = false } = {}) {
-  if (onStatus) onStatus('authenticating');
+  // onStatus receives: { status, message?, progress?, total? }
+  const emit = (status, message, progress, total) => {
+    if (onStatus) onStatus({ status, message, progress, total });
+  };
+
+  emit('authenticating', 'Signing in to Google…');
 
   const token = await getGoogleAccessToken(clientId, !silent);
 
-  if (onStatus) onStatus('loading');
+  emit('loading', 'Connecting to Drive…');
 
   const folderId = await findOrCreateFolder(token);
 
@@ -253,6 +258,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   if (hasPerTableFiles) {
     // Normal load: read each per-table file in parallel
+    let loaded = 0;
+    const total = DRIVE_TABLES.filter(t => filesByName.has(`${t}.json`)).length;
+    emit('loading', 'Loading tables…', 0, total);
     const readPromises = DRIVE_TABLES.map(async (table) => {
       const fileName = `${table}.json`;
       const fileInfo = filesByName.get(fileName);
@@ -260,6 +268,8 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         const { data, etag } = await downloadFile(token, fileInfo.id);
         fileMeta[table] = { fileId: fileInfo.id, etag, modifiedTime: fileInfo.modifiedTime };
         initialData[table] = Array.isArray(data) ? data : [];
+        loaded++;
+        emit('loading', `Loading ${table}…`, loaded, total);
       } else {
         initialData[table] = [];
         fileMeta[table] = { fileId: null, etag: null, modifiedTime: null };
@@ -268,7 +278,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     await Promise.all(readPromises);
   } else if (legacyFile) {
     // Legacy format: read single file, populate initialData from it
-    if (onStatus) onStatus('migrating');
+    emit('migrating', 'Upgrading data format…');
     const { data: legacyData } = await downloadFile(token, legacyFile.id);
     for (const table of DRIVE_TABLES) {
       initialData[table] = legacyData[table] || [];
@@ -309,7 +319,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     const toRun = pendingMigrations.filter(v => v > currentVersion);
 
     if (toRun.length > 0) {
-      if (onStatus) onStatus('migrating');
+      emit('migrating', 'Backing up data…', 0, toRun.length);
 
       // Context object for migrations that need Drive API access
       const migrationCtx = {
@@ -334,7 +344,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       }
 
       // Run each migration, bump schema_version after each success
-      for (const version of toRun) {
+      for (let i = 0; i < toRun.length; i++) {
+        const version = toRun[i];
+        emit('migrating', `Migrating to v${version}…`, i + 1, toRun.length);
         await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
 
         // Update schema_version in memory
@@ -505,6 +517,6 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   startPolling();
 
-  if (onStatus) onStatus('ready');
+  emit('ready');
   return adapter;
 }

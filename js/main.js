@@ -782,12 +782,22 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   } else if (mode === 'googledrive') {
     const { createDriveAdapter } = await import('./adapters/drive.js');
     const errEl = document.getElementById('loginError');
-    adapter = await createDriveAdapter(GOOGLE_CLIENT_ID, (status) => {
-      if (errEl) {
-        if (status === 'authenticating') errEl.textContent = t('login.drive_authenticating') || 'Signing in to Google…';
-        else if (status === 'loading') errEl.textContent = t('login.drive_loading') || 'Loading from Drive…';
-        else errEl.textContent = '';
+    const progressEl = document.getElementById('driveProgress');
+    const progressText = document.getElementById('driveProgressText');
+    const progressFill = document.getElementById('driveProgressFill');
+    adapter = await createDriveAdapter(GOOGLE_CLIENT_ID, (ev) => {
+      if (!ev) return;
+      // Hide error text, show progress bar
+      if (errEl) errEl.textContent = '';
+      if (progressEl) progressEl.style.display = '';
+      if (progressText) progressText.textContent = ev.message || '';
+      if (progressFill && ev.total > 0) {
+        progressFill.style.width = `${Math.round((ev.progress / ev.total) * 100)}%`;
+      } else if (progressFill && !ev.total) {
+        // Indeterminate: pulse at 40%
+        progressFill.style.width = '40%';
       }
+      if (ev.status === 'ready' && progressEl) progressEl.style.display = 'none';
     }, { silent: silentAuth });
     state.driveAdapter = adapter;
     state.driveMode = true;

@@ -21,6 +21,7 @@
 
 import { createDemoAdapter } from './demo.js';
 import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
+import { t } from '../i18n.js';
 
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const DRIVE_FOLDER_NAME = 'DeLaClaw';
@@ -232,11 +233,11 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     if (onStatus) onStatus({ status, message, progress, total });
   };
 
-  emit('authenticating', 'Signing in to Google…');
+  emit('authenticating', t('menu.drive_signing_in'));
 
   const token = await getGoogleAccessToken(clientId, !silent);
 
-  emit('loading', 'Connecting to Drive…');
+  emit('loading', t('menu.drive_connecting'));
 
   const folderId = await findOrCreateFolder(token);
 
@@ -260,7 +261,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     // Normal load: read each per-table file in parallel
     let loaded = 0;
     const total = DRIVE_TABLES.filter(t => filesByName.has(`${t}.json`)).length;
-    emit('loading', 'Loading tables…', 0, total);
+    emit('loading', t('menu.drive_loading_tables'), 0, total);
     const readPromises = DRIVE_TABLES.map(async (table) => {
       const fileName = `${table}.json`;
       const fileInfo = filesByName.get(fileName);
@@ -269,7 +270,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         fileMeta[table] = { fileId: fileInfo.id, etag, modifiedTime: fileInfo.modifiedTime };
         initialData[table] = Array.isArray(data) ? data : [];
         loaded++;
-        emit('loading', `Loading ${table}…`, loaded, total);
+        emit('loading', t('menu.drive_loading_table', table), loaded, total);
       } else {
         initialData[table] = [];
         fileMeta[table] = { fileId: null, etag: null, modifiedTime: null };
@@ -278,7 +279,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     await Promise.all(readPromises);
   } else if (legacyFile) {
     // Legacy format: read single file, populate initialData from it
-    emit('migrating', 'Upgrading data format…');
+    emit('migrating', t('menu.drive_upgrading'));
     const { data: legacyData } = await downloadFile(token, legacyFile.id);
     for (const table of DRIVE_TABLES) {
       initialData[table] = legacyData[table] || [];
@@ -314,12 +315,12 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     // Fresh install: create all table files on Drive with progress, set schema to latest
     const latestVersion = Object.keys(DRIVE_MIGRATIONS).sort((a, b) => parseFloat(a) - parseFloat(b)).pop() || '0';
     const total = DRIVE_TABLES.length;
-    emit('loading', 'Creating tables…', 0, total);
+    emit('loading', t('menu.drive_creating_tables'), 0, total);
     const tok = await getToken();
     if (tok) {
       for (let i = 0; i < DRIVE_TABLES.length; i++) {
         const table = DRIVE_TABLES[i];
-        emit('loading', `Creating ${table}…`, i + 1, total);
+        emit('loading', t('menu.drive_creating_table', table), i + 1, total);
         const result = await uploadFile(tok, folderId, null, `${table}.json`, []);
         fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
       }
@@ -348,7 +349,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       const toRun = pendingMigrations.filter(v => v > currentVersion);
 
       if (toRun.length > 0) {
-        emit('migrating', 'Backing up data…', 0, toRun.length);
+        emit('migrating', t('menu.drive_backing_up'), 0, toRun.length);
 
         // Context object for migrations that need Drive API access
         const migrationCtx = {
@@ -375,7 +376,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         // Run each migration, bump schema_version after each success
         for (let i = 0; i < toRun.length; i++) {
           const version = toRun[i];
-          emit('migrating', `Migrating to v${version}…`, i + 1, toRun.length);
+          emit('migrating', t('menu.drive_migrating', version), i + 1, toRun.length);
           await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
 
           // Update schema_version in memory

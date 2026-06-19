@@ -2506,7 +2506,7 @@ function importBackup() {
       const totalSteps = tables.length + (backup._meta.tables || []).length;
       let step = 0;
       for (const table of tables) {
-        showProgress(`Clearing ${table}…`, ++step, totalSteps);
+        showProgress(t('menu.settings_restore_clearing', table), ++step, totalSteps);
         try {
           const pk = (table === 'settings' || table === 'prompts') ? 'key' : 'id';
           await state.db.from(table).delete().neq(pk, '___nonexistent___');
@@ -2516,7 +2516,7 @@ function importBackup() {
       const importOrder = backup._meta.tables || [];
       let totalRows = 0;
       for (const table of importOrder) {
-        showProgress(`Restoring ${table}…`, ++step, totalSteps);
+        showProgress(t('menu.settings_restore_restoring', table), ++step, totalSteps);
         const rows = backup[table];
         if (!rows || !rows.length) continue;
         try {

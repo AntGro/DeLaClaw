@@ -483,6 +483,38 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
 
+  // ── Sync-save UI feedback ──
+
+  let _syncCount = 0;
+
+  function syncStatusShow() {
+    if (++_syncCount > 1) return; // already visible
+    let el = document.getElementById('driveSyncStatus');
+    if (!el) {
+      el = document.createElement('span');
+      el.id = 'driveSyncStatus';
+      el.className = 'drive-sync-badge';
+      const logo = document.querySelector('.header-logo');
+      if (logo) logo.parentNode.insertBefore(el, logo.nextSibling);
+    }
+    el.textContent = '☁ Saving…';
+    el.style.display = '';
+  }
+
+  function syncStatusHide(error) {
+    if (--_syncCount > 0) return; // other writes still in flight
+    _syncCount = 0;
+    const el = document.getElementById('driveSyncStatus');
+    if (!el) return;
+    if (error) {
+      el.textContent = '☁ Save failed';
+      el.classList.add('error');
+      setTimeout(() => { el.style.display = 'none'; el.classList.remove('error'); }, 2500);
+    } else {
+      el.style.display = 'none';
+    }
+  }
+
   // ── Wrapped adapter ──
 
   const adapter = {
@@ -498,8 +530,11 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
               delete saveTimers[table];
               dirtyTables.delete(table);
             }
+            syncStatusShow();
+            let saveErr = false;
             try { await flushTable(table); }
-            catch (e) { console.error(`Drive: sync flush failed for ${table}`, e); }
+            catch (e) { saveErr = true; console.error(`Drive: sync flush failed for ${table}`, e); }
+            finally { syncStatusHide(saveErr); }
           }
           resolve(result);
         }, reject);

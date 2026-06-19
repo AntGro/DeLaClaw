@@ -292,6 +292,8 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     }
   }
 
+  const isFreshInstall = !hasPerTableFiles && !legacyFile;
+
   // ── Create in-memory adapter seeded with loaded data ──
 
   const inner = createDemoAdapter(initialData);
@@ -308,64 +310,92 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   // ── Run pending migrations ──
 
-  const pendingMigrations = Object.keys(DRIVE_MIGRATIONS)
-    .sort((a, b) => parseFloat(a) - parseFloat(b));
-
-  if (pendingMigrations.length > 0) {
-    const settings = inner._store.settings || [];
-    const svEntry = settings.find(s => s.key === 'schema_version');
-    const currentVersion = svEntry ? String(svEntry.value) : '0';
-
-    const toRun = pendingMigrations.filter(v => v > currentVersion);
-
-    if (toRun.length > 0) {
-      emit('migrating', 'Backing up data…', 0, toRun.length);
-
-      // Context object for migrations that need Drive API access
-      const migrationCtx = {
-        token, folderId, fileMeta, filesByName,
-        getToken, DRIVE_TABLES,
-        uploadFile, downloadFile, deleteFile, listFolderFiles,
-      };
-
-      // Save a full backup before any migration runs
-      const backupData = {};
-      for (const table of DRIVE_TABLES) {
-        backupData[table] = JSON.parse(JSON.stringify(inner._store[table] || []));
+  if (isFreshInstall) {
+    // Fresh install: create all table files on Drive with progress, set schema to latest
+    const latestVersion = Object.keys(DRIVE_MIGRATIONS).sort((a, b) => parseFloat(a) - parseFloat(b)).pop() || '0';
+    const total = DRIVE_TABLES.length;
+    emit('loading', 'Creating tables…', 0, total);
+    const tok = await getToken();
+    if (tok) {
+      for (let i = 0; i < DRIVE_TABLES.length; i++) {
+        const table = DRIVE_TABLES[i];
+        emit('loading', `Creating ${table}…`, i + 1, total);
+        const result = await uploadFile(tok, folderId, null, `${table}.json`, []);
+        fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
       }
-      backupData._meta = {
-        backup_of: currentVersion,
-        created_at: new Date().toISOString(),
-        reason: `pre-migration (${toRun.length} pending: ${toRun.join(', ')})`,
-      };
-      const tok = await getToken();
-      if (tok) {
-        await uploadFile(tok, folderId, null, `backup-v${currentVersion}.json`, backupData);
-      }
+    }
+    // Set schema_version to latest — no migrations needed
+    if (!inner._store.settings) inner._store.settings = [];
+    inner._store.settings.push({ key: 'schema_version', value: latestVersion });
+    // Flush settings with the version stamp
+    const settingsTok = await getToken();
+    if (settingsTok) {
+      const meta = fileMeta.settings || {};
+      const result = await uploadFile(settingsTok, folderId, meta.fileId, 'settings.json', inner._store.settings);
+      fileMeta.settings = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+    }
+  } else {
+    // ── Run pending migrations (existing installs only) ──
 
-      // Run each migration, bump schema_version after each success
-      for (let i = 0; i < toRun.length; i++) {
-        const version = toRun[i];
-        emit('migrating', `Migrating to v${version}…`, i + 1, toRun.length);
-        await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
+    const pendingMigrations = Object.keys(DRIVE_MIGRATIONS)
+      .sort((a, b) => parseFloat(a) - parseFloat(b));
 
-        // Update schema_version in memory
-        const entry = (inner._store.settings || []).find(s => s.key === 'schema_version');
-        if (entry) {
-          entry.value = version;
-        } else {
-          if (!inner._store.settings) inner._store.settings = [];
-          inner._store.settings.push({ key: 'schema_version', value: version });
+    if (pendingMigrations.length > 0) {
+      const settings = inner._store.settings || [];
+      const svEntry = settings.find(s => s.key === 'schema_version');
+      const currentVersion = svEntry ? String(svEntry.value) : '0';
+
+      const toRun = pendingMigrations.filter(v => v > currentVersion);
+
+      if (toRun.length > 0) {
+        emit('migrating', 'Backing up data…', 0, toRun.length);
+
+        // Context object for migrations that need Drive API access
+        const migrationCtx = {
+          token, folderId, fileMeta, filesByName,
+          getToken, DRIVE_TABLES,
+          uploadFile, downloadFile, deleteFile, listFolderFiles,
+        };
+
+        // Save a full backup before any migration runs
+        const backupData = {};
+        for (const table of DRIVE_TABLES) {
+          backupData[table] = JSON.parse(JSON.stringify(inner._store[table] || []));
+        }
+        backupData._meta = {
+          backup_of: currentVersion,
+          created_at: new Date().toISOString(),
+          reason: `pre-migration (${toRun.length} pending: ${toRun.join(', ')})`,
+        };
+        const tok = await getToken();
+        if (tok) {
+          await uploadFile(tok, folderId, null, `backup-v${currentVersion}.json`, backupData);
         }
 
-        // Flush all tables + settings to Drive
-        const flushTok = await getToken();
-        if (flushTok) {
-          for (const table of DRIVE_TABLES) {
-            const fileName = `${table}.json`;
-            const meta = fileMeta[table] || {};
-            const result = await uploadFile(flushTok, folderId, meta.fileId, fileName, inner._store[table] || []);
-            fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+        // Run each migration, bump schema_version after each success
+        for (let i = 0; i < toRun.length; i++) {
+          const version = toRun[i];
+          emit('migrating', `Migrating to v${version}…`, i + 1, toRun.length);
+          await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
+
+          // Update schema_version in memory
+          const entry = (inner._store.settings || []).find(s => s.key === 'schema_version');
+          if (entry) {
+            entry.value = version;
+          } else {
+            if (!inner._store.settings) inner._store.settings = [];
+            inner._store.settings.push({ key: 'schema_version', value: version });
+          }
+
+          // Flush all tables + settings to Drive
+          const flushTok = await getToken();
+          if (flushTok) {
+            for (const table of DRIVE_TABLES) {
+              const fileName = `${table}.json`;
+              const meta = fileMeta[table] || {};
+              const result = await uploadFile(flushTok, folderId, meta.fileId, fileName, inner._store[table] || []);
+              fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+            }
           }
         }
       }

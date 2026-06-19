@@ -831,8 +831,9 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   // Flush pending Drive saves and stop polling on page close
   if (mode === 'googledrive' && adapter.forceSave) {
     window.addEventListener('beforeunload', () => {
-      if (adapter.destroy) adapter.destroy();
+      // Force-save first, then clean up — destroy() clears timers
       adapter.forceSave().catch(() => {});
+      if (adapter.destroy) adapter.destroy();
     });
   }
 

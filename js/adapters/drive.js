@@ -375,50 +375,58 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   // ── Per-table flush with ETag conflict handling ──
 
   const flushingTables = new Set();
+  const flushPromises = {};
 
   async function flushTable(table, retries = 0) {
-    if (flushingTables.has(table)) return;
-    flushingTables.add(table);
-    try {
-      const tok = await getToken();
-      if (!tok) { console.warn(`Drive: no token for save of ${table}`); return; }
-
-      const localData = inner._store[table] || [];
-      const meta = fileMeta[table] || {};
-      const fileName = `${table}.json`;
-      console.log(`Drive: flushing ${table} (${localData.length} rows, fileId=${meta.fileId})`);
-
-      try {
-        const result = await uploadFile(tok, folderId, meta.fileId, fileName, localData, meta.etag);
-        fileMeta[table] = {
-          fileId: result.id || meta.fileId,
-          etag: result.etag,
-          modifiedTime: new Date().toISOString(),
-        };
-        console.log(`Drive: flush ${table} OK (id=${fileMeta[table].fileId})`);
-      } catch (err) {
-        if (err.code === 412 && retries < MAX_RETRIES) {
-          console.warn(`Drive: ETag conflict on ${table}, merging (attempt ${retries + 1})`);
-          const { data: remoteData, etag: newEtag } = await downloadFile(tok, meta.fileId);
-          const merged = mergeTable(table, localData, Array.isArray(remoteData) ? remoteData : []);
-          inner._store[table] = merged;
-          fileMeta[table] = { ...meta, etag: newEtag };
-          flushingTables.delete(table);
-          return flushTable(table, retries + 1);
-        }
-        throw err;
-      }
-    } catch (e) {
-      console.error(`Drive: save failed for ${table}`, e);
-    } finally {
-      flushingTables.delete(table);
+    // If a flush is already in progress, wait for it then re-flush
+    // to capture any writes that happened during the previous flush.
+    while (flushingTables.has(table)) {
+      await (flushPromises[table] || Promise.resolve());
     }
+    flushingTables.add(table);
+    const p = (async () => {
+      try {
+        const tok = await getToken();
+        if (!tok) { console.warn(`Drive: no token for save of ${table}`); return; }
+
+        const localData = inner._store[table] || [];
+        const meta = fileMeta[table] || {};
+        const fileName = `${table}.json`;
+
+        try {
+          const result = await uploadFile(tok, folderId, meta.fileId, fileName, localData, meta.etag);
+          fileMeta[table] = {
+            fileId: result.id || meta.fileId,
+            etag: result.etag,
+            modifiedTime: new Date().toISOString(),
+          };
+        } catch (err) {
+          if (err.code === 412 && retries < MAX_RETRIES) {
+            console.warn(`Drive: ETag conflict on ${table}, merging (attempt ${retries + 1})`);
+            const { data: remoteData, etag: newEtag } = await downloadFile(tok, meta.fileId);
+            const merged = mergeTable(table, localData, Array.isArray(remoteData) ? remoteData : []);
+            inner._store[table] = merged;
+            fileMeta[table] = { ...meta, etag: newEtag };
+            flushingTables.delete(table);
+            delete flushPromises[table];
+            return flushTable(table, retries + 1);
+          }
+          throw err;
+        }
+      } catch (e) {
+        console.error(`Drive: save failed for ${table}`, e);
+      } finally {
+        flushingTables.delete(table);
+        delete flushPromises[table];
+      }
+    })();
+    flushPromises[table] = p;
+    return p;
   }
 
   function scheduleSave(table) {
     dirtyTables.add(table);
     if (saveTimers[table]) clearTimeout(saveTimers[table]);
-    console.log(`Drive: scheduleSave(${table}) — will flush in ${DEBOUNCE_MS}ms`);
     saveTimers[table] = setTimeout(() => {
       dirtyTables.delete(table);
       delete saveTimers[table];
@@ -482,9 +490,16 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       const builder = inner.from(table);
       const origThen = builder.then.bind(builder);
       builder.then = (resolve, reject) => {
-        origThen((result) => {
+        origThen(async (result) => {
           if (builder._method !== 'GET') {
-            scheduleSave(table);
+            // Cancel any pending debounced save — we flush immediately
+            if (saveTimers[table]) {
+              clearTimeout(saveTimers[table]);
+              delete saveTimers[table];
+              dirtyTables.delete(table);
+            }
+            try { await flushTable(table); }
+            catch (e) { console.error(`Drive: sync flush failed for ${table}`, e); }
           }
           resolve(result);
         }, reject);

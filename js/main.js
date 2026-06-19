@@ -307,9 +307,8 @@ function initGate() {
     switchBackendMode(saved.mode || 'googledrive');
     // Inject static logo (hero is skipped)
     injectGateLogo();
-    // Show a brief connecting message, then auto-connect
-    document.getElementById('loginForm').style.display = 'block';
-    document.getElementById('loginError').textContent = t('toast.reconnecting');
+    // Hide the login form entirely during auto-reconnect — only show the gate logo
+    document.getElementById('loginForm').style.display = 'none';
     document.getElementById('username').value = saved.url;
     document.getElementById('password').value = saved.key;
     autoConnect(saved.url, saved.key, saved.mode);
@@ -351,9 +350,10 @@ async function autoConnect(url, key, mode) {
   try {
     await connect(url, key, mode, /* skipDemoChooser */ true, { silentAuth: mode === 'googledrive' });
   } catch (e) {
-    // Stored credentials are stale — clear them and show the form
+    // Stored credentials are stale — clear them and show the full login form
     clearStayConnectedCreds();
     showHero();
+    document.getElementById('loginForm').style.display = 'block';
     document.getElementById('loginError').textContent = t('toast.session_expired');
     document.getElementById('username').value = '';
     document.getElementById('password').value = '';

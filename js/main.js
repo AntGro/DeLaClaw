@@ -856,19 +856,27 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   // Re-render logos now that the app is visible and layout is computed
   initLogos();
 
-  // Set Supabase dashboard link (hide in local/demo mode)
+  // Set Supabase dashboard link (hide — replaced by footer backend badge)
   const dashLink = document.getElementById('supabaseDashLink');
-  if (mode === 'local' || mode === 'demo' || mode === 'googledrive') {
-    dashLink.style.display = 'none';
-  } else {
-    const projectRef = url.replace('https://', '').replace('.supabase.co', '');
-    dashLink.href = `https://supabase.com/dashboard/project/${projectRef}`;
-  }
+  dashLink.style.display = 'none';
 
-  // Footer backend badge
+  // Footer backend badge — clickable for backends with a meaningful external URL
   const footerBackend = document.getElementById('footerBackend');
   if (footerBackend && LOGOS[mode]) {
-    footerBackend.innerHTML = `${LOGOS[mode](14)} <span>${LABELS[mode] || mode}</span>`;
+    const logo = LOGOS[mode](14);
+    const label = LABELS[mode] || mode;
+    let href = null;
+    if (mode === 'supabase') {
+      const projectRef = url.replace('https://', '').replace('.supabase.co', '');
+      href = `https://supabase.com/dashboard/project/${projectRef}`;
+    } else if (mode === 'googledrive') {
+      href = 'https://drive.google.com';
+    }
+    if (href) {
+      footerBackend.innerHTML = `<a href="${href}" target="_blank" rel="noopener">${logo} <span>${label} ↗</span></a>`;
+    } else {
+      footerBackend.innerHTML = `${logo} <span>${label}</span>`;
+    }
   }
 
 

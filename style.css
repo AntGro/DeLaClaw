@@ -642,6 +642,8 @@ body.paused-mode:has(.schema-banner) .schema-banner{top:var(--paused-banner-h,36
 .footer-copyright{color:var(--muted);font-size:0.7rem;letter-spacing:0.02em;}
 .footer-backend{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:0.7rem;letter-spacing:0.02em;}
 .footer-backend svg{opacity:0.7;}
+.footer-backend a{display:flex;align-items:center;gap:5px;color:var(--muted);text-decoration:none;}
+.footer-backend a:hover{color:var(--accent);}.footer-backend a:hover svg{opacity:1;}
 
 /* ===== REVISION FEEDBACK MODAL ===== */
 .revision-modal textarea{min-height:100px;}

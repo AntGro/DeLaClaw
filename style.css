@@ -281,8 +281,6 @@ input,select,button{font-family:inherit;}
 .header-logo.db-error{color:var(--red,#ef4444);animation:logo-pulse 0.4s ease-in-out 3;}
 @keyframes logo-spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
 @keyframes logo-pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
-.drive-sync-badge{display:none;font-size:0.7rem;color:var(--muted);margin-left:0.4rem;opacity:0.85;letter-spacing:0.02em;}
-.drive-sync-badge.error{color:var(--red,#ef4444);}
 .login-logo{width:80px;height:80px;display:block;margin:0 auto 12px;}
 .app-header.title-collapsed .app-title-text{display:none;}
 .app-header.title-collapsed h1 svg{margin-right:0;}
@@ -1575,6 +1573,8 @@ body.demo-mode .app-header{top:var(--demo-banner-h,36px);}
 .list-quick-input:focus{outline:none;border-color:var(--accent);}
 .list-quick-add-btn{background:none;border:1px solid var(--border);border-radius:6px;padding:5px 8px;cursor:pointer;color:var(--muted);transition:all 0.15s;display:flex;align-items:center;justify-content:center;}
 .list-quick-add-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--surface2);}
+.list-saving-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin-save 0.6s linear infinite;}
+@keyframes spin-save{to{transform:rotate(360deg);}}
 @media(max-width:600px){
   .list-item-actions button{font-size:0.78rem;padding:4px 6px;}
 }

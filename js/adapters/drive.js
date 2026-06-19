@@ -483,6 +483,35 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
 
+  // ── Global sync bar (covers ALL write operations) ──
+
+  let _syncCount = 0;
+  let _syncBar = null;
+
+  function ensureSyncBar() {
+    if (_syncBar) return _syncBar;
+    _syncBar = document.createElement('div');
+    _syncBar.className = 'drive-sync-bar';
+    document.body.appendChild(_syncBar);
+    return _syncBar;
+  }
+
+  function syncStart() {
+    if (++_syncCount > 1) return;
+    const bar = ensureSyncBar();
+    bar.classList.remove('done', 'error');
+    bar.classList.add('active');
+  }
+
+  function syncEnd(error) {
+    if (--_syncCount > 0) return;
+    _syncCount = 0;
+    if (!_syncBar) return;
+    _syncBar.classList.remove('active');
+    _syncBar.classList.add(error ? 'error' : 'done');
+    setTimeout(() => { if (_syncBar) _syncBar.classList.remove('done', 'error'); }, error ? 2500 : 400);
+  }
+
   // ── Wrapped adapter ──
 
   const adapter = {
@@ -498,8 +527,11 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
               delete saveTimers[table];
               dirtyTables.delete(table);
             }
+            syncStart();
+            let _err = false;
             try { await flushTable(table); }
-            catch (e) { console.error(`Drive: sync flush failed for ${table}`, e); }
+            catch (e) { _err = true; console.error(`Drive: sync flush failed for ${table}`, e); }
+            finally { syncEnd(_err); }
           }
           resolve(result);
         }, reject);

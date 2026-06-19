@@ -2,6 +2,7 @@ import { lucideIcon } from './icons.js';
 import { initHero, showHero, hideHero, injectGateLogo } from './hero.js';
 import { t, getLang, setLang, nextLang } from './i18n.js';
 import { renderStorm, LOGO_DEFAULTS, animLoading, animLock, animUnlock } from './logo.js';
+import { LOGOS, LABELS } from './backend-logos.js';
 import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY, TAB_VISIBILITY_KEY, TAB_ORDER_KEY } from './supabase.js';
 import db from './db.js';
 import { createSupabaseAdapter } from './adapters/supabase.js';
@@ -277,6 +278,16 @@ function switchBackendMode(mode) {
 // GATE LOGIC
 // ===================================================================
 function initGate() {
+  // Populate backend logo placeholders from single source of truth
+  document.querySelectorAll('[data-backend-logo]').forEach(el => {
+    const mode = el.dataset.backendLogo;
+    const size = parseInt(el.dataset.logoSize, 10) || 18;
+    if (LOGOS[mode]) el.innerHTML = LOGOS[mode](size);
+  });
+  document.querySelectorAll('.backend-option[data-mode]').forEach(btn => {
+    const mode = btn.dataset.mode;
+    if (LOGOS[mode] && !btn.innerHTML.trim()) btn.innerHTML = LOGOS[mode](18);
+  });
   // Wire up backend picker
   document.querySelectorAll('.backend-option').forEach(btn => {
     btn.addEventListener('click', () => switchBackendMode(btn.dataset.mode));
@@ -852,6 +863,12 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   } else {
     const projectRef = url.replace('https://', '').replace('.supabase.co', '');
     dashLink.href = `https://supabase.com/dashboard/project/${projectRef}`;
+  }
+
+  // Footer backend badge
+  const footerBackend = document.getElementById('footerBackend');
+  if (footerBackend && LOGOS[mode]) {
+    footerBackend.innerHTML = `${LOGOS[mode](14)} <span>${LABELS[mode] || mode}</span>`;
   }
 
 

@@ -640,6 +640,8 @@ body.paused-mode:has(.schema-banner) .schema-banner{top:var(--paused-banner-h,36
 .footer-stats .db-stats{display:flex;gap:16px;}
 .footer-stats .db-stat{display:flex;align-items:center;gap:4px;}
 .footer-copyright{color:var(--muted);font-size:0.7rem;letter-spacing:0.02em;}
+.footer-backend{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:0.7rem;letter-spacing:0.02em;}
+.footer-backend svg{opacity:0.7;}
 
 /* ===== REVISION FEEDBACK MODAL ===== */
 .revision-modal textarea{min-height:100px;}

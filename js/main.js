@@ -2483,6 +2483,17 @@ function importBackup() {
     if (!confirm(t('menu.settings_restore_confirm'))) return;
     const btn = document.querySelector('.settings-data-btn[onclick="importBackup()"]');
     if (btn) btn.disabled = true;
+
+    const progressEl = document.getElementById('importProgress');
+    const progressText = document.getElementById('importProgressText');
+    const progressFill = document.getElementById('importProgressFill');
+    const showProgress = (msg, current, total) => {
+      if (progressEl) progressEl.style.display = '';
+      if (progressText) progressText.textContent = msg;
+      if (progressFill && total > 0) progressFill.style.width = `${Math.round((current / total) * 100)}%`;
+    };
+    const hideProgress = () => { if (progressEl) progressEl.style.display = 'none'; };
+
     try {
       const text = await file.text();
       const backup = JSON.parse(text);
@@ -2492,10 +2503,11 @@ function importBackup() {
       }
       // Delete in reverse order (children before parents)
       const tables = [...(backup._meta.tables || [])].reverse();
+      const totalSteps = tables.length + (backup._meta.tables || []).length;
+      let step = 0;
       for (const table of tables) {
+        showProgress(`Clearing ${table}…`, ++step, totalSteps);
         try {
-          // Delete all rows — use a broadly matching filter
-          // settings/prompts use 'key' as PK, others use 'id'
           const pk = (table === 'settings' || table === 'prompts') ? 'key' : 'id';
           await state.db.from(table).delete().neq(pk, '___nonexistent___');
         } catch (e) { console.warn(`Could not clear ${table}:`, e.message); }
@@ -2504,10 +2516,10 @@ function importBackup() {
       const importOrder = backup._meta.tables || [];
       let totalRows = 0;
       for (const table of importOrder) {
+        showProgress(`Restoring ${table}…`, ++step, totalSteps);
         const rows = backup[table];
         if (!rows || !rows.length) continue;
         try {
-          // Insert in batches of 100
           for (let i = 0; i < rows.length; i += 100) {
             const batch = rows.slice(i, i + 100);
             const { error } = await state.db.from(table).insert(batch);
@@ -2516,6 +2528,7 @@ function importBackup() {
           totalRows += rows.length;
         } catch (e) { console.warn(`Failed to restore ${table}:`, e.message); }
       }
+      hideProgress();
       showToast(t('menu.settings_restore_done', totalRows));
       // In demo/drive mode, reseed the in-memory adapter instead of reloading
       // (reload would re-create the adapter with default/empty data)
@@ -2550,6 +2563,7 @@ function importBackup() {
       console.error('Import failed:', e);
       showToast(t('menu.settings_restore_error'));
     } finally {
+      hideProgress();
       if (btn) btn.disabled = false;
     }
   };

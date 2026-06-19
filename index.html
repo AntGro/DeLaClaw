@@ -797,6 +797,10 @@ bun run server.js</pre>
               <span data-icon="upload" data-size="16"></span>
               <span id="settingsImportBtn">Import backup</span>
             </button>
+            <div class="import-progress" id="importProgress" style="display:none">
+              <div class="import-progress-text" id="importProgressText"></div>
+              <div class="import-progress-bar"><div class="import-progress-fill" id="importProgressFill"></div></div>
+            </div>
             <input type="file" id="backupFileInput" accept=".json" style="display:none">
           </div>
         </div>

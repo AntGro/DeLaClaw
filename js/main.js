@@ -339,14 +339,15 @@ function initGate() {
     autoConnect(saved.url, saved.key, saved.mode);
     return;
   }
-  // Set login hash (user is on the login page) — preserve #setup if present
-  if (window.location.hash !== '#setup') {
-    history.replaceState(null, '', '#login');
-    showHero();
-  }
   // Check if returning from signup overlay with a pre-selected backend
   const signupMode = localStorage.getItem('claw_signup_mode');
   localStorage.removeItem('claw_signup_mode');
+  // Set login hash (user is on the login page) — preserve #setup if present
+  // Skip hero when returning from signup — go straight to the login form
+  if (window.location.hash !== '#setup' && !signupMode) {
+    history.replaceState(null, '', '#login');
+    showHero();
+  }
   switchBackendMode(signupMode || 'googledrive');
   // First visit: show welcome panel instead of login form
   // Skip welcome and go straight to login form if coming from signup

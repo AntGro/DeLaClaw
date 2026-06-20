@@ -482,6 +482,8 @@ document.addEventListener('DOMContentLoaded', () => {
     'saveNewVestiaire', 'saveEditVestiaire',
     'saveNewVestiaireCategory', 'saveEditVestiaireCategory',
     'executeDeleteConfirm',
+    'quickAddDraft', 'quickAddListItem',
+    'saveGlobalPrompt', 'saveProjectPrompt',
   ];
   for (const name of guardedNames) {
     if (typeof window[name] === 'function') window[name] = guard(window[name]);

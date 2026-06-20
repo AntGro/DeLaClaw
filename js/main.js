@@ -21,6 +21,7 @@ import { refreshLists, renderLists, initListModals } from './lists.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
 import { HABIT_CATEGORIES_KEY } from './supabase.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
+import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
 
 // ===================================================================
 // BACKEND-SCOPED localStorage — isolate per-backend settings so switching
@@ -2010,6 +2011,15 @@ function cmpVer(a, b) {
   return 0;
 }
 
+/** Collect pending migration SQL from dbVer up to LATEST_COMPAT. */
+function getPendingMigrationSQL(dbVer) {
+  const versions = Object.keys(SUPABASE_MIGRATIONS)
+    .filter(v => cmpVer(v, dbVer) > 0 && cmpVer(v, LATEST_COMPAT) <= 0)
+    .sort((a, b) => cmpVer(a, b));
+  if (!versions.length) return null;
+  return versions.map(v => SUPABASE_MIGRATIONS[v]).join('\n\n');
+}
+
 function checkSchemaVersion() {
   if (state.demoMode || state.driveMode) return;
   const dbVer = state.dbSchemaVersion || '0.00';
@@ -2024,9 +2034,14 @@ function checkSchemaVersion() {
 
   const icon = lucideIcon(isCritical ? 'alert-octagon' : 'alert-triangle', 16);
   const label = isCritical
-    ? `Database v${dbVer} is too old — DeLaClaw may not work correctly. Run pending migrations.`
-    : `Some features are unavailable (DB v${dbVer}, full support needs v${LATEST_COMPAT}). Run pending migrations.`;
-  banner.innerHTML = `${icon}<span>${label}</span><button onclick="dismissSchemaBanner()">Dismiss</button>`;
+    ? t('schema.banner_critical', { dbVer, latest: LATEST_COMPAT })
+    : t('schema.banner_warning', { dbVer, latest: LATEST_COMPAT });
+
+  const sql = getPendingMigrationSQL(dbVer);
+  const updateBtn = sql
+    ? `<button onclick="showMigrationModal()">${esc(t('schema.how_to_update'))}</button>`
+    : '';
+  banner.innerHTML = `${icon}<span>${label}</span>${updateBtn}<button onclick="dismissSchemaBanner()">${esc(t('schema.dismiss'))}</button>`;
   document.body.prepend(banner);
   // Measure actual banner height and expose as CSS variable (handles multi-line text on mobile)
   const updateSchemaH = () => {
@@ -2036,6 +2051,65 @@ function checkSchemaVersion() {
   const ro = new ResizeObserver(updateSchemaH);
   ro.observe(banner);
   banner._schemaRO = ro;
+}
+
+function showMigrationModal() {
+  const dbVer = state.dbSchemaVersion || '0.00';
+  const sql = getPendingMigrationSQL(dbVer);
+  if (!sql) return;
+
+  // Remove existing modal if any
+  document.getElementById('migrationModal')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'migrationModal';
+  overlay.className = 'modal-overlay visible';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeMigrationModal(); });
+
+  const pendingVersions = Object.keys(SUPABASE_MIGRATIONS)
+    .filter(v => cmpVer(v, dbVer) > 0 && cmpVer(v, LATEST_COMPAT) <= 0)
+    .sort((a, b) => cmpVer(a, b));
+  const countLabel = pendingVersions.length === 1
+    ? t('schema.migration_count_one')
+    : t('schema.migration_count', { count: pendingVersions.length });
+
+  overlay.innerHTML = `<div class="modal migration-modal">
+    <h2>${lucideIcon('database', 18)} ${esc(t('schema.modal_title'))}</h2>
+    <p class="migration-hint">${esc(t('schema.modal_hint', { dbVer, latest: LATEST_COMPAT }))} ${esc(countLabel)}</p>
+    <ol class="migration-steps">
+      <li>${t('schema.step_1')}</li>
+      <li>${t('schema.step_2')}</li>
+      <li>${t('schema.step_3')}</li>
+    </ol>
+    <div class="migration-sql-wrap">
+      <div class="migration-sql-header">
+        <span>SQL</span>
+        <button class="migration-copy-btn" id="migrationCopyBtn">${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}</button>
+      </div>
+      <pre class="migration-sql-code" id="migrationSqlCode">${esc(sql)}</pre>
+    </div>
+    <div class="migration-actions">
+      <a href="https://supabase.com/dashboard/project/_/sql" target="_blank" rel="noopener" class="btn-primary migration-open-btn">${esc(t('schema.open_sql_editor'))} ↗</a>
+      <button class="migration-close-btn" onclick="closeMigrationModal()">${esc(t('schema.close'))}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+
+  // Wire copy button
+  document.getElementById('migrationCopyBtn').addEventListener('click', async () => {
+    const code = document.getElementById('migrationSqlCode')?.textContent;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      const btn = document.getElementById('migrationCopyBtn');
+      btn.innerHTML = `${lucideIcon('check', 14)} ${esc(t('schema.copied'))}`;
+      setTimeout(() => { btn.innerHTML = `${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}`; }, 2000);
+    } catch { showToast(t('schema.copy_fallback')); }
+  });
+}
+
+function closeMigrationModal() {
+  document.getElementById('migrationModal')?.remove();
 }
 
 function dismissSchemaBanner() {
@@ -2918,6 +2992,8 @@ window.disconnect = disconnect;
 window.toggleSearch = toggleSearch;
 window.clearPageSearch = clearPageSearch;
 window.dismissSchemaBanner = dismissSchemaBanner;
+window.showMigrationModal = showMigrationModal;
+window.closeMigrationModal = closeMigrationModal;
 
 // --- Environment badge + dev favicon ---
 (function() {

@@ -432,6 +432,25 @@ const T = {
       continue_same_text: 'Same text', continue_another: 'Another chunk',
       revise_this: 'Revise this text',
     },
+    // ── Schema / Migration banner ──
+    schema: {
+      banner_critical: 'Database v{dbVer} is too old — DeLaClaw may not work correctly.',
+      banner_warning: 'Some features are unavailable (DB v{dbVer}, app needs v{latest}).',
+      how_to_update: 'How to update',
+      dismiss: 'Dismiss',
+      modal_title: 'Database Update Required',
+      modal_hint: 'Your database is at v{dbVer}. The app needs v{latest}.',
+      migration_count_one: '1 migration to run:',
+      migration_count: '{count} migrations to run (safe to run together):',
+      step_1: 'Copy the SQL below.',
+      step_2: 'Open the <strong>Supabase SQL Editor</strong> for your project.',
+      step_3: 'Paste and click <strong>Run</strong>.',
+      copy: 'Copy',
+      copied: 'Copied!',
+      copy_fallback: 'Could not copy — please select and copy manually.',
+      open_sql_editor: 'Open SQL Editor',
+      close: 'Close',
+    },
     // ── Utils / Stats ──
     utils: {
       db: 'DB', supabase_dashboard: 'Supabase Dashboard',
@@ -847,6 +866,24 @@ const T = {
       continue_same_text: 'Même texte', continue_another: 'Autre extrait',
       revise_this: 'Réviser ce texte',
     },
+    schema: {
+      banner_critical: 'Base de données v{dbVer} trop ancienne — DeLaClaw risque de ne pas fonctionner.',
+      banner_warning: 'Certaines fonctionnalités sont indisponibles (BDD v{dbVer}, l\'app nécessite v{latest}).',
+      how_to_update: 'Mettre à jour',
+      dismiss: 'Ignorer',
+      modal_title: 'Mise à jour de la base de données',
+      modal_hint: 'Votre base est en v{dbVer}. L\'app nécessite v{latest}.',
+      migration_count_one: '1 migration à exécuter :',
+      migration_count: '{count} migrations à exécuter (exécutables ensemble) :',
+      step_1: 'Copiez le SQL ci-dessous.',
+      step_2: 'Ouvrez l\'<strong>éditeur SQL Supabase</strong> de votre projet.',
+      step_3: 'Collez et cliquez sur <strong>Run</strong>.',
+      copy: 'Copier',
+      copied: 'Copié !',
+      copy_fallback: 'Impossible de copier — sélectionnez et copiez manuellement.',
+      open_sql_editor: 'Ouvrir l\'éditeur SQL',
+      close: 'Fermer',
+    },
     utils: {
       db: 'BDD', supabase_dashboard: 'Tableau de bord Supabase',
     },
@@ -1261,6 +1298,24 @@ const T = {
       continue_same_text: 'Mismo texto', continue_another: 'Otro fragmento',
       revise_this: 'Revisar este texto',
     },
+    schema: {
+      banner_critical: 'Base de datos v{dbVer} demasiado antigua — DeLaClaw puede no funcionar correctamente.',
+      banner_warning: 'Algunas funciones no están disponibles (BD v{dbVer}, la app necesita v{latest}).',
+      how_to_update: 'Cómo actualizar',
+      dismiss: 'Ignorar',
+      modal_title: 'Actualización de base de datos necesaria',
+      modal_hint: 'Tu base de datos está en v{dbVer}. La app necesita v{latest}.',
+      migration_count_one: '1 migración a ejecutar:',
+      migration_count: '{count} migraciones a ejecutar (se pueden ejecutar juntas):',
+      step_1: 'Copia el SQL de abajo.',
+      step_2: 'Abre el <strong>Editor SQL de Supabase</strong> de tu proyecto.',
+      step_3: 'Pega y haz clic en <strong>Run</strong>.',
+      copy: 'Copiar',
+      copied: '¡Copiado!',
+      copy_fallback: 'No se pudo copiar — selecciona y copia manualmente.',
+      open_sql_editor: 'Abrir editor SQL',
+      close: 'Cerrar',
+    },
     utils: {
       db: 'BDD', supabase_dashboard: 'Panel de Supabase',
     },
@@ -1285,7 +1340,11 @@ export function t(key, ...args) {
     }
   }
   if (typeof val !== 'string') return key;
-  // Replace {0}, {1}, etc. with args
+  // Replace {0}, {1}, etc. with positional args, OR {key} with named args from an object
+  if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
+    const params = args[0];
+    return val.replace(/\{(\w+)\}/g, (m, k) => params[k] !== undefined ? params[k] : m);
+  }
   return val.replace(/\{(\d+)\}/g, (_, i) => args[i] !== undefined ? args[i] : `{${i}}`);
 }
 

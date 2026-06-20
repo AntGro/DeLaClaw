@@ -1565,6 +1565,21 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .schema-banner button:hover{background:rgba(255,255,255,0.3);}
 body:has(.schema-banner) #app{padding-top:var(--schema-banner-h,40px);}
 body:has(.schema-banner) .app-header{top:var(--schema-banner-h,40px);}
+/* ── Migration modal ── */
+.migration-modal{max-width:600px;}
+.migration-modal h2{font-size:1.05rem;margin-bottom:10px;display:flex;align-items:center;gap:8px;}
+.migration-hint{font-size:0.85rem;color:var(--muted);margin-bottom:14px;line-height:1.4;}
+.migration-steps{font-size:0.85rem;margin:0 0 16px 0;padding-left:1.4em;line-height:1.6;}
+.migration-steps li{margin-bottom:4px;}
+.migration-sql-wrap{border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px;}
+.migration-sql-header{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:color-mix(in srgb, var(--border) 40%, transparent);font-size:0.78rem;font-weight:600;color:var(--muted);letter-spacing:0.04em;}
+.migration-copy-btn{display:inline-flex;align-items:center;gap:4px;background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:0.75rem;color:var(--text);cursor:pointer;font-family:inherit;transition:all 0.2s;}
+.migration-copy-btn:hover{background:var(--surface);border-color:var(--accent);color:var(--accent);}
+.migration-sql-code{margin:0;padding:14px;font-size:0.78rem;line-height:1.5;overflow-x:auto;max-height:280px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;font-family:'DM Mono',ui-monospace,monospace;color:var(--text);background:var(--bg);}
+.migration-actions{display:flex;gap:10px;align-items:center;}
+.migration-open-btn{display:inline-flex;align-items:center;gap:4px;padding:9px 18px;font-size:0.88rem;text-decoration:none;text-align:center;flex:1;justify-content:center;}
+.migration-close-btn{background:transparent;border:1px solid var(--border);border-radius:8px;padding:9px 18px;font-size:0.88rem;color:var(--muted);cursor:pointer;font-family:inherit;transition:all 0.2s;}
+.migration-close-btn:hover{border-color:var(--text);color:var(--text);}
 .demo-banner button{background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:3px 10px;font-size:0.78rem;cursor:pointer;white-space:nowrap;font-family:inherit;}
 .demo-banner button:hover{background:rgba(255,255,255,0.3);}
 .demo-banner .demo-banner-right{display:flex;gap:8px;align-items:center;}

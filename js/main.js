@@ -317,6 +317,8 @@ function initGate() {
   document.querySelectorAll('.backend-option').forEach(btn => {
     btn.addEventListener('click', () => switchBackendMode(btn.dataset.mode));
   });
+  // Wire up compare link
+  document.getElementById('backendCompareLink')?.addEventListener('click', showCompareModal);
   // Hero demo button: click starts demo directly
   const heroDemoBtn = document.getElementById('heroDemoBtn');
   if (heroDemoBtn) {
@@ -1333,6 +1335,8 @@ function updateStaticLabels() {
   // Setup Guide
   const guideEl = document.getElementById('gateGuideLink');
   if (guideEl) guideEl.textContent = t('setup.guide_link');
+  const compareLink = document.getElementById('backendCompareLink');
+  if (compareLink) compareLink.textContent = t('compare.link');
   const setupBackLabel = document.getElementById('setupBackLabel');
   if (setupBackLabel) setupBackLabel.textContent = t('setup.back');
   const setupTitle = document.getElementById('setupTitle');
@@ -1343,8 +1347,7 @@ function updateStaticLabels() {
   if (setupCloudName) setupCloudName.textContent = t('setup.cloud_name');
   const setupCloudDesc = document.getElementById('setupCloudDesc');
   if (setupCloudDesc) setupCloudDesc.textContent = t('setup.cloud_desc');
-  const setupCloudBadge = document.getElementById('setupCloudBadge');
-  if (setupCloudBadge) setupCloudBadge.textContent = t('setup.cloud_badge');
+  // setupCloudBadge removed — no longer recommending a single backend
   const setupLocalName = document.getElementById('setupLocalName');
   if (setupLocalName) setupLocalName.textContent = t('setup.local_name');
   const setupLocalDesc = document.getElementById('setupLocalDesc');
@@ -2111,6 +2114,48 @@ function showMigrationModal() {
 function closeMigrationModal() {
   document.getElementById('migrationModal')?.remove();
 }
+
+function showCompareModal() {
+  document.getElementById('compareModal')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'compareModal';
+  overlay.className = 'modal-overlay visible';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeCompareModal(); });
+
+  const check = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+  const cross = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+  const rows = [
+    { key: 'compare.setup', vals: ['compare.setup_drive', 'compare.setup_supa', 'compare.setup_local', 'compare.setup_demo'] },
+    { key: 'compare.multi_device', vals: [cross, check + ' ' + esc(t('compare.live')), cross, cross], raw: true },
+    { key: 'compare.offline', vals: [cross, cross, check, check], raw: true },
+    { key: 'compare.data_location', vals: ['compare.loc_drive', 'compare.loc_supa', 'compare.loc_local', 'compare.loc_demo'] },
+    { key: 'compare.storage', vals: ['compare.sto_drive', 'compare.sto_supa', 'compare.sto_local', 'compare.sto_demo'] },
+    { key: 'compare.cost', vals: ['compare.free', 'compare.free', 'compare.free', 'compare.free'] },
+  ];
+
+  const thead = `<tr><th></th><th>Google Drive</th><th>Supabase</th><th>Local</th><th>Demo</th></tr>`;
+  const tbody = rows.map(r => {
+    const cells = r.vals.map(v => `<td>${r.raw ? v : esc(t(v))}</td>`).join('');
+    return `<tr><td class="compare-label">${esc(t(r.key))}</td>${cells}</tr>`;
+  }).join('');
+
+  overlay.innerHTML = `<div class="modal compare-modal">
+    <h2>${esc(t('compare.title'))}</h2>
+    <p class="compare-subtitle">${esc(t('compare.subtitle'))}</p>
+    <div class="compare-table-wrap">
+      <table class="compare-table">${thead}${tbody}</table>
+    </div>
+    <button class="compare-close-btn" onclick="closeCompareModal()">${esc(t('schema.close'))}</button>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+
+function closeCompareModal() {
+  document.getElementById('compareModal')?.remove();
+}
+
 
 function dismissSchemaBanner() {
   const banner = document.getElementById('schema-banner');
@@ -2994,6 +3039,8 @@ window.clearPageSearch = clearPageSearch;
 window.dismissSchemaBanner = dismissSchemaBanner;
 window.showMigrationModal = showMigrationModal;
 window.closeMigrationModal = closeMigrationModal;
+window.showCompareModal = showCompareModal;
+window.closeCompareModal = closeCompareModal;
 
 // --- Environment badge + dev favicon ---
 (function() {

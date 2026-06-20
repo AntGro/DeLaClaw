@@ -2026,7 +2026,10 @@ function getPendingMigrationSQL(dbVer) {
 }
 
 function checkSchemaVersion() {
-  if (state.demoMode || state.driveMode) return;
+  if (state.demoMode || state.driveMode || !state.db?.connected) {
+    document.getElementById('schema-banner')?.remove();
+    return;
+  }
   const dbVer = state.dbSchemaVersion || '0.00';
   if (cmpVer(dbVer, LATEST_COMPAT) >= 0) return;
 

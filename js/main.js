@@ -1542,6 +1542,8 @@ function updateStaticLabels() {
     const val = t(key);
     if (val) el.textContent = val;
   });
+  // Re-render schema banner in new language (if visible)
+  checkSchemaVersion();
 }
 
 // ── Storm Logo Initialization ──

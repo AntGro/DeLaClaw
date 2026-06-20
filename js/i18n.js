@@ -46,6 +46,9 @@ const T = {
       mode_local: 'Local',
       mode_demo: 'Demo',
       storage_hint: 'Choose where your data is stored.',
+      welcome_text: 'Your personal command center. Organize projects, todos, habits, and more — your data stays yours.',
+      welcome_demo: 'Try the demo',
+      welcome_login: 'I already have an account',
       btn_demo: 'Try Demo',
       btn_googledrive: 'Connect with Google',
       drive_authenticating: 'Signing in to Google…',
@@ -108,6 +111,7 @@ const T = {
     // ── Demo Mode ──
     demo: {
       banner: 'Demo — changes are not saved',
+      start_own: 'Start my own',
       show_empty: 'Show empty',
       show_data: 'Show demo data',
       exit: 'Exit demo',
@@ -523,6 +527,9 @@ const T = {
       mode_local: 'Local',
       mode_demo: 'Démo',
       storage_hint: 'Choisissez où stocker vos données.',
+      welcome_text: 'Votre centre de commande personnel. Projets, tâches, habitudes et plus — vos données restent les vôtres.',
+      welcome_demo: 'Essayer la démo',
+      welcome_login: 'J\'ai déjà un compte',
       btn_demo: 'Essayer la démo',
       btn_googledrive: 'Se connecter avec Google',
       drive_authenticating: 'Connexion à Google…',
@@ -583,6 +590,7 @@ const T = {
     },
     demo: {
       banner: 'Démo — les modifications ne sont pas sauvegardées',
+      start_own: 'Créer mon espace',
       show_empty: 'Afficher vide',
       show_data: 'Afficher les données',
       exit: 'Quitter la démo',
@@ -985,6 +993,9 @@ const T = {
       mode_local: 'Local',
       mode_demo: 'Demo',
       storage_hint: 'Elige dónde almacenar tus datos.',
+      welcome_text: 'Tu centro de mando personal. Proyectos, tareas, hábitos y más — tus datos son tuyos.',
+      welcome_demo: 'Probar la demo',
+      welcome_login: 'Ya tengo una cuenta',
       btn_demo: 'Probar demo',
       btn_googledrive: 'Conectar con Google',
       drive_authenticating: 'Iniciando sesión en Google…',
@@ -1045,6 +1056,7 @@ const T = {
     },
     demo: {
       banner: 'Demo — los cambios no se guardan',
+      start_own: 'Crear mi espacio',
       show_empty: 'Mostrar vacío',
       show_data: 'Mostrar datos',
       exit: 'Salir de la demo',

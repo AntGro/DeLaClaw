@@ -115,6 +115,14 @@
         <div class="drive-progress-bar"><div class="drive-progress-fill" id="driveProgressFill"></div></div>
       </div>
     </form>
+
+    <!-- First-visit welcome (shown instead of loginForm on first visit) -->
+    <div id="gateWelcome" style="display:none;">
+      <p class="gate-welcome-text" data-i18n="login.welcome_text">Your personal command center. Organize projects, todos, habits, and more — your data stays yours.</p>
+      <button type="button" class="btn-primary gate-welcome-demo" id="gateWelcomeDemo" data-i18n="login.welcome_demo">Try the demo</button>
+      <a class="gate-welcome-login" id="gateWelcomeLogin" href="javascript:void(0)" data-i18n="login.welcome_login">I already have an account</a>
+    </div>
+
     <a class="gate-guide-link" id="gateGuideLink" href="#setup">New here? Get started</a>
   </div>
 

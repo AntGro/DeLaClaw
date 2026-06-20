@@ -811,6 +811,9 @@ async function archiveDeleteIntegrationTest() {
 
     // Navigate to app and log in via local mode
     await page.goto('http://127.0.0.1:4848/', { waitUntil: 'networkidle', timeout: 15000 });
+    // Dismiss welcome panel if visible (first-visit state)
+    const welcomeLogin = await page.$('#gateWelcomeLogin');
+    if (welcomeLogin && await welcomeLogin.isVisible()) await welcomeLogin.click();
     await page.click('.backend-option[data-mode="local"]');
     await page.fill('#username', 'http://127.0.0.1:4848');
     await page.click('#loginForm button[type="submit"]');
@@ -1145,6 +1148,9 @@ async function importFlashcardsIntegrationTest() {
     page.on('pageerror', err => jsErrors.push(err.message || String(err)));
 
     await page.goto('http://127.0.0.1:4850/', { waitUntil: 'networkidle', timeout: 15000 });
+    // Dismiss welcome panel if visible (first-visit state)
+    const welcomeLogin = await page.$('#gateWelcomeLogin');
+    if (welcomeLogin && await welcomeLogin.isVisible()) await welcomeLogin.click();
     await page.click('.backend-option[data-mode="local"]');
     await page.fill('#username', 'http://127.0.0.1:4850');
     await page.click('#loginForm button[type="submit"]');

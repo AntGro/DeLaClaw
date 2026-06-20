@@ -343,7 +343,22 @@ function initGate() {
   history.replaceState(null, '', '#login');
   showHero();
   switchBackendMode('googledrive');
-  document.getElementById('loginForm').style.display = 'flex';
+  // First visit: show welcome panel instead of login form
+  const gateWelcome = document.getElementById('gateWelcome');
+  gateWelcome.style.display = 'block';
+  document.getElementById('loginForm').style.display = 'none';
+  document.getElementById('gateGuideLink').style.display = 'none';
+  // "Try the demo" button
+  document.getElementById('gateWelcomeDemo').addEventListener('click', () => {
+    switchBackendMode('demo');
+    doLogin();
+  });
+  // "I already have an account" link
+  document.getElementById('gateWelcomeLogin').addEventListener('click', () => {
+    gateWelcome.style.display = 'none';
+    document.getElementById('loginForm').style.display = 'flex';
+    document.getElementById('gateGuideLink').style.display = '';
+  });
   // Update API Key link when project URL changes
   const _urlInput = document.getElementById('username');
   const _keyLink = document.getElementById('keyLabelLink');
@@ -1088,12 +1103,19 @@ function initDemoBanner() {
     refreshWelcome();
   });
 
+  // Start my own space — opens login overlay on top of demo
+  const startOwnBtn = document.createElement('button');
+  startOwnBtn.className = 'demo-banner-start';
+  startOwnBtn.textContent = t('demo.start_own');
+  startOwnBtn.addEventListener('click', () => showSignupOverlay());
+
   // Exit demo
   const exitBtn = document.createElement('button');
   exitBtn.textContent = t('demo.exit');
   exitBtn.addEventListener('click', () => disconnect());
 
   right.appendChild(toggleBtn);
+  right.appendChild(startOwnBtn);
   right.appendChild(exitBtn);
   banner.appendChild(left);
   banner.appendChild(right);
@@ -2154,6 +2176,105 @@ function showCompareModal() {
 
 function closeCompareModal() {
   document.getElementById('compareModal')?.remove();
+}
+
+/** Login overlay shown from demo "Start my own" button */
+function showSignupOverlay() {
+  document.getElementById('signupOverlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'signupOverlay';
+  overlay.className = 'signup-overlay';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeSignupOverlay(); });
+
+  const box = document.createElement('div');
+  box.className = 'gate-box';
+
+  const title = document.createElement('h1');
+  title.textContent = 'DeLaClaw';
+
+  const hint = document.createElement('p');
+  hint.className = 'gate-storage-hint';
+  hint.textContent = t('login.storage_hint');
+
+  const compareLink = document.createElement('a');
+  compareLink.className = 'backend-compare-link';
+  compareLink.href = 'javascript:void(0)';
+  compareLink.textContent = t('compare.link');
+  compareLink.addEventListener('click', showCompareModal);
+
+  // Clone the backend picker + form fields from the gate
+  const formClone = document.getElementById('loginForm').cloneNode(true);
+  formClone.id = 'signupForm';
+  formClone.style.display = 'flex';
+  // Remove the storage hint and compare link from clone (we already have them above)
+  formClone.querySelector('.gate-storage-hint')?.remove();
+  formClone.querySelector('.backend-compare-link')?.remove();
+
+  // Wire up backend switching on clone
+  const clonePicker = formClone.querySelector('.backend-picker');
+  if (clonePicker) {
+    clonePicker.querySelectorAll('.backend-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        clonePicker.querySelectorAll('.backend-option').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const mode = btn.dataset.mode;
+        // Update hint and fields visibility in clone
+        const cloneFields = formClone.querySelector('.gate-fields');
+        const cloneHint = formClone.querySelector('.hint');
+        const cloneKeyField = formClone.querySelector('#keyField') || formClone.querySelector('[id$="keyField"]');
+        if (mode === 'googledrive' || mode === 'demo') {
+          if (cloneFields) cloneFields.style.display = 'none';
+        } else {
+          if (cloneFields) cloneFields.style.display = '';
+          if (cloneHint) cloneHint.textContent = mode === 'supabase' ? t('login.hint_supabase') : t('login.hint_local');
+        }
+      });
+    });
+    // Trigger initial state: default to googledrive
+    const driveBtn = clonePicker.querySelector('[data-mode="googledrive"]');
+    if (driveBtn) {
+      clonePicker.querySelectorAll('.backend-option').forEach(b => b.classList.remove('active'));
+      driveBtn.classList.add('active');
+    }
+    const cloneFields = formClone.querySelector('.gate-fields');
+    if (cloneFields) cloneFields.style.display = 'none';
+  }
+
+  // Handle form submit — transfer values to real form and submit
+  formClone.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const activeMode = formClone.querySelector('.backend-option.active')?.dataset.mode || 'googledrive';
+    switchBackendMode(activeMode);
+    // Copy field values to the real form
+    const realUrl = document.getElementById('username');
+    const realKey = document.getElementById('password');
+    const cloneUrl = formClone.querySelector('[name="username"]');
+    const cloneKey = formClone.querySelector('[name="password"]');
+    if (realUrl && cloneUrl) realUrl.value = cloneUrl.value;
+    if (realKey && cloneKey) realKey.value = cloneKey.value;
+    closeSignupOverlay();
+    doLogin();
+  });
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'compare-close-btn';
+  cancelBtn.style.marginTop = '8px';
+  cancelBtn.textContent = t('demo.exit') === t('demo.exit') ? 'Back to demo' : t('demo.exit');
+  cancelBtn.textContent = t('schema.close');
+  cancelBtn.addEventListener('click', closeSignupOverlay);
+
+  box.appendChild(title);
+  box.appendChild(hint);
+  box.appendChild(compareLink);
+  box.appendChild(formClone);
+  box.appendChild(cancelBtn);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
+function closeSignupOverlay() {
+  document.getElementById('signupOverlay')?.remove();
 }
 
 

@@ -463,7 +463,7 @@ const T = {
       multi_device: 'Multi-device sync',
       offline: 'Works offline',
       data_location: 'Data stored in',
-      storage: 'Storage',
+      storage: 'Storage*',
       cost: 'Cost',
       live: 'Live',
       polling: 'Polling',
@@ -480,6 +480,7 @@ const T = {
       sto_supa: '500 MB (free tier)',
       sto_local: 'Unlimited',
       sto_demo: 'Session only',
+      storage_note: '* You should realistically not need more than 200 MB to enjoy the full DeLaClaw experience.',
     },
     // ── Utils / Stats ──
     utils: {
@@ -925,7 +926,7 @@ const T = {
       multi_device: 'Sync multi-appareils',
       offline: 'Fonctionne hors ligne',
       data_location: 'Données stockées dans',
-      storage: 'Stockage',
+      storage: 'Stockage*',
       cost: 'Coût',
       live: 'Temps réel',
       polling: 'Polling',
@@ -942,6 +943,7 @@ const T = {
       sto_supa: '500 Mo (offre gratuite)',
       sto_local: 'Illimité',
       sto_demo: 'Session uniquement',
+      storage_note: '* 200 Mo suffisent largement pour profiter pleinement de DeLaClaw.',
     },
     utils: {
       db: 'BDD', supabase_dashboard: 'Tableau de bord Supabase',
@@ -1386,7 +1388,7 @@ const T = {
       multi_device: 'Sync multidispositivo',
       offline: 'Funciona sin internet',
       data_location: 'Datos almacenados en',
-      storage: 'Almacenamiento',
+      storage: 'Almacenamiento*',
       cost: 'Coste',
       live: 'En vivo',
       polling: 'Polling',
@@ -1403,6 +1405,7 @@ const T = {
       sto_supa: '500 MB (plan gratuito)',
       sto_local: 'Ilimitado',
       sto_demo: 'Solo sesión',
+      storage_note: '* 200 MB son más que suficientes para disfrutar de DeLaClaw al completo.',
     },
     utils: {
       db: 'BDD', supabase_dashboard: 'Panel de Supabase',

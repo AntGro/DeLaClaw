@@ -2146,6 +2146,7 @@ function showCompareModal() {
     <div class="compare-table-wrap">
       <table class="compare-table">${thead}${tbody}</table>
     </div>
+    <p class="compare-footnote">${esc(t('compare.storage_note'))}</p>
     <button class="compare-close-btn" onclick="closeCompareModal()">${esc(t('schema.close'))}</button>
   </div>`;
   document.body.appendChild(overlay);

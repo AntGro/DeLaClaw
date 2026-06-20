@@ -344,12 +344,22 @@ function initGate() {
     history.replaceState(null, '', '#login');
     showHero();
   }
-  switchBackendMode('googledrive');
+  // Check if returning from signup overlay with a pre-selected backend
+  const signupMode = localStorage.getItem('claw_signup_mode');
+  localStorage.removeItem('claw_signup_mode');
+  switchBackendMode(signupMode || 'googledrive');
   // First visit: show welcome panel instead of login form
+  // Skip welcome and go straight to login form if coming from signup
   const gateWelcome = document.getElementById('gateWelcome');
-  gateWelcome.style.display = 'block';
-  document.getElementById('loginForm').style.display = 'none';
-  document.getElementById('gateGuideLink').style.display = 'none';
+  if (signupMode) {
+    gateWelcome.style.display = 'none';
+    document.getElementById('loginForm').style.display = 'flex';
+    document.getElementById('gateGuideLink').style.display = '';
+  } else {
+    gateWelcome.style.display = 'block';
+    document.getElementById('loginForm').style.display = 'none';
+    document.getElementById('gateGuideLink').style.display = 'none';
+  }
   // "Try the demo" button
   document.getElementById('gateWelcomeDemo').addEventListener('click', () => {
     switchBackendMode('demo');
@@ -2357,15 +2367,21 @@ function showSignupOverlay() {
   form.appendChild(fieldsDiv);
   form.appendChild(submitBtn);
 
-  // Handle form submit
+  // Handle form submit — exit demo and reload to the gate with the chosen backend
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    switchBackendMode(activeMode);
-    document.getElementById('username').value = urlInput.value;
-    document.getElementById('password').value = keyInput.value;
+    clearStayConnectedCreds();
+    // For Supabase/Local, pre-fill creds so the gate auto-connects on reload
+    if (activeMode !== 'googledrive') {
+      const url = urlInput.value.trim();
+      const key = keyInput.value.trim();
+      if (url) saveStayConnectedCreds(url, key, activeMode);
+    }
+    // Store chosen mode so the gate can pre-select it
+    localStorage.setItem('claw_signup_mode', activeMode);
     closeSignupOverlay();
-    removeDemoBanner();
-    doLogin();
+    location.hash = '#login';
+    location.reload();
   });
 
   const cancelBtn = document.createElement('button');

@@ -147,6 +147,8 @@ input,select,button{font-family:inherit;}
 [data-theme="light"] .gate-box{box-shadow:0 20px 60px rgba(0,0,0,0.08),0 0 80px rgba(100,108,255,0.04);}
 .gate-box .logo{margin-bottom:4px;color:#454dc6;}
 .gate-box h1{font-size:1.2rem;font-weight:600;margin-bottom:24px;letter-spacing:-0.04em;line-height:1;}
+#loginForm{flex-direction:column;align-items:center;width:100%;}
+#loginForm .gate-fields,#loginForm .stay-connected-label,#loginForm .drive-progress{align-self:stretch;}
 .gate-box input{width:100%;padding:11px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.92rem;margin-bottom:10px;outline:none;transition:border-color 0.2s;}
 .gate-box input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(100,108,255,0.1);}
 .gate-box .btn-primary{width:100%;padding:11px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:0.92rem;font-weight:600;cursor:pointer;transition:all 0.25s;margin-top:4px;margin-bottom:6px;box-shadow:0 2px 12px rgba(100,108,255,0.25);}

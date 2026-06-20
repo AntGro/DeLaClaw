@@ -343,7 +343,7 @@ function initGate() {
   history.replaceState(null, '', '#login');
   showHero();
   switchBackendMode('googledrive');
-  document.getElementById('loginForm').style.display = 'block';
+  document.getElementById('loginForm').style.display = 'flex';
   // Update API Key link when project URL changes
   const _urlInput = document.getElementById('username');
   const _keyLink = document.getElementById('keyLabelLink');
@@ -378,7 +378,7 @@ async function autoConnect(url, key, mode) {
     // Stored credentials are stale — clear them and show the full login form
     clearStayConnectedCreds();
     showHero();
-    document.getElementById('loginForm').style.display = 'block';
+    document.getElementById('loginForm').style.display = 'flex';
     document.getElementById('loginError').textContent = t('toast.session_expired');
     document.getElementById('username').value = '';
     document.getElementById('password').value = '';

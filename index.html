@@ -36,7 +36,7 @@
     <svg id="heroStorm" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"></svg>
     <canvas id="heroStorm3d"></canvas>
     <button type="button" class="hero-demo-btn" id="heroDemoBtn">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="7" height="7" rx="2" fill="#3b82f6"/><rect x="10" y="1" width="7" height="7" rx="2" fill="#6366f1"/><rect x="1" y="10" width="7" height="7" rx="2" fill="#22c55e"/><rect x="10" y="10" width="7" height="7" rx="2" fill="#ec4899"/></svg>
       <span>Demo</span>
     </button>
   </div>
@@ -87,19 +87,13 @@
     <h1 id="gateTitle">DeLaClaw</h1>
 
     <form id="loginForm" method="post" action="https://antgro.github.io/command-center/" style="display:none;">
+      <p class="gate-storage-hint" id="gateStorageHint" data-i18n="login.storage_hint">Choose where your data is stored.</p>
+      <a class="backend-compare-link" id="backendCompareLink" href="javascript:void(0)" data-i18n="compare.link">Compare options</a>
       <div class="backend-picker" id="backendPicker">
-        <button type="button" class="backend-option active" data-mode="supabase">
-          <svg width="18" height="19" viewBox="0 0 109 113" fill="none"><path d="M63.7076 110.284C60.8481 113.885 55.0502 111.912 54.9813 107.314L53.9738 40.0627H99.1935C107.384 40.0627 111.952 49.5228 106.859 55.9374L63.7076 110.284Z" fill="#249361"/><path d="M45.317 2.07103C48.1765-1.53037 53.9745 0.442937 54.0434 5.041L54.4849 72.2922H9.83113C1.64038 72.2922-2.92775 62.8321 2.16513 56.4175L45.317 2.07103Z" fill="#3ECF8E"/></svg>
-          <span>Supabase</span>
-        </button>
-        <button type="button" class="backend-option" data-mode="local">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-          <span>Local</span>
-        </button>
-        <button type="button" class="backend-option" data-mode="demo">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          <span>Demo</span>
-        </button>
+        <button type="button" class="backend-option active" data-mode="googledrive" title="Google Drive"><span class="backend-option-label" data-i18n="login.mode_drive">Drive</span></button>
+        <button type="button" class="backend-option" data-mode="supabase" title="Supabase"><span class="backend-option-label" data-i18n="login.mode_supabase">SB</span></button>
+        <button type="button" class="backend-option" data-mode="local" title="Local"><span class="backend-option-label" data-i18n="login.mode_local">Local</span></button>
+        <button type="button" class="backend-option" data-mode="demo" title="Demo"><span class="backend-option-label" data-i18n="login.mode_demo">Demo</span></button>
       </div>
       <div class="gate-fields" id="gateFields">
         <p class="hint" id="loginHint">Connect to your Supabase project.</p>
@@ -116,7 +110,19 @@
       </label>
       <button type="submit" class="btn-primary">Connect</button>
       <p class="error" id="loginError"></p>
+      <div class="drive-progress" id="driveProgress" style="display:none;">
+        <p class="drive-progress-text" id="driveProgressText"></p>
+        <div class="drive-progress-bar"><div class="drive-progress-fill" id="driveProgressFill"></div></div>
+      </div>
     </form>
+
+    <!-- First-visit welcome (shown instead of loginForm on first visit) -->
+    <div id="gateWelcome" style="display:none;">
+      <p class="gate-welcome-text" data-i18n="login.welcome_text">Your personal command center. Organize projects, todos, habits, and more — your data stays yours.</p>
+      <button type="button" class="btn-primary gate-welcome-demo" id="gateWelcomeDemo" data-i18n="login.welcome_demo">Try the demo</button>
+      <a class="gate-welcome-login" id="gateWelcomeLogin" href="javascript:void(0)" data-i18n="login.welcome_login">I already have an account</a>
+    </div>
+
     <a class="gate-guide-link" id="gateGuideLink" href="#setup">New here? Get started</a>
   </div>
 
@@ -127,21 +133,40 @@
     <p class="setup-subtitle" id="setupSubtitle">Choose how you want to store your data.</p>
 
     <div class="setup-paths">
+      <button class="setup-path-card" id="setupPathDrive" type="button">
+        <span class="setup-path-icon" data-backend-logo="googledrive" data-logo-size="22"></span>
+        <span class="setup-path-name" id="setupDriveName">Google Drive</span>
+        <span class="setup-path-desc" id="setupDriveDesc">Sign in with Google. Data stored in your Drive.</span>
+      </button>
       <button class="setup-path-card" id="setupPathCloud" type="button">
-        <span class="setup-path-icon">
-          <svg width="22" height="23" viewBox="0 0 109 113" fill="none"><path d="M63.7076 110.284C60.8481 113.885 55.0502 111.912 54.9813 107.314L53.9738 40.0627H99.1935C107.384 40.0627 111.952 49.5228 106.859 55.9374L63.7076 110.284Z" fill="#249361"/><path d="M45.317 2.07103C48.1765-1.53037 53.9745 0.442937 54.0434 5.041L54.4849 72.2922H9.83113C1.64038 72.2922-2.92775 62.8321 2.16513 56.4175L45.317 2.07103Z" fill="#3ECF8E"/></svg>
-        </span>
-        <span class="setup-path-name" id="setupCloudName">Cloud</span>
+        <span class="setup-path-icon" data-backend-logo="supabase" data-logo-size="22"></span>
+        <span class="setup-path-name" id="setupCloudName">Supabase</span>
         <span class="setup-path-desc" id="setupCloudDesc">Free, no install, works everywhere.</span>
-        <span class="setup-path-badge" id="setupCloudBadge">Recommended</span>
       </button>
       <button class="setup-path-card" id="setupPathLocal" type="button">
-        <span class="setup-path-icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        </span>
+        <span class="setup-path-icon" data-backend-logo="local" data-logo-size="22"></span>
         <span class="setup-path-name" id="setupLocalName">Local</span>
         <span class="setup-path-desc" id="setupLocalDesc">Your machine, your data. For developers.</span>
       </button>
+    </div>
+
+    <!-- Google Drive steps -->
+    <div class="setup-steps" id="setupDriveSteps" style="display:none;">
+      <div class="setup-step" data-step="1">
+        <span class="setup-step-num">1</span>
+        <div class="setup-step-body">
+          <h3 id="setupDrive1Title">Sign in with Google</h3>
+          <p id="setupDrive1Desc">Click <strong>Connect</strong> on the login screen and sign in with your Google account. DeLaClaw will create a <code>DeLaClaw/</code> folder in your Drive to store a single <code>delaclaw-data.json</code> file.</p>
+        </div>
+      </div>
+      <div class="setup-step" data-step="2">
+        <span class="setup-step-num">2</span>
+        <div class="setup-step-body">
+          <h3 id="setupDrive2Title">That's it</h3>
+          <p id="setupDrive2Desc">No API keys, no database setup. Your data lives in your Google Drive as a plain JSON file you can export or delete at any time.</p>
+        </div>
+      </div>
+      <button class="setup-done-btn" id="setupDriveDone" type="button">Go to login</button>
     </div>
 
     <!-- Cloud steps (Supabase) -->
@@ -326,7 +351,6 @@ bun run server.js</pre>
           <button class="filter-btn active" data-filter="pending" onclick="setTodoFilter('pending')">Pending</button>
           <button class="filter-btn" data-filter="done" onclick="setTodoFilter('done')">Done</button>
           <button class="filter-btn" data-filter="all" onclick="setTodoFilter('all')">All</button>
-          <button class="filter-btn" data-filter="flagged" onclick="setTodoFilter('flagged')"><span data-icon="flag" data-size="14"></span> Flagged</button>
           <button class="filter-btn" data-filter="outdated" onclick="setTodoFilter('outdated')"><span data-icon="hourglass" data-size="14"></span> Outdated</button>
           <select id="todoSortBy" class="page-sort" onchange="renderTodos()">
             <option value="manual">Manual order</option>
@@ -509,6 +533,7 @@ bun run server.js</pre>
     <div class="db-stats" id="dbStatsContainer"></div>
     <div><span id="lastUpdatedLabel" class="db-stat"></span></div>
     <div><a href="" id="supabaseDashLink" target="_blank">Supabase Dashboard ↗</a></div>
+    <div class="footer-backend" id="footerBackend"></div>
     <div class="footer-copyright">© 2026 DeLaClaw</div>
   </div>
 
@@ -768,7 +793,7 @@ bun run server.js</pre>
               <span id="settingsExportBtn">Export backup</span>
             </button>
             <button type="button" class="settings-data-btn" onclick="exportToGoogleDrive()">
-              <svg viewBox="0 0 87.3 78" width="16" height="16" xmlns="http://www.w3.org/2000/svg"><path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/><path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0-1.2 4.5h27.5z" fill="#00ac47"/><path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/><path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/><path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/><path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/></svg>
+              <img class="backend-icon-img" src="https://www.gstatic.com/images/branding/productlogos/drive_2026/v1/web-48dp/logo_drive_2026_color_2x_web_48dp.png" alt="Google Drive" width="16" height="16">
               <span id="settingsDriveExportBtn">Save to Google Drive</span>
             </button>
             <div class="drive-backup-link" id="driveBackupLink" style="display:none"></div>
@@ -780,6 +805,10 @@ bun run server.js</pre>
               <span data-icon="upload" data-size="16"></span>
               <span id="settingsImportBtn">Import backup</span>
             </button>
+            <div class="import-progress" id="importProgress" style="display:none">
+              <div class="import-progress-text" id="importProgressText"></div>
+              <div class="import-progress-bar"><div class="import-progress-fill" id="importProgressFill"></div></div>
+            </div>
             <input type="file" id="backupFileInput" accept=".json" style="display:none">
           </div>
         </div>

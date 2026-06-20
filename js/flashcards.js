@@ -1111,18 +1111,29 @@ window.revealCard = function() {
   document.getElementById('practiceButtons').style.display = 'flex';
 };
 
+let _ratingInProgress = false;
 window.rateCard = async function(rating) {
+  if (_ratingInProgress) return;
   if (sessionQueue.length === 0) return;
-  const card = sessionQueue.shift();
-  const now = new Date();
-  const updates = fsrsUpdate(card, rating, now);
-  Object.assign(card, updates);
-  const idx = allCards.findIndex(c => c.id === card.id);
-  if (idx >= 0) Object.assign(allCards[idx], updates);
-  if (state.db.connected) await state.db.from('flashcards').update(updates).eq('id', card.id);
-  sessionDone++;
-  if (rating >= 3) sessionCorrect++;
-  showNextCard();
+  _ratingInProgress = true;
+  // Disable buttons visually while processing
+  document.querySelectorAll('#practiceButtons .rating-btn').forEach(b => b.disabled = true);
+  const headerLogo = document.querySelector('.practice-header-logo');
+  if (headerLogo) headerLogo.classList.add('spinning');
+  try {
+    const card = sessionQueue.shift();
+    const now = new Date();
+    const updates = fsrsUpdate(card, rating, now);
+    Object.assign(card, updates);
+    const idx = allCards.findIndex(c => c.id === card.id);
+    if (idx >= 0) Object.assign(allCards[idx], updates);
+    if (state.db.connected) await state.db.from('flashcards').update(updates).eq('id', card.id);
+    sessionDone++;
+    if (rating >= 3) sessionCorrect++;
+    showNextCard();
+  } finally {
+    _ratingInProgress = false;
+  }
 };
 
 window.endPractice = function() {
@@ -1882,6 +1893,9 @@ window.openImportModal = async function(presetDeck) {
               <option value="__new">+ ${t('flashcards.new_deck')}</option>
             </select>
           </label>
+          <div id="importNewDeckWrap" class="import-new-deck-wrap" style="display:none">
+            <input type="text" id="importNewDeckName" class="import-new-deck-input" placeholder="${t('flashcards.import_new_deck_prompt')}">
+          </div>
           <label class="import-config-label">${t('flashcards.import_type')}
             <select id="importTypeSelect" class="page-sort">
               <option value="flashcard">${t('flashcards.import_flashcards')}</option>
@@ -1896,7 +1910,7 @@ window.openImportModal = async function(presetDeck) {
             <span>${t('flashcards.import_step1')}</span>
           </div>
           <div class="dc-prompt-box">
-            <pre class="dc-prompt-text" id="importPromptText"></pre>
+            <textarea class="dc-prompt-text" id="importPromptText" rows="6" spellcheck="false"></textarea>
             <button class="dc-copy-btn" id="importCopyBtn">
               <span class="import-copy-icon">${lucideIcon('copy', 15)}</span>
               <span id="importCopyLabel">${t('flashcards.import_copy')}</span>
@@ -1950,6 +1964,8 @@ window.openImportModal = async function(presetDeck) {
   const optionsDiv = overlay.querySelector('#importOptions');
   const flowDiv = overlay.querySelector('#importFlow');
   const deckSelect = overlay.querySelector('#importDeckSelect');
+  const newDeckWrap = overlay.querySelector('#importNewDeckWrap');
+  const newDeckInput = overlay.querySelector('#importNewDeckName');
   const typeSelect = overlay.querySelector('#importTypeSelect');
   const promptPre = overlay.querySelector('#importPromptText');
   const copyBtn = overlay.querySelector('#importCopyBtn');
@@ -1972,14 +1988,18 @@ window.openImportModal = async function(presetDeck) {
   let itemStates = []; // {included: bool} per item
 
   function selectedDeck() {
-    return deckSelect.value === '__new' ? null : deckSelect.value;
+    if (deckSelect.value === '__new') {
+      const name = newDeckInput.value.trim();
+      return name || null;
+    }
+    return deckSelect.value;
   }
   function selectedType() { return typeSelect.value; }
 
   function updatePrompt() {
     const deck = selectedDeck() || 'General';
     const type = selectedType();
-    promptPre.textContent = buildImportPrompt(importMode, deck, type);
+    promptPre.value = buildImportPrompt(importMode, deck, type);
   }
 
   // Auto-detect type from selected deck
@@ -1997,6 +2017,11 @@ window.openImportModal = async function(presetDeck) {
     optionsDiv.style.display = 'none';
     flowDiv.style.display = '';
     overlay.querySelector('.dc-subtitle').style.display = 'none';
+    // If no existing decks, __new is auto-selected — show the input immediately
+    if (deckSelect.value === '__new') {
+      newDeckWrap.style.display = '';
+      newDeckInput.focus();
+    }
     autoDetectType();
     updatePrompt();
   }
@@ -2008,26 +2033,22 @@ window.openImportModal = async function(presetDeck) {
   // Deck/type change → regenerate prompt
   deckSelect.addEventListener('change', () => {
     if (deckSelect.value === '__new') {
-      const name = prompt(t('flashcards.import_new_deck_prompt'));
-      if (name && name.trim()) {
-        const opt = document.createElement('option');
-        opt.value = name.trim();
-        opt.textContent = name.trim();
-        opt.selected = true;
-        deckSelect.insertBefore(opt, deckSelect.querySelector('[value="__new"]'));
-      } else {
-        deckSelect.value = allDecks[0] || 'General';
-      }
+      newDeckWrap.style.display = '';
+      newDeckInput.value = '';
+      newDeckInput.focus();
+    } else {
+      newDeckWrap.style.display = 'none';
     }
     autoDetectType();
     updatePrompt();
   });
   typeSelect.addEventListener('change', updatePrompt);
+  newDeckInput.addEventListener('input', updatePrompt);
 
   // Copy prompt
   copyBtn.addEventListener('click', async () => {
     try {
-      await navigator.clipboard.writeText(promptPre.textContent);
+      await navigator.clipboard.writeText(promptPre.value);
       copyLabel.textContent = t('flashcards.import_copied');
       copyIcon.innerHTML = lucideIcon('clipboard-check', 15);
       setTimeout(() => {
@@ -2035,11 +2056,7 @@ window.openImportModal = async function(presetDeck) {
         copyIcon.innerHTML = lucideIcon('copy', 15);
       }, 2000);
     } catch {
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(promptPre);
-      sel.removeAllRanges();
-      sel.addRange(range);
+      promptPre.select();
     }
   });
 

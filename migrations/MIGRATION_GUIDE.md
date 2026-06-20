@@ -1,34 +1,130 @@
 # Migration Guide
 
-## Schema Strategy
+## Version System
 
-DeLaClaw maintains two parallel paths for database setup:
+DeLaClaw uses a **single version number** for both the app and the database schema, stored in two places:
 
-### New Users → `sql/initial_schema.sql`
-A single file containing the complete current schema. Generated via `supabase db pull`. Run it once in the Supabase SQL Editor.
+- **`VERSION`** file (repo root) — `latest` field is the app version
+- **`settings.schema_version`** (Supabase / Local) — DB version, bumped by migrations
 
-### Existing Users → `migrations/NNN_*.sql`
-Incremental migration files applied in order.
+### Format
 
-**Rule:** whenever you add a migration, also update `sql/initial_schema.sql` (and `server/schema.sql` for SQLite) so all three stay in sync.
+`X.YYY` — e.g. `1.098`, `1.099`, `2.000`. Minor increments for features/fixes, major bump for breaking schema changes.
 
-### Local Backend
-`server/schema.sql` is the SQLite equivalent of `sql/initial_schema.sql`. The Bun server applies it on startup with `CREATE TABLE IF NOT EXISTS`, so local users always get the latest schema automatically.
+### Compatibility Fields (VERSION file)
+
+| Field | Meaning |
+|---|---|
+| `latest` | Current app version — bumped on every commit |
+| `latest_compat` | Minimum DB version for full feature support |
+| `latest_compat_deprec` | Minimum DB version that won't break the app |
+
+The app checks `schema_version` on Supabase connect and shows:
+- **Red banner** if DB < `latest_compat_deprec` — app may not work
+- **Amber banner** if DB < `latest_compat` — some features unavailable
+- Nothing if DB >= `latest_compat`
 
 ---
 
-## Supabase API Exposure (October 2026)
+## How Migrations Work Per Backend
 
-Starting **October 30, 2026**, new tables in the `public` schema won't be exposed to PostgREST / supabase-js by default. Any migration that creates a new table must include an explicit GRANT:
+| Backend | Schema source | Migration strategy | User action required |
+|---|---|---|---|
+| **Supabase** | `sql/supabase_schema.sql` (Postgres DDL) | Incremental `.sql` files in `migrations/`, run manually in the SQL Editor | Yes — run pending migration files in order |
+| **Local** | `server/schema.sql` (SQLite DDL) | `CREATE TABLE IF NOT EXISTS` on server startup. New columns need manual migration or DB reset | No for new tables. New columns on existing tables: yes |
+| **Google Drive** | Per-table JSON files in Drive | JS migration functions run on connect when `schema_version` is behind. New fields handled gracefully (undefined + defaults) | No — automatic on connect |
+| **Demo** | Schemaless (in-memory) | Same as Drive — new fields are simply absent on old objects | No — automatic |
 
-```sql
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.your_table TO anon, authenticated;
+### Supabase
+
+The primary migration path. Migration files live in `migrations/` and are named by target version:
+
 ```
+migrations/1.099_enable_realtime.sql
+migrations/1.102_add_lists.sql
+```
+
+Each migration ends with:
+```sql
+UPDATE settings SET value = 'X.YYY', updated_at = now()
+WHERE key = 'schema_version';
+```
+
+**New installs:** run `sql/supabase_schema.sql` once — it includes all migrations folded in and sets `schema_version` to the latest version.
+
+**Existing installs:** run pending migration files in order in the Supabase SQL Editor.
+
+### Local (Bun + SQLite)
+
+`server/schema.sql` is the SQLite equivalent of the Supabase schema. The Bun server applies it on startup with `CREATE TABLE IF NOT EXISTS`, so new tables are created automatically.
+
+**Limitation:** `CREATE TABLE IF NOT EXISTS` doesn't add new columns to existing tables. If a migration adds a column, local users need to either:
+- Run the SQLite equivalent manually (`ALTER TABLE ... ADD COLUMN ...`)
+- Delete the SQLite DB file and let the server recreate it (loses data)
+
+Auto-migration on server start is possible but not yet implemented.
+
+### Google Drive & Demo
+
+Google Drive stores data as per-table JSON files in a `DeLaClaw/` folder. When the app adds a new field, old records have `undefined` for that field — the app handles this with default values or conditional checks, same as Demo.
+
+For structural changes (new tables, renamed fields, table splits), Drive uses **JS migration functions** defined in `migrations/drive-migrations.js`. They run on connect when `schema_version` in `settings.json` is behind the app version. These are JavaScript transforms — not SQL — that modify the in-memory store. Example:
+
+```js
+export const DRIVE_MIGRATIONS = {
+  '1.140': async (store) => {
+    // New table
+    if (!store.texts) store.texts = [];
+  },
+  '1.145': async (store) => {
+    // Rename field
+    (store.todos || []).forEach(t => {
+      t.priority = t.importance;
+      delete t.importance;
+    });
+  },
+};
+```
+
+Migration runner behaviour:
+1. **Backup first** — before any migration runs, all table data is saved to `backup-v{currentVersion}.json` in the DeLaClaw/ Drive folder. This is a full snapshot that can be used for manual recovery.
+2. **Sequential execution** — migrations run in version order. After each one succeeds, `schema_version` is bumped in `settings.json` and all tables are flushed to Drive.
+3. **Safe resume** — if a migration fails mid-batch, `schema_version` reflects the last fully-applied step. Next connect retries from where it stopped, and the backup is still intact.
+
+Demo mode is truly schemaless with no migration mechanism — data doesn't persist across refresh, so there's nothing to migrate.
+
+---
+
+## Writing a Migration
+
+1. Create `migrations/<version>_<description>.sql`
+2. Write the SQL (see template below)
+3. Bump `latest` in `VERSION` to match
+4. If the migration adds required schema, bump `latest_compat` (or `latest_compat_deprec` if breaking)
+5. Update `sql/supabase_schema.sql` to include the change for new installs
+6. Update `server/schema.sql` (SQLite equivalent) if applicable
+7. If the new field is used in app code, ensure it handles `undefined` / missing values for Drive and Demo backends
+8. If adding a new CHECK constraint, update `CHECK_CONSTRAINTS` in `js/adapters/demo.js` (test 31 enforces parity)
+9. If the change is structural (new table, renamed field, table split), add a matching entry in `migrations/drive-migrations.js`
+10. Commit — the pre-commit and commit-msg hooks will verify
 
 ### Migration Template
 
 ```sql
--- Migration NNN: Description
+-- Migration X.YYY: Description
+
+-- ... your DDL / DML here ...
+
+-- Bump schema version
+UPDATE settings SET value = 'X.YYY', updated_at = now()
+WHERE key = 'schema_version';
+```
+
+### New Table Template (Supabase)
+
+Starting October 2026, new `public` tables require explicit grants:
+
+```sql
 CREATE TABLE IF NOT EXISTS public.your_table (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   -- columns...
@@ -43,10 +139,40 @@ CREATE POLICY "your_table_policy" ON public.your_table
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.your_table TO anon, authenticated, service_role;
 ```
 
-After creating the migration, update:
-1. `sql/initial_schema.sql` — add the table + RLS/grants
-2. `server/schema.sql` — add the SQLite equivalent
-3. `js/main.js` — add to `BACKUP_TABLES` if applicable
-4. `js/demo-data.js` — add empty array entry
+After creating the table, also add it to:
+- `js/main.js` — `BACKUP_TABLES` array
+- `js/demo-data.js` — empty array entry
+- Realtime publication (if cross-device sync needed):
+  ```sql
+  ALTER PUBLICATION supabase_realtime ADD TABLE your_table;
+  ```
 
-Ref: [Supabase changelog — May 2026](https://supabase.com/changelog)
+---
+
+## Git Hooks
+
+Hooks live in `.githooks/` (tracked in the repo). Activate them with:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+| Hook | What it does |
+|---|---|
+| **pre-commit** | Blocks commits without a `VERSION` bump. Auto-regenerates `js/version.js` and updates `sw.js` cache version. Lints staged code for pictographic emoji. |
+| **commit-msg** | Enforces the `Checked:` trailer with impact review tags. See `COMMIT_CHECKLIST.md`. |
+
+---
+
+## Dev / Prod Workflow
+
+| Branch | Deploys to | Supabase instance |
+|---|---|---|
+| `dev` | `dev.delaclaw.pages.dev` | Dev project (testing) |
+| `main` | `delaclaw.com` | Prod project |
+
+1. Write migration on a feature branch
+2. Test against dev Supabase
+3. Merge to `dev`, verify on preview
+4. Merge to `main`, run migration on prod Supabase
+5. Fold migration into `sql/supabase_schema.sql`

@@ -281,7 +281,15 @@ export async function reorderItems({
 // ===================================================================
 export function scrollToAndHighlight(element, color, durationMs = 1500) {
   if (!element) return;
-  element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const header = document.querySelector('.app-header');
+  if (header) {
+    const headerBottom = header.getBoundingClientRect().bottom;
+    const elementTop = element.getBoundingClientRect().top;
+    const offset = elementTop - headerBottom - 8;
+    window.scrollBy({ top: offset, behavior: 'smooth' });
+  } else {
+    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
   if (color) {
     element.style.boxShadow = `0 0 0 2px ${color}`;
     setTimeout(() => { element.style.boxShadow = ''; }, durationMs);
@@ -341,25 +349,6 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     root = wrapper;
   }
 
-  // Auto-expand parent containers to prevent edit area from being clipped
-  const _editList = spanEl.closest('.task-list, .vestiaire-item-list');
-  const _editCard = spanEl.closest('.project-card');
-  const _saved = {};
-  if (_editList) {
-    _saved.listMaxHeight = _editList.style.maxHeight;
-    _saved.listOverflowY = _editList.style.overflowY;
-    _editList.style.maxHeight = 'none';
-    _editList.style.overflowY = 'visible';
-  }
-  if (_editCard) {
-    _saved.cardOverflow = _editCard.style.overflow;
-    _saved.cardZIndex = _editCard.style.zIndex;
-    _saved.cardMaxHeight = _editCard.style.maxHeight;
-    _editCard.style.overflow = 'visible';
-    _editCard.style.zIndex = '20';
-    _editCard.style.maxHeight = 'none';
-  }
-
   if (onStart) onStart();
 
   function autoSize() {
@@ -379,16 +368,6 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     } else if (save && collectExtra) {
       const extra = collectExtra();
       if (extra) await saveFn(originalText, extra);
-    }
-    // Restore parent containers
-    if (_editList) {
-      _editList.style.maxHeight = _saved.listMaxHeight;
-      _editList.style.overflowY = _saved.listOverflowY;
-    }
-    if (_editCard) {
-      _editCard.style.overflow = _saved.cardOverflow;
-      _editCard.style.zIndex = _saved.cardZIndex;
-      _editCard.style.maxHeight = _saved.cardMaxHeight;
     }
     if (onFinish) onFinish();
     delete spanEl.dataset.editing;
@@ -450,6 +429,19 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
       };
       placeCursorAtEnd();
       setTimeout(placeCursorAtEnd, 50);
+
+      // Scroll the textarea into view within the scrollable task list
+      // without changing the deck's maxHeight
+      const parentList = input.closest('.task-list, .vestiaire-item-list');
+      if (parentList) {
+        const parentRect = parentList.getBoundingClientRect();
+        const inputRect = input.getBoundingClientRect();
+        if (inputRect.bottom > parentRect.bottom) {
+          parentList.scrollTop += (inputRect.bottom - parentRect.bottom) + 16;
+        } else if (inputRect.top < parentRect.top) {
+          parentList.scrollTop -= (parentRect.top - inputRect.top) + 16;
+        }
+      }
     });
   });
 }

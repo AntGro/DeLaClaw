@@ -1,0 +1,6 @@
+
+
+# ── Impact checklist (required) ──────────────────────────────
+# Mark irrelevant items with [~]. See COMMIT_CHECKLIST.md.
+# Delete these comment lines before committing.
+Checked: versioning, i18n, docs, readme, checklist, tests, welcome, prompts, xss

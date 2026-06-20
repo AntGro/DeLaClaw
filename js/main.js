@@ -2,13 +2,14 @@ import { lucideIcon } from './icons.js';
 import { initHero, showHero, hideHero, injectGateLogo } from './hero.js';
 import { t, getLang, setLang, nextLang } from './i18n.js';
 import { renderStorm, LOGO_DEFAULTS, animLoading, animLock, animUnlock } from './logo.js';
+import { LOGOS, LABELS } from './backend-logos.js';
 import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY, TAB_VISIBILITY_KEY, TAB_ORDER_KEY } from './supabase.js';
 import db from './db.js';
 import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 
-import { esc, showToast, updateFooterStats, updateTaskListMaxHeight, isEditing } from './utils.js';
+import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals } from './todos.js';
@@ -20,6 +21,7 @@ import { refreshLists, renderLists, initListModals } from './lists.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
 import { HABIT_CATEGORIES_KEY } from './supabase.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
+import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
 
 // ===================================================================
 // BACKEND-SCOPED localStorage — isolate per-backend settings so switching
@@ -100,6 +102,30 @@ function setDemoCategoriesFromData(data) {
   localStorage.setItem('claw_habit_shortnames', '{}');
   localStorage.setItem('claw_cc_vest_shortnames', '{}');
   localStorage.setItem('claw_flash_shortnames', '{}');
+}
+
+// ===================================================================
+// ACTION GUARD — prevents double-fire on async save/add/edit actions.
+// Wraps any async function so concurrent calls are silently dropped.
+// Also adds .saving class on the triggering button for visual feedback
+// (shimmer + disabled appearance via CSS).
+// ===================================================================
+function guard(fn) {
+  let inFlight = false;
+  return async function(...args) {
+    if (inFlight) return;
+    inFlight = true;
+    // Find the triggering button for visual feedback
+    const active = document.activeElement;
+    const btn = (active && active.tagName === 'BUTTON') ? active
+      : document.querySelector('.modal-overlay[style*="flex"] button.modal-save');
+    if (btn) btn.classList.add('saving');
+    try { await fn.apply(this, args); }
+    finally {
+      inFlight = false;
+      if (btn) btn.classList.remove('saving');
+    }
+  };
 }
 
 // ===================================================================
@@ -244,6 +270,12 @@ function switchBackendMode(mode) {
     if (urlLabel) urlLabel.style.visibility = 'hidden';
     if (hintEl) hintEl.textContent = t('login.hint_demo');
     if (submitBtn) submitBtn.textContent = t('login.btn_demo');
+  } else if (mode === 'googledrive') {
+    if (keyField) keyField.style.visibility = 'hidden';
+    if (urlField) urlField.style.visibility = 'hidden';
+    if (urlLabel) urlLabel.style.visibility = 'hidden';
+    if (hintEl) hintEl.textContent = t('login.hint_googledrive');
+    if (submitBtn) submitBtn.textContent = t('login.btn_googledrive');
   } else if (mode === 'local') {
     if (keyField) keyField.style.visibility = 'hidden';
     if (urlField) { urlField.style.visibility = ''; urlField.placeholder = 'http://localhost:3737'; }
@@ -255,7 +287,7 @@ function switchBackendMode(mode) {
     if (keyField) keyField.style.visibility = '';
     if (urlField) { urlField.style.visibility = ''; urlField.placeholder = 'https://xyz.supabase.co'; }
     if (urlLabel) urlLabel.style.visibility = '';
-    if (urlLabelLink) { urlLabelLink.textContent = t('login.url_label'); urlLabelLink.href = 'https://supabase.com/dashboard/projects'; }
+    if (urlLabelLink) { urlLabelLink.textContent = t('login.url_label'); urlLabelLink.href = 'https://supabase.com/dashboard/projects'; urlLabelLink.dataset.tooltip = t('toast.url_tooltip'); }
     if (hintEl) hintEl.textContent = t('login.hint_supabase');
     if (submitBtn) submitBtn.textContent = t('login.connect');
   }
@@ -265,10 +297,26 @@ function switchBackendMode(mode) {
 // GATE LOGIC
 // ===================================================================
 function initGate() {
+  // Populate backend logo placeholders from single source of truth
+  document.querySelectorAll('[data-backend-logo]').forEach(el => {
+    const mode = el.dataset.backendLogo;
+    const size = parseInt(el.dataset.logoSize, 10) || 18;
+    if (LOGOS[mode]) el.innerHTML = LOGOS[mode](size);
+  });
+  document.querySelectorAll('.backend-option[data-mode]').forEach(btn => {
+    const mode = btn.dataset.mode;
+    if (LOGOS[mode] && !btn.querySelector('svg, .backend-icon-img')) {
+      const labelSpan = btn.querySelector('.backend-option-label');
+      if (labelSpan) btn.insertAdjacentHTML('afterbegin', LOGOS[mode](16));
+      else btn.innerHTML = LOGOS[mode](16);
+    }
+  });
   // Wire up backend picker
   document.querySelectorAll('.backend-option').forEach(btn => {
     btn.addEventListener('click', () => switchBackendMode(btn.dataset.mode));
   });
+  // Wire up compare link
+  document.getElementById('backendCompareLink')?.addEventListener('click', showCompareModal);
   // Hero demo button: click starts demo directly
   const heroDemoBtn = document.getElementById('heroDemoBtn');
   if (heroDemoBtn) {
@@ -281,22 +329,49 @@ function initGate() {
   const saved = getStayConnectedCreds();
   if (saved) {
     // Restore backend mode
-    switchBackendMode(saved.mode || 'supabase');
+    switchBackendMode(saved.mode || 'googledrive');
     // Inject static logo (hero is skipped)
     injectGateLogo();
-    // Show a brief connecting message, then auto-connect
-    document.getElementById('loginForm').style.display = 'block';
-    document.getElementById('loginError').textContent = t('toast.reconnecting');
+    // Hide the login form entirely during auto-reconnect — only show the gate logo
+    document.getElementById('loginForm').style.display = 'none';
     document.getElementById('username').value = saved.url;
     document.getElementById('password').value = saved.key;
     autoConnect(saved.url, saved.key, saved.mode);
     return;
   }
-  // Set login hash (user is on the login page)
-  history.replaceState(null, '', '#login');
-  showHero();
-  document.getElementById('loginForm').style.display = 'block';
-  document.getElementById('username').focus();
+  // Check if returning from signup overlay with a pre-selected backend
+  const signupMode = localStorage.getItem('claw_signup_mode');
+  localStorage.removeItem('claw_signup_mode');
+  // Set login hash (user is on the login page) — preserve #setup if present
+  // Skip hero when returning from signup — go straight to the login form
+  if (window.location.hash !== '#setup' && !signupMode) {
+    history.replaceState(null, '', '#login');
+    showHero();
+  }
+  switchBackendMode(signupMode || 'googledrive');
+  // First visit: show welcome panel instead of login form
+  // Skip welcome and go straight to login form if coming from signup
+  const gateWelcome = document.getElementById('gateWelcome');
+  if (signupMode) {
+    gateWelcome.style.display = 'none';
+    document.getElementById('loginForm').style.display = 'flex';
+    document.getElementById('gateGuideLink').style.display = '';
+  } else {
+    gateWelcome.style.display = 'block';
+    document.getElementById('loginForm').style.display = 'none';
+    document.getElementById('gateGuideLink').style.display = 'none';
+  }
+  // "Try the demo" button
+  document.getElementById('gateWelcomeDemo').addEventListener('click', () => {
+    switchBackendMode('demo');
+    doLogin();
+  });
+  // "I already have an account" link
+  document.getElementById('gateWelcomeLogin').addEventListener('click', () => {
+    gateWelcome.style.display = 'none';
+    document.getElementById('loginForm').style.display = 'flex';
+    document.getElementById('gateGuideLink').style.display = '';
+  });
   // Update API Key link when project URL changes
   const _urlInput = document.getElementById('username');
   const _keyLink = document.getElementById('keyLabelLink');
@@ -326,11 +401,12 @@ function initGate() {
 
 async function autoConnect(url, key, mode) {
   try {
-    await connect(url, key, mode, /* skipDemoChooser */ true);
+    await connect(url, key, mode, /* skipDemoChooser */ true, { silentAuth: mode === 'googledrive' });
   } catch (e) {
-    // Stored credentials are stale — clear them and show the form
+    // Stored credentials are stale — clear them and show the full login form
     clearStayConnectedCreds();
     showHero();
+    document.getElementById('loginForm').style.display = 'flex';
     document.getElementById('loginError').textContent = t('toast.session_expired');
     document.getElementById('username').value = '';
     document.getElementById('password').value = '';
@@ -344,6 +420,7 @@ function getStayConnectedCreds() {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && parsed.mode === 'demo') return parsed;
+    if (parsed && parsed.mode === 'googledrive') return parsed;
     if (parsed && parsed.url && (parsed.key || parsed.mode === 'local')) return parsed;
     return null;
   } catch { return null; }
@@ -357,7 +434,12 @@ function clearStayConnectedCreds() {
   localStorage.removeItem(STAY_CONNECTED_KEY);
 }
 
-function disconnect() {
+async function disconnect() {
+  // Force-save and clean up Drive adapter before disconnecting
+  if (state.driveMode && state.driveAdapter) {
+    try { await state.driveAdapter.forceSave(); } catch {}
+    if (state.driveAdapter.destroy) state.driveAdapter.destroy();
+  }
   clearStayConnectedCreds();
   location.reload();
 }
@@ -375,7 +457,7 @@ async function doLogin() {
   const stayConnected = document.getElementById('stayConnected').checked;
   const err = document.getElementById('loginError');
   const mode = getSelectedMode();
-  if (mode !== 'demo' && (!url || (!key && mode !== 'local'))) { err.textContent = t('toast.enter_name'); return; }
+  if (mode !== 'demo' && mode !== 'googledrive' && (!url || (!key && mode !== 'local'))) { err.textContent = t('toast.enter_name'); return; }
   // Detect org URL
   if (/supabase\.com\/dashboard\/org\//i.test(url)) {
     err.innerHTML = t('toast.org_url_tip');
@@ -405,6 +487,10 @@ async function doLogin() {
   } catch (e) {
     if (e.message === 'project_paused') {
       err.innerHTML = `${t('toast.project_paused')} <a href="${e.dashboardUrl}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;">Check on Supabase ↗</a>`;
+    } else if (e.message === 'google_not_loaded') {
+      err.textContent = t('login.drive_gis_blocked') || 'Google sign-in is blocked. Disable your ad blocker or allow third-party scripts.';
+    } else if (e.message === 'popup_closed_by_user' || e.message === 'access_denied') {
+      err.textContent = t('login.drive_cancelled') || 'Google sign-in was cancelled.';
     } else {
       err.textContent = t('toast.connection_failed');
     }
@@ -412,6 +498,26 @@ async function doLogin() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Wrap all save/add/submit actions with guard() to prevent double-fire
+  const guardedNames = [
+    'saveNewBirthday', 'saveEditBirthday',
+    'saveNewDraft', 'saveEditedProposal', 'saveNewFlashcard', 'saveEditFlashcard',
+    'saveNewText', 'saveEditText', 'submitFeedback', 'submitTextReview',
+    'saveNewHabit', 'saveEditHabit', 'saveHabitCompletion', 'addHabitFromInput',
+    'saveNewHabitCategory', 'saveEditHabitCategory',
+    'saveNewList', 'saveEditList',
+    'addTask', 'saveNewProject', 'saveEditProject', 'submitRevision',
+    'saveNewCategory', 'saveEditCategory', 'submitSnooze', 'addTodoToCategory',
+    'saveNewVestiaire', 'saveEditVestiaire',
+    'saveNewVestiaireCategory', 'saveEditVestiaireCategory',
+    'executeDeleteConfirm',
+    'quickAddDraft', 'quickAddListItem',
+    'saveGlobalPrompt', 'saveProjectPrompt',
+  ];
+  for (const name of guardedNames) {
+    if (typeof window[name] === 'function') window[name] = guard(window[name]);
+  }
+
   initGate();
   document.getElementById('loginForm').addEventListener('submit', e => {
     e.preventDefault();
@@ -443,8 +549,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const setupBack = document.getElementById('setupBack');
   const setupCloudDone = document.getElementById('setupCloudDone');
   const setupLocalDone = document.getElementById('setupLocalDone');
+  const setupDriveDone = document.getElementById('setupDriveDone');
 
   function showGuide() {
+    hideHero();
+    window.scrollTo(0, 0);
     if (gateBox) gateBox.style.display = 'none';
     if (guidePanel) guidePanel.style.display = '';
     document.body.style.overflow = 'hidden';
@@ -459,14 +568,18 @@ document.addEventListener('DOMContentLoaded', () => {
   function showSteps(path) {
     const cloud = document.getElementById('setupCloudSteps');
     const local = document.getElementById('setupLocalSteps');
+    const drive = document.getElementById('setupDriveSteps');
     const cardCloud = document.getElementById('setupPathCloud');
     const cardLocal = document.getElementById('setupPathLocal');
+    const cardDrive = document.getElementById('setupPathDrive');
+    [cloud, local, drive].forEach(el => el && (el.style.display = 'none'));
+    [cardCloud, cardLocal, cardDrive].forEach(el => el?.classList.remove('active'));
     if (path === 'cloud') {
-      cloud.style.display = ''; local.style.display = 'none';
-      cardCloud.classList.add('active'); cardLocal.classList.remove('active');
+      cloud.style.display = ''; cardCloud.classList.add('active');
+    } else if (path === 'drive') {
+      drive.style.display = ''; cardDrive.classList.add('active');
     } else {
-      local.style.display = ''; cloud.style.display = 'none';
-      cardLocal.classList.add('active'); cardCloud.classList.remove('active');
+      local.style.display = ''; cardLocal.classList.add('active');
     }
   }
 
@@ -474,8 +587,10 @@ document.addEventListener('DOMContentLoaded', () => {
   if (setupBack) setupBack.addEventListener('click', hideGuide);
   if (setupCloudDone) setupCloudDone.addEventListener('click', hideGuide);
   if (setupLocalDone) setupLocalDone.addEventListener('click', hideGuide);
+  if (setupDriveDone) setupDriveDone.addEventListener('click', hideGuide);
   document.getElementById('setupPathCloud')?.addEventListener('click', () => showSteps('cloud'));
   document.getElementById('setupPathLocal')?.addEventListener('click', () => showSteps('local'));
+  document.getElementById('setupPathDrive')?.addEventListener('click', () => showSteps('drive'));
 
   // ── Schema copy + toggle ──
   let SUPABASE_SCHEMA = '';
@@ -714,7 +829,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ===================================================================
 // UNLOCK & INIT APP
 // ===================================================================
-async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
+async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { silentAuth = false } = {}) {
   state.supabaseUrl = url;
   state.supabaseKey = key;
 
@@ -750,6 +865,28 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
     state.demoAdapter = adapter;
     state.demoMode = true;
     setDemoCategoriesFromData(demoData);
+  } else if (mode === 'googledrive') {
+    const { createDriveAdapter } = await import('./adapters/drive.js');
+    const errEl = document.getElementById('loginError');
+    const progressEl = document.getElementById('driveProgress');
+    const progressText = document.getElementById('driveProgressText');
+    const progressFill = document.getElementById('driveProgressFill');
+    adapter = await createDriveAdapter(GOOGLE_CLIENT_ID, (ev) => {
+      if (!ev) return;
+      // Hide error text, show progress bar
+      if (errEl) errEl.textContent = '';
+      if (progressEl) progressEl.style.display = '';
+      if (progressText) progressText.textContent = ev.message || '';
+      if (progressFill && ev.total > 0) {
+        progressFill.style.width = `${Math.round((ev.progress / ev.total) * 100)}%`;
+      } else if (progressFill && !ev.total) {
+        // Indeterminate: pulse at 40%
+        progressFill.style.width = '40%';
+      }
+      if (ev.status === 'ready' && progressEl) progressEl.style.display = 'none';
+    }, { silent: silentAuth });
+    state.driveAdapter = adapter;
+    state.driveMode = true;
   } else if (mode === 'local') {
     adapter = createRestAdapter(url);
     // Test connection with raw adapter BEFORE wrapping with offline cache
@@ -777,6 +914,15 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
   }
   db.setAdapter(adapter);
 
+  // Flush pending Drive saves and stop polling on page close
+  if (mode === 'googledrive' && adapter.forceSave) {
+    window.addEventListener('beforeunload', () => {
+      // Force-save first, then clean up — destroy() clears timers
+      adapter.forceSave().catch(() => {});
+      if (adapter.destroy) adapter.destroy();
+    });
+  }
+
   document.getElementById('gate').style.display = 'none';
   document.getElementById('gateToolbar').style.display = 'none';
   hideHero();
@@ -785,13 +931,27 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
   // Re-render logos now that the app is visible and layout is computed
   initLogos();
 
-  // Set Supabase dashboard link (hide in local/demo mode)
+  // Set Supabase dashboard link (hide — replaced by footer backend badge)
   const dashLink = document.getElementById('supabaseDashLink');
-  if (mode === 'local' || mode === 'demo') {
-    dashLink.style.display = 'none';
-  } else {
-    const projectRef = url.replace('https://', '').replace('.supabase.co', '');
-    dashLink.href = `https://supabase.com/dashboard/project/${projectRef}`;
+  dashLink.style.display = 'none';
+
+  // Footer backend badge — clickable for backends with a meaningful external URL
+  const footerBackend = document.getElementById('footerBackend');
+  if (footerBackend && LOGOS[mode]) {
+    const logo = LOGOS[mode](14);
+    const label = LABELS[mode] || mode;
+    let href = null;
+    if (mode === 'supabase') {
+      const projectRef = url.replace('https://', '').replace('.supabase.co', '');
+      href = `https://supabase.com/dashboard/project/${projectRef}`;
+    } else if (mode === 'googledrive') {
+      href = 'https://drive.google.com';
+    }
+    if (href) {
+      footerBackend.innerHTML = `<a href="${href}" target="_blank" rel="noopener">${logo} <span>${label} ↗</span></a>`;
+    } else {
+      footerBackend.innerHTML = `${logo} <span>${label}</span>`;
+    }
   }
 
 
@@ -830,8 +990,8 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
   // Clean up any legacy localStorage ideas (one-time)
   localStorage.removeItem(IDEAS_KEY);
 
-  // Realtime subscription (skip for demo — no backend)
-  if (mode !== 'demo') {
+  // Realtime subscription (skip for demo/googledrive — no Postgres backend)
+  if (mode !== 'demo' && mode !== 'googledrive') {
     state.db.channel('tasks-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => { if (!isEditing()) { refreshAll().then(() => markLastUpdated()); } })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, async () => { if (isEditing()) return; await loadProjects(); buildProjectCards(); initProjectDragDrop(); await refreshAll(); markLastUpdated(); })
@@ -844,6 +1004,31 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'flashcards' }, () => refreshFlashcards().then(() => markLastUpdated()))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'flashcard_notes' }, () => refreshFlashcards().then(() => markLastUpdated()))
       .subscribe();
+  }
+
+  // Drive: wire poll-based change detection to the same refresh functions
+  if (mode === 'googledrive' && state.driveAdapter) {
+    const driveRefreshMap = {
+      tasks: () => refreshAll(),
+      projects: async () => { await loadProjects(); buildProjectCards(); initProjectDragDrop(); await refreshAll(); },
+      prompts: () => loadPrompts(),
+      todos: () => refreshTodos(),
+      habits: () => refreshHabits(),
+      habit_completions: () => refreshHabits(),
+      birthdays: () => refreshBirthdays(),
+      vestiaire: () => refreshVestiaire(),
+      flashcards: () => refreshFlashcards(),
+      flashcard_notes: () => refreshFlashcards(),
+      lists: () => refreshLists(),
+      list_items: () => refreshLists(),
+      settings: () => loadSettings(),
+    };
+    state.driveAdapter._onExternalChange = (table) => {
+      if (isEditing()) return;
+      const fn = driveRefreshMap[table];
+      if (fn) fn().then(() => markLastUpdated()).catch(e => console.warn('Drive refresh error:', e));
+      else markLastUpdated();
+    };
   }
 
   // Initialize TODOs
@@ -869,6 +1054,13 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false) {
   // Initialize Lists
   initListModals();
   await refreshLists();
+
+  // Re-render Welcome now that all data (birthdays, habits, flashcards…) is loaded.
+  // The initial switchView() call above rendered Welcome before async data was ready.
+  if (state.currentView === 'welcome') {
+    await refreshWelcome();
+    renderWelcome();
+  }
 
   markLastUpdated();
 
@@ -926,12 +1118,19 @@ function initDemoBanner() {
     refreshWelcome();
   });
 
+  // Start my own space — opens login overlay on top of demo
+  const startOwnBtn = document.createElement('button');
+  startOwnBtn.className = 'demo-banner-start';
+  startOwnBtn.textContent = t('demo.start_own');
+  startOwnBtn.addEventListener('click', () => showSignupOverlay());
+
   // Exit demo
   const exitBtn = document.createElement('button');
   exitBtn.textContent = t('demo.exit');
   exitBtn.addEventListener('click', () => disconnect());
 
   right.appendChild(toggleBtn);
+  right.appendChild(startOwnBtn);
   right.appendChild(exitBtn);
   banner.appendChild(left);
   banner.appendChild(right);
@@ -1089,26 +1288,11 @@ function updateStaticLabels() {
       el.innerHTML = svgHtml + ' <span class="tab-label">' + t(key) + '</span>';
     }
   }
-  // Login — mode-aware labels
+  // Login — re-apply all mode-specific labels (hint, button, url/key labels, visibility)
   const loginMode = getSelectedMode();
-  const urlLabel = document.getElementById('urlLabel');
-  const keyLabel = document.getElementById('keyLabel');
-  const urlLabelLink = document.getElementById('urlLabelLink');
-  const keyLabelLink = document.getElementById('keyLabelLink');
-  const loginHint = document.getElementById('loginHint');
-  if (urlLabelLink) { urlLabelLink.textContent = t(loginMode === 'local' ? 'login.url_label_local' : 'login.url_label'); urlLabelLink.dataset.tooltip = t('toast.url_tooltip'); }
-  else if (urlLabel) urlLabel.textContent = t(loginMode === 'local' ? 'login.url_label_local' : 'login.url_label');
-  if (keyLabelLink) keyLabelLink.textContent = t('login.key_label');
-  else if (keyLabel) keyLabel.textContent = t('login.key_label');
-  if (loginMode === 'demo') {
-    if (loginHint) loginHint.textContent = t('login.hint_demo');
-  } else {
-    if (loginHint) loginHint.textContent = t(loginMode === 'local' ? 'login.hint_local' : 'login.hint_supabase');
-  }
+  switchBackendMode(loginMode);
   const stayLabel = document.querySelector('.stay-connected-label span');
   if (stayLabel) stayLabel.textContent = t('login.stay_connected');
-  const connectBtn = document.querySelector('#loginForm button[type="submit"]');
-  if (connectBtn) connectBtn.textContent = t(loginMode === 'demo' ? 'login.btn_demo' : 'login.connect');
   // Search inputs
   const searchMap = {
     'projectsView': 'common.search',
@@ -1132,8 +1316,7 @@ function updateStaticLabels() {
   const todoFilterMap = { pending: 'todos.pending', done: 'todos.done', all: 'todos.all' };
   document.querySelectorAll('#todoFilters .filter-btn').forEach(btn => {
     const f = btn.dataset.filter;
-    if (f === 'flagged') { const svg = btn.querySelector('svg'); btn.innerHTML = (svg ? svg.outerHTML : '') + ' ' + t('todos.flagged'); }
-    else if (f === 'outdated') { const svg = btn.querySelector('svg'); btn.innerHTML = (svg ? svg.outerHTML : '') + ' ' + t('todos.outdated'); }
+    if (f === 'outdated') { const svg = btn.querySelector('svg'); btn.innerHTML = (svg ? svg.outerHTML : '') + ' ' + t('todos.outdated'); }
     else if (todoFilterMap[f]) btn.textContent = t(todoFilterMap[f]);
   });
   // Todo sort
@@ -1187,6 +1370,8 @@ function updateStaticLabels() {
   // Setup Guide
   const guideEl = document.getElementById('gateGuideLink');
   if (guideEl) guideEl.textContent = t('setup.guide_link');
+  const compareLink = document.getElementById('backendCompareLink');
+  if (compareLink) compareLink.textContent = t('compare.link');
   const setupBackLabel = document.getElementById('setupBackLabel');
   if (setupBackLabel) setupBackLabel.textContent = t('setup.back');
   const setupTitle = document.getElementById('setupTitle');
@@ -1197,8 +1382,7 @@ function updateStaticLabels() {
   if (setupCloudName) setupCloudName.textContent = t('setup.cloud_name');
   const setupCloudDesc = document.getElementById('setupCloudDesc');
   if (setupCloudDesc) setupCloudDesc.textContent = t('setup.cloud_desc');
-  const setupCloudBadge = document.getElementById('setupCloudBadge');
-  if (setupCloudBadge) setupCloudBadge.textContent = t('setup.cloud_badge');
+  // setupCloudBadge removed — no longer recommending a single backend
   const setupLocalName = document.getElementById('setupLocalName');
   if (setupLocalName) setupLocalName.textContent = t('setup.local_name');
   const setupLocalDesc = document.getElementById('setupLocalDesc');
@@ -1257,6 +1441,19 @@ function updateStaticLabels() {
   if (setupLocal3T) setupLocal3T.textContent = t('setup.local_3_title');
   const setupLocal3D = document.getElementById('setupLocal3Desc');
   if (setupLocal3D) setupLocal3D.innerHTML = t('setup.local_3_desc');
+  // Drive setup guide
+  const setupDriveName = document.getElementById('setupDriveName');
+  if (setupDriveName) setupDriveName.textContent = t('setup.drive_name');
+  const setupDriveDesc = document.getElementById('setupDriveDesc');
+  if (setupDriveDesc) setupDriveDesc.textContent = t('setup.drive_desc');
+  const setupDrive1T = document.getElementById('setupDrive1Title');
+  if (setupDrive1T) setupDrive1T.textContent = t('setup.drive_1_title');
+  const setupDrive1D = document.getElementById('setupDrive1Desc');
+  if (setupDrive1D) setupDrive1D.innerHTML = t('setup.drive_1_desc');
+  const setupDrive2T = document.getElementById('setupDrive2Title');
+  if (setupDrive2T) setupDrive2T.textContent = t('setup.drive_2_title');
+  const setupDrive2D = document.getElementById('setupDrive2Desc');
+  if (setupDrive2D) setupDrive2D.innerHTML = t('setup.drive_2_desc');
   document.querySelectorAll('.setup-done-btn:not(#setupLoginBtn)').forEach(btn => btn.textContent = t('setup.done_btn'));
   // Footer
   const dashLink = document.getElementById('supabaseDashLink');
@@ -1380,6 +1577,8 @@ function updateStaticLabels() {
     const val = t(key);
     if (val) el.textContent = val;
   });
+  // Re-render schema banner in new language (if visible)
+  checkSchemaVersion();
 }
 
 // ── Storm Logo Initialization ──
@@ -1852,10 +2051,25 @@ function cmpVer(a, b) {
   return 0;
 }
 
+/** Collect pending migration SQL from dbVer up to LATEST_COMPAT. */
+function getPendingMigrationSQL(dbVer) {
+  const versions = Object.keys(SUPABASE_MIGRATIONS)
+    .filter(v => cmpVer(v, dbVer) > 0 && cmpVer(v, LATEST_COMPAT) <= 0)
+    .sort((a, b) => cmpVer(a, b));
+  if (!versions.length) return null;
+  return versions.map(v => SUPABASE_MIGRATIONS[v]).join('\n\n');
+}
+
 function checkSchemaVersion() {
-  if (state.demoMode) return;
+  if (state.demoMode || state.driveMode || !state.db?.connected) {
+    document.getElementById('schema-banner')?.remove();
+    return;
+  }
   const dbVer = state.dbSchemaVersion || '0.00';
-  if (cmpVer(dbVer, LATEST_COMPAT) >= 0) return;
+  if (cmpVer(dbVer, LATEST_COMPAT) >= 0) {
+    dismissSchemaBanner();
+    return;
+  }
 
   document.getElementById('schema-banner')?.remove();
   const banner = document.createElement('div');
@@ -1866,10 +2080,383 @@ function checkSchemaVersion() {
 
   const icon = lucideIcon(isCritical ? 'alert-octagon' : 'alert-triangle', 16);
   const label = isCritical
-    ? `Database v${dbVer} is too old — DeLaClaw may not work correctly. Run pending migrations.`
-    : `Some features are unavailable (DB v${dbVer}, full support needs v${LATEST_COMPAT}). Run pending migrations.`;
-  banner.innerHTML = `${icon}<span>${label}</span><button onclick="this.parentElement.remove()">Dismiss</button>`;
+    ? t('schema.banner_critical', { dbVer, latest: LATEST_COMPAT })
+    : t('schema.banner_warning', { dbVer, latest: LATEST_COMPAT });
+
+  const sql = getPendingMigrationSQL(dbVer);
+  const updateBtn = sql
+    ? `<button onclick="showMigrationModal()">${esc(t('schema.how_to_update'))}</button>`
+    : '';
+  banner.innerHTML = `${icon}<span>${label}</span>${updateBtn}<button onclick="dismissSchemaBanner()">${esc(t('schema.dismiss'))}</button>`;
   document.body.prepend(banner);
+  // Measure actual banner height and expose as CSS variable (handles multi-line text on mobile)
+  const updateSchemaH = () => {
+    if (banner.isConnected) document.body.style.setProperty('--schema-banner-h', banner.offsetHeight + 'px');
+  };
+  requestAnimationFrame(updateSchemaH);
+  const ro = new ResizeObserver(updateSchemaH);
+  ro.observe(banner);
+  banner._schemaRO = ro;
+}
+
+/** Render two version strings with differing characters highlighted. */
+function highlightVersionDiff(dbVer, latest) {
+  function mark(ver, other) {
+    let html = 'v';
+    for (let i = 0; i < ver.length; i++) {
+      if (i < other.length && ver[i] === other[i]) {
+        html += esc(ver[i]);
+      } else {
+        html += `<span class="ver-diff">${esc(ver[i])}</span>`;
+      }
+    }
+    return html;
+  }
+  return { db: mark(dbVer, latest), app: mark(latest, dbVer) };
+}
+
+function showMigrationModal() {
+  const dbVer = state.dbSchemaVersion || '0.00';
+  const sql = getPendingMigrationSQL(dbVer);
+  if (!sql) return;
+
+  // Remove existing modal if any
+  document.getElementById('migrationModal')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'migrationModal';
+  overlay.className = 'modal-overlay visible';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeMigrationModal(); });
+
+  const projectRef = state.supabaseUrl?.replace('https://', '').replace('.supabase.co', '') || '_';
+  const sqlEditorUrl = `https://supabase.com/dashboard/project/${projectRef}/sql/new?skip=true`;
+
+  // Build hint with highlighted version diffs
+  const verHL = highlightVersionDiff(dbVer, LATEST_COMPAT);
+  const hintTemplate = t('schema.modal_hint', { dbVer: '{{DB}}', latest: '{{APP}}' });
+  const hintHTML = esc(hintTemplate).replace('{{DB}}', verHL.db).replace('{{APP}}', verHL.app);
+
+  overlay.innerHTML = `<div class="modal migration-modal">
+    <h2>${LOGOS.supabase(18)} ${esc(t('schema.modal_title'))}</h2>
+    <p class="migration-hint">${hintHTML}</p>
+    <ol class="migration-steps">
+      <li>${t('schema.step_1')}
+        <div class="migration-sql-wrap">
+          <div class="migration-sql-header">
+            <span>SQL</span>
+            <button class="migration-copy-btn" id="migrationCopyBtn">${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}</button>
+          </div>
+          <pre class="migration-sql-code" id="migrationSqlCode">${esc(sql)}</pre>
+        </div>
+      </li>
+      <li>${t('schema.step_2', { url: sqlEditorUrl })}</li>
+      <li>${t('schema.step_3')}</li>
+    </ol>
+    <div class="migration-actions">
+      <button class="migration-check-btn" id="migrationCheckBtn" onclick="checkMigrationStatus()">${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}</button>
+      <button class="migration-close-btn" onclick="closeMigrationModal()">${esc(t('schema.close'))}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+
+  // Wire copy button
+  document.getElementById('migrationCopyBtn').addEventListener('click', async () => {
+    const code = document.getElementById('migrationSqlCode')?.textContent;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      const btn = document.getElementById('migrationCopyBtn');
+      btn.innerHTML = `${lucideIcon('check', 14)} ${esc(t('schema.copied'))}`;
+      setTimeout(() => { btn.innerHTML = `${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}`; }, 2000);
+    } catch { showToast(t('schema.copy_fallback')); }
+  });
+}
+
+/** Re-fetch schema_version from DB and report whether migration succeeded. */
+async function checkMigrationStatus() {
+  const btn = document.getElementById('migrationCheckBtn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = `${lucideIcon('loader', 14)} ${esc(t('common.loading'))}`;
+  try {
+    const { data } = await state.db.from('settings').select('value').eq('key', 'schema_version').single();
+    const newVer = data?.value || '0.00';
+    state.dbSchemaVersion = newVer;
+    if (cmpVer(newVer, LATEST_COMPAT) >= 0) {
+      btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.check_success', { ver: newVer }))}`;
+      btn.classList.add('migration-check-ok');
+      // Dismiss banner after short delay
+      setTimeout(() => { closeMigrationModal(); checkSchemaVersion(); }, 1500);
+    } else {
+      btn.innerHTML = `${lucideIcon('alert-triangle', 14)} ${esc(t('schema.check_still_old', { ver: newVer }))}`;
+      btn.classList.add('migration-check-fail');
+      setTimeout(() => {
+        btn.classList.remove('migration-check-fail');
+        btn.disabled = false;
+        btn.innerHTML = `${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}`;
+      }, 3000);
+    }
+  } catch {
+    btn.disabled = false;
+    btn.innerHTML = `${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}`;
+    showToast(t('schema.check_error'), 'error');
+  }
+}
+
+function closeMigrationModal() {
+  document.getElementById('migrationModal')?.remove();
+}
+
+function showCompareModal() {
+  document.getElementById('compareModal')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'compareModal';
+  overlay.className = 'modal-overlay visible';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeCompareModal(); });
+
+  const check = '<span class="compare-check"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>';
+  const cross = '<span class="compare-cross"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
+
+  const rows = [
+    { key: 'compare.setup', vals: ['compare.setup_drive', 'compare.setup_supa', 'compare.setup_local'] },
+    { key: 'compare.multi_device', vals: [check + ' ' + esc(t('compare.polling')), check + ' ' + esc(t('compare.live')), cross], raw: true },
+    { key: 'compare.offline', vals: [cross, cross, check], raw: true },
+    { key: 'compare.data_location', vals: ['compare.loc_drive', 'compare.loc_supa', 'compare.loc_local'] },
+    { key: 'compare.storage', vals: ['compare.sto_drive', 'compare.sto_supa', 'compare.sto_local'] },
+    { key: 'compare.cost', vals: ['compare.free', 'compare.free', 'compare.free'] },
+  ];
+
+  const backends = ['googledrive', 'supabase', 'local'];
+  const thead = `<tr><th></th>${backends.map(b =>
+    `<th class="compare-th-${b}"><span class="compare-th-inner">${LOGOS[b](16)}${esc(LABELS[b])}</span></th>`
+  ).join('')}</tr>`;
+  const tbody = rows.map(r => {
+    const cells = r.vals.map(v => `<td>${r.raw ? v : esc(t(v))}</td>`).join('');
+    return `<tr><td class="compare-label">${esc(t(r.key))}</td>${cells}</tr>`;
+  }).join('');
+
+  overlay.innerHTML = `<div class="modal compare-modal">
+    <h2>${esc(t('compare.title'))}</h2>
+    <p class="compare-subtitle">${esc(t('compare.subtitle'))}</p>
+    <div class="compare-table-wrap">
+      <table class="compare-table">${thead}${tbody}</table>
+    </div>
+    <p class="compare-footnote">${esc(t('compare.storage_note'))}</p>
+    <button class="compare-close-btn" onclick="closeCompareModal()">${esc(t('schema.close'))}</button>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+
+function closeCompareModal() {
+  document.getElementById('compareModal')?.remove();
+}
+
+/** Login overlay shown from demo "Start my own" button */
+function showSignupOverlay() {
+  document.getElementById('signupOverlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'signupOverlay';
+  overlay.className = 'signup-overlay';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeSignupOverlay(); });
+
+  const box = document.createElement('div');
+  box.className = 'gate-box';
+
+  const title = document.createElement('h1');
+  title.textContent = 'DeLaClaw';
+
+  const hint = document.createElement('p');
+  hint.className = 'gate-storage-hint';
+  hint.textContent = t('login.storage_hint');
+
+  const compareLink = document.createElement('a');
+  compareLink.className = 'backend-compare-link';
+  compareLink.href = 'javascript:void(0)';
+  compareLink.textContent = t('compare.link');
+  compareLink.addEventListener('click', showCompareModal);
+
+  // Build a clean form (not a clone) with only what's needed
+  const form = document.createElement('form');
+  form.id = 'signupForm';
+  form.style.display = 'flex';
+  form.style.flexDirection = 'column';
+  form.style.alignItems = 'center';
+  form.style.width = '100%';
+
+  // Backend picker
+  const picker = document.createElement('div');
+  picker.className = 'backend-picker';
+  const modes = [
+    { mode: 'googledrive', label: t('login.mode_drive'), title: 'Google Drive' },
+    { mode: 'supabase', label: t('login.mode_supabase'), title: 'Supabase' },
+    { mode: 'local', label: t('login.mode_local'), title: 'Local' },
+  ];
+  let activeMode = 'googledrive';
+  const fieldsDiv = document.createElement('div');
+  fieldsDiv.className = 'gate-fields';
+  fieldsDiv.style.display = 'none';
+  fieldsDiv.style.alignSelf = 'stretch';
+
+  const hintP = document.createElement('p');
+  hintP.className = 'hint';
+
+  const urlLabel = document.createElement('label');
+  urlLabel.className = 'gate-label';
+  const urlLabelLink = document.createElement('a');
+  urlLabelLink.target = '_blank';
+  urlLabelLink.rel = 'noopener';
+  urlLabelLink.textContent = t('login.url_label');
+  urlLabelLink.href = 'https://supabase.com/dashboard/projects';
+  urlLabelLink.dataset.tooltip = t('toast.url_tooltip');
+  urlLabel.appendChild(urlLabelLink);
+  const urlInput = document.createElement('input');
+  urlInput.type = 'text';
+  urlInput.placeholder = 'https://xyz.supabase.co';
+
+  const keyDiv = document.createElement('div');
+  const keyLabel = document.createElement('label');
+  keyLabel.className = 'gate-label';
+  const keyLabelLink = document.createElement('a');
+  keyLabelLink.target = '_blank';
+  keyLabelLink.rel = 'noopener';
+  keyLabelLink.textContent = t('login.key_label');
+  keyLabel.appendChild(keyLabelLink);
+  const keyInput = document.createElement('input');
+  keyInput.type = 'password';
+  keyInput.placeholder = 'eyJhbG...';
+  keyDiv.appendChild(keyLabel);
+  keyDiv.appendChild(keyInput);
+
+  // Dynamic API key link — same behaviour as the gate login form
+  const updateKeyLink = () => {
+    const v = urlInput.value.trim();
+    const m = v.match(/^https?:\/\/([a-z0-9]+)\.supabase\.co/i) || v.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
+    if (m) {
+      keyLabelLink.href = `https://supabase.com/dashboard/project/${m[1]}/settings/api-keys`;
+    } else {
+      keyLabelLink.removeAttribute('href');
+    }
+  };
+  urlInput.addEventListener('input', updateKeyLink);
+
+  fieldsDiv.appendChild(hintP);
+  fieldsDiv.appendChild(urlLabel);
+  fieldsDiv.appendChild(urlInput);
+  fieldsDiv.appendChild(keyDiv);
+
+  const submitBtn = document.createElement('button');
+  submitBtn.type = 'submit';
+  submitBtn.className = 'btn-primary';
+  submitBtn.style.alignSelf = 'stretch';
+  submitBtn.textContent = t('login.btn_googledrive');
+
+  function updateSignupFields() {
+    if (activeMode === 'googledrive') {
+      fieldsDiv.style.display = 'none';
+      submitBtn.textContent = t('login.btn_googledrive');
+    } else {
+      fieldsDiv.style.display = '';
+      hintP.textContent = activeMode === 'supabase' ? t('login.hint_supabase') : t('login.hint_local');
+      keyDiv.style.display = activeMode === 'local' ? 'none' : '';
+      submitBtn.textContent = t('login.connect');
+      // Match the gate's label behaviour per mode
+      if (activeMode === 'local') {
+        urlLabelLink.textContent = t('login.url_label_local');
+        urlLabelLink.removeAttribute('href');
+        urlInput.placeholder = 'http://localhost:3737';
+      } else {
+        urlLabelLink.textContent = t('login.url_label');
+        urlLabelLink.href = 'https://supabase.com/dashboard/projects';
+        urlInput.placeholder = 'https://xyz.supabase.co';
+      }
+    }
+  }
+
+  modes.forEach(m => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'backend-option' + (m.mode === 'googledrive' ? ' active' : '');
+    btn.dataset.mode = m.mode;
+    btn.title = m.title;
+    // Icon from the real picker
+    const realBtn = document.querySelector(`.backend-option[data-mode="${m.mode}"]`);
+    const iconEl = realBtn?.querySelector('svg, img, .backend-icon-img');
+    if (iconEl) btn.appendChild(iconEl.cloneNode(true));
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'backend-option-label';
+    labelSpan.textContent = m.label;
+    btn.appendChild(labelSpan);
+    btn.addEventListener('click', () => {
+      picker.querySelectorAll('.backend-option').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeMode = m.mode;
+      updateSignupFields();
+    });
+    picker.appendChild(btn);
+  });
+
+  form.appendChild(picker);
+  form.appendChild(fieldsDiv);
+  form.appendChild(submitBtn);
+
+  // Handle form submit — exit demo and reload to the gate with the chosen backend
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    clearStayConnectedCreds();
+    // For Supabase/Local, pre-fill creds so the gate auto-connects on reload
+    if (activeMode !== 'googledrive') {
+      const url = urlInput.value.trim();
+      const key = keyInput.value.trim();
+      if (url) saveStayConnectedCreds(url, key, activeMode);
+    }
+    // Store chosen mode so the gate can pre-select it
+    localStorage.setItem('claw_signup_mode', activeMode);
+    closeSignupOverlay();
+    location.hash = '#login';
+    location.reload();
+  });
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'compare-close-btn';
+  cancelBtn.style.marginTop = '8px';
+  cancelBtn.textContent = t('schema.close');
+  cancelBtn.addEventListener('click', closeSignupOverlay);
+
+  const guideLink = document.createElement('a');
+  guideLink.className = 'gate-guide-link';
+  guideLink.href = 'javascript:void(0)';
+  guideLink.textContent = t('setup.guide_link');
+  guideLink.addEventListener('click', () => {
+    closeSignupOverlay();
+    clearStayConnectedCreds();
+    location.hash = '#setup';
+    location.reload();
+  });
+
+  box.appendChild(title);
+  box.appendChild(hint);
+  box.appendChild(compareLink);
+  box.appendChild(form);
+  box.appendChild(cancelBtn);
+  box.appendChild(guideLink);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
+function closeSignupOverlay() {
+  document.getElementById('signupOverlay')?.remove();
+}
+
+
+function dismissSchemaBanner() {
+  const banner = document.getElementById('schema-banner');
+  if (banner) {
+    banner._schemaRO?.disconnect();
+    banner.remove();
+  }
+  document.body.style.removeProperty('--schema-banner-h');
 }
 
 async function saveNvidiaKey() {
@@ -2334,78 +2921,107 @@ function importBackup() {
   input.onchange = async () => {
     const file = input.files[0];
     if (!file) return;
-    if (!confirm(t('menu.settings_restore_confirm'))) return;
-    const btn = document.querySelector('.settings-data-btn[onclick="importBackup()"]');
-    if (btn) btn.disabled = true;
-    try {
-      const text = await file.text();
-      const backup = JSON.parse(text);
-      if (!backup._meta || backup._meta.version !== 1) {
-        showToast(t('menu.settings_restore_invalid'));
-        return;
+    showDeleteConfirm(
+      t('menu.settings_restore'),
+      t('menu.settings_restore_confirm'),
+      () => performImport(file),
+      null,
+      {
+        btnText: t('menu.settings_restore') || 'Restore',
+        iconSvg: '<svg class="delete-confirm-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+        btnIconSvg: '<svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
       }
-      // Delete in reverse order (children before parents)
-      const tables = [...(backup._meta.tables || [])].reverse();
-      for (const table of tables) {
-        try {
-          // Delete all rows — use a broadly matching filter
-          // settings/prompts use 'key' as PK, others use 'id'
-          const pk = (table === 'settings' || table === 'prompts') ? 'key' : 'id';
-          await state.db.from(table).delete().neq(pk, '___nonexistent___');
-        } catch (e) { console.warn(`Could not clear ${table}:`, e.message); }
-      }
-      // Insert in forward order (parents before children)
-      const importOrder = backup._meta.tables || [];
-      let totalRows = 0;
-      for (const table of importOrder) {
-        const rows = backup[table];
-        if (!rows || !rows.length) continue;
-        try {
-          // Insert in batches of 100
-          for (let i = 0; i < rows.length; i += 100) {
-            const batch = rows.slice(i, i + 100);
-            const { error } = await state.db.from(table).insert(batch);
-            if (error) { console.warn(`Insert into ${table} batch ${i}:`, error.message); }
-          }
-          totalRows += rows.length;
-        } catch (e) { console.warn(`Failed to restore ${table}:`, e.message); }
-      }
-      showToast(t('menu.settings_restore_done', totalRows));
-      // In demo mode, reseed the in-memory adapter instead of reloading
-      // (reload would re-create the adapter with default demo data)
-      if (state.demoMode && state.demoAdapter) {
-        const reseedData = {};
-        for (const table of (backup._meta.tables || [])) {
-          reseedData[table] = backup[table] || [];
-        }
-        state.demoAdapter.reseed(reseedData);
-        setDemoCategoriesFromData(reseedData);
-        await loadProjects();
-        buildProjectCards();
-        initProjectDragDrop();
-        updateArchiveToggleBtn();
-        renderArchivedProjects();
-        await refreshAll();
-        await refreshTodos();
-        await refreshHabits();
-        await refreshBirthdays();
-        await refreshVestiaire();
-        await refreshFlashcards();
-        await refreshLists();
-        refreshWelcome();
-        closeSettings();
-      } else {
-        // Reload to reflect new data
-        setTimeout(() => location.reload(), 1200);
-      }
-    } catch (e) {
-      console.error('Import failed:', e);
-      showToast(t('menu.settings_restore_error'));
-    } finally {
-      if (btn) btn.disabled = false;
-    }
+    );
   };
   input.click();
+}
+
+async function performImport(file) {
+  const btn = document.querySelector('.settings-data-btn[onclick="importBackup()"]');
+  if (btn) btn.disabled = true;
+
+  const progressEl = document.getElementById('importProgress');
+  const progressText = document.getElementById('importProgressText');
+  const progressFill = document.getElementById('importProgressFill');
+  const showProgress = (msg, current, total) => {
+    if (progressEl) progressEl.style.display = '';
+    if (progressText) progressText.textContent = msg;
+    if (progressFill && total > 0) progressFill.style.width = `${Math.round((current / total) * 100)}%`;
+  };
+  const hideProgress = () => { if (progressEl) progressEl.style.display = 'none'; };
+
+  try {
+    const text = await file.text();
+    const backup = JSON.parse(text);
+    if (!backup._meta || backup._meta.version !== 1) {
+      showToast(t('menu.settings_restore_invalid'));
+      return;
+    }
+    // Delete in reverse order (children before parents)
+    const tables = [...(backup._meta.tables || [])].reverse();
+    const totalSteps = tables.length + (backup._meta.tables || []).length;
+    let step = 0;
+    for (const table of tables) {
+      showProgress(t('menu.settings_restore_clearing', table), ++step, totalSteps);
+      try {
+        const pk = (table === 'settings' || table === 'prompts') ? 'key' : 'id';
+        await state.db.from(table).delete().neq(pk, '___nonexistent___');
+      } catch (e) { console.warn(`Could not clear ${table}:`, e.message); }
+    }
+    // Insert in forward order (parents before children)
+    const importOrder = backup._meta.tables || [];
+    let totalRows = 0;
+    for (const table of importOrder) {
+      showProgress(t('menu.settings_restore_restoring', table), ++step, totalSteps);
+      const rows = backup[table];
+      if (!rows || !rows.length) continue;
+      try {
+        for (let i = 0; i < rows.length; i += 100) {
+          const batch = rows.slice(i, i + 100);
+          const { error } = await state.db.from(table).insert(batch);
+          if (error) { console.warn(`Insert into ${table} batch ${i}:`, error.message); }
+        }
+        totalRows += rows.length;
+      } catch (e) { console.warn(`Failed to restore ${table}:`, e.message); }
+    }
+    hideProgress();
+    showToast(t('menu.settings_restore_done', totalRows));
+    // In demo/drive mode, reseed the in-memory adapter instead of reloading
+    // (reload would re-create the adapter with default/empty data)
+    const inMemAdapter = (state.demoMode && state.demoAdapter) ? state.demoAdapter
+      : (state.driveMode && state.driveAdapter) ? state.driveAdapter : null;
+    if (inMemAdapter) {
+      const reseedData = {};
+      for (const table of (backup._meta.tables || [])) {
+        reseedData[table] = backup[table] || [];
+      }
+      inMemAdapter.reseed(reseedData);
+      setDemoCategoriesFromData(reseedData);
+      await loadProjects();
+      buildProjectCards();
+      initProjectDragDrop();
+      updateArchiveToggleBtn();
+      renderArchivedProjects();
+      await refreshAll();
+      await refreshTodos();
+      await refreshHabits();
+      await refreshBirthdays();
+      await refreshVestiaire();
+      await refreshFlashcards();
+      await refreshLists();
+      refreshWelcome();
+      closeSettings();
+    } else {
+      // Reload to reflect new data
+      setTimeout(() => location.reload(), 1200);
+    }
+  } catch (e) {
+    console.error('Import failed:', e);
+    showToast(t('menu.settings_restore_error'));
+  } finally {
+    hideProgress();
+    if (btn) btn.disabled = false;
+  }
 }
 
 window.exportBackup = exportBackup;
@@ -2714,6 +3330,12 @@ window.toggleTheme = toggleTheme;
 window.disconnect = disconnect;
 window.toggleSearch = toggleSearch;
 window.clearPageSearch = clearPageSearch;
+window.dismissSchemaBanner = dismissSchemaBanner;
+window.showMigrationModal = showMigrationModal;
+window.closeMigrationModal = closeMigrationModal;
+window.checkMigrationStatus = checkMigrationStatus;
+window.showCompareModal = showCompareModal;
+window.closeCompareModal = closeCompareModal;
 
 // --- Environment badge + dev favicon ---
 (function() {

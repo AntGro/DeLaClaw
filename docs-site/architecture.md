@@ -13,11 +13,12 @@ Browser
   |                         |
   sw.js (service worker)  js/db.js (adapter abstraction)
                             |
-            ┌───────────────┼───────────────┐
-            |               |               |
-    adapters/supabase.js  adapters/rest.js  adapters/demo.js
-            |               |               |
-    (Supabase cloud)   (Bun + SQLite)   (in-memory)
+            ┌───────────┬───┼───────────┬───────────────┐
+            |           |   |           |               |
+    adapters/       adapters/   adapters/       adapters/
+    supabase.js     rest.js     demo.js         drive.js
+            |           |       |               |
+    (Supabase)   (Bun+SQLite) (in-memory) (in-memory + Drive)
             |
     adapters/offline-cache.js (wraps any adapter)
 ```
@@ -49,6 +50,10 @@ Each adapter implements the same interface:
 The chainable query builder supports: `.select()`, `.insert()`, `.update()`, `.delete()`, `.upsert()`, `.eq()`, `.neq()`, `.gt()`, `.gte()`, `.lt()`, `.lte()`, `.is()`, `.order()`, `.limit()`, `.single()`.
 
 All adapters return `{ data, error }` objects. Successful queries return `{ data: [...], error: null }`.
+
+### Google Drive adapter (drive.js)
+
+Combines the demo adapter's in-memory query engine with Google Drive persistence. On connect, it authenticates via Google Identity Services (`drive.file` scope), finds or creates a `DeLaClaw/` folder, and downloads `delaclaw-data.json` into memory. All runtime queries hit the in-memory store (instant). On any mutation, a 2-second debounced write-back uploads the full store to Drive as a single JSON file. The adapter exposes `forceSave()` for explicit flushes (called on disconnect and `beforeunload`), and `reseed()` for backup imports.
 
 ### Offline cache (offline-cache.js)
 
@@ -170,6 +175,7 @@ js/
     supabase.js            Supabase PostgREST adapter
     rest.js                Local Bun+SQLite REST adapter
     demo.js                In-memory adapter
+    drive.js               Google Drive adapter (in-memory + Drive JSON persistence)
     offline-cache.js       IndexedDB caching layer
   welcome.js               Today dashboard
   projects.js              Project boards + task management

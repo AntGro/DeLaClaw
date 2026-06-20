@@ -655,7 +655,80 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
 });
 
 // ===================================================================
-// 31. Integration: archive project → delete it → remaining cards still render
+// 31. CHECK constraint parity across all backends (Supabase ↔ Demo ↔ SQLite)
+// ===================================================================
+
+test('CHECK constraints match across Supabase, Demo adapter, and SQLite schema', () => {
+  const demoSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'adapters', 'demo.js'), 'utf8');
+  const supabaseSrc = fs.readFileSync(path.resolve(__dirname, '..', 'sql', 'supabase_schema.sql'), 'utf8');
+  const sqliteSrc = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'schema.sql'), 'utf8');
+
+  // --- Helper: extract sorted values from a regex match group ---
+  function extractValues(match, label) {
+    assert(match, `Could not find ${label}`);
+    const vals = match[1].match(/'([^']+)'/g).map(s => s.replace(/'/g, ''));
+    return vals.sort();
+  }
+
+  // --- Helper: compare two sorted arrays ---
+  function assertSameValues(a, b, labelA, labelB) {
+    const jsonA = JSON.stringify(a), jsonB = JSON.stringify(b);
+    assert(jsonA === jsonB, `${labelA} ${jsonA} must match ${labelB} ${jsonB}`);
+  }
+
+  // ── 1. tasks.status ──
+
+  const demoTaskStatus = extractValues(
+    demoSrc.match(/tasks:\s*\{\s*status:\s*\[([^\]]+)\]/),
+    'Demo CHECK_CONSTRAINTS tasks.status');
+
+  const pgTaskStatus = extractValues(
+    supabaseSrc.match(/tasks_status_check.*?CHECK.*?ARRAY\[([^\]]+)\]/),
+    'Supabase tasks_status_check');
+
+  const sqliteTaskStatus = extractValues(
+    sqliteSrc.match(/tasks[\s\S]*?status\s+TEXT[^,]*CHECK\s*\(\s*status\s+IN\s*\(([^)]+)\)/i),
+    'SQLite tasks.status CHECK');
+
+  assertSameValues(demoTaskStatus, pgTaskStatus, 'Demo tasks.status', 'Supabase tasks.status');
+  assertSameValues(sqliteTaskStatus, pgTaskStatus, 'SQLite tasks.status', 'Supabase tasks.status');
+
+  // Regression guard: draft must be present
+  assert(demoTaskStatus.includes('draft'), 'tasks.status must include "draft" for draft task creation');
+
+  // ── 2. todos.priority ──
+
+  const demoTodoPriority = extractValues(
+    demoSrc.match(/todos:\s*\{\s*priority:\s*\[([^\]]+)\]/),
+    'Demo CHECK_CONSTRAINTS todos.priority');
+
+  const pgTodoPriority = extractValues(
+    supabaseSrc.match(/todos_priority_check.*?CHECK.*?ARRAY\[([^\]]+)\]/),
+    'Supabase todos_priority_check');
+
+  const sqliteTodoPriority = extractValues(
+    sqliteSrc.match(/todos[\s\S]*?priority\s+TEXT[^,]*CHECK\s*\(\s*priority\s+IN\s*\(([^)]+)\)/i),
+    'SQLite todos.priority CHECK');
+
+  assertSameValues(demoTodoPriority, pgTodoPriority, 'Demo todos.priority', 'Supabase todos.priority');
+  assertSameValues(sqliteTodoPriority, pgTodoPriority, 'SQLite todos.priority', 'Supabase todos.priority');
+
+  // ── 3. flashcard_notes.proposal_status (Demo + SQLite only — no Supabase CHECK) ──
+
+  const demoProposalStatus = extractValues(
+    demoSrc.match(/flashcard_notes:\s*\{\s*proposal_status:\s*\[([^\]]+)\]/),
+    'Demo CHECK_CONSTRAINTS flashcard_notes.proposal_status');
+
+  const sqliteProposalStatus = extractValues(
+    sqliteSrc.match(/flashcard_notes[\s\S]*?proposal_status\s+TEXT[^,]*CHECK\s*\(\s*proposal_status\s+IN\s*\(([^)]+)\)/i),
+    'SQLite flashcard_notes.proposal_status CHECK');
+
+  assertSameValues(demoProposalStatus, sqliteProposalStatus,
+    'Demo flashcard_notes.proposal_status', 'SQLite flashcard_notes.proposal_status');
+});
+
+// ===================================================================
+// 32. Integration: archive project → delete it → remaining cards still render
 // ===================================================================
 
 async function archiveDeleteIntegrationTest() {
@@ -738,6 +811,10 @@ async function archiveDeleteIntegrationTest() {
 
     // Navigate to app and log in via local mode
     await page.goto('http://127.0.0.1:4848/', { waitUntil: 'networkidle', timeout: 15000 });
+    // Skip hero and dismiss welcome panel
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(500);
+    try { await page.click('#gateWelcomeLogin', { timeout: 5000 }); } catch {}
     await page.click('.backend-option[data-mode="local"]');
     await page.fill('#username', 'http://127.0.0.1:4848');
     await page.click('#loginForm button[type="submit"]');
@@ -1072,6 +1149,10 @@ async function importFlashcardsIntegrationTest() {
     page.on('pageerror', err => jsErrors.push(err.message || String(err)));
 
     await page.goto('http://127.0.0.1:4850/', { waitUntil: 'networkidle', timeout: 15000 });
+    // Skip hero and dismiss welcome panel
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(500);
+    try { await page.click('#gateWelcomeLogin', { timeout: 5000 }); } catch {}
     await page.click('.backend-option[data-mode="local"]');
     await page.fill('#username', 'http://127.0.0.1:4850');
     await page.click('#loginForm button[type="submit"]');
@@ -1095,7 +1176,7 @@ async function importFlashcardsIntegrationTest() {
       assert(selectedDeck === 'Histoire', `Expected 'Histoire', got '${selectedDeck}'`);
     });
 
-    const promptText = await page.$eval('#importPromptText', el => el.textContent);
+    const promptText = await page.$eval('#importPromptText', el => el.value || el.textContent);
     test('Import: convert prompt contains JSON instruction', () => {
       assert(promptText.includes('JSON array') && promptText.includes('"front"'),
         'Prompt should mention JSON array and front field');
@@ -1189,7 +1270,7 @@ async function importFlashcardsIntegrationTest() {
     await page.selectOption('#importTypeSelect', 'text');
     await page.waitForTimeout(200);
 
-    const textPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    const textPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
     test('Import: text convert prompt mentions title/content fields', () => {
       assert(textPrompt.includes('"title"') && textPrompt.includes('"content"'),
         'Text prompt should mention title and content');
@@ -1222,7 +1303,7 @@ async function importFlashcardsIntegrationTest() {
     await page.click('#importGenerateCard');
     await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
 
-    const frPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    const frPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
     test('Import: French prompt includes French language instruction', () => {
       assert(frPrompt.includes('French'),
         'French prompt should contain "French" language instruction');
@@ -1246,7 +1327,7 @@ async function importFlashcardsIntegrationTest() {
     await page.click('#importGenerateCard');
     await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
 
-    const enPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    const enPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
     test('Import: English prompt has no language instruction', () => {
       assert(!enPrompt.includes('IMPORTANT: Generate ALL content'),
         'English prompt should not have language instruction');
@@ -1266,7 +1347,7 @@ async function importFlashcardsIntegrationTest() {
     await page.click('#importGenerateCard');
     await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
 
-    const esPrompt = await page.$eval('#importPromptText', el => el.textContent);
+    const esPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
     test('Import: Spanish prompt includes Spanish language instruction', () => {
       assert(esPrompt.includes('Spanish'),
         'Spanish prompt should contain "Spanish" language instruction');
@@ -1361,7 +1442,50 @@ async function importFlashcardsIntegrationTest() {
       assert(editedCards.length === 1, `Expected 1 card with edited front, got ${editedCards.length}`);
     });
 
-    // ── Test 10: No JS errors during all import flows ──
+    // ── Test 10: Import with zero existing decks ──
+    // Delete all flashcards and texts so no decks exist
+    await fetch(`${BASE}/flashcards?id=not.is.null`, { method: 'DELETE' });
+    await fetch(`${BASE}/texts?id=not.is.null`, { method: 'DELETE' });
+    // Refresh data in the app
+    await page.evaluate(() => window.refreshFlashcards());
+    await page.waitForTimeout(500);
+
+    await page.evaluate(() => window.openImportModal());
+    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
+    await page.click('#importConvertCard');
+    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
+
+    const noDecksSelectVal = await page.$eval('#importDeckSelect', el => el.value);
+    const newDeckWrapVisible = await page.$eval('#importNewDeckWrap', el => el.style.display !== 'none');
+    test('Import: zero decks — __new auto-selected and new deck input visible', () => {
+      assert(noDecksSelectVal === '__new', `Expected __new selected, got '${noDecksSelectVal}'`);
+      assert(newDeckWrapVisible, 'New deck input should be visible when no decks exist');
+    });
+
+    // Type a new deck name and verify it reads back correctly
+    await page.fill('#importNewDeckName', 'MathDeck');
+    await page.waitForTimeout(200);
+    const noDecksNewName = await page.$eval('#importNewDeckName', el => el.value);
+    test('Import: zero decks — new deck name input functional', () => {
+      assert(noDecksNewName === 'MathDeck', `Expected 'MathDeck', got '${noDecksNewName}'`);
+    });
+
+    // Actually import a card to this new deck
+    const newDeckJSON = JSON.stringify([{ front: 'What is 2+2?', back: '4' }]);
+    await page.fill('#importPasteArea', newDeckJSON);
+    await page.waitForTimeout(300);
+    await page.click('#importReviewBtn');
+    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
+    await page.click('#importConfirmBtn');
+    await page.waitForTimeout(1000);
+
+    const mathResp = await fetch(`${BASE}/flashcards?deck=eq.MathDeck`);
+    const mathCards = await mathResp.json();
+    test('Import: zero decks — card imported to brand-new deck', () => {
+      assert(mathCards.length === 1, `Expected 1 card in MathDeck, got ${mathCards.length}`);
+    });
+
+    // ── Test 11: No JS errors during all import flows ──
     test('Import: no JS errors during import flows', () => {
       const real = jsErrors.filter(e => !e.includes('favicon') && !e.includes('supabase') && !e.includes('fetch'));
       assert(real.length === 0, `JS errors: ${real.join('; ')}`);

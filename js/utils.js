@@ -131,7 +131,7 @@ function showToast(msg, type = 'info') {
 // ===================================================================
 let _deleteConfirmCallback = null;
 
-function showDeleteConfirm(title, message, onConfirm, detail) {
+function showDeleteConfirm(title, message, onConfirm, detail, opts) {
   document.getElementById('deleteConfirmTitle').textContent = title;
   document.getElementById('deleteConfirmMessage').textContent = message;
   const detailEl = document.getElementById('deleteConfirmDetail');
@@ -141,6 +141,26 @@ function showDeleteConfirm(title, message, onConfirm, detail) {
   } else {
     detailEl.style.display = 'none';
   }
+  // Custom confirm button text (default: Delete)
+  const btnTextEl = document.getElementById('deleteConfirmBtnText');
+  if (btnTextEl) btnTextEl.textContent = opts?.btnText || 'Delete';
+  // Custom icon (swap trash SVG for another Lucide icon)
+  const iconWrap = document.querySelector('.delete-confirm-icon-wrap');
+  if (iconWrap) {
+    if (opts?.iconSvg) {
+      iconWrap.dataset.originalHtml = iconWrap.innerHTML;
+      iconWrap.innerHTML = opts.iconSvg;
+    }
+  }
+  // Custom button icon (swap trash SVG on the action button)
+  const btnEl = document.getElementById('deleteConfirmBtn');
+  if (btnEl) {
+    const btnSvg = btnEl.querySelector('svg');
+    if (opts?.btnIconSvg && btnSvg) {
+      btnEl.dataset.originalBtnSvg = btnSvg.outerHTML;
+      btnSvg.outerHTML = opts.btnIconSvg;
+    }
+  }
   _deleteConfirmCallback = onConfirm;
   document.getElementById('deleteConfirmModal').classList.add('visible');
 }
@@ -148,6 +168,22 @@ function showDeleteConfirm(title, message, onConfirm, detail) {
 function closeDeleteConfirm() {
   document.getElementById('deleteConfirmModal').classList.remove('visible');
   _deleteConfirmCallback = null;
+  // Reset custom button text
+  const btnTextEl = document.getElementById('deleteConfirmBtnText');
+  if (btnTextEl) btnTextEl.textContent = 'Delete';
+  // Reset custom icon if it was changed
+  const iconWrap = document.querySelector('.delete-confirm-icon-wrap');
+  if (iconWrap && iconWrap.dataset.originalHtml) {
+    iconWrap.innerHTML = iconWrap.dataset.originalHtml;
+    delete iconWrap.dataset.originalHtml;
+  }
+  // Reset custom button icon if it was changed
+  const btnEl = document.getElementById('deleteConfirmBtn');
+  if (btnEl && btnEl.dataset.originalBtnSvg) {
+    const curSvg = btnEl.querySelector('svg');
+    if (curSvg) curSvg.outerHTML = btnEl.dataset.originalBtnSvg;
+    delete btnEl.dataset.originalBtnSvg;
+  }
 }
 
 async function executeDeleteConfirm() {
@@ -181,7 +217,7 @@ document.addEventListener('click', e => {
   if (e.target.id === 'editListModal') closeEditListModal();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeAddProjectModal(); closeEditProjectModal(); closeTaskExpandModal(); closeRevisionModal(); closePromptEditor(); closeProjectPrompt(); closeSnoozeModal(); closeDeleteConfirm(); closeAddCategoryModal(); if (window.closeAddVestiaireModal) closeAddVestiaireModal(); if (window.closeEditVestiaireModal) closeEditVestiaireModal(); if (window.closeAddVestiaireCategoryModal) closeAddVestiaireCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); }
+  if (e.key === 'Escape') { closeAddProjectModal(); closeEditProjectModal(); closeTaskExpandModal(); closeRevisionModal(); closePromptEditor(); closeProjectPrompt(); closeSnoozeModal(); closeDeleteConfirm(); closeAddCategoryModal(); if (window.closeAddVestiaireModal) closeAddVestiaireModal(); if (window.closeEditVestiaireModal) closeEditVestiaireModal(); if (window.closeAddVestiaireCategoryModal) closeAddVestiaireCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); if (window.closeMigrationModal) closeMigrationModal(); if (window.closeCompareModal) closeCompareModal(); }
 });
 
 
@@ -203,8 +239,17 @@ function updateFooterStats(viewCountsGetter) {
     statsHtml = counts.map(s => `<div class="db-stat">${s}</div>`).join('');
   }
 
-  // Always add DB size
-  statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} ${t('utils.db')}: <span id="dbSizeMb">—</span> / 500 MB</div>`;
+  // DB size — only for backends with meaningful storage metrics
+  if (state.demoMode) {
+    // Demo mode: no persistent storage, skip DB size
+    statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} Demo</div>`;
+  } else if (state.driveMode) {
+    // Google Drive: show estimated data size from in-memory store
+    statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} Google Drive · <span id="dbSizeMb">—</span></div>`;
+  } else {
+    // Supabase / Local: show DB size with limit
+    statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} ${t('utils.db')}: <span id="dbSizeMb">—</span> / 500 MB</div>`;
+  }
   // App + DB version
   const dbVer = state.dbSchemaVersion || '—';
   statsHtml += `<div class="db-stat">${lucideIcon('git-branch', 14)} v${APP_VERSION} · DB v${dbVer}</div>`;
@@ -216,12 +261,28 @@ function updateFooterStats(viewCountsGetter) {
     const projectRef = urlInput.value.replace('https://', '').replace('.supabase.co', '');
     document.getElementById('supabaseDashLink').href = `https://supabase.com/dashboard/project/${projectRef}`;
   }
-  // Fetch DB size via RPC
-  if (state.db.connected) {
+  // Fetch DB size via RPC (only relevant for Supabase/Local backends)
+  if (state.db.connected && !state.demoMode && !state.driveMode) {
     state.db.rpc('db_size_mb').then(({ data, error }) => {
       const el = document.getElementById('dbSizeMb');
-      if (el) el.textContent = error ? '?' : `${data} MB`;
+      if (el) el.textContent = (error || data == null) ? '—' : `${data} MB`;
     });
+  }
+  // Estimate data size for Google Drive from in-memory store
+  if (state.driveMode && state.driveAdapter && state.driveAdapter._store) {
+    try {
+      const store = state.driveAdapter._store;
+      let totalBytes = 0;
+      for (const table of Object.keys(store)) {
+        totalBytes += new Blob([JSON.stringify(store[table])]).size;
+      }
+      const el = document.getElementById('dbSizeMb');
+      if (el) {
+        el.textContent = totalBytes < 1024 * 1024
+          ? `~${Math.max(1, Math.round(totalBytes / 1024))} KB`
+          : `~${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
+      }
+    } catch { /* non-critical */ }
   }
 }
 

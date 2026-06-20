@@ -7,6 +7,7 @@ DeLaClaw is designed so that your data stays yours. This document explains what 
 DeLaClaw does not operate a central server. Depending on which backend mode you choose:
 
 - **Supabase**: your data is stored in your own Supabase project. DeLaClaw connects directly from your browser to your Supabase instance. No data passes through any DeLaClaw server.
+- **Google Drive**: your data is stored as a single JSON file (`delaclaw-data.json`) in a `DeLaClaw/` folder in your own Google Drive. Authentication uses Google Identity Services directly in the browser. DeLaClaw requests only the `drive.file` scope, which limits access to files it creates. No data passes through any DeLaClaw server.
 - **Local (Bun + SQLite)**: your data is stored in a SQLite file on your machine.
 - **Demo**: data exists only in browser memory and is lost when you close or refresh the page.
 
@@ -33,6 +34,9 @@ None of this data leaves your browser.
 When using DeLaClaw, your browser makes requests to:
 
 - **Your Supabase project** (if using Supabase mode): API calls to your own database.
+- **Google Identity Services** (`accounts.google.com/gsi/client`) (if using Google Drive mode): OAuth token flow for Drive authentication. Subject to [Google's privacy policy](https://policies.google.com/privacy).
+- **Google Drive API** (`www.googleapis.com`) (if using Google Drive mode): reading and writing your `delaclaw-data.json` file. Subject to [Google's privacy policy](https://policies.google.com/privacy).
+- **Google Static** (`www.gstatic.com`): Google Drive logo image on the login screen.
 - **Google Fonts** (`fonts.googleapis.com`): to load the DM Sans typeface. Subject to [Google's privacy policy](https://policies.google.com/privacy).
 - **jsDelivr CDN** (`cdn.jsdelivr.net`): to load the Supabase JS client and Three.js. Subject to [jsDelivr's privacy policy](https://www.jsdelivr.com/terms/privacy-policy-jsdelivr-net).
 - **GitHub Pages** (`delaclaw.com`): serves the static app files if you use the hosted version. Subject to [GitHub's privacy policy](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).

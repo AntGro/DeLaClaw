@@ -209,7 +209,7 @@ function buildProjectCards() {
       <div class="task-list" id="tasks-${p.id}"><p class="empty-msg">${t('common.loading')}</p></div>
       <div class="archive-toggle" onclick="toggleArchivedTasks('${p.id}')" id="archive-toggle-${p.id}" style="display:none;">
         <span class="arrow" id="archive-arrow-${p.id}">▶</span> ${t('projects.archived_tasks')} (<span id="archive-count-${p.id}">0</span>)
-        <button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllArchivedTasks('${p.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)} ${t('common.delete')}</button>
+        <button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllArchivedTasks('${p.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
       <div class="archived-tasks" id="archived-tasks-${p.id}"></div>
       <div class="add-task">
@@ -344,10 +344,9 @@ function renderTask(task, isArchived = false) {
   if (task.plan_note) meta += `<div class="task-meta-item"><span class="task-meta-label plan">${lucideIcon("clipboard-list",16)} Plan:</span>${truncateWithShowMore(task.plan_note, MAX_META_DISPLAY, task.id, 'plan')}</div>`;
   if (task.hatch_response) meta += `<div class="task-meta-item response"><span class="task-meta-label claw">${lucideIcon('feather', 14)} ${t('projects.claw')}:</span>${truncateWithShowMore(task.hatch_response, MAX_META_DISPLAY, task.id, 'response')}</div>`;
 
-  let promoteBtn = '';
   let actionBtns = '';
   if (isDraft) {
-    promoteBtn = `<button class="promote-btn" onclick="updateTaskStatus('${task.id}','todo')" title="${t('projects.promote_todo')}">▶ ${t('projects.promote_todo')}</button>`;
+    actionBtns += `<button class="promote-btn" onclick="updateTaskStatus('${task.id}','todo')" title="${t('projects.promote_todo')}">▶ ${t('projects.promote_todo')}</button>`;
   }
   if (task.status === 'review') {
     actionBtns += `<button onclick="updateTaskStatus('${task.id}','approved')" title="${t('projects.status_approved')}">${lucideIcon("circle-check",16)}</button>`;
@@ -364,7 +363,6 @@ function renderTask(task, isArchived = false) {
   return `<div class="bucket-item task-item${draftClass} task-status-${task.status}" data-task-id="${task.id}">
     <div class="task-row">
       <span class="task-text">${truncateWithShowMore(task.text, 120, task.id, 'text')}</span>
-      ${promoteBtn}
       <div class="task-actions">${actionBtns}</div>
     </div>
     ${meta ? `<div class="task-meta">${meta}</div>` : ''}
@@ -398,7 +396,7 @@ function initTaskHoverDelay(container) {
 function initDragDrop(container, projectId) {
   initItemDragDrop(container, {
     itemSelector: '.task-item',
-    excludeSelector: 'button, a, input, textarea, select, .task-actions, .promote-btn',
+    excludeSelector: 'button, a, input, textarea, select, .task-actions',
     skipInsideSelector: '.archived-tasks',
     idAttr: 'taskId',
     onReorder: async (draggedId, targetId) => {

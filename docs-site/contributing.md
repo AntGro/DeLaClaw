@@ -50,12 +50,13 @@ DeLaClaw is vanilla JavaScript by design. No frameworks, no build step, no trans
 ### Commits
 
 - Keep commit messages short and factual. No emoji, no conventional-commit prefixes required (though `fix:`, `feat:`, `docs:` are fine).
-- Every commit to `main` must bump the `latest` field in `VERSION` (the pre-commit hook enforces this).
+- Every commit must bump the `latest` field in `VERSION` (the pre-commit hook enforces this).
+- Every commit must include a `Checked:` trailer listing the impact areas reviewed (the commit-msg hook enforces this). See [COMMIT_CHECKLIST.md](/COMMIT_CHECKLIST.md) for the full list.
 
 ### Pull requests
 
 - One logical change per PR.
-- All tests must pass (`node tests/tests.js` -- 54 tests currently).
+- All tests must pass (`node tests/tests.js` -- 76 tests currently).
 - The PR description should explain *what* changed and *why*.
 - Screenshots or before/after comparisons for UI changes.
 
@@ -69,11 +70,11 @@ node tests/tests.js
 
 Tests include:
 - Unit tests for core logic (version parsing, drag-and-drop, utilities)
-- Adapter compliance tests (all three backends implement the same interface)
+- Adapter compliance tests (all four backends implement the same interface)
 - REST server integration tests (requires Bun)
 - Browser-based end-to-end tests (requires Playwright -- `npx playwright install chromium`)
 
-All 54 tests must pass. If you add a new feature, add tests for it.
+All 76 tests must pass. If you add a new feature, add tests for it.
 
 ## What contributions are welcome
 
@@ -112,9 +113,36 @@ Documentation improvements are always welcome. The main docs live in `docs/` and
 - Reviews focus on correctness, consistency with existing patterns, and test coverage.
 - Nitpicks are marked as such and are non-blocking.
 
+## Releasing
+
+All changes land on `dev` first, which auto-deploys to [dev.delaclaw.pages.dev](https://dev.delaclaw.pages.dev). When `dev` is stable, merge it into `main` (which deploys to [delaclaw.com](https://delaclaw.com) via GitHub Pages).
+
+### Pre-release checklist
+
+- All tests pass
+- Preview on [dev.delaclaw.pages.dev](https://dev.delaclaw.pages.dev) looks correct
+- `VERSION` has the right `latest`, `latest_compat`, and `latest_compat_deprec`
+- If DB schema changed: migration files exist for all three backends (Supabase `.sql`, `local-migrations.js`, `drive-migrations.js`), and `sql/supabase_schema.sql` is updated. See [MIGRATION_GUIDE.md](/migrations/MIGRATION_GUIDE.md)
+- i18n: all new strings present in EN, FR, ES
+- No hardcoded dark-mode colors — all via CSS variables
+- Responsive: tested on mobile viewport (≤ 480px)
+- `README.md` updated if features, file tree, or setup steps changed
+- `docs-site/` pages updated if architecture, privacy, or setup changed
+
+### Post-release smoke test
+
+- Login with each backend (Supabase, Google Drive, Local, Demo)
+- Check the Today page loads
+- Quick-add a TODO and delete it
+- If a migration was included, verify the schema banner appears on old DBs and the migration runs cleanly
+
+### Hotfix workflow
+
+For urgent fixes to `main` that can't wait for the normal `dev` cycle: branch off `main`, fix, merge back into `main`, then backport the fix into `dev`.
+
 ## Architecture notes
 
-Before diving into the code, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for an overview of the adapter pattern, state management, and file structure.
+Before diving into the code, read [docs-site/architecture.md](docs-site/architecture.md) for an overview of the adapter pattern, state management, and file structure.
 
 ## License
 

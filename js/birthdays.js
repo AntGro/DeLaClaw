@@ -138,7 +138,14 @@ function renderBirthdays() {
 
   // Separate into upcoming (next 30 days) and later
   const upcoming = birthdays.filter(b => daysUntilBirthday(b.birthday) <= 30);
-  const later = birthdays.filter(b => daysUntilBirthday(b.birthday) > 30);
+  const thisMonth = new Date().getMonth();
+  const thisYear = new Date().getFullYear();
+  const later = birthdays.filter(b => {
+    if (daysUntilBirthday(b.birthday) > 30) return true;
+    // Upcoming birthdays in a different month also appear in their month section
+    const next = getNextBirthday(b.birthday);
+    return !(next.getMonth() === thisMonth && next.getFullYear() === thisYear);
+  });
 
   // Build ordered sections: "Coming Up" + month groups
   const sections = [];

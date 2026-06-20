@@ -280,11 +280,11 @@ function renderCategoryCard(cat, items) {
         <span style="font-size:0.78rem;opacity:0.75;">(${count})</span>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="todo-cat-shortname-btn" onclick="promptVestShortname('${escQ(cat)}')" title="${getVestShortname(cat) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
-        <button class="archive-project-btn" onclick="openAddVestiaireModal('${escapedCat}')" title="Add to ${escapedCat}">
+        <button class="todo-cat-shortname-btn" onclick="openEditVestiaireCategoryModal('${escQ(cat)}')" title="${t('vestiaire.edit_category')}">${lucideIcon("pencil",14)}</button>
+        <button class="archive-project-btn" onclick="openAddVestiaireModal('${escapedCat}')" title="${t('vestiaire.add_to_category', escapedCat)}">
           ${lucideIcon('plus', 16)}
         </button>
-        <button class="archive-project-btn" onclick="deleteVestiaireCategory('${escapedCat}')" title="Delete category">
+        <button class="archive-project-btn" onclick="deleteVestiaireCategory('${escapedCat}')" title="${t('vestiaire.delete_category')}">
           ${lucideIcon('trash-2', 14)}
         </button>
       </div>
@@ -297,8 +297,8 @@ function renderCategoryCard(cat, items) {
 
 function renderVestiaireItem(v) {
   const brandHtml = v.brand
-    ? `<span class="vest-brand" onclick="editVestiaireBrandInline('${v.id}')" title="Click to edit brand">${esc(v.brand)}</span>`
-    : `<span class="vest-brand vest-brand-empty" onclick="editVestiaireBrandInline('${v.id}')" title="Click to add brand">${t('vestiaire.add_brand')}</span>`;
+    ? `<span class="vest-brand" onclick="editVestiaireBrandInline('${v.id}')" title="${t('vestiaire.click_edit_brand')}">${esc(v.brand)}</span>`
+    : `<span class="vest-brand vest-brand-empty" onclick="editVestiaireBrandInline('${v.id}')" title="${t('vestiaire.click_add_brand')}">${t('vestiaire.add_brand')}</span>`;
   const metaParts = [];
   if (v.size) metaParts.push(`${lucideIcon('ruler', 12)} ${esc(v.size)}`);
   if (v.color) metaParts.push(`${lucideIcon('palette', 12)} ${esc(v.color)}`);
@@ -310,11 +310,11 @@ function renderVestiaireItem(v) {
   // Purchase status badge (click to cycle: none → Tried → Purchased → none)
   let statusBadge = '';
   if (v.purchase_status === 'achete') {
-    statusBadge = `<span class="vest-status-badge vest-status-achete" onclick="cycleVestiaireStatus('${v.id}')" title="Click to cycle status">${t('vestiaire.purchased')}</span>`;
+    statusBadge = `<span class="vest-status-badge vest-status-achete" onclick="cycleVestiaireStatus('${v.id}')" title="${t('vestiaire.cycle_status')}">${t('vestiaire.purchased')}</span>`;
   } else if (v.purchase_status === 'essaye') {
-    statusBadge = `<span class="vest-status-badge vest-status-essaye" onclick="cycleVestiaireStatus('${v.id}')" title="Click to cycle status">${t('vestiaire.tried')}</span>`;
+    statusBadge = `<span class="vest-status-badge vest-status-essaye" onclick="cycleVestiaireStatus('${v.id}')" title="${t('vestiaire.cycle_status')}">${t('vestiaire.tried')}</span>`;
   } else {
-    statusBadge = `<span class="vest-status-badge vest-status-none" onclick="cycleVestiaireStatus('${v.id}')" title="Click to set status">○</span>`;
+    statusBadge = `<span class="vest-status-badge vest-status-none" onclick="cycleVestiaireStatus('${v.id}')" title="${t('vestiaire.set_status')}">○</span>`;
   }
 
   const statusCls = v.purchase_status === 'achete' ? ' vest-purchased' : v.purchase_status === 'essaye' ? ' vest-tried' : '';
@@ -330,9 +330,9 @@ function renderVestiaireItem(v) {
         ${metaHtml}
       </div>
       <div class="vest-actions">
-        <button onclick="editVestiaireInline('${v.id}')" title="Edit name">${lucideIcon('pencil', 14)}</button>
-        <button onclick="openEditVestiaireModal('${v.id}')" title="Edit all fields">${lucideIcon('settings', 14)}</button>
-        <button onclick="deleteVestiaire('${v.id}')" title="Delete">${lucideIcon('trash-2', 14)}</button>
+        <button onclick="editVestiaireInline('${v.id}')" title="${t('vestiaire.edit_name')}">${lucideIcon('pencil', 14)}</button>
+        <button onclick="openEditVestiaireModal('${v.id}')" title="${t('vestiaire.edit_all_fields')}">${lucideIcon('settings', 14)}</button>
+        <button onclick="deleteVestiaire('${v.id}')" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
       </div>
     </div>
   </div>`;
@@ -433,7 +433,7 @@ async function editVestiaireInline(id) {
       v.name = newName;
       showToast(t('toast.renamed'), 'success');
     },
-    refreshFn: renderVestiaire,
+    refreshFn: refreshVestiaire,
   });
 }
 /** Inline-edit the brand via click on brand badge */
@@ -454,7 +454,7 @@ async function editVestiaireBrandInline(id) {
       v.brand = newBrand || null;
       showToast(t('toast.updated'), 'success');
     },
-    refreshFn: renderVestiaire,
+    refreshFn: refreshVestiaire,
   });
 }
 
@@ -516,10 +516,16 @@ function editVestiaireInlineFull(id) {
         updates.updated_at = new Date().toISOString();
         const { error } = await state.db.from('vestiaire').update(updates).eq('id', id);
         if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+        // Update local state so re-render shows new values immediately
+        if (updates.name !== undefined) v.name = updates.name;
+        if (updates.brand !== undefined) v.brand = updates.brand;
+        if (updates.size !== undefined) v.size = updates.size;
+        if (updates.color !== undefined) v.color = updates.color;
+        if (updates.note !== undefined) v.note = updates.note;
         showToast(t('toast.updated'), 'success');
       }
     },
-    refreshFn: renderVestiaire,
+    refreshFn: refreshVestiaire,
   });
 }
 
@@ -624,6 +630,26 @@ function initVestiaireModals() {
     </div>
   </div>`;
   app.appendChild(m3);
+
+  // Edit Category Modal
+  const m4 = document.createElement('div');
+  m4.className = 'modal-overlay';
+  m4.id = 'editVestiaireCategoryModal';
+  m4.innerHTML = `<div class="modal">
+    <h2>${lucideIcon('pencil', 20)} ${t('vestiaire.edit_category')}</h2>
+    <input type="hidden" id="editVestiaireCategoryOldName">
+    <label>${t('common.name')}</label>
+    <input type="text" id="editVestiaireCategoryName" maxlength="40"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditVestiaireCategory();}">
+    <label>${t('vestiaire.shortname')}</label>
+    <input type="text" id="editVestiaireCategoryShortname" maxlength="20" placeholder="${t('vestiaire.shortname_placeholder')}"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditVestiaireCategory();}">
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeEditVestiaireCategoryModal()">${t('common.cancel')}</button>
+      <button class="modal-save" onclick="saveEditVestiaireCategory()">${t('common.save')}</button>
+    </div>
+  </div>`;
+  app.appendChild(m4);
 }
 
 function populateCategorySelect(selectId, preselect) {
@@ -769,6 +795,58 @@ function saveNewVestiaireCategory() {
   renderVestiaire();
 }
 
+function openEditVestiaireCategoryModal(cat) {
+  document.getElementById('editVestiaireCategoryOldName').value = cat;
+  document.getElementById('editVestiaireCategoryName').value = cat;
+  document.getElementById('editVestiaireCategoryShortname').value = getVestShortname(cat) || '';
+  document.getElementById('editVestiaireCategoryModal').classList.add('visible');
+  setTimeout(() => document.getElementById('editVestiaireCategoryName').focus(), 100);
+}
+
+function closeEditVestiaireCategoryModal() {
+  document.getElementById('editVestiaireCategoryModal').classList.remove('visible');
+}
+
+async function saveEditVestiaireCategory() {
+  const oldName = document.getElementById('editVestiaireCategoryOldName').value;
+  const newName = document.getElementById('editVestiaireCategoryName').value.trim();
+  const shortname = document.getElementById('editVestiaireCategoryShortname').value.trim();
+
+  if (!newName) { showToast(t('toast.enter_name'), 'error'); return; }
+
+  // Prevent duplicate category names
+  if (oldName !== newName) {
+    const cats = getVestiaireCategories();
+    if (cats.includes(newName)) { showToast(t('toast.name_taken') || 'Name already taken', 'error'); return; }
+  }
+
+  // Update shortname (move to new key if renamed)
+  if (oldName !== newName) {
+    // Rename category in localStorage list
+    const cats = getVestiaireCategories();
+    const idx = cats.indexOf(oldName);
+    if (idx >= 0) cats[idx] = newName;
+    saveVestiaireCategories(cats);
+
+    // Rename category on all vestiaire items in DB
+    const items = (state.allVestiaire || []).filter(v => v.category === oldName);
+    for (const item of items) {
+      await state.db.from('vestiaire').update({ category: newName, updated_at: new Date().toISOString() }).eq('id', item.id);
+    }
+
+    // Move shortname from old key to new key
+    const oldShortname = getVestShortname(oldName);
+    if (oldShortname) setVestShortname(oldName, '');
+    setVestShortname(newName, shortname);
+  } else {
+    setVestShortname(oldName, shortname);
+  }
+
+  closeEditVestiaireCategoryModal();
+  showToast(t('toast.updated'), 'success');
+  await refreshVestiaire();
+}
+
 function deleteVestiaireCategory(cat) {
   const items = (state.allVestiaire || []).filter(v => v.category === cat);
   if (items.length > 0) {
@@ -777,7 +855,7 @@ function deleteVestiaireCategory(cat) {
   }
   showDeleteConfirm(
     t('vestiaire.delete_category'),
-    `Remove the "${cat}" category?`,
+    t('vestiaire.delete_category_confirm', cat),
     () => {
       const cats = getVestiaireCategories().filter(c => c !== cat);
       saveVestiaireCategories(cats);
@@ -814,4 +892,7 @@ window.editVestiaireBrandInline = editVestiaireBrandInline;
 window.cycleVestiaireStatus = cycleVestiaireStatus;
 
 window.promptVestShortname = promptVestShortname;
+window.openEditVestiaireCategoryModal = openEditVestiaireCategoryModal;
+window.closeEditVestiaireCategoryModal = closeEditVestiaireCategoryModal;
+window.saveEditVestiaireCategory = saveEditVestiaireCategory;
 window.filterVestiaire = function(e) { vestSearchQuery = e.target.value; renderVestiaire(); };

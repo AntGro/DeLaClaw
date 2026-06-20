@@ -398,6 +398,13 @@ async function quickAddListItem(inputEl, listId) {
   const text = inputEl.value.trim();
   if (!text) return;
 
+  // Show saving state on the quick-add row
+  const wrapper = inputEl.closest('.list-quick-add');
+  const btn = wrapper && wrapper.querySelector('.list-quick-add-btn');
+  const btnHtml = btn ? btn.innerHTML : '';
+  if (btn) btn.innerHTML = `<span class="list-saving-spinner"></span>`;
+  inputEl.disabled = true;
+
   const items = (state.allListItems || []).filter(i => i.list_id === listId);
   const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
 
@@ -406,6 +413,11 @@ async function quickAddListItem(inputEl, listId) {
     text,
     sort_order: maxOrder + 1,
   });
+
+  // Restore input state
+  inputEl.disabled = false;
+  if (btn) btn.innerHTML = btnHtml;
+
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
   inputEl.value = '';

@@ -598,7 +598,7 @@ const T = {
       copy_done: 'Copié !',
     },
     demo: {
-      banner: 'Démo — les modifications ne sont pas sauvegardées',
+      banner: 'Démo — rien n\'est sauvegardé',
       start_own: 'Créer mon espace',
       show_empty: 'Afficher vide',
       show_data: 'Afficher les données',

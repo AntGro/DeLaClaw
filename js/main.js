@@ -2255,56 +2255,104 @@ function showSignupOverlay() {
   compareLink.textContent = t('compare.link');
   compareLink.addEventListener('click', showCompareModal);
 
-  // Clone the backend picker + form fields from the gate
-  const formClone = document.getElementById('loginForm').cloneNode(true);
-  formClone.id = 'signupForm';
-  formClone.style.display = 'flex';
-  // Remove the storage hint and compare link from clone (we already have them above)
-  formClone.querySelector('.gate-storage-hint')?.remove();
-  formClone.querySelector('.backend-compare-link')?.remove();
+  // Build a clean form (not a clone) with only what's needed
+  const form = document.createElement('form');
+  form.id = 'signupForm';
+  form.style.display = 'flex';
+  form.style.flexDirection = 'column';
+  form.style.alignItems = 'center';
+  form.style.width = '100%';
 
-  // Wire up backend switching on clone
-  const clonePicker = formClone.querySelector('.backend-picker');
-  if (clonePicker) {
-    clonePicker.querySelectorAll('.backend-option').forEach(btn => {
-      btn.addEventListener('click', () => {
-        clonePicker.querySelectorAll('.backend-option').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const mode = btn.dataset.mode;
-        // Update hint and fields visibility in clone
-        const cloneFields = formClone.querySelector('.gate-fields');
-        const cloneHint = formClone.querySelector('.hint');
-        const cloneKeyField = formClone.querySelector('#keyField') || formClone.querySelector('[id$="keyField"]');
-        if (mode === 'googledrive' || mode === 'demo') {
-          if (cloneFields) cloneFields.style.display = 'none';
-        } else {
-          if (cloneFields) cloneFields.style.display = '';
-          if (cloneHint) cloneHint.textContent = mode === 'supabase' ? t('login.hint_supabase') : t('login.hint_local');
-        }
-      });
-    });
-    // Trigger initial state: default to googledrive
-    const driveBtn = clonePicker.querySelector('[data-mode="googledrive"]');
-    if (driveBtn) {
-      clonePicker.querySelectorAll('.backend-option').forEach(b => b.classList.remove('active'));
-      driveBtn.classList.add('active');
+  // Backend picker
+  const picker = document.createElement('div');
+  picker.className = 'backend-picker';
+  const modes = [
+    { mode: 'googledrive', label: t('login.mode_drive'), title: 'Google Drive' },
+    { mode: 'supabase', label: t('login.mode_supabase'), title: 'Supabase' },
+    { mode: 'local', label: t('login.mode_local'), title: 'Local' },
+  ];
+  let activeMode = 'googledrive';
+  const fieldsDiv = document.createElement('div');
+  fieldsDiv.className = 'gate-fields';
+  fieldsDiv.style.display = 'none';
+  fieldsDiv.style.alignSelf = 'stretch';
+
+  const hintP = document.createElement('p');
+  hintP.className = 'hint';
+
+  const urlLabel = document.createElement('label');
+  urlLabel.className = 'gate-label';
+  urlLabel.textContent = 'Project URL';
+  const urlInput = document.createElement('input');
+  urlInput.type = 'text';
+  urlInput.placeholder = 'https://xyz.supabase.co';
+
+  const keyDiv = document.createElement('div');
+  const keyLabel = document.createElement('label');
+  keyLabel.className = 'gate-label';
+  keyLabel.textContent = 'API Key';
+  const keyInput = document.createElement('input');
+  keyInput.type = 'password';
+  keyInput.placeholder = 'eyJhbG...';
+  keyDiv.appendChild(keyLabel);
+  keyDiv.appendChild(keyInput);
+
+  fieldsDiv.appendChild(hintP);
+  fieldsDiv.appendChild(urlLabel);
+  fieldsDiv.appendChild(urlInput);
+  fieldsDiv.appendChild(keyDiv);
+
+  const submitBtn = document.createElement('button');
+  submitBtn.type = 'submit';
+  submitBtn.className = 'btn-primary';
+  submitBtn.style.alignSelf = 'stretch';
+  submitBtn.textContent = t('login.btn_googledrive');
+
+  function updateSignupFields() {
+    if (activeMode === 'googledrive') {
+      fieldsDiv.style.display = 'none';
+      submitBtn.textContent = t('login.btn_googledrive');
+    } else {
+      fieldsDiv.style.display = '';
+      hintP.textContent = activeMode === 'supabase' ? t('login.hint_supabase') : t('login.hint_local');
+      keyDiv.style.display = activeMode === 'local' ? 'none' : '';
+      submitBtn.textContent = t('login.connect');
     }
-    const cloneFields = formClone.querySelector('.gate-fields');
-    if (cloneFields) cloneFields.style.display = 'none';
   }
 
-  // Handle form submit — transfer values to real form and submit
-  formClone.addEventListener('submit', (e) => {
+  modes.forEach(m => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'backend-option' + (m.mode === 'googledrive' ? ' active' : '');
+    btn.dataset.mode = m.mode;
+    btn.title = m.title;
+    // Icon from the real picker
+    const realBtn = document.querySelector(`.backend-option[data-mode="${m.mode}"]`);
+    const iconEl = realBtn?.querySelector('svg, .backend-icon-img');
+    if (iconEl) btn.appendChild(iconEl.cloneNode(true));
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'backend-option-label';
+    labelSpan.textContent = m.label;
+    btn.appendChild(labelSpan);
+    btn.addEventListener('click', () => {
+      picker.querySelectorAll('.backend-option').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeMode = m.mode;
+      updateSignupFields();
+    });
+    picker.appendChild(btn);
+  });
+
+  form.appendChild(picker);
+  form.appendChild(fieldsDiv);
+  form.appendChild(submitBtn);
+
+  // Handle form submit
+  form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const activeMode = formClone.querySelector('.backend-option.active')?.dataset.mode || 'googledrive';
     switchBackendMode(activeMode);
-    // Copy field values to the real form
-    const realUrl = document.getElementById('username');
-    const realKey = document.getElementById('password');
-    const cloneUrl = formClone.querySelector('[name="username"]');
-    const cloneKey = formClone.querySelector('[name="password"]');
-    if (realUrl && cloneUrl) realUrl.value = cloneUrl.value;
-    if (realKey && cloneKey) realKey.value = cloneKey.value;
+    document.getElementById('username').value = urlInput.value;
+    document.getElementById('password').value = keyInput.value;
     closeSignupOverlay();
     doLogin();
   });
@@ -2313,14 +2361,13 @@ function showSignupOverlay() {
   cancelBtn.type = 'button';
   cancelBtn.className = 'compare-close-btn';
   cancelBtn.style.marginTop = '8px';
-  cancelBtn.textContent = t('demo.exit') === t('demo.exit') ? 'Back to demo' : t('demo.exit');
   cancelBtn.textContent = t('schema.close');
   cancelBtn.addEventListener('click', closeSignupOverlay);
 
   box.appendChild(title);
   box.appendChild(hint);
   box.appendChild(compareLink);
-  box.appendChild(formClone);
+  box.appendChild(form);
   box.appendChild(cancelBtn);
   overlay.appendChild(box);
   document.body.appendChild(overlay);

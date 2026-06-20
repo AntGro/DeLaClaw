@@ -195,8 +195,8 @@ input,select,button{font-family:inherit;}
 .gate-welcome-login{display:inline-block;font-size:0.82rem;color:var(--muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;transition:color 0.2s;}
 .gate-welcome-login:hover{color:var(--text);}
 /* Sign-up overlay (login modal on top of demo) */
-.signup-overlay{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
-.signup-overlay .gate-box{animation:gate-fadein 0.25s ease;}
+.signup-overlay{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+.signup-overlay .gate-box{animation:gate-fadein 0.25s ease;max-width:380px;width:100%;}
 @keyframes gate-fadein{from{opacity:0;transform:scale(0.96);}to{opacity:1;transform:scale(1);}}
 .gate-guide-link{display:inline-flex;align-items:center;gap:6px;margin-top:18px;font-size:0.88rem;font-weight:500;color:var(--accent);text-decoration:none;transition:all 0.2s;letter-spacing:-0.01em;padding:10px 20px;border:1.5px solid var(--accent);border-radius:10px;background:color-mix(in srgb,var(--accent) 6%,transparent);}
 .gate-guide-link:hover{background:color-mix(in srgb,var(--accent) 14%,transparent);box-shadow:0 0 0 3px rgba(100,108,255,0.12);}
@@ -1571,7 +1571,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 }
 
 /* ── Demo Mode Banner ── */
-.demo-banner{position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;padding:6px 16px;background:oklch(0.55 0.15 264);color:#fff;font-size:0.82rem;font-weight:500;gap:12px;}
+.demo-banner{position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;padding:6px 16px;background:oklch(0.55 0.15 264);color:#fff;font-size:0.82rem;font-weight:500;gap:8px;flex-wrap:wrap;}
 .schema-banner{position:fixed;top:0;left:0;right:0;z-index:9998;display:flex;align-items:center;gap:8px;padding:8px 16px;background:oklch(0.50 0.15 50);color:#fff;font-size:0.82rem;font-weight:500;}
 .schema-banner-critical{background:oklch(0.45 0.2 25);}
 .schema-banner svg{flex-shrink:0;}

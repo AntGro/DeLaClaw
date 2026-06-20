@@ -228,8 +228,8 @@ function updateFooterStats(viewCountsGetter) {
     // Demo mode: no persistent storage, skip DB size
     statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} Demo</div>`;
   } else if (state.driveMode) {
-    // Google Drive: no size limit, skip DB size
-    statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} Google Drive</div>`;
+    // Google Drive: show estimated data size from in-memory store
+    statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} Google Drive · <span id="dbSizeMb">—</span></div>`;
   } else {
     // Supabase / Local: show DB size with limit
     statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} ${t('utils.db')}: <span id="dbSizeMb">—</span> / 500 MB</div>`;
@@ -251,6 +251,22 @@ function updateFooterStats(viewCountsGetter) {
       const el = document.getElementById('dbSizeMb');
       if (el) el.textContent = (error || data == null) ? '—' : `${data} MB`;
     });
+  }
+  // Estimate data size for Google Drive from in-memory store
+  if (state.driveMode && state.driveAdapter && state.driveAdapter._store) {
+    try {
+      const store = state.driveAdapter._store;
+      let totalBytes = 0;
+      for (const table of Object.keys(store)) {
+        totalBytes += new Blob([JSON.stringify(store[table])]).size;
+      }
+      const el = document.getElementById('dbSizeMb');
+      if (el) {
+        el.textContent = totalBytes < 1024 * 1024
+          ? `~${Math.max(1, Math.round(totalBytes / 1024))} KB`
+          : `~${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
+      }
+    } catch { /* non-critical */ }
   }
 }
 

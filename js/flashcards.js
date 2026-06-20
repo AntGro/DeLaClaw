@@ -1118,6 +1118,8 @@ window.rateCard = async function(rating) {
   _ratingInProgress = true;
   // Disable buttons visually while processing
   document.querySelectorAll('#practiceButtons .rating-btn').forEach(b => b.disabled = true);
+  const headerLogo = document.querySelector('.practice-header-logo');
+  if (headerLogo) headerLogo.classList.add('spinning');
   try {
     const card = sessionQueue.shift();
     const now = new Date();

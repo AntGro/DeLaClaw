@@ -254,12 +254,6 @@ function switchBackendMode(mode) {
   document.querySelectorAll('.backend-option').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
-  // Update picker label
-  const labelEl = document.getElementById('backendPickerLabel');
-  if (labelEl) {
-    const labels = { googledrive: 'Google Drive', supabase: 'Supabase', local: 'Local', demo: 'Demo' };
-    labelEl.textContent = labels[mode] || mode;
-  }
   const keyField = document.getElementById('keyField');
   const urlField = document.getElementById('username');
   const urlLabel = document.getElementById('urlLabel');
@@ -311,7 +305,11 @@ function initGate() {
   });
   document.querySelectorAll('.backend-option[data-mode]').forEach(btn => {
     const mode = btn.dataset.mode;
-    if (LOGOS[mode] && !btn.innerHTML.trim()) btn.innerHTML = LOGOS[mode](18);
+    if (LOGOS[mode] && !btn.querySelector('svg, .backend-icon-img')) {
+      const labelSpan = btn.querySelector('.backend-option-label');
+      if (labelSpan) btn.insertAdjacentHTML('afterbegin', LOGOS[mode](16));
+      else btn.innerHTML = LOGOS[mode](16);
+    }
   });
   // Wire up backend picker
   document.querySelectorAll('.backend-option').forEach(btn => {

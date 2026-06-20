@@ -167,7 +167,7 @@ input,select,button{font-family:inherit;}
 #urlLabelLink[href]:hover::before{content:attr(data-tooltip);position:absolute;left:50%;transform:translateX(-50%);bottom:calc(100% + 6px);white-space:nowrap;font-size:0.72rem;font-weight:400;color:#fff;background:#333;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:10;}
 
 /* Backend Picker */
-.backend-picker{display:inline-flex;gap:3px;justify-content:center;padding:3px;margin:0 auto 14px;background:color-mix(in srgb,var(--border) 40%,transparent);border-radius:12px;}
+.backend-picker{display:flex;gap:3px;justify-content:center;padding:3px;margin:0 auto 14px;background:color-mix(in srgb,var(--border) 40%,transparent);border-radius:12px;width:fit-content;}
 .backend-option{display:flex;align-items:center;justify-content:center;gap:5px;height:36px;padding:0 10px;border:1.5px solid transparent;border-radius:9px;background:transparent;color:var(--muted);cursor:pointer;transition:all 0.2s;font-family:inherit;}
 .backend-option:hover{color:var(--text);background:color-mix(in srgb,var(--border) 30%,transparent);}
 .backend-option.active{background:var(--surface);color:var(--text);border-color:var(--border);box-shadow:0 1px 3px rgba(0,0,0,0.10);}

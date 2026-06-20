@@ -539,6 +539,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const setupDriveDone = document.getElementById('setupDriveDone');
 
   function showGuide() {
+    hideHero();
+    window.scrollTo(0, 0);
     if (gateBox) gateBox.style.display = 'none';
     if (guidePanel) guidePanel.style.display = '';
     document.body.style.overflow = 'hidden';
@@ -2373,6 +2375,7 @@ function showSignupOverlay() {
   guideLink.textContent = t('setup.guide_link');
   guideLink.addEventListener('click', () => {
     closeSignupOverlay();
+    clearStayConnectedCreds();
     location.hash = '#setup';
     location.reload();
   });

@@ -2202,8 +2202,8 @@ function showCompareModal() {
   overlay.className = 'modal-overlay visible';
   overlay.addEventListener('click', e => { if (e.target === overlay) closeCompareModal(); });
 
-  const check = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
-  const cross = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+  const check = '<span class="compare-check"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>';
+  const cross = '<span class="compare-cross"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
 
   const rows = [
     { key: 'compare.setup', vals: ['compare.setup_drive', 'compare.setup_supa', 'compare.setup_local', 'compare.setup_demo'] },
@@ -2214,7 +2214,10 @@ function showCompareModal() {
     { key: 'compare.cost', vals: ['compare.free', 'compare.free', 'compare.free', 'compare.free'] },
   ];
 
-  const thead = `<tr><th></th><th>Google Drive</th><th>Supabase</th><th>Local</th><th>Demo</th></tr>`;
+  const backends = ['googledrive', 'supabase', 'local', 'demo'];
+  const thead = `<tr><th></th>${backends.map(b =>
+    `<th class="compare-th-${b}"><span class="compare-th-inner">${LOGOS[b](16)}${esc(LABELS[b])}</span></th>`
+  ).join('')}</tr>`;
   const tbody = rows.map(r => {
     const cells = r.vals.map(v => `<td>${r.raw ? v : esc(t(v))}</td>`).join('');
     return `<tr><td class="compare-label">${esc(t(r.key))}</td>${cells}</tr>`;

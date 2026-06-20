@@ -1612,10 +1612,19 @@ body:has(.schema-banner) .app-header{top:var(--schema-banner-h,40px);}
 .compare-table{width:100%;border-collapse:collapse;font-size:0.78rem;line-height:1.5;}
 .compare-table th{padding:10px 12px;text-align:center;font-weight:700;font-size:0.78rem;letter-spacing:0.02em;border-bottom:2px solid var(--border);background:color-mix(in srgb, var(--border) 30%, transparent);white-space:nowrap;}
 .compare-table th:first-child{text-align:left;width:1%;}
+.compare-th-inner{display:inline-flex;align-items:center;gap:5px;justify-content:center;}
+.compare-th-inner img{width:16px;height:16px;object-fit:contain;}
+.compare-th-googledrive{border-bottom:3px solid #4285f4;background:color-mix(in srgb,#4285f4 8%,transparent);}
+.compare-th-supabase{border-bottom:3px solid #3ECF8E;background:color-mix(in srgb,#3ECF8E 8%,transparent);}
+.compare-th-local{border-bottom:3px solid #a78bfa;background:color-mix(in srgb,#a78bfa 8%,transparent);}
+.compare-th-demo{border-bottom:3px solid #6366f1;background:color-mix(in srgb,#6366f1 8%,transparent);}
 .compare-table td{padding:8px 12px;text-align:center;border-bottom:1px solid var(--border);vertical-align:middle;}
 .compare-table tr:last-child td{border-bottom:none;}
+.compare-table tbody tr:nth-child(even){background:color-mix(in srgb,var(--border) 15%,transparent);}
 .compare-label{text-align:left!important;font-weight:600;white-space:nowrap;color:var(--text);}
 .compare-footnote{font-size:0.72rem;color:var(--muted);margin:6px 0 12px;text-align:left;line-height:1.4;}
+.compare-check{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:color-mix(in srgb,#22c55e 12%,transparent);}
+.compare-cross{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:color-mix(in srgb,var(--muted) 8%,transparent);}
 .compare-close-btn{display:block;width:100%;background:transparent;border:1px solid var(--border);border-radius:8px;padding:9px 18px;font-size:0.88rem;color:var(--muted);cursor:pointer;font-family:inherit;transition:all 0.2s;}
 .compare-close-btn:hover{border-color:var(--text);color:var(--text);}
 .demo-banner button{background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:3px 10px;font-size:0.78rem;cursor:pointer;white-space:nowrap;font-family:inherit;}

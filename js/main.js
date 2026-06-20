@@ -339,9 +339,11 @@ function initGate() {
     autoConnect(saved.url, saved.key, saved.mode);
     return;
   }
-  // Set login hash (user is on the login page)
-  history.replaceState(null, '', '#login');
-  showHero();
+  // Set login hash (user is on the login page) — preserve #setup if present
+  if (window.location.hash !== '#setup') {
+    history.replaceState(null, '', '#login');
+    showHero();
+  }
   switchBackendMode('googledrive');
   // First visit: show welcome panel instead of login form
   const gateWelcome = document.getElementById('gateWelcome');

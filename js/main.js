@@ -2218,15 +2218,15 @@ function showCompareModal() {
   const cross = '<span class="compare-cross"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
 
   const rows = [
-    { key: 'compare.setup', vals: ['compare.setup_drive', 'compare.setup_supa', 'compare.setup_local', 'compare.setup_demo'] },
-    { key: 'compare.multi_device', vals: [check + ' ' + esc(t('compare.polling')), check + ' ' + esc(t('compare.live')), cross, cross], raw: true },
-    { key: 'compare.offline', vals: [cross, cross, check, check], raw: true },
-    { key: 'compare.data_location', vals: ['compare.loc_drive', 'compare.loc_supa', 'compare.loc_local', 'compare.loc_demo'] },
-    { key: 'compare.storage', vals: ['compare.sto_drive', 'compare.sto_supa', 'compare.sto_local', 'compare.sto_demo'] },
-    { key: 'compare.cost', vals: ['compare.free', 'compare.free', 'compare.free', 'compare.free'] },
+    { key: 'compare.setup', vals: ['compare.setup_drive', 'compare.setup_supa', 'compare.setup_local'] },
+    { key: 'compare.multi_device', vals: [check + ' ' + esc(t('compare.polling')), check + ' ' + esc(t('compare.live')), cross], raw: true },
+    { key: 'compare.offline', vals: [cross, cross, check], raw: true },
+    { key: 'compare.data_location', vals: ['compare.loc_drive', 'compare.loc_supa', 'compare.loc_local'] },
+    { key: 'compare.storage', vals: ['compare.sto_drive', 'compare.sto_supa', 'compare.sto_local'] },
+    { key: 'compare.cost', vals: ['compare.free', 'compare.free', 'compare.free'] },
   ];
 
-  const backends = ['googledrive', 'supabase', 'local', 'demo'];
+  const backends = ['googledrive', 'supabase', 'local'];
   const thead = `<tr><th></th>${backends.map(b =>
     `<th class="compare-th-${b}"><span class="compare-th-inner">${LOGOS[b](16)}${esc(LABELS[b])}</span></th>`
   ).join('')}</tr>`;

@@ -87,6 +87,8 @@
     <h1 id="gateTitle">DeLaClaw</h1>
 
     <form id="loginForm" method="post" action="https://antgro.github.io/command-center/" style="display:none;">
+      <p class="gate-storage-hint" id="gateStorageHint" data-i18n="login.storage_hint">Choose where your data is stored.</p>
+      <a class="backend-compare-link" id="backendCompareLink" href="javascript:void(0)" data-i18n="compare.link">Compare options</a>
       <div class="backend-picker" id="backendPicker">
         <button type="button" class="backend-option active" data-mode="googledrive" title="Google Drive"><span class="backend-option-label" data-i18n="login.mode_drive">Drive</span></button>
         <button type="button" class="backend-option" data-mode="supabase" title="Supabase"><span class="backend-option-label" data-i18n="login.mode_supabase">Supabase</span></button>
@@ -95,7 +97,6 @@
       </div>
       <div class="gate-fields" id="gateFields">
         <p class="hint" id="loginHint">Connect to your Supabase project.</p>
-        <a class="backend-compare-link" id="backendCompareLink" href="javascript:void(0)">Compare options</a>
         <label for="username" class="gate-label" id="urlLabel"><a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener" id="urlLabelLink" data-tooltip="Find the URL by connecting to your Supabase project">Project URL</a></label>
         <input type="text" id="username" name="username" placeholder="https://xyz.supabase.co" autocomplete="username">
         <div id="keyField">
@@ -784,7 +785,7 @@ bun run server.js</pre>
               <span id="settingsExportBtn">Export backup</span>
             </button>
             <button type="button" class="settings-data-btn" onclick="exportToGoogleDrive()">
-              <svg viewBox="0 0 87.3 78" width="16" height="16" xmlns="http://www.w3.org/2000/svg"><path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/><path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0-1.2 4.5h27.5z" fill="#00ac47"/><path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/><path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/><path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/><path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/></svg>
+              <img class="backend-icon-img" src="https://www.gstatic.com/images/branding/productlogos/drive_2026/v1/web-48dp/logo_drive_2026_color_2x_web_48dp.png" alt="Google Drive" width="16" height="16">
               <span id="settingsDriveExportBtn">Save to Google Drive</span>
             </button>
             <div class="drive-backup-link" id="driveBackupLink" style="display:none"></div>

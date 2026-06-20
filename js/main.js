@@ -2072,30 +2072,26 @@ function showMigrationModal() {
   overlay.className = 'modal-overlay visible';
   overlay.addEventListener('click', e => { if (e.target === overlay) closeMigrationModal(); });
 
-  const pendingVersions = Object.keys(SUPABASE_MIGRATIONS)
-    .filter(v => cmpVer(v, dbVer) > 0 && cmpVer(v, LATEST_COMPAT) <= 0)
-    .sort((a, b) => cmpVer(a, b));
-  const countLabel = pendingVersions.length === 1
-    ? t('schema.migration_count_one')
-    : t('schema.migration_count', { count: pendingVersions.length });
+  const projectRef = state.supabaseUrl?.replace('https://', '').replace('.supabase.co', '') || '_';
+  const sqlEditorUrl = `https://supabase.com/dashboard/project/${projectRef}/sql/new`;
 
   overlay.innerHTML = `<div class="modal migration-modal">
-    <h2>${lucideIcon('database', 18)} ${esc(t('schema.modal_title'))}</h2>
-    <p class="migration-hint">${esc(t('schema.modal_hint', { dbVer, latest: LATEST_COMPAT }))} ${esc(countLabel)}</p>
+    <h2>${LOGOS.supabase(18)} ${esc(t('schema.modal_title'))}</h2>
+    <p class="migration-hint">${esc(t('schema.modal_hint', { dbVer, latest: LATEST_COMPAT }))}</p>
     <ol class="migration-steps">
-      <li>${t('schema.step_1')}</li>
-      <li>${t('schema.step_2')}</li>
+      <li>${t('schema.step_1')}
+        <div class="migration-sql-wrap">
+          <div class="migration-sql-header">
+            <span>SQL</span>
+            <button class="migration-copy-btn" id="migrationCopyBtn">${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}</button>
+          </div>
+          <pre class="migration-sql-code" id="migrationSqlCode">${esc(sql)}</pre>
+        </div>
+      </li>
+      <li>${t('schema.step_2', { url: sqlEditorUrl })}</li>
       <li>${t('schema.step_3')}</li>
     </ol>
-    <div class="migration-sql-wrap">
-      <div class="migration-sql-header">
-        <span>SQL</span>
-        <button class="migration-copy-btn" id="migrationCopyBtn">${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}</button>
-      </div>
-      <pre class="migration-sql-code" id="migrationSqlCode">${esc(sql)}</pre>
-    </div>
     <div class="migration-actions">
-      <a href="https://supabase.com/dashboard/project/_/sql" target="_blank" rel="noopener" class="btn-primary migration-open-btn">${esc(t('schema.open_sql_editor'))} ↗</a>
       <button class="migration-close-btn" onclick="closeMigrationModal()">${esc(t('schema.close'))}</button>
     </div>
   </div>`;
@@ -2638,7 +2634,8 @@ function importBackup() {
       null,
       {
         btnText: t('menu.settings_restore') || 'Restore',
-        iconSvg: '<svg class="delete-confirm-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+        iconSvg: '<svg class="delete-confirm-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+        btnIconSvg: '<svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
       }
     );
   };

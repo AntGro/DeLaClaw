@@ -152,6 +152,15 @@ function showDeleteConfirm(title, message, onConfirm, detail, opts) {
       iconWrap.innerHTML = opts.iconSvg;
     }
   }
+  // Custom button icon (swap trash SVG on the action button)
+  const btnEl = document.getElementById('deleteConfirmBtn');
+  if (btnEl) {
+    const btnSvg = btnEl.querySelector('svg');
+    if (opts?.btnIconSvg && btnSvg) {
+      btnEl.dataset.originalBtnSvg = btnSvg.outerHTML;
+      btnSvg.outerHTML = opts.btnIconSvg;
+    }
+  }
   _deleteConfirmCallback = onConfirm;
   document.getElementById('deleteConfirmModal').classList.add('visible');
 }
@@ -167,6 +176,13 @@ function closeDeleteConfirm() {
   if (iconWrap && iconWrap.dataset.originalHtml) {
     iconWrap.innerHTML = iconWrap.dataset.originalHtml;
     delete iconWrap.dataset.originalHtml;
+  }
+  // Reset custom button icon if it was changed
+  const btnEl = document.getElementById('deleteConfirmBtn');
+  if (btnEl && btnEl.dataset.originalBtnSvg) {
+    const curSvg = btnEl.querySelector('svg');
+    if (curSvg) curSvg.outerHTML = btnEl.dataset.originalBtnSvg;
+    delete btnEl.dataset.originalBtnSvg;
   }
 }
 

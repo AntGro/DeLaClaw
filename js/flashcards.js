@@ -617,7 +617,7 @@ window.openAddDraftModal = function() {
       <textarea id="newDraftContent" rows="4" placeholder="${t('flashcards.learn_placeholder')}"></textarea>
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeAddDraftModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewDraft()">${t('common.save')}</button>
+        <button class="modal-save" onclick="return saveNewDraft()">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -816,7 +816,7 @@ window.editProposal = function(id) {
       <select id="editProposalDeck">${deckOptions}</select>
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeEditProposalModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveEditedProposal('${draft.id}')">${t('common.save')}</button>
+        <button class="modal-save" onclick="return saveEditedProposal('${draft.id}')">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -863,7 +863,7 @@ window.openAddFlashcardModal = function(deck) {
       <textarea id="newFlashBack" rows="3" placeholder="${t('flashcards.answer_placeholder')}"></textarea>
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeAddFlashcardModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewFlashcard()">${t('common.save')}</button>
+        <button class="modal-save" onclick="return saveNewFlashcard()">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -904,7 +904,7 @@ window.openEditFlashcardModal = function(id) {
       <textarea id="editFlashBack" rows="3">${esc(card.back)}</textarea>
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeEditFlashcardModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveEditFlashcard()">${t('common.save')}</button>
+        <button class="modal-save" onclick="return saveEditFlashcard()">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -953,7 +953,7 @@ window.openAddFlashDeckModal = function() {
       <input type="hidden" id="newDeckType" value="flashcard">
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeAddFlashDeckModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewFlashDeck()">${t('common.save')}</button>
+        <button class="modal-save" onclick="return saveNewFlashDeck()">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -1291,7 +1291,7 @@ window.openAddTextModal = function(deck) {
       </div>
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeAddTextModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewText()">${t('common.save')}</button>
+        <button class="modal-save" onclick="return saveNewText()">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -1367,7 +1367,7 @@ window.openEditTextModal = function(id) {
       <textarea id="editTextContent" rows="10" style="font-family:monospace;font-size:0.85rem;">${esc(tx.content)}</textarea>
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeEditTextModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveEditText()">${t('common.save')}</button>
+        <button class="modal-save" onclick="return saveEditText()">${t('common.save')}</button>
       </div>
     </div>
   </div>`;

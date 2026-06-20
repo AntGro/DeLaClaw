@@ -474,7 +474,7 @@ function initListModals() {
     <input type="color" id="newListColor" value="#14b8a6">
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeAddListModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveNewList()">${t('common.add')}</button>
+      <button class="modal-save" onclick="return saveNewList()">${t('common.add')}</button>
     </div>
   </div>`;
   app.appendChild(m1);
@@ -496,7 +496,7 @@ function initListModals() {
     <input type="color" id="editListColor">
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeEditListModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveEditList()">${t('common.save')}</button>
+      <button class="modal-save" onclick="return saveEditList()">${t('common.save')}</button>
     </div>
   </div>`;
   app.appendChild(m2);

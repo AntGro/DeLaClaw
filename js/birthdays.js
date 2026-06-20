@@ -297,7 +297,7 @@ function initBirthdayModals() {
     </div>
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeAddBirthdayModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveNewBirthday()">${t('common.add')}</button>
+      <button class="modal-save" onclick="return saveNewBirthday()">${t('common.add')}</button>
     </div>
   </div>`;
   app.appendChild(m1);
@@ -317,7 +317,7 @@ function initBirthdayModals() {
     <input type="text" id="editBirthdayNote" maxlength="500">
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeEditBirthdayModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveEditBirthday()">${t('common.save')}</button>
+      <button class="modal-save" onclick="return saveEditBirthday()">${t('common.save')}</button>
     </div>
   </div>`;
   app.appendChild(m2);

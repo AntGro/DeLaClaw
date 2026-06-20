@@ -830,13 +830,13 @@ function initHabitModals() {
   // Add Habit Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'addHabitModal';
-  m1.innerHTML = `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><input type="text" id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="200" onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewHabit();}"><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" onclick="closeAddHabitModal()">${t('common.cancel')}</button><button class="modal-save" onclick="saveNewHabit()">${t("common.create")}</button></div></div>`;
+  m1.innerHTML = `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><input type="text" id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="200" onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewHabit();}"><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" onclick="closeAddHabitModal()">${t('common.cancel')}</button><button class="modal-save" onclick="return saveNewHabit()">${t("common.create")}</button></div></div>`;
   app.appendChild(m1);
 
   // Edit Habit Modal
   const m2 = document.createElement('div');
   m2.className = 'modal-overlay'; m2.id = 'editHabitModal';
-  m2.innerHTML = `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><input type="text" id="editHabitName" maxlength="200"><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><div class="modal-actions"><button class="modal-cancel" onclick="closeEditHabitModal()" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" onclick="saveEditHabit()" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
+  m2.innerHTML = `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><input type="text" id="editHabitName" maxlength="200"><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><div class="modal-actions"><button class="modal-cancel" onclick="closeEditHabitModal()" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" onclick="return saveEditHabit()" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
   app.appendChild(m2);
 
   // Habit History Modal
@@ -848,13 +848,13 @@ function initHabitModals() {
   // Add Habit Category Modal
   const m5 = document.createElement('div');
   m5.className = 'modal-overlay'; m5.id = 'addHabitCategoryModal';
-  m5.innerHTML = `<div class="modal"><h2>` + lucideIcon("folder-plus",20) + ` ${t('habits.add_category')}</h2><label>${t('habits.category_name')}</label><input type="text" id="newHabitCategoryName" placeholder="${t('habits.category_placeholder')}" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewHabitCategory();}"><div class="modal-actions"><button class="modal-cancel" onclick="closeAddHabitCategoryModal()">${t('common.cancel')}</button><button class="modal-save" onclick="saveNewHabitCategory()">${t("common.create")}</button></div></div>`;
+  m5.innerHTML = `<div class="modal"><h2>` + lucideIcon("folder-plus",20) + ` ${t('habits.add_category')}</h2><label>${t('habits.category_name')}</label><input type="text" id="newHabitCategoryName" placeholder="${t('habits.category_placeholder')}" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewHabitCategory();}"><div class="modal-actions"><button class="modal-cancel" onclick="closeAddHabitCategoryModal()">${t('common.cancel')}</button><button class="modal-save" onclick="return saveNewHabitCategory()">${t("common.create")}</button></div></div>`;
   app.appendChild(m5);
 
   // Edit Habit Category Modal
   const m6 = document.createElement('div');
   m6.className = 'modal-overlay'; m6.id = 'editHabitCategoryModal';
-  m6.innerHTML = `<div class="modal"><h2>` + lucideIcon("pencil",20) + ` ${t('habits.edit_category')}</h2><input type="hidden" id="editHabitCatOldName"><label>${t('habits.category_name')}</label><input type="text" id="editHabitCatName" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditHabitCategory();}"><label>Shortname</label><input type="text" id="editHabitCatShortname" maxlength="20" placeholder="e.g. STR" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditHabitCategory();}"><label>${t('lists.color')}</label><input type="color" id="editHabitCatColor"><div class="modal-actions"><button class="modal-cancel" onclick="closeEditHabitCategoryModal()">${t('common.cancel')}</button><button class="modal-save" onclick="saveEditHabitCategory()">${t('common.save')}</button></div></div>`;
+  m6.innerHTML = `<div class="modal"><h2>` + lucideIcon("pencil",20) + ` ${t('habits.edit_category')}</h2><input type="hidden" id="editHabitCatOldName"><label>${t('habits.category_name')}</label><input type="text" id="editHabitCatName" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditHabitCategory();}"><label>Shortname</label><input type="text" id="editHabitCatShortname" maxlength="20" placeholder="e.g. STR" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditHabitCategory();}"><label>${t('lists.color')}</label><input type="color" id="editHabitCatColor"><div class="modal-actions"><button class="modal-cancel" onclick="closeEditHabitCategoryModal()">${t('common.cancel')}</button><button class="modal-save" onclick="return saveEditHabitCategory()">${t('common.save')}</button></div></div>`;
   app.appendChild(m6);
 }
 
@@ -1272,7 +1272,7 @@ async function editHabitCompletion(compId) {
       <label>${t('habits.edit_note')}</label>
       <input type="text" id="editCompNote_${compId}" value="${esc(noteVal)}" placeholder="${t('habits.note_optional')}" maxlength="500">
       <div class="habit-history-edit-actions">
-        <button onclick="saveHabitCompletion('${compId}')" class="modal-save">${t('common.save')}</button>
+        <button onclick="return saveHabitCompletion('${compId}')" class="modal-save">${t('common.save')}</button>
         <button onclick="cancelEditCompletion()" class="modal-cancel">${t('common.cancel')}</button>
       </div>
     </div>`;

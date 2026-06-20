@@ -331,8 +331,8 @@ function buildFrequencyPicker(container, currentRule) {
   container.innerHTML = '';
   container.className = (container.className.replace(/\bfreq-picker\b/, '') + ' freq-picker').trim();
 
-  // Detect current type from rule
-  let currentType = 'custom';
+  // Detect current type from rule (default to 'weekly' for new habits)
+  let currentType = currentRule ? 'custom' : 'weekly';
   let parsed = {};
   if (currentRule) {
     if (currentRule === 'daily') { currentType = 'daily'; }
@@ -350,6 +350,8 @@ function buildFrequencyPicker(container, currentRule) {
   const sel = document.createElement('select');
   sel.className = 'inline-edit-input freq-type-select';
   FREQ_TYPES.forEach(ft => {
+    // Hide 'custom' (free-text) for new habits; only show it for existing habits that already use it
+    if (ft === 'custom' && currentType !== 'custom') return;
     const opt = document.createElement('option');
     opt.value = ft;
     opt.textContent = t('habits.freq_' + ft.toLowerCase());

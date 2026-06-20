@@ -2051,7 +2051,10 @@ function checkSchemaVersion() {
     return;
   }
   const dbVer = state.dbSchemaVersion || '0.00';
-  if (cmpVer(dbVer, LATEST_COMPAT) >= 0) return;
+  if (cmpVer(dbVer, LATEST_COMPAT) >= 0) {
+    dismissSchemaBanner();
+    return;
+  }
 
   document.getElementById('schema-banner')?.remove();
   const banner = document.createElement('div');

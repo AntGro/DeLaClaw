@@ -2081,6 +2081,22 @@ function checkSchemaVersion() {
   banner._schemaRO = ro;
 }
 
+/** Render two version strings with differing characters highlighted. */
+function highlightVersionDiff(dbVer, latest) {
+  function mark(ver, other) {
+    let html = 'v';
+    for (let i = 0; i < ver.length; i++) {
+      if (i < other.length && ver[i] === other[i]) {
+        html += esc(ver[i]);
+      } else {
+        html += `<span class="ver-diff">${esc(ver[i])}</span>`;
+      }
+    }
+    return html;
+  }
+  return { db: mark(dbVer, latest), app: mark(latest, dbVer) };
+}
+
 function showMigrationModal() {
   const dbVer = state.dbSchemaVersion || '0.00';
   const sql = getPendingMigrationSQL(dbVer);
@@ -2095,11 +2111,16 @@ function showMigrationModal() {
   overlay.addEventListener('click', e => { if (e.target === overlay) closeMigrationModal(); });
 
   const projectRef = state.supabaseUrl?.replace('https://', '').replace('.supabase.co', '') || '_';
-  const sqlEditorUrl = `https://supabase.com/dashboard/project/${projectRef}/sql/new`;
+  const sqlEditorUrl = `https://supabase.com/dashboard/project/${projectRef}/sql/new?skip=true`;
+
+  // Build hint with highlighted version diffs
+  const verHL = highlightVersionDiff(dbVer, LATEST_COMPAT);
+  const hintTemplate = t('schema.modal_hint', { dbVer: '{{DB}}', latest: '{{APP}}' });
+  const hintHTML = esc(hintTemplate).replace('{{DB}}', verHL.db).replace('{{APP}}', verHL.app);
 
   overlay.innerHTML = `<div class="modal migration-modal">
     <h2>${LOGOS.supabase(18)} ${esc(t('schema.modal_title'))}</h2>
-    <p class="migration-hint">${esc(t('schema.modal_hint', { dbVer, latest: LATEST_COMPAT }))}</p>
+    <p class="migration-hint">${hintHTML}</p>
     <ol class="migration-steps">
       <li>${t('schema.step_1')}
         <div class="migration-sql-wrap">
@@ -2114,6 +2135,7 @@ function showMigrationModal() {
       <li>${t('schema.step_3')}</li>
     </ol>
     <div class="migration-actions">
+      <button class="migration-check-btn" id="migrationCheckBtn" onclick="checkMigrationStatus()">${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}</button>
       <button class="migration-close-btn" onclick="closeMigrationModal()">${esc(t('schema.close'))}</button>
     </div>
   </div>`;
@@ -2130,6 +2152,37 @@ function showMigrationModal() {
       setTimeout(() => { btn.innerHTML = `${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}`; }, 2000);
     } catch { showToast(t('schema.copy_fallback')); }
   });
+}
+
+/** Re-fetch schema_version from DB and report whether migration succeeded. */
+async function checkMigrationStatus() {
+  const btn = document.getElementById('migrationCheckBtn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = `${lucideIcon('loader', 14)} ${esc(t('common.loading'))}`;
+  try {
+    const { data } = await state.db.from('settings').select('value').eq('key', 'schema_version').single();
+    const newVer = data?.value || '0.00';
+    state.dbSchemaVersion = newVer;
+    if (cmpVer(newVer, LATEST_COMPAT) >= 0) {
+      btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.check_success', { ver: newVer }))}`;
+      btn.classList.add('migration-check-ok');
+      // Dismiss banner after short delay
+      setTimeout(() => { closeMigrationModal(); checkSchemaVersion(); }, 1500);
+    } else {
+      btn.innerHTML = `${lucideIcon('alert-triangle', 14)} ${esc(t('schema.check_still_old', { ver: newVer }))}`;
+      btn.classList.add('migration-check-fail');
+      setTimeout(() => {
+        btn.classList.remove('migration-check-fail');
+        btn.disabled = false;
+        btn.innerHTML = `${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}`;
+      }, 3000);
+    }
+  } catch {
+    btn.disabled = false;
+    btn.innerHTML = `${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}`;
+    showToast(t('schema.check_error'), 'error');
+  }
 }
 
 function closeMigrationModal() {
@@ -3161,6 +3214,7 @@ window.clearPageSearch = clearPageSearch;
 window.dismissSchemaBanner = dismissSchemaBanner;
 window.showMigrationModal = showMigrationModal;
 window.closeMigrationModal = closeMigrationModal;
+window.checkMigrationStatus = checkMigrationStatus;
 window.showCompareModal = showCompareModal;
 window.closeCompareModal = closeCompareModal;
 

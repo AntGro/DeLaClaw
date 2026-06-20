@@ -131,7 +131,7 @@ function showToast(msg, type = 'info') {
 // ===================================================================
 let _deleteConfirmCallback = null;
 
-function showDeleteConfirm(title, message, onConfirm, detail) {
+function showDeleteConfirm(title, message, onConfirm, detail, opts) {
   document.getElementById('deleteConfirmTitle').textContent = title;
   document.getElementById('deleteConfirmMessage').textContent = message;
   const detailEl = document.getElementById('deleteConfirmDetail');
@@ -141,6 +141,17 @@ function showDeleteConfirm(title, message, onConfirm, detail) {
   } else {
     detailEl.style.display = 'none';
   }
+  // Custom confirm button text (default: Delete)
+  const btnTextEl = document.getElementById('deleteConfirmBtnText');
+  if (btnTextEl) btnTextEl.textContent = opts?.btnText || 'Delete';
+  // Custom icon (swap trash SVG for another Lucide icon)
+  const iconWrap = document.querySelector('.delete-confirm-icon-wrap');
+  if (iconWrap) {
+    if (opts?.iconSvg) {
+      iconWrap.dataset.originalHtml = iconWrap.innerHTML;
+      iconWrap.innerHTML = opts.iconSvg;
+    }
+  }
   _deleteConfirmCallback = onConfirm;
   document.getElementById('deleteConfirmModal').classList.add('visible');
 }
@@ -148,6 +159,15 @@ function showDeleteConfirm(title, message, onConfirm, detail) {
 function closeDeleteConfirm() {
   document.getElementById('deleteConfirmModal').classList.remove('visible');
   _deleteConfirmCallback = null;
+  // Reset custom button text
+  const btnTextEl = document.getElementById('deleteConfirmBtnText');
+  if (btnTextEl) btnTextEl.textContent = 'Delete';
+  // Reset custom icon if it was changed
+  const iconWrap = document.querySelector('.delete-confirm-icon-wrap');
+  if (iconWrap && iconWrap.dataset.originalHtml) {
+    iconWrap.innerHTML = iconWrap.dataset.originalHtml;
+    delete iconWrap.dataset.originalHtml;
+  }
 }
 
 async function executeDeleteConfirm() {

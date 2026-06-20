@@ -9,7 +9,7 @@ import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 
-import { esc, showToast, updateFooterStats, updateTaskListMaxHeight, isEditing } from './utils.js';
+import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals } from './todos.js';
@@ -2465,94 +2465,106 @@ function importBackup() {
   input.onchange = async () => {
     const file = input.files[0];
     if (!file) return;
-    if (!confirm(t('menu.settings_restore_confirm'))) return;
-    const btn = document.querySelector('.settings-data-btn[onclick="importBackup()"]');
-    if (btn) btn.disabled = true;
-
-    const progressEl = document.getElementById('importProgress');
-    const progressText = document.getElementById('importProgressText');
-    const progressFill = document.getElementById('importProgressFill');
-    const showProgress = (msg, current, total) => {
-      if (progressEl) progressEl.style.display = '';
-      if (progressText) progressText.textContent = msg;
-      if (progressFill && total > 0) progressFill.style.width = `${Math.round((current / total) * 100)}%`;
-    };
-    const hideProgress = () => { if (progressEl) progressEl.style.display = 'none'; };
-
-    try {
-      const text = await file.text();
-      const backup = JSON.parse(text);
-      if (!backup._meta || backup._meta.version !== 1) {
-        showToast(t('menu.settings_restore_invalid'));
-        return;
+    showDeleteConfirm(
+      t('menu.settings_restore'),
+      t('menu.settings_restore_confirm'),
+      () => performImport(file),
+      null,
+      {
+        btnText: t('menu.settings_restore') || 'Restore',
+        iconSvg: '<svg class="delete-confirm-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
       }
-      // Delete in reverse order (children before parents)
-      const tables = [...(backup._meta.tables || [])].reverse();
-      const totalSteps = tables.length + (backup._meta.tables || []).length;
-      let step = 0;
-      for (const table of tables) {
-        showProgress(t('menu.settings_restore_clearing', table), ++step, totalSteps);
-        try {
-          const pk = (table === 'settings' || table === 'prompts') ? 'key' : 'id';
-          await state.db.from(table).delete().neq(pk, '___nonexistent___');
-        } catch (e) { console.warn(`Could not clear ${table}:`, e.message); }
-      }
-      // Insert in forward order (parents before children)
-      const importOrder = backup._meta.tables || [];
-      let totalRows = 0;
-      for (const table of importOrder) {
-        showProgress(t('menu.settings_restore_restoring', table), ++step, totalSteps);
-        const rows = backup[table];
-        if (!rows || !rows.length) continue;
-        try {
-          for (let i = 0; i < rows.length; i += 100) {
-            const batch = rows.slice(i, i + 100);
-            const { error } = await state.db.from(table).insert(batch);
-            if (error) { console.warn(`Insert into ${table} batch ${i}:`, error.message); }
-          }
-          totalRows += rows.length;
-        } catch (e) { console.warn(`Failed to restore ${table}:`, e.message); }
-      }
-      hideProgress();
-      showToast(t('menu.settings_restore_done', totalRows));
-      // In demo/drive mode, reseed the in-memory adapter instead of reloading
-      // (reload would re-create the adapter with default/empty data)
-      const inMemAdapter = (state.demoMode && state.demoAdapter) ? state.demoAdapter
-        : (state.driveMode && state.driveAdapter) ? state.driveAdapter : null;
-      if (inMemAdapter) {
-        const reseedData = {};
-        for (const table of (backup._meta.tables || [])) {
-          reseedData[table] = backup[table] || [];
-        }
-        inMemAdapter.reseed(reseedData);
-        setDemoCategoriesFromData(reseedData);
-        await loadProjects();
-        buildProjectCards();
-        initProjectDragDrop();
-        updateArchiveToggleBtn();
-        renderArchivedProjects();
-        await refreshAll();
-        await refreshTodos();
-        await refreshHabits();
-        await refreshBirthdays();
-        await refreshVestiaire();
-        await refreshFlashcards();
-        await refreshLists();
-        refreshWelcome();
-        closeSettings();
-      } else {
-        // Reload to reflect new data
-        setTimeout(() => location.reload(), 1200);
-      }
-    } catch (e) {
-      console.error('Import failed:', e);
-      showToast(t('menu.settings_restore_error'));
-    } finally {
-      hideProgress();
-      if (btn) btn.disabled = false;
-    }
+    );
   };
   input.click();
+}
+
+async function performImport(file) {
+  const btn = document.querySelector('.settings-data-btn[onclick="importBackup()"]');
+  if (btn) btn.disabled = true;
+
+  const progressEl = document.getElementById('importProgress');
+  const progressText = document.getElementById('importProgressText');
+  const progressFill = document.getElementById('importProgressFill');
+  const showProgress = (msg, current, total) => {
+    if (progressEl) progressEl.style.display = '';
+    if (progressText) progressText.textContent = msg;
+    if (progressFill && total > 0) progressFill.style.width = `${Math.round((current / total) * 100)}%`;
+  };
+  const hideProgress = () => { if (progressEl) progressEl.style.display = 'none'; };
+
+  try {
+    const text = await file.text();
+    const backup = JSON.parse(text);
+    if (!backup._meta || backup._meta.version !== 1) {
+      showToast(t('menu.settings_restore_invalid'));
+      return;
+    }
+    // Delete in reverse order (children before parents)
+    const tables = [...(backup._meta.tables || [])].reverse();
+    const totalSteps = tables.length + (backup._meta.tables || []).length;
+    let step = 0;
+    for (const table of tables) {
+      showProgress(t('menu.settings_restore_clearing', table), ++step, totalSteps);
+      try {
+        const pk = (table === 'settings' || table === 'prompts') ? 'key' : 'id';
+        await state.db.from(table).delete().neq(pk, '___nonexistent___');
+      } catch (e) { console.warn(`Could not clear ${table}:`, e.message); }
+    }
+    // Insert in forward order (parents before children)
+    const importOrder = backup._meta.tables || [];
+    let totalRows = 0;
+    for (const table of importOrder) {
+      showProgress(t('menu.settings_restore_restoring', table), ++step, totalSteps);
+      const rows = backup[table];
+      if (!rows || !rows.length) continue;
+      try {
+        for (let i = 0; i < rows.length; i += 100) {
+          const batch = rows.slice(i, i + 100);
+          const { error } = await state.db.from(table).insert(batch);
+          if (error) { console.warn(`Insert into ${table} batch ${i}:`, error.message); }
+        }
+        totalRows += rows.length;
+      } catch (e) { console.warn(`Failed to restore ${table}:`, e.message); }
+    }
+    hideProgress();
+    showToast(t('menu.settings_restore_done', totalRows));
+    // In demo/drive mode, reseed the in-memory adapter instead of reloading
+    // (reload would re-create the adapter with default/empty data)
+    const inMemAdapter = (state.demoMode && state.demoAdapter) ? state.demoAdapter
+      : (state.driveMode && state.driveAdapter) ? state.driveAdapter : null;
+    if (inMemAdapter) {
+      const reseedData = {};
+      for (const table of (backup._meta.tables || [])) {
+        reseedData[table] = backup[table] || [];
+      }
+      inMemAdapter.reseed(reseedData);
+      setDemoCategoriesFromData(reseedData);
+      await loadProjects();
+      buildProjectCards();
+      initProjectDragDrop();
+      updateArchiveToggleBtn();
+      renderArchivedProjects();
+      await refreshAll();
+      await refreshTodos();
+      await refreshHabits();
+      await refreshBirthdays();
+      await refreshVestiaire();
+      await refreshFlashcards();
+      await refreshLists();
+      refreshWelcome();
+      closeSettings();
+    } else {
+      // Reload to reflect new data
+      setTimeout(() => location.reload(), 1200);
+    }
+  } catch (e) {
+    console.error('Import failed:', e);
+    showToast(t('menu.settings_restore_error'));
+  } finally {
+    hideProgress();
+    if (btn) btn.disabled = false;
+  }
 }
 
 window.exportBackup = exportBackup;

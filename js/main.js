@@ -2127,7 +2127,7 @@ function showCompareModal() {
 
   const rows = [
     { key: 'compare.setup', vals: ['compare.setup_drive', 'compare.setup_supa', 'compare.setup_local', 'compare.setup_demo'] },
-    { key: 'compare.multi_device', vals: [cross, check + ' ' + esc(t('compare.live')), cross, cross], raw: true },
+    { key: 'compare.multi_device', vals: [check + ' ' + esc(t('compare.polling')), check + ' ' + esc(t('compare.live')), cross, cross], raw: true },
     { key: 'compare.offline', vals: [cross, cross, check, check], raw: true },
     { key: 'compare.data_location', vals: ['compare.loc_drive', 'compare.loc_supa', 'compare.loc_local', 'compare.loc_demo'] },
     { key: 'compare.storage', vals: ['compare.sto_drive', 'compare.sto_supa', 'compare.sto_local', 'compare.sto_demo'] },

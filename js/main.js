@@ -2367,11 +2367,22 @@ function showSignupOverlay() {
   cancelBtn.textContent = t('schema.close');
   cancelBtn.addEventListener('click', closeSignupOverlay);
 
+  const guideLink = document.createElement('a');
+  guideLink.className = 'gate-guide-link';
+  guideLink.href = 'javascript:void(0)';
+  guideLink.textContent = t('setup.guide_link');
+  guideLink.addEventListener('click', () => {
+    closeSignupOverlay();
+    location.hash = '#setup';
+    location.reload();
+  });
+
   box.appendChild(title);
   box.appendChild(hint);
   box.appendChild(compareLink);
   box.appendChild(form);
   box.appendChild(cancelBtn);
+  box.appendChild(guideLink);
   overlay.appendChild(box);
   document.body.appendChild(overlay);
 }

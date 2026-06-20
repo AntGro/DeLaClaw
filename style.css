@@ -1604,6 +1604,7 @@ body:has(.schema-banner) .app-header{top:var(--schema-banner-h,40px);}
 .migration-close-btn{background:transparent;border:1px solid var(--border);border-radius:8px;padding:9px 18px;font-size:0.88rem;color:var(--muted);cursor:pointer;font-family:inherit;transition:all 0.2s;}
 .migration-close-btn:hover{border-color:var(--text);color:var(--text);}
 /* ── Compare backends modal ── */
+#compareModal{z-index:10001;}
 .compare-modal{max-width:640px;}
 .compare-modal h2{font-size:1.05rem;margin-bottom:6px;}
 .compare-subtitle{font-size:0.82rem;color:var(--muted);margin-bottom:16px;line-height:1.4;}

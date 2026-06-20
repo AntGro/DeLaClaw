@@ -1111,18 +1111,25 @@ window.revealCard = function() {
   document.getElementById('practiceButtons').style.display = 'flex';
 };
 
+let _ratingInProgress = false;
 window.rateCard = async function(rating) {
+  if (_ratingInProgress) return;
   if (sessionQueue.length === 0) return;
-  const card = sessionQueue.shift();
-  const now = new Date();
-  const updates = fsrsUpdate(card, rating, now);
-  Object.assign(card, updates);
-  const idx = allCards.findIndex(c => c.id === card.id);
-  if (idx >= 0) Object.assign(allCards[idx], updates);
-  if (state.db.connected) await state.db.from('flashcards').update(updates).eq('id', card.id);
-  sessionDone++;
-  if (rating >= 3) sessionCorrect++;
-  showNextCard();
+  _ratingInProgress = true;
+  try {
+    const card = sessionQueue.shift();
+    const now = new Date();
+    const updates = fsrsUpdate(card, rating, now);
+    Object.assign(card, updates);
+    const idx = allCards.findIndex(c => c.id === card.id);
+    if (idx >= 0) Object.assign(allCards[idx], updates);
+    if (state.db.connected) await state.db.from('flashcards').update(updates).eq('id', card.id);
+    sessionDone++;
+    if (rating >= 3) sessionCorrect++;
+    showNextCard();
+  } finally {
+    _ratingInProgress = false;
+  }
 };
 
 window.endPractice = function() {

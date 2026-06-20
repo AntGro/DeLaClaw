@@ -549,7 +549,7 @@ bun run server.js</pre>
       <input type="url" id="newProjectLive" placeholder="https://...">
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeAddProjectModal()">Cancel</button>
-        <button class="modal-save" onclick="return saveNewProject()">Create</button>
+        <button class="modal-save" onclick="saveNewProject()">Create</button>
       </div>
     </div>
   </div>
@@ -563,7 +563,7 @@ bun run server.js</pre>
       <input type="hidden" id="revisionTaskId">
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeRevisionModal()">Cancel</button>
-        <button class="modal-save" onclick="return submitRevision()">Submit Revision</button>
+        <button class="modal-save" onclick="submitRevision()">Submit Revision</button>
       </div>
     </div>
   </div>
@@ -576,7 +576,7 @@ bun run server.js</pre>
       <textarea id="promptGlobalText" placeholder="e.g. Always create feature branches. Run tests before pushing. Prefer functional style..."></textarea>
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closePromptEditor()">Cancel</button>
-        <button class="modal-save" onclick="return saveGlobalPrompt()">Save</button>
+        <button class="modal-save" onclick="saveGlobalPrompt()">Save</button>
       </div>
     </div>
   </div>
@@ -590,7 +590,7 @@ bun run server.js</pre>
       <input type="hidden" id="promptProjectId">
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeProjectPrompt()">Cancel</button>
-        <button class="modal-save" onclick="return saveProjectPrompt()">Save</button>
+        <button class="modal-save" onclick="saveProjectPrompt()">Save</button>
       </div>
     </div>
   </div>
@@ -614,7 +614,7 @@ bun run server.js</pre>
       <input type="url" id="editProjectLive" placeholder="https://...">
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeEditProjectModal()">Cancel</button>
-        <button class="modal-save" onclick="return saveEditProject()">Save</button>
+        <button class="modal-save" onclick="saveEditProject()">Save</button>
       </div>
     </div>
   </div>
@@ -637,7 +637,7 @@ bun run server.js</pre>
       <input type="text" id="editCategoryShortname" maxlength="20" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditCategory();}">
       <div class="modal-actions">
         <button class="modal-cancel" onclick="closeEditCategoryModal()">Cancel</button>
-        <button class="modal-save" onclick="return saveEditCategory()">Save</button>
+        <button class="modal-save" onclick="saveEditCategory()">Save</button>
       </div>
     </div>
   </div>
@@ -653,7 +653,7 @@ bun run server.js</pre>
       <div id="deleteConfirmDetail" class="delete-confirm-detail" style="display:none;"></div>
       <div class="modal-actions">
         <button class="modal-cancel" id="deleteConfirmCancelBtn" onclick="closeDeleteConfirm()">Cancel</button>
-        <button class="modal-save delete-confirm-btn" id="deleteConfirmBtn" onclick="return executeDeleteConfirm()">
+        <button class="modal-save delete-confirm-btn" id="deleteConfirmBtn" onclick="executeDeleteConfirm()">
           <svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
           <span id="deleteConfirmBtnText">Delete</span>
         </button>

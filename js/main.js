@@ -104,39 +104,28 @@ function setDemoCategoriesFromData(data) {
 }
 
 // ===================================================================
-// ACTION GUARD — prevents double-fire on async save/add buttons.
-// Capture-phase click handler on .modal-save buttons: adds .saving to
-// block re-entry, invokes the onclick handler, awaits its promise, then
-// cleans up. The onclick attribute MUST use "return fn()" so the promise
-// is returned to the onclick event handler property.
+// ACTION GUARD — prevents double-fire on async save/add/edit actions.
+// Wraps any async function so concurrent calls are silently dropped.
+// Also adds .saving class on the triggering button for visual feedback
+// (shimmer + disabled appearance via CSS).
 // ===================================================================
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('button.modal-save, button.action-guard');
-  if (!btn) return;
-  if (btn.classList.contains('saving')) { e.stopImmediatePropagation(); e.preventDefault(); return; }
-  const handler = btn.onclick;
-  if (typeof handler !== 'function') return;
-  e.stopImmediatePropagation();
-  e.preventDefault();
-  btn.classList.add('saving');
-  btn.onclick = null;  // prevent native fire
-  const restore = () => { btn.classList.remove('saving'); btn.onclick = handler; };
-  try {
-    const p = handler.call(btn, e);
-    if (p && typeof p.then === 'function') {
-      p.then(restore, restore);
-    } else {
-      restore();
+function guard(fn) {
+  let inFlight = false;
+  return async function(...args) {
+    if (inFlight) return;
+    inFlight = true;
+    // Find the triggering button for visual feedback
+    const active = document.activeElement;
+    const btn = (active && active.tagName === 'BUTTON') ? active
+      : document.querySelector('.modal-overlay[style*="flex"] button.modal-save');
+    if (btn) btn.classList.add('saving');
+    try { await fn.apply(this, args); }
+    finally {
+      inFlight = false;
+      if (btn) btn.classList.remove('saving');
     }
-  } catch (_) { restore(); }
-}, true);
-
-window.guardAction = async function guardAction(btn, fn, ...args) {
-  if (btn.classList.contains('saving')) return;
-  btn.classList.add('saving');
-  try { await fn(...args); }
-  finally { btn.classList.remove('saving'); }
-};
+  };
+}
 
 // ===================================================================
 // ICON HYDRATION — replace <span data-icon="..."> with SVGs from icons.js
@@ -480,6 +469,24 @@ async function doLogin() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Wrap all save/add/submit actions with guard() to prevent double-fire
+  const guardedNames = [
+    'saveNewBirthday', 'saveEditBirthday',
+    'saveNewDraft', 'saveEditedProposal', 'saveNewFlashcard', 'saveEditFlashcard',
+    'saveNewText', 'saveEditText', 'submitFeedback', 'submitTextReview',
+    'saveNewHabit', 'saveEditHabit', 'saveHabitCompletion', 'addHabitFromInput',
+    'saveNewHabitCategory', 'saveEditHabitCategory',
+    'saveNewList', 'saveEditList',
+    'addTask', 'saveNewProject', 'saveEditProject', 'submitRevision',
+    'saveNewCategory', 'saveEditCategory', 'submitSnooze', 'addTodoToCategory',
+    'saveNewVestiaire', 'saveEditVestiaire',
+    'saveNewVestiaireCategory', 'saveEditVestiaireCategory',
+    'executeDeleteConfirm',
+  ];
+  for (const name of guardedNames) {
+    if (typeof window[name] === 'function') window[name] = guard(window[name]);
+  }
+
   initGate();
   document.getElementById('loginForm').addEventListener('submit', e => {
     e.preventDefault();

@@ -578,7 +578,7 @@ function initVestiaireModals() {
     </select>
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeAddVestiaireModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="return saveNewVestiaire()">${t('common.add')}</button>
+      <button class="modal-save" onclick="saveNewVestiaire()">${t('common.add')}</button>
     </div>
   </div>`;
   app.appendChild(m1);
@@ -610,7 +610,7 @@ function initVestiaireModals() {
     </select>
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeEditVestiaireModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="return saveEditVestiaire()">${t('common.save')}</button>
+      <button class="modal-save" onclick="saveEditVestiaire()">${t('common.save')}</button>
     </div>
   </div>`;
   app.appendChild(m2);
@@ -626,7 +626,7 @@ function initVestiaireModals() {
       onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewVestiaireCategory();}">
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeAddVestiaireCategoryModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="return saveNewVestiaireCategory()">${t('common.add')}</button>
+      <button class="modal-save" onclick="saveNewVestiaireCategory()">${t('common.add')}</button>
     </div>
   </div>`;
   app.appendChild(m3);
@@ -646,7 +646,7 @@ function initVestiaireModals() {
       onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditVestiaireCategory();}">
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeEditVestiaireCategoryModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="return saveEditVestiaireCategory()">${t('common.save')}</button>
+      <button class="modal-save" onclick="saveEditVestiaireCategory()">${t('common.save')}</button>
     </div>
   </div>`;
   app.appendChild(m4);

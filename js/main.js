@@ -2336,7 +2336,7 @@ function showSignupOverlay() {
     btn.title = m.title;
     // Icon from the real picker
     const realBtn = document.querySelector(`.backend-option[data-mode="${m.mode}"]`);
-    const iconEl = realBtn?.querySelector('svg, .backend-icon-img');
+    const iconEl = realBtn?.querySelector('svg, img, .backend-icon-img');
     if (iconEl) btn.appendChild(iconEl.cloneNode(true));
     const labelSpan = document.createElement('span');
     labelSpan.className = 'backend-option-label';
@@ -2362,6 +2362,7 @@ function showSignupOverlay() {
     document.getElementById('username').value = urlInput.value;
     document.getElementById('password').value = keyInput.value;
     closeSignupOverlay();
+    removeDemoBanner();
     doLogin();
   });
 

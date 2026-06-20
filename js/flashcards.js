@@ -1116,6 +1116,8 @@ window.rateCard = async function(rating) {
   if (_ratingInProgress) return;
   if (sessionQueue.length === 0) return;
   _ratingInProgress = true;
+  // Disable buttons visually while processing
+  document.querySelectorAll('#practiceButtons .rating-btn').forEach(b => b.disabled = true);
   try {
     const card = sessionQueue.shift();
     const now = new Date();

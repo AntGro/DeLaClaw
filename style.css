@@ -1442,6 +1442,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
   cursor:pointer; color:#fff; min-width:80px; transition:transform 0.1s,box-shadow 0.15s;
 }
 .rating-btn:active { transform:scale(0.95); }
+.rating-btn:disabled { opacity:0.45; cursor:default; pointer-events:none; }
 .rating-num { font-size:0.7rem; opacity:0.6; margin-right:4px; }
 .rating-again { background:#ef4444; } .rating-again:hover { box-shadow:0 0 16px rgba(239,68,68,0.4); }
 .rating-hard  { background:#f97316; } .rating-hard:hover  { box-shadow:0 0 16px rgba(249,115,22,0.4); }

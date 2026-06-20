@@ -12,7 +12,7 @@ const LOGOS = {
     `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Local"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>`,
 
   demo: (size = 18) =>
-    `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Demo"><polygon points="5 3 19 12 5 21 5 3"/></svg>`,
+    `<svg width="${size}" height="${size}" viewBox="0 0 18 18" fill="none" aria-label="Demo"><rect x="1" y="1" width="7" height="7" rx="2" fill="#3b82f6"/><rect x="10" y="1" width="7" height="7" rx="2" fill="#6366f1"/><rect x="1" y="10" width="7" height="7" rx="2" fill="#22c55e"/><rect x="10" y="10" width="7" height="7" rx="2" fill="#ec4899"/></svg>`,
 };
 
 const LABELS = {

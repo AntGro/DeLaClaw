@@ -2302,7 +2302,13 @@ function showSignupOverlay() {
 
   const urlLabel = document.createElement('label');
   urlLabel.className = 'gate-label';
-  urlLabel.textContent = 'Project URL';
+  const urlLabelLink = document.createElement('a');
+  urlLabelLink.target = '_blank';
+  urlLabelLink.rel = 'noopener';
+  urlLabelLink.textContent = t('login.url_label');
+  urlLabelLink.href = 'https://supabase.com/dashboard/projects';
+  urlLabelLink.dataset.tooltip = t('toast.url_tooltip');
+  urlLabel.appendChild(urlLabelLink);
   const urlInput = document.createElement('input');
   urlInput.type = 'text';
   urlInput.placeholder = 'https://xyz.supabase.co';
@@ -2310,12 +2316,28 @@ function showSignupOverlay() {
   const keyDiv = document.createElement('div');
   const keyLabel = document.createElement('label');
   keyLabel.className = 'gate-label';
-  keyLabel.textContent = 'API Key';
+  const keyLabelLink = document.createElement('a');
+  keyLabelLink.target = '_blank';
+  keyLabelLink.rel = 'noopener';
+  keyLabelLink.textContent = t('login.key_label');
+  keyLabel.appendChild(keyLabelLink);
   const keyInput = document.createElement('input');
   keyInput.type = 'password';
   keyInput.placeholder = 'eyJhbG...';
   keyDiv.appendChild(keyLabel);
   keyDiv.appendChild(keyInput);
+
+  // Dynamic API key link — same behaviour as the gate login form
+  const updateKeyLink = () => {
+    const v = urlInput.value.trim();
+    const m = v.match(/^https?:\/\/([a-z0-9]+)\.supabase\.co/i) || v.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
+    if (m) {
+      keyLabelLink.href = `https://supabase.com/dashboard/project/${m[1]}/settings/api-keys`;
+    } else {
+      keyLabelLink.removeAttribute('href');
+    }
+  };
+  urlInput.addEventListener('input', updateKeyLink);
 
   fieldsDiv.appendChild(hintP);
   fieldsDiv.appendChild(urlLabel);
@@ -2337,6 +2359,16 @@ function showSignupOverlay() {
       hintP.textContent = activeMode === 'supabase' ? t('login.hint_supabase') : t('login.hint_local');
       keyDiv.style.display = activeMode === 'local' ? 'none' : '';
       submitBtn.textContent = t('login.connect');
+      // Match the gate's label behaviour per mode
+      if (activeMode === 'local') {
+        urlLabelLink.textContent = t('login.url_label_local');
+        urlLabelLink.removeAttribute('href');
+        urlInput.placeholder = 'http://localhost:3737';
+      } else {
+        urlLabelLink.textContent = t('login.url_label');
+        urlLabelLink.href = 'https://supabase.com/dashboard/projects';
+        urlInput.placeholder = 'https://xyz.supabase.co';
+      }
     }
   }
 

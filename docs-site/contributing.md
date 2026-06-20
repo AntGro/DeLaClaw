@@ -113,6 +113,33 @@ Documentation improvements are always welcome. The main docs live in `docs/` and
 - Reviews focus on correctness, consistency with existing patterns, and test coverage.
 - Nitpicks are marked as such and are non-blocking.
 
+## Releasing
+
+All changes land on `dev` first, which auto-deploys to [dev.delaclaw.pages.dev](https://dev.delaclaw.pages.dev). When `dev` is stable, merge it into `main` (which deploys to [delaclaw.com](https://delaclaw.com) via GitHub Pages).
+
+### Pre-release checklist
+
+- All tests pass
+- Preview on [dev.delaclaw.pages.dev](https://dev.delaclaw.pages.dev) looks correct
+- `VERSION` has the right `latest`, `latest_compat`, and `latest_compat_deprec`
+- If DB schema changed: migration files exist for all three backends (Supabase `.sql`, `local-migrations.js`, `drive-migrations.js`), and `sql/supabase_schema.sql` is updated. See [MIGRATION_GUIDE.md](/migrations/MIGRATION_GUIDE.md)
+- i18n: all new strings present in EN, FR, ES
+- No hardcoded dark-mode colors — all via CSS variables
+- Responsive: tested on mobile viewport (≤ 480px)
+- `README.md` updated if features, file tree, or setup steps changed
+- `docs-site/` pages updated if architecture, privacy, or setup changed
+
+### Post-release smoke test
+
+- Login with each backend (Supabase, Google Drive, Local, Demo)
+- Check the Today page loads
+- Quick-add a TODO and delete it
+- If a migration was included, verify the schema banner appears on old DBs and the migration runs cleanly
+
+### Hotfix workflow
+
+For urgent fixes to `main` that can't wait for the normal `dev` cycle: branch off `main`, fix, merge back into `main`, then backport the fix into `dev`.
+
 ## Architecture notes
 
 Before diving into the code, read [docs-site/architecture.md](docs-site/architecture.md) for an overview of the adapter pattern, state management, and file structure.

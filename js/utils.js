@@ -223,8 +223,17 @@ function updateFooterStats(viewCountsGetter) {
     statsHtml = counts.map(s => `<div class="db-stat">${s}</div>`).join('');
   }
 
-  // Always add DB size
-  statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} ${t('utils.db')}: <span id="dbSizeMb">—</span> / 500 MB</div>`;
+  // DB size — only for backends with meaningful storage metrics
+  if (state.demoMode) {
+    // Demo mode: no persistent storage, skip DB size
+    statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} Demo</div>`;
+  } else if (state.driveMode) {
+    // Google Drive: no size limit, skip DB size
+    statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} Google Drive</div>`;
+  } else {
+    // Supabase / Local: show DB size with limit
+    statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} ${t('utils.db')}: <span id="dbSizeMb">—</span> / 500 MB</div>`;
+  }
   // App + DB version
   const dbVer = state.dbSchemaVersion || '—';
   statsHtml += `<div class="db-stat">${lucideIcon('git-branch', 14)} v${APP_VERSION} · DB v${dbVer}</div>`;
@@ -236,11 +245,11 @@ function updateFooterStats(viewCountsGetter) {
     const projectRef = urlInput.value.replace('https://', '').replace('.supabase.co', '');
     document.getElementById('supabaseDashLink').href = `https://supabase.com/dashboard/project/${projectRef}`;
   }
-  // Fetch DB size via RPC
-  if (state.db.connected) {
+  // Fetch DB size via RPC (only relevant for Supabase/Local backends)
+  if (state.db.connected && !state.demoMode && !state.driveMode) {
     state.db.rpc('db_size_mb').then(({ data, error }) => {
       const el = document.getElementById('dbSizeMb');
-      if (el) el.textContent = error ? '?' : `${data} MB`;
+      if (el) el.textContent = (error || data == null) ? '—' : `${data} MB`;
     });
   }
 }

@@ -484,6 +484,7 @@ function renderFlashcardDeck(deck, q) {
         <button class="todo-cat-shortname-btn" onclick="promptFlashShortname('${escQ(deck)}')" title="${getFlashShortname(deck) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
         ${practiceButton}
         <button class="archive-project-btn" onclick="openAddFlashcardModal('${escQ(deck)}')" title="${t('flashcards.add_card')}">${lucideIcon('plus', 16)}</button>
+        <button class="todo-cat-delete-btn" onclick="deleteDeck('${escQ(deck)}')" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
       </div>
     </div>
     <div class="task-list">
@@ -552,6 +553,7 @@ function renderTextDeck(deck, q) {
         <button class="todo-cat-shortname-btn" onclick="promptFlashShortname('${escQ(deck)}')" title="${getFlashShortname(deck) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
         ${practiceButton}
         <button class="archive-project-btn" onclick="openAddTextModal('${escQ(deck)}')" title="${t('text_revision.add_text')}">${lucideIcon('plus', 16)}</button>
+        <button class="todo-cat-delete-btn" onclick="deleteDeck('${escQ(deck)}')" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
       </div>
     </div>
     <div class="task-list">
@@ -2303,3 +2305,32 @@ window.setFlashcardFilter = setFlashcardFilter;
 window.refreshFlashcards = refreshFlashcards;
 
 window.promptFlashShortname = promptFlashShortname;
+
+async function deleteDeck(deck) {
+  const cards = allCards.filter(c => c.deck === deck);
+  const texts = allTexts.filter(tx => tx.deck === deck);
+  const drafts = allDrafts.filter(d => d.proposed_deck === deck);
+  const total = cards.length + texts.length;
+  const msg = total > 0
+    ? `Delete "${deck}" and its ${total} item(s)?`
+    : `Delete empty deck "${deck}"?`;
+
+  showDeleteConfirm(t('common.delete'), msg, async () => {
+    // Delete flashcards
+    for (const c of cards) {
+      await state.db.from('flashcards').delete().eq('id', c.id);
+    }
+    // Delete texts and their chunk progress
+    for (const tx of texts) {
+      await state.db.from('text_line_progress').delete().eq('text_id', tx.id);
+      await state.db.from('texts').delete().eq('id', tx.id);
+    }
+    // Delete drafts targeting this deck
+    for (const d of drafts) {
+      await state.db.from('flashcard_notes').delete().eq('id', d.id);
+    }
+    showToast(t('toast.deleted'), 'info');
+    await refreshFlashcards();
+  });
+}
+window.deleteDeck = deleteDeck;

@@ -849,18 +849,21 @@ async function saveEditVestiaireCategory() {
 
 function deleteVestiaireCategory(cat) {
   const items = (state.allVestiaire || []).filter(v => v.category === cat);
-  if (items.length > 0) {
-    showToast(t('vestiaire.category_has_items', cat, items.length), 'error');
-    return;
-  }
+  const msg = items.length > 0
+    ? t('vestiaire.delete_category_confirm', cat) + ` (${items.length} item${items.length > 1 ? 's' : ''})`
+    : t('vestiaire.delete_category_confirm', cat);
   showDeleteConfirm(
     t('vestiaire.delete_category'),
-    t('vestiaire.delete_category_confirm', cat),
-    () => {
+    msg,
+    async () => {
+      // Delete all items in this category
+      for (const item of items) {
+        await state.db.from('vestiaire').delete().eq('id', item.id);
+      }
       const cats = getVestiaireCategories().filter(c => c !== cat);
       saveVestiaireCategories(cats);
       showToast(t('toast.removed'), 'info');
-      renderVestiaire();
+      await refreshVestiaire();
     }
   );
 }

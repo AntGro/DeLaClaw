@@ -1337,12 +1337,14 @@ function saveNewHabitCategory() {
 async function deleteHabitCategory(name) {
   const habitsInCat = state.allHabits.filter(c => (c.category || 'General') === name);
   const msg = habitsInCat.length > 0
-    ? `Delete "${name}"? Its ${habitsInCat.length} habit(s) will move to General.`
+    ? `Delete "${name}" and its ${habitsInCat.length} habit(s)?`
     : `Delete empty category "${name}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
-    for (const c of habitsInCat) {
-      await state.db.from('habits').update({ category: 'General' }).eq('id', c.id);
+    for (const h of habitsInCat) {
+      // Delete completions first, then the habit
+      await state.db.from('habit_completions').delete().eq('habit_id', h.id);
+      await state.db.from('habits').delete().eq('id', h.id);
     }
     const cats = getHabitCategories();
     const idx = cats.findIndex(c => c === name);

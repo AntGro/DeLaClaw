@@ -859,13 +859,13 @@ function saveNewCategory() {
 async function deleteCategory(name) {
   const todosInCat = allTodos.filter(t => t.category === name);
   const msg = todosInCat.length > 0
-    ? `Delete "${name}"? Its ${todosInCat.length} TODO(s) will move to General.`
+    ? `Delete "${name}" and its ${todosInCat.length} TODO(s)?`
     : `Delete empty category "${name}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
-    // Move todos to General
-    for (const t of todosInCat) {
-      await state.db.from('todos').update({ category: '' }).eq('id', t.id);
+    // Delete all todos in this category
+    for (const td of todosInCat) {
+      await state.db.from('todos').delete().eq('id', td.id);
     }
     const categories = getCategories();
     const idx = categories.findIndex(c => c === name);

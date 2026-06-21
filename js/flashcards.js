@@ -476,7 +476,7 @@ function renderFlashcardDeck(deck, q) {
     <div class="project-card-header">
       <div style="display:flex;align-items:flex-start;gap:6px;">
         <div class="project-info">
-          <strong>${lucideIcon('layers', 14)} ${esc(deck)}${getFlashShortname(deck) ? '<span class="todo-cat-shortname-label">' + esc(getFlashShortname(deck)) + '</span>' : ''}</strong>
+          <strong>${lucideIcon('layers', 14)} ${esc(deck)}</strong>
           <span class="tech">${allDeckCards.length} ${t('flashcards.cards')} ${chips.join(' ')}</span>
         </div>
       </div>
@@ -545,7 +545,7 @@ function renderTextDeck(deck, q) {
     <div class="project-card-header">
       <div style="display:flex;align-items:flex-start;gap:6px;">
         <div class="project-info">
-          <strong>${lucideIcon('book-open', 14)} ${esc(deck)}${getFlashShortname(deck) ? '<span class="todo-cat-shortname-label">' + esc(getFlashShortname(deck)) + '</span>' : ''}</strong>
+          <strong>${lucideIcon('book-open', 14)} ${esc(deck)}</strong>
           <span class="tech">${allDeckTexts.length} ${t('text_revision.texts')} ${chips.join(' ')}</span>
         </div>
       </div>

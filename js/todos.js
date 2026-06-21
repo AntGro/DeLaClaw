@@ -433,10 +433,6 @@ function renderCategoryCard(category) {
     ? `<button class="todo-cat-shortname-btn" onclick="openEditCategoryModal('${escQ(category)}')" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
     : '';
 
-  const shortnameLabel = shortname
-    ? `<span class="todo-cat-shortname-label">${esc(shortname)}</span>`
-    : '';
-
   return `<div class="project-card" id="${catId}" data-category="${esc(category)}" style="--cat-color:${catColor}">
     <div class="todo-cat-header">
       <div class="todo-cat-header-left">

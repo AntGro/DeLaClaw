@@ -215,14 +215,11 @@ function renderListCard(list, items, idx) {
     <button class="list-quick-add-btn" onclick="quickAddListItem(this.previousElementSibling,'${escQ(list.id)}')" title="${esc(t('lists.add_item'))}">${lucideIcon('plus', 16)}</button>
   </div>`;
 
-  const shortname = getListShortname(list.id);
-  const shortnameLabel = shortname ? `<span class="todo-cat-shortname-label">${esc(shortname)}</span>` : '';
-
   return `<div class="project-card list-bucket" data-list-id="${esc(list.id)}" style="--cat-color:${color}">
     <div class="project-card-header">
       <div style="display:flex;align-items:center;gap:8px;">
         <span>${lucideIcon(list.icon || 'list', 18)}</span>
-        <strong style="font-size:1rem;">${esc(list.name)}${shortnameLabel}</strong>
+        <strong style="font-size:1rem;">${esc(list.name)}</strong>
         <span style="font-size:0.78rem;opacity:0.75;">(${count})</span>
       </div>
       <div class="project-header-actions" style="opacity:1;">

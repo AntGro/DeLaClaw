@@ -759,7 +759,7 @@ function renderHabitCategoryCard(category) {
     <div class="todo-cat-header">
       <div class="todo-cat-header-left">
         <div class="todo-cat-info">
-          <h3 class="todo-cat-name">${esc(catName)}${getHabitShortname(catName) ? '<span class="todo-cat-shortname-label">' + esc(getHabitShortname(catName)) + '</span>' : ''}</h3>
+          <h3 class="todo-cat-name">${esc(catName)}</h3>
           <span class="todo-cat-stats">${statsText}</span>
         </div>
       </div>

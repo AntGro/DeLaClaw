@@ -251,7 +251,7 @@ function renderDeckNavButtons() {
 }
 
 window.navigateToFlashDeck = function(deck) {
-  const el = document.getElementById(deck === '__drafts' ? 'flashDraftsDeck' : `flashDeck-${CSS.escape(deck)}`);
+  const el = document.getElementById(deck === '__drafts' ? 'flashDraftsDeck' : `flashDeck-${deck}`);
   scrollToAndHighlight(el, null);
 };
 

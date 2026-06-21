@@ -308,7 +308,9 @@ function renderTodos() {
     html += renderCategoryCard(cat);
   }
 
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
+  window.scrollTo(0, scrollY);
 
   // Init drag-and-drop for each card (individual TODO items)
   categoryList.forEach(cat => {

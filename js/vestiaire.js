@@ -234,8 +234,10 @@ function renderVestiaire() {
     html += renderCategoryCard('Autre', grouped['Autre']);
   }
 
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
   grid.className = 'project-grid';
+  window.scrollTo(0, scrollY);
 
   // Init hover-delay action buttons & drag-drop for each category card
   cats.forEach(cat => {

@@ -206,7 +206,9 @@ function renderBirthdays() {
     </div>`;
   }
 
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
+  window.scrollTo(0, scrollY);
   initBirthdayHoverDelay(grid);
   balanceGrid(grid);
 }

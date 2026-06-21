@@ -697,7 +697,9 @@ function renderHabits() {
     }
     html += renderHabitCategoryCard(cat);
   }
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
+  window.scrollTo(0, scrollY);
   initHabitHoverDelay(grid);
   renderHabitNavButtons(categoryList);
   balanceGrid(grid);

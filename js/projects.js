@@ -132,6 +132,7 @@ function renderArchivedProjects() {
       <button onclick="deleteProject('${p.id}','${escQ(p.name)}')" style="color:var(--red);">${t('common.delete')}</button>
     </div>
   `).join('');
+  window.scrollTo(0, scrollY);
 }
 
 function copyProjectTitle(e, name) {
@@ -189,6 +190,7 @@ function buildProjectCards() {
     return;
   }
 
+  const scrollY = window.scrollY;
   grid.innerHTML = visibleProjects.map(p => `
     <div class="project-card" data-project="${p.id}" style="--cat-color:${p.color}">
       <div class="project-card-header">

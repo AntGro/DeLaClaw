@@ -297,7 +297,9 @@ function renderAllBuckets() {
     </div>`;
   }
 
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
+  window.scrollTo(0, scrollY);
   initFlashcardHoverDelay(grid);
   // Bind expand toggles for text items
   grid.querySelectorAll('.tr-expand-toggle').forEach(btn => {

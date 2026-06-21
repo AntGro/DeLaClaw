@@ -181,8 +181,10 @@ function renderLists() {
     html += renderListCard(list, items, idx);
   });
 
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
   grid.className = 'project-grid';
+  window.scrollTo(0, scrollY);
 
   // Init hover-delay + drag-drop for each list card
   visibleLists.forEach(list => {

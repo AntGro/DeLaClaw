@@ -6,7 +6,7 @@ import { APP_VERSION } from './version.js';
 // ===================================================================
 // UTILS
 // ===================================================================
-function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML.replace(/"/g, '\x26quot;'); }
 function escQ(s) { return esc(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
 function linkify(html) { return html.replace(/https?:\/\/[^\s<&]+/g, url => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`); }
 

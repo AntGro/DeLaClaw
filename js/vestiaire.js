@@ -284,8 +284,8 @@ function renderCategoryCard(cat, items) {
         <button class="archive-project-btn" onclick="openAddVestiaireModal('${escapedCat}')" title="${t('vestiaire.add_to_category', escapedCat)}">
           ${lucideIcon('plus', 16)}
         </button>
-        <button class="archive-project-btn" onclick="deleteVestiaireCategory('${escapedCat}')" title="${t('vestiaire.delete_category')}">
-          ${lucideIcon('trash-2', 14)}
+        <button class="todo-cat-delete-btn" onclick="deleteVestiaireCategory('${escapedCat}')" title="${t('vestiaire.delete_category')}">
+          ${lucideIcon('trash-2', 16)}
         </button>
       </div>
     </div>

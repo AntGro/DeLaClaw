@@ -229,8 +229,8 @@ function renderListCard(list, items, idx) {
         <button class="archive-project-btn" onclick="openEditListModal('${escQ(list.id)}')" title="${t('lists.edit_list')}">
           ${lucideIcon('pencil', 14)}
         </button>
-        <button class="archive-project-btn" onclick="deleteList('${escQ(list.id)}')" title="${t('common.delete')}">
-          ${lucideIcon('trash-2', 14)}
+        <button class="todo-cat-delete-btn" onclick="deleteList('${escQ(list.id)}')" title="${t('common.delete')}">
+          ${lucideIcon('trash-2', 16)}
         </button>
       </div>
     </div>

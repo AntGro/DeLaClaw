@@ -534,6 +534,7 @@ input,select,button{font-family:inherit;}
 .project-card[style*="--cat-color"] > .project-card-header .project-link,
 .project-card[style*="--cat-color"] > .project-card-header .todo-cat-shortname-btn,
 .project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-shortname-btn,
+.project-card[style*="--cat-color"] > .project-card-header .todo-cat-delete-btn,
 .project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-delete-btn{color:rgba(255,255,255,0.65);}
 .project-card[style*="--cat-color"] > .project-card-header .archive-project-btn:hover,
 .project-card[style*="--cat-color"] > .project-card-header .prompt-project-btn:hover,
@@ -541,6 +542,7 @@ input,select,button{font-family:inherit;}
 .project-card[style*="--cat-color"] > .project-card-header .project-link:hover,
 .project-card[style*="--cat-color"] > .project-card-header .todo-cat-shortname-btn:hover,
 .project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-shortname-btn:hover,
+.project-card[style*="--cat-color"] > .project-card-header .todo-cat-delete-btn:hover,
 .project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-delete-btn:hover{color:#fff;background:rgba(255,255,255,0.15);}
 .project-card[style*="--cat-color"] > .project-card-header .todo-cat-shortname-label,
 .project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-shortname-label{color:rgba(255,255,255,0.6);}

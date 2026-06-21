@@ -861,10 +861,8 @@ async function deleteCategory(name) {
     : `Delete empty category "${name}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
-    // Delete all todos in this category
-    for (const td of todosInCat) {
-      await state.db.from('todos').delete().eq('id', td.id);
-    }
+    // Delete all todos in this category in bulk
+    if (todosInCat.length) await state.db.from('todos').delete().eq('category', name);
     const categories = getCategories();
     const idx = categories.findIndex(c => c === name);
     if (idx !== -1) {

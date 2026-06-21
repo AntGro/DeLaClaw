@@ -2318,19 +2318,15 @@ async function deleteDeck(deck) {
     : `Delete empty deck "${deck}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
-    // Delete flashcards
-    for (const c of cards) {
-      await state.db.from('flashcards').delete().eq('id', c.id);
-    }
-    // Delete texts and their chunk progress
+    // Delete flashcards in bulk
+    if (cards.length) await state.db.from('flashcards').delete().eq('deck', deck);
+    // Delete chunk progress for texts in this deck, then texts
     for (const tx of texts) {
       await state.db.from('text_line_progress').delete().eq('text_id', tx.id);
-      await state.db.from('texts').delete().eq('id', tx.id);
     }
+    if (texts.length) await state.db.from('texts').delete().eq('deck', deck);
     // Delete drafts targeting this deck
-    for (const d of drafts) {
-      await state.db.from('flashcard_notes').delete().eq('id', d.id);
-    }
+    if (drafts.length) await state.db.from('flashcard_notes').delete().eq('proposed_deck', deck);
     showToast(t('toast.deleted'), 'info');
     await refreshFlashcards();
   });

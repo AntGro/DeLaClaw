@@ -858,10 +858,8 @@ function deleteVestiaireCategory(cat) {
     t('vestiaire.delete_category'),
     msg,
     async () => {
-      // Delete all items in this category
-      for (const item of items) {
-        await state.db.from('vestiaire').delete().eq('id', item.id);
-      }
+      // Delete all items in this category in bulk
+      if (items.length) await state.db.from('vestiaire').delete().eq('category', cat);
       const cats = getVestiaireCategories().filter(c => c !== cat);
       saveVestiaireCategories(cats);
       showToast(t('toast.removed'), 'info');

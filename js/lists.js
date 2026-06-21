@@ -580,11 +580,8 @@ async function deleteList(listId) {
     t('common.delete'),
     msg,
     async () => {
-      // Delete items first (cascade may not work in all adapters)
-      const itemIds = (state.allListItems || []).filter(i => i.list_id === listId).map(i => i.id);
-      for (const iid of itemIds) {
-        await state.db.from('list_items').delete().eq('id', iid);
-      }
+      // Delete items in bulk
+      if (itemCount > 0) await state.db.from('list_items').delete().eq('list_id', listId);
       const { error } = await state.db.from('lists').delete().eq('id', listId);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
       showToast(t('toast.removed'), 'info');

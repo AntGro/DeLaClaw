@@ -1344,10 +1344,11 @@ async function deleteHabitCategory(name) {
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
     for (const h of habitsInCat) {
-      // Delete completions first, then the habit
+      // Delete completions for each habit
       await state.db.from('habit_completions').delete().eq('habit_id', h.id);
-      await state.db.from('habits').delete().eq('id', h.id);
     }
+    // Delete all habits in this category in bulk
+    if (habitsInCat.length) await state.db.from('habits').delete().eq('category', name);
     const cats = getHabitCategories();
     const idx = cats.findIndex(c => c === name);
     if (idx !== -1) { cats.splice(idx, 1); saveHabitCategories(cats); }

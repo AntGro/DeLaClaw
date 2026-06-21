@@ -289,7 +289,7 @@ function renderCategoryCard(cat, items) {
         </button>
       </div>
     </div>
-    <div class="vestiaire-item-list" data-category="${escapedCat}">
+    <div class="task-list vestiaire-item-list" data-category="${escapedCat}">
       ${itemsHtml}
     </div>
   </div>`;

@@ -772,7 +772,7 @@ function renderHabitCategoryCard(category) {
       <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catName)}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addHabitFromInput(this);}">
       <button onclick="addHabitFromInput(this.previousElementSibling)">${lucideIcon('plus', 16)}</button>
     </div>
-    <div class="habit-list todo-cat-list">
+    <div class="task-list habit-list todo-cat-list">
       ${items}
     </div>
   </div>`;

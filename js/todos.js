@@ -452,7 +452,7 @@ function renderCategoryCard(category) {
       <button onclick="addTodoToCategory(this.closest('.todo-cat-add').querySelector('.todo-cat-input'))">${lucideIcon('plus', 16)}</button>
     </div>
     <div class="char-counter" id="todo-counter-${catId}"></div>
-    <div class="todo-cat-list" data-category="${esc(category)}">
+    <div class="task-list todo-cat-list" data-category="${esc(category)}">
       ${mainListContent}
     </div>
     ${doneToggle}

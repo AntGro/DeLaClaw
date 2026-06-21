@@ -231,7 +231,7 @@ function renderListCard(list, items, idx) {
         </button>
       </div>
     </div>
-    <div class="list-item-list" data-list-id="${esc(list.id)}">
+    <div class="task-list list-item-list" data-list-id="${esc(list.id)}">
       ${itemsHtml}
     </div>
     ${quickAddHtml}

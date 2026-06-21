@@ -74,7 +74,7 @@
         nextText: 'Next',
         crossChapter: true,
       },
-      basePath: '/docs-site/',
+      basePath: location.hostname === 'docs.delaclaw.com' ? '/' : '/docs-site/',
     };
   </script>
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>

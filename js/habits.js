@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { HABIT_CATEGORIES_KEY } from './supabase.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { getCategoryColor, setCategoryColor } from './todos.js';
 import { t, getLang } from './i18n.js';
@@ -553,16 +553,19 @@ function syncHabitCategoriesFromData() {
 async function refreshHabits() {
   if (!state.db.connected) return;
   await loadHabitShortnames();
-  const { data: habits, error: chErr } = await state.db.from('habits').select('*').order('created_at', { ascending: true });
-  if (chErr) {
+  let habits;
+  try {
+    habits = await fetchAll(() => state.db.from('habits').select('*').order('created_at', { ascending: true }));
+  } catch (chErr) {
     if (chErr.code === '42P01' || chErr.message?.includes('does not exist')) return;
     showToast(t('toast.failed_to_load'), 'error');
     return;
   }
   state.allHabits = habits || [];
 
-  const { data: completions, error: compErr } = await state.db.from('habit_completions').select('*').order('completed_at', { ascending: false });
-  if (!compErr) state.allHabitCompletions = completions || [];
+  try {
+    state.allHabitCompletions = await fetchAll(() => state.db.from('habit_completions').select('*').order('completed_at', { ascending: false }));
+  } catch (compErr) { /* leave existing completions as-is */ }
 
   syncHabitCategoriesFromData();
   if (state.currentView === 'habits') {

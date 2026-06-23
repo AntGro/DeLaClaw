@@ -2,7 +2,7 @@ import { t } from './i18n.js';
 import { lucideIcon } from './icons.js';
 import state, { ARCHIVED_PROJECTS_KEY, SHOW_ARCHIVED_KEY, MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './supabase.js';
 import { esc, escQ, linkify, renderMd, showToast, showDeleteConfirm,
-         updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid } from './utils.js';
+         updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
 import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 
 // ===================================================================
@@ -56,8 +56,10 @@ function updateArchiveToggleBtn() {
 }
 
 async function loadProjects() {
-  const { data, error } = await state.db.from('projects').select('*').order('sort_order', { ascending: true });
-  if (error) { showToast(t('toast.failed_to_load'), 'error'); return; }
+  let data;
+  try {
+    data = await fetchAll(() => state.db.from('projects').select('*').order('sort_order', { ascending: true }));
+  } catch (error) { showToast(t('toast.failed_to_load'), 'error'); return; }
   state.PROJECTS = (data || []).map(p => ({
     ...p,
     links: typeof p.links === 'string' ? JSON.parse(p.links) : (p.links || [])
@@ -247,9 +249,10 @@ function updateCharCounter(input) {
 
 async function refreshAll() {
   if (!state.db.connected || isDragging) return;
-  const { data, error } = await state.db.from('tasks').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true });
-  if (error) { showToast(t('toast.failed_to_load'), 'error'); return; }
-  const all = data || [];
+  let all;
+  try {
+    all = await fetchAll(() => state.db.from('tasks').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }));
+  } catch (error) { showToast(t('toast.failed_to_load'), 'error'); return; }
   state.allTasks = all;
   renderAllTasks();
 }
@@ -812,8 +815,10 @@ let promptsCache = {};
 
 async function loadPrompts() {
   if (!state.db.connected) return;
-  const { data, error } = await state.db.from('prompts').select('*');
-  if (error) return;
+  let data;
+  try {
+    data = await fetchAll(() => state.db.from('prompts').select('*'));
+  } catch (error) { return; }
   promptsCache = {};
   (data || []).forEach(p => { promptsCache[p.key] = p.text; });
 }

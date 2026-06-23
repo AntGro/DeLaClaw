@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN } from './supabase.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid } from './utils.js';
+import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
 import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 import { t } from './i18n.js';
 
@@ -208,8 +208,10 @@ function migrateBucketsToCategories() {
 async function refreshTodos() {
   if (!state.db.connected) return;
   await loadTodoCategoryMeta();
-  const { data, error } = await state.db.from('todos').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true });
-  if (error) {
+  let data;
+  try {
+    data = await fetchAll(() => state.db.from('todos').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }));
+  } catch (error) {
     if (error.code === '42P01' || error.message?.includes('does not exist')) return;
     showToast(t('toast.failed_to_load'), 'error');
     return;

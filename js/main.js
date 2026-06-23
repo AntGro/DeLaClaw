@@ -9,7 +9,7 @@ import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 
-import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing } from './utils.js';
+import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals } from './todos.js';
@@ -2753,9 +2753,7 @@ async function generateBackupJSON() {
   const backup = { _meta: { version: 1, exported_at: new Date().toISOString(), tables: [] } };
   for (const table of BACKUP_TABLES) {
     try {
-      const { data, error } = await state.db.from(table).select('*');
-      if (error) { console.warn(`Skipping ${table}:`, error.message); continue; }
-      backup[table] = data || [];
+      backup[table] = await fetchAll(() => state.db.from(table).select('*'));
       backup._meta.tables.push(table);
     } catch (e) { console.warn(`Skipping ${table}:`, e.message); }
   }

@@ -6,7 +6,7 @@ import { APP_VERSION } from './version.js';
 // ===================================================================
 // UTILS
 // ===================================================================
-function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML.replace(/"/g, '\x26quot;'); }
 function escQ(s) { return esc(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
 function linkify(html) { return html.replace(/https?:\/\/[^\s<&]+/g, url => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`); }
 
@@ -378,12 +378,65 @@ function balanceGrid(gridEl, { min = 400, max = 700, gap = 14 } = {}) {
   }
 }
 
+// ===================================================================
+// fetchAll — paginated read that defeats PostgREST's 1000-row cap
+// ===================================================================
+// Supabase's PostgREST layer caps any unpaginated GET at `max-rows`
+// (default 1000). A plain `.from('x').select('*')` therefore silently
+// truncates to the first 1000 rows once a table grows past that — the
+// rows exist in the DB but never reach the client. This pages through
+// with .range() until a short page is returned, so every row loads.
+//
+// Backends differ: the Supabase adapter exposes .range(); the local
+// REST, demo, and Drive adapters load whole tables in one shot and
+// have no server-side row cap. So we only page when .range() exists,
+// and otherwise run the query once.
+//
+// Usage — pass a factory that builds a FRESH query chain each call
+// (a chain can't be re-awaited), without .range()/.limit():
+//   const rows = await fetchAll(() =>
+//     state.db.from('flashcards').select('*').order('created_at'));
+//
+// @param {() => object} buildQuery  — returns a fresh awaitable query
+// @param {number} pageSize          — rows per page (default 1000)
+// @returns {Promise<Array>}         — all rows (never the {data,error} envelope)
+async function fetchAll(buildQuery, pageSize = 1000) {
+  const probe = buildQuery();
+
+  // Adapter without .range() (local REST / demo / Drive): no row cap,
+  // one round-trip returns everything.
+  if (typeof probe.range !== 'function') {
+    const { data, error } = await probe;
+    if (error) throw error;
+    return data || [];
+  }
+
+  const all = [];
+  let from = 0;
+  let first = true;
+  // Cap iterations as a belt-and-braces guard against a backend that
+  // ignores range and keeps returning full pages.
+  for (let guard = 0; guard < 10000; guard++) {
+    const to = from + pageSize - 1;
+    // First page reuses the probe chain; later pages need a fresh one.
+    const q = first ? probe : buildQuery();
+    first = false;
+    const { data, error } = await q.range(from, to);
+    if (error) throw error;
+    const batch = data || [];
+    all.push(...batch);
+    if (batch.length < pageSize) break; // short page → last page
+    from += pageSize;
+  }
+  return all;
+}
+
 // Exports
 export {
   esc, escQ, linkify, renderMd, showToast, formatRelativeDate,
   showDeleteConfirm, closeDeleteConfirm, executeDeleteConfirm,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
-  isEditing, balanceGrid,
+  isEditing, balanceGrid, fetchAll,
 };
 
 window.closeDeleteConfirm = closeDeleteConfirm;

@@ -1,4 +1,4 @@
-- [Home](/)
+- [Home](README.md)
 - **Getting Started**
   - [Setup Guide](setup.md)
   - [Demo Mode](setup.md?id=demo-mode-no-setup)

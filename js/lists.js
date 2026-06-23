@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './supabase.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, truncateWithShowMore } from './utils.js';
+import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, truncateWithShowMore, fetchAll } from './utils.js';
 import { scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 
@@ -84,23 +84,27 @@ function setListShortname(listId, shortname) {
 async function refreshLists() {
   if (!state.db.connected) return;
   await loadListShortnames();
-  const { data: lists, error: e1 } = await state.db
-    .from('lists')
-    .select('*')
-    .order('sort_order', { ascending: true })
-    .order('name', { ascending: true });
-  if (e1) {
+  let lists;
+  try {
+    lists = await fetchAll(() => state.db
+      .from('lists')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true }));
+  } catch (e1) {
     if (e1.code === '42P01' || e1.message?.includes('does not exist')) return;
     showToast(t('toast.failed_to_load'), 'error');
     return;
   }
   state.allLists = lists || [];
 
-  const { data: items, error: e2 } = await state.db
-    .from('list_items')
-    .select('*')
-    .order('sort_order', { ascending: true });
-  if (e2) {
+  let items;
+  try {
+    items = await fetchAll(() => state.db
+      .from('list_items')
+      .select('*')
+      .order('sort_order', { ascending: true }));
+  } catch (e2) {
     if (e2.code === '42P01' || e2.message?.includes('does not exist')) return;
     showToast(t('toast.failed_to_load'), 'error');
     return;
@@ -181,8 +185,10 @@ function renderLists() {
     html += renderListCard(list, items, idx);
   });
 
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
   grid.className = 'project-grid';
+  window.scrollTo(0, scrollY);
 
   // Init hover-delay + drag-drop for each list card
   visibleLists.forEach(list => {
@@ -215,26 +221,23 @@ function renderListCard(list, items, idx) {
     <button class="list-quick-add-btn" onclick="quickAddListItem(this.previousElementSibling,'${escQ(list.id)}')" title="${esc(t('lists.add_item'))}">${lucideIcon('plus', 16)}</button>
   </div>`;
 
-  const shortname = getListShortname(list.id);
-  const shortnameLabel = shortname ? `<span class="todo-cat-shortname-label">${esc(shortname)}</span>` : '';
-
   return `<div class="project-card list-bucket" data-list-id="${esc(list.id)}" style="--cat-color:${color}">
     <div class="project-card-header">
       <div style="display:flex;align-items:center;gap:8px;">
         <span>${lucideIcon(list.icon || 'list', 18)}</span>
-        <strong style="font-size:1rem;">${esc(list.name)}${shortnameLabel}</strong>
+        <strong style="font-size:1rem;">${esc(list.name)}</strong>
         <span style="font-size:0.78rem;opacity:0.75;">(${count})</span>
       </div>
       <div class="project-header-actions" style="opacity:1;">
         <button class="archive-project-btn" onclick="openEditListModal('${escQ(list.id)}')" title="${t('lists.edit_list')}">
           ${lucideIcon('pencil', 14)}
         </button>
-        <button class="archive-project-btn" onclick="deleteList('${escQ(list.id)}')" title="${t('common.delete')}">
-          ${lucideIcon('trash-2', 14)}
+        <button class="todo-cat-delete-btn" onclick="deleteList('${escQ(list.id)}')" title="${t('common.delete')}">
+          ${lucideIcon('trash-2', 16)}
         </button>
       </div>
     </div>
-    <div class="list-item-list" data-list-id="${esc(list.id)}">
+    <div class="task-list list-item-list" data-list-id="${esc(list.id)}">
       ${itemsHtml}
     </div>
     ${quickAddHtml}
@@ -581,11 +584,8 @@ async function deleteList(listId) {
     t('common.delete'),
     msg,
     async () => {
-      // Delete items first (cascade may not work in all adapters)
-      const itemIds = (state.allListItems || []).filter(i => i.list_id === listId).map(i => i.id);
-      for (const iid of itemIds) {
-        await state.db.from('list_items').delete().eq('id', iid);
-      }
+      // Delete items in bulk
+      if (itemCount > 0) await state.db.from('list_items').delete().eq('list_id', listId);
       const { error } = await state.db.from('lists').delete().eq('id', listId);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
       showToast(t('toast.removed'), 'info');

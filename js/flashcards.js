@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state from './supabase.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
@@ -178,15 +178,11 @@ function getDeckColor(deck) {
 async function refreshFlashcards() {
   if (!state.db.connected) return;
   await loadFlashShortnames();
-  const { data } = await state.db.from('flashcards').select('*').order('created_at');
-  allCards = data || [];
-  const { data: drafts } = await state.db.from('flashcard_notes').select('*').order('created_at', { ascending: false });
-  allDrafts = drafts || [];
+  allCards = await fetchAll(() => state.db.from('flashcards').select('*').order('created_at'));
+  allDrafts = await fetchAll(() => state.db.from('flashcard_notes').select('*').order('created_at', { ascending: false }));
   try {
-    const { data: texts } = await state.db.from('texts').select('*').order('created_at');
-    allTexts = texts || [];
-    const { data: chunks } = await state.db.from('text_line_progress').select('*').order('chunk_index');
-    allChunkProgress = chunks || [];
+    allTexts = await fetchAll(() => state.db.from('texts').select('*').order('created_at'));
+    allChunkProgress = await fetchAll(() => state.db.from('text_line_progress').select('*').order('chunk_index'));
   } catch (e) { allTexts = []; allChunkProgress = []; }
   // Auto-repair: generate missing chunk progress rows for texts with content
   for (const tx of allTexts) {
@@ -251,7 +247,7 @@ function renderDeckNavButtons() {
 }
 
 window.navigateToFlashDeck = function(deck) {
-  const el = document.getElementById(deck === '__drafts' ? 'flashDraftsDeck' : `flashDeck-${CSS.escape(deck)}`);
+  const el = document.getElementById(deck === '__drafts' ? 'flashDraftsDeck' : `flashDeck-${deck}`);
   scrollToAndHighlight(el, null);
 };
 
@@ -297,7 +293,9 @@ function renderAllBuckets() {
     </div>`;
   }
 
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
+  window.scrollTo(0, scrollY);
   initFlashcardHoverDelay(grid);
   // Bind expand toggles for text items
   grid.querySelectorAll('.tr-expand-toggle').forEach(btn => {
@@ -476,7 +474,7 @@ function renderFlashcardDeck(deck, q) {
     <div class="project-card-header">
       <div style="display:flex;align-items:flex-start;gap:6px;">
         <div class="project-info">
-          <strong>${lucideIcon('layers', 14)} ${esc(deck)}${getFlashShortname(deck) ? '<span class="todo-cat-shortname-label">' + esc(getFlashShortname(deck)) + '</span>' : ''}</strong>
+          <strong>${lucideIcon('layers', 14)} ${esc(deck)}</strong>
           <span class="tech">${allDeckCards.length} ${t('flashcards.cards')} ${chips.join(' ')}</span>
         </div>
       </div>
@@ -484,6 +482,7 @@ function renderFlashcardDeck(deck, q) {
         <button class="todo-cat-shortname-btn" onclick="promptFlashShortname('${escQ(deck)}')" title="${getFlashShortname(deck) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
         ${practiceButton}
         <button class="archive-project-btn" onclick="openAddFlashcardModal('${escQ(deck)}')" title="${t('flashcards.add_card')}">${lucideIcon('plus', 16)}</button>
+        <button class="todo-cat-delete-btn" onclick="deleteDeck('${escQ(deck)}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>
     </div>
     <div class="task-list">
@@ -544,7 +543,7 @@ function renderTextDeck(deck, q) {
     <div class="project-card-header">
       <div style="display:flex;align-items:flex-start;gap:6px;">
         <div class="project-info">
-          <strong>${lucideIcon('book-open', 14)} ${esc(deck)}${getFlashShortname(deck) ? '<span class="todo-cat-shortname-label">' + esc(getFlashShortname(deck)) + '</span>' : ''}</strong>
+          <strong>${lucideIcon('book-open', 14)} ${esc(deck)}</strong>
           <span class="tech">${allDeckTexts.length} ${t('text_revision.texts')} ${chips.join(' ')}</span>
         </div>
       </div>
@@ -552,6 +551,7 @@ function renderTextDeck(deck, q) {
         <button class="todo-cat-shortname-btn" onclick="promptFlashShortname('${escQ(deck)}')" title="${getFlashShortname(deck) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
         ${practiceButton}
         <button class="archive-project-btn" onclick="openAddTextModal('${escQ(deck)}')" title="${t('text_revision.add_text')}">${lucideIcon('plus', 16)}</button>
+        <button class="todo-cat-delete-btn" onclick="deleteDeck('${escQ(deck)}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>
     </div>
     <div class="task-list">
@@ -2303,3 +2303,28 @@ window.setFlashcardFilter = setFlashcardFilter;
 window.refreshFlashcards = refreshFlashcards;
 
 window.promptFlashShortname = promptFlashShortname;
+
+async function deleteDeck(deck) {
+  const cards = allCards.filter(c => c.deck === deck);
+  const texts = allTexts.filter(tx => tx.deck === deck);
+  const drafts = allDrafts.filter(d => d.proposed_deck === deck);
+  const total = cards.length + texts.length;
+  const msg = total > 0
+    ? `Delete "${deck}" and its ${total} item(s)?`
+    : `Delete empty deck "${deck}"?`;
+
+  showDeleteConfirm(t('common.delete'), msg, async () => {
+    // Delete flashcards in bulk
+    if (cards.length) await state.db.from('flashcards').delete().eq('deck', deck);
+    // Delete chunk progress for texts in this deck, then texts
+    for (const tx of texts) {
+      await state.db.from('text_line_progress').delete().eq('text_id', tx.id);
+    }
+    if (texts.length) await state.db.from('texts').delete().eq('deck', deck);
+    // Delete drafts targeting this deck
+    if (drafts.length) await state.db.from('flashcard_notes').delete().eq('proposed_deck', deck);
+    showToast(t('toast.deleted'), 'info');
+    await refreshFlashcards();
+  });
+}
+window.deleteDeck = deleteDeck;

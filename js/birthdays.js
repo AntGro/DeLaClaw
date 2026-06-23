@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './supabase.js';
-import { esc, showToast, showDeleteConfirm, balanceGrid } from './utils.js';
+import { esc, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { scrollToAndHighlight, initItemHoverDelay, inlineEditText } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 
@@ -13,11 +13,13 @@ let birthdayFilter = 'all';
 
 async function refreshBirthdays() {
   if (!state.db.connected) return;
-  const { data, error } = await state.db
-    .from('birthdays')
-    .select('*')
-    .order('birthday', { ascending: true });
-  if (error) {
+  let data;
+  try {
+    data = await fetchAll(() => state.db
+      .from('birthdays')
+      .select('*')
+      .order('birthday', { ascending: true }));
+  } catch (error) {
     if (error.code === '42P01' || error.message?.includes('does not exist')) return;
     showToast(t('toast.failed_to_load'), 'error');
     return;
@@ -206,7 +208,9 @@ function renderBirthdays() {
     </div>`;
   }
 
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
+  window.scrollTo(0, scrollY);
   initBirthdayHoverDelay(grid);
   balanceGrid(grid);
 }

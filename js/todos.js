@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN } from './supabase.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid } from './utils.js';
+import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
 import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 import { t } from './i18n.js';
 
@@ -208,8 +208,10 @@ function migrateBucketsToCategories() {
 async function refreshTodos() {
   if (!state.db.connected) return;
   await loadTodoCategoryMeta();
-  const { data, error } = await state.db.from('todos').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true });
-  if (error) {
+  let data;
+  try {
+    data = await fetchAll(() => state.db.from('todos').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }));
+  } catch (error) {
     if (error.code === '42P01' || error.message?.includes('does not exist')) return;
     showToast(t('toast.failed_to_load'), 'error');
     return;
@@ -308,7 +310,9 @@ function renderTodos() {
     html += renderCategoryCard(cat);
   }
 
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
+  window.scrollTo(0, scrollY);
 
   // Init drag-and-drop for each card (individual TODO items)
   categoryList.forEach(cat => {
@@ -433,10 +437,6 @@ function renderCategoryCard(category) {
     ? `<button class="todo-cat-shortname-btn" onclick="openEditCategoryModal('${escQ(category)}')" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
     : '';
 
-  const shortnameLabel = shortname
-    ? `<span class="todo-cat-shortname-label">${esc(shortname)}</span>`
-    : '';
-
   return `<div class="project-card" id="${catId}" data-category="${esc(category)}" style="--cat-color:${catColor}">
     <div class="todo-cat-header">
       <div class="todo-cat-header-left">
@@ -456,7 +456,7 @@ function renderCategoryCard(category) {
       <button onclick="addTodoToCategory(this.closest('.todo-cat-add').querySelector('.todo-cat-input'))">${lucideIcon('plus', 16)}</button>
     </div>
     <div class="char-counter" id="todo-counter-${catId}"></div>
-    <div class="todo-cat-list" data-category="${esc(category)}">
+    <div class="task-list todo-cat-list" data-category="${esc(category)}">
       ${mainListContent}
     </div>
     ${doneToggle}
@@ -859,14 +859,12 @@ function saveNewCategory() {
 async function deleteCategory(name) {
   const todosInCat = allTodos.filter(t => t.category === name);
   const msg = todosInCat.length > 0
-    ? `Delete "${name}"? Its ${todosInCat.length} TODO(s) will move to General.`
+    ? `Delete "${name}" and its ${todosInCat.length} TODO(s)?`
     : `Delete empty category "${name}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
-    // Move todos to General
-    for (const t of todosInCat) {
-      await state.db.from('todos').update({ category: '' }).eq('id', t.id);
-    }
+    // Delete all todos in this category in bulk
+    if (todosInCat.length) await state.db.from('todos').delete().eq('category', name);
     const categories = getCategories();
     const idx = categories.findIndex(c => c === name);
     if (idx !== -1) {

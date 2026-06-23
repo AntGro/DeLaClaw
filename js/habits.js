@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { HABIT_CATEGORIES_KEY } from './supabase.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { getCategoryColor, setCategoryColor } from './todos.js';
 import { t, getLang } from './i18n.js';
@@ -553,16 +553,19 @@ function syncHabitCategoriesFromData() {
 async function refreshHabits() {
   if (!state.db.connected) return;
   await loadHabitShortnames();
-  const { data: habits, error: chErr } = await state.db.from('habits').select('*').order('created_at', { ascending: true });
-  if (chErr) {
+  let habits;
+  try {
+    habits = await fetchAll(() => state.db.from('habits').select('*').order('created_at', { ascending: true }));
+  } catch (chErr) {
     if (chErr.code === '42P01' || chErr.message?.includes('does not exist')) return;
     showToast(t('toast.failed_to_load'), 'error');
     return;
   }
   state.allHabits = habits || [];
 
-  const { data: completions, error: compErr } = await state.db.from('habit_completions').select('*').order('completed_at', { ascending: false });
-  if (!compErr) state.allHabitCompletions = completions || [];
+  try {
+    state.allHabitCompletions = await fetchAll(() => state.db.from('habit_completions').select('*').order('completed_at', { ascending: false }));
+  } catch (compErr) { /* leave existing completions as-is */ }
 
   syncHabitCategoriesFromData();
   if (state.currentView === 'habits') {
@@ -697,7 +700,9 @@ function renderHabits() {
     }
     html += renderHabitCategoryCard(cat);
   }
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
+  window.scrollTo(0, scrollY);
   initHabitHoverDelay(grid);
   renderHabitNavButtons(categoryList);
   balanceGrid(grid);
@@ -759,7 +764,7 @@ function renderHabitCategoryCard(category) {
     <div class="todo-cat-header">
       <div class="todo-cat-header-left">
         <div class="todo-cat-info">
-          <h3 class="todo-cat-name">${esc(catName)}${getHabitShortname(catName) ? '<span class="todo-cat-shortname-label">' + esc(getHabitShortname(catName)) + '</span>' : ''}</h3>
+          <h3 class="todo-cat-name">${esc(catName)}</h3>
           <span class="todo-cat-stats">${statsText}</span>
         </div>
       </div>
@@ -772,7 +777,7 @@ function renderHabitCategoryCard(category) {
       <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catName)}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addHabitFromInput(this);}">
       <button onclick="addHabitFromInput(this.previousElementSibling)">${lucideIcon('plus', 16)}</button>
     </div>
-    <div class="habit-list todo-cat-list">
+    <div class="task-list habit-list todo-cat-list">
       ${items}
     </div>
   </div>`;
@@ -1337,13 +1342,16 @@ function saveNewHabitCategory() {
 async function deleteHabitCategory(name) {
   const habitsInCat = state.allHabits.filter(c => (c.category || 'General') === name);
   const msg = habitsInCat.length > 0
-    ? `Delete "${name}"? Its ${habitsInCat.length} habit(s) will move to General.`
+    ? `Delete "${name}" and its ${habitsInCat.length} habit(s)?`
     : `Delete empty category "${name}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
-    for (const c of habitsInCat) {
-      await state.db.from('habits').update({ category: 'General' }).eq('id', c.id);
+    for (const h of habitsInCat) {
+      // Delete completions for each habit
+      await state.db.from('habit_completions').delete().eq('habit_id', h.id);
     }
+    // Delete all habits in this category in bulk
+    if (habitsInCat.length) await state.db.from('habits').delete().eq('category', name);
     const cats = getHabitCategories();
     const idx = cats.findIndex(c => c === name);
     if (idx !== -1) { cats.splice(idx, 1); saveHabitCategories(cats); }

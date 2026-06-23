@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './supabase.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 
@@ -108,12 +108,14 @@ function saveVestiaireCategories(cats) {
 async function refreshVestiaire() {
   if (!state.db.connected) return;
   await loadVestShortnames();
-  const { data, error } = await state.db
-    .from('vestiaire')
-    .select('*')
-    .order('sort_order', { ascending: true })
-    .order('name', { ascending: true });
-  if (error) {
+  let data;
+  try {
+    data = await fetchAll(() => state.db
+      .from('vestiaire')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true }));
+  } catch (error) {
     if (error.code === '42P01' || error.message?.includes('does not exist')) return;
     showToast(t('toast.failed_to_load'), 'error');
     return;
@@ -234,8 +236,10 @@ function renderVestiaire() {
     html += renderCategoryCard('Autre', grouped['Autre']);
   }
 
+  const scrollY = window.scrollY;
   grid.innerHTML = html;
   grid.className = 'project-grid';
+  window.scrollTo(0, scrollY);
 
   // Init hover-delay action buttons & drag-drop for each category card
   cats.forEach(cat => {
@@ -284,12 +288,12 @@ function renderCategoryCard(cat, items) {
         <button class="archive-project-btn" onclick="openAddVestiaireModal('${escapedCat}')" title="${t('vestiaire.add_to_category', escapedCat)}">
           ${lucideIcon('plus', 16)}
         </button>
-        <button class="archive-project-btn" onclick="deleteVestiaireCategory('${escapedCat}')" title="${t('vestiaire.delete_category')}">
-          ${lucideIcon('trash-2', 14)}
+        <button class="todo-cat-delete-btn" onclick="deleteVestiaireCategory('${escapedCat}')" title="${t('vestiaire.delete_category')}">
+          ${lucideIcon('trash-2', 16)}
         </button>
       </div>
     </div>
-    <div class="vestiaire-item-list" data-category="${escapedCat}">
+    <div class="task-list vestiaire-item-list" data-category="${escapedCat}">
       ${itemsHtml}
     </div>
   </div>`;
@@ -849,18 +853,19 @@ async function saveEditVestiaireCategory() {
 
 function deleteVestiaireCategory(cat) {
   const items = (state.allVestiaire || []).filter(v => v.category === cat);
-  if (items.length > 0) {
-    showToast(t('vestiaire.category_has_items', cat, items.length), 'error');
-    return;
-  }
+  const msg = items.length > 0
+    ? t('vestiaire.delete_category_confirm', cat) + ` (${items.length} item${items.length > 1 ? 's' : ''})`
+    : t('vestiaire.delete_category_confirm', cat);
   showDeleteConfirm(
     t('vestiaire.delete_category'),
-    t('vestiaire.delete_category_confirm', cat),
-    () => {
+    msg,
+    async () => {
+      // Delete all items in this category in bulk
+      if (items.length) await state.db.from('vestiaire').delete().eq('category', cat);
       const cats = getVestiaireCategories().filter(c => c !== cat);
       saveVestiaireCategories(cats);
       showToast(t('toast.removed'), 'info');
-      renderVestiaire();
+      await refreshVestiaire();
     }
   );
 }

@@ -16,6 +16,6 @@
 #   DB < latest_compat         →  AMBER  "Some features unavailable — run migrations for full support."
 #   DB >= latest_compat        →  (none)
 
-latest=1.210
+latest=1.211
 latest_compat=1.100
 latest_compat_deprec=1.000

@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './supabase.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 
@@ -108,12 +108,14 @@ function saveVestiaireCategories(cats) {
 async function refreshVestiaire() {
   if (!state.db.connected) return;
   await loadVestShortnames();
-  const { data, error } = await state.db
-    .from('vestiaire')
-    .select('*')
-    .order('sort_order', { ascending: true })
-    .order('name', { ascending: true });
-  if (error) {
+  let data;
+  try {
+    data = await fetchAll(() => state.db
+      .from('vestiaire')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true }));
+  } catch (error) {
     if (error.code === '42P01' || error.message?.includes('does not exist')) return;
     showToast(t('toast.failed_to_load'), 'error');
     return;

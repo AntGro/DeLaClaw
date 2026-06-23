@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './supabase.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, truncateWithShowMore } from './utils.js';
+import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, truncateWithShowMore, fetchAll } from './utils.js';
 import { scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 
@@ -84,23 +84,27 @@ function setListShortname(listId, shortname) {
 async function refreshLists() {
   if (!state.db.connected) return;
   await loadListShortnames();
-  const { data: lists, error: e1 } = await state.db
-    .from('lists')
-    .select('*')
-    .order('sort_order', { ascending: true })
-    .order('name', { ascending: true });
-  if (e1) {
+  let lists;
+  try {
+    lists = await fetchAll(() => state.db
+      .from('lists')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true }));
+  } catch (e1) {
     if (e1.code === '42P01' || e1.message?.includes('does not exist')) return;
     showToast(t('toast.failed_to_load'), 'error');
     return;
   }
   state.allLists = lists || [];
 
-  const { data: items, error: e2 } = await state.db
-    .from('list_items')
-    .select('*')
-    .order('sort_order', { ascending: true });
-  if (e2) {
+  let items;
+  try {
+    items = await fetchAll(() => state.db
+      .from('list_items')
+      .select('*')
+      .order('sort_order', { ascending: true }));
+  } catch (e2) {
     if (e2.code === '42P01' || e2.message?.includes('does not exist')) return;
     showToast(t('toast.failed_to_load'), 'error');
     return;

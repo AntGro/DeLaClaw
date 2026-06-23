@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state from './supabase.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
@@ -178,15 +178,11 @@ function getDeckColor(deck) {
 async function refreshFlashcards() {
   if (!state.db.connected) return;
   await loadFlashShortnames();
-  const { data } = await state.db.from('flashcards').select('*').order('created_at');
-  allCards = data || [];
-  const { data: drafts } = await state.db.from('flashcard_notes').select('*').order('created_at', { ascending: false });
-  allDrafts = drafts || [];
+  allCards = await fetchAll(() => state.db.from('flashcards').select('*').order('created_at'));
+  allDrafts = await fetchAll(() => state.db.from('flashcard_notes').select('*').order('created_at', { ascending: false }));
   try {
-    const { data: texts } = await state.db.from('texts').select('*').order('created_at');
-    allTexts = texts || [];
-    const { data: chunks } = await state.db.from('text_line_progress').select('*').order('chunk_index');
-    allChunkProgress = chunks || [];
+    allTexts = await fetchAll(() => state.db.from('texts').select('*').order('created_at'));
+    allChunkProgress = await fetchAll(() => state.db.from('text_line_progress').select('*').order('chunk_index'));
   } catch (e) { allTexts = []; allChunkProgress = []; }
   // Auto-repair: generate missing chunk progress rows for texts with content
   for (const tx of allTexts) {

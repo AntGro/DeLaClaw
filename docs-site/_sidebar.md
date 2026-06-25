@@ -1,6 +1,7 @@
 - [Home](README.md)
 - **Getting Started**
   - [Setup Guide](setup.md)
+  - [Install on Your Phone](setup.md?id=install-on-your-phone)
   - [Demo Mode](setup.md?id=demo-mode-no-setup)
 - **Reference**
   - [Architecture](architecture.md)

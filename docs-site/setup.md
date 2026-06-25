@@ -86,11 +86,35 @@ The SQLite database is created automatically at `server/last.db`. The schema (`s
 - Data is stored in a single SQLite file. Back it up by copying `server/last.db`.
 - The server has no authentication. Run it on localhost or behind a reverse proxy if exposing to a network.
 
+## Install on your phone
+
+DeLaClaw is a PWA, so you can add it to your home screen and run it fullscreen like a native app — no App Store, no Play Store, no account. Watch the short for your platform, or follow the steps below it.
+
+### iPhone / iPad
+
+<iframe width="315" height="560" src="https://www.youtube.com/embed/uRh2HcT_KcY" title="Install DeLaClaw on iPhone — Add to Home Screen" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+
+1. Open [delaclaw.com](https://delaclaw.com) in **Safari**
+2. Tap the **Share** button
+3. Tap **Add to Home Screen**
+4. Tap **Add**
+
+> On iOS the install option only appears in **Safari**, not Chrome or Firefox.
+
+### Android
+
+<iframe width="315" height="560" src="https://www.youtube.com/embed/54JBnBFZM_I" title="Install DeLaClaw on Android — Add to Home Screen" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+
+1. Open [delaclaw.com](https://delaclaw.com) in **Chrome**
+2. Tap the **⋮** menu (top right)
+3. Tap **Install app** (or **Add to Home screen**)
+4. Confirm
+
 ## After connecting
 
 Regardless of the backend mode:
 
 - **Theme**: defaults to your OS preference. Toggle in Settings (gear icon in the header).
 - **Language**: defaults to English. Change in Settings (English, French, Spanish).
-- **PWA install**: on supported browsers, you can install DeLaClaw as a standalone app from the browser menu.
+- **PWA install**: add DeLaClaw to your home screen to run it fullscreen like a native app — see [Install on your phone](setup.md?id=install-on-your-phone).
 - **Offline mode**: after the first load, data is cached in IndexedDB. If the network drops, the app serves cached data in read-only mode with an amber banner. Full functionality resumes automatically when connectivity returns.

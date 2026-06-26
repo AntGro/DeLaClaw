@@ -9,7 +9,7 @@ import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 
-import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll } from './utils.js';
+import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals } from './todos.js';
@@ -27,7 +27,7 @@ import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
 // BACKEND-SCOPED localStorage — isolate per-backend settings so switching
 // between Supabase, Local, and Demo never leaks data across modes.
 // Keys listed here are saved/restored under `scope:{mode}:{key}`.
-// Global keys (STAY_CONNECTED_KEY, cc-lang) are never scoped.
+// Global keys (STAY_CONNECTED_KEY, cc-lang, install-dismiss) are never scoped.
 // ===================================================================
 const SCOPED_LS_KEYS = [
   'claw_cc_theme',
@@ -1066,6 +1066,10 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   // Show demo banner if in demo mode
   if (mode === 'demo') initDemoBanner();
+
+  // Offer PWA install on phones/tablets when not already installed
+  // (skip in demo mode — premature, and avoids stacking with the demo banner)
+  if (mode !== 'demo') maybeShowInstallBanner();
 }
 
 
@@ -1146,6 +1150,85 @@ function removeDemoBanner() {
   document.querySelector('.demo-banner')?.remove();
   document.body.classList.remove('demo-mode');
   document.body.style.removeProperty('--demo-banner-h');
+}
+
+// ===================================================================
+// INSTALL BANNER (PWA)
+// ===================================================================
+const INSTALL_DISMISS_KEY = 'claw_cc_install_dismissed';
+
+/**
+ * Show an "install the app" banner when the user is on a phone or tablet,
+ * is NOT already running the installed PWA, and hasn't dismissed it before.
+ * Android/Chromium gets a native install button (beforeinstallprompt);
+ * iOS Safari gets manual "Add to Home Screen" instructions instead.
+ */
+function maybeShowInstallBanner() {
+  if (isInstalledPWA()) return;                 // already installed — nothing to do
+  if (deviceClass() === 'computer') return;     // laptops/desktops excluded
+  if (localStorage.getItem(INSTALL_DISMISS_KEY) === '1') return; // user said not now
+  if (document.getElementById('installBanner')) return;
+
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  // Android/Chromium: only worth showing if we can actually trigger the prompt.
+  // If the native event hasn't arrived yet, wait for it (or fall back on iOS).
+  if (!isIOS && !window.__bipEvent) {
+    window.addEventListener('bip-ready', () => maybeShowInstallBanner(), { once: true });
+    return;
+  }
+
+  const banner = document.createElement('div');
+  banner.id = 'installBanner';
+  banner.className = 'install-banner';
+
+  const left = document.createElement('span');
+  left.className = 'install-banner-msg';
+  left.textContent = isIOS ? t('install.banner_ios') : t('install.banner');
+
+  const right = document.createElement('div');
+  right.className = 'install-banner-right';
+
+  // Native install button — Android/Chromium only (iOS has no programmatic install)
+  if (!isIOS) {
+    const installBtn = document.createElement('button');
+    installBtn.className = 'install-banner-go';
+    installBtn.textContent = t('install.btn');
+    installBtn.addEventListener('click', async () => {
+      const evt = window.__bipEvent;
+      if (!evt) { removeInstallBanner(); return; }
+      evt.prompt();
+      try { await evt.userChoice; } catch (e) {}
+      delete window.__bipEvent;
+      removeInstallBanner();
+    });
+    right.appendChild(installBtn);
+  }
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.textContent = t('install.dismiss');
+  dismissBtn.addEventListener('click', () => {
+    localStorage.setItem(INSTALL_DISMISS_KEY, '1');
+    removeInstallBanner();
+  });
+  right.appendChild(dismissBtn);
+
+  banner.appendChild(left);
+  banner.appendChild(right);
+  document.body.prepend(banner);
+  document.body.classList.add('install-mode');
+  requestAnimationFrame(() => {
+    document.body.style.setProperty('--install-banner-h', banner.offsetHeight + 'px');
+  });
+
+  // If the app gets installed while the banner is up, clear it.
+  window.addEventListener('app-installed', removeInstallBanner, { once: true });
+}
+
+function removeInstallBanner() {
+  document.getElementById('installBanner')?.remove();
+  document.body.classList.remove('install-mode');
+  document.body.style.removeProperty('--install-banner-h');
 }
 
 async function onLangSwitchDemo(lang) {

@@ -1651,6 +1651,18 @@ body.demo-mode #app{padding-top:var(--demo-banner-h,36px);}
 body.demo-mode .hero-storm-wrap{top:var(--demo-banner-h,36px);}
 body.demo-mode .app-header{top:var(--demo-banner-h,36px);}
 
+/* Install banner (PWA) */
+.install-banner{position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;padding:6px 16px;background:var(--accent,oklch(0.65 0.15 264));color:#fff;font-size:0.82rem;font-weight:500;gap:8px;flex-wrap:wrap;}
+.install-banner-msg{flex:1;min-width:0;}
+.install-banner-right{display:flex;gap:8px;align-items:center;}
+.install-banner button{background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:3px 10px;font-size:0.78rem;cursor:pointer;white-space:nowrap;font-family:inherit;}
+.install-banner button:hover{background:rgba(255,255,255,0.3);}
+.install-banner .install-banner-go{background:#fff;color:var(--accent,oklch(0.45 0.15 264));border-color:transparent;font-weight:600;}
+.install-banner .install-banner-go:hover{background:rgba(255,255,255,0.9);}
+body.install-mode #app{padding-top:var(--install-banner-h,36px);}
+body.install-mode .hero-storm-wrap{top:var(--install-banner-h,36px);}
+body.install-mode .app-header{top:var(--install-banner-h,36px);}
+
 /* ── Lists Page ── */
 .list-item-list{padding:10px 16px 4px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;}
 .list-item{display:flex;align-items:flex-start;justify-content:space-between;border-left:3px solid var(--muted);padding-left:10px;margin-bottom:4px;}

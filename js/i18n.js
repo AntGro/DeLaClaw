@@ -116,6 +116,12 @@ const T = {
       show_data: 'Show demo data',
       exit: 'Exit demo',
     },
+    install: {
+      banner: 'Get the app — install DeLaClaw on your device',
+      banner_ios: 'Install DeLaClaw: tap Share, then “Add to Home Screen”',
+      btn: 'Install',
+      dismiss: 'Not now',
+    },
     demo_chooser: {
       title: 'Choose your demo experience',
       subtitle: 'Try DeLaClaw with sample data or generate content tailored to you.',
@@ -604,6 +610,12 @@ const T = {
       show_data: 'Afficher les données',
       exit: 'Quitter la démo',
     },
+    install: {
+      banner: 'Obtenez l\'app — installez DeLaClaw sur votre appareil',
+      banner_ios: 'Installer DeLaClaw : appuyez sur Partager, puis « Sur l\'écran d\'accueil »',
+      btn: 'Installer',
+      dismiss: 'Plus tard',
+    },
     demo_chooser: {
       title: 'Choisissez votre expérience de démo',
       subtitle: 'Essayez DeLaClaw avec des données d\'exemple ou générez du contenu adapté à vous.',
@@ -1078,6 +1090,12 @@ const T = {
       show_empty: 'Mostrar vacío',
       show_data: 'Mostrar datos',
       exit: 'Salir de la demo',
+    },
+    install: {
+      banner: 'Consigue la app — instala DeLaClaw en tu dispositivo',
+      banner_ios: 'Instala DeLaClaw: pulsa Compartir y luego «Añadir a inicio»',
+      btn: 'Instalar',
+      dismiss: 'Ahora no',
     },
     demo_chooser: {
       title: 'Elige tu experiencia de demo',

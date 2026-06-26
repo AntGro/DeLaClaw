@@ -118,8 +118,9 @@ const T = {
     },
     install: {
       banner: 'Get the app — install DeLaClaw on your device',
-      banner_ios: 'Install DeLaClaw: tap Share, then “Add to Home Screen”',
       btn: 'Install',
+      watch: 'Watch how',
+      how_title: 'Install DeLaClaw',
       dismiss: 'Not now',
     },
     demo_chooser: {
@@ -612,8 +613,9 @@ const T = {
     },
     install: {
       banner: 'Obtenez l\'app — installez DeLaClaw sur votre appareil',
-      banner_ios: 'Installer DeLaClaw : appuyez sur Partager, puis « Sur l\'écran d\'accueil »',
       btn: 'Installer',
+      watch: 'Voir comment',
+      how_title: 'Installer DeLaClaw',
       dismiss: 'Plus tard',
     },
     demo_chooser: {
@@ -1093,8 +1095,9 @@ const T = {
     },
     install: {
       banner: 'Consigue la app — instala DeLaClaw en tu dispositivo',
-      banner_ios: 'Instala DeLaClaw: pulsa Compartir y luego «Añadir a inicio»',
       btn: 'Instalar',
+      watch: 'Ver cómo',
+      how_title: 'Instalar DeLaClaw',
       dismiss: 'Ahora no',
     },
     demo_chooser: {

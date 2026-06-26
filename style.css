@@ -1663,6 +1663,11 @@ body.install-mode #app{padding-top:var(--install-banner-h,36px);}
 body.install-mode .hero-storm-wrap{top:var(--install-banner-h,36px);}
 body.install-mode .app-header{top:var(--install-banner-h,36px);}
 
+/* Install how-to lightbox (vertical Short, 9:16) */
+.install-how-modal{max-width:380px;width:92%;}
+.install-how-video{position:relative;width:100%;aspect-ratio:9/16;max-height:70vh;border-radius:12px;overflow:hidden;background:#000;}
+.install-how-video iframe{position:absolute;inset:0;width:100%;height:100%;border:0;}
+
 /* ── Lists Page ── */
 .list-item-list{padding:10px 16px 4px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;}
 .list-item{display:flex;align-items:flex-start;justify-content:space-between;border-left:3px solid var(--muted);padding-left:10px;margin-bottom:4px;}

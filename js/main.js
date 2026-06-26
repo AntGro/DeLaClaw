@@ -1157,11 +1157,24 @@ function removeDemoBanner() {
 // ===================================================================
 const INSTALL_DISMISS_KEY = 'claw_cc_install_dismissed';
 
+// How-to-install YouTube Shorts, per platform (same videos embedded in the docs).
+const INSTALL_VIDEOS = {
+  ios: 'uRh2HcT_KcY',      // iPhone — Safari Share → Add to Home Screen
+  android: '54JBnBFZM_I',  // Android — Chrome → Add to Home Screen
+};
+
+function isIOSDevice() {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 /**
  * Show an "install the app" banner when the user is on a phone or tablet,
  * is NOT already running the installed PWA, and hasn't dismissed it before.
- * Android/Chromium gets a native install button (beforeinstallprompt);
- * iOS Safari gets manual "Add to Home Screen" instructions instead.
+ * Android/Chromium gets a native install button (beforeinstallprompt).
+ * Both platforms get a "Watch how" action that opens the matching install
+ * video in an in-app lightbox (iOS has no programmatic install, so the video
+ * is its primary path).
  */
 function maybeShowInstallBanner() {
   if (isInstalledPWA()) return;                 // already installed — nothing to do
@@ -1169,10 +1182,9 @@ function maybeShowInstallBanner() {
   if (localStorage.getItem(INSTALL_DISMISS_KEY) === '1') return; // user said not now
   if (document.getElementById('installBanner')) return;
 
-  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  // Android/Chromium: only worth showing if we can actually trigger the prompt.
-  // If the native event hasn't arrived yet, wait for it (or fall back on iOS).
+  const isIOS = isIOSDevice();
+  // Android/Chromium native install: if the event hasn't arrived yet, wait for
+  // it before showing (so the Install button is live). iOS shows immediately.
   if (!isIOS && !window.__bipEvent) {
     window.addEventListener('bip-ready', () => maybeShowInstallBanner(), { once: true });
     return;
@@ -1184,7 +1196,7 @@ function maybeShowInstallBanner() {
 
   const left = document.createElement('span');
   left.className = 'install-banner-msg';
-  left.textContent = isIOS ? t('install.banner_ios') : t('install.banner');
+  left.textContent = t('install.banner');
 
   const right = document.createElement('div');
   right.className = 'install-banner-right';
@@ -1204,6 +1216,14 @@ function maybeShowInstallBanner() {
     });
     right.appendChild(installBtn);
   }
+
+  // "Watch how" — opens the platform-matched install video in a lightbox.
+  // On iOS this is the primary (and only) action, so style it accordingly.
+  const watchBtn = document.createElement('button');
+  watchBtn.textContent = t('install.watch');
+  if (isIOS) watchBtn.className = 'install-banner-go';
+  watchBtn.addEventListener('click', () => showInstallHowModal(isIOS ? 'ios' : 'android'));
+  right.appendChild(watchBtn);
 
   const dismissBtn = document.createElement('button');
   dismissBtn.textContent = t('install.dismiss');
@@ -1229,6 +1249,52 @@ function removeInstallBanner() {
   document.getElementById('installBanner')?.remove();
   document.body.classList.remove('install-mode');
   document.body.style.removeProperty('--install-banner-h');
+}
+
+/** Lightbox that plays the platform-matched install Short inside the app. */
+function showInstallHowModal(platform) {
+  const videoId = INSTALL_VIDEOS[platform] || INSTALL_VIDEOS.ios;
+  document.getElementById('installHowModal')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'installHowModal';
+  overlay.className = 'modal-overlay visible';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeInstallHowModal(); });
+
+  const modal = document.createElement('div');
+  modal.className = 'modal install-how-modal';
+
+  const h2 = document.createElement('h2');
+  h2.textContent = t('install.how_title');
+
+  const frameWrap = document.createElement('div');
+  frameWrap.className = 'install-how-video';
+  const iframe = document.createElement('iframe');
+  iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`;
+  iframe.title = t('install.how_title');
+  iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+  iframe.allowFullscreen = true;
+  iframe.setAttribute('frameborder', '0');
+  frameWrap.appendChild(iframe);
+
+  const actions = document.createElement('div');
+  actions.className = 'modal-actions';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn';
+  closeBtn.textContent = t('common.close') || 'Close';
+  closeBtn.addEventListener('click', closeInstallHowModal);
+  actions.appendChild(closeBtn);
+
+  modal.appendChild(h2);
+  modal.appendChild(frameWrap);
+  modal.appendChild(actions);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function closeInstallHowModal() {
+  // Removing the iframe stops playback.
+  document.getElementById('installHowModal')?.remove();
 }
 
 async function onLangSwitchDemo(lang) {

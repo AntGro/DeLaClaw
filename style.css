@@ -1663,6 +1663,12 @@ body.install-mode #app{padding-top:var(--install-banner-h,36px);}
 body.install-mode .hero-storm-wrap{top:var(--install-banner-h,36px);}
 body.install-mode .app-header{top:var(--install-banner-h,36px);}
 
+/* Demo + install banners stacked: install sits below demo, offsets sum */
+body.demo-mode.install-mode .install-banner{top:var(--demo-banner-h,36px);}
+body.demo-mode.install-mode #app{padding-top:calc(var(--demo-banner-h,36px) + var(--install-banner-h,36px));}
+body.demo-mode.install-mode .hero-storm-wrap{top:calc(var(--demo-banner-h,36px) + var(--install-banner-h,36px));}
+body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var(--install-banner-h,36px));}
+
 /* Install how-to lightbox (vertical Short, 9:16) */
 .install-how-modal{max-width:380px;width:92%;}
 .install-how-video{position:relative;width:100%;aspect-ratio:9/16;max-height:70vh;border-radius:12px;overflow:hidden;background:#000;}

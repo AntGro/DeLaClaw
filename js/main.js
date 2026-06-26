@@ -1067,9 +1067,9 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   // Show demo banner if in demo mode
   if (mode === 'demo') initDemoBanner();
 
-  // Offer PWA install on phones/tablets when not already installed
-  // (skip in demo mode — premature, and avoids stacking with the demo banner)
-  if (mode !== 'demo') maybeShowInstallBanner();
+  // Offer PWA install on phones/tablets when not already installed.
+  // In demo mode this stacks below the demo banner (see install-banner CSS).
+  maybeShowInstallBanner();
 }
 
 

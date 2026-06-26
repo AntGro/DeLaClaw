@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state from './supabase.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, isMobileUA } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
@@ -1852,7 +1852,7 @@ window.openImportModal = async function(presetDeck) {
   const textDecks = [...new Set(allTexts.map(c => c.deck))].sort();
   const allDecks = [...new Set([...cardDecks, ...textDecks])].sort();
 
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const isMobile = isMobileUA();
   const serviceButtons = LLM_SERVICES.map(s => {
     const href = isMobile && s.appUrl ? s.appUrl : s.url;
     return `<a href="${href}" target="_blank" rel="noopener" class="dc-llm-btn">${s.svg}<span>${s.name}</span></a>`;

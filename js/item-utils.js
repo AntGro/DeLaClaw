@@ -2,7 +2,7 @@
 // SHARED ITEM UTILITIES — used by projects.js and todos.js
 // ===================================================================
 
-import { showToast } from './utils.js';
+import { showToast, isTouchDevice } from './utils.js';
 import { t } from './i18n.js';
 import db from './db.js';
 
@@ -27,7 +27,7 @@ export function initItemHoverDelay(container, {
   editingSelector = '.task-edit-input',
   onDblClick,
 }) {
-  const isTouchDevice = window.matchMedia('(max-width:480px)').matches || 'ontouchstart' in window;
+  const isTouch = isTouchDevice();
 
   // Track currently-visible actions so tapping elsewhere hides them
   let _activeActionsItem = null;
@@ -41,7 +41,7 @@ export function initItemHoverDelay(container, {
   }
 
   // Dismiss actions when tapping outside on touch devices
-  if (isTouchDevice) {
+  if (isTouch) {
     document.addEventListener('click', (e) => {
       if (_activeActionsItem && !_activeActionsItem.contains(e.target)) {
         hideActiveActions();
@@ -56,7 +56,7 @@ export function initItemHoverDelay(container, {
     const row = item.querySelector(rowSelector);
     const text = item.querySelector(textSelector);
 
-    if (!isTouchDevice) {
+    if (!isTouch) {
       // Desktop: hover & single-click → show action buttons
       if (actions && row) {
         item.addEventListener('mouseenter', () => {

@@ -1077,6 +1077,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .todo-item{border-left:3px solid var(--fc-draft);}
 .todo-item.todo-done{opacity:0.5;}
 .todo-item.todo-done .todo-text{text-decoration:line-through;color:var(--muted);}
+.todo-completed-date{font-size:0.75rem;color:var(--muted);white-space:nowrap;margin-left:auto;padding-right:4px;}
 .todo-item.todo-overdue{border-left-color:var(--red);}
 
 .todo-row{display:flex;align-items:center;gap:10px;}

@@ -10,7 +10,7 @@
 // backends never cross-contaminate.
 // ===================================================================
 
-import state from '../supabase.js';
+import state from '../state.js';
 
 const EXCLUDE      = new Set(['prompts', 'nvidia_usage']);
 const STRIP        = { birthdays: ['avatar_url'] };

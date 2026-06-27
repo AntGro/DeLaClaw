@@ -90,7 +90,7 @@ index.html              Shell: login gate, tab navigation, all views
 style.css               All styles (dark + light themes, responsive)
 js/
   main.js               App bootstrap, view switching, settings, footer
-  supabase.js           Centralized state and DB client
+  state.js              Centralized state and constants
   db.js                 Adapter abstraction with Proxy-based activity tracking
   adapters/
     supabase.js         Supabase PostgREST adapter
@@ -98,6 +98,7 @@ js/
     demo.js             In-memory adapter with sample data
     drive.js            Google Drive adapter (in-memory + JSON file persistence)
     offline-cache.js    IndexedDB caching layer (wraps any adapter)
+  sharing.js            Drive-based multi-user sharing (groups, items, Picker)
   welcome.js            Today dashboard
   projects.js           Project boards and task management
   todos.js              TODO management

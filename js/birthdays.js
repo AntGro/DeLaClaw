@@ -1,5 +1,5 @@
 import { lucideIcon } from './icons.js';
-import state from './supabase.js';
+import state from './state.js';
 import { esc, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { scrollToAndHighlight, initItemHoverDelay, inlineEditText } from './item-utils.js';
 import { t, getLang } from './i18n.js';

@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
-import state from './supabase.js';
+import state from './state.js';
 import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, isMobileUA } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';

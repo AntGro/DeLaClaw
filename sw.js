@@ -1,6 +1,6 @@
 // Service Worker for DeLaClaw (PWA)
 // CACHE_VERSION is updated by the pre-commit hook from VERSION file
-const CACHE_VERSION = 'dlc-1.237';
+const CACHE_VERSION = 'dlc-1.238';
 
 const PRECACHE_URLS = [
   './',
@@ -29,7 +29,7 @@ const PRECACHE_URLS = [
   'js/logo.js',
   'js/main.js',
   'js/projects.js',
-  'js/supabase.js',
+  'js/state.js',
   'js/todos.js',
   'js/utils.js',
   'js/version.js',

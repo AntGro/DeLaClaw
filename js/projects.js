@@ -1,6 +1,6 @@
 import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
-import state, { ARCHIVED_PROJECTS_KEY, SHOW_ARCHIVED_KEY, MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './supabase.js';
+import state, { ARCHIVED_PROJECTS_KEY, SHOW_ARCHIVED_KEY, MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
 import { esc, escQ, linkify, renderMd, showToast, showDeleteConfirm,
          updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
 import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
@@ -8,7 +8,7 @@ import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderI
 // ===================================================================
 // state.PROJECTS (loaded from Supabase)
 // ===================================================================
-// (state managed in supabase.js)
+// (state managed in state.js)
 
 // ── Search State ──
 let projectSearchQuery = '';
@@ -245,7 +245,7 @@ function updateCharCounter(input) {
 // ===================================================================
 // SUPABASE TASK CRUD
 // ===================================================================
-// (state managed in supabase.js)
+// (state managed in state.js)
 
 async function refreshAll() {
   if (!state.db.connected || isDragging) return;

@@ -22,9 +22,13 @@ const state = {
   dbSchemaVersion: '0.000',
   offlineMode: false,
   pausedMode: false,
+  sharing: null,
 };
 
 export default state;
+
+// Debug: expose state on window for console access
+if (typeof window !== 'undefined') window.__dlc = state;
 
 // Constants
 export const IDEAS_KEY = 'claw_cc_ideas';

@@ -3,7 +3,7 @@
 // ===================================================================
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
-import state, { ARCHIVED_PROJECTS_KEY } from './supabase.js';
+import state, { ARCHIVED_PROJECTS_KEY } from './state.js';
 import { esc, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText } from './item-utils.js';
 import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, refreshHabits } from './habits.js';

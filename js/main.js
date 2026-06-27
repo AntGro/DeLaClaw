@@ -3,7 +3,7 @@ import { initHero, showHero, hideHero, injectGateLogo } from './hero.js';
 import { t, getLang, setLang, nextLang } from './i18n.js';
 import { renderStorm, generateStorm, LOGO_DEFAULTS, animLoading, animLock, animUnlock } from './logo.js';
 import { LOGOS, LABELS } from './backend-logos.js';
-import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY, TAB_VISIBILITY_KEY, TAB_ORDER_KEY } from './supabase.js';
+import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY, TAB_VISIBILITY_KEY, TAB_ORDER_KEY } from './state.js';
 import db from './db.js';
 import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
@@ -19,7 +19,7 @@ import { refreshVestiaire, renderVestiaire, initVestiaireModals } from './vestia
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals } from './lists.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
-import { HABIT_CATEGORIES_KEY } from './supabase.js';
+import { HABIT_CATEGORIES_KEY } from './state.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
 import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
 
@@ -516,6 +516,7 @@ async function disconnect() {
   // Force-save and clean up Drive adapter before disconnecting
   if (state.driveMode && state.driveAdapter) {
     try { await state.driveAdapter.forceSave(); } catch {}
+    if (state.sharing) { try { state.sharing.destroy(); } catch {} }
     if (state.driveAdapter.destroy) state.driveAdapter.destroy();
   }
   clearStayConnectedCreds();
@@ -1109,6 +1110,15 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       if (fn) fn().then(() => markLastUpdated()).catch(e => console.warn('Drive refresh error:', e));
       else markLastUpdated();
     };
+
+    // Wire up Drive sharing module
+    try {
+      const { createDriveSharing } = await import('./sharing.js');
+      const driveAppId = GOOGLE_CLIENT_ID.split('-')[0];
+      state.sharing = createDriveSharing(() => state.driveAdapter.getToken(), driveAppId);
+      state.sharing.loadAll().catch(e => console.warn('sharing loadAll:', e));
+      state.sharing.startPolling();
+    } catch (e) { console.warn('sharing init:', e); }
   }
 
   // Initialize TODOs

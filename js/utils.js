@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import { t } from './i18n.js';
-import state from './supabase.js';
+import state from './state.js';
 import { APP_VERSION } from './version.js';
 
 // ===================================================================

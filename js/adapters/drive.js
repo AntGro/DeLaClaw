@@ -628,6 +628,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     get driveFolderId() { return folderId; },
     get driveFileMeta() { return { ...fileMeta }; },
 
+    /** Expose token getter for sharing module. */
+    getToken,
+
     // Callback for external change notification
     _onExternalChange: null,
 

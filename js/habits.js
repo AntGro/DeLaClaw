@@ -1,5 +1,5 @@
 import { lucideIcon } from './icons.js';
-import state, { HABIT_CATEGORIES_KEY } from './supabase.js';
+import state, { HABIT_CATEGORIES_KEY } from './state.js';
 import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { getCategoryColor, setCategoryColor } from './todos.js';
@@ -8,8 +8,8 @@ import { t, getLang } from './i18n.js';
 // ===================================================================
 // HABITS — DATA, CRUD & RENDERING
 // ===================================================================
-// (state managed in supabase.js)
-// (state managed in supabase.js)
+// (state managed in state.js)
+// (state managed in state.js)
 let habitFilter = 'all';
 let habitSearchQuery = '';
 let habitViewMode = 'list'; // 'list' or 'calendar'

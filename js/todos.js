@@ -1,5 +1,5 @@
 import { lucideIcon } from './icons.js';
-import state, { TODO_MAX_LEN } from './supabase.js';
+import state, { TODO_MAX_LEN } from './state.js';
 import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
 import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 import { t, getLang } from './i18n.js';

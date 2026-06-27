@@ -540,14 +540,25 @@ bun run server.js</pre>
 
   <!-- Snooze Modal is created dynamically by js/todos.js -->
 
-  <!-- Footer Stats -->
-  <div class="footer-stats" id="footerStats">
-    <div class="db-stats" id="dbStatsContainer"></div>
-    <div><span id="lastUpdatedLabel" class="db-stat"></span></div>
-    <div><a href="" id="supabaseDashLink" target="_blank">Supabase Dashboard ↗</a></div>
-    <div class="footer-backend" id="footerBackend"></div>
-    <div class="footer-copyright">© 2026 DeLaClaw</div>
-  </div>
+  <!-- Footer -->
+  <footer class="site-footer" id="footerStats">
+    <div class="footer-row footer-row-tech">
+      <div class="db-stats" id="dbStatsContainer"></div>
+      <div><span id="lastUpdatedLabel" class="db-stat"></span></div>
+      <div><a href="" id="supabaseDashLink" target="_blank">Supabase Dashboard ↗</a></div>
+      <div class="footer-backend" id="footerBackend"></div>
+    </div>
+    <div class="footer-row footer-row-identity">
+      <div class="footer-links">
+        <a href="docs-site/" target="_blank" rel="noopener" class="footer-link"><span data-icon="book-open" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_docs">Docs</span></a>
+        <span class="footer-sep">·</span>
+        <a href="https://github.com/AntGro/DeLaClaw" target="_blank" rel="noopener" class="footer-link"><span data-icon="github" data-size="13" data-color="currentColor"></span> GitHub</a>
+        <span class="footer-sep">·</span>
+        <a href="https://github.com/AntGro/DeLaClaw/blob/main/LICENSE" target="_blank" rel="noopener" class="footer-link"><span data-icon="scale" data-size="13" data-color="currentColor"></span> AGPL-3.0</a>
+      </div>
+      <div class="footer-copyright">© 2026 DeLaClaw</div>
+    </div>
+  </footer>
 
   <!-- Add Project Modal -->
   <div class="modal-overlay" id="addProjectModal">

@@ -510,7 +510,7 @@ const T = {
     },
     // ── Utils / Stats ──
     utils: {
-      db: 'DB', supabase_dashboard: 'Supabase Dashboard',
+      db: 'DB', supabase_dashboard: 'Supabase Dashboard', footer_docs: 'Docs',
     },
   },
   fr: {
@@ -998,7 +998,7 @@ const T = {
       storage_note: '* 200 Mo suffisent largement pour profiter pleinement de DeLaClaw.',
     },
     utils: {
-      db: 'BDD', supabase_dashboard: 'Tableau de bord Supabase',
+      db: 'BDD', supabase_dashboard: 'Tableau de bord Supabase', footer_docs: 'Docs',
     },
   },
   es: {
@@ -1486,7 +1486,7 @@ const T = {
       storage_note: '* 200 MB son más que suficientes para disfrutar de DeLaClaw al completo.',
     },
     utils: {
-      db: 'BDD', supabase_dashboard: 'Panel de Supabase',
+      db: 'BDD', supabase_dashboard: 'Panel de Supabase', footer_docs: 'Docs',
     },
   },
 };

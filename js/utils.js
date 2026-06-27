@@ -295,7 +295,7 @@ function updateTaskListMaxHeight() {
   const app = document.getElementById('app');
   if (!app || !app.classList.contains('active')) return;
   const header = document.querySelector('.app-header');
-  const footer = document.querySelector('.footer-stats');
+  const footer = document.querySelector('.site-footer');
   
   // Calculate occupied height (header + footer + padding)
   const occupiedHeight = (header?.offsetHeight || 0) + 

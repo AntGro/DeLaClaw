@@ -334,10 +334,23 @@ function formatRelativeDate(d) {
 // ===================================================================
 function truncateWithShowMore(text, maxLen, id, field) {
   if (!text) return '';
-  const firstLine = text.split('\n')[0].slice(0, 120);
+  let firstLine = text.split('\n')[0];
+  // Truncate to maxLen but avoid slicing through markdown links [text](url)
+  if (firstLine.length > maxLen) {
+    let cut = firstLine.slice(0, maxLen);
+    // If the cut lands inside a markdown link, extend to include it
+    const openBracket = cut.lastIndexOf('[');
+    if (openBracket !== -1) {
+      const closeParen = firstLine.indexOf(')', openBracket);
+      if (closeParen !== -1 && firstLine.charAt(firstLine.indexOf(']', openBracket) + 1) === '(') {
+        cut = firstLine.slice(0, closeParen + 1);
+      }
+    }
+    firstLine = cut;
+  }
   const renderedFirstLine = renderMd(firstLine + (text.length > firstLine.length ? '…' : ''));
   const renderedFull = renderMd(text);
-  if (text.length <= 120 && !text.includes('\n')) return renderedFull;
+  if (text.length <= maxLen && !text.includes('\n')) return renderedFull;
   return `<span id="meta-${id}-${field}-short">${renderedFirstLine} <button class="show-more-btn" onclick="expandMeta('${id}','${field}')" title="Show more">▼</button></span><span id="meta-${id}-${field}-full" style="display:none;">${renderedFull} <button class="show-more-btn" onclick="collapseMeta('${id}','${field}')" title="Show less">▲</button></span>`;
 }
 

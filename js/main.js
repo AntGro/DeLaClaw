@@ -254,6 +254,12 @@ function switchBackendMode(mode) {
   document.querySelectorAll('.backend-option').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
+
+  // Pre-cache the Drive adapter module so the dynamic import() in connect()
+  // resolves instantly on click — preserving the user-activation window that
+  // mobile browsers require for the Google OAuth popup.
+  if (mode === 'googledrive') import('./adapters/drive.js').catch(() => {});
+
   const keyField = document.getElementById('keyField');
   const urlField = document.getElementById('username');
   const urlLabel = document.getElementById('urlLabel');
@@ -491,6 +497,8 @@ async function doLogin() {
       err.textContent = t('login.drive_gis_blocked') || 'Google sign-in is blocked. Disable your ad blocker or allow third-party scripts.';
     } else if (e.message === 'popup_closed_by_user' || e.message === 'access_denied') {
       err.textContent = t('login.drive_cancelled') || 'Google sign-in was cancelled.';
+    } else if (e.message === 'popup_failed_to_open') {
+      err.textContent = t('login.drive_popup_blocked') || 'Pop-up blocked by your browser — please try again.';
     } else {
       err.textContent = t('toast.connection_failed');
     }

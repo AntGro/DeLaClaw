@@ -2,7 +2,7 @@ import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN } from './supabase.js';
 import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
 import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
-import { t } from './i18n.js';
+import { t, getLang } from './i18n.js';
 
 // ===================================================================
 // TODOS — DATA & CRUD (Category Card Layout)
@@ -530,7 +530,7 @@ function renderTodoItem(td) {
     <div class="todo-row">
       ${flagBtn}
       <span class="todo-text">${td.text.length > 150 ? truncateWithShowMore(td.text, 150, td.id, 'todo') : renderMd(td.text)}</span>
-      ${td.done && td.updated_at ? `<span class="todo-completed-date">${new Date(td.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>` : ''}
+      ${td.done && td.updated_at ? `<span class="todo-completed-date">${new Date(td.updated_at).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })}</span>` : ''}
       <div class="todo-actions">
         ${!td.done ? `<button onclick="toggleTodo('${td.id}', true)" title="${t('common.done')}">${lucideIcon("circle-check",16)}</button>` : `<button onclick="toggleTodo('${td.id}', false)" title="${t('common.undo')}">${lucideIcon("refresh-cw",16)}</button>`}
         ${!td.done ? `<button onclick="openSnoozeModal('${td.id}')" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>` : ''}

@@ -1,4 +1,4 @@
-import { t } from './i18n.js';
+import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
 import state, { ARCHIVED_PROJECTS_KEY, SHOW_ARCHIVED_KEY, MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './supabase.js';
 import { esc, escQ, linkify, renderMd, showToast, showDeleteConfirm,
@@ -368,7 +368,7 @@ function renderTask(task, isArchived = false) {
   return `<div class="bucket-item task-item${draftClass} task-status-${task.status}" data-task-id="${task.id}">
     <div class="task-row">
       <span class="task-text">${truncateWithShowMore(task.text, 120, task.id, 'text')}</span>
-      ${isArchived && task.updated_at ? `<span class="task-completed-date">${new Date(task.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>` : ''}
+      ${isArchived && task.updated_at ? `<span class="task-completed-date">${new Date(task.updated_at).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })}</span>` : ''}
       <div class="task-actions">${actionBtns}</div>
     </div>
     ${meta ? `<div class="task-meta">${meta}</div>` : ''}

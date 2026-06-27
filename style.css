@@ -1531,7 +1531,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .birthday-today-avatar{background:linear-gradient(135deg,#f97316,#ec4899);}
 .welcome-flag{display:inline-flex;flex-shrink:0;}
 .welcome-badge{font-size:0.72rem;padding:1px 7px;border-radius:4px;background:var(--accent-dim);color:var(--muted);white-space:nowrap;}
-.welcome-todo-cat-label{display:flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--muted);padding:6px 0 2px;letter-spacing:0.03em;text-transform:uppercase;font-weight:600;}
+.welcome-todo-cat-label{display:flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--cat-color, var(--muted));padding:6px 0 2px;letter-spacing:0.03em;text-transform:uppercase;font-weight:600;}
 .welcome-todo-cat-dot{width:8px;height:8px;border-radius:50%;background:var(--cat-color);flex-shrink:0;}
 .birthday-badge{background:rgba(249,115,22,0.12);color:#f97316;}
 .welcome-due-today{color:var(--yellow);font-weight:500;}

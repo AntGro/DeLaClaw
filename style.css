@@ -632,6 +632,7 @@ input,select,button{font-family:inherit;}
 .archived-tasks{display:none;padding:0 16px 8px;}
 .archived-tasks.visible{display:block;max-height:300px;overflow-y:auto;}
 .archived-tasks .task-item{opacity:0.6;}
+.task-completed-date{font-size:0.75rem;color:var(--muted);white-space:nowrap;margin-left:auto;padding-right:4px;}
 .project-card-header .project-header-actions{display:flex;align-items:center;gap:6px;opacity:0;transition:opacity 0.2s;}
 .project-card-header:hover .project-header-actions{opacity:1;}
 .project-card.expanded .project-header-actions{opacity:1;}

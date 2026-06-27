@@ -135,7 +135,7 @@ input,select,button{font-family:inherit;}
 /* Skip + scroll indicator */
 .hero-skip{position:fixed;top:3.8rem;right:2.5rem;color:var(--muted);text-decoration:none;font-size:0.78rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;pointer-events:auto;z-index:3;transition:color 0.25s;}
 .hero-skip:hover{color:var(--text);}
-.hero-scroll-ind{position:fixed;bottom:2.5rem;left:50%;transform:translateX(-50%);color:var(--muted);z-index:2;pointer-events:none;animation:hero-bob 2.4s ease-in-out infinite;}
+.hero-scroll-ind{position:fixed;bottom:2.5rem;left:50%;transform:translateX(-50%);color:var(--muted);z-index:2;cursor:pointer;animation:hero-bob 2.4s ease-in-out infinite;}
 @keyframes hero-bob{0%,100%{transform:translateX(-50%) translateY(0);}50%{transform:translateX(-50%) translateY(8px);}}
 
 /* ===== GATE ===== */

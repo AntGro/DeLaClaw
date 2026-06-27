@@ -1036,6 +1036,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 
 /* ===== TODOS VIEW ===== */
 .filter-btn{padding:5px 5px;border-radius:20px;border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:0.82rem;font-weight:500;transition:color 0.15s ease,background 0.15s ease;font-family:inherit;line-height:1.4;}
+.filter-btn svg{vertical-align:middle;}
 .filter-btn:hover{color:var(--text);background:color-mix(in srgb,var(--border) 30%,transparent);}
 .filter-btn.active{color:var(--accent);font-weight:600;background:var(--accent-dim);}
 

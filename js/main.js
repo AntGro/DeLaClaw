@@ -475,7 +475,7 @@ function showDriveReconnectScreen(url, key) {
 
   const backBtn = document.createElement('button');
   backBtn.className = 'drive-reconnect-secondary';
-  backBtn.textContent = t('login.drive_back_to_login') || 'Back to login';
+  backBtn.textContent = t('login.drive_back_to_login') || 'Switch account';
   backBtn.addEventListener('click', () => {
     screen.remove();
     clearStayConnectedCreds();

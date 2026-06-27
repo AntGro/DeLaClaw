@@ -409,6 +409,18 @@ async function autoConnect(url, key, mode) {
   try {
     await connect(url, key, mode, /* skipDemoChooser */ true, { silentAuth: mode === 'googledrive' });
   } catch (e) {
+    if (mode === 'googledrive') {
+      // Silent OAuth refresh failed — common on mobile (ITP, no third-party
+      // cookies). Don't nuke "Stay connected" or show "session expired".
+      // Show a one-tap reconnect instead: the tap provides the user gesture
+      // the browser needs for the OAuth popup.
+      showHero();
+      document.getElementById('loginForm').style.display = 'flex';
+      switchBackendMode('googledrive');
+      const err = document.getElementById('loginError');
+      if (err) err.textContent = t('login.drive_reconnect_hint') || 'Tap Connect to sign back in with Google.';
+      return;
+    }
     // Stored credentials are stale — clear them and show the full login form
     clearStayConnectedCreds();
     showHero();

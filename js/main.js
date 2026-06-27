@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { initHero, showHero, hideHero, injectGateLogo } from './hero.js';
 import { t, getLang, setLang, nextLang } from './i18n.js';
-import { renderStorm, LOGO_DEFAULTS, animLoading, animLock, animUnlock } from './logo.js';
+import { renderStorm, generateStorm, LOGO_DEFAULTS, animLoading, animLock, animUnlock } from './logo.js';
 import { LOGOS, LABELS } from './backend-logos.js';
 import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY, TAB_VISIBILITY_KEY, TAB_ORDER_KEY } from './supabase.js';
 import db from './db.js';
@@ -410,15 +410,11 @@ async function autoConnect(url, key, mode) {
     await connect(url, key, mode, /* skipDemoChooser */ true, { silentAuth: mode === 'googledrive' });
   } catch (e) {
     if (mode === 'googledrive') {
-      // Silent OAuth refresh failed — common on mobile (ITP, no third-party
-      // cookies). Don't nuke "Stay connected" or show "session expired".
-      // Show a one-tap reconnect instead: the tap provides the user gesture
-      // the browser needs for the OAuth popup.
-      showHero();
-      document.getElementById('loginForm').style.display = 'flex';
-      switchBackendMode('googledrive');
-      const err = document.getElementById('loginError');
-      if (err) err.textContent = t('login.drive_reconnect_hint') || 'Tap Connect to sign back in with Google.';
+      // Silent OAuth refresh failed (common on mobile — Safari ITP blocks
+      // third-party cookies in the GIS iframe). Show a minimal reconnect
+      // screen instead of the full hero/gate. The "Reconnect" tap provides
+      // the user gesture the browser needs for the OAuth popup.
+      showDriveReconnectScreen(url, key);
       return;
     }
     // Stored credentials are stale — clear them and show the full login form
@@ -430,6 +426,70 @@ async function autoConnect(url, key, mode) {
     document.getElementById('password').value = '';
     document.getElementById('username').focus();
   }
+}
+
+function showDriveReconnectScreen(url, key) {
+  // Remove any previous instance
+  document.getElementById('driveReconnectScreen')?.remove();
+
+  const screen = document.createElement('div');
+  screen.id = 'driveReconnectScreen';
+  screen.className = 'drive-reconnect-screen';
+
+  // Reuse the gate logo (storm SVG)
+  const logoWrap = document.createElement('div');
+  logoWrap.className = 'drive-reconnect-logo';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'storm-logo');
+  svg.setAttribute('viewBox', '0 0 400 400');
+  // Use the same generator as the gate logo
+  svg.innerHTML = generateStorm(LOGO_DEFAULTS, 400);
+  logoWrap.appendChild(svg);
+
+  const title = document.createElement('h1');
+  title.className = 'drive-reconnect-title';
+  title.textContent = 'DeLaClaw';
+
+  const msg = document.createElement('p');
+  msg.className = 'drive-reconnect-msg';
+  msg.textContent = t('login.drive_session_expired') || 'Your Google Drive session has expired.';
+
+  const actions = document.createElement('div');
+  actions.className = 'drive-reconnect-actions';
+
+  const reconnectBtn = document.createElement('button');
+  reconnectBtn.className = 'btn-primary drive-reconnect-primary';
+  reconnectBtn.textContent = t('login.drive_reconnect') || 'Reconnect';
+  reconnectBtn.addEventListener('click', async () => {
+    reconnectBtn.disabled = true;
+    reconnectBtn.textContent = t('toast.connecting') || 'Connecting…';
+    try {
+      await connect(url, key, 'googledrive', true, { silentAuth: false });
+      screen.remove();
+    } catch (err) {
+      reconnectBtn.disabled = false;
+      reconnectBtn.textContent = t('login.drive_reconnect') || 'Reconnect';
+      msg.textContent = t('login.drive_reconnect_failed') || 'Could not reconnect — try again.';
+    }
+  });
+
+  const backBtn = document.createElement('button');
+  backBtn.className = 'drive-reconnect-secondary';
+  backBtn.textContent = t('login.drive_back_to_login') || 'Back to login';
+  backBtn.addEventListener('click', () => {
+    screen.remove();
+    clearStayConnectedCreds();
+    showHero();
+    document.getElementById('loginForm').style.display = 'flex';
+  });
+
+  actions.appendChild(reconnectBtn);
+  actions.appendChild(backBtn);
+  screen.appendChild(logoWrap);
+  screen.appendChild(title);
+  screen.appendChild(msg);
+  screen.appendChild(actions);
+  document.body.appendChild(screen);
 }
 
 function getStayConnectedCreds() {

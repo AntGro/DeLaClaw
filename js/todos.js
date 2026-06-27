@@ -383,7 +383,8 @@ function renderCategoryCard(category) {
 
   // Split: active items (not done) and done items
   const activeTodos = getFilteredTodosForCategory(category).filter(t => !t.done);
-  const doneTodos = allInCat.filter(t => t.done);
+  const doneTodos = allInCat.filter(t => t.done)
+    .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
 
   // If user is explicitly filtering to 'done', show all done; if 'pending', show only active
   let displayActive, displayDone;

@@ -1542,7 +1542,7 @@ function updateStaticLabels() {
     }
   }
   // Todo filters
-  const todoFilterMap = { pending: 'todos.pending', done: 'todos.done', all: 'todos.all' };
+  const todoFilterMap = { pending: 'todos.pending' };
   document.querySelectorAll('#todoFilters .filter-btn').forEach(btn => {
     const f = btn.dataset.filter;
     if (f === 'outdated') { const svg = btn.querySelector('svg'); btn.innerHTML = (svg ? svg.outerHTML : '') + ' ' + t('todos.outdated'); }

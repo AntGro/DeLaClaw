@@ -363,9 +363,7 @@ bun run server.js</pre>
       <div class="page-toolbar-left">
         <div class="page-filters" id="todoFilters">
           <button class="filter-btn active" data-filter="pending" onclick="setTodoFilter('pending')">Pending</button>
-          <button class="filter-btn" data-filter="done" onclick="setTodoFilter('done')">Done</button>
-          <button class="filter-btn" data-filter="all" onclick="setTodoFilter('all')">All</button>
-          <button class="filter-btn" data-filter="outdated" onclick="setTodoFilter('outdated')"><span data-icon="hourglass" data-size="14"></span> Outdated</button>
+          <button class="filter-btn" data-filter="outdated" onclick="setTodoFilter('outdated')"><span data-icon="alert-triangle" data-size="14"></span> Outdated</button>
           <select id="todoSortBy" class="page-sort" onchange="renderTodos()">
             <option value="manual">Manual order</option>
             <option value="due">Due date</option>

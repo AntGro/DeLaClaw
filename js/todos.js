@@ -386,12 +386,9 @@ function renderCategoryCard(category) {
   const doneTodos = allInCat.filter(t => t.done)
     .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
 
-  // If user is explicitly filtering to 'done', show all done; if 'pending', show only active
+  // Show active todos based on filter; done section always available as collapsible
   let displayActive, displayDone;
-  if (todoFilter === 'done') {
-    displayActive = [];
-    displayDone = doneTodos;
-  } else if (todoFilter === 'pending') {
+  if (todoFilter === 'outdated') {
     displayActive = activeTodos;
     displayDone = [];
   } else {

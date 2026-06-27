@@ -1651,6 +1651,29 @@ body.demo-mode #app{padding-top:var(--demo-banner-h,36px);}
 body.demo-mode .hero-storm-wrap{top:var(--demo-banner-h,36px);}
 body.demo-mode .app-header{top:var(--demo-banner-h,36px);}
 
+/* Install banner (PWA) */
+.install-banner{position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;padding:6px 16px;background:var(--green,#10b981);color:#fff;font-size:0.82rem;font-weight:500;gap:8px;flex-wrap:wrap;}
+.install-banner-msg{flex:1;min-width:0;}
+.install-banner-right{display:flex;gap:8px;align-items:center;}
+.install-banner button{background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:3px 10px;font-size:0.78rem;cursor:pointer;white-space:nowrap;font-family:inherit;}
+.install-banner button:hover{background:rgba(255,255,255,0.3);}
+.install-banner .install-banner-go{background:#fff;color:var(--green,#10b981);border-color:transparent;font-weight:600;}
+.install-banner .install-banner-go:hover{background:rgba(255,255,255,0.9);}
+body.install-mode #app{padding-top:var(--install-banner-h,36px);}
+body.install-mode .hero-storm-wrap{top:var(--install-banner-h,36px);}
+body.install-mode .app-header{top:var(--install-banner-h,36px);}
+
+/* Demo + install banners stacked: install sits below demo, offsets sum */
+body.demo-mode.install-mode .install-banner{top:var(--demo-banner-h,36px);}
+body.demo-mode.install-mode #app{padding-top:calc(var(--demo-banner-h,36px) + var(--install-banner-h,36px));}
+body.demo-mode.install-mode .hero-storm-wrap{top:calc(var(--demo-banner-h,36px) + var(--install-banner-h,36px));}
+body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var(--install-banner-h,36px));}
+
+/* Install how-to lightbox (vertical Short, 9:16) */
+.install-how-modal{max-width:380px;width:92%;}
+.install-how-video{position:relative;width:100%;aspect-ratio:9/16;max-height:70vh;border-radius:12px;overflow:hidden;background:#000;}
+.install-how-video iframe{position:absolute;inset:0;width:100%;height:100%;border:0;}
+
 /* ── Lists Page ── */
 .list-item-list{padding:10px 16px 4px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;}
 .list-item{display:flex;align-items:flex-start;justify-content:space-between;border-left:3px solid var(--muted);padding-left:10px;margin-bottom:4px;}
@@ -1866,3 +1889,16 @@ body.demo-mode .app-header{top:var(--demo-banner-h,36px);}
   .habit-cal-week-empty{margin-top:0;}
 }
 .env-badge{position:fixed;top:44px;left:14px;z-index:99;padding:2px 8px;border-radius:4px;font-size:0.65rem;font-weight:700;font-family:'DM Mono',monospace;letter-spacing:0.08em;opacity:0.7;pointer-events:none;background:var(--accent);color:#fff;}
+
+/* Drive reconnect screen — shown when silent OAuth refresh fails */
+.drive-reconnect-screen{position:fixed;inset:0;z-index:300;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);color:var(--text);gap:12px;padding:24px;}
+.drive-reconnect-logo{width:80px;height:80px;}
+.drive-reconnect-logo svg{width:100%;height:100%;}
+.drive-reconnect-title{font-size:1.4rem;font-weight:700;margin:0;}
+.drive-reconnect-msg{font-size:0.9rem;color:var(--muted);text-align:center;margin:0;max-width:320px;}
+.drive-reconnect-actions{display:flex;flex-direction:column;gap:10px;width:100%;max-width:260px;margin-top:8px;}
+.drive-reconnect-primary{padding:12px 24px;border-radius:10px;font-size:0.95rem;font-weight:600;cursor:pointer;border:none;background:var(--accent);color:#fff;transition:opacity 0.2s;}
+.drive-reconnect-primary:hover{opacity:0.9;}
+.drive-reconnect-primary:disabled{opacity:0.5;cursor:default;}
+.drive-reconnect-secondary{padding:10px 24px;border-radius:10px;font-size:0.85rem;font-weight:500;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--muted);transition:all 0.2s;}
+.drive-reconnect-secondary:hover{color:var(--text);border-color:var(--text);}

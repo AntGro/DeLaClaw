@@ -3,6 +3,7 @@
 // ===================================================================
 import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
+import { isMobileUA } from './utils.js';
 
 // ── Prompt generators (EN / FR / ES) ──────────────────────────────
 
@@ -295,7 +296,7 @@ export function showDemoChooser(lang) {
     overlay.id = 'demoChooserOverlay';
 
     const prompt = buildPrompt(lang);
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const isMobile = isMobileUA();
     const serviceButtons = LLM_SERVICES.map(s => {
       const href = isMobile && s.appUrl ? s.appUrl : s.url;
       return `<a href="${href}" target="_blank" rel="noopener" class="dc-llm-btn">${s.svg}<span>${s.name}</span></a>`;

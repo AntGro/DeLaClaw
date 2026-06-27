@@ -42,10 +42,44 @@ const DRIVE_TABLES = [
 let _cachedToken = null;
 let _tokenExpiry = 0;
 
+const _TOKEN_STORAGE_KEY = 'claw_drive_token';
+
+function _persistToken(token, expiryMs) {
+  try {
+    sessionStorage.setItem(_TOKEN_STORAGE_KEY, JSON.stringify({ token, expiry: expiryMs }));
+  } catch (_) {}
+}
+
+function _loadPersistedToken() {
+  try {
+    const raw = sessionStorage.getItem(_TOKEN_STORAGE_KEY);
+    if (!raw) return null;
+    const { token, expiry } = JSON.parse(raw);
+    // Still valid with ≥60s margin
+    if (token && expiry && Date.now() < expiry - 60000) return { token, expiry };
+  } catch (_) {}
+  return null;
+}
+
+function clearDriveTokenCache() {
+  _cachedToken = null;
+  _tokenExpiry = 0;
+  try { sessionStorage.removeItem(_TOKEN_STORAGE_KEY); } catch (_) {}
+}
+
 function getGoogleAccessToken(clientId, promptIfNeeded = true) {
+  // 1. In-memory cache (same page lifecycle)
   if (_cachedToken && Date.now() < _tokenExpiry - 60000) {
     return Promise.resolve(_cachedToken);
   }
+  // 2. sessionStorage cache (survives refresh within the ~1h token lifetime)
+  const persisted = _loadPersistedToken();
+  if (persisted) {
+    _cachedToken = persisted.token;
+    _tokenExpiry = persisted.expiry;
+    return Promise.resolve(_cachedToken);
+  }
+  // 3. Fresh OAuth flow
   return new Promise((resolve, reject) => {
     if (typeof google === 'undefined' || !google.accounts) {
       reject(new Error('google_not_loaded'));
@@ -60,6 +94,7 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
         } else {
           _cachedToken = resp.access_token;
           _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
+          _persistToken(_cachedToken, _tokenExpiry);
           resolve(resp.access_token);
         }
       },
@@ -602,6 +637,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     destroy() {
       stopPolling();
       for (const t of Object.keys(saveTimers)) clearTimeout(saveTimers[t]);
+      clearDriveTokenCache();
     },
   };
 

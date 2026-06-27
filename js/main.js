@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { initHero, showHero, hideHero, injectGateLogo } from './hero.js';
 import { t, getLang, setLang, nextLang } from './i18n.js';
-import { renderStorm, LOGO_DEFAULTS, animLoading, animLock, animUnlock } from './logo.js';
+import { renderStorm, generateStorm, LOGO_DEFAULTS, animLoading, animLock, animUnlock } from './logo.js';
 import { LOGOS, LABELS } from './backend-logos.js';
 import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY, TAB_VISIBILITY_KEY, TAB_ORDER_KEY } from './supabase.js';
 import db from './db.js';
@@ -9,7 +9,7 @@ import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 
-import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll } from './utils.js';
+import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals } from './todos.js';
@@ -27,7 +27,7 @@ import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
 // BACKEND-SCOPED localStorage — isolate per-backend settings so switching
 // between Supabase, Local, and Demo never leaks data across modes.
 // Keys listed here are saved/restored under `scope:{mode}:{key}`.
-// Global keys (STAY_CONNECTED_KEY, cc-lang) are never scoped.
+// Global keys (STAY_CONNECTED_KEY, cc-lang, install-dismiss) are never scoped.
 // ===================================================================
 const SCOPED_LS_KEYS = [
   'claw_cc_theme',
@@ -254,6 +254,12 @@ function switchBackendMode(mode) {
   document.querySelectorAll('.backend-option').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
+
+  // Pre-cache the Drive adapter module so the dynamic import() in connect()
+  // resolves instantly on click — preserving the user-activation window that
+  // mobile browsers require for the Google OAuth popup.
+  if (mode === 'googledrive') import('./adapters/drive.js').catch(() => {});
+
   const keyField = document.getElementById('keyField');
   const urlField = document.getElementById('username');
   const urlLabel = document.getElementById('urlLabel');
@@ -403,6 +409,14 @@ async function autoConnect(url, key, mode) {
   try {
     await connect(url, key, mode, /* skipDemoChooser */ true, { silentAuth: mode === 'googledrive' });
   } catch (e) {
+    if (mode === 'googledrive') {
+      // Silent OAuth refresh failed (common on mobile — Safari ITP blocks
+      // third-party cookies in the GIS iframe). Show a minimal reconnect
+      // screen instead of the full hero/gate. The "Reconnect" tap provides
+      // the user gesture the browser needs for the OAuth popup.
+      showDriveReconnectScreen(url, key);
+      return;
+    }
     // Stored credentials are stale — clear them and show the full login form
     clearStayConnectedCreds();
     showHero();
@@ -412,6 +426,70 @@ async function autoConnect(url, key, mode) {
     document.getElementById('password').value = '';
     document.getElementById('username').focus();
   }
+}
+
+function showDriveReconnectScreen(url, key) {
+  // Remove any previous instance
+  document.getElementById('driveReconnectScreen')?.remove();
+
+  const screen = document.createElement('div');
+  screen.id = 'driveReconnectScreen';
+  screen.className = 'drive-reconnect-screen';
+
+  // Reuse the gate logo (storm SVG)
+  const logoWrap = document.createElement('div');
+  logoWrap.className = 'drive-reconnect-logo';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'storm-logo');
+  svg.setAttribute('viewBox', '0 0 400 400');
+  // Use the same generator as the gate logo
+  svg.innerHTML = generateStorm(LOGO_DEFAULTS, 400);
+  logoWrap.appendChild(svg);
+
+  const title = document.createElement('h1');
+  title.className = 'drive-reconnect-title';
+  title.textContent = 'DeLaClaw';
+
+  const msg = document.createElement('p');
+  msg.className = 'drive-reconnect-msg';
+  msg.textContent = t('login.drive_session_expired') || 'Your Google Drive session has expired.';
+
+  const actions = document.createElement('div');
+  actions.className = 'drive-reconnect-actions';
+
+  const reconnectBtn = document.createElement('button');
+  reconnectBtn.className = 'btn-primary drive-reconnect-primary';
+  reconnectBtn.textContent = t('login.drive_reconnect') || 'Reconnect';
+  reconnectBtn.addEventListener('click', async () => {
+    reconnectBtn.disabled = true;
+    reconnectBtn.textContent = t('toast.connecting') || 'Connecting…';
+    try {
+      await connect(url, key, 'googledrive', true, { silentAuth: false });
+      screen.remove();
+    } catch (err) {
+      reconnectBtn.disabled = false;
+      reconnectBtn.textContent = t('login.drive_reconnect') || 'Reconnect';
+      msg.textContent = t('login.drive_reconnect_failed') || 'Could not reconnect — try again.';
+    }
+  });
+
+  const backBtn = document.createElement('button');
+  backBtn.className = 'drive-reconnect-secondary';
+  backBtn.textContent = t('login.drive_back_to_login') || 'Switch account';
+  backBtn.addEventListener('click', () => {
+    screen.remove();
+    clearStayConnectedCreds();
+    showHero();
+    document.getElementById('loginForm').style.display = 'flex';
+  });
+
+  actions.appendChild(reconnectBtn);
+  actions.appendChild(backBtn);
+  screen.appendChild(logoWrap);
+  screen.appendChild(title);
+  screen.appendChild(msg);
+  screen.appendChild(actions);
+  document.body.appendChild(screen);
 }
 
 function getStayConnectedCreds() {
@@ -491,6 +569,8 @@ async function doLogin() {
       err.textContent = t('login.drive_gis_blocked') || 'Google sign-in is blocked. Disable your ad blocker or allow third-party scripts.';
     } else if (e.message === 'popup_closed_by_user' || e.message === 'access_denied') {
       err.textContent = t('login.drive_cancelled') || 'Google sign-in was cancelled.';
+    } else if (e.message === 'popup_failed_to_open') {
+      err.textContent = t('login.drive_popup_blocked') || 'Pop-up blocked by your browser — please try again.';
     } else {
       err.textContent = t('toast.connection_failed');
     }
@@ -1066,6 +1146,10 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   // Show demo banner if in demo mode
   if (mode === 'demo') initDemoBanner();
+
+  // Offer PWA install on phones/tablets when not already installed.
+  // In demo mode this stacks below the demo banner (see install-banner CSS).
+  maybeShowInstallBanner();
 }
 
 
@@ -1146,6 +1230,151 @@ function removeDemoBanner() {
   document.querySelector('.demo-banner')?.remove();
   document.body.classList.remove('demo-mode');
   document.body.style.removeProperty('--demo-banner-h');
+}
+
+// ===================================================================
+// INSTALL BANNER (PWA)
+// ===================================================================
+const INSTALL_DISMISS_KEY = 'claw_cc_install_dismissed';
+
+// How-to-install YouTube Shorts, per platform (same videos embedded in the docs).
+const INSTALL_VIDEOS = {
+  ios: 'uRh2HcT_KcY',      // iPhone — Safari Share → Add to Home Screen
+  android: '54JBnBFZM_I',  // Android — Chrome → Add to Home Screen
+};
+
+function isIOSDevice() {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+/**
+ * Show an "install the app" banner when the user is on a phone or tablet,
+ * is NOT already running the installed PWA, and hasn't dismissed it before.
+ * Android/Chromium gets a native install button (beforeinstallprompt).
+ * Both platforms get a "Watch how" action that opens the matching install
+ * video in an in-app lightbox (iOS has no programmatic install, so the video
+ * is its primary path).
+ */
+function maybeShowInstallBanner() {
+  if (isInstalledPWA()) return;                 // already installed — nothing to do
+  if (deviceClass() === 'computer') return;     // laptops/desktops excluded
+  if (localStorage.getItem(INSTALL_DISMISS_KEY) === '1') return; // user said not now
+  if (document.getElementById('installBanner')) return;
+
+  const isIOS = isIOSDevice();
+  // Android/Chromium native install: if the event hasn't arrived yet, wait for
+  // it before showing (so the Install button is live). iOS shows immediately.
+  if (!isIOS && !window.__bipEvent) {
+    window.addEventListener('bip-ready', () => maybeShowInstallBanner(), { once: true });
+    return;
+  }
+
+  const banner = document.createElement('div');
+  banner.id = 'installBanner';
+  banner.className = 'install-banner';
+
+  const left = document.createElement('span');
+  left.className = 'install-banner-msg';
+  left.textContent = t('install.banner');
+
+  const right = document.createElement('div');
+  right.className = 'install-banner-right';
+
+  // Native install button — Android/Chromium only (iOS has no programmatic install)
+  if (!isIOS) {
+    const installBtn = document.createElement('button');
+    installBtn.className = 'install-banner-go';
+    installBtn.textContent = t('install.btn');
+    installBtn.addEventListener('click', async () => {
+      const evt = window.__bipEvent;
+      if (!evt) { removeInstallBanner(); return; }
+      evt.prompt();
+      try { await evt.userChoice; } catch (e) {}
+      delete window.__bipEvent;
+      removeInstallBanner();
+    });
+    right.appendChild(installBtn);
+  }
+
+  // "Watch how" — opens the platform-matched install video in a lightbox.
+  // On iOS this is the primary (and only) action, so style it accordingly.
+  const watchBtn = document.createElement('button');
+  watchBtn.textContent = t('install.watch');
+  if (isIOS) watchBtn.className = 'install-banner-go';
+  watchBtn.addEventListener('click', () => showInstallHowModal(isIOS ? 'ios' : 'android'));
+  right.appendChild(watchBtn);
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.textContent = t('install.dismiss');
+  dismissBtn.addEventListener('click', () => {
+    localStorage.setItem(INSTALL_DISMISS_KEY, '1');
+    removeInstallBanner();
+  });
+  right.appendChild(dismissBtn);
+
+  banner.appendChild(left);
+  banner.appendChild(right);
+  document.body.prepend(banner);
+  document.body.classList.add('install-mode');
+  requestAnimationFrame(() => {
+    document.body.style.setProperty('--install-banner-h', banner.offsetHeight + 'px');
+  });
+
+  // If the app gets installed while the banner is up, clear it.
+  window.addEventListener('app-installed', removeInstallBanner, { once: true });
+}
+
+function removeInstallBanner() {
+  document.getElementById('installBanner')?.remove();
+  document.body.classList.remove('install-mode');
+  document.body.style.removeProperty('--install-banner-h');
+}
+
+/** Lightbox that plays the platform-matched install Short inside the app. */
+function showInstallHowModal(platform) {
+  const videoId = INSTALL_VIDEOS[platform] || INSTALL_VIDEOS.ios;
+  document.getElementById('installHowModal')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'installHowModal';
+  overlay.className = 'modal-overlay visible';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeInstallHowModal(); });
+
+  const modal = document.createElement('div');
+  modal.className = 'modal install-how-modal';
+
+  const h2 = document.createElement('h2');
+  h2.textContent = t('install.how_title');
+
+  const frameWrap = document.createElement('div');
+  frameWrap.className = 'install-how-video';
+  const iframe = document.createElement('iframe');
+  iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`;
+  iframe.title = t('install.how_title');
+  iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+  iframe.allowFullscreen = true;
+  iframe.setAttribute('frameborder', '0');
+  frameWrap.appendChild(iframe);
+
+  const actions = document.createElement('div');
+  actions.className = 'modal-actions';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn';
+  closeBtn.textContent = t('common.close') || 'Close';
+  closeBtn.addEventListener('click', closeInstallHowModal);
+  actions.appendChild(closeBtn);
+
+  modal.appendChild(h2);
+  modal.appendChild(frameWrap);
+  modal.appendChild(actions);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function closeInstallHowModal() {
+  // Removing the iframe stops playback.
+  document.getElementById('installHowModal')?.remove();
 }
 
 async function onLangSwitchDemo(lang) {

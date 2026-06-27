@@ -432,11 +432,62 @@ async function fetchAll(buildQuery, pageSize = 1000) {
 }
 
 // Exports
+// ===================================================================
+// ENVIRONMENT DETECTION
+// ===================================================================
+
+/**
+ * True when DeLaClaw is running as an installed PWA (launched from the home
+ * screen / app icon) rather than inside a normal browser tab.
+ * Uses the standard display-mode media query plus the iOS Safari fallback.
+ */
+function isInstalledPWA() {
+  return window.matchMedia('(display-mode: standalone)').matches
+    || window.matchMedia('(display-mode: fullscreen)').matches
+    || window.matchMedia('(display-mode: minimal-ui)').matches
+    || window.navigator.standalone === true; // iOS Safari
+}
+
+/**
+ * Best-effort device class: 'phone' | 'tablet' | 'computer'.
+ * Web platforms cannot identify device type reliably, so this combines a
+ * coarse-pointer check (touch-first device) with viewport width. The 768px
+ * phone/tablet split is a convention, not ground truth — large phones in
+ * landscape and small tablets sit near the boundary.
+ */
+function deviceClass() {
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+  if (!coarse) return 'computer';
+  const w = Math.min(window.innerWidth, window.innerHeight); // orientation-agnostic
+  return w < 768 ? 'phone' : 'tablet';
+}
+
+/**
+ * True when the primary pointer is touch or the screen is phone-sized.
+ * This is an *interaction* signal (should we use tap-to-reveal UI?), not a
+ * device identity. Centralises the check previously inlined in item-utils.
+ */
+function isTouchDevice() {
+  return window.matchMedia('(pointer: coarse)').matches
+    || window.matchMedia('(max-width:480px)').matches
+    || 'ontouchstart' in window;
+}
+
+/**
+ * True for iOS/Android user agents. Intended only for deciding whether to
+ * open a native-app deep link (appUrl) vs a web URL — a deliberately
+ * UA-based check, since a touch laptop should NOT get a mobile app link.
+ */
+function isMobileUA() {
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+}
+
 export {
   esc, escQ, linkify, renderMd, showToast, formatRelativeDate,
   showDeleteConfirm, closeDeleteConfirm, executeDeleteConfirm,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, fetchAll,
+  isInstalledPWA, deviceClass, isTouchDevice, isMobileUA,
 };
 
 window.closeDeleteConfirm = closeDeleteConfirm;

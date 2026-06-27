@@ -20,6 +20,20 @@
 <script>
 (function(){var h=location.hostname,d=h.startsWith('dev.')||h.includes('dev.delaclaw')||h==='localhost'||h==='127.0.0.1';var l=document.createElement('link');l.rel='manifest';l.href=d?'manifest-dev.json':'manifest.json';document.head.appendChild(l);})();
 </script>
+<script>
+// Capture Android/Chromium's native install prompt before the app module loads,
+// so the install banner can trigger it on demand. iOS Safari never fires this.
+window.__bipEvent = null;
+window.addEventListener('beforeinstallprompt', function(e){
+  e.preventDefault();
+  window.__bipEvent = e;
+  window.dispatchEvent(new Event('bip-ready'));
+});
+window.addEventListener('appinstalled', function(){
+  window.__bipEvent = null;
+  window.dispatchEvent(new Event('app-installed'));
+});
+</script>
 <meta name="theme-color" content="#08090d">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">

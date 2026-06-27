@@ -2305,6 +2305,13 @@ function checkSchemaVersion() {
   banner.id = 'schema-banner';
 
   const isCritical = cmpVer(dbVer, LATEST_COMPAT_DEPREC) < 0;
+
+  // Non-critical migration banners: hide on phone (Supabase SQL Editor is not phone-friendly)
+  if (!isCritical && deviceClass() === 'phone') {
+    dismissSchemaBanner();
+    return;
+  }
+
   banner.className = isCritical ? 'schema-banner schema-banner-critical' : 'schema-banner';
 
   const icon = lucideIcon(isCritical ? 'alert-octagon' : 'alert-triangle', 16);

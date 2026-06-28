@@ -9,13 +9,15 @@
 //   └── DeLaClaw-Shared/                   ← shared root (one per user)
 //       └── DeLaClaw-Shared-{groupId}/     ← per-group subfolder
 //           ├── group.json                 ← metadata + member list
-//           └── items.json                 ← shared todo/habit/list items
+//           ├── todos.json                 ← shared todos
+//           ├── habits.json                ← shared habits
+//           └── lists.json                 ← shared list items
 //
 // Sharing flow:
-//   1. User A creates a group → subfolder + group.json + items.json
+//   1. User A creates a group → subfolder + group.json + per-type JSONs
 //   2. A invites B by email → Drive permissions.create on the subfolder
 //   3. B's app discovers groups via sharedWithMe query on DeLaClaw-Shared-*
-//   4. Both read/write items.json; ETag + updated_at merge on conflict
+//   4. Both read/write per-type JSONs; ETag + updated_at merge on conflict
 //
 // Identity:
 //   User email comes from the Drive About API (works with drive.file scope,
@@ -41,6 +43,7 @@ const SHARED_ROOT_NAME = 'DeLaClaw-Shared';
 const GROUP_PREFIX     = 'DeLaClaw-Shared-';
 const POLL_MS          = 15_000;      // 15s — faster than personal (30s)
 const MAX_RETRIES      = 2;
+const ITEM_TYPES       = ['todos', 'habits', 'lists'];
 
 // ── Picker API (lazy-loaded) ────────────────────────────────────
 
@@ -113,6 +116,18 @@ async function driveListChildren(token, folderId, mime) {
   return files || [];
 }
 
+/**
+ * Find a file by name inside a folder.
+ * Works for both owned and shared-with-me files.
+ */
+async function driveFindFile(token, folderId, fileName) {
+  const q = `name='${fileName}' and '${folderId}' in parents and trashed=false`;
+  const res = await driveGet(token,
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=1`);
+  const { files } = await res.json();
+  return files?.[0] ?? null;
+}
+
 async function driveDownload(token, fileId) {
   const res = await driveGet(token,
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
@@ -176,10 +191,9 @@ async function driveListPermissions(token, fileId) {
 }
 
 async function driveRemovePermission(token, fileId, permissionId) {
-  const res = await fetch(
+  await fetch(
     `https://www.googleapis.com/drive/v3/files/${fileId}/permissions/${permissionId}`,
     { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
-  if (!res.ok && res.status !== 404) throw new Error(`Remove perm failed: ${res.status}`);
 }
 
 async function driveDiscoverShared(token) {
@@ -204,6 +218,55 @@ function mergeItems(local, remote) {
   return Array.from(map.values());
 }
 
+// ── Migration: items.json → per-type files ──────────────────────
+
+/**
+ * If a legacy items.json exists, split its contents into per-type files
+ * and trash items.json. Idempotent.
+ */
+async function migrateItemsJson(tok, folderId, entry) {
+  const legacyFile = await driveFindFile(tok, folderId, 'items.json');
+  if (!legacyFile) return;
+
+  try {
+    const { data } = await driveDownload(tok, legacyFile.id);
+    const items = Array.isArray(data) ? data : [];
+
+    if (items.length > 0) {
+      for (const type of ITEM_TYPES) {
+        const itemType = type === 'lists' ? 'list_item' : type.slice(0, -1);
+        const typedItems = items.filter(i => i.item_type === itemType);
+        if (typedItems.length > 0) {
+          entry.typeData[type] = mergeItems(entry.typeData[type] || [], typedItems);
+        }
+      }
+      // Save migrated data to per-type files
+      for (const type of ITEM_TYPES) {
+        if (entry.typeData[type]?.length) {
+          const fileName = `${type}.json`;
+          const meta = entry.typeMeta[type] || {};
+          if (!meta.fileId) {
+            const existing = await driveFindFile(tok, folderId, fileName);
+            if (existing) meta.fileId = existing.id;
+          }
+          const r = await driveUpload(tok, folderId, meta.fileId, fileName, entry.typeData[type]);
+          entry.typeMeta[type] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+        }
+      }
+    }
+
+    // Trash legacy file
+    await fetch(`https://www.googleapis.com/drive/v3/files/${legacyFile.id}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashed: true }),
+    });
+    console.log(`sharing: migrated items.json → per-type files for folder ${folderId}`);
+  } catch (err) {
+    console.warn('sharing: items.json migration error:', err);
+  }
+}
+
 // ── Public API ──────────────────────────────────────────────────
 
 /**
@@ -219,6 +282,15 @@ export function createDriveSharing(getToken, appId) {
   const _groups = new Map();     // groupId → GroupEntry
   let _pollTimer = null;
   let _listeners = [];
+
+  // GroupEntry shape:
+  // {
+  //   folderId: string,
+  //   group: { id, name, created_by, members, created_at },
+  //   typeData: { todos: [], habits: [], lists: [] },
+  //   typeMeta: { todos: { fileId, etag, modifiedTime }, ... },
+  //   gMeta: { fileId, etag, modifiedTime },
+  // }
 
   // ── Joined-groups cache (localStorage fallback for discovery) ──
 
@@ -257,30 +329,51 @@ export function createDriveSharing(getToken, appId) {
     return _rootId;
   }
 
+  /** Map item_type to the per-type file key. */
+  function typeKey(itemType) {
+    if (itemType === 'list_item') return 'lists';
+    return itemType + 's';   // todo → todos, habit → habits
+  }
+
   /** Load a single group from its Drive subfolder. */
   async function loadGroup(folderId, groupId) {
     const tok = await token();
-    const files = await driveListChildren(tok, folderId);
-    const gFile = files.find(f => f.name === 'group.json');
-    const iFile = files.find(f => f.name === 'items.json');
 
+    // Load group.json — targeted search (works for shared files after Picker)
     let group = { id: groupId, name: groupId, created_by: null, members: [], created_at: null };
-    let items = [];
-    let gMeta = {}, iMeta = {};
+    let gMeta = {};
 
+    const gFile = await driveFindFile(tok, folderId, 'group.json');
     if (gFile) {
       const { data, etag } = await driveDownload(tok, gFile.id);
       group = data;
       gMeta = { fileId: gFile.id, etag, modifiedTime: gFile.modifiedTime };
     }
-    if (iFile) {
-      const { data, etag } = await driveDownload(tok, iFile.id);
-      items = Array.isArray(data) ? data : [];
-      iMeta = { fileId: iFile.id, etag, modifiedTime: iFile.modifiedTime };
+
+    // Load per-type files
+    const typeData = {};
+    const typeMeta = {};
+    for (const type of ITEM_TYPES) {
+      typeData[type] = [];
+      typeMeta[type] = {};
+      const file = await driveFindFile(tok, folderId, `${type}.json`);
+      if (file) {
+        try {
+          const { data, etag } = await driveDownload(tok, file.id);
+          typeData[type] = Array.isArray(data) ? data : [];
+          typeMeta[type] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+        } catch (err) {
+          console.warn(`sharing: failed to download ${type}.json for ${groupId}:`, err);
+        }
+      }
     }
 
-    const entry = { folderId, group, items, gMeta, iMeta };
+    const entry = { folderId, group, typeData, typeMeta, gMeta };
     _groups.set(groupId, entry);
+
+    // Migrate legacy items.json if present
+    await migrateItemsJson(tok, folderId, entry);
+
     return entry;
   }
 
@@ -289,13 +382,23 @@ export function createDriveSharing(getToken, appId) {
     const e = _groups.get(groupId);
     if (!e) return;
     const tok = await token();
+
+    // If we don't have a fileId for group.json, find it first
+    if (!e.gMeta.fileId) {
+      const gFile = await driveFindFile(tok, e.folderId, 'group.json');
+      if (gFile) {
+        const { data, etag } = await driveDownload(tok, gFile.id);
+        e.gMeta = { fileId: gFile.id, etag, modifiedTime: gFile.modifiedTime };
+        e.group.members = mergeMemberLists(e.group.members, data.members || []);
+      }
+    }
+
     try {
       const r = await driveUpload(tok, e.folderId, e.gMeta.fileId, 'group.json', e.group, e.gMeta.etag);
       e.gMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
     } catch (err) {
       if (err.code === 412 && retries < MAX_RETRIES) {
         const { data, etag } = await driveDownload(tok, e.gMeta.fileId);
-        // Remote group wins for metadata (merge members)
         e.group.members = mergeMemberLists(e.group.members, data.members || []);
         e.gMeta.etag = etag;
         return saveGroup(groupId, retries + 1);
@@ -304,20 +407,41 @@ export function createDriveSharing(getToken, appId) {
     }
   }
 
-  /** Persist items.json with ETag conflict handling. */
-  async function saveItems(groupId, retries = 0) {
+  /** Persist a per-type items file with ETag conflict handling. */
+  async function saveTypedItems(groupId, type, retries = 0) {
     const e = _groups.get(groupId);
     if (!e) return;
     const tok = await token();
+    const fileName = `${type}.json`;
+    const meta = e.typeMeta[type] || {};
+
+    // If we don't have a fileId, search for existing file to avoid duplicates
+    if (!meta.fileId) {
+      const existing = await driveFindFile(tok, e.folderId, fileName);
+      if (existing) {
+        // Found existing file — download, merge, then update
+        try {
+          const { data, etag } = await driveDownload(tok, existing.id);
+          const remoteItems = Array.isArray(data) ? data : [];
+          e.typeData[type] = mergeItems(e.typeData[type] || [], remoteItems);
+          meta.fileId = existing.id;
+          meta.etag = etag;
+        } catch (err) {
+          meta.fileId = existing.id;
+        }
+        e.typeMeta[type] = meta;
+      }
+    }
+
     try {
-      const r = await driveUpload(tok, e.folderId, e.iMeta.fileId, 'items.json', e.items, e.iMeta.etag);
-      e.iMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+      const r = await driveUpload(tok, e.folderId, meta.fileId, fileName, e.typeData[type] || [], meta.etag);
+      e.typeMeta[type] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
     } catch (err) {
       if (err.code === 412 && retries < MAX_RETRIES) {
-        const { data, etag } = await driveDownload(tok, e.iMeta.fileId);
-        e.items = mergeItems(e.items, Array.isArray(data) ? data : []);
-        e.iMeta.etag = etag;
-        return saveItems(groupId, retries + 1);
+        const { data, etag } = await driveDownload(tok, e.typeMeta[type].fileId);
+        e.typeData[type] = mergeItems(e.typeData[type] || [], Array.isArray(data) ? data : []);
+        e.typeMeta[type].etag = etag;
+        return saveTypedItems(groupId, type, retries + 1);
       }
       throw err;
     }
@@ -358,14 +482,22 @@ export function createDriveSharing(getToken, appId) {
       };
 
       const gRes = await driveUpload(tok, subfolder.id, null, 'group.json', group);
-      const iRes = await driveUpload(tok, subfolder.id, null, 'items.json', []);
+
+      // Create empty per-type files
+      const typeMeta = {};
+      const typeData = {};
+      for (const type of ITEM_TYPES) {
+        const r = await driveUpload(tok, subfolder.id, null, `${type}.json`, []);
+        typeMeta[type] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+        typeData[type] = [];
+      }
 
       _groups.set(groupId, {
         folderId: subfolder.id,
         group,
-        items: [],
+        typeData,
+        typeMeta,
         gMeta: { fileId: gRes.id, etag: gRes.etag, modifiedTime: gRes.modifiedTime },
-        iMeta: { fileId: iRes.id, etag: iRes.etag, modifiedTime: iRes.modifiedTime },
       });
 
       emit('group-created', { group });
@@ -588,8 +720,10 @@ export function createDriveSharing(getToken, appId) {
         updated_at: new Date().toISOString(),
       };
 
-      e.items.push(item);
-      await saveItems(groupId);
+      const key = typeKey(item_type);
+      if (!e.typeData[key]) e.typeData[key] = [];
+      e.typeData[key].push(item);
+      await saveTypedItems(groupId, key);
       emit('item-added', { groupId, item });
       return item;
     },
@@ -597,11 +731,18 @@ export function createDriveSharing(getToken, appId) {
     async updateItem(groupId, itemId, changes) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
-      const item = e.items.find(i => i.id === itemId);
+
+      // Find item across all type files
+      let item = null;
+      let key = null;
+      for (const type of ITEM_TYPES) {
+        item = (e.typeData[type] || []).find(i => i.id === itemId);
+        if (item) { key = type; break; }
+      }
       if (!item) throw new Error(`Item ${itemId} not found`);
 
       Object.assign(item, changes, { updated_at: new Date().toISOString() });
-      await saveItems(groupId);
+      await saveTypedItems(groupId, key);
       emit('item-updated', { groupId, item });
       return item;
     },
@@ -609,8 +750,15 @@ export function createDriveSharing(getToken, appId) {
     async deleteItem(groupId, itemId) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
-      e.items = e.items.filter(i => i.id !== itemId);
-      await saveItems(groupId);
+
+      for (const type of ITEM_TYPES) {
+        const idx = (e.typeData[type] || []).findIndex(i => i.id === itemId);
+        if (idx >= 0) {
+          e.typeData[type].splice(idx, 1);
+          await saveTypedItems(groupId, type);
+          break;
+        }
+      }
       emit('item-deleted', { groupId, itemId });
     },
 
@@ -636,16 +784,24 @@ export function createDriveSharing(getToken, appId) {
     getItems(groupId, itemType) {
       const e = _groups.get(groupId);
       if (!e) return [];
-      return itemType ? e.items.filter(i => i.item_type === itemType) : [...e.items];
+      if (itemType) {
+        const key = typeKey(itemType);
+        return [...(e.typeData[key] || [])];
+      }
+      const out = [];
+      for (const type of ITEM_TYPES) out.push(...(e.typeData[type] || []));
+      return out;
     },
 
-    /** Get all shared items across all groups, annotated with _groupId / _groupName. */
+    /** Get all shared items across all groups, annotated with group_id / group_name. */
     getAllSharedItems(itemType) {
       const out = [];
       for (const e of _groups.values()) {
-        for (const item of e.items) {
-          if (itemType && item.item_type !== itemType) continue;
-          out.push({ ...item, _groupId: e.group.id, _groupName: e.group.name });
+        const types = itemType ? [typeKey(itemType)] : ITEM_TYPES;
+        for (const type of types) {
+          for (const item of (e.typeData[type] || [])) {
+            out.push({ ...item, group_id: e.group.id, group_name: e.group.name });
+          }
         }
       }
       return out;
@@ -667,22 +823,36 @@ export function createDriveSharing(getToken, appId) {
       let changed = false;
 
       for (const [groupId, e] of _groups) {
-        // Poll items.json
-        if (e.iMeta.fileId) {
-          try {
-            const meta = await driveFileMeta(tok, e.iMeta.fileId);
-            if (meta.modifiedTime > (e.iMeta.modifiedTime || '')) {
-              const { data, etag } = await driveDownload(tok, e.iMeta.fileId);
-              const remote = Array.isArray(data) ? data : [];
-              if (JSON.stringify(remote) !== JSON.stringify(e.items)) {
-                e.items = mergeItems(e.items, remote);
-                e.iMeta.etag = etag;
-                e.iMeta.modifiedTime = meta.modifiedTime;
+        // Poll per-type files
+        for (const type of ITEM_TYPES) {
+          const meta = e.typeMeta[type];
+          if (!meta?.fileId) {
+            // Check if file was created by another user since last poll
+            try {
+              const file = await driveFindFile(tok, e.folderId, `${type}.json`);
+              if (file) {
+                const { data, etag } = await driveDownload(tok, file.id);
+                e.typeData[type] = Array.isArray(data) ? data : [];
+                e.typeMeta[type] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
                 changed = true;
-                emit('items-changed', { groupId, items: e.items });
+              }
+            } catch (err) { console.warn(`sharing poll discover ${type} ${groupId}:`, err); }
+            continue;
+          }
+          try {
+            const fileMeta = await driveFileMeta(tok, meta.fileId);
+            if (fileMeta.modifiedTime > (meta.modifiedTime || '')) {
+              const { data, etag } = await driveDownload(tok, meta.fileId);
+              const remote = Array.isArray(data) ? data : [];
+              if (JSON.stringify(remote) !== JSON.stringify(e.typeData[type])) {
+                e.typeData[type] = mergeItems(e.typeData[type] || [], remote);
+                e.typeMeta[type].etag = etag;
+                e.typeMeta[type].modifiedTime = fileMeta.modifiedTime;
+                changed = true;
+                emit('items-changed', { groupId, type, items: e.typeData[type] });
               }
             }
-          } catch (err) { console.warn(`sharing poll items ${groupId}:`, err); }
+          } catch (err) { console.warn(`sharing poll ${type} ${groupId}:`, err); }
         }
 
         // Poll group.json (membership changes)

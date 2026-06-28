@@ -550,6 +550,7 @@ const T = {
       group_deleted: 'Group deleted',
       left_group: 'Left group',
       no_drive: 'Sharing requires Google Drive backend.',
+      delete_shared_item_confirm: 'Delete this shared item?',
     },
   },
   fr: {
@@ -1077,6 +1078,7 @@ const T = {
       group_deleted: 'Groupe supprim\u00e9',
       left_group: 'Groupe quitt\u00e9',
       no_drive: 'Le partage n\u00e9cessite le backend Google Drive.',
+      delete_shared_item_confirm: 'Supprimer cet \u00e9l\u00e9ment partag\u00e9\u00a0?',
     },
   },
   es: {
@@ -1604,6 +1606,7 @@ const T = {
       group_deleted: 'Grupo eliminado',
       left_group: 'Grupo abandonado',
       no_drive: 'Compartir requiere el backend de Google Drive.',
+      delete_shared_item_confirm: '\u00bfEliminar este elemento compartido?',
     },
   },
 };

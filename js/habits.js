@@ -4,7 +4,7 @@ import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from '
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { getCategoryColor, setCategoryColor } from './todos.js';
 import { t, getLang } from './i18n.js';
-import { sharedBadge, assigneeDots, showCompletionModal } from './sharing-ui.js';
+import { sharedBadge, assigneeDots, showCompletionModal, openSharePopover } from './sharing-ui.js';
 
 // ===================================================================
 // HABITS — DATA, CRUD & RENDERING
@@ -780,6 +780,7 @@ function renderHabitCategoryCard(category) {
     <div class="todo-cat-add">
       <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catName)}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addHabitFromInput(this);}">
       <button onclick="addHabitFromInput(this.previousElementSibling)">${lucideIcon('plus', 16)}</button>
+      ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" onclick="shareHabitFromAdd(this)" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
     </div>
     <div class="task-list habit-list todo-cat-list">
       ${items}
@@ -1781,6 +1782,30 @@ function renderSharedHabits() {
   grid.appendChild(section);
 }
 
+async function shareHabitFromAdd(btn) {
+  const addRow = btn.closest('.todo-cat-add');
+  if (!addRow) return;
+  const input = addRow.querySelector('.habit-add-input');
+  const text = input?.value.trim();
+  if (!text) return;
+  const category = input.dataset.category || '';
+
+  openSharePopover(btn, async (groupId, assignees) => {
+    try {
+      await state.sharing.addItem(groupId, {
+        item_type: 'habit',
+        payload: { name: text, category, frequency_rule: '' },
+        assignees,
+      });
+      input.value = '';
+      showToast(t('sharing.shared') + '!', 'success');
+      renderSharedHabits();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  });
+}
+
 async function toggleSharedHabit(groupId, itemId, checked, assigneeEmails) {
   if (!state.sharing) return;
   try {
@@ -1800,7 +1825,7 @@ async function toggleSharedHabit(groupId, itemId, checked, assigneeEmails) {
 
 async function deleteSharedHabit(groupId, itemId) {
   if (!state.sharing) return;
-  showDeleteConfirm(t('common.delete'), 'Delete this shared item?', async () => {
+  showDeleteConfirm(t('common.delete'), t('sharing.delete_shared_item_confirm'), async () => {
     try {
       await state.sharing.deleteItem(groupId, itemId);
       renderSharedHabits();
@@ -1810,6 +1835,7 @@ async function deleteSharedHabit(groupId, itemId) {
 
 window.toggleSharedHabit = toggleSharedHabit;
 window.deleteSharedHabit = deleteSharedHabit;
+window.shareHabitFromAdd = shareHabitFromAdd;
 
 export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, initHabitHoverDelay };
 

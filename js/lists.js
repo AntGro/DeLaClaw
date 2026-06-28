@@ -3,7 +3,7 @@ import state from './state.js';
 import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, truncateWithShowMore, fetchAll } from './utils.js';
 import { scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
-import { sharedBadge, assigneeDots } from './sharing-ui.js';
+import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 
 // ===================================================================
 // LISTS — GENERIC USER-CREATED LISTS (bucket-card layout)
@@ -223,6 +223,7 @@ function renderListCard(list, items, idx) {
     <input type="text" class="list-quick-input" placeholder="${esc(t('lists.add_item'))}" maxlength="2000"
       onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();quickAddListItem(this,'${escQ(list.id)}');}">
     <button class="list-quick-add-btn" onclick="quickAddListItem(this.previousElementSibling,'${escQ(list.id)}')" title="${esc(t('lists.add_item'))}">${lucideIcon('plus', 16)}</button>
+    ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" onclick="shareListItemFromAdd(this,'${escQ(list.id)}')" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
   </div>`;
 
   return `<div class="project-card list-bucket" data-list-id="${esc(list.id)}" style="--cat-color:${color}">
@@ -661,7 +662,7 @@ async function toggleSharedListItem(groupId, itemId, checked) {
 
 async function deleteSharedListItem(groupId, itemId) {
   if (!state.sharing) return;
-  showDeleteConfirm(t('common.delete'), 'Delete this shared item?', async () => {
+  showDeleteConfirm(t('common.delete'), t('sharing.delete_shared_item_confirm'), async () => {
     try {
       await state.sharing.deleteItem(groupId, itemId);
       renderSharedListItems();
@@ -671,6 +672,33 @@ async function deleteSharedListItem(groupId, itemId) {
 
 window.toggleSharedListItem = toggleSharedListItem;
 window.deleteSharedListItem = deleteSharedListItem;
+
+async function shareListItemFromAdd(btn, listId) {
+  const addRow = btn.closest('.list-quick-add');
+  if (!addRow) return;
+  const input = addRow.querySelector('.list-quick-input');
+  const text = input?.value.trim();
+  if (!text) return;
+
+  // Find list name for payload context
+  const listObj = state.data.lists?.find(l => l.id === listId);
+
+  openSharePopover(btn, async (groupId, assignees) => {
+    try {
+      await state.sharing.addItem(groupId, {
+        item_type: 'list_item',
+        payload: { text, list_name: listObj?.name || '' },
+        assignees,
+      });
+      input.value = '';
+      showToast(t('sharing.shared') + '!', 'success');
+      renderSharedListItems();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  });
+}
+window.shareListItemFromAdd = shareListItemFromAdd;
 
 export { refreshLists, renderLists, initListModals };
 

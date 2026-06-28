@@ -1190,7 +1190,7 @@ async function toggleSharedTodo(groupId, itemId, checked, assigneeEmails) {
 
 async function deleteSharedTodo(groupId, itemId) {
   if (!state.sharing) return;
-  showDeleteConfirm(t('common.delete'), 'Delete this shared item?', async () => {
+  showDeleteConfirm(t('common.delete'), t('sharing.delete_shared_item_confirm'), async () => {
     try {
       await state.sharing.deleteItem(groupId, itemId);
       renderSharedTodos();

@@ -4,6 +4,7 @@ import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from '
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { getCategoryColor, setCategoryColor } from './todos.js';
 import { t, getLang } from './i18n.js';
+import { sharedBadge, assigneeDots, showCompletionModal } from './sharing-ui.js';
 
 // ===================================================================
 // HABITS — DATA, CRUD & RENDERING
@@ -706,6 +707,9 @@ function renderHabits() {
   initHabitHoverDelay(grid);
   renderHabitNavButtons(categoryList);
   balanceGrid(grid);
+
+  // Render shared habits section below the grid
+  renderSharedHabits();
 }
 
 function initHabitHoverDelay(container) {
@@ -1733,6 +1737,79 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
   detail.innerHTML = html;
   detail.classList.add('visible');
 }
+
+// ── Shared Habits ───────────────────────────────────────────────
+
+function renderSharedHabits() {
+  if (!state.sharing) return;
+  const grid = document.getElementById('habitCategoryGrid');
+  if (!grid) return;
+
+  const allShared = state.sharing.getAllSharedItems().filter(i => i.item_type === 'habit');
+  if (!allShared.length) return;
+
+  const existing = document.getElementById('sharedHabitsSection');
+  if (existing) existing.remove();
+
+  const section = document.createElement('div');
+  section.id = 'sharedHabitsSection';
+  section.style.gridColumn = '1 / -1';
+
+  let html = `<button class="shared-section-toggle" onclick="this.parentElement.classList.toggle('open')">
+    ${lucideIcon('users', 14)} ${t('sharing.shared')} (${allShared.length})
+    ${lucideIcon('chevron-down', 14)}
+  </button>
+  <div class="shared-section-items">`;
+
+  for (const item of allShared) {
+    const group = state.sharing.getAllGroups().find(g => g.id === item.group_id);
+    const groupName = group?.name || '?';
+    const name = item.payload?.name || item.payload?.title || '';
+    const isDone = !!item.completed;
+    html += `<div class="bucket-item${isDone ? ' completed' : ''}" style="border-left:3px solid var(--accent);margin:2px 0;padding:4px 8px;display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" ${isDone ? 'checked' : ''} data-group="${esc(item.group_id)}" data-item="${esc(item.id)}" data-assignees="${esc(JSON.stringify((item.assignees||[]).map(a=>typeof a==='string'?a:a.email)))}" onchange="toggleSharedHabit(this.dataset.group,this.dataset.item,this.checked,JSON.parse(this.dataset.assignees))">
+      <span style="flex:1;${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${esc(name)}</span>
+      ${sharedBadge(groupName)}
+      ${assigneeDots(item.assignees || [])}
+      <button class="sharing-remove-btn" onclick="deleteSharedHabit('${escQ(item.group_id)}','${escQ(item.id)}')" title="${t('common.delete')}">${lucideIcon('x', 14)}</button>
+    </div>`;
+  }
+
+  html += '</div>';
+  section.innerHTML = html;
+  section.classList.add('open');
+  grid.appendChild(section);
+}
+
+async function toggleSharedHabit(groupId, itemId, checked, assigneeEmails) {
+  if (!state.sharing) return;
+  try {
+    if (checked) {
+      const currentUser = await state.sharing.getCurrentUser();
+      if (assigneeEmails.length > 1) {
+        showCompletionModal(groupId, itemId, assigneeEmails, currentUser?.email);
+        return;
+      }
+      await state.sharing.completeItem(groupId, itemId, [currentUser?.email || assigneeEmails[0]]);
+    } else {
+      await state.sharing.uncompleteItem(groupId, itemId);
+    }
+    renderSharedHabits();
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function deleteSharedHabit(groupId, itemId) {
+  if (!state.sharing) return;
+  showDeleteConfirm(t('common.delete'), 'Delete this shared item?', async () => {
+    try {
+      await state.sharing.deleteItem(groupId, itemId);
+      renderSharedHabits();
+    } catch (e) { showToast(e.message, 'error'); }
+  });
+}
+
+window.toggleSharedHabit = toggleSharedHabit;
+window.deleteSharedHabit = deleteSharedHabit;
 
 export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, initHabitHoverDelay };
 

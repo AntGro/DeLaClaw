@@ -18,6 +18,7 @@ import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthda
 import { refreshVestiaire, renderVestiaire, initVestiaireModals } from './vestiaire.js';
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals } from './lists.js';
+import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
 import { HABIT_CATEGORIES_KEY } from './state.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
@@ -1122,6 +1123,10 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       state.sharing = createDriveSharing(() => state.driveAdapter.getToken(), driveAppId);
       state.sharing.loadAll().catch(e => console.warn('sharing loadAll:', e));
       state.sharing.startPolling();
+      state.sharing.onUpdate(() => {
+        document.dispatchEvent(new CustomEvent('sharing-changed'));
+      });
+      updateSharingNavVisibility();
     } catch (e) { console.warn('sharing init:', e); }
   }
 
@@ -1157,6 +1162,16 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   }
 
   markLastUpdated();
+
+  // Listen for sharing updates (Drive sharing module polls and fires sharing-changed)
+  document.addEventListener('sharing-changed', () => {
+    refreshTodos().then(renderTodos);
+    refreshHabits().then(renderHabits);
+    refreshLists().then(renderLists);
+    // Re-render sharing pane if it's currently visible
+    const sharingPane = document.getElementById('settingsPane-sharing');
+    if (sharingPane?.classList.contains('active')) renderSharingPane();
+  });
 
   // Show demo banner if in demo mode
   if (mode === 'demo') initDemoBanner();
@@ -1735,6 +1750,7 @@ function updateStaticLabels() {
   if (settingsNavStats) settingsNavStats.textContent = t('menu.settings_stats');
   const settingsPaneStatsTitle = document.getElementById('settingsPaneStatsTitle');
   if (settingsPaneStatsTitle) settingsPaneStatsTitle.textContent = t('menu.settings_stats');
+  applySharingI18n();
   const settingsDisplayLabel = document.getElementById('settingsDisplayLabel');
   if (settingsDisplayLabel) settingsDisplayLabel.textContent = t('menu.settings_display');
   const settingsNvidiaKeyLabel = document.getElementById('settingsNvidiaKeyLabel');
@@ -2085,6 +2101,7 @@ function switchSettingsPane(paneKey) {
   });
   if (paneKey === 'ai') { populateNvidiaModels(); loadNvidiaUsage(); }
   if (paneKey === 'stats') { loadUsageStats(); }
+  if (paneKey === 'sharing') { renderSharingPane(); }
 }
 
 function renderTabConfigList() {

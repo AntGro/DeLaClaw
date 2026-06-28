@@ -30,6 +30,7 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 ### Capabilities
 
 - **Four backend modes**: Supabase (cloud PostgreSQL), Google Drive (JSON file in your Drive), local REST server (Bun + SQLite), in-memory demo
+- **Sharing**: Drive-backed group sharing for TODOs, habits, and lists — invite by email, multi-assignee completion, Google Picker for joining
 - **Offline-first**: IndexedDB cache serves read-only data when the network is down, with automatic recovery
 - **PWA**: installable on mobile and desktop via service worker with network-first caching
 - **Dark and light themes** with automatic OS preference detection
@@ -99,6 +100,7 @@ js/
     drive.js            Google Drive adapter (in-memory + JSON file persistence)
     offline-cache.js    IndexedDB caching layer (wraps any adapter)
   sharing.js            Drive-based multi-user sharing (groups, items, Picker)
+  sharing-ui.js         Sharing UI: settings pane, share popovers, completion modal
   welcome.js            Today dashboard
   projects.js           Project boards and task management
   todos.js              TODO management

@@ -3,6 +3,7 @@ import state from './state.js';
 import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, truncateWithShowMore, fetchAll } from './utils.js';
 import { scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
+import { sharedBadge, assigneeDots } from './sharing-ui.js';
 
 // ===================================================================
 // LISTS — GENERIC USER-CREATED LISTS (bucket-card layout)
@@ -201,6 +202,9 @@ function renderLists() {
     }
   });
   balanceGrid(grid);
+
+  // Render shared list items below the grid
+  renderSharedListItems();
 }
 
 function renderListCard(list, items, idx) {
@@ -598,6 +602,75 @@ async function deleteList(listId) {
 // ===================================================================
 // EXPORTS
 // ===================================================================
+
+// ── Shared List Items ───────────────────────────────────────────
+
+function renderSharedListItems() {
+  if (!state.sharing) return;
+  const grid = document.getElementById('listGrid');
+  if (!grid) return;
+
+  const allShared = state.sharing.getAllSharedItems().filter(i => i.item_type === 'list_item');
+  if (!allShared.length) return;
+
+  const existing = document.getElementById('sharedListsSection');
+  if (existing) existing.remove();
+
+  const section = document.createElement('div');
+  section.id = 'sharedListsSection';
+  section.style.gridColumn = '1 / -1';
+
+  let html = `<button class="shared-section-toggle" onclick="this.parentElement.classList.toggle('open')">
+    ${lucideIcon('users', 14)} ${t('sharing.shared')} (${allShared.length})
+    ${lucideIcon('chevron-down', 14)}
+  </button>
+  <div class="shared-section-items">`;
+
+  for (const item of allShared) {
+    const group = state.sharing.getAllGroups().find(g => g.id === item.group_id);
+    const groupName = group?.name || '?';
+    const text = item.payload?.text || item.payload?.title || '';
+    const isDone = !!item.completed;
+    html += `<div class="bucket-item${isDone ? ' completed' : ''}" style="border-left:3px solid var(--accent);margin:2px 0;padding:4px 8px;display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" ${isDone ? 'checked' : ''} onchange="toggleSharedListItem('${escQ(item.group_id)}','${escQ(item.id)}',this.checked)">
+      <span style="flex:1;${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${esc(text)}</span>
+      ${sharedBadge(groupName)}
+      ${assigneeDots(item.assignees || [])}
+      <button class="sharing-remove-btn" onclick="deleteSharedListItem('${escQ(item.group_id)}','${escQ(item.id)}')" title="${t('common.delete')}">${lucideIcon('x', 14)}</button>
+    </div>`;
+  }
+
+  html += '</div>';
+  section.innerHTML = html;
+  section.classList.add('open');
+  grid.appendChild(section);
+}
+
+async function toggleSharedListItem(groupId, itemId, checked) {
+  if (!state.sharing) return;
+  try {
+    if (checked) {
+      const currentUser = await state.sharing.getCurrentUser();
+      await state.sharing.completeItem(groupId, itemId, [currentUser?.email]);
+    } else {
+      await state.sharing.uncompleteItem(groupId, itemId);
+    }
+    renderSharedListItems();
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function deleteSharedListItem(groupId, itemId) {
+  if (!state.sharing) return;
+  showDeleteConfirm(t('common.delete'), 'Delete this shared item?', async () => {
+    try {
+      await state.sharing.deleteItem(groupId, itemId);
+      renderSharedListItems();
+    } catch (e) { showToast(e.message, 'error'); }
+  });
+}
+
+window.toggleSharedListItem = toggleSharedListItem;
+window.deleteSharedListItem = deleteSharedListItem;
 
 export { refreshLists, renderLists, initListModals };
 

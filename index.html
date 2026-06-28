@@ -725,6 +725,10 @@ bun run server.js</pre>
             <span data-icon="bar-chart-3" data-size="16"></span>
             <span id="settingsNavStats">Stats</span>
           </button>
+          <button class="settings-nav-btn" data-pane="sharing" onclick="switchSettingsPane('sharing')" id="settingsNavSharingBtn" style="display:none">
+            <span data-icon="users" data-size="16"></span>
+            <span id="settingsNavSharing">Sharing</span>
+          </button>
         </nav>
       </div>
       <div class="settings-content">
@@ -840,6 +844,10 @@ bun run server.js</pre>
           <div class="setting-group">
             <div id="usageStatsContainer" class="usage-stats-container"></div>
           </div>
+        </div>
+        <div class="settings-pane" id="settingsPane-sharing">
+          <h3 id="settingsPaneSharingTitle">Sharing</h3>
+          <div id="sharingPaneContent"></div>
         </div>
       </div>
     </div>

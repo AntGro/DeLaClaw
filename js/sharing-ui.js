@@ -146,7 +146,7 @@ async function sharingCreateGroup() {
     <input type="text" id="sharingNewGroupName" placeholder="${t('sharing.group_name_placeholder')}" maxlength="60" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingCreateGroupSubmit();}">
     <div class="modal-actions">
       <button class="modal-cancel" onclick="document.getElementById('sharingCreateGroupModal').remove()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="sharingCreateGroupSubmit()">${t('common.create')}</button>
+      <button class="modal-save" id="sharingCreateGroupBtn" onclick="sharingCreateGroupSubmit()">${t('common.create')}</button>
     </div>
   </div>`;
   document.getElementById('app').appendChild(overlay);
@@ -157,6 +157,8 @@ async function sharingCreateGroupSubmit() {
   const input = document.getElementById('sharingNewGroupName');
   const name = input?.value.trim();
   if (!name) return;
+  const btn = document.getElementById('sharingCreateGroupBtn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
   try {
     await state.sharing.createGroup(name);
     showToast(t('sharing.group_created'), 'success');
@@ -164,6 +166,7 @@ async function sharingCreateGroupSubmit() {
     renderSharingPane();
   } catch (e) {
     showToast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
   }
 }
 
@@ -184,6 +187,8 @@ async function sharingInvite(groupId) {
   const input = document.getElementById(`sharingInvite-${groupId}`);
   const email = input?.value.trim();
   if (!email) return;
+  const btn = input?.nextElementSibling;
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
   try {
     await state.sharing.inviteUser(groupId, email);
     input.value = '';
@@ -191,6 +196,7 @@ async function sharingInvite(groupId) {
     renderSharingPane();
   } catch (e) {
     showToast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
   }
 }
 
@@ -384,14 +390,16 @@ async function sharingCompleteSubmit(groupId, itemId) {
   if (!modal) return;
   const doneBy = [...modal.querySelectorAll('.share-popover-check input:checked')].map(cb => cb.value);
   if (!doneBy.length) return;
+  const btn = modal.querySelector('.modal-save');
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
   try {
     await state.sharing.completeItem(groupId, itemId, doneBy);
     showToast(t('common.done') + '!', 'success');
     modal.remove();
-    // Trigger refresh of views
     document.dispatchEvent(new CustomEvent('sharing-changed'));
   } catch (e) {
     showToast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
   }
 }
 

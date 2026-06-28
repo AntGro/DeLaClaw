@@ -23,7 +23,14 @@ import { createDemoAdapter } from './demo.js';
 import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
 import { t } from '../i18n.js';
 
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_SCOPE_FULL = 'https://www.googleapis.com/auth/drive';
+
+function getDriveScope() {
+  return localStorage.getItem('dlc_sharing_enabled') === 'true'
+    ? DRIVE_SCOPE_FULL
+    : DRIVE_SCOPE_FILE;
+}
 const DRIVE_FOLDER_NAME = 'DeLaClaw';
 const DEBOUNCE_MS = 2000;
 const POLL_INTERVAL_MS = 30000;
@@ -87,7 +94,7 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
     }
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: DRIVE_SCOPE,
+      scope: getDriveScope(),
       callback: (resp) => {
         if (resp.error) {
           reject(new Error(resp.error));
@@ -630,6 +637,23 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
     /** Expose token getter for sharing module. */
     getToken,
+
+    /** Upgrade OAuth to full Drive scope for sharing features. */
+    async requestScopeUpgrade() {
+      localStorage.setItem('dlc_sharing_enabled', 'true');
+      clearDriveTokenCache();
+      return getGoogleAccessToken(clientId, true);
+    },
+
+    /** Downgrade back to drive.file scope (disables sharing). */
+    revokeSharingScope() {
+      localStorage.removeItem('dlc_sharing_enabled');
+      clearDriveTokenCache();
+    },
+
+    get sharingEnabled() {
+      return localStorage.getItem('dlc_sharing_enabled') === 'true';
+    },
 
     // Callback for external change notification
     _onExternalChange: null,

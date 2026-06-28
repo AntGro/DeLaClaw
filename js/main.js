@@ -1119,8 +1119,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     // Wire up Drive sharing module
     try {
       const { createDriveSharing } = await import('./sharing.js');
-      const driveAppId = GOOGLE_CLIENT_ID.split('-')[0];
-      state.sharing = createDriveSharing(() => state.driveAdapter.getToken(), driveAppId);
+      state.sharing = createDriveSharing(() => state.driveAdapter.getToken(), state.driveAdapter.driveFolderId);
       state.sharing.loadAll().catch(e => console.warn('sharing loadAll:', e));
       state.sharing.startPolling();
       state.sharing.onUpdate(() => {

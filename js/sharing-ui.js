@@ -2,9 +2,10 @@
 // SHARING UI — Settings pane, share popovers, completion modal
 // ===================================================================
 //
-// Renders the sharing settings pane (group management) and provides
-// helpers for share badges, share-to-group popovers, and multi-
-// assignee completion modals used by todos.js, habits.js, lists.js.
+// Renders the sharing settings pane (trusted contacts + group
+// management) and provides helpers for share badges, share-to-group
+// popovers, and multi-assignee completion modals used by
+// todos.js, habits.js, lists.js.
 //
 // Requires state.sharing (Drive sharing module) to be initialized.
 // All UI is hidden when state.sharing is null.
@@ -62,28 +63,62 @@ export async function renderSharingPane() {
     return;
   }
 
+  // Check if sharing (full Drive scope) is enabled
+  const sharingEnabled = state.driveAdapter?.sharingEnabled;
+
+  if (!sharingEnabled) {
+    container.innerHTML = `
+      <div class="page-empty-state">
+        ${lucideIcon('shield', 40)}
+        <h3>${t('sharing.enable_title')}</h3>
+        <p>${t('sharing.enable_hint')}</p>
+        <button class="empty-cta" id="enableSharingBtn" onclick="enableSharingMode()">
+          ${lucideIcon('unlock', 16)} ${t('sharing.enable_btn')}
+        </button>
+      </div>`;
+    return;
+  }
+
   // Get current user identity
   try {
     if (!_currentUser) _currentUser = await state.sharing.getCurrentUser();
   } catch { _currentUser = null; }
 
-  const groups = state.sharing.getAllGroups();
+  let html = '';
 
-  if (groups.length === 0) {
-    container.innerHTML = `
-      <div class="page-empty-state">
-        ${lucideIcon('users', 40)}
-        <h3>${t('sharing.no_groups')}</h3>
-        <p>${t('sharing.no_groups_hint')}</p>
-        <div class="sharing-empty-actions">
-          <button class="empty-cta" onclick="sharingCreateGroup()">${lucideIcon('plus', 16)} ${t('sharing.create_group')}</button>
-          <button class="empty-cta sharing-join-btn" onclick="sharingJoinGroup()">${lucideIcon('log-in', 16)} ${t('sharing.join_group')}</button>
-        </div>
+  // ── Trusted contacts section ──
+  const trusted = state.sharing.getTrustedContacts();
+
+  html += `<div class="setting-group">
+    <div class="setting-group-label">${t('sharing.trusted_contacts')}</div>
+    <p class="setting-hint">${t('sharing.trusted_hint')}</p>`;
+
+  if (trusted.length > 0) {
+    html += `<div class="sharing-trusted-list">`;
+    for (const email of trusted) {
+      html += `<div class="sharing-member">
+        ${avatarDot({ email, name: '' }, 22)}
+        <span class="sharing-member-email">${esc(email)}</span>
+        <button class="sharing-remove-btn" onclick="sharingRemoveTrusted('${escQ(email)}')" title="${t('common.delete')}">${lucideIcon('x', 12)}</button>
       </div>`;
-    return;
+    }
+    html += `</div>`;
   }
 
-  let html = `<div class="setting-group"><div class="setting-group-label">${t('sharing.groups')}</div>`;
+  html += `<div class="sharing-invite-row">
+    <input type="email" class="sharing-invite-input" id="sharingTrustedInput" placeholder="${t('sharing.trusted_placeholder')}" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingAddTrusted();}">
+    <button class="sharing-invite-btn" onclick="sharingAddTrusted()">${lucideIcon('user-plus', 14)} ${t('common.add')}</button>
+  </div>
+  </div>`;
+
+  // ── Groups section ──
+  const groups = state.sharing.getAllGroups();
+
+  html += `<div class="setting-group"><div class="setting-group-label">${t('sharing.groups')}</div>`;
+
+  if (groups.length === 0) {
+    html += `<p class="setting-hint">${t('sharing.no_groups_hint')}</p>`;
+  }
 
   for (const group of groups) {
     const isCreator = _currentUser && group.created_by?.email === _currentUser.email;
@@ -126,7 +161,6 @@ export async function renderSharingPane() {
   html += `</div>
     <div class="sharing-bottom-actions">
       <button class="sharing-action-btn" onclick="sharingCreateGroup()">${lucideIcon('plus', 14)} ${t('sharing.create_group')}</button>
-      <button class="sharing-action-btn" onclick="sharingJoinGroup()">${lucideIcon('log-in', 14)} ${t('sharing.join_group')}</button>
     </div>`;
 
   container.innerHTML = html;
@@ -134,14 +168,59 @@ export async function renderSharingPane() {
 
 // ── Actions (exposed on window) ─────────────────────────────────
 
+async function enableSharingMode() {
+  const btn = document.getElementById('enableSharingBtn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+  try {
+    await state.driveAdapter.requestScopeUpgrade();
+    await state.sharing.loadTrustedContacts();
+    showToast(t('sharing.enabled'), 'success');
+    renderSharingPane();
+  } catch (e) {
+    showToast(e.message || t('sharing.enable_failed'), 'error');
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+  }
+}
+
+async function sharingAddTrusted() {
+  const input = document.getElementById('sharingTrustedInput');
+  const email = input?.value.trim();
+  if (!email) return;
+  try {
+    await state.sharing.addTrustedContact(email);
+    input.value = '';
+    showToast(t('sharing.trusted_added'), 'success');
+    renderSharingPane();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+async function sharingRemoveTrusted(email) {
+  showDeleteConfirm(
+    t('sharing.remove_trusted'),
+    t('sharing.remove_trusted_confirm', email),
+    async () => {
+      try {
+        await state.sharing.removeTrustedContact(email);
+        showToast(t('sharing.trusted_removed'), 'info');
+        renderSharingPane();
+      } catch (e) { showToast(e.message, 'error'); }
+    }
+  );
+}
+
 async function sharingCreateGroup() {
-  // Open modal with name input
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingCreateGroupModal';
   overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('users', 20)} ${t('sharing.create_group')}</h2>
+    <div class="sharing-antispam-notice">
+      ${lucideIcon('shield-alert', 16)}
+      <span>${t('sharing.antispam_notice')}</span>
+    </div>
     <label>${t('sharing.group_name')}</label>
     <input type="text" id="sharingNewGroupName" placeholder="${t('sharing.group_name_placeholder')}" maxlength="60" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingCreateGroupSubmit();}">
     <div class="modal-actions">
@@ -167,19 +246,6 @@ async function sharingCreateGroupSubmit() {
   } catch (e) {
     showToast(e.message, 'error');
     if (btn) { btn.disabled = false; btn.style.opacity = ''; }
-  }
-}
-
-async function sharingJoinGroup() {
-  if (!state.sharing) return;
-  try {
-    const group = await state.sharing.joinGroup();
-    if (group) {
-      showToast(t('sharing.group_created'), 'success');
-      renderSharingPane();
-    }
-  } catch (e) {
-    showToast(e.message, 'error');
   }
 }
 
@@ -307,7 +373,6 @@ export function openSharePopover(anchorEl, onShare) {
       <button class="share-popover-submit" onclick="submitSharePopover()">${lucideIcon('share', 14)} ${t('sharing.share')}</button>
     `;
 
-    // Listen for group radio changes
     popover.querySelectorAll('input[name="shareGroup"]').forEach(radio => {
       radio.addEventListener('change', () => {
         selectedGroupId = radio.value;
@@ -318,7 +383,6 @@ export function openSharePopover(anchorEl, onShare) {
 
   renderPopover();
 
-  // Position near anchor
   const rect = anchorEl.getBoundingClientRect();
   popover.style.position = 'fixed';
   popover.style.top = `${rect.bottom + 4}px`;
@@ -326,10 +390,8 @@ export function openSharePopover(anchorEl, onShare) {
   popover.style.zIndex = '300';
   document.body.appendChild(popover);
 
-  // Store callback
   popover._onShare = onShare;
 
-  // Close on outside click
   setTimeout(() => {
     document.addEventListener('click', _closeSharePopoverOutside, true);
   }, 0);
@@ -414,9 +476,11 @@ export function applySettingsI18n() {
 
 // ── Expose actions on window ────────────────────────────────────
 
+window.enableSharingMode = enableSharingMode;
+window.sharingAddTrusted = sharingAddTrusted;
+window.sharingRemoveTrusted = sharingRemoveTrusted;
 window.sharingCreateGroup = sharingCreateGroup;
 window.sharingCreateGroupSubmit = sharingCreateGroupSubmit;
-window.sharingJoinGroup = sharingJoinGroup;
 window.sharingInvite = sharingInvite;
 window.sharingRemoveMember = sharingRemoveMember;
 window.sharingLeaveGroup = sharingLeaveGroup;

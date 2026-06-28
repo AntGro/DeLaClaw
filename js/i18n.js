@@ -510,7 +510,11 @@ const T = {
     },
     // ── Utils / Stats ──
     utils: {
-      db: 'DB', supabase_dashboard: 'Supabase Dashboard', footer_docs: 'Docs',
+      db: 'DB', supabase_dashboard: 'Supabase Dashboard', footer_docs: 'Docs', footer_license: 'License',
+      updated_just_now: 'Updated just now',
+      updated_s_ago: 'Updated {0}s ago',
+      updated_m_ago: 'Updated {0}m ago',
+      updated_h_ago: 'Updated {0}h ago',
     },
   },
   fr: {
@@ -998,7 +1002,11 @@ const T = {
       storage_note: '* 200 Mo suffisent largement pour profiter pleinement de DeLaClaw.',
     },
     utils: {
-      db: 'BDD', supabase_dashboard: 'Tableau de bord Supabase', footer_docs: 'Docs',
+      db: 'BDD', supabase_dashboard: 'Tableau de bord Supabase', footer_docs: 'Documentation', footer_license: 'Licence',
+      updated_just_now: 'Mis \u00e0 jour \u00e0 l\u2019instant',
+      updated_s_ago: 'Mis \u00e0 jour il y a {0}s',
+      updated_m_ago: 'Mis \u00e0 jour il y a {0} min',
+      updated_h_ago: 'Mis \u00e0 jour il y a {0}h',
     },
   },
   es: {
@@ -1486,7 +1494,11 @@ const T = {
       storage_note: '* 200 MB son más que suficientes para disfrutar de DeLaClaw al completo.',
     },
     utils: {
-      db: 'BDD', supabase_dashboard: 'Panel de Supabase', footer_docs: 'Docs',
+      db: 'BDD', supabase_dashboard: 'Panel de Supabase', footer_docs: 'Documentaci\u00f3n', footer_license: 'Licencia',
+      updated_just_now: 'Actualizado justo ahora',
+      updated_s_ago: 'Actualizado hace {0}s',
+      updated_m_ago: 'Actualizado hace {0} min',
+      updated_h_ago: 'Actualizado hace {0}h',
     },
   },
 };

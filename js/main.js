@@ -23,6 +23,10 @@ import { HABIT_CATEGORIES_KEY } from './state.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
 import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
 
+// Last-updated tracking (declared early so renderLastUpdated can be called from updateStaticLabels)
+let _lastUpdatedAt = null;
+let _lastUpdatedTimer = null;
+
 // ===================================================================
 // BACKEND-SCOPED localStorage — isolate per-backend settings so switching
 // between Supabase, Local, and Demo never leaks data across modes.
@@ -1816,6 +1820,8 @@ function updateStaticLabels() {
     const val = t(key);
     if (val) el.textContent = val;
   });
+  // Re-render footer "Updated" label in the new language
+  renderLastUpdated();
   // Re-render schema banner in new language (if visible)
   checkSchemaVersion();
 }
@@ -3494,8 +3500,6 @@ function updateViewFooterStats() {
 // ===================================================================
 // LAST UPDATED LABEL
 // ===================================================================
-let _lastUpdatedAt = null;
-let _lastUpdatedTimer = null;
 
 function markLastUpdated() {
   _lastUpdatedAt = Date.now();
@@ -3510,12 +3514,12 @@ function renderLastUpdated() {
   const el = document.getElementById('lastUpdatedLabel');
   if (!el || !_lastUpdatedAt) return;
   const secs = Math.round((Date.now() - _lastUpdatedAt) / 1000);
-  let label;
-  if (secs < 5) label = 'just now';
-  else if (secs < 60) label = `${secs}s ago`;
-  else if (secs < 3600) label = `${Math.floor(secs / 60)}m ago`;
-  else label = `${Math.floor(secs / 3600)}h ago`;
-  el.textContent = `Updated ${label}`;
+  let text;
+  if (secs < 5) text = t('utils.updated_just_now');
+  else if (secs < 60) text = t('utils.updated_s_ago', secs);
+  else if (secs < 3600) text = t('utils.updated_m_ago', Math.floor(secs / 60));
+  else text = t('utils.updated_h_ago', Math.floor(secs / 3600));
+  el.textContent = text;
 }
 
 // ===================================================================

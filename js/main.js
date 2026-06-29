@@ -18,7 +18,7 @@ import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthda
 import { refreshVestiaire, renderVestiaire, initVestiaireModals } from './vestiaire.js';
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals } from './lists.js';
-import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
+import { updateSharingNavVisibility, renderSharingPane, handleJoinHash, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
 import { HABIT_CATEGORIES_KEY } from './state.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
@@ -1126,6 +1126,18 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
         document.dispatchEvent(new CustomEvent('sharing-changed'));
       });
       updateSharingNavVisibility();
+
+      // Handle #join=<folderId> invite link
+      if (location.hash.startsWith('#join=')) {
+        const joinFolderId = location.hash.slice(6);
+        history.replaceState(null, '', location.pathname + location.search);
+        if (joinFolderId) {
+          // Wait for loadAll to finish before joining
+          state.sharing.loadAll().then(() => {
+            handleJoinHash(joinFolderId);
+          }).catch(e => console.warn('sharing join after load:', e));
+        }
+      }
     } catch (e) { console.warn('sharing init:', e); }
   }
 

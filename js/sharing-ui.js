@@ -2,13 +2,19 @@
 // SHARING UI — Settings pane, share popovers, completion modal
 // ===================================================================
 //
-// Renders the sharing settings pane (trusted contacts + group
-// management) and provides helpers for share badges, share-to-group
+// Renders the sharing settings pane (groups, invite links, trusted
+// contacts) and provides helpers for share badges, share-to-group
 // popovers, and multi-assignee completion modals used by
 // todos.js, habits.js, lists.js.
 //
 // Requires state.sharing (Drive sharing module) to be initialized.
 // All UI is hidden when state.sharing is null.
+//
+// HYBRID MODEL:
+//   - Sharing is always available with Drive backend (no scope gate)
+//   - Groups + invite links work with drive.file scope
+//   - Auto-discovery (trusted contacts) is optional (full drive scope)
+//   - Join via invite link uses Google Picker for drive.file access
 // ===================================================================
 
 import state from './state.js';
@@ -63,53 +69,14 @@ export async function renderSharingPane() {
     return;
   }
 
-  // Check if sharing (full Drive scope) is enabled
-  const sharingEnabled = state.driveAdapter?.sharingEnabled;
-
-  if (!sharingEnabled) {
-    container.innerHTML = `
-      <div class="page-empty-state">
-        ${lucideIcon('shield', 40)}
-        <h3>${t('sharing.enable_title')}</h3>
-        <p>${t('sharing.enable_hint')}</p>
-        <button class="empty-cta" id="enableSharingBtn" onclick="enableSharingMode()">
-          ${lucideIcon('unlock', 16)} ${t('sharing.enable_btn')}
-        </button>
-      </div>`;
-    return;
-  }
-
   // Get current user identity
   try {
     if (!_currentUser) _currentUser = await state.sharing.getCurrentUser();
   } catch { _currentUser = null; }
 
+  const autoDiscoveryEnabled = state.driveAdapter?.sharingEnabled;
+
   let html = '';
-
-  // ── Trusted contacts section ──
-  const trusted = state.sharing.getTrustedContacts();
-
-  html += `<div class="setting-group">
-    <div class="setting-group-label">${t('sharing.trusted_contacts')}</div>
-    <p class="setting-hint">${t('sharing.trusted_hint')}</p>`;
-
-  if (trusted.length > 0) {
-    html += `<div class="sharing-trusted-list">`;
-    for (const email of trusted) {
-      html += `<div class="sharing-member">
-        ${avatarDot({ email, name: '' }, 22)}
-        <span class="sharing-member-email">${esc(email)}</span>
-        <button class="sharing-remove-btn" onclick="sharingRemoveTrusted('${escQ(email)}')" title="${t('common.delete')}">${lucideIcon('x', 12)}</button>
-      </div>`;
-    }
-    html += `</div>`;
-  }
-
-  html += `<div class="sharing-invite-row">
-    <input type="email" class="sharing-invite-input" id="sharingTrustedInput" placeholder="${t('sharing.trusted_placeholder')}" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingAddTrusted();}">
-    <button class="sharing-invite-btn" onclick="sharingAddTrusted()">${lucideIcon('user-plus', 14)} ${t('common.add')}</button>
-  </div>
-  </div>`;
 
   // ── Groups section ──
   const groups = state.sharing.getAllGroups();
@@ -122,19 +89,22 @@ export async function renderSharingPane() {
 
   for (const group of groups) {
     const isCreator = _currentUser && group.created_by?.email === _currentUser.email;
+    const isJoined = state.sharing.isJoinedViaLink(group.id);
     const memberCount = group.members?.length || 0;
     const itemCount = state.sharing.getItems(group.id).length;
     const memberStr = memberCount === 1 ? t('sharing.member') : t('sharing.members', memberCount);
     const itemStr = itemCount === 1 ? t('sharing.shared_item') : t('sharing.shared_items', itemCount);
+    const inviteLink = state.sharing.getInviteLink(group.id);
 
     html += `<div class="sharing-group-card">
       <div class="sharing-group-header">
         <div class="sharing-group-info">
           <h4>${esc(group.name)}</h4>
-          <span class="sharing-group-stats">${memberStr} · ${itemStr}</span>
+          <span class="sharing-group-stats">${memberStr} \u00b7 ${itemStr}</span>
         </div>
         <div class="sharing-group-actions">
-          ${isCreator ? '' : `<button class="sharing-action-btn sharing-leave-btn" onclick="sharingLeaveGroup('${escQ(group.id)}')" title="${t('sharing.leave')}">${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>`}
+          ${inviteLink ? `<button class="sharing-action-btn sharing-copy-link-btn" onclick="sharingCopyLink('${escQ(group.id)}')" title="${t('sharing.copy_link')}">${lucideIcon('link', 14)} ${t('sharing.copy_link')}</button>` : ''}
+          ${!isCreator ? `<button class="sharing-action-btn sharing-leave-btn" onclick="${isJoined ? `sharingUnjoinGroup('${escQ(group.id)}')` : `sharingLeaveGroup('${escQ(group.id)}')`}" title="${t('sharing.leave')}">${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>` : ''}
         </div>
       </div>
       <div class="sharing-members">`;
@@ -163,18 +133,58 @@ export async function renderSharingPane() {
       <button class="sharing-action-btn" onclick="sharingCreateGroup()">${lucideIcon('plus', 14)} ${t('sharing.create_group')}</button>
     </div>`;
 
+  // ── Auto-discovery section ──
+  html += `<div class="setting-group">
+    <div class="setting-group-label">${t('sharing.auto_discovery')}</div>`;
+
+  if (autoDiscoveryEnabled) {
+    html += `<p class="setting-hint">${t('sharing.auto_discovery_active')}</p>`;
+
+    // Trusted contacts
+    const trusted = state.sharing.getTrustedContacts();
+
+    html += `<div class="setting-group">
+      <div class="setting-group-label">${t('sharing.trusted_contacts')}</div>
+      <p class="setting-hint">${t('sharing.trusted_hint')}</p>`;
+
+    if (trusted.length > 0) {
+      html += `<div class="sharing-trusted-list">`;
+      for (const email of trusted) {
+        html += `<div class="sharing-member">
+          ${avatarDot({ email, name: '' }, 22)}
+          <span class="sharing-member-email">${esc(email)}</span>
+          <button class="sharing-remove-btn" onclick="sharingRemoveTrusted('${escQ(email)}')" title="${t('common.delete')}">${lucideIcon('x', 12)}</button>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+
+    html += `<div class="sharing-invite-row">
+      <input type="email" class="sharing-invite-input" id="sharingTrustedInput" placeholder="${t('sharing.trusted_placeholder')}" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingAddTrusted();}">
+      <button class="sharing-invite-btn" onclick="sharingAddTrusted()">${lucideIcon('user-plus', 14)} ${t('common.add')}</button>
+    </div>
+    </div>`;
+  } else {
+    html += `<p class="setting-hint">${t('sharing.auto_discovery_hint')}</p>
+    <button class="sharing-action-btn" id="enableAutoDiscoveryBtn" onclick="enableAutoDiscovery()">
+      ${lucideIcon('unlock', 16)} ${t('sharing.enable_auto_discovery')}
+    </button>`;
+  }
+
+  html += `</div>`;
+
   container.innerHTML = html;
 }
 
 // ── Actions (exposed on window) ─────────────────────────────────
 
-async function enableSharingMode() {
-  const btn = document.getElementById('enableSharingBtn');
+async function enableAutoDiscovery() {
+  const btn = document.getElementById('enableAutoDiscoveryBtn');
   if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
   try {
     await state.driveAdapter.requestScopeUpgrade();
     await state.sharing.loadTrustedContacts();
-    showToast(t('sharing.enabled'), 'success');
+    showToast(t('sharing.auto_discovery_enabled'), 'success');
     renderSharingPane();
   } catch (e) {
     showToast(e.message || t('sharing.enable_failed'), 'error');
@@ -239,13 +249,60 @@ async function sharingCreateGroupSubmit() {
   const btn = document.getElementById('sharingCreateGroupBtn');
   if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
   try {
-    await state.sharing.createGroup(name);
-    showToast(t('sharing.group_created'), 'success');
+    const group = await state.sharing.createGroup(name);
     document.getElementById('sharingCreateGroupModal')?.remove();
+    // Show the invite link immediately after creation
+    const link = state.sharing.getInviteLink(group.id);
+    if (link) {
+      showInviteLinkModal(group.name, link);
+    } else {
+      showToast(t('sharing.group_created'), 'success');
+    }
     renderSharingPane();
   } catch (e) {
     showToast(e.message, 'error');
     if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+  }
+}
+
+/** Show a modal with the invite link after group creation. */
+function showInviteLinkModal(groupName, link) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay visible';
+  overlay.id = 'sharingInviteLinkModal';
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="modal">
+    <h2>${lucideIcon('link', 20)} ${t('sharing.group_created')}</h2>
+    <p>${t('sharing.invite_link_hint', groupName)}</p>
+    <div class="sharing-invite-link-box">
+      <input type="text" id="sharingInviteLinkInput" value="${esc(link)}" readonly onclick="this.select()">
+      <button class="sharing-invite-btn" onclick="sharingCopyLinkValue()">${lucideIcon('copy', 14)} ${t('sharing.copy')}</button>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-save" onclick="document.getElementById('sharingInviteLinkModal').remove()">${t('common.close')}</button>
+    </div>
+  </div>`;
+  document.getElementById('app').appendChild(overlay);
+}
+
+function sharingCopyLinkValue() {
+  const input = document.getElementById('sharingInviteLinkInput');
+  if (input) {
+    navigator.clipboard.writeText(input.value).then(() => {
+      showToast(t('common.copied'), 'success');
+    });
+  }
+}
+
+async function sharingCopyLink(groupId) {
+  const link = state.sharing?.getInviteLink(groupId);
+  if (link) {
+    try {
+      await navigator.clipboard.writeText(link);
+      showToast(t('common.copied'), 'success');
+    } catch {
+      showInviteLinkModal('', link);
+    }
   }
 }
 
@@ -294,6 +351,20 @@ async function sharingLeaveGroup(groupId) {
   );
 }
 
+async function sharingUnjoinGroup(groupId) {
+  showDeleteConfirm(
+    t('sharing.leave'),
+    t('sharing.leave_confirm'),
+    async () => {
+      try {
+        await state.sharing.unjoinGroup(groupId);
+        showToast(t('sharing.left_group'), 'info');
+        renderSharingPane();
+      } catch (e) { showToast(e.message, 'error'); }
+    }
+  );
+}
+
 async function sharingDeleteGroup(groupId) {
   showDeleteConfirm(
     t('sharing.delete_group'),
@@ -306,6 +377,96 @@ async function sharingDeleteGroup(groupId) {
       } catch (e) { showToast(e.message, 'error'); }
     }
   );
+}
+
+// ── Join via invite link (#join=<folderId>) ─────────────────────
+
+/** Handle the #join= hash, called from main.js after Drive init. */
+export async function handleJoinHash(folderId) {
+  if (!state.sharing) return;
+
+  // Try direct access first (works with full drive scope)
+  const group = await state.sharing.tryDirectJoin(folderId);
+  if (group) {
+    showToast(t('sharing.joined_group', group.name || ''), 'success');
+    renderSharingPane();
+    document.dispatchEvent(new CustomEvent('sharing-changed'));
+    return;
+  }
+
+  // Need Picker — show join modal
+  if (!state.driveAdapter?.openSharedFolderPicker) {
+    showToast(t('sharing.join_failed'), 'error');
+    return;
+  }
+
+  showJoinPickerModal(folderId);
+}
+
+function showJoinPickerModal(folderId) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay visible';
+  overlay.id = 'sharingJoinModal';
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="modal">
+    <h2>${lucideIcon('users', 20)} ${t('sharing.join_group')}</h2>
+    <p>${t('sharing.join_picker_hint')}</p>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="document.getElementById('sharingJoinModal').remove()">${t('common.cancel')}</button>
+      <button class="modal-save" id="sharingJoinPickerBtn" onclick="sharingOpenJoinPicker('${escQ(folderId)}')">${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}</button>
+    </div>
+  </div>`;
+  document.getElementById('app').appendChild(overlay);
+}
+
+async function sharingOpenJoinPicker(folderId) {
+  const btn = document.getElementById('sharingJoinPickerBtn');
+  if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
+
+  try {
+    const docs = await state.driveAdapter.openSharedFolderPicker(folderId);
+    if (!docs) {
+      document.getElementById('sharingJoinModal')?.remove();
+      return; // user cancelled
+    }
+
+    // Map Picker results to fileIds
+    const fileIds = {};
+    for (const d of docs) {
+      const key = d.name.replace('.json', '');
+      if (['group', 'todos', 'habits', 'lists'].includes(key)) {
+        fileIds[key] = d.id;
+      }
+    }
+
+    if (!fileIds.group) {
+      // User may have selected the folder itself — try direct access now
+      // (Picker should have granted access to the folder)
+      const folderDoc = docs.find(d => d.mimeType === 'application/vnd.google-apps.folder');
+      if (folderDoc) {
+        const group = await state.sharing.tryDirectJoin(folderDoc.id);
+        if (group) {
+          document.getElementById('sharingJoinModal')?.remove();
+          showToast(t('sharing.joined_group', group.name || ''), 'success');
+          renderSharingPane();
+          document.dispatchEvent(new CustomEvent('sharing-changed'));
+          return;
+        }
+      }
+      showToast(t('sharing.join_no_files'), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = t('sharing.select_files'); }
+      return;
+    }
+
+    const group = await state.sharing.joinWithFileIds(folderId, fileIds);
+    document.getElementById('sharingJoinModal')?.remove();
+    showToast(t('sharing.joined_group', group?.name || ''), 'success');
+    renderSharingPane();
+    document.dispatchEvent(new CustomEvent('sharing-changed'));
+  } catch (e) {
+    showToast(e.message || t('sharing.join_failed'), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = t('sharing.select_files'); }
+  }
 }
 
 // ── Shared badge (used by todos/habits/lists) ───────────────────
@@ -476,7 +637,7 @@ export function applySettingsI18n() {
 
 // ── Expose actions on window ────────────────────────────────────
 
-window.enableSharingMode = enableSharingMode;
+window.enableAutoDiscovery = enableAutoDiscovery;
 window.sharingAddTrusted = sharingAddTrusted;
 window.sharingRemoveTrusted = sharingRemoveTrusted;
 window.sharingCreateGroup = sharingCreateGroup;
@@ -484,6 +645,10 @@ window.sharingCreateGroupSubmit = sharingCreateGroupSubmit;
 window.sharingInvite = sharingInvite;
 window.sharingRemoveMember = sharingRemoveMember;
 window.sharingLeaveGroup = sharingLeaveGroup;
+window.sharingUnjoinGroup = sharingUnjoinGroup;
 window.sharingDeleteGroup = sharingDeleteGroup;
+window.sharingCopyLink = sharingCopyLink;
+window.sharingCopyLinkValue = sharingCopyLinkValue;
+window.sharingOpenJoinPicker = sharingOpenJoinPicker;
 window.submitSharePopover = submitSharePopover;
 window.sharingCompleteSubmit = sharingCompleteSubmit;

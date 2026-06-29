@@ -2,10 +2,50 @@
 // DRIVE SHARING — multi-user shared items via Google Drive folders
 // ===================================================================
 //
+// HYBRID MODEL: two ways to join a shared group
+//
+//   1. LINK JOIN (drive.file scope — default, no scary permissions)
+//      A creates group → A invites B by email (shares folder) →
+//      A sends B invite link (#join=<folderId>) → B opens link →
+//      Google Picker opens → B selects the shared files →
+//      Picker grants drive.file access → B saves file IDs in
+//      DeLaClaw/joined-groups.json → done.
+//
+//   2. AUTO-DISCOVERY (full drive scope — opt-in via Settings)
+//      A creates group → A invites B → B has A in trusted contacts →
+//      B's app auto-discovers via sharedWithMe query → loads group.
+//
+// Both paths produce the same GroupEntry. A single group can have
+// members using either path. Invite links always work regardless of
+// scope.
+//
+// Scenarios (A=Alice, B=Bob, C=Carol, D=Dave):
+//
+//   S1: A(file) creates group, invites B(file) via link
+//       A creates folder+files (app owns → drive.file OK)
+//       A shares folder with B (app owns → OK)
+//       A copies link → sends to B
+//       B opens #join → Picker → selects files → joined
+//
+//   S2: A(file) creates group, B(drive) auto-discovers
+//       A creates+shares as above
+//       B has A in trusted → auto-discovery finds it
+//
+//   S3: A creates, B joins via link, C auto-discovers, D joins later
+//       Mixed modes on the same group — all see same data
+//       D receives link after A adds them as member
+//
+//   S4: B leaves a joined group
+//       B removes from joined-groups.json → polling stops
+//       Drive permissions untouched (B still has user-level access
+//       but DeLaClaw no longer loads it)
+//
 // Folder structure (inside the user's Google Drive):
 //
 //   My Drive/
 //   ├── DeLaClaw/                          ← personal data (existing)
+//   │   ├── joined-groups.json             ← NEW: link-joined group refs
+//   │   └── trusted-contacts.json          ← trusted contacts (existing)
 //   └── DeLaClaw-Shared/                   ← shared root (one per user)
 //       └── DeLaClaw-Shared-{groupId}/     ← per-group subfolder
 //           ├── group.json                 ← metadata + member list
@@ -13,31 +53,18 @@
 //           ├── habits.json                ← shared habits
 //           └── lists.json                 ← shared list items
 //
-// Sharing flow:
-//   1. B adds A to B's trusted contacts (DeLaClaw/trusted-contacts.json)
-//   2. A creates a group → subfolder + group.json + per-type JSONs
-//   3. A invites B by email → Drive permissions.create on the subfolder
-//   4. B's app auto-discovers the folder via sharedWithMe, verifies A is
-//      in B's trusted set → loads group. Untrusted folders are rejected
-//      (own permission removed, folder disappears from future scans).
-//   5. Both read/write per-type JSONs; ETag + updated_at merge on conflict
-//
 // Identity:
 //   User email comes from the Drive About API (no extra OAuth scope needed).
 //
 // Scope:
-//   drive.file — default scope for personal data (creating own files).
-//   drive — upgraded scope when sharing is enabled (localStorage
-//   'dlc_sharing_enabled'). Needed so B can read/write files created
-//   by A in shared folders. The upgrade is triggered from Settings >
-//   Sharing > Enable Sharing, which prompts Google consent.
+//   drive.file — default. Sufficient for creating groups (app owns the
+//   files) and for joining via link (Picker grants per-file access).
+//   drive — optional upgrade for auto-discovery convenience.
 //
 // Trust model:
-//   Each user maintains a trusted contacts list (DeLaClaw/trusted-contacts.json
-//   in their personal DeLaClaw/ folder). On connect, the app auto-discovers
-//   shared folders (DeLaClaw-Shared-*) via sharedWithMe query. For each
-//   folder, the owner's email is checked against the local trusted set
-//   (O(1) Set lookup). Trusted → load. Untrusted → remove own permission.
+//   Link join: explicit user consent (clicking a link + using Picker).
+//   No trusted contacts check needed.
+//   Auto-discovery: trusted contacts whitelist (unchanged).
 //
 // ===================================================================
 
@@ -272,6 +299,7 @@ export function createDriveSharing(getToken, personalFolderId) {
   //   typeData: { todos: [], habits: [], lists: [] },
   //   typeMeta: { todos: { fileId, etag, modifiedTime }, ... },
   //   gMeta: { fileId, etag, modifiedTime },
+  //   joinedViaLink: boolean,   // true if joined via invite link
   // }
 
   // ── Trusted contacts ──
@@ -279,6 +307,11 @@ export function createDriveSharing(getToken, personalFolderId) {
   let _trustedContacts = [];    // array of lowercase email strings
   let _trustedSet = new Set();  // O(1) lookup mirror
   let _trustedMeta = {};        // { fileId, etag }
+
+  // ── Joined groups (link-join, works with drive.file) ──
+
+  let _joinedGroups = [];       // [{ folderId, groupId, fileIds: { group, todos, habits, lists }, joinedAt }]
+  let _joinedMeta = {};         // { fileId, etag }
 
   // ── Internals ──
 
@@ -354,6 +387,83 @@ export function createDriveSharing(getToken, personalFolderId) {
     } catch (err) {
       console.warn('sharing: failed to reject untrusted folder:', err);
     }
+  }
+
+  /** Load joined groups from DeLaClaw/joined-groups.json. */
+  async function loadJoinedGroups() {
+    const tok = await token();
+    const file = await driveFindFile(tok, personalFolderId, 'joined-groups.json');
+    if (file) {
+      try {
+        const { data, etag } = await driveDownload(tok, file.id);
+        _joinedGroups = Array.isArray(data) ? data : [];
+        _joinedMeta = { fileId: file.id, etag };
+      } catch (err) {
+        console.warn('sharing: failed to load joined groups:', err);
+      }
+    }
+  }
+
+  /** Save joined groups to Drive. */
+  async function saveJoinedGroups() {
+    const tok = await token();
+    try {
+      const r = await driveUpload(tok, personalFolderId, _joinedMeta.fileId,
+        'joined-groups.json', _joinedGroups, _joinedMeta.etag);
+      _joinedMeta = { fileId: r.id, etag: r.etag };
+    } catch (err) {
+      if (err.code === 412 && _joinedMeta.fileId) {
+        const { data, etag } = await driveDownload(tok, _joinedMeta.fileId);
+        const remote = Array.isArray(data) ? data : [];
+        // Merge: union by folderId
+        const map = new Map(remote.map(j => [j.folderId, j]));
+        for (const j of _joinedGroups) map.set(j.folderId, j);
+        _joinedGroups = Array.from(map.values());
+        const r2 = await driveUpload(tok, personalFolderId, _joinedMeta.fileId,
+          'joined-groups.json', _joinedGroups);
+        _joinedMeta = { fileId: r2.id, etag: r2.etag };
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  /** Load a joined group using explicit file IDs (no search queries needed). */
+  async function loadGroupWithIds(folderId, groupId, fileIds) {
+    const tok = await token();
+
+    let group = { id: groupId, name: groupId, created_by: null, members: [], created_at: null };
+    let gMeta = {};
+
+    if (fileIds.group) {
+      try {
+        const { data, etag } = await driveDownload(tok, fileIds.group);
+        group = data;
+        gMeta = { fileId: fileIds.group, etag };
+      } catch (err) {
+        console.warn(`sharing: failed to download group.json for joined group ${groupId}:`, err);
+      }
+    }
+
+    const typeData = {};
+    const typeMeta = {};
+    for (const type of ITEM_TYPES) {
+      typeData[type] = [];
+      typeMeta[type] = {};
+      if (fileIds[type]) {
+        try {
+          const { data, etag } = await driveDownload(tok, fileIds[type]);
+          typeData[type] = Array.isArray(data) ? data : [];
+          typeMeta[type] = { fileId: fileIds[type], etag };
+        } catch (err) {
+          console.warn(`sharing: failed to download ${type}.json for joined group ${groupId}:`, err);
+        }
+      }
+    }
+
+    const entry = { folderId, group, typeData, typeMeta, gMeta, joinedViaLink: true };
+    _groups.set(groupId, entry);
+    return entry;
   }
 
   /** Map item_type to the per-type file key. */
@@ -531,13 +641,13 @@ export function createDriveSharing(getToken, personalFolderId) {
       return group;
     },
 
-    /** Load all groups: own (from DeLaClaw-Shared/) + trusted shared (auto-discovery). */
+    /** Load all groups: own + joined (link) + auto-discovered (if full Drive scope). */
     async loadAll() {
       const tok = await token();
       const promises = [];
 
-      // Load trusted contacts first (needed for discovery check)
-      await loadTrusted();
+      // Load trusted contacts + joined groups metadata
+      await Promise.all([loadTrusted(), loadJoinedGroups()]);
 
       // Own groups: list subfolders under DeLaClaw-Shared/
       const rootFolder = await driveFindFolder(tok, SHARED_ROOT_NAME, null);
@@ -551,7 +661,18 @@ export function createDriveSharing(getToken, personalFolderId) {
         }
       }
 
-      // Auto-discover groups shared by trusted contacts
+      // Joined groups (link-join): load using saved file IDs
+      for (const joined of _joinedGroups) {
+        if (_groups.has(joined.groupId)) continue;
+        if (joined.fileIds) {
+          promises.push(loadGroupWithIds(joined.folderId, joined.groupId, joined.fileIds));
+        } else {
+          // Legacy entry without fileIds — try search-based load
+          promises.push(loadGroup(joined.folderId, joined.groupId));
+        }
+      }
+
+      // Auto-discover groups shared by trusted contacts (requires full Drive scope)
       try {
         const user = await ensureUser();
         const shared = await driveDiscoverShared(tok);
@@ -562,12 +683,17 @@ export function createDriveSharing(getToken, personalFolderId) {
             const gid = folder.name.slice(GROUP_PREFIX.length);
             if (!_groups.has(gid)) promises.push(loadGroup(folder.id, gid));
           } else {
-            // Untrusted — remove own permission so it won't appear again
-            promises.push(rejectSharedFolder(tok, folder.id, user.email));
+            // Untrusted + not manually joined → remove own permission
+            const gid = folder.name.slice(GROUP_PREFIX.length);
+            const isJoined = _joinedGroups.some(j => j.folderId === folder.id || j.groupId === gid);
+            if (!isJoined) {
+              promises.push(rejectSharedFolder(tok, folder.id, user.email));
+            }
           }
         }
       } catch (err) {
-        console.warn('sharing: auto-discovery failed:', err);
+        // Auto-discovery may fail with drive.file scope — that's expected
+        if (err.code !== 403) console.warn('sharing: auto-discovery skipped:', err.message);
       }
 
       await Promise.all(promises);
@@ -779,6 +905,8 @@ export function createDriveSharing(getToken, personalFolderId) {
         for (const type of ITEM_TYPES) {
           const meta = e.typeMeta[type];
           if (!meta?.fileId) {
+            // For joined groups without a file ID, skip (can't discover by search under drive.file)
+            if (e.joinedViaLink) continue;
             // Check if file was created by another user since last poll
             try {
               const file = await driveFindFile(tok, e.folderId, `${type}.json`);
@@ -825,7 +953,7 @@ export function createDriveSharing(getToken, personalFolderId) {
         }
       }
 
-      // Discover newly shared groups (trusted contacts only)
+      // Discover newly shared groups (trusted contacts only, requires full Drive scope)
       try {
         const user = await ensureUser();
         const shared = await driveDiscoverShared(tok);
@@ -833,7 +961,9 @@ export function createDriveSharing(getToken, personalFolderId) {
           const gid = folder.name.slice(GROUP_PREFIX.length);
           if (_groups.has(gid)) continue;
           const ownerEmail = folder.owners?.[0]?.emailAddress?.toLowerCase();
-          if (ownerEmail && _trustedSet.has(ownerEmail)) {
+          // Accept if trusted OR if manually joined
+          const isJoined = _joinedGroups.some(j => j.folderId === folder.id || j.groupId === gid);
+          if (ownerEmail && (_trustedSet.has(ownerEmail) || isJoined)) {
             await loadGroup(folder.id, gid);
             changed = true;
             emit('group-discovered', { groupId: gid, group: _groups.get(gid)?.group });
@@ -841,7 +971,10 @@ export function createDriveSharing(getToken, personalFolderId) {
             await rejectSharedFolder(tok, folder.id, user.email);
           }
         }
-      } catch (err) { console.warn('sharing poll discover:', err); }
+      } catch (err) {
+        // Auto-discovery may fail with drive.file scope — that's expected
+        if (err.code !== 403) console.warn('sharing poll discover:', err.message);
+      }
 
       return changed;
     },
@@ -887,6 +1020,85 @@ export function createDriveSharing(getToken, personalFolderId) {
       return () => { _listeners = _listeners.filter(f => f !== fn); };
     },
 
+    // ─── Link join ───
+
+    /** Try to join a shared group by direct folder access (needs full Drive scope).
+     *  Returns the group object on success, null if scope is insufficient. */
+    async tryDirectJoin(folderId) {
+      const tok = await token();
+      try {
+        const children = await driveListChildren(tok, folderId);
+        if (children.length === 0) return null;
+        const fileIds = {};
+        for (const f of children) {
+          const key = f.name.replace('.json', '');
+          if (['group', ...ITEM_TYPES].includes(key)) fileIds[key] = f.id;
+        }
+        if (!fileIds.group) return null;
+        return this.joinWithFileIds(folderId, fileIds);
+      } catch {
+        return null; // permission denied → needs Picker
+      }
+    },
+
+    /** Join a shared group using explicit file IDs (from Picker or direct access).
+     *  @param {string} folderId — the shared subfolder ID
+     *  @param {Object} fileIds — { group: fileId, todos: fileId, habits: fileId, lists: fileId } */
+    async joinWithFileIds(folderId, fileIds) {
+      const tok = await token();
+
+      // Read group.json to get groupId
+      let groupId, groupData;
+      if (fileIds.group) {
+        const { data } = await driveDownload(tok, fileIds.group);
+        groupData = data;
+        groupId = data?.id;
+      }
+      if (!groupId) throw new Error('Could not read group metadata');
+
+      // Already loaded?
+      if (_groups.has(groupId)) {
+        emit('group-joined', { groupId, group: _groups.get(groupId).group });
+        return _groups.get(groupId).group;
+      }
+
+      // Load group data using explicit file IDs
+      await loadGroupWithIds(folderId, groupId, fileIds);
+
+      // Persist in joined-groups.json
+      const entry = { folderId, groupId, fileIds, joinedAt: new Date().toISOString() };
+      const existing = _joinedGroups.findIndex(j => j.folderId === folderId || j.groupId === groupId);
+      if (existing >= 0) _joinedGroups[existing] = entry;
+      else _joinedGroups.push(entry);
+      await saveJoinedGroups();
+
+      const group = _groups.get(groupId)?.group;
+      emit('group-joined', { groupId, group });
+      this.startPolling();
+      return group;
+    },
+
+    /** Leave a joined group (removes from joined-groups.json). */
+    async unjoinGroup(groupId) {
+      _joinedGroups = _joinedGroups.filter(j => j.groupId !== groupId);
+      await saveJoinedGroups();
+      _groups.delete(groupId);
+      emit('group-left', { groupId });
+    },
+
+    /** Get the invite link for a group. */
+    getInviteLink(groupId) {
+      const e = _groups.get(groupId);
+      if (!e) return null;
+      const base = location.origin + location.pathname;
+      return `${base}#join=${e.folderId}`;
+    },
+
+    /** Check if a group was joined via invite link. */
+    isJoinedViaLink(groupId) {
+      return _groups.get(groupId)?.joinedViaLink === true;
+    },
+
     // ─── Lifecycle ───
 
     destroy() {
@@ -895,6 +1107,8 @@ export function createDriveSharing(getToken, personalFolderId) {
       _trustedContacts = [];
       _trustedSet.clear();
       _trustedMeta = {};
+      _joinedGroups = [];
+      _joinedMeta = {};
       _user = null;
       _rootId = null;
       _listeners = [];

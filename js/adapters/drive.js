@@ -269,6 +269,28 @@ function mergeTable(tableName, local, remote) {
 
 // ── Drive Adapter ───────────────────────────────────────────────
 
+// ── Google Picker API (lazy-loaded for sharing join flow) ────────
+
+let _pickerApiLoaded = false;
+
+async function ensurePickerApi() {
+  if (_pickerApiLoaded) return;
+  // Wait for gapi script to load
+  if (typeof gapi === 'undefined') {
+    await new Promise((resolve, reject) => {
+      let elapsed = 0;
+      const iv = setInterval(() => {
+        if (typeof gapi !== 'undefined') { clearInterval(iv); resolve(); }
+        elapsed += 100;
+        if (elapsed > 10000) { clearInterval(iv); reject(new Error('Google API not loaded')); }
+      }, 100);
+    });
+  }
+  await new Promise((resolve, reject) => {
+    gapi.load('picker', { callback: () => { _pickerApiLoaded = true; resolve(); }, onerror: reject });
+  });
+}
+
 export async function createDriveAdapter(clientId, onStatus, { silent = false } = {}) {
   // onStatus receives: { status, message?, progress?, total? }
   const emit = (status, message, progress, total) => {
@@ -653,6 +675,49 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
     get sharingEnabled() {
       return localStorage.getItem('dlc_sharing_enabled') === 'true';
+    },
+
+    /** Open Google Picker to select files inside a shared folder.
+     *  Used for drive.file scope: Picker grants per-file access. */
+    async openSharedFolderPicker(folderId) {
+      await ensurePickerApi();
+      const tok = await getToken();
+      const appId = clientId.split('-')[0];
+
+      return new Promise((resolve) => {
+        // Primary view: contents of the shared folder
+        const folderView = new google.picker.DocsView()
+          .setParent(folderId)
+          .setIncludeFolders(false)
+          .setMode(google.picker.DocsViewMode.LIST);
+
+        // Fallback view: "Shared with me" (in case setParent fails)
+        const sharedView = new google.picker.DocsView()
+          .setOwnedByMe(false)
+          .setIncludeFolders(true)
+          .setSelectFolderEnabled(true);
+
+        const picker = new google.picker.PickerBuilder()
+          .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+          .addView(folderView)
+          .addView(sharedView)
+          .setOAuthToken(tok)
+          .setAppId(appId)
+          .setCallback((data) => {
+            if (data.action === google.picker.Action.PICKED) {
+              resolve(data.docs.map(d => ({
+                id: d[google.picker.Document.ID],
+                name: d[google.picker.Document.NAME],
+                mimeType: d[google.picker.Document.MIME_TYPE],
+              })));
+            } else if (data.action === google.picker.Action.CANCEL) {
+              resolve(null);
+            }
+          })
+          .build();
+
+        picker.setVisible(true);
+      });
     },
 
     // Callback for external change notification

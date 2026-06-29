@@ -1125,6 +1125,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
         {
           hasAutoDiscovery: () => state.driveAdapter.sharingEnabled,
           requestAutoDiscovery: () => state.driveAdapter.requestScopeUpgrade(),
+          revokeAutoDiscovery: () => state.driveAdapter.revokeSharingScope(),
           openJoinPicker: (folderId) => state.driveAdapter.openSharedFolderPicker(folderId),
         },
       );

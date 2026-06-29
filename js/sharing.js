@@ -293,6 +293,7 @@ async function migrateItemsJson(tok, folderId, entry) {
  *   implementations (or omit the ones that don't apply).
  * @param {() => boolean}            [capabilities.hasAutoDiscovery]
  * @param {() => Promise<void>}      [capabilities.requestAutoDiscovery]
+ * @param {() => void}               [capabilities.revokeAutoDiscovery]
  * @param {(folderId: string) => Promise<Array|null>} [capabilities.openJoinPicker]
  */
 export function createDriveSharing(getToken, personalFolderId, capabilities = {}) {
@@ -1121,6 +1122,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (!capabilities.requestAutoDiscovery) throw new Error('Auto-discovery not available for this backend');
       await capabilities.requestAutoDiscovery();
       await loadTrusted();
+    },
+
+    /** Revoke auto-discovery (downgrade scope). */
+    revokeAutoDiscovery() {
+      if (capabilities.revokeAutoDiscovery) capabilities.revokeAutoDiscovery();
     },
 
     /** Open a backend-specific file picker for join-via-link.

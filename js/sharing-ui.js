@@ -163,7 +163,10 @@ export async function renderSharingPane() {
       <input type="email" class="sharing-invite-input" id="sharingTrustedInput" placeholder="${t('sharing.trusted_placeholder')}" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingAddTrusted();}">
       <button class="sharing-invite-btn" onclick="sharingAddTrusted()">${lucideIcon('user-plus', 14)} ${t('common.add')}</button>
     </div>
-    </div>`;
+    </div>
+    <button class="sharing-action-btn sharing-danger-btn" id="disableAutoDiscoveryBtn" onclick="disableAutoDiscovery()">
+      ${lucideIcon('lock', 14)} ${t('sharing.disable_auto_discovery')}
+    </button>`;
   } else {
     html += `<p class="setting-hint">${t('sharing.auto_discovery_hint')}</p>
     <button class="sharing-action-btn" id="enableAutoDiscoveryBtn" onclick="enableAutoDiscovery()">
@@ -189,6 +192,13 @@ async function enableAutoDiscovery() {
     showToast(e.message || t('sharing.enable_failed'), 'error');
     if (btn) { btn.disabled = false; btn.style.opacity = ''; }
   }
+}
+
+function disableAutoDiscovery() {
+  if (!confirm(t('sharing.disable_auto_discovery_confirm'))) return;
+  state.sharing.revokeAutoDiscovery();
+  showToast(t('sharing.auto_discovery'), 'info');
+  renderSharingPane();
 }
 
 async function sharingAddTrusted() {
@@ -637,6 +647,7 @@ export function applySettingsI18n() {
 // ── Expose actions on window ────────────────────────────────────
 
 window.enableAutoDiscovery = enableAutoDiscovery;
+window.disableAutoDiscovery = disableAutoDiscovery;
 window.sharingAddTrusted = sharingAddTrusted;
 window.sharingRemoveTrusted = sharingRemoveTrusted;
 window.sharingCreateGroup = sharingCreateGroup;

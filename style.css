@@ -1979,3 +1979,6 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .sharing-auto-section h4{font-size:0.85rem;font-weight:600;margin:0 0 6px;}
 .sharing-auto-hint{font-size:0.78rem;color:var(--muted);margin:0 0 10px;line-height:1.4;}
 .sharing-join-modal-hint{font-size:0.82rem;color:var(--muted);margin:0 0 12px;line-height:1.4;}
+
+.sharing-danger-btn{color:var(--danger,#e74c3c);border-color:color-mix(in srgb, var(--danger,#e74c3c) 25%, transparent);margin-top:10px;}
+.sharing-danger-btn:hover{background:color-mix(in srgb, var(--danger,#e74c3c) 8%, transparent);}

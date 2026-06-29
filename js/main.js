@@ -355,7 +355,8 @@ function initGate() {
   localStorage.removeItem('claw_signup_mode');
   // Set login hash (user is on the login page) — preserve #setup if present
   // Skip hero when returning from signup — go straight to the login form
-  if (window.location.hash !== '#setup' && !signupMode) {
+  const isJoinLink = window.location.hash.startsWith('#join=');
+  if (window.location.hash !== '#setup' && !signupMode && !isJoinLink) {
     history.replaceState(null, '', '#login');
     showHero();
   }
@@ -3405,9 +3406,9 @@ function switchView(view) {
   }
   state.currentView = view;
   localStorage.setItem(CURRENT_VIEW_KEY, view);
-  // Sync URL hash (no reload)
+  // Sync URL hash (no reload) — but preserve #join= invite links
   const newHash = '#' + view;
-  if (location.hash !== newHash) history.replaceState(null, '', newHash);
+  if (location.hash !== newHash && !location.hash.startsWith('#join=')) history.replaceState(null, '', newHash);
   const welcomeView = document.getElementById('welcomeView');
   const projectsView = document.getElementById('projectsView');
   const todosView = document.getElementById('todosView');

@@ -970,6 +970,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         if (e.gMeta.fileId) {
           try {
             const meta = await driveFileMeta(tok, e.gMeta.fileId);
+            e.notFoundStrikes = 0;  // successful fetch — reset 404 counter
             if (meta.modifiedTime > (e.gMeta.modifiedTime || '')) {
               const { data, etag } = await driveDownload(tok, e.gMeta.fileId);
               if (data && JSON.stringify(data) !== JSON.stringify(e.group)) {
@@ -981,9 +982,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
               }
             }
           } catch (err) {
-            // 404 = group was deleted (folder trashed) or access revoked → mark for cleanup
+            // 404 = group may have been deleted (folder trashed) or access revoked
+            // Require 3 consecutive 404s before purging (guards against transient Drive hiccups)
             if (err?.code === 404 || err?.status === 404) {
-              staleGroupIds.push(groupId);
+              e.notFoundStrikes = (e.notFoundStrikes || 0) + 1;
+              if (e.notFoundStrikes >= 3) staleGroupIds.push(groupId);
             } else {
               console.warn(`sharing poll group ${groupId}:`, err);
             }

@@ -819,6 +819,9 @@ async function editTodoInline(id, itemEl) {
 function initTodoModals() {
   const app = document.getElementById('app');
 
+  // Re-render shared TODOs when sharing data changes (poll, join, etc.)
+  document.addEventListener('sharing-changed', () => renderSharedTodos());
+
   // Snooze Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'snoozeModal';

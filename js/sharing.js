@@ -722,7 +722,26 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     async deleteGroup(groupId) {
       const e = _groups.get(groupId);
       if (!e) return;
+      const user = await ensureUser();
+
+      // Only the creator can delete
+      if (e.group.created_by?.email?.toLowerCase() !== user.email.toLowerCase()) {
+        throw new Error('Only the group creator can delete it');
+      }
+
       const tok = await token();
+
+      // Revoke Drive permissions for all non-owner members before trashing
+      try {
+        const perms = await driveListPermissions(tok, e.folderId);
+        for (const perm of perms) {
+          // Keep owner permission, revoke everyone else
+          if (perm.role === 'owner') continue;
+          try { await driveRemovePermission(tok, e.folderId, perm.id); }
+          catch (err) { console.warn('sharing: failed to revoke permission for', perm.emailAddress, err); }
+        }
+      } catch (err) { console.warn('sharing: could not list permissions before delete:', err); }
+
       // Trash the entire subfolder (recoverable on Drive)
       await fetch(`https://www.googleapis.com/drive/v3/files/${e.folderId}`, {
         method: 'PATCH',
@@ -910,6 +929,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     async poll() {
       const tok = await token();
       let changed = false;
+      const staleGroupIds = [];  // groups to remove after iteration
 
       for (const [groupId, e] of _groups) {
         // Poll per-type files
@@ -960,8 +980,28 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
                 emit('group-changed', { groupId, group: e.group });
               }
             }
-          } catch (err) { console.warn(`sharing poll group ${groupId}:`, err); }
+          } catch (err) {
+            // 404 = group was deleted (folder trashed) or access revoked → mark for cleanup
+            if (err?.code === 404 || err?.status === 404) {
+              staleGroupIds.push(groupId);
+            } else {
+              console.warn(`sharing poll group ${groupId}:`, err);
+            }
+          }
         }
+      }
+
+      // Clean up groups whose files are gone (deleted by creator or access revoked)
+      if (staleGroupIds.length) {
+        for (const gid of staleGroupIds) {
+          _groups.delete(gid);
+          emit('group-deleted', { groupId: gid });
+        }
+        // Purge from joined-groups.json
+        const before = _joinedGroups.length;
+        _joinedGroups = _joinedGroups.filter(j => !staleGroupIds.includes(j.groupId));
+        if (_joinedGroups.length !== before) saveJoinedGroups().catch(() => {});
+        changed = true;
       }
 
       // Discover newly shared groups (trusted contacts only, requires full Drive scope)

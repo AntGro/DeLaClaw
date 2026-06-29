@@ -1119,7 +1119,15 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     // Wire up Drive sharing module
     try {
       const { createDriveSharing } = await import('./sharing.js');
-      state.sharing = createDriveSharing(() => state.driveAdapter.getToken(), state.driveAdapter.driveFolderId);
+      state.sharing = createDriveSharing(
+        () => state.driveAdapter.getToken(),
+        state.driveAdapter.driveFolderId,
+        {
+          hasAutoDiscovery: () => state.driveAdapter.sharingEnabled,
+          requestAutoDiscovery: () => state.driveAdapter.requestScopeUpgrade(),
+          openJoinPicker: (folderId) => state.driveAdapter.openSharedFolderPicker(folderId),
+        },
+      );
       state.sharing.loadAll().catch(e => console.warn('sharing loadAll:', e));
       state.sharing.startPolling();
       state.sharing.onUpdate(() => {

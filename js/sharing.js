@@ -285,7 +285,17 @@ async function migrateItemsJson(tok, folderId, entry) {
  * @param {string} appId  — Google Cloud project number (numeric prefix of client ID)
  * @returns {DriveSharingManager}
  */
-export function createDriveSharing(getToken, personalFolderId) {
+/**
+ * @param {() => Promise<string>} getToken
+ * @param {string} personalFolderId
+ * @param {Object} [capabilities]  — backend-specific hooks so the UI never
+ *   reaches past state.sharing. A future Supabase backend would supply its own
+ *   implementations (or omit the ones that don't apply).
+ * @param {() => boolean}            [capabilities.hasAutoDiscovery]
+ * @param {() => Promise<void>}      [capabilities.requestAutoDiscovery]
+ * @param {(folderId: string) => Promise<Array|null>} [capabilities.openJoinPicker]
+ */
+export function createDriveSharing(getToken, personalFolderId, capabilities = {}) {
   let _user   = null;            // { email, name, photo }
   let _rootId  = null;           // DeLaClaw-Shared folder id (own)
   const _groups = new Map();     // groupId → GroupEntry
@@ -1098,6 +1108,25 @@ export function createDriveSharing(getToken, personalFolderId) {
     isJoinedViaLink(groupId) {
       return _groups.get(groupId)?.joinedViaLink === true;
     },
+
+    // ─── Backend capabilities (injected, backend-agnostic) ───
+
+    /** Whether auto-discovery (full drive scope / equivalent) is active. */
+    hasAutoDiscovery() {
+      return capabilities.hasAutoDiscovery?.() ?? false;
+    },
+
+    /** Request auto-discovery upgrade + load trusted contacts. */
+    async requestAutoDiscovery() {
+      if (!capabilities.requestAutoDiscovery) throw new Error('Auto-discovery not available for this backend');
+      await capabilities.requestAutoDiscovery();
+      await loadTrusted();
+    },
+
+    /** Open a backend-specific file picker for join-via-link.
+     *  Returns array of selected docs or null if cancelled.
+     *  Null/undefined when the backend has no picker concept. */
+    openJoinPicker: capabilities.openJoinPicker ?? null,
 
     // ─── Lifecycle ───
 

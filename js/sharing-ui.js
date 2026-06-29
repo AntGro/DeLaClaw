@@ -74,7 +74,7 @@ export async function renderSharingPane() {
     if (!_currentUser) _currentUser = await state.sharing.getCurrentUser();
   } catch { _currentUser = null; }
 
-  const autoDiscoveryEnabled = state.driveAdapter?.sharingEnabled;
+  const autoDiscoveryEnabled = state.sharing.hasAutoDiscovery();
 
   let html = '';
 
@@ -182,8 +182,7 @@ async function enableAutoDiscovery() {
   const btn = document.getElementById('enableAutoDiscoveryBtn');
   if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
   try {
-    await state.driveAdapter.requestScopeUpgrade();
-    await state.sharing.loadTrustedContacts();
+    await state.sharing.requestAutoDiscovery();
     showToast(t('sharing.auto_discovery_enabled'), 'success');
     renderSharingPane();
   } catch (e) {
@@ -395,7 +394,7 @@ export async function handleJoinHash(folderId) {
   }
 
   // Need Picker — show join modal
-  if (!state.driveAdapter?.openSharedFolderPicker) {
+  if (!state.sharing.openJoinPicker) {
     showToast(t('sharing.join_failed'), 'error');
     return;
   }
@@ -424,7 +423,7 @@ async function sharingOpenJoinPicker(folderId) {
   if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
 
   try {
-    const docs = await state.driveAdapter.openSharedFolderPicker(folderId);
+    const docs = await state.sharing.openJoinPicker(folderId);
     if (!docs) {
       document.getElementById('sharingJoinModal')?.remove();
       return; // user cancelled

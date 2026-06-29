@@ -839,6 +839,9 @@ function formatHabitRelative(d) {
 function initHabitModals() {
   const app = document.getElementById('app');
 
+  // Re-render shared habits when sharing data changes
+  document.addEventListener('sharing-changed', () => renderSharedHabits());
+
   // Add Habit Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'addHabitModal';

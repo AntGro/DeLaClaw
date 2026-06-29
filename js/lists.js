@@ -480,6 +480,9 @@ async function deleteListItem(id) {
 function initListModals() {
   const app = document.getElementById('app');
 
+  // Re-render shared list items when sharing data changes
+  document.addEventListener('sharing-changed', () => renderSharedListItems());
+
   // Add List Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay';

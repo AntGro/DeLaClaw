@@ -364,15 +364,26 @@ function editListItemInlineFull(id) {
   extras.className = 'inline-edit-extras';
 
   const row = document.createElement('div');
-  row.className = 'inline-edit-row';
+  row.className = 'inline-edit-row inline-edit-row-note';
   const label = document.createElement('label');
   label.className = 'inline-edit-label';
   label.textContent = t('common.notes');
-  const input = document.createElement('input');
-  input.type = 'text';
+  const input = document.createElement('textarea');
   input.className = 'inline-edit-input';
   input.value = item.note || '';
   input.placeholder = t('lists.note_placeholder');
+  input.rows = 2;
+  input.style.resize = 'vertical';
+  input.style.fontFamily = 'inherit';
+  // Allow Enter to create newlines — stop propagation so extraEl handler doesn't finishEdit
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') e.stopPropagation();
+  });
+  // Auto-size the textarea
+  input.addEventListener('input', () => {
+    input.style.height = '0';
+    input.style.height = input.scrollHeight + 'px';
+  });
   row.appendChild(label);
   row.appendChild(input);
   extras.appendChild(row);

@@ -854,6 +854,9 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .freq-picker-inline{flex:1;min-width:0;}
 .inline-edit-row-freq{flex-direction:column;align-items:stretch;gap:4px;}
 .inline-edit-row-freq .inline-edit-label{min-width:auto;}
+.inline-edit-row-note{flex-direction:column;align-items:stretch;gap:4px;}
+.inline-edit-row-note .inline-edit-label{min-width:auto;}
+.inline-edit-row-note textarea.inline-edit-input{min-height:48px;line-height:1.5;white-space:pre-wrap;}
 
 /* Habit Done Modal */
 .habit-done-modal{max-width:400px;}
@@ -1697,7 +1700,7 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .list-item-checked .list-item-text{text-decoration:line-through;}
 .list-item-row{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px;}
 .list-item-text{font-size:0.88rem;font-weight:500;}
-.list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;}
+.list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;white-space:pre-line;}
 .list-check-btn{background:none;border:none;cursor:pointer;padding:2px;flex-shrink:0;}
 .list-item-actions{display:grid;grid-template-columns:auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
 .list-item-actions.visible{max-width:80px;opacity:1;pointer-events:auto;}

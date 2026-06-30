@@ -195,12 +195,11 @@ async function enableAutoDiscovery() {
   }
 }
 
-async function disableAutoDiscovery() {
+function disableAutoDiscovery() {
   if (!confirm(t('sharing.disable_auto_discovery_confirm'))) return;
-  await state.sharing.revokeAutoDiscovery();
+  state.sharing.revokeAutoDiscovery();
   showToast(t('sharing.auto_discovery'), 'info');
   renderSharingPane();
-  // Refresh backend scope display in General pane
   if (typeof populateBackendInfo === 'function') populateBackendInfo();
 }
 

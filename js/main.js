@@ -2122,20 +2122,29 @@ async function populateBackendInfo() {
   const details = document.getElementById('settingsBackendDetails');
   if (!container || !details) return;
 
-  if (!state.driveAdapter?.getGrantedScopes) {
+  if (!state.driveAdapter) {
     container.style.display = 'none';
     return;
   }
 
   container.style.display = '';
-  details.textContent = '…';
 
   try {
     const scopes = await state.driveAdapter.getGrantedScopes();
-    const hasFullDrive = scopes.includes('https://www.googleapis.com/auth/drive');
-    const hasFileOnly = scopes.includes('https://www.googleapis.com/auth/drive.file');
-    const scopeLabel = hasFullDrive ? t('menu.settings_scope_full_drive') : hasFileOnly ? t('menu.settings_scope_drive_file') : t('menu.settings_scope_unknown');
-    const scopeHint = hasFullDrive ? t('menu.settings_scope_full_hint') : t('menu.settings_scope_file_hint');
+    let scopeLabel, scopeHint;
+
+    if (scopes) {
+      // Real scope data from tokeninfo
+      const hasFullDrive = scopes.includes('https://www.googleapis.com/auth/drive');
+      const hasFileOnly = scopes.includes('https://www.googleapis.com/auth/drive.file');
+      scopeLabel = hasFullDrive ? t('menu.settings_scope_full_drive') : hasFileOnly ? t('menu.settings_scope_drive_file') : t('menu.settings_scope_unknown');
+      scopeHint = hasFullDrive ? t('menu.settings_scope_full_hint') : t('menu.settings_scope_file_hint');
+    } else {
+      // No token cached yet — show configured scope
+      const configured = state.driveAdapter.sharingEnabled;
+      scopeLabel = configured ? t('menu.settings_scope_full_drive') : t('menu.settings_scope_drive_file');
+      scopeHint = configured ? t('menu.settings_scope_full_hint') : t('menu.settings_scope_file_hint');
+    }
 
     details.innerHTML = `<span class="backend-scope-label">${esc(scopeLabel)}</span><br><span class="setting-hint">${esc(scopeHint)}</span>`;
   } catch {

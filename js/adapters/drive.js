@@ -27,8 +27,6 @@ const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
 const DRIVE_SCOPE_FULL = 'https://www.googleapis.com/auth/drive';
 
 function getDriveScope() {
-  // Use cached scope check if available; fall back to localStorage hint for initial auth
-  if (_cachedScopes) return hasFullDriveScope(_cachedScopes) ? DRIVE_SCOPE_FULL : DRIVE_SCOPE_FILE;
   return localStorage.getItem('dlc_sharing_enabled') === 'true'
     ? DRIVE_SCOPE_FULL
     : DRIVE_SCOPE_FILE;
@@ -692,34 +690,21 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     },
 
     /** Downgrade back to drive.file scope (disables sharing). */
-    async revokeSharingScope() {
-      // Revoke the current Google token so GIS doesn't silently reissue full-scope
-      const tok = _cachedToken;
+    revokeSharingScope() {
       localStorage.removeItem('dlc_sharing_enabled');
       _cachedScopes = null;
       clearDriveTokenCache();
-      if (tok) {
-        try {
-          await fetch(`https://oauth2.googleapis.com/revoke?token=${tok}`, { method: 'POST' });
-        } catch { /* best effort */ }
-      }
-      // Force GIS to forget the cached credential
-      if (window.google?.accounts?.oauth2) {
-        try { google.accounts.oauth2.revoke(tok, () => {}); } catch { /* best effort */ }
-      }
     },
 
-    /** Check granted scopes from tokeninfo (cached, async). */
+    /** Check granted scopes from tokeninfo (cached, async).
+     *  Returns null if no token is available — never triggers auth. */
     async getGrantedScopes() {
       if (_cachedScopes) return _cachedScopes;
-      const tok = await getToken();
-      if (!tok) return [];
-      return await fetchGrantedScopes(tok) || [];
+      if (!_cachedToken) return null;
+      return await fetchGrantedScopes(_cachedToken) || null;
     },
 
     get sharingEnabled() {
-      // Synchronous check — uses cached scopes if available, else localStorage hint
-      if (_cachedScopes) return hasFullDriveScope(_cachedScopes);
       return localStorage.getItem('dlc_sharing_enabled') === 'true';
     },
 

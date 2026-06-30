@@ -1168,8 +1168,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     },
 
     /** Revoke auto-discovery (downgrade scope). */
-    async revokeAutoDiscovery() {
-      if (capabilities.revokeAutoDiscovery) await capabilities.revokeAutoDiscovery();
+    revokeAutoDiscovery() {
+      if (capabilities.revokeAutoDiscovery) capabilities.revokeAutoDiscovery();
     },
 
     /** Open a backend-specific file picker for join-via-link.

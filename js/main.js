@@ -1774,6 +1774,8 @@ function updateStaticLabels() {
   applySharingI18n();
   const settingsDisplayLabel = document.getElementById('settingsDisplayLabel');
   if (settingsDisplayLabel) settingsDisplayLabel.textContent = t('menu.settings_display');
+  const settingsBackendLabel = document.getElementById('settingsBackendLabel');
+  if (settingsBackendLabel) settingsBackendLabel.textContent = t('menu.settings_backend');
   const settingsNvidiaKeyLabel = document.getElementById('settingsNvidiaKeyLabel');
   if (settingsNvidiaKeyLabel) settingsNvidiaKeyLabel.textContent = t('menu.settings_nvidia_key');
   const settingsNvidiaKeyHint = document.getElementById('settingsNvidiaKeyHint');
@@ -2095,6 +2097,8 @@ function openSettings() {
   if (toggleBtn) toggleBtn.innerHTML = `<span data-icon="eye" data-size="16"></span>`;
   // Reset to first pane
   switchSettingsPane('general');
+  // Populate backend info for Drive users
+  populateBackendInfo();
   // Init theme toggle state
   updateMenuThemeItem();
   hydrateIcons();
@@ -2111,6 +2115,32 @@ function closeSettings() {
   const scrollY = parseInt(document.body.dataset.scrollY || '0', 10);
   document.body.style.top = '';
   window.scrollTo(0, scrollY);
+}
+
+async function populateBackendInfo() {
+  const container = document.getElementById('settingsBackendInfo');
+  const details = document.getElementById('settingsBackendDetails');
+  if (!container || !details) return;
+
+  if (!state.driveAdapter?.getGrantedScopes) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = '';
+  details.textContent = '…';
+
+  try {
+    const scopes = await state.driveAdapter.getGrantedScopes();
+    const hasFullDrive = scopes.includes('https://www.googleapis.com/auth/drive');
+    const hasFileOnly = scopes.includes('https://www.googleapis.com/auth/drive.file');
+    const scopeLabel = hasFullDrive ? t('menu.settings_scope_full_drive') : hasFileOnly ? t('menu.settings_scope_drive_file') : t('menu.settings_scope_unknown');
+    const scopeHint = hasFullDrive ? t('menu.settings_scope_full_hint') : t('menu.settings_scope_file_hint');
+
+    details.innerHTML = `<span class="backend-scope-label">${esc(scopeLabel)}</span><br><span class="setting-hint">${esc(scopeHint)}</span>`;
+  } catch {
+    details.textContent = t('menu.settings_scope_unavailable');
+  }
 }
 
 function switchSettingsPane(paneKey) {

@@ -24,35 +24,14 @@ import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
 import { t } from '../i18n.js';
 
 const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
-const DRIVE_SCOPE_FULL = 'https://www.googleapis.com/auth/drive';
 
 function getDriveScope() {
-  return localStorage.getItem('dlc_sharing_enabled') === 'true'
-    ? DRIVE_SCOPE_FULL
-    : DRIVE_SCOPE_FILE;
+  return DRIVE_SCOPE_FILE;
 }
 const DRIVE_FOLDER_NAME = 'DeLaClaw';
 const DEBOUNCE_MS = 2000;
 const POLL_INTERVAL_MS = 30000;
 const MAX_RETRIES = 2;
-
-/** Cache for granted scopes (refreshed on token change). */
-let _cachedScopes = null;
-
-async function fetchGrantedScopes(accessToken) {
-  try {
-    const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${accessToken}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const scopes = data.scope ? data.scope.split(' ') : [];
-    _cachedScopes = scopes;
-    return scopes;
-  } catch { return null; }
-}
-
-function hasFullDriveScope(scopes) {
-  return scopes?.includes(DRIVE_SCOPE_FULL) ?? false;
-}
 
 // Tables that map to individual Drive files
 const DRIVE_TABLES = [
@@ -120,7 +99,6 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
           _cachedToken = resp.access_token;
           _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
           _persistToken(_cachedToken, _tokenExpiry);
-          fetchGrantedScopes(resp.access_token);  // fire-and-forget scope cache
           resolve(resp.access_token);
         }
       },
@@ -678,35 +656,6 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
     /** Expose token getter for sharing module. */
     getToken,
-
-    /** Upgrade OAuth to full Drive scope for sharing features. */
-    async requestScopeUpgrade() {
-      localStorage.setItem('dlc_sharing_enabled', 'true');  // hint for next getDriveScope()
-      _cachedScopes = null;
-      clearDriveTokenCache();
-      const tok = await getGoogleAccessToken(clientId, true);
-      await fetchGrantedScopes(tok);
-      return tok;
-    },
-
-    /** Downgrade back to drive.file scope (disables sharing). */
-    revokeSharingScope() {
-      localStorage.removeItem('dlc_sharing_enabled');
-      _cachedScopes = null;
-      clearDriveTokenCache();
-    },
-
-    /** Check granted scopes from tokeninfo (cached, async).
-     *  Returns null if no token is available — never triggers auth. */
-    async getGrantedScopes() {
-      if (_cachedScopes) return _cachedScopes;
-      if (!_cachedToken) return null;
-      return await fetchGrantedScopes(_cachedToken) || null;
-    },
-
-    get sharingEnabled() {
-      return localStorage.getItem('dlc_sharing_enabled') === 'true';
-    },
 
     /** Open Google Picker to select files inside a shared folder.
      *  Used for drive.file scope: Picker grants per-file access. */

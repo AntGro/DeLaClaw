@@ -1946,9 +1946,6 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .sharing-delete-btn:hover{color:#ef4444;}
 .sharing-bottom-actions{display:flex;gap:8px;margin-top:12px;}
 .sharing-empty-actions{display:flex;gap:8px;justify-content:center;margin-top:8px;}
-.sharing-antispam-notice{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;margin-bottom:12px;border-radius:8px;background:color-mix(in srgb, var(--accent) 8%, transparent);border:1px solid color-mix(in srgb, var(--accent) 20%, transparent);font-size:0.8rem;color:var(--muted);line-height:1.4;}
-.sharing-antispam-notice svg{flex-shrink:0;margin-top:1px;color:var(--accent);}
-.sharing-trusted-list{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;}
 .sharing-join-btn{border-color:var(--muted);}
 .sharing-avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff;font-weight:600;flex-shrink:0;line-height:1;}
 .shared-badge{font-size:0.72rem;color:var(--muted);background:color-mix(in srgb, var(--accent) 8%, transparent);padding:1px 6px;border-radius:4px;display:inline-flex;align-items:center;gap:3px;white-space:nowrap;flex-shrink:0;}
@@ -1982,5 +1979,3 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 
 .sharing-danger-btn{color:var(--danger,#e74c3c);border-color:color-mix(in srgb, var(--danger,#e74c3c) 25%, transparent);margin-top:10px;}
 .sharing-danger-btn:hover{background:color-mix(in srgb, var(--danger,#e74c3c) 8%, transparent);}
-
-.backend-scope-label{font-weight:600;font-size:0.85rem;}

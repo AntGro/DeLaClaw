@@ -74,8 +74,6 @@ export async function renderSharingPane() {
     if (!_currentUser) _currentUser = await state.sharing.getCurrentUser();
   } catch { _currentUser = null; }
 
-  const autoDiscoveryEnabled = state.sharing.hasAutoDiscovery();
-
   let html = '';
 
   // ── Groups section ──
@@ -133,103 +131,10 @@ export async function renderSharingPane() {
       <button class="sharing-action-btn" onclick="sharingCreateGroup()">${lucideIcon('plus', 14)} ${t('sharing.create_group')}</button>
     </div>`;
 
-  // ── Auto-discovery section ──
-  html += `<div class="setting-group">
-    <div class="setting-group-label">${t('sharing.auto_discovery')}</div>`;
-
-  if (autoDiscoveryEnabled) {
-    html += `<p class="setting-hint">${t('sharing.auto_discovery_active')}</p>`;
-
-    // Trusted contacts
-    const trusted = state.sharing.getTrustedContacts();
-
-    html += `<div class="setting-group">
-      <div class="setting-group-label">${t('sharing.trusted_contacts')}</div>
-      <p class="setting-hint">${t('sharing.trusted_hint')}</p>`;
-
-    if (trusted.length > 0) {
-      html += `<div class="sharing-trusted-list">`;
-      for (const email of trusted) {
-        html += `<div class="sharing-member">
-          ${avatarDot({ email, name: '' }, 22)}
-          <span class="sharing-member-email">${esc(email)}</span>
-          <button class="sharing-remove-btn" onclick="sharingRemoveTrusted('${escQ(email)}')" title="${t('common.delete')}">${lucideIcon('x', 12)}</button>
-        </div>`;
-      }
-      html += `</div>`;
-    }
-
-    html += `<div class="sharing-invite-row">
-      <input type="email" class="sharing-invite-input" id="sharingTrustedInput" placeholder="${t('sharing.trusted_placeholder')}" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingAddTrusted();}">
-      <button class="sharing-invite-btn" onclick="sharingAddTrusted()">${lucideIcon('user-plus', 14)} ${t('common.add')}</button>
-    </div>
-    </div>
-    <button class="sharing-action-btn sharing-danger-btn" id="disableAutoDiscoveryBtn" onclick="disableAutoDiscovery()">
-      ${lucideIcon('lock', 14)} ${t('sharing.disable_auto_discovery')}
-    </button>`;
-  } else {
-    html += `<p class="setting-hint">${t('sharing.auto_discovery_hint')}</p>
-    <button class="sharing-action-btn" id="enableAutoDiscoveryBtn" onclick="enableAutoDiscovery()">
-      ${lucideIcon('unlock', 16)} ${t('sharing.enable_auto_discovery')}
-    </button>`;
-  }
-
-  html += `</div>`;
-
   container.innerHTML = html;
 }
 
 // ── Actions (exposed on window) ─────────────────────────────────
-
-async function enableAutoDiscovery() {
-  const btn = document.getElementById('enableAutoDiscoveryBtn');
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
-  try {
-    await state.sharing.requestAutoDiscovery();
-    showToast(t('sharing.auto_discovery_enabled'), 'success');
-    renderSharingPane();
-    if (typeof populateBackendInfo === 'function') populateBackendInfo();
-  } catch (e) {
-    showToast(e.message || t('sharing.enable_failed'), 'error');
-    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
-  }
-}
-
-function disableAutoDiscovery() {
-  if (!confirm(t('sharing.disable_auto_discovery_confirm'))) return;
-  state.sharing.revokeAutoDiscovery();
-  showToast(t('sharing.auto_discovery'), 'info');
-  renderSharingPane();
-  if (typeof populateBackendInfo === 'function') populateBackendInfo();
-}
-
-async function sharingAddTrusted() {
-  const input = document.getElementById('sharingTrustedInput');
-  const email = input?.value.trim();
-  if (!email) return;
-  try {
-    await state.sharing.addTrustedContact(email);
-    input.value = '';
-    showToast(t('sharing.trusted_added'), 'success');
-    renderSharingPane();
-  } catch (e) {
-    showToast(e.message, 'error');
-  }
-}
-
-async function sharingRemoveTrusted(email) {
-  showDeleteConfirm(
-    t('sharing.remove_trusted'),
-    t('sharing.remove_trusted_confirm', email),
-    async () => {
-      try {
-        await state.sharing.removeTrustedContact(email);
-        showToast(t('sharing.trusted_removed'), 'info');
-        renderSharingPane();
-      } catch (e) { showToast(e.message, 'error'); }
-    }
-  );
-}
 
 async function sharingCreateGroup() {
   const overlay = document.createElement('div');
@@ -238,10 +143,6 @@ async function sharingCreateGroup() {
   overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('users', 20)} ${t('sharing.create_group')}</h2>
-    <div class="sharing-antispam-notice">
-      ${lucideIcon('shield-alert', 16)}
-      <span>${t('sharing.antispam_notice')}</span>
-    </div>
     <label>${t('sharing.group_name')}</label>
     <input type="text" id="sharingNewGroupName" placeholder="${t('sharing.group_name_placeholder')}" maxlength="60" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingCreateGroupSubmit();}">
     <div class="modal-actions">
@@ -648,10 +549,6 @@ export function applySettingsI18n() {
 
 // ── Expose actions on window ────────────────────────────────────
 
-window.enableAutoDiscovery = enableAutoDiscovery;
-window.disableAutoDiscovery = disableAutoDiscovery;
-window.sharingAddTrusted = sharingAddTrusted;
-window.sharingRemoveTrusted = sharingRemoveTrusted;
 window.sharingCreateGroup = sharingCreateGroup;
 window.sharingCreateGroupSubmit = sharingCreateGroupSubmit;
 window.sharingInvite = sharingInvite;

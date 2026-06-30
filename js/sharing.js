@@ -27,15 +27,7 @@
 //       A copies link → sends to B
 //       B opens #join → Picker → selects files → joined
 //
-//   S2: A(file) creates group, B(drive) auto-discovers
-//       A creates+shares as above
-//       B has A in trusted → auto-discovery finds it
-//
-//   S3: A creates, B joins via link, C auto-discovers, D joins later
-//       Mixed modes on the same group — all see same data
-//       D receives link after A adds them as member
-//
-//   S4: B leaves a joined group
+//   S2: B leaves a joined group
 //       B removes from joined-groups.json → polling stops
 //       Drive permissions untouched (B still has user-level access
 //       but DeLaClaw no longer loads it)
@@ -44,8 +36,7 @@
 //
 //   My Drive/
 //   ├── DeLaClaw/                          ← personal data (existing)
-//   │   ├── joined-groups.json             ← NEW: link-joined group refs
-//   │   └── trusted-contacts.json          ← trusted contacts (existing)
+//   │   └── joined-groups.json             ← link-joined group refs
 //   └── DeLaClaw-Shared/                   ← shared root (one per user)
 //       └── DeLaClaw-Shared-{groupId}/     ← per-group subfolder
 //           ├── group.json                 ← metadata + member list
@@ -57,14 +48,10 @@
 //   User email comes from the Drive About API (no extra OAuth scope needed).
 //
 // Scope:
-//   drive.file — default. Sufficient for creating groups (app owns the
-//   files) and for joining via link (Picker grants per-file access).
-//   drive — optional upgrade for auto-discovery convenience.
+//   drive.file — app-created files + Picker-granted access for joining.
 //
 // Trust model:
 //   Link join: explicit user consent (clicking a link + using Picker).
-//   No trusted contacts check needed.
-//   Auto-discovery: trusted contacts whitelist (unchanged).
 //
 // ===================================================================
 
@@ -205,14 +192,6 @@ async function driveRemovePermission(token, fileId, permissionId) {
     { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
 }
 
-async function driveDiscoverShared(token) {
-  const q = `sharedWithMe=true and mimeType='application/vnd.google-apps.folder' and name contains '${GROUP_PREFIX}' and trashed=false`;
-  const res = await driveGet(token,
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,owners(emailAddress,displayName),modifiedTime)&pageSize=100`);
-  const { files } = await res.json();
-  return files || [];
-}
-
 // ── Merge ───────────────────────────────────────────────────────
 
 function mergeItems(local, remote) {
@@ -291,9 +270,6 @@ async function migrateItemsJson(tok, folderId, entry) {
  * @param {Object} [capabilities]  — backend-specific hooks so the UI never
  *   reaches past state.sharing. A future Supabase backend would supply its own
  *   implementations (or omit the ones that don't apply).
- * @param {() => boolean}            [capabilities.hasAutoDiscovery]
- * @param {() => Promise<void>}      [capabilities.requestAutoDiscovery]
- * @param {() => void}               [capabilities.revokeAutoDiscovery]
  * @param {(folderId: string) => Promise<Array|null>} [capabilities.openJoinPicker]
  */
 export function createDriveSharing(getToken, personalFolderId, capabilities = {}) {
@@ -312,12 +288,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   //   gMeta: { fileId, etag, modifiedTime },
   //   joinedViaLink: boolean,   // true if joined via invite link
   // }
-
-  // ── Trusted contacts ──
-
-  let _trustedContacts = [];    // array of lowercase email strings
-  let _trustedSet = new Set();  // O(1) lookup mirror
-  let _trustedMeta = {};        // { fileId, etag }
 
   // ── Joined groups (link-join, works with drive.file) ──
 
@@ -345,59 +315,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     const folder = await driveFindOrCreateFolder(tok, SHARED_ROOT_NAME, null);
     _rootId = folder.id;
     return _rootId;
-  }
-
-  /** Load trusted contacts from DeLaClaw/trusted-contacts.json. */
-  async function loadTrusted() {
-    const tok = await token();
-    const file = await driveFindFile(tok, personalFolderId, 'trusted-contacts.json');
-    if (file) {
-      try {
-        const { data, etag } = await driveDownload(tok, file.id);
-        _trustedContacts = Array.isArray(data) ? data.map(e => e.toLowerCase()) : [];
-        _trustedSet = new Set(_trustedContacts);
-        _trustedMeta = { fileId: file.id, etag };
-      } catch (err) {
-        console.warn('sharing: failed to load trusted contacts:', err);
-      }
-    }
-  }
-
-  /** Save trusted contacts to Drive. */
-  async function saveTrusted() {
-    const tok = await token();
-    try {
-      const r = await driveUpload(tok, personalFolderId, _trustedMeta.fileId,
-        'trusted-contacts.json', _trustedContacts, _trustedMeta.etag);
-      _trustedMeta = { fileId: r.id, etag: r.etag };
-    } catch (err) {
-      if (err.code === 412 && _trustedMeta.fileId) {
-        // ETag conflict — merge and retry
-        const { data, etag } = await driveDownload(tok, _trustedMeta.fileId);
-        const remote = Array.isArray(data) ? data.map(e => e.toLowerCase()) : [];
-        const merged = [...new Set([...remote, ..._trustedContacts])];
-        _trustedContacts = merged;
-        _trustedSet = new Set(merged);
-        const r2 = await driveUpload(tok, personalFolderId, _trustedMeta.fileId,
-          'trusted-contacts.json', _trustedContacts);
-        _trustedMeta = { fileId: r2.id, etag: r2.etag };
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  /** Remove own permission from a shared folder (reject untrusted share). */
-  async function rejectSharedFolder(tok, folderId, myEmail) {
-    try {
-      const perms = await driveListPermissions(tok, folderId);
-      const myPerm = perms.find(p =>
-        p.emailAddress?.toLowerCase() === myEmail.toLowerCase() && p.role !== 'owner'
-      );
-      if (myPerm) await driveRemovePermission(tok, folderId, myPerm.id);
-    } catch (err) {
-      console.warn('sharing: failed to reject untrusted folder:', err);
-    }
   }
 
   /** Load joined groups from DeLaClaw/joined-groups.json. */
@@ -657,8 +574,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       const tok = await token();
       const promises = [];
 
-      // Load trusted contacts + joined groups metadata
-      await Promise.all([loadTrusted(), loadJoinedGroups()]);
+      // Load joined groups metadata
+      await loadJoinedGroups();
 
       // Own groups: list subfolders under DeLaClaw-Shared/
       const rootFolder = await driveFindFolder(tok, SHARED_ROOT_NAME, null);
@@ -681,30 +598,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           // Legacy entry without fileIds — try search-based load
           promises.push(loadGroup(joined.folderId, joined.groupId));
         }
-      }
-
-      // Auto-discover groups shared by trusted contacts (requires full Drive scope)
-      try {
-        const user = await ensureUser();
-        const shared = await driveDiscoverShared(tok);
-        for (const folder of shared) {
-          const ownerEmail = folder.owners?.[0]?.emailAddress?.toLowerCase();
-          if (!ownerEmail) continue;
-          if (_trustedSet.has(ownerEmail)) {
-            const gid = folder.name.slice(GROUP_PREFIX.length);
-            if (!_groups.has(gid)) promises.push(loadGroup(folder.id, gid));
-          } else {
-            // Untrusted + not manually joined → remove own permission
-            const gid = folder.name.slice(GROUP_PREFIX.length);
-            const isJoined = _joinedGroups.some(j => j.folderId === folder.id || j.groupId === gid);
-            if (!isJoined) {
-              promises.push(rejectSharedFolder(tok, folder.id, user.email));
-            }
-          }
-        }
-      } catch (err) {
-        // Auto-discovery may fail with drive.file scope — that's expected
-        if (err.code !== 403) console.warn('sharing: auto-discovery skipped:', err.message);
       }
 
       await Promise.all(promises);
@@ -1007,63 +900,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         changed = true;
       }
 
-      // Discover newly shared groups (trusted contacts only, requires full Drive scope)
-      try {
-        const user = await ensureUser();
-        const shared = await driveDiscoverShared(tok);
-        for (const folder of shared) {
-          const gid = folder.name.slice(GROUP_PREFIX.length);
-          if (_groups.has(gid)) continue;
-          const ownerEmail = folder.owners?.[0]?.emailAddress?.toLowerCase();
-          // Accept if trusted OR if manually joined
-          const isJoined = _joinedGroups.some(j => j.folderId === folder.id || j.groupId === gid);
-          if (ownerEmail && (_trustedSet.has(ownerEmail) || isJoined)) {
-            await loadGroup(folder.id, gid);
-            changed = true;
-            emit('group-discovered', { groupId: gid, group: _groups.get(gid)?.group });
-          } else if (ownerEmail) {
-            await rejectSharedFolder(tok, folder.id, user.email);
-          }
-        }
-      } catch (err) {
-        // Auto-discovery may fail with drive.file scope — that's expected
-        if (err.code !== 403) console.warn('sharing poll discover:', err.message);
-      }
-
       return changed;
-    },
-
-    // ─── Trusted contacts ───
-
-    getTrustedContacts() {
-      return [..._trustedContacts];
-    },
-
-    async addTrustedContact(email) {
-      const lower = email.toLowerCase();
-      if (_trustedSet.has(lower)) return;
-      _trustedContacts.push(lower);
-      _trustedSet.add(lower);
-      await saveTrusted();
-      emit('trusted-added', { email: lower });
-    },
-
-    async removeTrustedContact(email) {
-      const lower = email.toLowerCase();
-      if (!_trustedSet.has(lower)) return;
-      _trustedContacts = _trustedContacts.filter(e => e !== lower);
-      _trustedSet.delete(lower);
-      await saveTrusted();
-      emit('trusted-removed', { email: lower });
-    },
-
-    isTrusted(email) {
-      return _trustedSet.has(email.toLowerCase());
-    },
-
-    async loadTrustedContacts() {
-      await loadTrusted();
-      return [..._trustedContacts];
     },
 
     // ─── Events ───
@@ -1155,23 +992,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     // ─── Backend capabilities (injected, backend-agnostic) ───
 
-    /** Whether auto-discovery (full drive scope / equivalent) is active. */
-    hasAutoDiscovery() {
-      return capabilities.hasAutoDiscovery?.() ?? false;
-    },
-
-    /** Request auto-discovery upgrade + load trusted contacts. */
-    async requestAutoDiscovery() {
-      if (!capabilities.requestAutoDiscovery) throw new Error('Auto-discovery not available for this backend');
-      await capabilities.requestAutoDiscovery();
-      await loadTrusted();
-    },
-
-    /** Revoke auto-discovery (downgrade scope). */
-    revokeAutoDiscovery() {
-      if (capabilities.revokeAutoDiscovery) capabilities.revokeAutoDiscovery();
-    },
-
     /** Open a backend-specific file picker for join-via-link.
      *  Returns array of selected docs or null if cancelled.
      *  Null/undefined when the backend has no picker concept. */
@@ -1182,9 +1002,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     destroy() {
       this.stopPolling();
       _groups.clear();
-      _trustedContacts = [];
-      _trustedSet.clear();
-      _trustedMeta = {};
       _joinedGroups = [];
       _joinedMeta = {};
       _user = null;

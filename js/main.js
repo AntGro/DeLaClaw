@@ -3047,6 +3047,7 @@ async function testNvidiaApi() {
 }
 
 window.openSettings = openSettings;
+window.populateBackendInfo = populateBackendInfo;
 window.closeSettings = closeSettings;
 window.switchSettingsPane = switchSettingsPane;
 window.toggleTabConfigItem = toggleTabConfigItem;

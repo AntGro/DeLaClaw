@@ -692,10 +692,21 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     },
 
     /** Downgrade back to drive.file scope (disables sharing). */
-    revokeSharingScope() {
+    async revokeSharingScope() {
+      // Revoke the current Google token so GIS doesn't silently reissue full-scope
+      const tok = _cachedToken;
       localStorage.removeItem('dlc_sharing_enabled');
       _cachedScopes = null;
       clearDriveTokenCache();
+      if (tok) {
+        try {
+          await fetch(`https://oauth2.googleapis.com/revoke?token=${tok}`, { method: 'POST' });
+        } catch { /* best effort */ }
+      }
+      // Force GIS to forget the cached credential
+      if (window.google?.accounts?.oauth2) {
+        try { google.accounts.oauth2.revoke(tok, () => {}); } catch { /* best effort */ }
+      }
     },
 
     /** Check granted scopes from tokeninfo (cached, async). */

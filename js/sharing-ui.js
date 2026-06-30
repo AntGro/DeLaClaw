@@ -188,17 +188,20 @@ async function enableAutoDiscovery() {
     await state.sharing.requestAutoDiscovery();
     showToast(t('sharing.auto_discovery_enabled'), 'success');
     renderSharingPane();
+    if (typeof populateBackendInfo === 'function') populateBackendInfo();
   } catch (e) {
     showToast(e.message || t('sharing.enable_failed'), 'error');
     if (btn) { btn.disabled = false; btn.style.opacity = ''; }
   }
 }
 
-function disableAutoDiscovery() {
+async function disableAutoDiscovery() {
   if (!confirm(t('sharing.disable_auto_discovery_confirm'))) return;
-  state.sharing.revokeAutoDiscovery();
+  await state.sharing.revokeAutoDiscovery();
   showToast(t('sharing.auto_discovery'), 'info');
   renderSharingPane();
+  // Refresh backend scope display in General pane
+  if (typeof populateBackendInfo === 'function') populateBackendInfo();
 }
 
 async function sharingAddTrusted() {

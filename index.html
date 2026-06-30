@@ -204,10 +204,6 @@ window.addEventListener('appinstalled', function(){
             <input type="url" id="setupProjectUrl" class="setup-url-input" placeholder="https://xyz.supabase.co or https://supabase.com/dashboard/project/xyz">
             <p class="setup-url-error" id="setupProjectUrlError">Please enter a valid Supabase project URL</p>
           </div>
-          <div class="setting-group" id="settingsBackendInfo" style="display:none;">
-            <div class="setting-group-label" id="settingsBackendLabel">Backend</div>
-            <div id="settingsBackendDetails" class="setting-hint"></div>
-          </div>
         </div>
       </div>
       <div class="setup-step" data-step="2">
@@ -760,6 +756,10 @@ bun run server.js</pre>
               <span class="setting-toggle-switch" id="themeSwitch"></span>
             </div>
 
+          </div>
+          <div class="setting-group" id="settingsBackendInfo" style="display:none;">
+            <div class="setting-group-label" id="settingsBackendLabel">Backend</div>
+            <div id="settingsBackendDetails" class="setting-hint"></div>
           </div>
         </div>
         <div class="settings-pane" id="settingsPane-ai">

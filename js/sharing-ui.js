@@ -110,9 +110,14 @@ export async function renderSharingPane() {
     for (const member of (group.members || [])) {
       const isYou = _currentUser && member.email === _currentUser.email;
       const canRemove = isCreator && !isYou;
+      const isOwner = member.role === 'owner';
+      const hasJoined = isOwner || !!member.joined_at;
+      const statusHtml = isYou ? ` <span class="sharing-you">(${t('sharing.you')})</span>`
+        : hasJoined ? ` <span class="sharing-member-joined">${lucideIcon('check', 12)}</span>`
+        : ` <span class="sharing-member-pending">${t('sharing.pending')}</span>`;
       html += `<div class="sharing-member">
           ${avatarDot(member, 22)}
-          <span class="sharing-member-email">${esc(member.email)}${isYou ? ` <span class="sharing-you">(${t('sharing.you')})</span>` : ''}</span>
+          <span class="sharing-member-email">${esc(member.email)}${statusHtml}</span>
           ${canRemove ? `<button class="sharing-remove-btn" onclick="sharingRemoveMember('${escQ(group.id)}','${escQ(member.email)}')" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
         </div>`;
     }

@@ -1936,6 +1936,8 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .sharing-member{display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--text);}
 .sharing-member-email{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sharing-you{color:var(--muted);font-style:italic;}
+.sharing-member-joined{color:#22c55e;margin-left:2px;}
+.sharing-member-pending{color:var(--muted);font-size:0.78rem;font-style:italic;margin-left:4px;}
 .sharing-remove-btn{border:none;background:transparent;cursor:pointer;color:var(--muted);padding:2px;line-height:1;border-radius:4px;transition:color 0.15s;}
 .sharing-remove-btn:hover{color:#ef4444;}
 .sharing-invite-row{display:flex;gap:6px;margin-bottom:8px;}

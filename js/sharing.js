@@ -937,6 +937,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      *  @param {Object} fileIds — { group: fileId, todos: fileId, habits: fileId, lists: fileId } */
     async joinWithFileIds(folderId, fileIds) {
       const tok = await token();
+      const user = await ensureUser();
 
       // Read group.json to get groupId
       let groupId, groupData;
@@ -955,6 +956,25 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       // Load group data using explicit file IDs
       await loadGroupWithIds(folderId, groupId, fileIds);
+
+      // Mark self as joined in group.json
+      const e = _groups.get(groupId);
+      if (e) {
+        const member = e.group.members.find(m => m.email.toLowerCase() === user.email.toLowerCase());
+        if (member) {
+          member.joined_at = new Date().toISOString();
+          if (user.name) member.name = user.name;
+        } else {
+          e.group.members.push({
+            email: user.email,
+            name: user.name || user.email,
+            role: 'member',
+            added_at: new Date().toISOString(),
+            joined_at: new Date().toISOString(),
+          });
+        }
+        await saveGroup(groupId);
+      }
 
       // Persist in joined-groups.json
       const entry = { folderId, groupId, fileIds, joinedAt: new Date().toISOString() };

@@ -369,7 +369,7 @@ async function sharingOpenJoinPicker(folderId) {
     const fileIds = {};
     for (const d of docs) {
       const key = d.name.replace('.json', '');
-      if (['group', 'todos', 'habits', 'lists'].includes(key)) {
+      if (['group', 'todos', 'habits', 'lists'].includes(key) || /^extra_\d+$/.test(key)) {
         fileIds[key] = d.id;
       }
     }

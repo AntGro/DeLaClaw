@@ -60,6 +60,8 @@ const GROUP_PREFIX     = 'DeLaClaw-Shared-';
 const POLL_MS          = 15_000;      // 15s — faster than personal (30s)
 const MAX_RETRIES      = 2;
 const ITEM_TYPES       = ['todos', 'habits', 'lists'];
+const EXTRA_COUNT      = 10;
+const EXTRA_FILES      = Array.from({ length: EXTRA_COUNT }, (_, i) => `extra_${i + 1}`);
 
 // ── Drive API helpers (self-contained, no drive.js dependency) ──
 
@@ -389,7 +391,15 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       }
     }
 
-    const entry = { folderId, group, typeData, typeMeta, gMeta, joinedViaLink: true };
+    // Store extra file IDs (reserved for future types — no data download needed)
+    const extraMeta = {};
+    for (const name of EXTRA_FILES) {
+      if (fileIds[name]) {
+        extraMeta[name] = { fileId: fileIds[name] };
+      }
+    }
+
+    const entry = { folderId, group, typeData, typeMeta, extraMeta, gMeta, joinedViaLink: true };
     _groups.set(groupId, entry);
     return entry;
   }
@@ -433,7 +443,16 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       }
     }
 
-    const entry = { folderId, group, typeData, typeMeta, gMeta };
+    // Load extra file IDs (reserved for future types — no data download needed)
+    const extraMeta = {};
+    for (const name of EXTRA_FILES) {
+      const file = await driveFindFile(tok, folderId, `${name}.json`);
+      if (file) {
+        extraMeta[name] = { fileId: file.id };
+      }
+    }
+
+    const entry = { folderId, group, typeData, typeMeta, extraMeta, gMeta };
     _groups.set(groupId, entry);
 
     // Migrate legacy items.json if present
@@ -557,11 +576,19 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         typeData[type] = [];
       }
 
+      // Create reserved extra files for future shareable types
+      const extraMeta = {};
+      for (const name of EXTRA_FILES) {
+        const r = await driveUpload(tok, subfolder.id, null, `${name}.json`, []);
+        extraMeta[name] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+      }
+
       _groups.set(groupId, {
         folderId: subfolder.id,
         group,
         typeData,
         typeMeta,
+        extraMeta,
         gMeta: { fileId: gRes.id, etag: gRes.etag, modifiedTime: gRes.modifiedTime },
       });
 
@@ -923,7 +950,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         const fileIds = {};
         for (const f of children) {
           const key = f.name.replace('.json', '');
-          if (['group', ...ITEM_TYPES].includes(key)) fileIds[key] = f.id;
+          if (['group', ...ITEM_TYPES, ...EXTRA_FILES].includes(key)) fileIds[key] = f.id;
         }
         if (!fileIds.group) return null;
         return this.joinWithFileIds(folderId, fileIds);

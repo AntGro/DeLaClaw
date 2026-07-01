@@ -291,7 +291,15 @@ async function sharingDeleteGroup(groupId) {
 export async function handleJoinHash(folderId) {
   if (!state.sharing) return;
 
-  // Try direct access first (works with full drive scope)
+  // Check if already joined via this folderId
+  const existing = state.sharing.getGroupByFolderId?.(folderId);
+  if (existing) {
+    showToast(t('sharing.already_joined', existing.name || ''), 'info');
+    renderSharingPane();
+    return;
+  }
+
+  // Try direct access first (works when Drive permission is already granted)
   const group = await state.sharing.tryDirectJoin(folderId);
   if (group) {
     showToast(t('sharing.joined_group', group.name || ''), 'success');
@@ -317,6 +325,8 @@ function showJoinPickerModal(folderId) {
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('users', 20)} ${t('sharing.join_group')}</h2>
     <p>${t('sharing.join_picker_hint')}</p>
+    <p class="sharing-join-file-list">${t('sharing.join_expected_files')}</p>
+    <div id="sharingJoinError" class="sharing-join-error" style="display:none"></div>
     <div class="modal-actions">
       <button class="modal-cancel" onclick="document.getElementById('sharingJoinModal').remove()">${t('common.cancel')}</button>
       <button class="modal-save" id="sharingJoinPickerBtn" onclick="sharingOpenJoinPicker('${escQ(folderId)}')">${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}</button>
@@ -325,15 +335,23 @@ function showJoinPickerModal(folderId) {
   document.getElementById('app').appendChild(overlay);
 }
 
+function showJoinError(msg) {
+  const el = document.getElementById('sharingJoinError');
+  if (el) { el.textContent = msg; el.style.display = ''; }
+}
+
 async function sharingOpenJoinPicker(folderId) {
   const btn = document.getElementById('sharingJoinPickerBtn');
+  const errEl = document.getElementById('sharingJoinError');
+  if (errEl) errEl.style.display = 'none';
   if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
 
   try {
     const docs = await state.sharing.openJoinPicker(folderId);
     if (!docs) {
-      document.getElementById('sharingJoinModal')?.remove();
-      return; // user cancelled
+      // User cancelled — keep modal open, reset button
+      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
+      return;
     }
 
     // Map Picker results to fileIds
@@ -347,7 +365,6 @@ async function sharingOpenJoinPicker(folderId) {
 
     if (!fileIds.group) {
       // User may have selected the folder itself — try direct access now
-      // (Picker should have granted access to the folder)
       const folderDoc = docs.find(d => d.mimeType === 'application/vnd.google-apps.folder');
       if (folderDoc) {
         const group = await state.sharing.tryDirectJoin(folderDoc.id);
@@ -359,8 +376,8 @@ async function sharingOpenJoinPicker(folderId) {
           return;
         }
       }
-      showToast(t('sharing.join_no_files'), 'error');
-      if (btn) { btn.disabled = false; btn.textContent = t('sharing.select_files'); }
+      showJoinError(t('sharing.join_no_files'));
+      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
       return;
     }
 
@@ -369,8 +386,8 @@ async function sharingOpenJoinPicker(folderId) {
     const missing = required.filter(k => !fileIds[k]);
     if (missing.length > 0) {
       const names = missing.map(k => `${k}.json`).join(', ');
-      showToast(t('sharing.join_missing_files', names), 'error');
-      if (btn) { btn.disabled = false; btn.textContent = t('sharing.select_files'); }
+      showJoinError(t('sharing.join_missing_files', names));
+      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
       return;
     }
 
@@ -380,8 +397,8 @@ async function sharingOpenJoinPicker(folderId) {
     renderSharingPane();
     document.dispatchEvent(new CustomEvent('sharing-changed'));
   } catch (e) {
-    showToast(e.message || t('sharing.join_failed'), 'error');
-    if (btn) { btn.disabled = false; btn.textContent = t('sharing.select_files'); }
+    showJoinError(e.message || t('sharing.join_failed'));
+    if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
   }
 }
 

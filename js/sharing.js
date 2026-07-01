@@ -985,6 +985,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return `${base}#join=${e.folderId}`;
     },
 
+    /** Find a group by its Drive folder ID (for duplicate join detection). */
+    getGroupByFolderId(folderId) {
+      for (const [, e] of _groups) {
+        if (e.folderId === folderId) return e.group;
+      }
+      return null;
+    },
+
     /** Check if a group was joined via invite link. */
     isJoinedViaLink(groupId) {
       return _groups.get(groupId)?.joinedViaLink === true;

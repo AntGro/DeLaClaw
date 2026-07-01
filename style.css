@@ -1931,6 +1931,7 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .sharing-group-actions{flex-shrink:0;}
 .sharing-action-btn{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:0.78rem;transition:all 0.15s;}
 .sharing-action-btn:hover{color:var(--text);border-color:var(--text);}
+a.sharing-drive-link{text-decoration:none;}
 .sharing-leave-btn:hover{color:#ef4444;border-color:#ef4444;}
 .sharing-members{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;}
 .sharing-member{display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--text);}

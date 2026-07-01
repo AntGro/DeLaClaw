@@ -605,7 +605,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     },
 
     getAllGroups() {
-      return Array.from(_groups.values()).map(e => ({ ...e.group }));
+      return Array.from(_groups.values()).map(e => ({ ...e.group, folderId: e.folderId }));
     },
 
     getGroup(groupId) {

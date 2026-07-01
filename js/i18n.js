@@ -567,6 +567,7 @@ const T = {
       join_failed: 'Failed to join group',
       join_no_files: 'No group files found in selection. Please select the JSON files inside the shared folder.',
       join_missing_files: 'Missing files: {0}. Please select all files in the shared folder.',
+      open_drive_folder: 'Open in Drive',
     },
   },
   fr: {
@@ -1111,6 +1112,7 @@ const T = {
       join_failed: '\u00c9chec de la connexion au groupe',
       join_no_files: 'Aucun fichier de groupe trouv\u00e9. Veuillez s\u00e9lectionner les fichiers JSON du dossier partag\u00e9.',
       join_missing_files: 'Fichiers manquants\u00a0: {0}. Veuillez s\u00e9lectionner tous les fichiers du dossier partag\u00e9.',
+      open_drive_folder: 'Ouvrir dans Drive',
     },
   },
   es: {
@@ -1655,6 +1657,7 @@ const T = {
       join_failed: 'Error al unirse al grupo',
       join_no_files: 'No se encontraron archivos del grupo. Seleccione los archivos JSON de la carpeta compartida.',
       join_missing_files: 'Archivos faltantes: {0}. Seleccione todos los archivos de la carpeta compartida.',
+      open_drive_folder: 'Abrir en Drive',
     },
   },
 };

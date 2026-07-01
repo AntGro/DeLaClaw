@@ -163,13 +163,7 @@ async function sharingCreateGroupSubmit() {
   try {
     const group = await state.sharing.createGroup(name);
     document.getElementById('sharingCreateGroupModal')?.remove();
-    // Show the invite link immediately after creation
-    const link = state.sharing.getInviteLink(group.id);
-    if (link) {
-      showInviteLinkModal(group.name, link);
-    } else {
-      showToast(t('sharing.group_created'), 'success');
-    }
+    showToast(t('sharing.group_created'), 'success');
     renderSharingPane();
   } catch (e) {
     showToast(e.message, 'error');

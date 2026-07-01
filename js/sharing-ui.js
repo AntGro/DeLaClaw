@@ -364,6 +364,16 @@ async function sharingOpenJoinPicker(folderId) {
       return;
     }
 
+    // Check all required files are selected
+    const required = ['group', 'todos', 'habits', 'lists'];
+    const missing = required.filter(k => !fileIds[k]);
+    if (missing.length > 0) {
+      const names = missing.map(k => `${k}.json`).join(', ');
+      showToast(t('sharing.join_missing_files', names), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = t('sharing.select_files'); }
+      return;
+    }
+
     const group = await state.sharing.joinWithFileIds(folderId, fileIds);
     document.getElementById('sharingJoinModal')?.remove();
     showToast(t('sharing.joined_group', group?.name || ''), 'success');

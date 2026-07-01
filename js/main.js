@@ -1062,6 +1062,13 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   // Listen for back/forward navigation
   window.addEventListener('hashchange', () => {
+    // Handle #join=<folderId> invite links while app is running
+    if (location.hash.startsWith('#join=') && state.sharing) {
+      const joinFolderId = location.hash.slice(6);
+      history.replaceState(null, '', location.pathname + location.search);
+      if (joinFolderId) handleJoinHash(joinFolderId);
+      return;
+    }
     const raw = location.hash.replace('#', '');
     const h = validViews.includes(raw) ? raw : 'welcome';
     if (h !== state.currentView) switchView(h);

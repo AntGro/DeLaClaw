@@ -567,20 +567,27 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       const gRes = await driveUpload(tok, subfolder.id, null, 'group.json', group);
 
-      // Create empty per-type files
+      // Create empty per-type files + reserved extras in parallel
+      const allFiles = [
+        ...ITEM_TYPES.map(type => ({ key: type, name: `${type}.json` })),
+        ...EXTRA_FILES.map(name => ({ key: name, name: `${name}.json` })),
+      ];
+      const results = await Promise.all(
+        allFiles.map(f => driveUpload(tok, subfolder.id, null, f.name, []))
+      );
+
       const typeMeta = {};
       const typeData = {};
-      for (const type of ITEM_TYPES) {
-        const r = await driveUpload(tok, subfolder.id, null, `${type}.json`, []);
-        typeMeta[type] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
-        typeData[type] = [];
-      }
-
-      // Create reserved extra files for future shareable types
       const extraMeta = {};
-      for (const name of EXTRA_FILES) {
-        const r = await driveUpload(tok, subfolder.id, null, `${name}.json`, []);
-        extraMeta[name] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+      for (let i = 0; i < allFiles.length; i++) {
+        const { key } = allFiles[i];
+        const r = results[i];
+        if (ITEM_TYPES.includes(key)) {
+          typeMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+          typeData[key] = [];
+        } else {
+          extraMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+        }
       }
 
       _groups.set(groupId, {

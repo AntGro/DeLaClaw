@@ -1366,6 +1366,17 @@ async function deleteHabitCompletion(compId) {
     async () => {
       const { error } = await state.db.from('habit_completions').delete().eq('id', compId);
       if (error) { showToast(t('toast.failed_to_delete'), 'error'); return; }
+
+      // Sync to Drive if shared
+      if (comp) {
+        const habit = state.allHabits.find(h => h.id === comp.habit_id);
+        if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+          try {
+            await syncCompletionsToDrive(habit);
+          } catch (e) { console.warn('Failed to sync completion delete to Drive:', e); }
+        }
+      }
+
       showToast(t('habits.completion_deleted'), 'success');
       await refreshHabits();
       if (state._historyHabitId) {
@@ -1403,6 +1414,8 @@ async function saveHabitCompletion(compId) {
   const dateEl = document.getElementById(`editCompDate_${compId}`);
   const noteEl = document.getElementById(`editCompNote_${compId}`);
   if (!dateEl) return;
+  const comp = state.allHabitCompletions.find(c => c.id === compId);
+  const oldCompletedAt = comp?.completed_at;
   const newDate = new Date(dateEl.value + 'T12:00:00Z').toISOString();
   const newNote = noteEl ? noteEl.value.trim() : null;
   const updates = { completed_at: newDate };
@@ -1410,6 +1423,27 @@ async function saveHabitCompletion(compId) {
 
   const { error } = await state.db.from('habit_completions').update(updates).eq('id', compId);
   if (error) { showToast(t('toast.failed_to_update'), 'error'); return; }
+
+  // Sync to Drive if shared — update the matching completion's completed_at
+  if (comp) {
+    const habit = state.allHabits.find(h => h.id === comp.habit_id);
+    if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+      try {
+        const sharedHabits = state.sharing.getAllSharedHabits();
+        const sh = sharedHabits.find(h => h.id === habit.shared_id);
+        if (sh?.completions) {
+          const driveComp = sh.completions.find(c => c.completed_at === oldCompletedAt);
+          if (driveComp) {
+            driveComp.completed_at = newDate;
+            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, {
+              completions: sh.completions,
+            });
+          }
+        }
+      } catch (e) { console.warn('Failed to sync completion edit to Drive:', e); }
+    }
+  }
+
   showToast(t('habits.completion_updated'), 'success');
   await refreshHabits();
   if (state._historyHabitId) {
@@ -1864,6 +1898,23 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
  * - Shared habit deleted from Drive → delete local habit + completions
  * - New completions → insert into local habit_completions
  */
+/**
+ * Rebuild the Drive completions array from local DB for a shared habit.
+ * Called after a local completion is deleted or edited.
+ */
+async function syncCompletionsToDrive(habit) {
+  if (!habit?.shared_id || !habit?.shared_group_id || !state.sharing) return;
+  // Re-read local completions for this habit (after the delete has landed)
+  const { data: localComps } = await state.db.from('habit_completions')
+    .select('*').eq('habit_id', habit.id).order('completed_at', { ascending: true });
+  const completions = (localComps || []).map(c => ({
+    id: crypto.randomUUID(),
+    completed_at: c.completed_at,
+    completed_by: c.completed_by || '',
+  }));
+  await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions });
+}
+
 async function syncSharedHabits() {
   if (!state.sharing || !state.db?.connected) return;
 

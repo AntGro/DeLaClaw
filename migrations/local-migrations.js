@@ -39,5 +39,9 @@
 // ===================================================================
 
 export const LOCAL_MIGRATIONS = {
-  // No migrations yet — schema.sql covers the full current schema
+  '1.270': `
+    ALTER TABLE habits ADD COLUMN shared_id TEXT;
+    ALTER TABLE habits ADD COLUMN shared_group_id TEXT;
+    ALTER TABLE habit_completions ADD COLUMN completed_by TEXT;
+  `,
 };

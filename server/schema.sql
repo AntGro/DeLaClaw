@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS habits (
   category TEXT DEFAULT 'General',
   is_draft INTEGER DEFAULT 0,
   next_due TEXT,
+  shared_id TEXT,
+  shared_group_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -53,6 +55,7 @@ CREATE TABLE IF NOT EXISTS habit_completions (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   habit_id TEXT REFERENCES habits(id) ON DELETE CASCADE,
   completed_at TEXT,
+  completed_by TEXT,
   note TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );

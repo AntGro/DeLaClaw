@@ -4,7 +4,7 @@ import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from '
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { getCategoryColor, setCategoryColor } from './todos.js';
 import { t, getLang } from './i18n.js';
-import { sharedBadge, assigneeDots, showCompletionModal, openSharePopover } from './sharing-ui.js';
+import { sharedBadge } from './sharing-ui.js';
 
 // ===================================================================
 // HABITS — DATA, CRUD & RENDERING
@@ -112,6 +112,16 @@ async function saveEditHabitCategory() {
         state.db.from('habits').update({ category: newName }).eq('id', c.id)
       ));
       habitsToUpdate.forEach(c => { c.category = newName; });
+    }
+
+    // Update creator_category on Drive for any shared habits in the renamed deck
+    if (state.sharing) {
+      const sharedInCat = habitsToUpdate.filter(c => c.shared_id && c.shared_group_id);
+      for (const h of sharedInCat) {
+        try {
+          await state.sharing.updateSharedHabit(h.shared_group_id, h.shared_id, { creator_category: newName });
+        } catch (e) { console.warn('Failed to update creator_category on Drive:', e); }
+      }
     }
   }
 
@@ -707,9 +717,6 @@ function renderHabits() {
   initHabitHoverDelay(grid);
   renderHabitNavButtons(categoryList);
   balanceGrid(grid);
-
-  // Render shared habits section below the grid
-  renderSharedHabits();
 }
 
 function initHabitHoverDelay(container) {
@@ -780,7 +787,6 @@ function renderHabitCategoryCard(category) {
     <div class="todo-cat-add">
       <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catName)}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addHabitFromInput(this);}">
       <button onclick="addHabitFromInput(this.previousElementSibling)">${lucideIcon('plus', 16)}</button>
-      ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" onclick="shareHabitFromAdd(this)" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
     </div>
     <div class="task-list habit-list todo-cat-list">
       ${items}
@@ -801,10 +807,18 @@ function renderHabitItem(habit) {
 
   const promoteBtn = isDraft ? `<button onclick="promoteHabit('${habit.id}')" title="${t('habits.promote')}" class="habit-promote-btn">▶ ${t('habits.promote')}</button>` : '';
 
+  // Shared habit badge
+  const isShared = habit.shared_id && habit.shared_group_id;
+  let sharedHtml = '';
+  if (isShared && state.sharing) {
+    const group = state.sharing.getAllGroups().find(g => g.id === habit.shared_group_id);
+    sharedHtml = sharedBadge(group?.name || '');
+  }
+
   return `<div class="bucket-item habit-item habit-status-${status}" data-habit-id="${habit.id}">
     <div class="habit-row">
       <div class="habit-info">
-        <span class="habit-name">${esc(habit.name)}</span>
+        <span class="habit-name">${esc(habit.name)}</span>${sharedHtml}
         <span class="habit-frequency">${esc(formatFrequency(habit.frequency_rule))}</span>
       </div>
       <div class="habit-actions">
@@ -840,12 +854,12 @@ function initHabitModals() {
   const app = document.getElementById('app');
 
   // Re-render shared habits when sharing data changes
-  document.addEventListener('sharing-changed', () => renderSharedHabits());
+  document.addEventListener('sharing-changed', () => syncSharedHabits());
 
   // Add Habit Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'addHabitModal';
-  m1.innerHTML = `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><input type="text" id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="200" onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewHabit();}"><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" onclick="closeAddHabitModal()">${t('common.cancel')}</button><button class="modal-save" onclick="saveNewHabit()">${t("common.create")}</button></div></div>`;
+  m1.innerHTML = `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><input type="text" id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="200" onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewHabit();}"><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><div id="newHabitGroupRow" style="display:none"><label>${t('sharing.group')}</label><select id="newHabitGroup"><option value="">${t('sharing.no_group')}</option></select></div><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" onclick="closeAddHabitModal()">${t('common.cancel')}</button><button class="modal-save" onclick="saveNewHabit()">${t("common.create")}</button></div></div>`;
   app.appendChild(m1);
 
   // Edit Habit Modal
@@ -879,6 +893,21 @@ function openAddHabitModal() {
   document.getElementById('newHabitDraft').checked = false;
   buildFrequencyPicker(document.getElementById('newHabitFreqPicker'), '');
   populateHabitCategorySelect('newHabitCategory');
+  // Show group selector if user belongs to any sharing groups
+  const groupRow = document.getElementById('newHabitGroupRow');
+  const groupSel = document.getElementById('newHabitGroup');
+  if (state.sharing) {
+    const groups = state.sharing.getAllGroups();
+    if (groups.length > 0) {
+      groupSel.innerHTML = `<option value="">${t('sharing.no_group')}</option>` +
+        groups.map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
+      groupRow.style.display = '';
+    } else {
+      groupRow.style.display = 'none';
+    }
+  } else {
+    groupRow.style.display = 'none';
+  }
   const modal = document.getElementById('addHabitModal');
   modal.style.setProperty('--cat-color', getCategoryColor('General'));
   modal.classList.add('visible');
@@ -921,11 +950,21 @@ async function saveNewHabit() {
   const cat = document.getElementById('newHabitCategory').value || 'General';
   const lastDoneVal = document.getElementById('newHabitLastDone').value;
   const isDraft = document.getElementById('newHabitDraft').checked;
+  const groupId = document.getElementById('newHabitGroup')?.value || '';
 
   if (!name) { showToast(t('habits.enter_habit_name'), 'error'); return; }
   if (!freq) { showToast(t('habits.enter_frequency'), 'error'); return; }
 
-  const { data, error } = await state.db.from('habits').insert({ name, frequency_rule: freq, category: cat, is_draft: isDraft }).select().single();
+  // Generate a shared ID upfront so local + Drive use the same UUID
+  const sharedId = groupId ? crypto.randomUUID() : null;
+
+  const insertObj = { name, frequency_rule: freq, category: cat, is_draft: isDraft };
+  if (sharedId) {
+    insertObj.shared_id = sharedId;
+    insertObj.shared_group_id = groupId;
+  }
+
+  const { data, error } = await state.db.from('habits').insert(insertObj).select().single();
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
   // If lastDone was provided, create an initial completion
@@ -935,6 +974,35 @@ async function saveNewHabit() {
   // Compute next_due client-side for structured rules, else delegate to heartbeat
   if (data && data.id) {
     await updateHabitNextDue(data.id, freq, lastDoneVal || null);
+  }
+
+  // Write to shared Drive file if group was selected
+  if (sharedId && groupId && state.sharing) {
+    try {
+      const user = await state.sharing.getCurrentUser();
+      const sharedItem = {
+        id: sharedId,
+        item_type: 'habit',
+        name,
+        frequency_rule: freq,
+        creator_category: cat,
+        created_by: user?.email || '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        completions: [],
+      };
+      if (lastDoneVal) {
+        sharedItem.completions.push({
+          id: crypto.randomUUID(),
+          completed_at: new Date(lastDoneVal).toISOString(),
+          completed_by: user?.email || '',
+        });
+      }
+      await state.sharing.addSharedHabit(groupId, sharedItem);
+    } catch (e) {
+      console.warn('Failed to write shared habit to Drive:', e);
+      showToast(t('toast.failed_to_add') + ' (shared)', 'error');
+    }
   }
 
   closeAddHabitModal();
@@ -1075,6 +1143,20 @@ async function saveEditHabit() {
   const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: cat }).eq('id', id);
   if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
 
+  // If shared, push name/frequency/category changes to Drive
+  const habit = state.allHabits.find(c => c.id === id);
+  if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+    try {
+      await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, {
+        name,
+        frequency_rule: freq,
+        creator_category: cat,
+      });
+    } catch (e) {
+      console.warn('Failed to update shared habit on Drive:', e);
+    }
+  }
+
   // Handle last done date change
   const prevLastDone = getHabitLastDone(id);
   const prevDateStr = prevLastDone ? localDateStr(prevLastDone) : '';
@@ -1107,6 +1189,14 @@ async function deleteHabit(habitId) {
     t('common.delete'),
     `Delete "${habit.name}"? All completion history will be lost.`,
     async () => {
+      // If shared, also delete from Drive (removes for all group members)
+      if (habit.shared_id && habit.shared_group_id && state.sharing) {
+        try {
+          await state.sharing.deleteSharedHabit(habit.shared_group_id, habit.shared_id);
+        } catch (e) {
+          console.warn('Failed to delete shared habit from Drive:', e);
+        }
+      }
       const { error } = await state.db.from('habits').delete().eq('id', habitId);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
       showToast(t('habits.habit_deleted'), 'info');
@@ -1132,6 +1222,22 @@ async function markHabitDone(habitId) {
   const now = new Date().toISOString();
 
   const row = { habit_id: habitId, completed_at: now };
+
+  // If this is a shared habit, include completed_by and push to Drive
+  if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+    try {
+      const user = await state.sharing.getCurrentUser();
+      row.completed_by = user?.email || '';
+      const completion = {
+        id: crypto.randomUUID(),
+        completed_at: now,
+        completed_by: user?.email || '',
+      };
+      await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion);
+    } catch (e) {
+      console.warn('Failed to push shared habit completion to Drive:', e);
+    }
+  }
 
   const { error } = await state.db.from('habit_completions').insert(row);
   if (error) { showToast(t('habits.failed_record'), 'error'); return; }
@@ -1744,101 +1850,117 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
 
 // ── Shared Habits ───────────────────────────────────────────────
 
-function renderSharedHabits() {
-  if (!state.sharing) return;
-  const grid = document.getElementById('habitCategoryGrid');
-  if (!grid) return;
+// ===================================================================
+// SHARED HABIT SYNC — import / update / delete / completions
+// ===================================================================
 
-  const allShared = state.sharing.getAllSharedItems().filter(i => i.item_type === 'habit');
-  if (!allShared.length) return;
+/**
+ * Sync shared habits from Drive to local DB.
+ * Called on 'sharing-changed' event (poll detected changes).
+ *
+ * For each group:
+ * - New shared habit not in local DB → create local habit in "General"
+ * - Shared habit name/frequency changed → update local habit
+ * - Shared habit deleted from Drive → delete local habit + completions
+ * - New completions → insert into local habit_completions
+ */
+async function syncSharedHabits() {
+  if (!state.sharing || !state.db?.connected) return;
 
-  const existing = document.getElementById('sharedHabitsSection');
-  if (existing) existing.remove();
+  const sharedHabits = state.sharing.getAllSharedHabits();
+  // Index local shared habits by shared_id
+  const localShared = (state.allHabits || []).filter(h => h.shared_id);
+  const localBySharedId = new Map(localShared.map(h => [h.shared_id, h]));
 
-  const section = document.createElement('div');
-  section.id = 'sharedHabitsSection';
-  section.style.gridColumn = '1 / -1';
+  // Track which shared_ids still exist on Drive (for deletion detection)
+  const driveSharedIds = new Set(sharedHabits.map(h => h.id));
 
-  let html = `<button class="shared-section-toggle" onclick="this.parentElement.classList.toggle('open')">
-    ${lucideIcon('users', 14)} ${t('sharing.shared')} (${allShared.length})
-    ${lucideIcon('chevron-down', 14)}
-  </button>
-  <div class="shared-section-items">`;
+  let needsRefresh = false;
 
-  for (const item of allShared) {
-    const group = state.sharing.getAllGroups().find(g => g.id === item.group_id);
-    const groupName = group?.name || '?';
-    const name = item.payload?.name || item.payload?.title || '';
-    const isDone = !!item.completed;
-    html += `<div class="bucket-item${isDone ? ' completed' : ''}" style="border-left:3px solid var(--accent);margin:2px 0;padding:4px 8px;display:flex;align-items:center;gap:6px;">
-      <input type="checkbox" ${isDone ? 'checked' : ''} data-group="${esc(item.group_id)}" data-item="${esc(item.id)}" data-assignees="${esc(JSON.stringify((item.assignees||[]).map(a=>typeof a==='string'?a:a.email)))}" onchange="toggleSharedHabit(this.dataset.group,this.dataset.item,this.checked,JSON.parse(this.dataset.assignees))">
-      <span style="flex:1;${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${esc(name)}</span>
-      ${sharedBadge(groupName)}
-      ${assigneeDots(item.assignees || [])}
-      <button class="sharing-remove-btn" onclick="deleteSharedHabit('${escQ(item.group_id)}','${escQ(item.id)}')" title="${t('common.delete')}">${lucideIcon('x', 14)}</button>
-    </div>`;
+  for (const sh of sharedHabits) {
+    const local = localBySharedId.get(sh.id);
+
+    if (!local) {
+      // ─── New shared habit: import to local DB ───
+      const { data, error } = await state.db.from('habits').insert({
+        name: sh.name,
+        frequency_rule: sh.frequency_rule || '',
+        category: 'General',
+        is_draft: 0,
+        shared_id: sh.id,
+        shared_group_id: sh.group_id,
+      }).select().single();
+      if (error) { console.warn('syncSharedHabits: failed to import', sh.id, error); continue; }
+
+      // Import existing completions
+      if (sh.completions?.length && data?.id) {
+        for (const c of sh.completions) {
+          await state.db.from('habit_completions').insert({
+            habit_id: data.id,
+            completed_at: c.completed_at,
+            completed_by: c.completed_by || '',
+          });
+        }
+        await updateHabitNextDue(data.id, sh.frequency_rule, sh.completions[sh.completions.length - 1].completed_at);
+      }
+      needsRefresh = true;
+    } else {
+      // ─── Existing shared habit: sync name/frequency/completions ───
+      let updated = false;
+      if (local.name !== sh.name || local.frequency_rule !== (sh.frequency_rule || '')) {
+        await state.db.from('habits').update({
+          name: sh.name,
+          frequency_rule: sh.frequency_rule || '',
+          updated_at: new Date().toISOString(),
+        }).eq('id', local.id);
+        updated = true;
+      }
+
+      // Sync completions: find completions on Drive not in local DB
+      if (sh.completions?.length) {
+        const localComps = (state.allHabitCompletions || []).filter(c => c.habit_id === local.id);
+        const localCompTimes = new Set(localComps.map(c => c.completed_at));
+        let newCompAdded = false;
+        for (const c of sh.completions) {
+          if (!localCompTimes.has(c.completed_at)) {
+            await state.db.from('habit_completions').insert({
+              habit_id: local.id,
+              completed_at: c.completed_at,
+              completed_by: c.completed_by || '',
+            });
+            newCompAdded = true;
+          }
+        }
+        if (newCompAdded) {
+          const lastComp = sh.completions[sh.completions.length - 1];
+          await updateHabitNextDue(local.id, sh.frequency_rule || local.frequency_rule, lastComp.completed_at);
+          updated = true;
+        }
+      }
+
+      if (updated) needsRefresh = true;
+    }
   }
 
-  html += '</div>';
-  section.innerHTML = html;
-  section.classList.add('open');
-  grid.appendChild(section);
-}
-
-async function shareHabitFromAdd(btn) {
-  const addRow = btn.closest('.todo-cat-add');
-  if (!addRow) return;
-  const input = addRow.querySelector('.habit-add-input');
-  const text = input?.value.trim();
-  if (!text) return;
-  const category = input.dataset.category || '';
-
-  openSharePopover(btn, async (groupId, assignees) => {
-    try {
-      await state.sharing.addItem(groupId, {
-        item_type: 'habit',
-        payload: { name: text, category, frequency_rule: '' },
-        assignees,
-      });
-      input.value = '';
-      showToast(t('sharing.shared') + '!', 'success');
-      renderSharedHabits();
-    } catch (e) {
-      showToast(e.message, 'error');
-    }
-  });
-}
-
-async function toggleSharedHabit(groupId, itemId, checked, assigneeEmails) {
-  if (!state.sharing) return;
-  try {
-    if (checked) {
-      const currentUser = await state.sharing.getCurrentUser();
-      if (assigneeEmails.length > 1) {
-        showCompletionModal(groupId, itemId, assigneeEmails, currentUser?.email);
-        return;
+  // ─── Deletion: local shared habits whose shared_id no longer exists on Drive ───
+  for (const local of localShared) {
+    if (!driveSharedIds.has(local.shared_id)) {
+      // Check the group still exists (don't delete if group just hasn't loaded yet)
+      const group = state.sharing.getAllGroups().find(g => g.id === local.shared_group_id);
+      if (group) {
+        await state.db.from('habit_completions').delete().eq('habit_id', local.id);
+        await state.db.from('habits').delete().eq('id', local.id);
+        needsRefresh = true;
       }
-      await state.sharing.completeItem(groupId, itemId, [currentUser?.email || assigneeEmails[0]]);
-    } else {
-      await state.sharing.uncompleteItem(groupId, itemId);
     }
-    renderSharedHabits();
-  } catch (e) { showToast(e.message, 'error'); }
+  }
+
+  if (needsRefresh) {
+    await refreshHabits();
+  }
 }
 
-async function deleteSharedHabit(groupId, itemId) {
-  if (!state.sharing) return;
-  showDeleteConfirm(t('common.delete'), t('sharing.delete_shared_item_confirm'), async () => {
-    try {
-      await state.sharing.deleteItem(groupId, itemId);
-      renderSharedHabits();
-    } catch (e) { showToast(e.message, 'error'); }
-  });
-}
-
-window.toggleSharedHabit = toggleSharedHabit;
-window.deleteSharedHabit = deleteSharedHabit;
-window.shareHabitFromAdd = shareHabitFromAdd;
+window.syncSharedHabits = syncSharedHabits;
 
 export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, initHabitHoverDelay };
 

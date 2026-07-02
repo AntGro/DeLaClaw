@@ -811,6 +811,87 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return this.updateItem(groupId, itemId, { done: false, done_by: [], done_at: null });
     },
 
+    // ─── Shared Habits (new format) ───
+
+    /**
+     * Add a shared habit to a group's habits.json.
+     * Uses the new format: { id, item_type:'habit', name, frequency_rule,
+     * creator_category, created_by, completions:[] }
+     */
+    async addSharedHabit(groupId, habitData) {
+      const e = _groups.get(groupId);
+      if (!e) throw new Error(`Group ${groupId} not loaded`);
+      if (!e.typeData.habits) e.typeData.habits = [];
+      e.typeData.habits.push(habitData);
+      await saveTypedItems(groupId, 'habits');
+      emit('item-added', { groupId, item: habitData });
+      return habitData;
+    },
+
+    /**
+     * Update a shared habit in a group's habits.json.
+     * Merges `changes` into the habit with matching id.
+     */
+    async updateSharedHabit(groupId, sharedId, changes) {
+      const e = _groups.get(groupId);
+      if (!e) throw new Error(`Group ${groupId} not loaded`);
+      const items = e.typeData.habits || [];
+      const item = items.find(h => h.id === sharedId);
+      if (!item) throw new Error(`Shared habit ${sharedId} not found`);
+      Object.assign(item, changes, { updated_at: new Date().toISOString() });
+      await saveTypedItems(groupId, 'habits');
+      emit('item-updated', { groupId, item });
+      return item;
+    },
+
+    /**
+     * Delete a shared habit from a group's habits.json.
+     */
+    async deleteSharedHabit(groupId, sharedId) {
+      const e = _groups.get(groupId);
+      if (!e) throw new Error(`Group ${groupId} not loaded`);
+      const items = e.typeData.habits || [];
+      const idx = items.findIndex(h => h.id === sharedId);
+      if (idx >= 0) {
+        items.splice(idx, 1);
+        await saveTypedItems(groupId, 'habits');
+      }
+      emit('item-deleted', { groupId, itemId: sharedId });
+    },
+
+    /**
+     * Add a completion to a shared habit on Drive.
+     */
+    async addSharedHabitCompletion(groupId, sharedId, completion) {
+      const e = _groups.get(groupId);
+      if (!e) throw new Error(`Group ${groupId} not loaded`);
+      const items = e.typeData.habits || [];
+      const item = items.find(h => h.id === sharedId);
+      if (!item) throw new Error(`Shared habit ${sharedId} not found`);
+      if (!item.completions) item.completions = [];
+      item.completions.push(completion);
+      item.updated_at = new Date().toISOString();
+      await saveTypedItems(groupId, 'habits');
+      emit('item-updated', { groupId, item });
+      return item;
+    },
+
+    /**
+     * Get all shared habits across all groups (new format).
+     * Returns items with group_id / group_name annotated.
+     */
+    getAllSharedHabits() {
+      const out = [];
+      for (const e of _groups.values()) {
+        for (const item of (e.typeData.habits || [])) {
+          if (item.item_type === 'habit' && item.completions !== undefined) {
+            out.push({ ...item, group_id: e.group.id, group_name: e.group.name });
+          }
+        }
+      }
+      return out;
+    },
+
     /** Get items for one group, optionally filtered by type. */
     getItems(groupId, itemType) {
       const e = _groups.get(groupId);

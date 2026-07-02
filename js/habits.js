@@ -677,8 +677,8 @@ function renderHabits() {
     return;
   }
 
-  // Show page-level empty state when user has zero habits
-  if (state.allHabits.length === 0) {
+  // Show page-level empty state when user has zero habits AND no custom categories
+  if (state.allHabits.length === 0 && getHabitCategories().length === 0) {
     grid.innerHTML = `<div class="page-empty-state">
       <div class="empty-icon">${lucideIcon('calendar-check', 48, 'var(--muted)')}</div>
       <h3>${t('habits.empty_title')}</h3>

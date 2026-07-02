@@ -166,7 +166,7 @@ async function sharingCreateGroupSubmit() {
   const name = input?.value.trim();
   if (!name) return;
   const btn = document.getElementById('sharingCreateGroupBtn');
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; btn.textContent = t('sharing.creating_group'); }
+  if (btn) { btn.disabled = true; btn.classList.add('loading'); btn.textContent = t('sharing.creating_group'); }
   try {
     const group = await state.sharing.createGroup(name);
     document.getElementById('sharingCreateGroupModal')?.remove();
@@ -174,7 +174,7 @@ async function sharingCreateGroupSubmit() {
     renderSharingPane();
   } catch (e) {
     showToast(e.message, 'error');
-    if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.textContent = t('common.create'); }
+    if (btn) { btn.disabled = false; btn.classList.remove('loading'); btn.textContent = t('common.create'); }
   }
 }
 

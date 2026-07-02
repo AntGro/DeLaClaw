@@ -362,44 +362,41 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   async function loadGroupWithIds(folderId, groupId, fileIds) {
     const tok = await token();
 
+    // Download group.json + all type files in parallel
+    const downloads = [
+      fileIds.group
+        ? driveDownload(tok, fileIds.group).catch(err => { console.warn(`sharing: failed to download group.json for joined group ${groupId}:`, err); return null; })
+        : Promise.resolve(null),
+      ...ITEM_TYPES.map(type =>
+        fileIds[type]
+          ? driveDownload(tok, fileIds[type]).catch(err => { console.warn(`sharing: failed to download ${type}.json for joined group ${groupId}:`, err); return null; })
+          : Promise.resolve(null)
+      ),
+    ];
+    const [gResult, ...typeResults] = await Promise.all(downloads);
+
     let group = { id: groupId, name: groupId, created_by: null, members: [], created_at: null };
     let gMeta = {};
-
-    if (fileIds.group) {
-      try {
-        const { data, etag } = await driveDownload(tok, fileIds.group);
-        group = data;
-        gMeta = { fileId: fileIds.group, etag };
-      } catch (err) {
-        console.warn(`sharing: failed to download group.json for joined group ${groupId}:`, err);
-      }
+    if (gResult) {
+      group = gResult.data;
+      gMeta = { fileId: fileIds.group, etag: gResult.etag };
     }
 
     const typeData = {};
     const typeMeta = {};
-    for (const type of ITEM_TYPES) {
-      typeData[type] = [];
-      typeMeta[type] = {};
-      if (fileIds[type]) {
-        try {
-          const { data, etag } = await driveDownload(tok, fileIds[type]);
-          typeData[type] = Array.isArray(data) ? data : [];
-          typeMeta[type] = { fileId: fileIds[type], etag };
-        } catch (err) {
-          console.warn(`sharing: failed to download ${type}.json for joined group ${groupId}:`, err);
-        }
+    for (let i = 0; i < ITEM_TYPES.length; i++) {
+      const type = ITEM_TYPES[i];
+      const r = typeResults[i];
+      if (r) {
+        typeData[type] = Array.isArray(r.data) ? r.data : [];
+        typeMeta[type] = { fileId: fileIds[type], etag: r.etag };
+      } else {
+        typeData[type] = [];
+        typeMeta[type] = {};
       }
     }
 
-    // Store extra file IDs (reserved for future types — no data download needed)
-    const extraMeta = {};
-    for (const name of EXTRA_FILES) {
-      if (fileIds[name]) {
-        extraMeta[name] = { fileId: fileIds[name] };
-      }
-    }
-
-    const entry = { folderId, group, typeData, typeMeta, extraMeta, gMeta, joinedViaLink: true };
+    const entry = { folderId, group, typeData, typeMeta, gMeta, joinedViaLink: true };
     _groups.set(groupId, entry);
     return entry;
   }
@@ -414,45 +411,47 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   async function loadGroup(folderId, groupId) {
     const tok = await token();
 
-    // Load group.json — targeted search (works for shared files after Picker)
+    // Find all core files in parallel
+    const [gFile, ...typeFiles] = await Promise.all([
+      driveFindFile(tok, folderId, 'group.json'),
+      ...ITEM_TYPES.map(type => driveFindFile(tok, folderId, `${type}.json`)),
+    ]);
+
+    // Download all found files in parallel
+    const downloads = [];
+    downloads.push(gFile
+      ? driveDownload(tok, gFile.id).then(r => ({ ...r, file: gFile }))
+      : Promise.resolve(null));
+    for (let i = 0; i < ITEM_TYPES.length; i++) {
+      const file = typeFiles[i];
+      downloads.push(file
+        ? driveDownload(tok, file.id).then(r => ({ ...r, file })).catch(err => { console.warn(`sharing: failed to download ${ITEM_TYPES[i]}.json for ${groupId}:`, err); return null; })
+        : Promise.resolve(null));
+    }
+    const [gResult, ...typeResults] = await Promise.all(downloads);
+
     let group = { id: groupId, name: groupId, created_by: null, members: [], created_at: null };
     let gMeta = {};
-
-    const gFile = await driveFindFile(tok, folderId, 'group.json');
-    if (gFile) {
-      const { data, etag } = await driveDownload(tok, gFile.id);
-      group = data;
-      gMeta = { fileId: gFile.id, etag, modifiedTime: gFile.modifiedTime };
+    if (gResult) {
+      group = gResult.data;
+      gMeta = { fileId: gFile.id, etag: gResult.etag, modifiedTime: gFile.modifiedTime };
     }
 
-    // Load per-type files
     const typeData = {};
     const typeMeta = {};
-    for (const type of ITEM_TYPES) {
-      typeData[type] = [];
-      typeMeta[type] = {};
-      const file = await driveFindFile(tok, folderId, `${type}.json`);
-      if (file) {
-        try {
-          const { data, etag } = await driveDownload(tok, file.id);
-          typeData[type] = Array.isArray(data) ? data : [];
-          typeMeta[type] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
-        } catch (err) {
-          console.warn(`sharing: failed to download ${type}.json for ${groupId}:`, err);
-        }
+    for (let i = 0; i < ITEM_TYPES.length; i++) {
+      const type = ITEM_TYPES[i];
+      const r = typeResults[i];
+      if (r) {
+        typeData[type] = Array.isArray(r.data) ? r.data : [];
+        typeMeta[type] = { fileId: r.file.id, etag: r.etag, modifiedTime: r.file.modifiedTime };
+      } else {
+        typeData[type] = [];
+        typeMeta[type] = {};
       }
     }
 
-    // Load extra file IDs (reserved for future types — no data download needed)
-    const extraMeta = {};
-    for (const name of EXTRA_FILES) {
-      const file = await driveFindFile(tok, folderId, `${name}.json`);
-      if (file) {
-        extraMeta[name] = { fileId: file.id };
-      }
-    }
-
-    const entry = { folderId, group, typeData, typeMeta, extraMeta, gMeta };
+    const entry = { folderId, group, typeData, typeMeta, gMeta };
     _groups.set(groupId, entry);
 
     // Migrate legacy items.json if present
@@ -578,16 +577,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       const typeMeta = {};
       const typeData = {};
-      const extraMeta = {};
       for (let i = 0; i < allFiles.length; i++) {
         const { key } = allFiles[i];
         const r = results[i];
         if (ITEM_TYPES.includes(key)) {
           typeMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
           typeData[key] = [];
-        } else {
-          extraMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
         }
+        // Extra files are created on Drive but not tracked in memory (unused for now)
       }
 
       _groups.set(groupId, {
@@ -595,7 +592,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         group,
         typeData,
         typeMeta,
-        extraMeta,
         gMeta: { fileId: gRes.id, etag: gRes.etag, modifiedTime: gRes.modifiedTime },
       });
 

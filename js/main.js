@@ -1196,6 +1196,12 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     // Re-render sharing pane if it's currently visible
     const sharingPane = document.getElementById('settingsPane-sharing');
     if (sharingPane?.classList.contains('active')) renderSharingPane();
+    // Update footer groups count
+    const footerGc = document.getElementById('footerGroupCount');
+    if (footerGc && state.sharing) {
+      const gc = state.sharing.getAllGroups().length;
+      footerGc.innerHTML = `${lucideIcon('users', 14)} ${gc} group${gc !== 1 ? 's' : ''}`;
+    }
   });
 
   // Show demo banner if in demo mode

@@ -1134,7 +1134,9 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
           openJoinPicker: (folderId) => state.driveAdapter.openSharedFolderPicker(folderId),
         },
       );
-      state.sharing.loadAll().catch(e => console.warn('sharing loadAll:', e));
+      state.sharing.loadAll().then(() => {
+        document.dispatchEvent(new CustomEvent('sharing-changed'));
+      }).catch(e => console.warn('sharing loadAll:', e));
       state.sharing.startPolling();
       state.sharing.onUpdate(() => {
         document.dispatchEvent(new CustomEvent('sharing-changed'));

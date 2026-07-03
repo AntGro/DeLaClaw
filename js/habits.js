@@ -1018,6 +1018,13 @@ async function saveNewHabit() {
   if (groupId && state.sharing) {
     // ─── Shared habit: pointer locally + canonical data on Drive ───
     const sharedId = crypto.randomUUID();
+    // Insert local pointer FIRST to prevent syncSharedHabits race
+    // (addSharedHabit emits sharing-changed before we return here)
+    const { data: pointerData, error: pointerErr } = await state.db.from('habits').insert({
+      name: '', frequency_rule: '', category: cat, is_draft: 0,
+      shared_id: sharedId, shared_group_id: groupId,
+    }).select().single();
+    if (pointerErr) { console.warn('Failed to create local pointer:', pointerErr); }
     try {
       const user = await state.sharing.getCurrentUser();
       const sharedItem = {
@@ -1041,15 +1048,11 @@ async function saveNewHabit() {
       await state.sharing.addSharedHabit(groupId, sharedItem);
     } catch (e) {
       console.warn('Failed to write shared habit to Drive:', e);
+      // Clean up the local pointer since Drive write failed
+      if (pointerData?.id) await state.db.from('habits').delete().eq('id', pointerData.id);
       showToast(t('toast.failed_to_add') + ' (shared)', 'error');
       return;
     }
-    // Local pointer — only stores deck placement + link
-    const { error } = await state.db.from('habits').insert({
-      name: '', frequency_rule: '', category: cat, is_draft: 0,
-      shared_id: sharedId, shared_group_id: groupId,
-    }).select().single();
-    if (error) { console.warn('Failed to create local pointer:', error); }
   } else {
     // ─── Normal (non-shared) habit ───
     const { data, error } = await state.db.from('habits').insert({

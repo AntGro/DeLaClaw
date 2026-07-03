@@ -940,6 +940,7 @@ function openAddHabitModal() {
   const groupSel = document.getElementById('newHabitGroup');
   if (state.sharing) {
     const groups = state.sharing.getAllGroups();
+    console.log('[openAddHabitModal] groups:', groups.length, groups);
     if (groups.length > 0) {
       groupSel.innerHTML = `<option value="">${t('sharing.no_group')}</option>` +
         groups.map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');

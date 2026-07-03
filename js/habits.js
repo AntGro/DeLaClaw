@@ -615,6 +615,9 @@ async function refreshHabits() {
           // Compute next_due from latest completion
           const latest = sh.completions[sh.completions.length - 1];
           updateHabitNextDue(habit.id, sh.frequency_rule, latest.completed_at);
+        } else {
+          // No completions yet — compute first next_due from now
+          updateHabitNextDue(habit.id, sh.frequency_rule, null);
         }
       }
     }

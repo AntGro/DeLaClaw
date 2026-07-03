@@ -1053,6 +1053,10 @@ async function saveNewHabit() {
       showToast(t('toast.failed_to_add') + ' (shared)', 'error');
       return;
     }
+    // Compute next_due on the pointer immediately
+    if (pointerData?.id) {
+      await updateHabitNextDue(pointerData.id, freq, lastDoneVal || null);
+    }
   } else {
     // ─── Normal (non-shared) habit ───
     const { data, error } = await state.db.from('habits').insert({

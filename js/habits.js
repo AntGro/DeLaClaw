@@ -2006,6 +2006,9 @@ async function syncSharedHabits() {
   // Create pointers for new shared habits
   for (const sh of sharedHabits) {
     if (!localBySharedId.has(sh.id)) {
+      // Double-check DB to avoid race with saveNewHabit (which inserts pointer after Drive write)
+      const { data: existing } = await state.db.from('habits').select('id').eq('shared_id', sh.id).limit(1);
+      if (existing?.length) continue;
       const { error } = await state.db.from('habits').insert({
         name: '', frequency_rule: '', category: 'General', is_draft: 0,
         shared_id: sh.id, shared_group_id: sh.group_id,

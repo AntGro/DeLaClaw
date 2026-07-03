@@ -1244,6 +1244,9 @@ async function saveEditHabit() {
         }
       } catch (e) { console.warn('Failed to update shared completion on Drive:', e); }
     }
+    // Recompute next_due on local pointer
+    const lastDone = lastDoneVal ? new Date(lastDoneVal + 'T12:00:00').toISOString() : (getHabitLastDone(id)?.toISOString() || null);
+    await updateHabitNextDue(id, freq, lastDone);
   } else {
     // ─── Normal habit ───
     const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: cat }).eq('id', id);
@@ -1324,6 +1327,8 @@ async function markHabitDone(habitId) {
         completed_by: user?.email || '',
       };
       await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion);
+      // Recompute next_due on local pointer
+      await updateHabitNextDue(habitId, habit.frequency_rule, now);
     } catch (e) {
       console.warn('Failed to push shared habit completion to Drive:', e);
       showToast(t('habits.failed_record'), 'error');
@@ -1467,6 +1472,9 @@ async function deleteHabitCompletion(compId) {
             const idx = sh.completions.findIndex(c => c.completed_at === comp.completed_at);
             if (idx >= 0) sh.completions.splice(idx, 1);
             await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: sh.completions });
+            // Recompute next_due from new latest completion (or null if none left)
+            const latest = sh.completions.length ? sh.completions[sh.completions.length - 1].completed_at : null;
+            await updateHabitNextDue(habit.id, habit.frequency_rule, latest);
           }
         } catch (e) { showToast(t('toast.failed_to_delete'), 'error'); return; }
       } else {
@@ -1529,6 +1537,9 @@ async function saveHabitCompletion(compId) {
         if (driveComp) {
           driveComp.completed_at = newDate;
           await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: sh.completions });
+          // Recompute next_due from latest completion
+          const latest = sh.completions[sh.completions.length - 1]?.completed_at || null;
+          await updateHabitNextDue(habit.id, habit.frequency_rule, latest);
         }
       }
     } catch (e) { showToast(t('toast.failed_to_update'), 'error'); return; }

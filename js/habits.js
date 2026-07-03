@@ -940,7 +940,6 @@ function openAddHabitModal() {
   const groupSel = document.getElementById('newHabitGroup');
   if (state.sharing) {
     const groups = state.sharing.getAllGroups();
-    console.log('[openAddHabitModal] groups:', groups.length, groups);
     if (groups.length > 0) {
       groupSel.innerHTML = `<option value="">${t('sharing.no_group')}</option>` +
         groups.map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
@@ -979,6 +978,21 @@ async function addHabitFromInput(inputEl) {
   buildFrequencyPicker(document.getElementById('newHabitFreqPicker'), '');
   populateHabitCategorySelect('newHabitCategory');
   document.getElementById('newHabitCategory').value = category;
+  // Show group selector if user belongs to any sharing groups
+  const groupRow = document.getElementById('newHabitGroupRow');
+  const groupSel = document.getElementById('newHabitGroup');
+  if (state.sharing) {
+    const groups = state.sharing.getAllGroups();
+    if (groups.length > 0) {
+      groupSel.innerHTML = `<option value="">${t('sharing.no_group')}</option>` +
+        groups.map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
+      groupRow.style.display = '';
+    } else {
+      groupRow.style.display = 'none';
+    }
+  } else {
+    groupRow.style.display = 'none';
+  }
   const addModal = document.getElementById('addHabitModal');
   const addCatColor = getCategoryColor(category);
   addModal.style.setProperty('--cat-color', addCatColor);

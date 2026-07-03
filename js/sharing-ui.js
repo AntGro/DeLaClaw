@@ -125,10 +125,10 @@ export async function renderSharingPane() {
     }
 
     html += `</div>
-      <div class="sharing-invite-row">
+      ${isCreator ? `<div class="sharing-invite-row">
         <input type="email" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${t('sharing.invite_placeholder')}" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingInvite('${escQ(group.id)}');}">
         <button class="sharing-invite-btn" onclick="sharingInvite('${escQ(group.id)}')">${lucideIcon('user-plus', 14)} ${t('sharing.invite')}</button>
-      </div>
+      </div>` : ''}
       ${isCreator ? `<button class="sharing-delete-btn" onclick="sharingDeleteGroup('${escQ(group.id)}')">${lucideIcon('trash-2', 14)} ${t('sharing.delete_group')}</button>` : ''}
     </div>`;
   }

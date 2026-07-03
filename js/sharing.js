@@ -733,13 +733,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     // ─── Items ───
 
-    async addItem(groupId, { item_type, payload, assignees = [] }) {
+    async addItem(groupId, { id: presetId, item_type, payload, assignees = [] }) {
       const user = await ensureUser();
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
 
       const item = {
-        id: crypto.randomUUID(),
+        id: presetId || crypto.randomUUID(),
         item_type,             // 'todo' | 'habit' | 'list_item'
         payload,               // mirrors the fields of the native type
         assignees,             // emails

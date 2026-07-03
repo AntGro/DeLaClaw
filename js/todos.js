@@ -1191,6 +1191,9 @@ async function syncSharedTodos() {
 
     if (!local) {
       // ─── New shared TODO: import to local DB ───
+      // Double-check DB to avoid race with shareTodoFromAdd (which inserts after Drive write)
+      const { data: existing } = await state.db.from('todos').select('id').eq('shared_id', sh.id).limit(1);
+      if (existing?.length) continue;
       const text = sh.payload?.text || sh.payload?.title || '';
       const category = sh.payload?.category || '';
       const priority = sh.payload?.priority || 'medium';
@@ -1255,23 +1258,33 @@ async function shareTodoFromAdd(btn) {
 
   openSharePopover(btn, async (groupId, assignees) => {
     try {
-      const driveItem = await state.sharing.addItem(groupId, {
-        item_type: 'todo',
-        payload: { text, category, priority },
-        assignees,
-      });
-
-      // Insert into local DB as a standard todo with shared link
+      // Insert local row FIRST to prevent syncSharedTodos race
+      // (addItem emits sharing-changed before we return here)
+      const sharedId = crypto.randomUUID();
       const pendingTodos = allTodos.filter(t => !t.done && (t.category || '') === category);
       const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
-      await state.db.from('todos').insert({
+      const { data: localRow, error: localErr } = await state.db.from('todos').insert({
         text,
         priority,
         category,
         sort_order: minOrder,
-        shared_id: driveItem.id,
+        shared_id: sharedId,
         shared_group_id: groupId,
-      });
+      }).select().single();
+      if (localErr) { showToast(localErr.message, 'error'); return; }
+
+      try {
+        await state.sharing.addItem(groupId, {
+          id: sharedId,
+          item_type: 'todo',
+          payload: { text, category, priority },
+          assignees,
+        });
+      } catch (driveErr) {
+        // Clean up local row since Drive write failed
+        if (localRow?.id) await state.db.from('todos').delete().eq('id', localRow.id);
+        throw driveErr;
+      }
 
       input.value = '';
       input.dataset.priority = 'medium';

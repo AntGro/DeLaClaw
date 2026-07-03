@@ -44,4 +44,8 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE habits ADD COLUMN shared_group_id TEXT;
     ALTER TABLE habit_completions ADD COLUMN completed_by TEXT;
   `,
+  '1.273': `
+    ALTER TABLE todos ADD COLUMN shared_id TEXT;
+    ALTER TABLE todos ADD COLUMN shared_group_id TEXT;
+  `,
 };

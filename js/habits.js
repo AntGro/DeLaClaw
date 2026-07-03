@@ -578,6 +578,48 @@ async function refreshHabits() {
     state.allHabitCompletions = await fetchAll(() => state.db.from('habit_completions').select('*').order('completed_at', { ascending: false }));
   } catch (compErr) { /* leave existing completions as-is */ }
 
+  // Enrich shared habit pointers with live data from Drive
+  if (state.sharing) {
+    const sharedHabits = state.sharing.getAllSharedHabits();
+    const sharedById = new Map(sharedHabits.map(h => [h.id, h]));
+
+    for (const habit of state.allHabits) {
+      if (!habit.shared_id) continue;
+      const sh = sharedById.get(habit.shared_id);
+      if (sh) {
+        // Enrich pointer with Drive data (keep local category for deck placement)
+        habit.name = sh.name;
+        habit.frequency_rule = sh.frequency_rule || '';
+        habit.is_draft = 0;
+        habit._shared = sh; // keep reference for completions/metadata
+        // Inject shared completions into allHabitCompletions
+        if (sh.completions?.length) {
+          for (const c of sh.completions) {
+            // Avoid duplicates (use shared habit id + completed_at as key)
+            const exists = state.allHabitCompletions.some(
+              lc => lc.habit_id === habit.id && lc.completed_at === c.completed_at
+            );
+            if (!exists) {
+              state.allHabitCompletions.push({
+                id: c.id,
+                habit_id: habit.id,
+                completed_at: c.completed_at,
+                completed_by: c.completed_by || '',
+                note: null,
+                _shared: true,
+              });
+            }
+          }
+          // Re-sort after injection
+          state.allHabitCompletions.sort((a, b) => b.completed_at.localeCompare(a.completed_at));
+          // Compute next_due from latest completion
+          const latest = sh.completions[sh.completions.length - 1];
+          updateHabitNextDue(habit.id, sh.frequency_rule, latest.completed_at);
+        }
+      }
+    }
+  }
+
   syncHabitCategoriesFromData();
   if (state.currentView === 'habits') {
     renderHabits();
@@ -955,29 +997,9 @@ async function saveNewHabit() {
   if (!name) { showToast(t('habits.enter_habit_name'), 'error'); return; }
   if (!freq) { showToast(t('habits.enter_frequency'), 'error'); return; }
 
-  // Generate a shared ID upfront so local + Drive use the same UUID
-  const sharedId = groupId ? crypto.randomUUID() : null;
-
-  const insertObj = { name, frequency_rule: freq, category: cat, is_draft: isDraft };
-  if (sharedId) {
-    insertObj.shared_id = sharedId;
-    insertObj.shared_group_id = groupId;
-  }
-
-  const { data, error } = await state.db.from('habits').insert(insertObj).select().single();
-  if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
-
-  // If lastDone was provided, create an initial completion
-  if (lastDoneVal && data && data.id) {
-    await state.db.from('habit_completions').insert({ habit_id: data.id, completed_at: new Date(lastDoneVal).toISOString() });
-  }
-  // Compute next_due client-side for structured rules, else delegate to heartbeat
-  if (data && data.id) {
-    await updateHabitNextDue(data.id, freq, lastDoneVal || null);
-  }
-
-  // Write to shared Drive file if group was selected
-  if (sharedId && groupId && state.sharing) {
+  if (groupId && state.sharing) {
+    // ─── Shared habit: pointer locally + canonical data on Drive ───
+    const sharedId = crypto.randomUUID();
     try {
       const user = await state.sharing.getCurrentUser();
       const sharedItem = {
@@ -1002,6 +1024,26 @@ async function saveNewHabit() {
     } catch (e) {
       console.warn('Failed to write shared habit to Drive:', e);
       showToast(t('toast.failed_to_add') + ' (shared)', 'error');
+      return;
+    }
+    // Local pointer — only stores deck placement + link
+    const { error } = await state.db.from('habits').insert({
+      name: '', frequency_rule: '', category: cat, is_draft: 0,
+      shared_id: sharedId, shared_group_id: groupId,
+    }).select().single();
+    if (error) { console.warn('Failed to create local pointer:', error); }
+  } else {
+    // ─── Normal (non-shared) habit ───
+    const { data, error } = await state.db.from('habits').insert({
+      name, frequency_rule: freq, category: cat, is_draft: isDraft,
+    }).select().single();
+    if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
+
+    if (lastDoneVal && data?.id) {
+      await state.db.from('habit_completions').insert({ habit_id: data.id, completed_at: new Date(lastDoneVal).toISOString() });
+    }
+    if (data?.id) {
+      await updateHabitNextDue(data.id, freq, lastDoneVal || null);
     }
   }
 
@@ -1136,16 +1178,15 @@ async function saveEditHabit() {
   const freq = getFrequencyFromPicker(document.getElementById('editHabitFreqPicker'));
   const cat = document.getElementById('editHabitCategory').value || 'General';
   const lastDoneVal = document.getElementById('editHabitLastDone').value;
+  const habit = state.allHabits.find(c => c.id === id);
 
   if (!name) { showToast(t('habits.enter_habit_name'), 'error'); return; }
   if (!freq) { showToast(t('habits.enter_frequency'), 'error'); return; }
 
-  const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: cat }).eq('id', id);
-  if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
-
-  // If shared, push name/frequency/category changes to Drive
-  const habit = state.allHabits.find(c => c.id === id);
   if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+    // ─── Shared habit: name/frequency to Drive, category stays local ───
+    // Update local pointer's category (deck placement)
+    await state.db.from('habits').update({ category: cat }).eq('id', id);
     try {
       await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, {
         name,
@@ -1154,28 +1195,55 @@ async function saveEditHabit() {
       });
     } catch (e) {
       console.warn('Failed to update shared habit on Drive:', e);
+      showToast(t('toast.update_failed'), 'error');
+      return;
     }
-  }
+    // Handle last done date change — write to Drive completions
+    const prevLastDone = getHabitLastDone(id);
+    const prevDateStr = prevLastDone ? localDateStr(prevLastDone) : '';
+    if (lastDoneVal && lastDoneVal !== prevDateStr) {
+      try {
+        const user = await state.sharing.getCurrentUser();
+        const sharedHabits = state.sharing.getAllSharedHabits();
+        const sh = sharedHabits.find(h => h.id === habit.shared_id);
+        if (sh) {
+          const newIso = new Date(lastDoneVal + 'T12:00:00').toISOString();
+          const comps = sh.completions || [];
+          if (comps.length > 0) {
+            // Update latest completion
+            comps[comps.length - 1].completed_at = newIso;
+          } else {
+            comps.push({ id: crypto.randomUUID(), completed_at: newIso, completed_by: user?.email || '' });
+          }
+          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: comps });
+        }
+      } catch (e) { console.warn('Failed to update shared completion on Drive:', e); }
+    }
+  } else {
+    // ─── Normal habit ───
+    const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: cat }).eq('id', id);
+    if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
 
-  // Handle last done date change
-  const prevLastDone = getHabitLastDone(id);
-  const prevDateStr = prevLastDone ? localDateStr(prevLastDone) : '';
-  if (lastDoneVal !== prevDateStr) {
-    if (lastDoneVal) {
-      const newDate = new Date(lastDoneVal + 'T12:00:00');
-      const newIso = newDate.toISOString();
-      const latestComp = state.allHabitCompletions.find(c => c.habit_id === id);
-      if (latestComp) {
-        await state.db.from('habit_completions').update({ completed_at: newIso }).eq('id', latestComp.id);
-      } else {
-        await state.db.from('habit_completions').insert({ habit_id: id, completed_at: newIso });
+    // Handle last done date change
+    const prevLastDone = getHabitLastDone(id);
+    const prevDateStr = prevLastDone ? localDateStr(prevLastDone) : '';
+    if (lastDoneVal !== prevDateStr) {
+      if (lastDoneVal) {
+        const newDate = new Date(lastDoneVal + 'T12:00:00');
+        const newIso = newDate.toISOString();
+        const latestComp = state.allHabitCompletions.find(c => c.habit_id === id);
+        if (latestComp) {
+          await state.db.from('habit_completions').update({ completed_at: newIso }).eq('id', latestComp.id);
+        } else {
+          await state.db.from('habit_completions').insert({ habit_id: id, completed_at: newIso });
+        }
       }
     }
-  }
 
-  // Compute next_due client-side for structured rules, else delegate to heartbeat
-  const lastDone = lastDoneVal ? new Date(lastDoneVal + 'T12:00:00').toISOString() : getHabitLastDone(id);
-  await updateHabitNextDue(id, freq, lastDone);
+    // Compute next_due
+    const lastDone = lastDoneVal ? new Date(lastDoneVal + 'T12:00:00').toISOString() : getHabitLastDone(id);
+    await updateHabitNextDue(id, freq, lastDone);
+  }
 
   closeEditHabitModal();
   showToast(t('habits.habit_updated'), 'success');
@@ -1221,13 +1289,10 @@ async function markHabitDone(habitId) {
   const habit = state.allHabits.find(c => c.id === habitId);
   const now = new Date().toISOString();
 
-  const row = { habit_id: habitId, completed_at: now };
-
-  // If this is a shared habit, include completed_by and push to Drive
   if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+    // ─── Shared habit: write only to Drive ───
     try {
       const user = await state.sharing.getCurrentUser();
-      row.completed_by = user?.email || '';
       const completion = {
         id: crypto.randomUUID(),
         completed_at: now,
@@ -1236,17 +1301,19 @@ async function markHabitDone(habitId) {
       await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion);
     } catch (e) {
       console.warn('Failed to push shared habit completion to Drive:', e);
+      showToast(t('habits.failed_record'), 'error');
+      return;
     }
-  }
-
-  const { error } = await state.db.from('habit_completions').insert(row);
-  if (error) { showToast(t('habits.failed_record'), 'error'); return; }
-
-  // Compute next_due for structured rules, delegate to heartbeat for custom
-  if (habit) {
-    await updateHabitNextDue(habitId, habit.frequency_rule, now);
   } else {
-    await clearHabitNextDue(habitId);
+    // ─── Normal habit: write to local DB ───
+    const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: now });
+    if (error) { showToast(t('habits.failed_record'), 'error'); return; }
+
+    if (habit) {
+      await updateHabitNextDue(habitId, habit.frequency_rule, now);
+    } else {
+      await clearHabitNextDue(habitId);
+    }
   }
 
   showToast(t('habits.habit_done'), 'success');
@@ -1359,22 +1426,28 @@ function renderHabitHistoryList(habitId, habit) {
 
 async function deleteHabitCompletion(compId) {
   const comp = state.allHabitCompletions.find(c => c.id === compId);
-  const dateStr = comp ? new Date(comp.completed_at).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  if (!comp) return;
+  const habit = state.allHabits.find(h => h.id === comp.habit_id);
+  const dateStr = new Date(comp.completed_at).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   showDeleteConfirm(
     t('common.delete'),
     'Are you sure you want to delete this completion record?',
     async () => {
-      const { error } = await state.db.from('habit_completions').delete().eq('id', compId);
-      if (error) { showToast(t('toast.failed_to_delete'), 'error'); return; }
-
-      // Sync to Drive if shared
-      if (comp) {
-        const habit = state.allHabits.find(h => h.id === comp.habit_id);
-        if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-          try {
-            await syncCompletionsToDrive(habit);
-          } catch (e) { console.warn('Failed to sync completion delete to Drive:', e); }
-        }
+      if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+        // ─── Shared: remove from Drive completions array ───
+        try {
+          const sharedHabits = state.sharing.getAllSharedHabits();
+          const sh = sharedHabits.find(h => h.id === habit.shared_id);
+          if (sh?.completions) {
+            const idx = sh.completions.findIndex(c => c.completed_at === comp.completed_at);
+            if (idx >= 0) sh.completions.splice(idx, 1);
+            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: sh.completions });
+          }
+        } catch (e) { showToast(t('toast.failed_to_delete'), 'error'); return; }
+      } else {
+        // ─── Normal: delete from local DB ───
+        const { error } = await state.db.from('habit_completions').delete().eq('id', compId);
+        if (error) { showToast(t('toast.failed_to_delete'), 'error'); return; }
       }
 
       showToast(t('habits.completion_deleted'), 'success');
@@ -1384,7 +1457,7 @@ async function deleteHabitCompletion(compId) {
         renderHabitHistoryList(state._historyHabitId);
       }
     },
-    dateStr + (comp && comp.note ? ` — ${comp.note}` : '')
+    dateStr + (comp.note ? ` — ${comp.note}` : '')
   );
 }
 
@@ -1415,33 +1488,31 @@ async function saveHabitCompletion(compId) {
   const noteEl = document.getElementById(`editCompNote_${compId}`);
   if (!dateEl) return;
   const comp = state.allHabitCompletions.find(c => c.id === compId);
-  const oldCompletedAt = comp?.completed_at;
+  if (!comp) return;
+  const habit = state.allHabits.find(h => h.id === comp.habit_id);
+  const oldCompletedAt = comp.completed_at;
   const newDate = new Date(dateEl.value + 'T12:00:00Z').toISOString();
   const newNote = noteEl ? noteEl.value.trim() : null;
-  const updates = { completed_at: newDate };
-  if (newNote !== null) updates.note = newNote || null;
 
-  const { error } = await state.db.from('habit_completions').update(updates).eq('id', compId);
-  if (error) { showToast(t('toast.failed_to_update'), 'error'); return; }
-
-  // Sync to Drive if shared — update the matching completion's completed_at
-  if (comp) {
-    const habit = state.allHabits.find(h => h.id === comp.habit_id);
-    if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-      try {
-        const sharedHabits = state.sharing.getAllSharedHabits();
-        const sh = sharedHabits.find(h => h.id === habit.shared_id);
-        if (sh?.completions) {
-          const driveComp = sh.completions.find(c => c.completed_at === oldCompletedAt);
-          if (driveComp) {
-            driveComp.completed_at = newDate;
-            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, {
-              completions: sh.completions,
-            });
-          }
+  if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+    // ─── Shared: update in Drive completions array ───
+    try {
+      const sharedHabits = state.sharing.getAllSharedHabits();
+      const sh = sharedHabits.find(h => h.id === habit.shared_id);
+      if (sh?.completions) {
+        const driveComp = sh.completions.find(c => c.completed_at === oldCompletedAt);
+        if (driveComp) {
+          driveComp.completed_at = newDate;
+          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: sh.completions });
         }
-      } catch (e) { console.warn('Failed to sync completion edit to Drive:', e); }
-    }
+      }
+    } catch (e) { showToast(t('toast.failed_to_update'), 'error'); return; }
+  } else {
+    // ─── Normal: update in local DB ───
+    const updates = { completed_at: newDate };
+    if (newNote !== null) updates.note = newNote || null;
+    const { error } = await state.db.from('habit_completions').update(updates).eq('id', compId);
+    if (error) { showToast(t('toast.failed_to_update'), 'error'); return; }
   }
 
   showToast(t('habits.completion_updated'), 'success');
@@ -1899,107 +1970,38 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
  * - New completions → insert into local habit_completions
  */
 /**
- * Rebuild the Drive completions array from local DB for a shared habit.
- * Called after a local completion is deleted or edited.
+ * Sync shared habits: manage local pointers only.
+ * - New shared habit on Drive with no local pointer → create pointer in "General"
+ * - Shared habit deleted from Drive → delete local pointer
+ * - Data (name, frequency, completions) is read live from Drive in refreshHabits()
  */
-async function syncCompletionsToDrive(habit) {
-  if (!habit?.shared_id || !habit?.shared_group_id || !state.sharing) return;
-  // Re-read local completions for this habit (after the delete has landed)
-  const { data: localComps } = await state.db.from('habit_completions')
-    .select('*').eq('habit_id', habit.id).order('completed_at', { ascending: true });
-  const completions = (localComps || []).map(c => ({
-    id: crypto.randomUUID(),
-    completed_at: c.completed_at,
-    completed_by: c.completed_by || '',
-  }));
-  await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions });
-}
-
 async function syncSharedHabits() {
   if (!state.sharing || !state.db?.connected) return;
 
   const sharedHabits = state.sharing.getAllSharedHabits();
-  // Index local shared habits by shared_id
   const localShared = (state.allHabits || []).filter(h => h.shared_id);
   const localBySharedId = new Map(localShared.map(h => [h.shared_id, h]));
-
-  // Track which shared_ids still exist on Drive (for deletion detection)
   const driveSharedIds = new Set(sharedHabits.map(h => h.id));
 
   let needsRefresh = false;
 
+  // Create pointers for new shared habits
   for (const sh of sharedHabits) {
-    const local = localBySharedId.get(sh.id);
-
-    if (!local) {
-      // ─── New shared habit: import to local DB ───
-      const { data, error } = await state.db.from('habits').insert({
-        name: sh.name,
-        frequency_rule: sh.frequency_rule || '',
-        category: 'General',
-        is_draft: 0,
-        shared_id: sh.id,
-        shared_group_id: sh.group_id,
-      }).select().single();
-      if (error) { console.warn('syncSharedHabits: failed to import', sh.id, error); continue; }
-
-      // Import existing completions
-      if (sh.completions?.length && data?.id) {
-        for (const c of sh.completions) {
-          await state.db.from('habit_completions').insert({
-            habit_id: data.id,
-            completed_at: c.completed_at,
-            completed_by: c.completed_by || '',
-          });
-        }
-        await updateHabitNextDue(data.id, sh.frequency_rule, sh.completions[sh.completions.length - 1].completed_at);
-      }
+    if (!localBySharedId.has(sh.id)) {
+      const { error } = await state.db.from('habits').insert({
+        name: '', frequency_rule: '', category: 'General', is_draft: 0,
+        shared_id: sh.id, shared_group_id: sh.group_id,
+      });
+      if (error) { console.warn('syncSharedHabits: failed to create pointer', sh.id, error); continue; }
       needsRefresh = true;
-    } else {
-      // ─── Existing shared habit: sync name/frequency/completions ───
-      let updated = false;
-      if (local.name !== sh.name || local.frequency_rule !== (sh.frequency_rule || '')) {
-        await state.db.from('habits').update({
-          name: sh.name,
-          frequency_rule: sh.frequency_rule || '',
-          updated_at: new Date().toISOString(),
-        }).eq('id', local.id);
-        updated = true;
-      }
-
-      // Sync completions: find completions on Drive not in local DB
-      if (sh.completions?.length) {
-        const localComps = (state.allHabitCompletions || []).filter(c => c.habit_id === local.id);
-        const localCompTimes = new Set(localComps.map(c => c.completed_at));
-        let newCompAdded = false;
-        for (const c of sh.completions) {
-          if (!localCompTimes.has(c.completed_at)) {
-            await state.db.from('habit_completions').insert({
-              habit_id: local.id,
-              completed_at: c.completed_at,
-              completed_by: c.completed_by || '',
-            });
-            newCompAdded = true;
-          }
-        }
-        if (newCompAdded) {
-          const lastComp = sh.completions[sh.completions.length - 1];
-          await updateHabitNextDue(local.id, sh.frequency_rule || local.frequency_rule, lastComp.completed_at);
-          updated = true;
-        }
-      }
-
-      if (updated) needsRefresh = true;
     }
   }
 
-  // ─── Deletion: local shared habits whose shared_id no longer exists on Drive ───
+  // Delete pointers for removed shared habits
   for (const local of localShared) {
     if (!driveSharedIds.has(local.shared_id)) {
-      // Check the group still exists (don't delete if group just hasn't loaded yet)
       const group = state.sharing.getAllGroups().find(g => g.id === local.shared_group_id);
       if (group) {
-        await state.db.from('habit_completions').delete().eq('habit_id', local.id);
         await state.db.from('habits').delete().eq('id', local.id);
         needsRefresh = true;
       }

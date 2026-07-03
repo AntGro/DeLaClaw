@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS todos (
   snooze_until TEXT,
   category TEXT DEFAULT '',
   sort_order INTEGER DEFAULT 0,
+  shared_id TEXT,
+  shared_group_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );

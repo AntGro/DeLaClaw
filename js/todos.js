@@ -3,7 +3,7 @@ import state, { TODO_MAX_LEN } from './state.js';
 import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
 import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 import { t, getLang } from './i18n.js';
-import { sharedBadge, assigneeDots, openSharePopover, closeSharePopover, showCompletionModal } from './sharing-ui.js';
+import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
 // ===================================================================
 // TODOS — DATA & CRUD (Category Card Layout)
@@ -331,9 +331,6 @@ function renderTodos() {
   initCategoryDragDrop();
 
   balanceGrid(grid);
-
-  // Render shared TODOs section below the grid
-  renderSharedTodos();
 }
 
 function renderCategoryToolbarButtons(categoryList) {
@@ -528,10 +525,18 @@ function renderTodoItem(td) {
     priorityClass
   ].filter(Boolean).join(' ');
 
+  // Shared TODO badge
+  const isShared = td.shared_id && td.shared_group_id;
+  let sharedHtml = '';
+  if (isShared && state.sharing) {
+    const group = state.sharing.getAllGroups().find(g => g.id === td.shared_group_id);
+    sharedHtml = sharedBadge(group?.name || '');
+  }
+
   return `<div class="${classes}" data-todo-id="${td.id}">
     <div class="todo-row">
       ${flagBtn}
-      <span class="todo-text">${td.text.length > 150 ? truncateWithShowMore(td.text, 150, td.id, 'todo') : renderMd(td.text)}</span>
+      <span class="todo-text">${td.text.length > 150 ? truncateWithShowMore(td.text, 150, td.id, 'todo') : renderMd(td.text)}</span>${sharedHtml}
       ${td.done && td.updated_at ? `<span class="todo-completed-date">${new Date(td.updated_at).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })}</span>` : ''}
       <div class="todo-actions">
         ${!td.done ? `<button onclick="toggleTodo('${td.id}', true)" title="${t('common.done')}">${lucideIcon("circle-check",16)}</button>` : `<button onclick="toggleTodo('${td.id}', false)" title="${t('common.undo')}">${lucideIcon("refresh-cw",16)}</button>`}
@@ -655,8 +660,20 @@ let _lastQuickAddPrioBtn = null;
 
 async function setTodoPriority(id, level) {
   closePriorityPicker();
+  const todo = allTodos.find(t => t.id === id);
   const { error } = await state.db.from('todos').update({ priority: level }).eq('id', id);
   if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+
+  // Sync priority to Drive if shared
+  if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+    try {
+      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
+      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+        payload: { ...currentPayload, priority: level },
+      });
+    } catch (e) { console.warn('Failed to sync shared todo priority to Drive:', e); }
+  }
+
   const label = t(`todos.priority_${level}`) || level;
   showToast(label, 'success');
   await refreshTodos();
@@ -684,8 +701,22 @@ async function addTodoToCategory(inputEl) {
 }
 
 async function toggleTodo(id, done) {
+  const todo = allTodos.find(t => t.id === id);
   const { error } = await state.db.from('todos').update({ done }).eq('id', id);
   if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+
+  // Sync to Drive if shared
+  if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+    try {
+      if (done) {
+        const currentUser = await state.sharing.getCurrentUser();
+        await state.sharing.completeItem(todo.shared_group_id, todo.shared_id, [currentUser?.email || '']);
+      } else {
+        await state.sharing.uncompleteItem(todo.shared_group_id, todo.shared_id);
+      }
+    } catch (e) { console.warn('Failed to sync shared todo toggle to Drive:', e); }
+  }
+
   showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
   await refreshTodos();
 }
@@ -695,8 +726,17 @@ async function deleteTodo(id) {
     t('common.delete'),
     'Delete this TODO? This cannot be undone.',
     async () => {
+      const todo = allTodos.find(t => t.id === id);
       const { error } = await state.db.from('todos').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Delete from Drive if shared (removes for all group members)
+      if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+        try {
+          await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
+        } catch (e) { console.warn('Failed to delete shared todo from Drive:', e); }
+      }
+
       showToast(t('toast.deleted'), 'info');
       await refreshTodos();
     }
@@ -720,6 +760,11 @@ async function deleteAllDoneTodos(category) {
     async () => {
       for (const td of doneTodos) {
         await state.db.from('todos').delete().eq('id', td.id);
+        // Delete from Drive if shared
+        if (td.shared_id && td.shared_group_id && state.sharing) {
+          try { await state.sharing.deleteItem(td.shared_group_id, td.shared_id); }
+          catch (e) { console.warn('Failed to delete shared todo from Drive:', e); }
+        }
       }
       showToast(t('toast.deleted'), 'info');
       await refreshTodos();
@@ -806,7 +851,23 @@ async function editTodoInline(id, itemEl) {
       if (Object.keys(updates).length > 0) {
         const { error } = await state.db.from('todos').update(updates).eq('id', id);
         if (error) showToast(t('toast.update_failed'), 'error');
-        else showToast(t('todos.todo_updated'), 'success');
+        else {
+          // Sync to Drive if shared
+          if (todo.shared_id && todo.shared_group_id && state.sharing) {
+            try {
+              const payloadUpdates = {};
+              if (updates.text) payloadUpdates.text = updates.text;
+              if (updates.category !== undefined) payloadUpdates.category = updates.category;
+              if (Object.keys(payloadUpdates).length > 0) {
+                const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
+                await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+                  payload: { ...currentPayload, ...payloadUpdates },
+                });
+              }
+            } catch (e) { console.warn('Failed to sync shared todo edit to Drive:', e); }
+          }
+          showToast(t('todos.todo_updated'), 'success');
+        }
       }
     },
     refreshFn: refreshTodos,
@@ -820,7 +881,7 @@ function initTodoModals() {
   const app = document.getElementById('app');
 
   // Re-render shared TODOs when sharing data changes (poll, join, etc.)
-  document.addEventListener('sharing-changed', () => renderSharedTodos());
+  document.addEventListener('sharing-changed', () => syncSharedTodos());
 
   // Snooze Modal
   const m1 = document.createElement('div');
@@ -1101,52 +1162,87 @@ function initTodoHoverDelay(container) {
 /** Return the in-memory todos array (no DB fetch). */
 function getTodos() { return allTodos; }
 
-// ── Shared TODOs ────────────────────────────────────────────────
+// ── Shared TODOs — Sync (mirrors shared habit sync) ─────────────
 
-function renderSharedTodos() {
-  if (!state.sharing) return;
-  const container = document.getElementById('todoCategoryGrid');
-  if (!container) return;
+/**
+ * Sync shared TODOs from Drive to local DB.
+ * Called on 'sharing-changed' event (poll detected changes).
+ *
+ * For each group:
+ * - New shared TODO not in local DB → create local todo
+ * - Shared TODO text/done/priority changed → update local todo
+ * - Shared TODO deleted from Drive → delete local todo
+ */
+async function syncSharedTodos() {
+  if (!state.sharing || !state.db?.connected) return;
 
   const allShared = state.sharing.getAllSharedItems().filter(i => i.item_type === 'todo');
-  if (!allShared.length) return;
+  // Index local shared todos by shared_id
+  const localShared = allTodos.filter(t => t.shared_id);
+  const localBySharedId = new Map(localShared.map(t => [t.shared_id, t]));
 
-  // Remove existing shared section if re-rendering
-  const existing = document.getElementById('sharedTodosSection');
-  if (existing) existing.remove();
+  // Track which shared_ids still exist on Drive (for deletion detection)
+  const driveSharedIds = new Set(allShared.map(i => i.id));
 
-  const section = document.createElement('div');
-  section.id = 'sharedTodosSection';
-  section.style.gridColumn = '1 / -1';
+  let needsRefresh = false;
 
-  const pending = allShared.filter(i => !i.completed);
-  const done = allShared.filter(i => i.completed);
+  for (const sh of allShared) {
+    const local = localBySharedId.get(sh.id);
 
-  let html = `<button class="shared-section-toggle" onclick="this.parentElement.classList.toggle('open')">
-    ${lucideIcon('users', 14)} ${t('sharing.shared')} (${allShared.length})
-    ${lucideIcon('chevron-down', 14)}
-  </button>
-  <div class="shared-section-items">`;
+    if (!local) {
+      // ─── New shared TODO: import to local DB ───
+      const text = sh.payload?.text || sh.payload?.title || '';
+      const category = sh.payload?.category || '';
+      const priority = sh.payload?.priority || 'medium';
+      const done = sh.done ? 1 : 0;
 
-  for (const item of [...pending, ...done]) {
-    const group = state.sharing.getAllGroups().find(g => g.id === item.group_id);
-    const groupName = group?.name || '?';
-    const text = item.payload?.text || item.payload?.title || '';
-    const isDone = !!item.completed;
-    html += `<div class="bucket-item${isDone ? ' completed' : ''}" style="border-left:3px solid var(--accent);margin:2px 0;padding:4px 8px;display:flex;align-items:center;gap:6px;">
-      <input type="checkbox" ${isDone ? 'checked' : ''} data-group="${esc(item.group_id)}" data-item="${esc(item.id)}" data-assignees="${esc(JSON.stringify((item.assignees||[]).map(a=>typeof a==='string'?a:a.email)))}" onchange="toggleSharedTodo(this.dataset.group,this.dataset.item,this.checked,JSON.parse(this.dataset.assignees))">
-      <span style="flex:1;${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${esc(text)}</span>
-      ${sharedBadge(groupName)}
-      ${assigneeDots(item.assignees || [])}
-      <button class="sharing-remove-btn" onclick="deleteSharedTodo('${escQ(item.group_id)}','${escQ(item.id)}')" title="${t('common.delete')}">${lucideIcon('x', 14)}</button>
-    </div>`;
+      const { error } = await state.db.from('todos').insert({
+        text,
+        category,
+        priority,
+        done,
+        shared_id: sh.id,
+        shared_group_id: sh.group_id,
+      });
+      if (error) { console.warn('syncSharedTodos: failed to import', sh.id, error); continue; }
+      needsRefresh = true;
+    } else {
+      // ─── Existing shared TODO: sync text/done/priority ───
+      const remoteText = sh.payload?.text || sh.payload?.title || '';
+      const remoteDone = sh.done ? 1 : 0;
+      const remotePriority = sh.payload?.priority || 'medium';
+
+      const updates = {};
+      if (local.text !== remoteText) updates.text = remoteText;
+      if ((local.done ? 1 : 0) !== remoteDone) updates.done = remoteDone;
+      if ((local.priority || 'medium') !== remotePriority) updates.priority = remotePriority;
+
+      if (Object.keys(updates).length > 0) {
+        updates.updated_at = new Date().toISOString();
+        await state.db.from('todos').update(updates).eq('id', local.id);
+        needsRefresh = true;
+      }
+    }
   }
 
-  html += '</div>';
-  section.innerHTML = html;
-  section.classList.add('open');
-  container.appendChild(section);
+  // ─── Deletion: local shared todos whose shared_id no longer exists on Drive ───
+  for (const local of localShared) {
+    if (!driveSharedIds.has(local.shared_id)) {
+      // Check the group still exists (don't delete if group just hasn't loaded yet)
+      const group = state.sharing.getAllGroups().find(g => g.id === local.shared_group_id);
+      if (group) {
+        await state.db.from('todos').delete().eq('id', local.id);
+        needsRefresh = true;
+      }
+    }
+  }
+
+  if (needsRefresh) {
+    await refreshTodos();
+  }
 }
+
+window.syncSharedTodos = syncSharedTodos;
 
 async function shareTodoFromAdd(btn) {
   const addRow = btn.closest('.todo-cat-add');
@@ -1155,55 +1251,41 @@ async function shareTodoFromAdd(btn) {
   const text = input?.value.trim();
   if (!text) return;
   const category = input.dataset.category || '';
-  const prioBtn = addRow.querySelector('.todo-add-priority-btn');
   const priority = input.dataset.priority || 'medium';
 
   openSharePopover(btn, async (groupId, assignees) => {
     try {
-      await state.sharing.addItem(groupId, {
+      const driveItem = await state.sharing.addItem(groupId, {
         item_type: 'todo',
         payload: { text, category, priority },
         assignees,
       });
+
+      // Insert into local DB as a standard todo with shared link
+      const pendingTodos = allTodos.filter(t => !t.done && (t.category || '') === category);
+      const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
+      await state.db.from('todos').insert({
+        text,
+        priority,
+        category,
+        sort_order: minOrder,
+        shared_id: driveItem.id,
+        shared_group_id: groupId,
+      });
+
       input.value = '';
+      input.dataset.priority = 'medium';
+      const prioBtn = addRow.querySelector('.todo-add-priority-btn');
+      if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'medium');
       showToast(t('sharing.shared') + '!', 'success');
-      renderSharedTodos();
+      await refreshTodos();
     } catch (e) {
       showToast(e.message, 'error');
     }
   });
 }
 
-async function toggleSharedTodo(groupId, itemId, checked, assigneeEmails) {
-  if (!state.sharing) return;
-  try {
-    if (checked) {
-      const currentUser = await state.sharing.getCurrentUser();
-      if (assigneeEmails.length > 1) {
-        showCompletionModal(groupId, itemId, assigneeEmails, currentUser?.email);
-        return;
-      }
-      await state.sharing.completeItem(groupId, itemId, [currentUser?.email || assigneeEmails[0]]);
-    } else {
-      await state.sharing.uncompleteItem(groupId, itemId);
-    }
-    renderSharedTodos();
-  } catch (e) { showToast(e.message, 'error'); }
-}
-
-async function deleteSharedTodo(groupId, itemId) {
-  if (!state.sharing) return;
-  showDeleteConfirm(t('common.delete'), t('sharing.delete_shared_item_confirm'), async () => {
-    try {
-      await state.sharing.deleteItem(groupId, itemId);
-      renderSharedTodos();
-    } catch (e) { showToast(e.message, 'error'); }
-  });
-}
-
 window.shareTodoFromAdd = shareTodoFromAdd;
-window.toggleSharedTodo = toggleSharedTodo;
-window.deleteSharedTodo = deleteSharedTodo;
 
 export { refreshTodos, renderTodos, getCategoryColor, getCategoryColors, setCategoryColor, loadTodoCategoryMeta, initTodoModals, getTodoCounts, getTodos };
 

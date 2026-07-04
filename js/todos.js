@@ -218,6 +218,27 @@ async function refreshTodos() {
     return;
   }
   allTodos = data || [];
+
+  // Enrich shared todo pointers with live data from Drive
+  if (state.sharing) {
+    const sharedItems = state.sharing.getAllSharedItems().filter(i => i.item_type === 'todo');
+    const sharedById = new Map(sharedItems.map(i => [i.id, i]));
+
+    for (const todo of allTodos) {
+      if (!todo.shared_id) continue;
+      const sh = sharedById.get(todo.shared_id);
+      if (sh) {
+        // Enrich pointer with Drive data (keep local category + sort_order)
+        todo.text = sh.payload?.text || sh.payload?.title || '';
+        todo.priority = sh.payload?.priority || 'medium';
+        todo.done = sh.done ? 1 : 0;
+        todo.due_date = sh.payload?.due_date || null;
+        todo.snooze_until = sh.payload?.snooze_until || null;
+        todo._shared = sh; // keep reference for metadata
+      }
+    }
+  }
+
   migrateBucketsToCategories();
   syncCategoriesFromTodos();
   if (state.currentView === 'todos') {
@@ -661,17 +682,19 @@ let _lastQuickAddPrioBtn = null;
 async function setTodoPriority(id, level) {
   closePriorityPicker();
   const todo = allTodos.find(t => t.id === id);
-  const { error } = await state.db.from('todos').update({ priority: level }).eq('id', id);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
 
-  // Sync priority to Drive if shared
   if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+    // ─── Shared: write only to Drive ───
     try {
       const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
       await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
         payload: { ...currentPayload, priority: level },
       });
-    } catch (e) { console.warn('Failed to sync shared todo priority to Drive:', e); }
+    } catch (e) { console.warn('Failed to update shared todo priority on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+  } else {
+    // ─── Normal: write to local DB ───
+    const { error } = await state.db.from('todos').update({ priority: level }).eq('id', id);
+    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
   }
 
   const label = t(`todos.priority_${level}`) || level;
@@ -702,11 +725,9 @@ async function addTodoToCategory(inputEl) {
 
 async function toggleTodo(id, done) {
   const todo = allTodos.find(t => t.id === id);
-  const { error } = await state.db.from('todos').update({ done }).eq('id', id);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
 
-  // Sync to Drive if shared
   if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+    // ─── Shared: write only to Drive ───
     try {
       if (done) {
         const currentUser = await state.sharing.getCurrentUser();
@@ -714,7 +735,11 @@ async function toggleTodo(id, done) {
       } else {
         await state.sharing.uncompleteItem(todo.shared_group_id, todo.shared_id);
       }
-    } catch (e) { console.warn('Failed to sync shared todo toggle to Drive:', e); }
+    } catch (e) { console.warn('Failed to toggle shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+  } else {
+    // ─── Normal: write to local DB ───
+    const { error } = await state.db.from('todos').update({ done }).eq('id', id);
+    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
   }
 
   showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
@@ -849,24 +874,28 @@ async function editTodoInline(id, itemEl) {
         if (extra.category !== oldCategory) updates.category = extra.category;
       }
       if (Object.keys(updates).length > 0) {
-        const { error } = await state.db.from('todos').update(updates).eq('id', id);
-        if (error) showToast(t('toast.update_failed'), 'error');
-        else {
-          // Sync to Drive if shared
-          if (todo.shared_id && todo.shared_group_id && state.sharing) {
-            try {
-              const payloadUpdates = {};
-              if (updates.text) payloadUpdates.text = updates.text;
-              if (updates.category !== undefined) payloadUpdates.category = updates.category;
-              if (Object.keys(payloadUpdates).length > 0) {
-                const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
-                await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-                  payload: { ...currentPayload, ...payloadUpdates },
-                });
-              }
-            } catch (e) { console.warn('Failed to sync shared todo edit to Drive:', e); }
+        if (todo.shared_id && todo.shared_group_id && state.sharing) {
+          // ─── Shared: category to local pointer, text/priority/due_date to Drive ───
+          if (updates.category !== undefined) {
+            await state.db.from('todos').update({ category: updates.category }).eq('id', id);
           }
+          try {
+            const driveUpdates = {};
+            if (updates.text) driveUpdates.text = updates.text;
+            if (updates.due_date !== undefined) driveUpdates.due_date = updates.due_date;
+            if (Object.keys(driveUpdates).length > 0) {
+              const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
+              await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+                payload: { ...currentPayload, ...driveUpdates },
+              });
+            }
+          } catch (e) { console.warn('Failed to update shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
           showToast(t('todos.todo_updated'), 'success');
+        } else {
+          // ─── Normal: write all to local DB ───
+          const { error } = await state.db.from('todos').update(updates).eq('id', id);
+          if (error) showToast(t('toast.update_failed'), 'error');
+          else showToast(t('todos.todo_updated'), 'success');
         }
       }
     },
@@ -987,8 +1016,21 @@ async function submitSnooze() {
 async function doSnooze(snoozeUntil) {
   const taskId = document.getElementById('snoozeTaskId').value;
   if (!taskId) return;
-  const { error } = await state.db.from('todos').update({ snooze_until: snoozeUntil.toISOString() }).eq('id', taskId);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+  const todo = allTodos.find(t => t.id === taskId);
+
+  if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+    // ─── Shared: write snooze to Drive payload ───
+    try {
+      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
+      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+        payload: { ...currentPayload, snooze_until: snoozeUntil.toISOString() },
+      });
+    } catch (e) { console.warn('Failed to snooze shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+  } else {
+    // ─── Normal: write to local DB ───
+    const { error } = await state.db.from('todos').update({ snooze_until: snoozeUntil.toISOString() }).eq('id', taskId);
+    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+  }
   closeSnoozeModal();
   showToast(`${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 'success');
   await refreshTodos();
@@ -1186,45 +1228,18 @@ async function syncSharedTodos() {
 
   let needsRefresh = false;
 
+  // Create pointers for new shared TODOs
   for (const sh of allShared) {
-    const local = localBySharedId.get(sh.id);
-
-    if (!local) {
-      // ─── New shared TODO: import to local DB ───
-      // Double-check DB to avoid race with shareTodoFromAdd (which inserts after Drive write)
+    if (!localBySharedId.has(sh.id)) {
+      // Double-check DB to avoid race with shareTodoFromAdd
       const { data: existing } = await state.db.from('todos').select('id').eq('shared_id', sh.id).limit(1);
       if (existing?.length) continue;
-      const text = sh.payload?.text || sh.payload?.title || '';
-      const category = sh.payload?.category || '';
-      const priority = sh.payload?.priority || 'medium';
-      const done = sh.done ? 1 : 0;
-
       const { error } = await state.db.from('todos').insert({
-        text,
-        category,
-        priority,
-        done,
-        shared_id: sh.id,
-        shared_group_id: sh.group_id,
+        text: '', category: '', priority: 'medium', done: 0,
+        shared_id: sh.id, shared_group_id: sh.group_id,
       });
-      if (error) { console.warn('syncSharedTodos: failed to import', sh.id, error); continue; }
+      if (error) { console.warn('syncSharedTodos: failed to create pointer', sh.id, error); continue; }
       needsRefresh = true;
-    } else {
-      // ─── Existing shared TODO: sync text/done/priority ───
-      const remoteText = sh.payload?.text || sh.payload?.title || '';
-      const remoteDone = sh.done ? 1 : 0;
-      const remotePriority = sh.payload?.priority || 'medium';
-
-      const updates = {};
-      if (local.text !== remoteText) updates.text = remoteText;
-      if ((local.done ? 1 : 0) !== remoteDone) updates.done = remoteDone;
-      if ((local.priority || 'medium') !== remotePriority) updates.priority = remotePriority;
-
-      if (Object.keys(updates).length > 0) {
-        updates.updated_at = new Date().toISOString();
-        await state.db.from('todos').update(updates).eq('id', local.id);
-        needsRefresh = true;
-      }
     }
   }
 
@@ -1258,14 +1273,13 @@ async function shareTodoFromAdd(btn) {
 
   openSharePopover(btn, async (groupId, assignees) => {
     try {
-      // Insert local row FIRST to prevent syncSharedTodos race
+      // Insert local pointer FIRST to prevent syncSharedTodos race
       // (addItem emits sharing-changed before we return here)
       const sharedId = crypto.randomUUID();
       const pendingTodos = allTodos.filter(t => !t.done && (t.category || '') === category);
       const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
       const { data: localRow, error: localErr } = await state.db.from('todos').insert({
-        text,
-        priority,
+        text: '', priority: 'medium', done: 0,
         category,
         sort_order: minOrder,
         shared_id: sharedId,

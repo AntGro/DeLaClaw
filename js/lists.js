@@ -112,6 +112,23 @@ async function refreshLists() {
   }
   state.allListItems = items || [];
 
+  // Enrich shared list item pointers with live data from Drive
+  if (state.sharing) {
+    const sharedItems = state.sharing.getAllSharedItems().filter(i => i.item_type === 'list_item');
+    const sharedById = new Map(sharedItems.map(i => [i.id, i]));
+
+    for (const item of state.allListItems) {
+      if (!item.shared_id) continue;
+      const sh = sharedById.get(item.shared_id);
+      if (sh) {
+        item.text = sh.payload?.text || sh.payload?.title || '';
+        item.note = sh.payload?.note || null;
+        item.checked = sh.done ? 1 : 0;
+        item._shared = sh;
+      }
+    }
+  }
+
   if (state.currentView === 'lists') {
     renderLists();
   }
@@ -202,9 +219,6 @@ function renderLists() {
     }
   });
   balanceGrid(grid);
-
-  // Render shared list items below the grid
-  renderSharedListItems();
 }
 
 function renderListCard(list, items, idx) {
@@ -258,11 +272,19 @@ function renderListItem(item) {
     ? `<div class="list-item-note">${esc(item.note)}</div>`
     : '';
 
+  // Shared list item badge
+  const isShared = item.shared_id && item.shared_group_id;
+  let sharedHtml = '';
+  if (isShared && state.sharing) {
+    const group = state.sharing.getAllGroups().find(g => g.id === item.shared_group_id);
+    sharedHtml = sharedBadge(group?.name || '');
+  }
+
   return `<div class="bucket-item list-item${checkedCls}" data-item-id="${item.id}">
     <div class="list-item-row">
       <button class="list-check-btn" onclick="toggleListItemCheck('${escQ(item.id)}')" title="Toggle">${checkIcon}</button>
       <div style="flex:1;min-width:0;">
-        <span class="list-item-text">${truncateWithShowMore(item.text, 120, item.id, 'listtext')}</span>
+        <span class="list-item-text">${truncateWithShowMore(item.text, 120, item.id, 'listtext')}</span>${sharedHtml}
         ${noteHtml}
       </div>
       <div class="list-item-actions">
@@ -396,13 +418,28 @@ function editListItemInlineFull(id) {
       const updates = {};
       if (newText !== item.text) updates.text = newText;
       if (extra && (extra.note || '') !== (item.note || '')) updates.note = extra.note || null;
-      if (Object.keys(updates).length > 0) {
-        updates.updated_at = new Date().toISOString();
-        const { error } = await state.db.from('list_items').update(updates).eq('id', id);
-        if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+      if (Object.keys(updates).length === 0) return;
+
+      // Shared → text & note go to Drive payload
+      if (item.shared_id && item.shared_group_id && state.sharing) {
+        const drivePayload = {};
+        if ('text' in updates) drivePayload.text = updates.text;
+        if ('note' in updates) drivePayload.note = updates.note;
+        if (Object.keys(drivePayload).length > 0) {
+          const currentPayload = item._shared?.payload || {};
+          await state.sharing.updateItem(item.shared_group_id, item.shared_id, { payload: { ...currentPayload, ...drivePayload } });
+        }
         Object.assign(item, updates);
         showToast(t('toast.updated'), 'success');
+        return;
       }
+
+      // Normal → local DB
+      updates.updated_at = new Date().toISOString();
+      const { error } = await state.db.from('list_items').update(updates).eq('id', id);
+      if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+      Object.assign(item, updates);
+      showToast(t('toast.updated'), 'success');
     },
     refreshFn: renderLists,
   });
@@ -448,6 +485,23 @@ async function toggleListItemCheck(id) {
   const item = (state.allListItems || []).find(x => x.id === id);
   if (!item) return;
   const newVal = item.checked ? 0 : 1;
+
+  // Shared → Drive only
+  if (item.shared_id && item.shared_group_id && state.sharing) {
+    try {
+      if (newVal) {
+        const currentUser = await state.sharing.getCurrentUser();
+        await state.sharing.completeItem(item.shared_group_id, item.shared_id, [currentUser?.email]);
+      } else {
+        await state.sharing.uncompleteItem(item.shared_group_id, item.shared_id);
+      }
+      item.checked = newVal;
+      renderLists();
+    } catch (e) { showToast(e.message, 'error'); }
+    return;
+  }
+
+  // Normal → local DB
   const { error } = await state.db.from('list_items').update({
     checked: newVal,
     updated_at: new Date().toISOString(),
@@ -464,6 +518,12 @@ async function deleteListItem(id) {
     t('common.delete'),
     `Remove "${item.text}"?`,
     async () => {
+      // Shared → delete from Drive + delete local pointer
+      if (item.shared_id && item.shared_group_id && state.sharing) {
+        try {
+          await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
+        } catch (e) { /* item may already be gone from Drive */ }
+      }
       const { error } = await state.db.from('list_items').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
       showToast(t('toast.removed'), 'info');
@@ -481,7 +541,10 @@ function initListModals() {
   const app = document.getElementById('app');
 
   // Re-render shared list items when sharing data changes
-  document.addEventListener('sharing-changed', () => renderSharedListItems());
+  document.addEventListener('sharing-changed', async () => {
+    await syncSharedListItems();
+    await refreshLists();
+  });
 
   // Add List Modal
   const m1 = document.createElement('div');
@@ -595,7 +658,8 @@ async function saveEditList() {
 async function deleteList(listId) {
   const list = (state.allLists || []).find(l => l.id === listId);
   if (!list) return;
-  const itemCount = (state.allListItems || []).filter(i => i.list_id === listId).length;
+  const items = (state.allListItems || []).filter(i => i.list_id === listId);
+  const itemCount = items.length;
   const msg = itemCount > 0
     ? `Delete "${list.name}" and its ${itemCount} item(s)?`
     : `Delete "${list.name}"?`;
@@ -603,7 +667,15 @@ async function deleteList(listId) {
     t('common.delete'),
     msg,
     async () => {
-      // Delete items in bulk
+      // Delete shared items from Drive first
+      if (state.sharing) {
+        for (const item of items) {
+          if (item.shared_id && item.shared_group_id) {
+            try { await state.sharing.deleteItem(item.shared_group_id, item.shared_id); } catch { /* ok */ }
+          }
+        }
+      }
+      // Delete items in bulk from local DB
       if (itemCount > 0) await state.db.from('list_items').delete().eq('list_id', listId);
       const { error } = await state.db.from('lists').delete().eq('id', listId);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
@@ -618,74 +690,64 @@ async function deleteList(listId) {
 // EXPORTS
 // ===================================================================
 
-// ── Shared List Items ───────────────────────────────────────────
+// ── Shared List Items — sync pointers ─────────────────────────────
 
-function renderSharedListItems() {
-  if (!state.sharing) return;
-  const grid = document.getElementById('listGrid');
-  if (!grid) return;
+async function syncSharedListItems() {
+  if (!state.sharing || !state.db.connected) return;
 
-  const allShared = state.sharing.getAllSharedItems().filter(i => i.item_type === 'list_item');
-  if (!allShared.length) return;
+  const sharedItems = state.sharing.getAllSharedItems().filter(i => i.item_type === 'list_item');
+  const sharedById = new Map(sharedItems.map(i => [i.id, i]));
 
-  const existing = document.getElementById('sharedListsSection');
-  if (existing) existing.remove();
+  // Get current local pointers
+  let localPointers;
+  try {
+    const res = await fetchAll(() => state.db
+      .from('list_items')
+      .select('id,shared_id,shared_group_id,list_id')
+      .not('shared_id', 'is', null));
+    localPointers = res || [];
+  } catch { localPointers = []; }
 
-  const section = document.createElement('div');
-  section.id = 'sharedListsSection';
-  section.style.gridColumn = '1 / -1';
+  const existingSharedIds = new Set(localPointers.map(p => p.shared_id));
 
-  let html = `<button class="shared-section-toggle" onclick="this.parentElement.classList.toggle('open')">
-    ${lucideIcon('users', 14)} ${t('sharing.shared')} (${allShared.length})
-    ${lucideIcon('chevron-down', 14)}
-  </button>
-  <div class="shared-section-items">`;
+  // Create pointers for new shared items
+  for (const sh of sharedItems) {
+    if (existingSharedIds.has(sh.id)) continue;
 
-  for (const item of allShared) {
-    const group = state.sharing.getAllGroups().find(g => g.id === item.group_id);
-    const groupName = group?.name || '?';
-    const text = item.payload?.text || item.payload?.title || '';
-    const isDone = !!item.completed;
-    html += `<div class="bucket-item${isDone ? ' completed' : ''}" style="border-left:3px solid var(--accent);margin:2px 0;padding:4px 8px;display:flex;align-items:center;gap:6px;">
-      <input type="checkbox" ${isDone ? 'checked' : ''} onchange="toggleSharedListItem('${escQ(item.group_id)}','${escQ(item.id)}',this.checked)">
-      <span style="flex:1;${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${esc(text)}</span>
-      ${sharedBadge(groupName)}
-      ${assigneeDots(item.assignees || [])}
-      <button class="sharing-remove-btn" onclick="deleteSharedListItem('${escQ(item.group_id)}','${escQ(item.id)}')" title="${t('common.delete')}">${lucideIcon('x', 14)}</button>
-    </div>`;
+    // Find the best local list — match by list_name in payload, or use first list
+    const listName = sh.payload?.list_name || '';
+    let targetList = (state.allLists || []).find(l => l.name === listName);
+    if (!targetList) targetList = (state.allLists || [])[0];
+    if (!targetList) continue; // No lists exist to place item into
+
+    // DB check to prevent race duplicates
+    try {
+      const existing = await fetchAll(() => state.db
+        .from('list_items')
+        .select('id')
+        .eq('shared_id', sh.id));
+      if (existing && existing.length > 0) continue;
+    } catch { /* proceed */ }
+
+    const items = (state.allListItems || []).filter(i => i.list_id === targetList.id);
+    const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
+
+    await state.db.from('list_items').insert({
+      list_id: targetList.id,
+      text: '',
+      sort_order: maxOrder + 1,
+      shared_id: sh.id,
+      shared_group_id: sh.group_id,
+    });
   }
 
-  html += '</div>';
-  section.innerHTML = html;
-  section.classList.add('open');
-  grid.appendChild(section);
-}
-
-async function toggleSharedListItem(groupId, itemId, checked) {
-  if (!state.sharing) return;
-  try {
-    if (checked) {
-      const currentUser = await state.sharing.getCurrentUser();
-      await state.sharing.completeItem(groupId, itemId, [currentUser?.email]);
-    } else {
-      await state.sharing.uncompleteItem(groupId, itemId);
+  // Remove pointers for deleted shared items
+  for (const ptr of localPointers) {
+    if (!sharedById.has(ptr.shared_id)) {
+      await state.db.from('list_items').delete().eq('id', ptr.id);
     }
-    renderSharedListItems();
-  } catch (e) { showToast(e.message, 'error'); }
+  }
 }
-
-async function deleteSharedListItem(groupId, itemId) {
-  if (!state.sharing) return;
-  showDeleteConfirm(t('common.delete'), t('sharing.delete_shared_item_confirm'), async () => {
-    try {
-      await state.sharing.deleteItem(groupId, itemId);
-      renderSharedListItems();
-    } catch (e) { showToast(e.message, 'error'); }
-  });
-}
-
-window.toggleSharedListItem = toggleSharedListItem;
-window.deleteSharedListItem = deleteSharedListItem;
 
 async function shareListItemFromAdd(btn, listId) {
   const addRow = btn.closest('.list-quick-add');
@@ -695,26 +757,45 @@ async function shareListItemFromAdd(btn, listId) {
   if (!text) return;
 
   // Find list name for payload context
-  const listObj = state.data.lists?.find(l => l.id === listId);
+  const listObj = (state.allLists || []).find(l => l.id === listId);
 
   openSharePopover(btn, async (groupId, assignees) => {
+    // Pre-generate UUID for pointer → Drive linkage
+    const presetId = crypto.randomUUID();
+
+    // 1. Insert local pointer FIRST (prevents race with syncSharedListItems)
+    const items = (state.allListItems || []).filter(i => i.list_id === listId);
+    const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
+    const { error: ptrErr } = await state.db.from('list_items').insert({
+      list_id: listId,
+      text: '',
+      sort_order: maxOrder + 1,
+      shared_id: presetId,
+      shared_group_id: groupId,
+    });
+    if (ptrErr) { showToast(t('toast.failed_to_add') + ': ' + ptrErr.message, 'error'); return; }
+
+    // 2. Write to Drive with the same ID
     try {
       await state.sharing.addItem(groupId, {
+        id: presetId,
         item_type: 'list_item',
         payload: { text, list_name: listObj?.name || '' },
         assignees,
       });
       input.value = '';
       showToast(t('sharing.shared') + '!', 'success');
-      renderSharedListItems();
+      await refreshLists();
     } catch (e) {
+      // Drive failed — clean up local pointer
+      await state.db.from('list_items').delete().eq('shared_id', presetId);
       showToast(e.message, 'error');
     }
   });
 }
 window.shareListItemFromAdd = shareListItemFromAdd;
 
-export { refreshLists, renderLists, initListModals };
+export { refreshLists, renderLists, initListModals, syncSharedListItems };
 
 // Window bindings
 window.openAddListModal = openAddListModal;

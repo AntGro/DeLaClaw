@@ -54,6 +54,14 @@ ALTER TABLE todos ADD COLUMN IF NOT EXISTS shared_group_id TEXT;
 -- Bump schema version
 UPDATE settings SET value = '1.273', updated_at = now()
 WHERE key = 'schema_version';`,
+
+  '1.287': `-- Shared list items: thin pointer model
+ALTER TABLE list_items ADD COLUMN IF NOT EXISTS shared_id TEXT;
+ALTER TABLE list_items ADD COLUMN IF NOT EXISTS shared_group_id TEXT;
+
+-- Bump schema version
+UPDATE settings SET value = '1.287', updated_at = now()
+WHERE key = 'schema_version';`,
 };
 
 export { SUPABASE_MIGRATIONS };

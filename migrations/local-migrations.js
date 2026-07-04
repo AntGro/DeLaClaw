@@ -48,4 +48,8 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE todos ADD COLUMN shared_id TEXT;
     ALTER TABLE todos ADD COLUMN shared_group_id TEXT;
   `,
+  '1.287': `
+    ALTER TABLE list_items ADD COLUMN shared_id TEXT;
+    ALTER TABLE list_items ADD COLUMN shared_group_id TEXT;
+  `,
 };

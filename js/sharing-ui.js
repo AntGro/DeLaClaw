@@ -489,9 +489,13 @@ export function openSharePopover(anchorEl, onShare, opts = {}) {
   const rect = anchorEl.getBoundingClientRect();
   popover.style.position = 'fixed';
   popover.style.top = `${rect.bottom + 4}px`;
-  popover.style.left = `${Math.max(8, rect.left - 120)}px`;
   popover.style.zIndex = '300';
   document.body.appendChild(popover);
+
+  // Clamp horizontal position so the popover stays within the viewport
+  const popW = popover.offsetWidth;
+  const maxLeft = window.innerWidth - popW - 8;
+  popover.style.left = `${Math.max(8, Math.min(rect.left - 120, maxLeft))}px`;
 
   popover._onShare = onShare;
 

@@ -436,11 +436,13 @@ export function assigneeDots(assignees, maxShow = 3) {
 // ── Share-to-group popover ──────────────────────────────────────
 
 /** Open a share-to-group popover near the given button element. */
-export function openSharePopover(anchorEl, onShare) {
+export function openSharePopover(anchorEl, onShare, opts = {}) {
   closeSharePopover();
   if (!state.sharing) return;
   const groups = state.sharing.getAllGroups();
   if (!groups.length) return;
+
+  const showAssignees = opts.showAssignees !== false;
 
   const popover = document.createElement('div');
   popover.className = 'share-popover';
@@ -462,7 +464,7 @@ export function openSharePopover(anchorEl, onShare) {
           </label>
         `).join('')}
       </div>
-      <div class="share-popover-section">
+      ${showAssignees ? `<div class="share-popover-section">
         <div class="share-popover-label">${t('sharing.assign_to')}</div>
         ${members.map(m => `
           <label class="share-popover-check">
@@ -470,7 +472,7 @@ export function openSharePopover(anchorEl, onShare) {
             ${esc(m.email)}
           </label>
         `).join('')}
-      </div>
+      </div>` : ''}
       <button class="share-popover-submit" onclick="submitSharePopover()">${lucideIcon('share', 14)} ${t('sharing.share')}</button>
     `;
 

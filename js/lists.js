@@ -759,7 +759,7 @@ async function shareListItemFromAdd(btn, listId) {
   // Find list name for payload context
   const listObj = (state.allLists || []).find(l => l.id === listId);
 
-  openSharePopover(btn, async (groupId, assignees) => {
+  openSharePopover(btn, async (groupId) => {
     // Pre-generate UUID for pointer → Drive linkage
     const presetId = crypto.randomUUID();
 
@@ -781,7 +781,6 @@ async function shareListItemFromAdd(btn, listId) {
         id: presetId,
         item_type: 'list_item',
         payload: { text, list_name: listObj?.name || '' },
-        assignees,
       });
       input.value = '';
       showToast(t('sharing.shared') + '!', 'success');
@@ -791,7 +790,7 @@ async function shareListItemFromAdd(btn, listId) {
       await state.db.from('list_items').delete().eq('shared_id', presetId);
       showToast(e.message, 'error');
     }
-  });
+  }, { showAssignees: false });
 }
 window.shareListItemFromAdd = shareListItemFromAdd;
 

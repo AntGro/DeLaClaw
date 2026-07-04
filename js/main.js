@@ -1032,7 +1032,8 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       const projectRef = url.replace('https://', '').replace('.supabase.co', '');
       href = `https://supabase.com/dashboard/project/${projectRef}`;
     } else if (mode === 'googledrive') {
-      href = 'https://drive.google.com';
+      const fid = state.driveAdapter?.driveFolderId;
+      href = fid ? `https://drive.google.com/drive/folders/${fid}` : 'https://drive.google.com';
     }
     if (href) {
       footerBackend.innerHTML = `<a href="${href}" target="_blank" rel="noopener">${logo} <span>${label} ↗</span></a>`;

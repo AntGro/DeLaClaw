@@ -41,10 +41,15 @@ export async function createSharing(backendType, config = {}) {
       );
     }
 
-    // case 'supabase': {
-    //   const { createSupabaseSharing } = await import('./sharing-supabase.js');
-    //   return createSupabaseSharing(config.supabaseUrl, config.anonKey, ...);
-    // }
+    case 'supabase': {
+      const { createSupabaseSharing } = await import('./sharing-supabase.js');
+      return createSupabaseSharing(config.adapter, {
+        getAuthUser: config.getAuthUser,
+        supabaseUrl: config.supabaseUrl,
+        anonKey: config.anonKey,
+        capabilities: config.capabilities || {},
+      });
+    }
 
     // case 'local': {
     //   const { createLocalSharing } = await import('./sharing-local.js');

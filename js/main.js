@@ -525,6 +525,11 @@ async function disconnect() {
     if (state.sharing) { try { state.sharing.destroy(); } catch {} }
     if (state.driveAdapter.destroy) state.driveAdapter.destroy();
   }
+  // Clean up Supabase sharing
+  if (state.sharing && !state.driveMode) {
+    try { state.sharing.destroy(); } catch {}
+  }
+  state.authUser = null;
   clearStayConnectedCreds();
   location.reload();
 }
@@ -1001,6 +1006,18 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   }
   db.setAdapter(adapter);
 
+  // Initialize Supabase Auth (check for existing session / magic link callback)
+  if (mode === 'supabase') {
+    try {
+      const { initAuth, claimOwnership } = await import('./auth.js');
+      const authResult = await initAuth(adapter);
+      state.authUser = authResult.user;
+      if (authResult.user && authResult.isNewAuth) {
+        await claimOwnership(adapter, authResult.user.id);
+      }
+    } catch (e) { console.warn('auth init:', e); }
+  }
+
   // Flush pending Drive saves and stop polling on page close
   if (mode === 'googledrive' && adapter.forceSave) {
     window.addEventListener('beforeunload', () => {
@@ -1063,11 +1080,18 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   // Listen for back/forward navigation
   window.addEventListener('hashchange', () => {
-    // Handle #join=<folderId> invite links while app is running
+    // Handle #join= invite links while app is running
     if (location.hash.startsWith('#join=') && state.sharing) {
-      const joinFolderId = location.hash.slice(6);
+      const joinVal = location.hash.slice(6);
       history.replaceState(null, '', location.pathname + location.search);
-      if (joinFolderId) handleJoinHash(joinFolderId);
+      if (joinVal) {
+        // Supabase join: strip "supabase:" prefix before passing to handler
+        if (joinVal.startsWith('supabase:')) {
+          handleJoinHash(joinVal.slice(9));
+        } else {
+          handleJoinHash(joinVal);
+        }
+      }
       return;
     }
     const raw = location.hash.replace('#', '');
@@ -1156,6 +1180,48 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
         }
       }
     } catch (e) { console.warn('sharing init:', e); }
+  }
+
+  // Supabase sharing init (requires auth)
+  if (mode === 'supabase' && state.authUser) {
+    try {
+      const { createSharing } = await import('./sharing.js');
+      state.sharing = await createSharing('supabase', {
+        adapter,
+        getAuthUser: () => state.authUser,
+        supabaseUrl: url,
+        anonKey: key,
+      });
+      state.sharing.loadAll().then(() => {
+        document.dispatchEvent(new CustomEvent('sharing-changed'));
+      }).catch(e => console.warn('supabase sharing loadAll:', e));
+      state.sharing.startPolling();
+      state.sharing.onUpdate(() => {
+        document.dispatchEvent(new CustomEvent('sharing-changed'));
+      });
+      updateSharingNavVisibility();
+    } catch (e) { console.warn('supabase sharing init:', e); }
+  }
+
+  // Handle #join= invite links (both Drive and Supabase)
+  if (location.hash.startsWith('#join=') && !state.sharing) {
+    // Even without auth, handle Supabase join links by initializing a minimal sharing adapter
+    const joinHash = location.hash.slice(6);
+    if (joinHash.startsWith('supabase:') && mode !== 'googledrive') {
+      try {
+        const { createSharing } = await import('./sharing.js');
+        state.sharing = await createSharing('supabase', {
+          adapter,
+          getAuthUser: () => state.authUser || null,
+          supabaseUrl: url,
+          anonKey: key,
+        });
+        state.sharing.loadAll().catch(() => {});
+        const ref = joinHash.slice(9); // strip "supabase:"
+        history.replaceState(null, '', location.pathname + location.search);
+        handleJoinHash(ref);
+      } catch (e) { console.warn('sharing join init:', e); }
+    }
   }
 
   // Initialize TODOs

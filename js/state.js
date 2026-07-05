@@ -23,6 +23,7 @@ const state = {
   offlineMode: false,
   pausedMode: false,
   sharing: null,
+  authUser: null,
 };
 
 export default state;

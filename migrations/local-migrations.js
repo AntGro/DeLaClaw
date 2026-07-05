@@ -52,4 +52,32 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE list_items ADD COLUMN shared_id TEXT;
     ALTER TABLE list_items ADD COLUMN shared_group_id TEXT;
   `,
+  '1.294': `
+    ALTER TABLE projects ADD COLUMN owner_id TEXT;
+    ALTER TABLE tasks ADD COLUMN owner_id TEXT;
+    ALTER TABLE todos ADD COLUMN owner_id TEXT;
+    ALTER TABLE habits ADD COLUMN owner_id TEXT;
+    ALTER TABLE habit_completions ADD COLUMN owner_id TEXT;
+    ALTER TABLE flashcard_notes ADD COLUMN owner_id TEXT;
+    ALTER TABLE birthdays ADD COLUMN owner_id TEXT;
+    ALTER TABLE vestiaire ADD COLUMN owner_id TEXT;
+    ALTER TABLE lists ADD COLUMN owner_id TEXT;
+    ALTER TABLE list_items ADD COLUMN owner_id TEXT;
+    ALTER TABLE settings ADD COLUMN owner_id TEXT;
+    ALTER TABLE prompts ADD COLUMN owner_id TEXT;
+  `,
+  '1.297': `
+    CREATE TABLE IF NOT EXISTS joined_groups (
+      group_id TEXT PRIMARY KEY,
+      member_id TEXT NOT NULL,
+      token TEXT NOT NULL,
+      display_name TEXT,
+      group_name TEXT,
+      remote_backend_type TEXT NOT NULL,
+      remote_url TEXT,
+      remote_anon_key TEXT,
+      owner_id TEXT,
+      joined_at TEXT DEFAULT (datetime('now'))
+    );
+  `,
 };

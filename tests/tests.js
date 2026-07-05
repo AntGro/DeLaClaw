@@ -903,6 +903,133 @@ async function archiveDeleteIntegrationTest() {
 }
 
 // ===================================================================
+// AUTH & SHARING: Migration files exist
+// ===================================================================
+console.log('\n-- Auth & Sharing (D+E Hybrid)\n');
+
+test('Migration SQL files 1.294-1.297 exist', () => {
+  const migDir = path.join(__dirname, '..', 'migrations');
+  const expected = [
+    '1.294_auth_owner.sql',
+    '1.295_sharing_tables.sql',
+    '1.296_sharing_rpc.sql',
+    '1.297_joined_groups.sql',
+  ];
+  for (const f of expected) {
+    assert(fs.existsSync(path.join(migDir, f)), `Missing migration file: ${f}`);
+  }
+});
+
+test('supabase-migrations.js has entries for 1.294-1.297', () => {
+  const content = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'supabase-migrations.js'), 'utf-8');
+  for (const ver of ['1.294', '1.295', '1.296', '1.297']) {
+    assert(content.includes(`'${ver}':`), `Missing supabase migration entry for ${ver}`);
+  }
+});
+
+test('local-migrations.js has entries for 1.294 and 1.297', () => {
+  const content = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+  assert(content.includes("'1.294':"), 'Missing local migration entry for 1.294');
+  assert(content.includes("'1.297':"), 'Missing local migration entry for 1.297');
+});
+
+test('auth.js exports initAuth, sendMagicLink, claimOwnership, getAuthUser, signOut, onAuthStateChange', () => {
+  const authJs = fs.readFileSync(path.join(JS_DIR, 'auth.js'), 'utf-8');
+  const expected = ['initAuth', 'sendMagicLink', 'claimOwnership', 'getAuthUser', 'signOut', 'onAuthStateChange'];
+  for (const fn of expected) {
+    assert(authJs.includes(`export ${fn.startsWith('on') ? 'function' : 'async function'} ${fn}`) ||
+           authJs.includes(`export function ${fn}`),
+      `auth.js missing export: ${fn}`);
+  }
+});
+
+test('sharing-supabase.js exports createSupabaseSharing', () => {
+  const content = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
+  assert(content.includes('export async function createSupabaseSharing'),
+    'sharing-supabase.js missing export: createSupabaseSharing');
+});
+
+test('sharing.js factory includes supabase case (not commented out)', () => {
+  const content = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+  // Must NOT be commented out — look for actual case, not inside // comments
+  const lines = content.split('\n');
+  const hasActiveCase = lines.some(l => {
+    const trimmed = l.trim();
+    return trimmed.startsWith("case 'supabase':") || trimmed.startsWith('case "supabase":');
+  });
+  assert(hasActiveCase, "sharing.js: 'supabase' case is missing or commented out");
+});
+
+test('sw.js caches auth.js and sharing-supabase.js', () => {
+  const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
+  assert(sw.includes("'js/auth.js'"), 'sw.js missing cache entry for auth.js');
+  assert(sw.includes("'js/sharing-supabase.js'"), 'sw.js missing cache entry for sharing-supabase.js');
+});
+
+test('auth.js claimOwnership includes joined_groups table', () => {
+  const authJs = fs.readFileSync(path.join(JS_DIR, 'auth.js'), 'utf-8');
+  assert(authJs.includes("'joined_groups'"), 'auth.js claimOwnership missing joined_groups table');
+});
+
+test('sharing-supabase.js references all expected RPC function names', () => {
+  const content = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
+  const rpcNames = [
+    'verify_join_token', 'confirm_join', 'get_shared_items',
+    'add_shared_item', 'update_shared_item', 'delete_shared_item',
+    'get_group_members', 'leave_group',
+  ];
+  for (const rpc of rpcNames) {
+    assert(content.includes(`'${rpc}'`), `sharing-supabase.js missing RPC call: ${rpc}`);
+  }
+});
+
+test('state.js includes authUser property', () => {
+  const content = fs.readFileSync(path.join(JS_DIR, 'state.js'), 'utf-8');
+  assert(content.includes('authUser'), 'state.js missing authUser property');
+});
+
+test('No HTML entities in new JS files (auth.js, sharing-supabase.js)', () => {
+  const files = ['auth.js', 'sharing-supabase.js'];
+  for (const name of files) {
+    const content = fs.readFileSync(path.join(JS_DIR, name), 'utf-8');
+    const entities = content.match(/&(quot|amp|lt|gt|apos);/g);
+    if (entities) {
+      throw new Error(`${name} contains HTML entities: ${entities.join(', ')}`);
+    }
+  }
+});
+
+test('1.296 migration defines all 8 RPC functions', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.296_sharing_rpc.sql'), 'utf-8');
+  const expected = [
+    'verify_join_token', 'confirm_join', 'get_shared_items',
+    'add_shared_item', 'update_shared_item', 'delete_shared_item',
+    'get_group_members', 'leave_group',
+  ];
+  for (const fn of expected) {
+    assert(sql.includes(`FUNCTION ${fn}(`), `1.296 migration missing function: ${fn}`);
+  }
+});
+
+test('1.294 migration adds owner_id to all 12 personal tables', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.294_auth_owner.sql'), 'utf-8');
+  const tables = [
+    'projects', 'tasks', 'todos', 'habits', 'habit_completions',
+    'flashcard_notes', 'birthdays', 'vestiaire', 'lists', 'list_items',
+    'settings', 'prompts',
+  ];
+  for (const t of tables) {
+    assert(sql.includes(`ALTER TABLE ${t} ADD COLUMN`), `1.294 missing ALTER TABLE ${t}`);
+  }
+});
+
+test('main.js handles #join=supabase: links', () => {
+  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  assert(main.includes("joinVal.startsWith('supabase:')") || main.includes("joinHash.startsWith('supabase:')"),
+    'main.js missing supabase join link handler');
+});
+
+// ===================================================================
 // 30. Browser smoke test: all JS modules load without runtime errors
 // ===================================================================
 

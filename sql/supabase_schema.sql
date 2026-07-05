@@ -90,7 +90,8 @@ CREATE TABLE "public"."flashcard_notes" (
     "proposed_front" "text",
     "proposed_back" "text",
     "proposal_status" "text",
-    "proposed_deck" "text"
+    "proposed_deck" "text",
+    "owner_id" "uuid"
 );
 
 
@@ -170,7 +171,8 @@ CREATE TABLE "public"."lists" (
     "sort_order" integer DEFAULT 0,
     "archived" integer DEFAULT 0,
     "created_at" timestamp with time zone DEFAULT "now"(),
-    "updated_at" timestamp with time zone DEFAULT "now"()
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "owner_id" "uuid"
 );
 
 
@@ -223,7 +225,8 @@ CREATE TABLE "public"."prompts" (
 CREATE TABLE "public"."settings" (
     "key" "text" NOT NULL,
     "value" "text",
-    "updated_at" timestamp with time zone DEFAULT "now"()
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "owner_id" "uuid"
 );
 
 
@@ -315,8 +318,221 @@ CREATE TABLE "public"."vestiaire" (
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
     "purchase_status" "text",
-    "sort_order" integer DEFAULT 0
+    "sort_order" integer DEFAULT 0,
+    "owner_id" "uuid"
 );
+
+
+--
+-- Name: sharing_groups; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE "public"."sharing_groups" (
+    "id" "text" NOT NULL,
+    "name" "text" NOT NULL,
+    "backend_type" "text" NOT NULL DEFAULT 'supabase',
+    "auth_owner_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+--
+-- Name: sharing_members; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE "public"."sharing_members" (
+    "member_id" "text" NOT NULL,
+    "group_id" "text" NOT NULL,
+    "token" "text" NOT NULL,
+    "display_name" "text",
+    "role" "text" NOT NULL DEFAULT 'member',
+    "joined_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+--
+-- Name: sharing_items; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE "public"."sharing_items" (
+    "item_id" "text" NOT NULL,
+    "group_id" "text" NOT NULL,
+    "item_type" "text" NOT NULL,
+    "parent_item_id" "text",
+    "payload" "jsonb" NOT NULL,
+    "created_by" "text",
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "created_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+--
+-- Name: joined_groups; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE "public"."joined_groups" (
+    "group_id" "text" NOT NULL,
+    "member_id" "text" NOT NULL,
+    "token" "text" NOT NULL,
+    "display_name" "text",
+    "group_name" "text",
+    "remote_backend_type" "text" NOT NULL,
+    "remote_url" "text",
+    "remote_anon_key" "text",
+    "owner_id" "uuid",
+    "joined_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+--
+-- Name: verify_join_token; Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE OR REPLACE FUNCTION "public"."verify_join_token"("p_token" "text")
+RETURNS TABLE("group_id" "text", "group_name" "text", "member_id" "text",
+              "display_name" "text", "backend_type" "text")
+LANGUAGE "sql" SECURITY DEFINER AS $$
+  SELECT sg.id, sg.name, sm.member_id, sm.display_name, sg.backend_type
+  FROM sharing_members sm
+  JOIN sharing_groups sg ON sg.id = sm.group_id
+  WHERE sm.token = p_token AND sm.joined_at IS NULL;
+$$;
+
+
+--
+-- Name: confirm_join; Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE OR REPLACE FUNCTION "public"."confirm_join"("p_token" "text", "p_display_name" "text")
+RETURNS "void"
+LANGUAGE "sql" SECURITY DEFINER AS $$
+  UPDATE sharing_members
+  SET joined_at = now(),
+      display_name = COALESCE(NULLIF(p_display_name, ''), display_name)
+  WHERE token = p_token AND joined_at IS NULL;
+$$;
+
+
+--
+-- Name: get_shared_items; Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE OR REPLACE FUNCTION "public"."get_shared_items"("p_token" "text", "p_group_id" "text",
+                                                        "p_item_type" "text" DEFAULT NULL)
+RETURNS SETOF "public"."sharing_items"
+LANGUAGE "sql" SECURITY DEFINER AS $$
+  SELECT si.* FROM sharing_items si
+  WHERE si.group_id = p_group_id
+  AND (p_item_type IS NULL OR si.item_type = p_item_type)
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = p_group_id
+    AND sm.token = p_token
+    AND sm.joined_at IS NOT NULL
+  );
+$$;
+
+
+--
+-- Name: add_shared_item; Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE OR REPLACE FUNCTION "public"."add_shared_item"(
+  "p_token" "text", "p_item_id" "text", "p_group_id" "text", "p_item_type" "text",
+  "p_payload" "jsonb", "p_member_id" "text", "p_parent_item_id" "text" DEFAULT NULL
+)
+RETURNS SETOF "public"."sharing_items"
+LANGUAGE "sql" SECURITY DEFINER AS $$
+  INSERT INTO sharing_items
+    (item_id, group_id, item_type, parent_item_id, payload, created_by)
+  SELECT p_item_id, p_group_id, p_item_type,
+         p_parent_item_id, p_payload, p_member_id
+  WHERE EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = p_group_id
+    AND sm.token = p_token
+    AND sm.member_id = p_member_id
+    AND sm.joined_at IS NOT NULL
+  )
+  RETURNING *;
+$$;
+
+
+--
+-- Name: update_shared_item; Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE OR REPLACE FUNCTION "public"."update_shared_item"("p_token" "text", "p_item_id" "text",
+                                                          "p_payload" "jsonb")
+RETURNS SETOF "public"."sharing_items"
+LANGUAGE "sql" SECURITY DEFINER AS $$
+  UPDATE sharing_items si
+  SET payload = p_payload, updated_at = now()
+  WHERE si.item_id = p_item_id
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = si.group_id
+    AND sm.token = p_token
+    AND sm.joined_at IS NOT NULL
+  )
+  RETURNING *;
+$$;
+
+
+--
+-- Name: delete_shared_item; Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE OR REPLACE FUNCTION "public"."delete_shared_item"("p_token" "text", "p_item_id" "text")
+RETURNS "void"
+LANGUAGE "plpgsql" SECURITY DEFINER AS $$
+BEGIN
+  DELETE FROM sharing_items si
+  WHERE si.item_id = p_item_id
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = si.group_id
+    AND sm.token = p_token
+    AND sm.joined_at IS NOT NULL
+  );
+END;
+$$;
+
+
+--
+-- Name: get_group_members; Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE OR REPLACE FUNCTION "public"."get_group_members"("p_token" "text", "p_group_id" "text")
+RETURNS TABLE("member_id" "text", "display_name" "text", "role" "text",
+              "joined_at" timestamp with time zone)
+LANGUAGE "sql" SECURITY DEFINER AS $$
+  SELECT sm.member_id, sm.display_name, sm.role, sm.joined_at
+  FROM sharing_members sm
+  WHERE sm.group_id = p_group_id
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm2
+    WHERE sm2.group_id = p_group_id
+    AND sm2.token = p_token
+    AND sm2.joined_at IS NOT NULL
+  );
+$$;
+
+
+--
+-- Name: leave_group; Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE OR REPLACE FUNCTION "public"."leave_group"("p_token" "text")
+RETURNS "void"
+LANGUAGE "plpgsql" SECURITY DEFINER AS $$
+BEGIN
+  DELETE FROM sharing_members
+  WHERE token = p_token
+  AND role != 'creator';
+END;
+$$;
 
 
 --
@@ -456,6 +672,46 @@ ALTER TABLE ONLY "public"."vestiaire"
 
 
 --
+-- Name: sharing_groups sharing_groups_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."sharing_groups"
+    ADD CONSTRAINT "sharing_groups_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: sharing_members sharing_members_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."sharing_members"
+    ADD CONSTRAINT "sharing_members_pkey" PRIMARY KEY ("member_id");
+
+
+--
+-- Name: sharing_members sharing_members_token_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."sharing_members"
+    ADD CONSTRAINT "sharing_members_token_key" UNIQUE ("token");
+
+
+--
+-- Name: sharing_items sharing_items_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."sharing_items"
+    ADD CONSTRAINT "sharing_items_pkey" PRIMARY KEY ("item_id");
+
+
+--
+-- Name: joined_groups joined_groups_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."joined_groups"
+    ADD CONSTRAINT "joined_groups_pkey" PRIMARY KEY ("group_id");
+
+
+--
 -- Name: prompts prompts_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -508,385 +764,116 @@ ALTER TABLE ONLY "public"."text_line_progress"
 
 
 --
--- Name: habit_completions Allow all; Type: POLICY; Schema: public; Owner: postgres
+-- Name: sharing_members sharing_members_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
-CREATE POLICY "Allow all" ON "public"."habit_completions" USING (true) WITH CHECK (true);
+ALTER TABLE ONLY "public"."sharing_members"
+    ADD CONSTRAINT "sharing_members_group_id_fkey" FOREIGN KEY ("group_id") REFERENCES "public"."sharing_groups"("id") ON DELETE CASCADE;
 
 
 --
--- Name: habits Allow all; Type: POLICY; Schema: public; Owner: postgres
+-- Name: sharing_items sharing_items_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
-CREATE POLICY "Allow all" ON "public"."habits" USING (true) WITH CHECK (true);
+ALTER TABLE ONLY "public"."sharing_items"
+    ADD CONSTRAINT "sharing_items_group_id_fkey" FOREIGN KEY ("group_id") REFERENCES "public"."sharing_groups"("id") ON DELETE CASCADE;
 
 
 --
--- Name: daily_visits Allow all access to daily_visits; Type: POLICY; Schema: public; Owner: postgres
+-- Name: sharing_items sharing_items_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
-CREATE POLICY "Allow all access to daily_visits" ON "public"."daily_visits" USING (true) WITH CHECK (true);
+ALTER TABLE ONLY "public"."sharing_items"
+    ADD CONSTRAINT "sharing_items_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."sharing_members"("member_id");
 
 
 --
--- Name: projects Allow all delete; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all delete" ON "public"."projects" FOR DELETE USING (true);
-
-
---
--- Name: prompts Allow all delete; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all delete" ON "public"."prompts" FOR DELETE USING (true);
-
-
---
--- Name: tasks Allow all delete; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all delete" ON "public"."tasks" FOR DELETE USING (true);
-
-
---
--- Name: birthdays Allow all for anon; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all for anon" ON "public"."birthdays" TO "anon" USING (true) WITH CHECK (true);
-
-
---
--- Name: flashcard_notes Allow all for anon; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all for anon" ON "public"."flashcard_notes" TO "anon" USING (true) WITH CHECK (true);
-
-
---
--- Name: flashcards Allow all for anon; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all for anon" ON "public"."flashcards" TO "anon" USING (true) WITH CHECK (true);
-
-
---
--- Name: vestiaire Allow all for anon; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all for anon" ON "public"."vestiaire" TO "anon" USING (true) WITH CHECK (true);
-
-
---
--- Name: projects Allow all insert; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all insert" ON "public"."projects" FOR INSERT WITH CHECK (true);
-
-
---
--- Name: prompts Allow all insert; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all insert" ON "public"."prompts" FOR INSERT WITH CHECK (true);
-
-
---
--- Name: tasks Allow all insert; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all insert" ON "public"."tasks" FOR INSERT WITH CHECK (true);
-
-
---
--- Name: projects Allow all read; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all read" ON "public"."projects" FOR SELECT USING (true);
-
-
---
--- Name: prompts Allow all read; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all read" ON "public"."prompts" FOR SELECT USING (true);
-
-
---
--- Name: tasks Allow all read; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all read" ON "public"."tasks" FOR SELECT USING (true);
-
-
---
--- Name: projects Allow all update; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all update" ON "public"."projects" FOR UPDATE USING (true);
-
-
---
--- Name: prompts Allow all update; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all update" ON "public"."prompts" FOR UPDATE USING (true);
-
-
---
--- Name: tasks Allow all update; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "Allow all update" ON "public"."tasks" FOR UPDATE USING (true);
-
-
---
--- Name: birthdays allow_all_birthdays; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_birthdays" ON "public"."birthdays" USING (true) WITH CHECK (true);
-
-
---
--- Name: habit_completions allow_all_chore_completions; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_chore_completions" ON "public"."habit_completions" USING (true) WITH CHECK (true);
-
-
---
--- Name: habits allow_all_chores; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_chores" ON "public"."habits" USING (true) WITH CHECK (true);
-
-
---
--- Name: flashcard_notes allow_all_flashcard_notes; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_flashcard_notes" ON "public"."flashcard_notes" USING (true) WITH CHECK (true);
-
-
---
--- Name: flashcards allow_all_flashcards; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_flashcards" ON "public"."flashcards" USING (true) WITH CHECK (true);
-
-
---
--- Name: nvidia_usage allow_all_nvidia_usage; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_nvidia_usage" ON "public"."nvidia_usage" USING (true) WITH CHECK (true);
-
-
---
--- Name: projects allow_all_projects; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_projects" ON "public"."projects" USING (true) WITH CHECK (true);
-
-
---
--- Name: prompts allow_all_prompts; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_prompts" ON "public"."prompts" USING (true) WITH CHECK (true);
-
-
---
--- Name: settings allow_all_settings; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_settings" ON "public"."settings" USING (true) WITH CHECK (true);
-
-
---
--- Name: tasks allow_all_tasks; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_tasks" ON "public"."tasks" USING (true) WITH CHECK (true);
-
-
---
--- Name: text_line_progress allow_all_text_line_progress; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_text_line_progress" ON "public"."text_line_progress" USING (true) WITH CHECK (true);
-
-
---
--- Name: texts allow_all_texts; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_texts" ON "public"."texts" USING (true) WITH CHECK (true);
-
-
---
--- Name: todos allow_all_todos; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_todos" ON "public"."todos" USING (true) WITH CHECK (true);
-
-
---
--- Name: vestiaire allow_all_vestiaire; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "allow_all_vestiaire" ON "public"."vestiaire" USING (true) WITH CHECK (true);
-
-
---
--- Name: birthdays; Type: ROW SECURITY; Schema: public; Owner: postgres
+-- ===== ROW LEVEL SECURITY: ENABLE =====
 --
 
 ALTER TABLE "public"."birthdays" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: daily_visits; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."daily_visits" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: flashcard_notes; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."flashcard_notes" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: flashcards; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."flashcards" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: habit_completions; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."habit_completions" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: habits; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."habits" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: list_items; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."list_items" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: list_items list_items_policy; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "list_items_policy" ON "public"."list_items" USING (true) WITH CHECK (true);
-
-
---
--- Name: lists; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."lists" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: lists lists_policy; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "lists_policy" ON "public"."lists" USING (true) WITH CHECK (true);
-
-
---
--- Name: nvidia_usage; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."nvidia_usage" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: projects; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."projects" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: prompts; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."prompts" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: settings; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."settings" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: tasks; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."tasks" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: text_line_progress; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."text_line_progress" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: texts; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."texts" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: todos; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."todos" ENABLE ROW LEVEL SECURITY;
-
---
--- Name: todos todos_open_delete; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "todos_open_delete" ON "public"."todos" FOR DELETE USING (true);
-
-
---
--- Name: todos todos_open_insert; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "todos_open_insert" ON "public"."todos" FOR INSERT WITH CHECK (true);
-
-
---
--- Name: todos todos_open_read; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "todos_open_read" ON "public"."todos" FOR SELECT USING (true);
-
-
---
--- Name: todos todos_open_update; Type: POLICY; Schema: public; Owner: postgres
---
-
-CREATE POLICY "todos_open_update" ON "public"."todos" FOR UPDATE USING (true) WITH CHECK (true);
-
-
---
--- Name: vestiaire; Type: ROW SECURITY; Schema: public; Owner: postgres
---
-
 ALTER TABLE "public"."vestiaire" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."sharing_groups" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."sharing_members" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."sharing_items" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."joined_groups" ENABLE ROW LEVEL SECURITY;
+
+
+--
+-- ===== ROW LEVEL SECURITY: POLICIES =====
+--
+-- Personal tables use "owner or unclaimed": owner_id = auth.uid() OR owner_id IS NULL.
+-- The IS NULL fallback provides backward compatibility for users who haven't enabled auth.
+--
+
+-- ── Personal tables (owner or unclaimed) ──────────────────────
+
+CREATE POLICY "owner or unclaimed" ON "public"."birthdays" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+CREATE POLICY "owner or unclaimed" ON "public"."flashcard_notes" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+CREATE POLICY "owner or unclaimed" ON "public"."habit_completions" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+CREATE POLICY "owner or unclaimed" ON "public"."habits" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+CREATE POLICY "owner or unclaimed" ON "public"."list_items" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+CREATE POLICY "owner or unclaimed" ON "public"."lists" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+CREATE POLICY "owner or unclaimed" ON "public"."projects" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+CREATE POLICY "owner or unclaimed" ON "public"."prompts" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+CREATE POLICY "owner or unclaimed" ON "public"."settings" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+CREATE POLICY "owner or unclaimed" ON "public"."tasks" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+CREATE POLICY "owner or unclaimed" ON "public"."todos" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+CREATE POLICY "owner or unclaimed" ON "public"."vestiaire" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+
+-- ── Tables without owner_id (open access) ─────────────────────
+
+CREATE POLICY "Allow all access to daily_visits" ON "public"."daily_visits" USING (true) WITH CHECK (true);
+
+CREATE POLICY "allow_all_flashcards" ON "public"."flashcards" USING (true) WITH CHECK (true);
+
+CREATE POLICY "allow_all_nvidia_usage" ON "public"."nvidia_usage" USING (true) WITH CHECK (true);
+
+CREATE POLICY "allow_all_text_line_progress" ON "public"."text_line_progress" USING (true) WITH CHECK (true);
+
+CREATE POLICY "allow_all_texts" ON "public"."texts" USING (true) WITH CHECK (true);
+
+-- ── Sharing tables ────────────────────────────────────────────
+
+CREATE POLICY "owner" ON "public"."sharing_groups" FOR ALL USING ("auth_owner_id" = "auth"."uid"());
+
+CREATE POLICY "owner" ON "public"."sharing_members" FOR ALL USING ("group_id" IN (SELECT "id" FROM "public"."sharing_groups" WHERE "auth_owner_id" = "auth"."uid"()));
+
+CREATE POLICY "owner" ON "public"."sharing_items" FOR ALL USING ("group_id" IN (SELECT "id" FROM "public"."sharing_groups" WHERE "auth_owner_id" = "auth"."uid"()));
+
+CREATE POLICY "owner or unclaimed" ON "public"."joined_groups" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
 
 
 -- ===== SEED DATA =====
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.099')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.099', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.297')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.297', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;
@@ -896,4 +883,5 @@ ON CONFLICT ("key") DO NOTHING;
 ALTER PUBLICATION supabase_realtime ADD TABLE
   tasks, projects, todos, habits, habit_completions,
   birthdays, vestiaire, flashcards, flashcard_notes,
-  prompts, settings, lists, list_items, daily_visits;
+  prompts, settings, lists, list_items, daily_visits,
+  sharing_groups, sharing_members, sharing_items;

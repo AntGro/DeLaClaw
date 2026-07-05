@@ -80,7 +80,7 @@ export async function renderSharingPane() {
         <p class="auth-inline-hint">${t('auth.sign_in_to_share_hint')}</p>
         <input type="email" id="sharingAuthEmail" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
         <div class="auth-inline-error" id="sharingAuthError" style="display:none"></div>
-        <button class="btn-primary" id="sharingAuthSendBtn" onclick="window.sendAuthFromSharing()">${t('auth.send_magic_link')}</button>
+        <button class="auth-send-btn" id="sharingAuthSendBtn" onclick="window.sendAuthFromSharing()">${t('auth.send_magic_link')}</button>
         <div class="auth-inline-status" id="sharingAuthStatus" style="display:none"></div>
       </div>`;
     } else {

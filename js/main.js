@@ -524,8 +524,8 @@ function showAuthPrompt(rawAdapter, url, key) {
       <p class="auth-hint">${t('auth.sign_in_hint')}</p>
       <input type="email" id="authEmail" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
       <div class="auth-error" id="authError" style="display:none"></div>
-      <button class="btn-primary" id="authSendBtn" style="width:100%">${t('auth.send_magic_link')}</button>
-      <p class="auth-site-url-hint">${t('auth.site_url_hint', authConfigUrl)}</p>
+      <button class="auth-send-btn" id="authSendBtn">${t('auth.send_magic_link')}</button>
+      <p class="auth-site-url-hint">${lucideIcon('info', 14)} ${t('auth.site_url_hint', authConfigUrl)}</p>
       <button class="auth-skip" id="authSkipBtn">${t('auth.skip')}</button>
     `;
     const emailEl = content.querySelector('#authEmail');
@@ -547,7 +547,8 @@ function showAuthPrompt(rawAdapter, url, key) {
         const { sendMagicLink } = await import('./auth.js');
         const { error } = await sendMagicLink(rawAdapter, email);
         if (error) {
-          errEl.textContent = t('auth.error');
+          const isRateLimit = error.status === 429 || (error.message || '').toLowerCase().includes('rate');
+          errEl.textContent = isRateLimit ? t('auth.rate_limit') : t('auth.error');
           errEl.style.display = '';
           sendBtn.disabled = false;
           sendBtn.textContent = t('auth.send_magic_link');
@@ -630,7 +631,8 @@ async function sendAuthFromSharing() {
     const { sendMagicLink } = await import('./auth.js');
     const { error } = await sendMagicLink(state._rawSupabaseAdapter, email);
     if (error) {
-      if (errEl) { errEl.textContent = t('auth.error'); errEl.style.display = ''; }
+      const isRateLimit = error.status === 429 || (error.message || '').toLowerCase().includes('rate');
+      if (errEl) { errEl.textContent = isRateLimit ? t('auth.rate_limit') : t('auth.error'); errEl.style.display = ''; }
       btn.disabled = false;
       btn.textContent = t('auth.send_magic_link');
     } else {

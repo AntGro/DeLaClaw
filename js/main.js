@@ -2721,8 +2721,16 @@ async function checkMigrationStatus() {
     if (cmpVer(newVer, LATEST_COMPAT) >= 0) {
       btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.check_success', { ver: newVer }))}`;
       btn.classList.add('migration-check-ok');
-      // Dismiss banner after short delay
-      setTimeout(() => { closeMigrationModal(); checkSchemaVersion(); }, 1500);
+      // Dismiss banner after short delay, refresh footer & trigger auth
+      setTimeout(() => {
+        closeMigrationModal();
+        checkSchemaVersion();
+        markLastUpdated();
+        // Show auth prompt now that DB supports it
+        if (getSelectedMode() === 'supabase' && !state.authUser && !localStorage.getItem('claw_auth_skipped')) {
+          showAuthPrompt(state._rawSupabaseAdapter);
+        }
+      }, 1500);
     } else {
       btn.innerHTML = `${lucideIcon('alert-triangle', 14)} ${esc(t('schema.check_still_old', { ver: newVer }))}`;
       btn.classList.add('migration-check-fail');

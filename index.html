@@ -225,6 +225,7 @@ window.addEventListener('appinstalled', function(){
         <div class="setup-step-body">
           <h3 id="setupCloud3Title">Connect</h3>
           <p id="setupCloud3Desc">In your Supabase dashboard, go to <a href="https://supabase.com/dashboard/project/_/settings/api-keys" target="_blank" rel="noopener"><strong>Settings &rarr; API Keys</strong></a>. Copy the <strong>anon (public) key</strong> and paste it below.</p>
+          <p class="setup-note" style="font-size:0.82rem;color:var(--muted);margin:0.25rem 0 0.75rem;line-height:1.4;"><strong>Want sharing?</strong> Set your <strong>Site URL</strong> in Supabase &rarr; Authentication &rarr; URL Configuration to your DeLaClaw URL.</p>
           <form id="setupLoginForm" method="post" action="https://antgro.github.io/command-center/">
             <label for="setupLoginUrl" class="gate-label" id="setupLoginUrlLabel">Project URL</label>
             <input type="text" id="setupLoginUrl" name="username" placeholder="https://xyz.supabase.co" autocomplete="username">
@@ -851,6 +852,13 @@ bun run server.js</pre>
           <div id="sharingPaneContent"></div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ===== AUTH PROMPT ===== -->
+  <div class="modal-overlay" id="authPromptOverlay" style="display:none;" onclick="if(event.target===this){this.style.display='none'}">
+    <div class="modal auth-prompt-modal">
+      <div class="auth-prompt-content" id="authPromptContent"></div>
     </div>
   </div>
 

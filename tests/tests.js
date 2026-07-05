@@ -1029,6 +1029,70 @@ test('main.js handles #join=supabase: links', () => {
     'main.js missing supabase join link handler');
 });
 
+// ── Auth Prompt UI ──
+
+test('index.html has authPromptOverlay modal', () => {
+  assert(indexHtml.includes('id="authPromptOverlay"'), 'authPromptOverlay missing from index.html');
+  assert(indexHtml.includes('id="authPromptContent"'), 'authPromptContent missing from index.html');
+});
+
+test('i18n has auth keys in all 3 languages', () => {
+  const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  const requiredKeys = ['sign_in', 'sign_in_hint', 'send_magic_link', 'skip', 'check_inbox', 'sign_out', 'signed_in_as'];
+  // Check EN section (first auth: block)
+  const authBlocks = i18nSrc.split(/\bauth:\s*\{/);
+  assert(authBlocks.length >= 4, `Expected 3 auth blocks (EN/FR/ES), found ${authBlocks.length - 1}`);
+  for (const key of requiredKeys) {
+    // Verify the key appears in at least 3 contexts
+    const re = new RegExp(`\\b${key}\\b.*:`, 'g');
+    const matches = i18nSrc.match(re) || [];
+    assert(matches.length >= 3, `i18n auth.${key} not found in all 3 languages (found ${matches.length})`);
+  }
+});
+
+test('main.js defines showAuthPrompt function', () => {
+  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  assert(main.includes('function showAuthPrompt('), 'showAuthPrompt function missing from main.js');
+});
+
+test('main.js stores _rawSupabaseAdapter before wrapping', () => {
+  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  assert(main.includes('state._rawSupabaseAdapter = adapter'), '_rawSupabaseAdapter assignment missing');
+});
+
+test('main.js shows auth prompt after initAuth for unauthenticated users', () => {
+  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  assert(main.includes('claw_auth_skipped'), 'claw_auth_skipped check missing');
+  assert(main.includes('showAuthPrompt('), 'showAuthPrompt call missing after initAuth');
+});
+
+test('sharing-ui.js updateSharingNavVisibility shows for supabase mode', () => {
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(sui.includes("activeMode === 'supabase'"), 'sharing nav visibility missing supabase mode check');
+});
+
+test('sharing-ui.js renderSharingPane has inline auth prompt for unauthenticated supabase', () => {
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(sui.includes('auth-inline-prompt'), 'auth-inline-prompt class missing from sharing pane render');
+  assert(sui.includes('sharingAuthEmail'), 'sharingAuthEmail input missing from sharing pane render');
+});
+
+test('sharing-ui.js renderSharingPane shows signed-in badge for authenticated supabase', () => {
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(sui.includes('auth-signed-in-badge'), 'auth-signed-in-badge class missing');
+  assert(sui.includes('signOutFromSharing'), 'signOutFromSharing reference missing');
+});
+
+test('window.sendAuthFromSharing and window.signOutFromSharing are exposed', () => {
+  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  assert(main.includes('window.sendAuthFromSharing'), 'window.sendAuthFromSharing not exposed');
+  assert(main.includes('window.signOutFromSharing'), 'window.signOutFromSharing not exposed');
+});
+
+test('Setup guide mentions Site URL for sharing', () => {
+  assert(indexHtml.includes('Site URL'), 'Setup guide missing Site URL mention');
+});
+
 // ===================================================================
 // 30. Browser smoke test: all JS modules load without runtime errors
 // ===================================================================

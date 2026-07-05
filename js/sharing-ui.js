@@ -57,7 +57,10 @@ let _currentUser = null;
 /** Show or hide the sharing nav button based on state.sharing availability. */
 export function updateSharingNavVisibility() {
   const btn = document.getElementById('settingsNavSharingBtn');
-  if (btn) btn.style.display = state.sharing ? '' : 'none';
+  if (!btn) return;
+  // Show sharing nav for Drive users with sharing, or Supabase users (even if not yet authenticated)
+  const activeMode = localStorage.getItem('claw_cc_active_mode');
+  btn.style.display = (state.sharing || activeMode === 'supabase') ? '' : 'none';
 }
 
 /** Render the full sharing settings pane content. */
@@ -65,9 +68,34 @@ export async function renderSharingPane() {
   const container = document.getElementById('sharingPaneContent');
   if (!container) return;
 
+  const activeMode = localStorage.getItem('claw_cc_active_mode');
+
   if (!state.sharing) {
-    container.innerHTML = `<p class="setting-hint">${t('sharing.no_drive')}</p>`;
+    // Supabase without auth: show inline sign-in prompt
+    if (activeMode === 'supabase' && !state.authUser) {
+      container.innerHTML = `<div class="auth-inline-prompt">
+        <div class="auth-icon">${lucideIcon('lock', 28)}</div>
+        <h4>${t('auth.sign_in_to_share')}</h4>
+        <p class="auth-inline-hint">${t('auth.sign_in_to_share_hint')}</p>
+        <input type="email" id="sharingAuthEmail" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
+        <div class="auth-inline-error" id="sharingAuthError" style="display:none"></div>
+        <button class="btn-primary" id="sharingAuthSendBtn" onclick="window.sendAuthFromSharing()">${t('auth.send_magic_link')}</button>
+        <div class="auth-inline-status" id="sharingAuthStatus" style="display:none"></div>
+      </div>`;
+    } else {
+      container.innerHTML = `<p class="setting-hint">${t('sharing.no_drive')}</p>`;
+    }
     return;
+  }
+
+  // Show auth status for authenticated Supabase users
+  let authBadgeHtml = '';
+  if (activeMode === 'supabase' && state.authUser) {
+    const email = esc(state.authUser.email || '');
+    authBadgeHtml = `<div class="setting-group">
+      <div class="auth-signed-in-badge">${lucideIcon('shield-check', 14)} ${t('auth.signed_in_as', email)}</div>
+      <button class="btn-secondary sharing-danger-btn" onclick="window.signOutFromSharing()" style="font-size:0.8rem;padding:4px 12px;margin-top:0">${t('auth.sign_out')}</button>
+    </div>`;
   }
 
   // Get current user identity
@@ -75,7 +103,7 @@ export async function renderSharingPane() {
     if (!_currentUser) _currentUser = await state.sharing.getCurrentUser();
   } catch { _currentUser = null; }
 
-  let html = '';
+  let html = authBadgeHtml;
 
   // ── Groups section ──
   const groups = state.sharing.getAllGroups();

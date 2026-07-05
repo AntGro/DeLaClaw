@@ -498,6 +498,160 @@ function showDriveReconnectScreen(url, key) {
   document.body.appendChild(screen);
 }
 
+// ── Auth prompt modal ─────────────────────────────────────────
+
+/**
+ * Show magic-link auth prompt after Supabase connect.
+ * @param {Object} rawAdapter — unwrapped Supabase adapter (needs .raw.auth)
+ * @param {string} url — Supabase project URL
+ * @param {string} key — Supabase anon key
+ */
+function showAuthPrompt(rawAdapter, url, key) {
+  const overlay = document.getElementById('authPromptOverlay');
+  const content = document.getElementById('authPromptContent');
+  if (!overlay || !content) return;
+
+  // ── Sign-in form state ──
+  function renderForm() {
+    content.innerHTML = `
+      <div class="auth-icon">${lucideIcon('lock', 28)}</div>
+      <h3>${t('auth.sign_in')}</h3>
+      <p class="auth-hint">${t('auth.sign_in_hint')}</p>
+      <input type="email" id="authEmail" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
+      <div class="auth-error" id="authError" style="display:none"></div>
+      <button class="btn-primary" id="authSendBtn" style="width:100%">${t('auth.send_magic_link')}</button>
+      <button class="auth-skip" id="authSkipBtn">${t('auth.skip')}</button>
+    `;
+    const emailEl = content.querySelector('#authEmail');
+    const errEl = content.querySelector('#authError');
+    const sendBtn = content.querySelector('#authSendBtn');
+    const skipBtn = content.querySelector('#authSkipBtn');
+
+    sendBtn.addEventListener('click', async () => {
+      const email = emailEl.value.trim();
+      if (!email || !email.includes('@')) {
+        errEl.textContent = t('auth.error');
+        errEl.style.display = '';
+        return;
+      }
+      sendBtn.disabled = true;
+      sendBtn.textContent = t('auth.sending');
+      errEl.style.display = 'none';
+      try {
+        const { sendMagicLink } = await import('./auth.js');
+        const { error } = await sendMagicLink(rawAdapter, email);
+        if (error) {
+          errEl.textContent = t('auth.error');
+          errEl.style.display = '';
+          sendBtn.disabled = false;
+          sendBtn.textContent = t('auth.send_magic_link');
+        } else {
+          renderInbox(email);
+        }
+      } catch {
+        errEl.textContent = t('auth.error');
+        errEl.style.display = '';
+        sendBtn.disabled = false;
+        sendBtn.textContent = t('auth.send_magic_link');
+      }
+    });
+
+    skipBtn.addEventListener('click', () => {
+      localStorage.setItem('claw_auth_skipped', '1');
+      overlay.style.display = 'none';
+    });
+
+    emailEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); sendBtn.click(); }
+    });
+  }
+
+  // ── Check-inbox state ──
+  function renderInbox(email) {
+    content.innerHTML = `
+      <div class="auth-icon">${lucideIcon('mail', 28)}</div>
+      <h3>${t('auth.check_inbox')}</h3>
+      <p class="auth-hint">${t('auth.check_inbox_hint', esc(email))}</p>
+      <div class="auth-actions">
+        <button class="btn-secondary" id="authResendBtn">${t('auth.resend')}</button>
+        <button class="auth-skip" id="authCancelBtn">${t('auth.cancel')}</button>
+      </div>
+      <div class="auth-status" id="authResendStatus" style="display:none"></div>
+    `;
+    const resendBtn = content.querySelector('#authResendBtn');
+    const cancelBtn = content.querySelector('#authCancelBtn');
+    const statusEl = content.querySelector('#authResendStatus');
+
+    resendBtn.addEventListener('click', async () => {
+      resendBtn.disabled = true;
+      resendBtn.textContent = t('auth.sending');
+      try {
+        const { sendMagicLink } = await import('./auth.js');
+        await sendMagicLink(rawAdapter, email);
+        statusEl.textContent = t('auth.sent');
+        statusEl.style.display = '';
+      } catch { /* ignore */ }
+      resendBtn.disabled = false;
+      resendBtn.textContent = t('auth.resend');
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      overlay.style.display = 'none';
+    });
+  }
+
+  renderForm();
+  overlay.style.display = '';
+}
+
+/** Global entry point for sending auth link from Settings > Sharing pane. */
+async function sendAuthFromSharing() {
+  const emailEl = document.getElementById('sharingAuthEmail');
+  const errEl = document.getElementById('sharingAuthError');
+  const statusEl = document.getElementById('sharingAuthStatus');
+  const btn = document.getElementById('sharingAuthSendBtn');
+  if (!emailEl || !btn) return;
+  const email = emailEl.value.trim();
+  if (!email || !email.includes('@')) {
+    if (errEl) { errEl.textContent = t('auth.error'); errEl.style.display = ''; }
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = t('auth.sending');
+  if (errEl) errEl.style.display = 'none';
+  try {
+    const { sendMagicLink } = await import('./auth.js');
+    const { error } = await sendMagicLink(state._rawSupabaseAdapter, email);
+    if (error) {
+      if (errEl) { errEl.textContent = t('auth.error'); errEl.style.display = ''; }
+      btn.disabled = false;
+      btn.textContent = t('auth.send_magic_link');
+    } else {
+      if (statusEl) { statusEl.textContent = t('auth.check_inbox_hint', esc(email)); statusEl.style.display = ''; }
+      btn.textContent = t('auth.sent');
+      setTimeout(() => { btn.disabled = false; btn.textContent = t('auth.send_magic_link'); }, 5000);
+    }
+  } catch {
+    if (errEl) { errEl.textContent = t('auth.error'); errEl.style.display = ''; }
+    btn.disabled = false;
+    btn.textContent = t('auth.send_magic_link');
+  }
+}
+window.sendAuthFromSharing = sendAuthFromSharing;
+
+/** Sign out from Settings > Sharing pane. */
+async function signOutFromSharing() {
+  try {
+    const { signOut } = await import('./auth.js');
+    await signOut(state._rawSupabaseAdapter);
+  } catch { /* ignore */ }
+  state.authUser = null;
+  if (state.sharing) { try { state.sharing.destroy(); } catch {} }
+  state.sharing = null;
+  location.reload();
+}
+window.signOutFromSharing = signOutFromSharing;
+
 function getStayConnectedCreds() {
   try {
     const raw = localStorage.getItem(STAY_CONNECTED_KEY);
@@ -988,6 +1142,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     adapter = wrapWithOfflineCache(adapter, `local:${scopeRef}`);
   } else {
     adapter = createSupabaseAdapter(url, key);
+    state._rawSupabaseAdapter = adapter; // Keep unwrapped for auth calls
     // Test connection with raw adapter BEFORE wrapping with offline cache
     const { error } = await adapter.from('projects').select('id').limit(1);
     if (error) {
@@ -1010,12 +1165,16 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   if (mode === 'supabase') {
     try {
       const { initAuth, claimOwnership } = await import('./auth.js');
-      const authResult = await initAuth(adapter);
+      const authResult = await initAuth(state._rawSupabaseAdapter);
       state.authUser = authResult.user;
       if (authResult.user && authResult.isNewAuth) {
         await claimOwnership(adapter, authResult.user.id);
       }
     } catch (e) { console.warn('auth init:', e); }
+    // Show auth prompt for users who aren't authenticated and haven't skipped
+    if (!state.authUser && !localStorage.getItem('claw_auth_skipped')) {
+      showAuthPrompt(state._rawSupabaseAdapter, url, key);
+    }
   }
 
   // Flush pending Drive saves and stop polling on page close

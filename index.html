@@ -856,7 +856,7 @@ bun run server.js</pre>
   </div>
 
   <!-- ===== AUTH PROMPT ===== -->
-  <div class="modal-overlay" id="authPromptOverlay" style="display:none;" onclick="if(event.target===this){this.style.display='none'}">
+  <div class="modal-overlay" id="authPromptOverlay" onclick="if(event.target===this){this.classList.remove('visible')}">
     <div class="modal auth-prompt-modal">
       <div class="auth-prompt-content" id="authPromptContent"></div>
     </div>

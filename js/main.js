@@ -558,7 +558,7 @@ function showAuthPrompt(rawAdapter, url, key) {
 
     skipBtn.addEventListener('click', () => {
       localStorage.setItem('claw_auth_skipped', '1');
-      overlay.style.display = 'none';
+      overlay.classList.remove('visible');
     });
 
     emailEl.addEventListener('keydown', (e) => {
@@ -596,12 +596,13 @@ function showAuthPrompt(rawAdapter, url, key) {
     });
 
     cancelBtn.addEventListener('click', () => {
-      overlay.style.display = 'none';
+      overlay.classList.remove('visible');
     });
   }
 
   renderForm();
-  overlay.style.display = '';
+  overlay.style.removeProperty('display');
+  overlay.classList.add('visible');
 }
 
 /** Global entry point for sending auth link from Settings > Sharing pane. */

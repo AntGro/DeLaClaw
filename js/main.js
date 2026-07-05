@@ -511,6 +511,11 @@ function showAuthPrompt(rawAdapter, url, key) {
   const content = document.getElementById('authPromptContent');
   if (!overlay || !content) return;
 
+  // Build Supabase dashboard URL for Site URL config
+  const creds = (() => { try { return JSON.parse(localStorage.getItem(STAY_CONNECTED_KEY) || '{}'); } catch { return {}; } })();
+  const projRef = (creds.url || '').replace('https://', '').replace('.supabase.co', '');
+  const authConfigUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/url-configuration` : 'https://supabase.com/dashboard';
+
   // ── Sign-in form state ──
   function renderForm() {
     content.innerHTML = `
@@ -520,6 +525,7 @@ function showAuthPrompt(rawAdapter, url, key) {
       <input type="email" id="authEmail" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
       <div class="auth-error" id="authError" style="display:none"></div>
       <button class="btn-primary" id="authSendBtn" style="width:100%">${t('auth.send_magic_link')}</button>
+      <p class="auth-site-url-hint">${t('auth.site_url_hint', authConfigUrl)}</p>
       <button class="auth-skip" id="authSkipBtn">${t('auth.skip')}</button>
     `;
     const emailEl = content.querySelector('#authEmail');

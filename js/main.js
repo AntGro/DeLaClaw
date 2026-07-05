@@ -1172,9 +1172,16 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
         await claimOwnership(adapter, authResult.user.id);
       }
     } catch (e) { console.warn('auth init:', e); }
-    // Show auth prompt for users who aren't authenticated and haven't skipped
+    // Show auth prompt only if DB has owner_id (migration 1.294+)
     if (!state.authUser && !localStorage.getItem('claw_auth_skipped')) {
-      showAuthPrompt(state._rawSupabaseAdapter, url, key);
+      try {
+        const { data: verRow } = await adapter.from('settings')
+          .select('value').eq('key', 'schema_version').maybeSingle();
+        const dbVer = verRow?.value || '0.00';
+        if (cmpVer(dbVer, '1.294') >= 0) {
+          showAuthPrompt(state._rawSupabaseAdapter, url, key);
+        }
+      } catch { /* DB too old or settings missing — skip prompt */ }
     }
   }
 

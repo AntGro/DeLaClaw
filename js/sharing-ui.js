@@ -71,8 +71,9 @@ export async function renderSharingPane() {
   const activeMode = localStorage.getItem('claw_cc_active_mode');
 
   if (!state.sharing) {
-    // Supabase without auth: show inline sign-in prompt
-    if (activeMode === 'supabase' && !state.authUser) {
+    // Supabase without auth: show inline sign-in prompt (only if DB has auth tables)
+    const dbReady = parseFloat(state.dbSchemaVersion || '0') >= 1.294;
+    if (activeMode === 'supabase' && !state.authUser && dbReady) {
       container.innerHTML = `<div class="auth-inline-prompt">
         <div class="auth-icon">${lucideIcon('lock', 28)}</div>
         <h4>${t('auth.sign_in_to_share')}</h4>

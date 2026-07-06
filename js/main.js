@@ -1242,6 +1242,41 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
         }
       } catch { /* DB too old or settings missing — skip prompt */ }
     }
+    // Listen for late auth events (magic link callback may resolve after getSession)
+    try {
+      const { onAuthStateChange, claimOwnership: claimOwn } = await import('./auth.js');
+      onAuthStateChange(state._rawSupabaseAdapter, async (event, session) => {
+        if (event === 'SIGNED_IN' && session?.user && !state.authUser) {
+          state.authUser = session.user;
+          // Claim unclaimed rows
+          try { await claimOwn(adapter, session.user.id); } catch {}
+          // Close auth prompt if open
+          const overlay = document.getElementById('authPromptOverlay');
+          if (overlay) overlay.classList.remove('visible');
+          // Initialize sharing if not already done
+          const ver = parseFloat(state.dbSchemaVersion || '0');
+          if (!state.sharing && ver >= 1.295) {
+            try {
+              const { createSharing } = await import('./sharing.js');
+              state.sharing = await createSharing('supabase', {
+                adapter,
+                getAuthUser: () => state.authUser,
+                supabaseUrl: url,
+                anonKey: key,
+              });
+              state.sharing.loadAll().then(() => {
+                document.dispatchEvent(new CustomEvent('sharing-changed'));
+              }).catch(e => console.warn('sharing loadAll:', e));
+              state.sharing.startPolling();
+              state.sharing.onUpdate(() => {
+                document.dispatchEvent(new CustomEvent('sharing-changed'));
+              });
+            } catch (e) { console.warn('late sharing init:', e); }
+          }
+          updateSharingNavVisibility();
+        }
+      });
+    } catch {}
   }
 
   // Flush pending Drive saves and stop polling on page close

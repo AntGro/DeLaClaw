@@ -121,7 +121,7 @@ export async function createSupabaseSharing(adapter, config) {
       id: groupId,
       name,
       backendType: 'supabase',
-      createdBy: user.email,
+      created_by: { email: user.email },
       members: [{
         email: user.email,
         role: 'creator',
@@ -160,7 +160,7 @@ export async function createSupabaseSharing(adapter, config) {
             id: g.id,
             name: g.name,
             backendType: g.backend_type,
-            createdBy: memberList.find(m => m.role === 'creator')?.email || '',
+            created_by: { email: memberList.find(m => m.role === 'creator')?.email || '' },
             members: memberList,
           });
 
@@ -213,7 +213,7 @@ export async function createSupabaseSharing(adapter, config) {
             id: jg.group_id,
             name: jg.group_name,
             backendType: jg.remote_backend_type,
-            createdBy: memberList.find(m => m.role === 'creator')?.email || '',
+            created_by: { email: memberList.find(m => m.role === 'creator')?.email || '' },
             members: memberList,
             _isJoined: true,
           });
@@ -451,7 +451,7 @@ export async function createSupabaseSharing(adapter, config) {
       id: pj.groupId,
       name: pj.info.group_name,
       backendType: 'supabase',
-      createdBy: memberList.find(m => m.role === 'creator')?.email || '',
+      created_by: { email: memberList.find(m => m.role === 'creator')?.email || '' },
       members: memberList,
       _isJoined: true,
     };

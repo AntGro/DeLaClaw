@@ -40,7 +40,7 @@ export async function createSharing(backendType, config = {}) {
 
     case 'supabase': {
       const { createSupabaseSharing } = await import('./sharing-supabase.js');
-      adapter = createSupabaseSharing(config.adapter, {
+      adapter = await createSupabaseSharing(config.adapter, {
         getAuthUser: config.getAuthUser,
         supabaseUrl: config.supabaseUrl,
         anonKey: config.anonKey,

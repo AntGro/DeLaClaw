@@ -518,20 +518,66 @@ function showAuthPrompt(rawAdapter, url, key) {
 
   // ── Sign-in form state ──
   function renderForm() {
+    const siteOrigin = location.origin;
     content.innerHTML = `
       <div class="auth-icon">${lucideIcon('lock', 28)}</div>
       <h3>${t('auth.sign_in')}</h3>
       <p class="auth-hint">${t('auth.sign_in_hint')}</p>
-      <input type="email" id="authEmail" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
-      <div class="auth-error" id="authError" style="display:none"></div>
-      <button class="auth-send-btn" id="authSendBtn">${t('auth.send_magic_link')}</button>
-      <p class="auth-site-url-hint">${lucideIcon('info', 14)} ${t('auth.site_url_hint', authConfigUrl)}</p>
+
+      <div class="auth-step" id="authStep1">
+        <div class="auth-step-header">
+          <span class="auth-step-num">1</span>
+          <span>${t('auth.step_site_url')}</span>
+        </div>
+        <p class="auth-step-detail">${t('auth.step_site_url_detail')}</p>
+        <div class="auth-site-url-value">
+          <code id="authSiteUrlValue">${esc(siteOrigin)}</code>
+          <button class="auth-copy-url-btn" id="authCopyUrlBtn" title="${t('sharing.copy')}">${lucideIcon('copy', 14)}</button>
+        </div>
+        <a class="auth-config-link" href="${authConfigUrl}" target="_blank" rel="noopener">${lucideIcon('external-link', 14)} ${t('auth.open_supabase_settings')}</a>
+        <label class="auth-toggle-label" id="authConfirmLabel">
+          <input type="checkbox" id="authSiteUrlConfirm">
+          <span>${t('auth.site_url_confirmed')}</span>
+        </label>
+      </div>
+
+      <div class="auth-step auth-step-locked" id="authStep2">
+        <div class="auth-step-header">
+          <span class="auth-step-num">2</span>
+          <span>${t('auth.step_magic_link')}</span>
+        </div>
+        <div class="auth-step2-body" id="authStep2Body" style="display:none">
+          <input type="email" id="authEmail" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
+          <div class="auth-error" id="authError" style="display:none"></div>
+          <button class="auth-send-btn" id="authSendBtn">${t('auth.send_magic_link')}</button>
+        </div>
+      </div>
+
       <button class="auth-skip" id="authSkipBtn">${t('auth.skip')}</button>
     `;
+    const confirmBox = content.querySelector('#authSiteUrlConfirm');
+    const step2 = content.querySelector('#authStep2');
+    const step2Body = content.querySelector('#authStep2Body');
     const emailEl = content.querySelector('#authEmail');
     const errEl = content.querySelector('#authError');
     const sendBtn = content.querySelector('#authSendBtn');
     const skipBtn = content.querySelector('#authSkipBtn');
+    const copyUrlBtn = content.querySelector('#authCopyUrlBtn');
+
+    copyUrlBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(siteOrigin).then(() => showToast(t('common.copied'), 'success'));
+    });
+
+    confirmBox.addEventListener('change', () => {
+      if (confirmBox.checked) {
+        step2.classList.remove('auth-step-locked');
+        step2Body.style.display = '';
+        emailEl.focus();
+      } else {
+        step2.classList.add('auth-step-locked');
+        step2Body.style.display = 'none';
+      }
+    });
 
     sendBtn.addEventListener('click', async () => {
       const email = emailEl.value.trim();

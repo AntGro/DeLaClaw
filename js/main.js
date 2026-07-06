@@ -1405,6 +1405,9 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     }
   }
 
+  // Always update sharing nav visibility (even if sharing init failed or was skipped)
+  updateSharingNavVisibility();
+
   // Initialize TODOs
   initTodoModals();
   await refreshTodos();

@@ -1381,7 +1381,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
         document.dispatchEvent(new CustomEvent('sharing-changed'));
       });
       updateSharingNavVisibility();
-    } catch (e) { console.warn('supabase sharing init:', e); }
+    } catch (e) { console.warn('supabase sharing init:', e); state._sharingInitError = e; }
   }
 
   // Handle #join= invite links (both Drive and Supabase)

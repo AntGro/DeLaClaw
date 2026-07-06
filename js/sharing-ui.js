@@ -84,11 +84,14 @@ export async function renderSharingPane() {
         <div class="auth-inline-status" id="sharingAuthStatus" style="display:none"></div>
       </div>`;
     } else if (activeMode === 'supabase' && state.authUser) {
-      // Authenticated but sharing adapter failed to initialise (e.g. stale cache)
+      // Authenticated but sharing adapter failed to initialise
+      const errMsg = state._sharingInitError ? esc(String(state._sharingInitError.message || state._sharingInitError)) : '';
+      const dbVer = esc(state.dbSchemaVersion || '?');
       container.innerHTML = `<div class="auth-inline-prompt">
         <div class="auth-icon">${lucideIcon('refresh-cw', 28)}</div>
         <h4>${t('sharing.init_failed')}</h4>
         <p class="auth-inline-hint">${t('sharing.init_failed_hint')}</p>
+        ${errMsg ? `<p class="setting-hint" style="font-size:0.75rem;opacity:0.6;margin-top:8px">Error: ${errMsg} (DB ${dbVer})</p>` : ''}
       </div>`;
     } else {
       container.innerHTML = `<p class="setting-hint">${t('sharing.no_drive')}</p>`;

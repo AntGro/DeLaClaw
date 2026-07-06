@@ -488,6 +488,18 @@ export async function createSupabaseSharing(adapter, config) {
     return _allItems;
   }
 
+  function getAllSharedHabits() {
+    return _allItems.filter(i => i.item_type === 'habit');
+  }
+
+  function getAllSharedTodos() {
+    return _allItems.filter(i => i.item_type === 'todo');
+  }
+
+  function getAllSharedListItems() {
+    return _allItems.filter(i => i.item_type === 'list_item');
+  }
+
   function getItems(groupId, itemType) {
     return _allItems.filter(i =>
       i.group_id === groupId && (!itemType || i.item_type === itemType));
@@ -797,6 +809,9 @@ export async function createSupabaseSharing(adapter, config) {
     unjoinGroup,
     getAllGroups,
     getAllSharedItems,
+    getAllSharedHabits,
+    getAllSharedTodos,
+    getAllSharedListItems,
     getItems,
     getGroupByFolderId,
     getInviteLink,

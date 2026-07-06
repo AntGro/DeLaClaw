@@ -681,7 +681,7 @@ function openAddVestiaireModal(preselectedCategory) {
 }
 
 function closeAddVestiaireModal() {
-  document.getElementById('addVestiaireModal').classList.remove('visible');
+  document.getElementById('addVestiaireModal')?.classList.remove('visible');
 }
 
 async function saveNewVestiaire() {

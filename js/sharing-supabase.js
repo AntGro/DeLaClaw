@@ -154,6 +154,7 @@ export async function createSupabaseSharing(adapter, config) {
             accepted: m.joined_at != null,
             memberId: m.member_id,
             displayName: m.display_name,
+            token: m.token,
           }));
 
           const creatorEmail = getAuthUser()?.email || '';
@@ -297,6 +298,7 @@ export async function createSupabaseSharing(adapter, config) {
         accepted: false,
         memberId,
         displayName,
+        token,
       });
     }
 
@@ -520,6 +522,13 @@ export async function createSupabaseSharing(adapter, config) {
     return location.origin + location.pathname
       + '#join=supabase:' + encodeURIComponent(supabaseUrl)
       + ':' + anonKey + ':' + groupId;
+  }
+
+  function getMemberInviteLink(groupId, token) {
+    if (!supabaseUrl || !anonKey || !token) return null;
+    return location.origin + location.pathname
+      + '#join=supabase:' + encodeURIComponent(supabaseUrl)
+      + ':' + anonKey + ':' + groupId + ':' + token;
   }
 
   function isJoinedViaLink(groupId) {
@@ -825,6 +834,7 @@ export async function createSupabaseSharing(adapter, config) {
     getItems,
     getGroupByFolderId,
     getInviteLink,
+    getMemberInviteLink,
     isJoinedViaLink,
     addItem,
     updateItem,

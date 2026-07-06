@@ -142,7 +142,7 @@ export async function renderSharingPane() {
         </div>
         <div class="sharing-group-actions">
           ${group.folderId ? `<a class="sharing-action-btn sharing-drive-link" href="https://drive.google.com/drive/folders/${encodeURIComponent(group.folderId)}" target="_blank" rel="noopener" title="${t('sharing.open_drive_folder')}">${LOGOS.googledrive(14)} ${t('sharing.open_drive_folder')}</a>` : ''}
-          ${inviteLink && isCreator ? `<button class="sharing-action-btn sharing-copy-link-btn" onclick="sharingCopyLink('${escQ(group.id)}')" title="${t('sharing.copy_link')}">${lucideIcon('link', 14)} ${t('sharing.copy_link')}</button>` : ''}
+          ${inviteLink && isCreator && group.backendType !== 'supabase' ? `<button class="sharing-action-btn sharing-copy-link-btn" onclick="sharingCopyLink('${escQ(group.id)}')" title="${t('sharing.copy_link')}">${lucideIcon('link', 14)} ${t('sharing.copy_link')}</button>` : ''}
           ${!isCreator ? `<button class="sharing-action-btn sharing-leave-btn" onclick="${isJoined ? `sharingUnjoinGroup('${escQ(group.id)}')` : `sharingLeaveGroup('${escQ(group.id)}')`}" title="${t('sharing.leave')}">${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>` : ''}
         </div>
       </div>
@@ -156,16 +156,18 @@ export async function renderSharingPane() {
       const statusHtml = isYou ? ` <span class="sharing-you">(${t('sharing.you')})</span>`
         : hasJoined ? ` <span class="sharing-member-joined">${lucideIcon('check', 12)}</span>`
         : ` <span class="sharing-member-pending">${t('sharing.pending')}</span>`;
+      const canCopyLink = isCreator && !isYou && !hasJoined && member.token && state.sharing.getMemberInviteLink;
       html += `<div class="sharing-member">
           ${avatarDot(member, 22)}
           <span class="sharing-member-email">${esc(member.email)}${statusHtml}</span>
+          ${canCopyLink ? `<button class="sharing-action-btn" onclick="sharingCopyMemberLink('${escQ(group.id)}','${escQ(member.token)}')" title="${t('sharing.copy_link')}" style="font-size:0.75rem;padding:2px 6px">${lucideIcon('link', 12)}</button>` : ''}
           ${canRemove ? `<button class="sharing-remove-btn" onclick="sharingRemoveMember('${escQ(group.id)}','${escQ(member.email)}')" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
         </div>`;
     }
 
     html += `</div>
       ${isCreator ? `<div class="sharing-invite-row">
-        <input type="email" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${t('sharing.invite_placeholder')}" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingInvite('${escQ(group.id)}');}">
+        <input type="text" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${t('sharing.invite_name_placeholder')}" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingInvite('${escQ(group.id)}');}">
         <button class="sharing-invite-btn" onclick="sharingInvite('${escQ(group.id)}')">${lucideIcon('user-plus', 14)} ${t('sharing.invite')}</button>
       </div>` : ''}
       ${isCreator ? `<button class="sharing-delete-btn" onclick="sharingDeleteGroup('${escQ(group.id)}')">${lucideIcon('trash-2', 14)} ${t('sharing.delete_group')}</button>` : ''}
@@ -217,15 +219,19 @@ async function sharingCreateGroupSubmit() {
   }
 }
 
-/** Show a modal with the invite link after group creation. */
-function showInviteLinkModal(groupName, link) {
+/** Show a modal with an invite link (after group creation or member invite). */
+function showInviteLinkModal(name, link, isNewGroup) {
+  const title = isNewGroup ? t('sharing.group_created') : t('sharing.member_added');
+  const hint = isNewGroup
+    ? t('sharing.invite_link_hint', name)
+    : t('sharing.member_link_hint', name);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingInviteLinkModal';
   overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
   overlay.innerHTML = `<div class="modal">
-    <h2>${lucideIcon('link', 20)} ${t('sharing.group_created')}</h2>
-    <p>${t('sharing.invite_link_hint', groupName)}</p>
+    <h2>${lucideIcon('link', 20)} ${title}</h2>
+    <p>${hint}</p>
     <div class="sharing-invite-link-box">
       <input type="text" id="sharingInviteLinkInput" value="${esc(link)}" readonly onclick="this.select()">
       <button class="sharing-invite-btn" onclick="sharingCopyLinkValue()">${lucideIcon('copy', 14)} ${t('sharing.copy')}</button>
@@ -258,17 +264,37 @@ async function sharingCopyLink(groupId) {
   }
 }
 
+async function sharingCopyMemberLink(groupId, token) {
+  const link = state.sharing?.getMemberInviteLink?.(groupId, token);
+  if (link) {
+    try {
+      await navigator.clipboard.writeText(link);
+      showToast(t('common.copied'), 'success');
+    } catch {
+      showInviteLinkModal('', link);
+    }
+  }
+}
+
 async function sharingInvite(groupId) {
   const input = document.getElementById(`sharingInvite-${groupId}`);
-  const email = input?.value.trim();
-  if (!email) return;
+  const name = input?.value.trim();
+  if (!name) return;
   const btn = input?.nextElementSibling;
   if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
   try {
-    await state.sharing.inviteUser(groupId, email);
+    const result = await state.sharing.inviteUser(groupId, name);
     input.value = '';
-    showToast(t('sharing.invite_sent'), 'success');
+    // Build per-member invite link with token
+    const memberLink = state.sharing.getMemberInviteLink
+      ? state.sharing.getMemberInviteLink(groupId, result.token)
+      : null;
     renderSharingPane();
+    if (memberLink) {
+      showInviteLinkModal(name, memberLink);
+    } else {
+      showToast(t('sharing.member_added'), 'success');
+    }
   } catch (e) {
     showToast(e.message, 'error');
     if (btn) { btn.disabled = false; btn.style.opacity = ''; }
@@ -630,6 +656,7 @@ window.sharingLeaveGroup = sharingLeaveGroup;
 window.sharingUnjoinGroup = sharingUnjoinGroup;
 window.sharingDeleteGroup = sharingDeleteGroup;
 window.sharingCopyLink = sharingCopyLink;
+window.sharingCopyMemberLink = sharingCopyMemberLink;
 window.sharingCopyLinkValue = sharingCopyLinkValue;
 window.sharingOpenJoinPicker = sharingOpenJoinPicker;
 window.submitSharePopover = submitSharePopover;

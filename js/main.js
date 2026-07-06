@@ -579,14 +579,12 @@ function showAuthPrompt(rawAdapter, url, key) {
       <div class="auth-icon">${lucideIcon('mail', 28)}</div>
       <h3>${t('auth.check_inbox')}</h3>
       <p class="auth-hint">${t('auth.check_inbox_hint', esc(email))}</p>
-      <div class="auth-actions">
-        <button class="btn-secondary" id="authResendBtn">${t('auth.resend')}</button>
-        <button class="auth-skip" id="authCancelBtn">${t('auth.cancel')}</button>
-      </div>
+      <button class="auth-send-btn" id="authResendBtn">${t('auth.resend')}</button>
       <div class="auth-status" id="authResendStatus" style="display:none"></div>
+      <button class="auth-skip" id="authCloseBtn">${t('auth.close')}</button>
     `;
     const resendBtn = content.querySelector('#authResendBtn');
-    const cancelBtn = content.querySelector('#authCancelBtn');
+    const closeBtn = content.querySelector('#authCloseBtn');
     const statusEl = content.querySelector('#authResendStatus');
 
     resendBtn.addEventListener('click', async () => {
@@ -594,15 +592,22 @@ function showAuthPrompt(rawAdapter, url, key) {
       resendBtn.textContent = t('auth.sending');
       try {
         const { sendMagicLink } = await import('./auth.js');
-        await sendMagicLink(rawAdapter, email);
-        statusEl.textContent = t('auth.sent');
+        const { error } = await sendMagicLink(rawAdapter, email);
+        if (error) {
+          const isRateLimit = error.status === 429 || (error.message || '').toLowerCase().includes('rate');
+          statusEl.textContent = isRateLimit ? t('auth.rate_limit') : t('auth.error');
+          statusEl.style.color = 'var(--danger,#e74c3c)';
+        } else {
+          statusEl.textContent = t('auth.sent');
+          statusEl.style.color = '';
+        }
         statusEl.style.display = '';
       } catch { /* ignore */ }
       resendBtn.disabled = false;
       resendBtn.textContent = t('auth.resend');
     });
 
-    cancelBtn.addEventListener('click', () => {
+    closeBtn.addEventListener('click', () => {
       overlay.classList.remove('visible');
     });
   }

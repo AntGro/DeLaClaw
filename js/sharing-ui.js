@@ -149,10 +149,11 @@ export async function renderSharingPane() {
       <div class="sharing-members">`;
 
     for (const member of (group.members || [])) {
-      const isYou = _currentUser && member.email === _currentUser.email;
+      const isYou = _currentUser && (member.email === _currentUser.email
+        || member.displayName === _currentUser.email
+        || member.displayName === _currentUser.email?.split('@')[0]);
       const canRemove = isCreator && !isYou;
-      const isOwner = member.role === 'owner';
-      const hasJoined = isOwner || !!member.joined_at;
+      const hasJoined = member.role === 'owner' || member.role === 'creator' || !!member.accepted || !!member.joined_at;
       const statusHtml = isYou ? ` <span class="sharing-you">(${t('sharing.you')})</span>`
         : hasJoined ? ` <span class="sharing-member-joined">${lucideIcon('check', 12)}</span>`
         : ` <span class="sharing-member-pending">${t('sharing.pending')}</span>`;

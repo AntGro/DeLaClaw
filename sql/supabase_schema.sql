@@ -64,7 +64,8 @@ CREATE TABLE "public"."birthdays" (
     "note" "text",
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
-    "avatar_url" "text"
+    "avatar_url" "text",
+    "owner_id" "uuid"
 );
 
 
@@ -123,7 +124,8 @@ CREATE TABLE "public"."habit_completions" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "habit_id" "uuid",
     "completed_at" timestamp with time zone DEFAULT "now"(),
-    "note" "text"
+    "note" "text",
+    "owner_id" "uuid"
 );
 
 
@@ -139,7 +141,8 @@ CREATE TABLE "public"."habits" (
     "next_due" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
-    "is_draft" boolean DEFAULT false
+    "is_draft" boolean DEFAULT false,
+    "owner_id" "uuid"
 );
 
 
@@ -155,7 +158,8 @@ CREATE TABLE "public"."list_items" (
     "note" "text",
     "sort_order" integer DEFAULT 0,
     "created_at" timestamp with time zone DEFAULT "now"(),
-    "updated_at" timestamp with time zone DEFAULT "now"()
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "owner_id" "uuid"
 );
 
 
@@ -203,7 +207,8 @@ CREATE TABLE "public"."projects" (
     "links" "jsonb" DEFAULT '[]'::"jsonb",
     "sort_order" integer DEFAULT 0,
     "created_at" timestamp with time zone DEFAULT "now"(),
-    "shortname" "text"
+    "shortname" "text",
+    "owner_id" "uuid"
 );
 
 
@@ -214,7 +219,8 @@ CREATE TABLE "public"."projects" (
 CREATE TABLE "public"."prompts" (
     "key" "text" NOT NULL,
     "text" "text" DEFAULT ''::"text" NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT "now"()
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "owner_id" "uuid"
 );
 
 
@@ -247,7 +253,8 @@ CREATE TABLE "public"."tasks" (
     CONSTRAINT "plan_max" CHECK (("char_length"("plan_note") <= 5000)),
     CONSTRAINT "response_max" CHECK (("char_length"("hatch_response") <= 5000)),
     CONSTRAINT "tasks_status_check" CHECK (("status" = ANY (ARRAY['todo'::"text", 'in-progress'::"text", 'review'::"text", 'approved'::"text", 'revision'::"text", 'draft'::"text", 'idea'::"text", 'idea-shipped'::"text", 'idea-plan-requested'::"text"]))),
-    CONSTRAINT "text_max" CHECK (("char_length"("text") <= 5000))
+    CONSTRAINT "text_max" CHECK (("char_length"("text") <= 5000)),
+    "owner_id" "uuid"
 );
 
 
@@ -299,7 +306,8 @@ CREATE TABLE "public"."todos" (
     "sort_order" integer DEFAULT 0,
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
-    CONSTRAINT "todos_priority_check" CHECK (("priority" = ANY (ARRAY['urgent'::"text", 'high'::"text", 'medium'::"text", 'low'::"text", 'normal'::"text"])))
+    CONSTRAINT "todos_priority_check" CHECK (("priority" = ANY (ARRAY['urgent'::"text", 'high'::"text", 'medium'::"text", 'low'::"text", 'normal'::"text"]))),
+    "owner_id" "uuid"
 );
 
 

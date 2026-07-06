@@ -895,6 +895,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return out;
     },
 
+    getAllSharedTodos() {
+      return this.getAllSharedItems('todo');
+    },
+
+    getAllSharedListItems() {
+      return this.getAllSharedItems('list_item');
+    },
+
     /** Get items for one group, optionally filtered by type. */
     getItems(groupId, itemType) {
       const e = _groups.get(groupId);
@@ -931,6 +939,17 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     stopPolling() {
       if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    },
+
+    /** Force-save all groups and their items to Drive. */
+    async forceSave() {
+      for (const [groupId, e] of _groups) {
+        if (e.joinedViaLink) continue; // can't write to someone else's group.json as non-owner
+        await saveGroup(groupId);
+        for (const type of ITEM_TYPES) {
+          if (e.typeData[type]?.length) await saveTypedItems(groupId, type);
+        }
+      }
     },
 
     async poll() {

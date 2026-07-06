@@ -1734,6 +1734,52 @@ async function importFlashcardsIntegrationTest() {
   }
 
   // ===================================================================
+  // SHARING INTERFACE CONFORMANCE
+  // ===================================================================
+  console.log('\n--- Sharing Interface Conformance\n');
+
+  {
+    // Parse the canonical interface keys from sharing-interface.js
+    const interfaceSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf8');
+    const interfaceKeys = [];
+    for (const m of interfaceSrc.matchAll(/^\s{2}(\w+):\s+'(fn|any)'/gm)) {
+      interfaceKeys.push({ key: m[1], kind: m[2] });
+    }
+
+    test('sharing-interface.js exports a non-empty SHARING_INTERFACE', () => {
+      assert(interfaceKeys.length >= 30,
+        `Expected ≥30 interface keys, got ${interfaceKeys.length}`);
+    });
+
+    // Check the Supabase adapter return block
+    const sbSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf8');
+    const sbReturn = sbSrc.match(/return \{[\s\S]*?\n  \};/);
+    const sbKeys = sbReturn ? [...sbReturn[0].matchAll(/^\s{4}(\w+)/gm)].map(m => m[1]) : [];
+
+    for (const { key } of interfaceKeys) {
+      test(`supabase adapter exports: ${key}`, () => {
+        assert(sbKeys.includes(key),
+          `sharing-supabase.js return block is missing "${key}"`);
+      });
+    }
+
+    // Check the Drive adapter object literal
+    const drvSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf8');
+    const drvBlock = drvSrc.match(/const sharing = \{[\s\S]*?\n  \};/);
+    // Drive uses both `name(` method shorthand and `name:` property syntax
+    const drvKeys = drvBlock
+      ? [...drvBlock[0].matchAll(/^\s{4}(?:async\s+)?(\w+)\s*[\(:{]/gm)].map(m => m[1])
+      : [];
+
+    for (const { key } of interfaceKeys) {
+      test(`drive adapter exports: ${key}`, () => {
+        assert(drvKeys.includes(key),
+          `sharing-drive.js sharing object is missing "${key}"`);
+      });
+    }
+  }
+
+  // ===================================================================
   // SUMMARY
   // ===================================================================
   console.log(`\n${'═'.repeat(50)}`);

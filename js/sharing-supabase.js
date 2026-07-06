@@ -484,6 +484,10 @@ export async function createSupabaseSharing(adapter, config) {
     return [..._ownedGroups, ..._joinedGroups];
   }
 
+  function getGroup(groupId) {
+    return getAllGroups().find(g => g.id === groupId) || null;
+  }
+
   function getAllSharedItems() {
     return _allItems;
   }
@@ -790,6 +794,10 @@ export async function createSupabaseSharing(adapter, config) {
     );
   }
 
+  function stopPolling() {
+    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  }
+
   function onUpdate(fn) {
     _updateCallbacks.push(fn);
   }
@@ -808,6 +816,7 @@ export async function createSupabaseSharing(adapter, config) {
     joinWithFileIds,
     unjoinGroup,
     getAllGroups,
+    getGroup,
     getAllSharedItems,
     getAllSharedHabits,
     getAllSharedTodos,
@@ -829,6 +838,7 @@ export async function createSupabaseSharing(adapter, config) {
     forceSave,
     destroy,
     startPolling,
+    stopPolling,
     onUpdate,
     openJoinPicker: null,
   };

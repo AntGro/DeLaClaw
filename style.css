@@ -1988,7 +1988,7 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-danger-btn:hover{background:color-mix(in srgb, var(--danger,#e74c3c) 8%, transparent);}
 
 /* ── Auth prompt modal ────────────────────────────────────────── */
-.auth-prompt-modal{max-width:380px;padding:2rem;text-align:center;}
+.auth-prompt-modal{max-width:480px;padding:2rem;text-align:center;}
 .auth-prompt-modal h3{margin:0.5rem 0 0.25rem;font-size:1.2rem;}
 .auth-prompt-modal .auth-hint{color:var(--muted);font-size:0.85rem;margin:0 0 1.25rem;line-height:1.4;}
 .auth-prompt-modal input[type="email"]{width:100%;padding:0.6rem 0.75rem;border:1px solid var(--border);border-radius:6px;font-size:0.9rem;background:var(--bg);color:var(--text);margin-bottom:0.75rem;box-sizing:border-box;}

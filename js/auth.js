@@ -72,12 +72,20 @@ export async function claimOwnership(adapter, userId) {
   const tables = [
     'projects', 'tasks', 'todos', 'habits', 'habit_completions',
     'flashcard_notes', 'birthdays', 'vestiaire', 'lists', 'list_items',
-    'settings', 'prompts', 'joined_groups',
+    'settings', 'prompts',
   ];
+  // joined_groups only exists at schema >= 1.297
+  const { data: verRow } = await adapter.from('settings')
+    .select('value').eq('key', 'schema_version').maybeSingle().catch(() => ({ data: null }));
+  const dbVer = parseFloat(verRow?.value || '0');
+  if (dbVer >= 1.297) tables.push('joined_groups');
+
   for (const table of tables) {
-    await adapter.from(table)
-      .update({ owner_id: userId })
-      .is('owner_id', null);
+    try {
+      await adapter.from(table)
+        .update({ owner_id: userId })
+        .is('owner_id', null);
+    } catch { /* table may not exist yet */ }
   }
 }
 

@@ -1362,8 +1362,9 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     } catch (e) { console.warn('sharing init:', e); }
   }
 
-  // Supabase sharing init (requires auth)
-  if (mode === 'supabase' && state.authUser) {
+  // Supabase sharing init (requires auth + sharing tables ≥ 1.295)
+  const dbVerForSharing = parseFloat(state.dbSchemaVersion || '0');
+  if (mode === 'supabase' && state.authUser && dbVerForSharing >= 1.295) {
     try {
       const { createSharing } = await import('./sharing.js');
       state.sharing = await createSharing('supabase', {

@@ -250,10 +250,12 @@ function updateFooterStats(viewCountsGetter) {
     // Supabase / Local: show DB size with limit
     statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} ${t('utils.db')}: <span id="dbSizeMb">—</span> / 500 MB</div>`;
   }
-  // Sharing groups count (Drive only)
+  // Sharing groups count
   if (state.sharing) {
-    const groupCount = state.sharing.getAllGroups().length;
-    statsHtml += `<div class="db-stat" id="footerGroupCount">${lucideIcon('users', 14)} ${groupCount} group${groupCount !== 1 ? 's' : ''}</div>`;
+    try {
+      const groupCount = state.sharing.getAllGroups().length;
+      statsHtml += `<div class="db-stat" id="footerGroupCount">${lucideIcon('users', 14)} ${groupCount} group${groupCount !== 1 ? 's' : ''}</div>`;
+    } catch { /* sharing not ready */ }
   }
   // App + DB version
   const dbVer = state.dbSchemaVersion || '—';

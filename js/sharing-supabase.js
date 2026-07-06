@@ -156,11 +156,12 @@ export async function createSupabaseSharing(adapter, config) {
             displayName: m.display_name,
           }));
 
+          const creatorEmail = getAuthUser()?.email || '';
           _ownedGroups.push({
             id: g.id,
             name: g.name,
             backendType: g.backend_type,
-            created_by: { email: memberList.find(m => m.role === 'creator')?.email || '' },
+            created_by: { email: creatorEmail },
             members: memberList,
           });
 

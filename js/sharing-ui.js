@@ -83,6 +83,13 @@ export async function renderSharingPane() {
         <button class="auth-send-btn" id="sharingAuthSendBtn" onclick="window.sendAuthFromSharing()">${t('auth.send_magic_link')}</button>
         <div class="auth-inline-status" id="sharingAuthStatus" style="display:none"></div>
       </div>`;
+    } else if (activeMode === 'supabase' && state.authUser) {
+      // Authenticated but sharing adapter failed to initialise (e.g. stale cache)
+      container.innerHTML = `<div class="auth-inline-prompt">
+        <div class="auth-icon">${lucideIcon('refresh-cw', 28)}</div>
+        <h4>${t('sharing.init_failed')}</h4>
+        <p class="auth-inline-hint">${t('sharing.init_failed_hint')}</p>
+      </div>`;
     } else {
       container.innerHTML = `<p class="setting-hint">${t('sharing.no_drive')}</p>`;
     }

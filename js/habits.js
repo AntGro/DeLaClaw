@@ -155,9 +155,13 @@ function localDateStr(d) {
 
 function computeNextDue(frequencyRule, lastDoneDate) {
   if (!frequencyRule || !isStructuredRule(frequencyRule)) return null;
-  const base = lastDoneDate ? new Date(lastDoneDate) : new Date();
-  const baseDay = new Date(base.getFullYear(), base.getMonth(), base.getDate());
   const today = new Date(); today.setHours(0,0,0,0);
+
+  // No completions yet — due today
+  if (!lastDoneDate) return localDateStr(today);
+
+  const base = new Date(lastDoneDate);
+  const baseDay = new Date(base.getFullYear(), base.getMonth(), base.getDate());
 
   if (frequencyRule === 'daily') {
     const next = new Date(baseDay); next.setDate(next.getDate() + 1);

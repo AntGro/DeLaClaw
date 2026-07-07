@@ -375,19 +375,70 @@ export async function handleJoinHash(folderId) {
   // Try direct access first (works when Drive permission is already granted)
   const group = await state.sharing.tryDirectJoin(folderId);
   if (group) {
-    showToast(t('sharing.joined_group', group.name || ''), 'success');
-    renderSharingPane();
-    document.dispatchEvent(new CustomEvent('sharing-changed'));
+    if (group._pendingJoin) {
+      // Supabase: token verified but join not confirmed yet — show confirmation modal
+      showJoinConfirmModal(group);
+    } else {
+      // Drive: join completed directly
+      showToast(t('sharing.joined_group', group.name || ''), 'success');
+      renderSharingPane();
+      document.dispatchEvent(new CustomEvent('sharing-changed'));
+    }
     return;
   }
 
-  // Need Picker — show join modal
+  // Token invalid or already used
+  if (folderId && folderId.includes(':')) {
+    // Supabase link — verify_join_token returned nothing
+    showToast(t('sharing.join_token_used'), 'error');
+    return;
+  }
+
+  // Need Picker — show join modal (Drive)
   if (!state.sharing.openJoinPicker) {
     showToast(t('sharing.join_failed'), 'error');
     return;
   }
 
   showJoinPickerModal(folderId);
+}
+
+function showJoinConfirmModal(group) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay visible';
+  overlay.id = 'sharingJoinConfirmModal';
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="modal">
+    <h2>${lucideIcon('users', 20)} ${t('sharing.join_confirm_title')}</h2>
+    <p>${t('sharing.join_confirm_hint', group.name || '')}</p>
+    <input type="text" id="joinDisplayName" class="sharing-input"
+      placeholder="${t('sharing.join_confirm_name')}"
+      value="${esc(group._suggestedName || '')}" />
+    <div id="joinConfirmError" class="sharing-join-error" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="document.getElementById('sharingJoinConfirmModal').remove()">${t('common.cancel')}</button>
+      <button class="modal-save" id="joinConfirmBtn">${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}</button>
+    </div>
+  </div>`;
+  document.getElementById('app').appendChild(overlay);
+  document.getElementById('joinConfirmBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('joinConfirmBtn');
+    const errEl = document.getElementById('joinConfirmError');
+    if (errEl) errEl.style.display = 'none';
+    if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
+    try {
+      const displayName = document.getElementById('joinDisplayName')?.value.trim() || '';
+      await state.sharing.joinWithFileIds(null, { displayName });
+      overlay.remove();
+      showToast(t('sharing.joined_group', group.name || ''), 'success');
+      renderSharingPane();
+      document.dispatchEvent(new CustomEvent('sharing-changed'));
+    } catch (e) {
+      console.warn('join confirm failed:', e);
+      if (errEl) { errEl.textContent = t('sharing.join_failed'); errEl.style.display = ''; }
+      if (btn) { btn.disabled = false; btn.textContent = `${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}`; }
+    }
+  });
 }
 
 function showJoinPickerModal(folderId) {

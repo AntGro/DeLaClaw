@@ -372,6 +372,20 @@ export async function handleJoinHash(folderId) {
     return;
   }
 
+  // For Supabase links, extract group ID and check if already joined
+  if (folderId && folderId.includes(':')) {
+    const parts = decodeURIComponent(folderId).split(':');
+    if (parts.length >= 4) {
+      const gid = parts[parts.length - 2];
+      const alreadyJoined = state.sharing.getAllGroups?.()?.find(g => g.id === gid);
+      if (alreadyJoined) {
+        showToast(t('sharing.already_joined', alreadyJoined.name || ''), 'info');
+        renderSharingPane();
+        return;
+      }
+    }
+  }
+
   // Try direct access first (works when Drive permission is already granted)
   const group = await state.sharing.tryDirectJoin(folderId);
   if (group) {

@@ -1945,7 +1945,7 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-remove-btn:hover{color:#ef4444;}
 .sharing-invite-row{display:flex;gap:6px;margin-bottom:8px;}
 .sharing-invite-input{flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.82rem;}
-.sharing-invite-btn{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:6px;border:1px solid var(--accent);background:color-mix(in srgb, var(--accent) 10%, transparent);color:var(--accent);cursor:pointer;font-size:0.78rem;font-weight:500;transition:all 0.15s;}
+.sharing-invite-btn{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:6px;border:1px solid var(--accent);background:color-mix(in srgb, var(--accent) 10%, transparent);color:var(--accent);cursor:pointer;font-size:0.78rem;font-weight:500;transition:all 0.15s;white-space:nowrap;flex-shrink:0;}
 .sharing-invite-btn:hover{background:color-mix(in srgb, var(--accent) 20%, transparent);}
 .sharing-delete-btn{display:inline-flex;align-items:center;gap:4px;border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:0.78rem;padding:4px 0;transition:color 0.15s;}
 .sharing-delete-btn:hover{color:#ef4444;}

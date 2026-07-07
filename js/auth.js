@@ -75,9 +75,12 @@ export async function claimOwnership(adapter, userId) {
     'settings', 'prompts',
   ];
   // joined_groups only exists at schema >= 1.297
-  const { data: verRow } = await adapter.from('settings')
-    .select('value').eq('key', 'schema_version').maybeSingle().catch(() => ({ data: null }));
-  const dbVer = parseFloat(verRow?.value || '0');
+  let dbVer = 0;
+  try {
+    const { data: verRow } = await adapter.from('settings')
+      .select('value').eq('key', 'schema_version').maybeSingle();
+    dbVer = parseFloat(verRow?.value || '0');
+  } catch { /* settings table may not exist */ }
   if (dbVer >= 1.297) tables.push('joined_groups');
 
   for (const table of tables) {

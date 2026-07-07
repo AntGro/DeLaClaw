@@ -361,7 +361,9 @@ export async function createSupabaseSharing(adapter, config) {
   async function tryDirectJoin(connectionRef) {
     // connectionRef format: "supabase:<url>:<anonKey>:<groupId>:<token>"
     // (the "supabase:" prefix is already stripped by the caller)
-    const parts = connectionRef.split(':');
+    // URL may be percent-encoded from the hash fragment
+    const decoded = decodeURIComponent(connectionRef);
+    const parts = decoded.split(':');
     if (parts.length < 4) return null;
 
     // Reconstruct the URL (it may contain colons in https://)

@@ -36,6 +36,7 @@ export async function createSupabaseSharing(adapter, config) {
   let _memberCache = {};   // groupId -> members array
   let _remoteClients = {}; // groupId -> { client, token, memberId }
   let _pollTimer = null;
+  let _realtimeChannel = null;
   let _updateCallbacks = [];
   let _loaded = false;
 
@@ -800,6 +801,7 @@ export async function createSupabaseSharing(adapter, config) {
   }
 
   function destroy() {
+    _stopRealtime();
     if (_pollTimer) {
       clearInterval(_pollTimer);
       _pollTimer = null;
@@ -808,16 +810,57 @@ export async function createSupabaseSharing(adapter, config) {
     _remoteClients = {};
   }
 
+  // ── Realtime (owned groups — instant member/item updates) ───
+
+  let _rtDebounce = null;
+  function _realtimePoll() {
+    if (_rtDebounce) clearTimeout(_rtDebounce);
+    _rtDebounce = setTimeout(() => {
+      _rtDebounce = null;
+      poll().catch(e => console.warn('realtime poll:', e));
+    }, 500);
+  }
+
+  function _startRealtime() {
+    if (_realtimeChannel || !_isOwner() || !adapter.channel) return;
+    try {
+      _realtimeChannel = adapter.channel('sharing-realtime')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'sharing_members' },
+          () => _realtimePoll())
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'sharing_items' },
+          () => _realtimePoll())
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.info('sharing: realtime subscribed');
+          }
+        });
+    } catch (e) {
+      console.warn('sharing: realtime setup failed, falling back to poll', e);
+    }
+  }
+
+  function _stopRealtime() {
+    if (_realtimeChannel) {
+      try { adapter.raw?.removeChannel?.(_realtimeChannel) || _realtimeChannel.unsubscribe(); }
+      catch { /* ignore */ }
+      _realtimeChannel = null;
+    }
+  }
+
   function startPolling() {
     if (_pollTimer) clearInterval(_pollTimer);
     _pollTimer = setInterval(
       () => poll().catch(e => console.warn('sharing poll:', e)),
       POLL_MS,
     );
+    _startRealtime();
   }
 
   function stopPolling() {
     if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    _stopRealtime();
   }
 
   function onUpdate(fn) {

@@ -722,6 +722,10 @@ export async function createSupabaseSharing(adapter, config) {
               displayName: m.display_name,
               token: m.token,
             }));
+            const oldMl = _memberCache[group.id] || [];
+            if (oldMl.length !== ml.length || JSON.stringify(oldMl.map(m => ({ e: m.email, a: m.accepted }))) !== JSON.stringify(ml.map(m => ({ e: m.email, a: m.accepted })))) {
+              changed = true;
+            }
             group.members = ml;
             _memberCache[group.id] = ml;
           }
@@ -764,6 +768,10 @@ export async function createSupabaseSharing(adapter, config) {
           memberId: m.member_id,
           displayName: m.display_name,
         }));
+        const oldMl = _memberCache[group.id] || [];
+        if (oldMl.length !== ml.length || JSON.stringify(oldMl.map(m => ({ e: m.email, a: m.accepted }))) !== JSON.stringify(ml.map(m => ({ e: m.email, a: m.accepted })))) {
+          changed = true;
+        }
         group.members = ml;
         _memberCache[group.id] = ml;
 

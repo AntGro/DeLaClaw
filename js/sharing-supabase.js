@@ -720,6 +720,7 @@ export async function createSupabaseSharing(adapter, config) {
               accepted: m.joined_at != null,
               memberId: m.member_id,
               displayName: m.display_name,
+              token: m.token,
             }));
             group.members = ml;
             _memberCache[group.id] = ml;

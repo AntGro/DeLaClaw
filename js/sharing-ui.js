@@ -154,7 +154,9 @@ export async function renderSharingPane() {
         || member.displayName === _currentUser.email?.split('@')[0]);
       const canRemove = isCreator && !isYou;
       const hasJoined = member.role === 'owner' || member.role === 'creator' || !!member.accepted || !!member.joined_at;
+      const isCreatorMember = member.role === 'creator';
       const statusHtml = isYou ? ` <span class="sharing-you">(${t('sharing.you')})</span>`
+        : isCreatorMember ? ` <span class="sharing-member-creator">${lucideIcon('crown', 12)} ${t('sharing.creator')}</span>`
         : hasJoined ? ` <span class="sharing-member-joined">${lucideIcon('check', 12)}</span>`
         : ` <span class="sharing-member-pending">${t('sharing.pending')}</span>`;
       const canCopyLink = isCreator && !isYou && !hasJoined && member.token && state.sharing.getMemberInviteLink;

@@ -392,6 +392,7 @@ export async function createSupabaseSharing(adapter, config) {
         members: [],
         _pendingJoin: true,
         _suggestedName: info.display_name,
+        _creatorName: info.creator_name || '',
       };
     } catch (e) {
       console.warn('sharing: tryDirectJoin failed', e);

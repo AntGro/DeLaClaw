@@ -408,9 +408,12 @@ function showJoinConfirmModal(group) {
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingJoinConfirmModal';
   overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  const ownerLine = group._creatorName
+    ? `<p class="sharing-join-owner">${lucideIcon('user', 14)} ${t('sharing.join_confirm_owner', esc(group._creatorName))}</p>` : '';
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('users', 20)} ${t('sharing.join_confirm_title')}</h2>
-    <p>${t('sharing.join_confirm_hint', group.name || '')}</p>
+    <p>${t('sharing.join_confirm_hint', esc(group.name || ''))}</p>
+    ${ownerLine}
     <input type="text" id="joinDisplayName" class="sharing-input"
       placeholder="${t('sharing.join_confirm_name')}"
       value="${esc(group._suggestedName || '')}" />

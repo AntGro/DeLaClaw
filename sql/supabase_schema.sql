@@ -399,9 +399,11 @@ CREATE TABLE "public"."joined_groups" (
 
 CREATE OR REPLACE FUNCTION "public"."verify_join_token"("p_token" "text")
 RETURNS TABLE("group_id" "text", "group_name" "text", "member_id" "text",
-              "display_name" "text", "backend_type" "text")
+              "display_name" "text", "backend_type" "text", "creator_name" "text")
 LANGUAGE "sql" SECURITY DEFINER AS $$
-  SELECT sg.id, sg.name, sm.member_id, sm.display_name, sg.backend_type
+  SELECT sg.id, sg.name, sm.member_id, sm.display_name, sg.backend_type,
+         (SELECT cm.display_name FROM sharing_members cm
+          WHERE cm.group_id = sg.id AND cm.role = 'creator' LIMIT 1)
   FROM sharing_members sm
   JOIN sharing_groups sg ON sg.id = sm.group_id
   WHERE sm.token = p_token AND sm.joined_at IS NULL;

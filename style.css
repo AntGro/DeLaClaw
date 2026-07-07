@@ -1983,6 +1983,7 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-join-modal-hint{font-size:0.82rem;color:var(--muted);margin:0 0 12px;line-height:1.4;}
 .sharing-join-file-list{font-size:0.82rem;color:var(--muted);margin:0 0 8px;line-height:1.5;font-style:italic;}
 .sharing-join-error{font-size:0.82rem;color:var(--danger,#ef4444);background:color-mix(in srgb,var(--danger,#ef4444) 8%,transparent);border-radius:6px;padding:8px 12px;margin:0 0 8px;line-height:1.4;}
+.sharing-join-owner{font-size:0.85rem;color:var(--muted);margin:0 0 12px;display:flex;align-items:center;gap:6px;}
 
 .sharing-danger-btn{color:var(--danger,#e74c3c);border-color:color-mix(in srgb, var(--danger,#e74c3c) 25%, transparent);margin-top:10px;}
 .sharing-danger-btn:hover{background:color-mix(in srgb, var(--danger,#e74c3c) 8%, transparent);}

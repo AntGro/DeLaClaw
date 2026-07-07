@@ -254,6 +254,21 @@ ALTER TABLE joined_groups ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "owner or unclaimed" ON joined_groups FOR ALL USING (owner_id = auth.uid() OR owner_id IS NULL);
 
 UPDATE settings SET value = '1.297', updated_at = now() WHERE key = 'schema_version';`,
+
+  '1.298': `-- Migration 1.298: Add creator_name to verify_join_token RPC
+CREATE OR REPLACE FUNCTION "public"."verify_join_token"("p_token" "text")
+RETURNS TABLE("group_id" "text", "group_name" "text", "member_id" "text",
+              "display_name" "text", "backend_type" "text", "creator_name" "text")
+LANGUAGE "sql" SECURITY DEFINER AS $$
+  SELECT sg.id, sg.name, sm.member_id, sm.display_name, sg.backend_type,
+         (SELECT cm.display_name FROM sharing_members cm
+          WHERE cm.group_id = sg.id AND cm.role = 'creator' LIMIT 1)
+  FROM sharing_members sm
+  JOIN sharing_groups sg ON sg.id = sm.group_id
+  WHERE sm.token = p_token AND sm.joined_at IS NULL;
+$$;
+
+UPDATE settings SET value = '1.298', updated_at = now() WHERE key = 'schema_version';`,
 };
 
 export { SUPABASE_MIGRATIONS };

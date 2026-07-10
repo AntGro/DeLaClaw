@@ -2,7 +2,9 @@
   "name": "DeLaClaw",
   "short_name": "DeLaClaw",
   "start_url": ".",
+  "scope": "/",
   "display": "standalone",
+  "handle_links": "preferred",
   "background_color": "#08090d",
   "theme_color": "#08090d",
   "icons": [

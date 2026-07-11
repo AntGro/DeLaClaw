@@ -9,16 +9,29 @@
 //
 // It is safe to concatenate multiple migrations — intermediate
 // schema_version bumps are simply overwritten by the final one.
+//
+// IMPORTANT: all statements must be idempotent. The initial schema
+// SQL (supabase_schema.sql) may already include tables, columns,
+// policies, and publication memberships that migrations also touch.
+// Use:
+//   - CREATE TABLE IF NOT EXISTS
+//   - ALTER TABLE ... ADD COLUMN IF NOT EXISTS
+//   - DROP POLICY IF EXISTS before CREATE POLICY
+//   - DO $$ BEGIN ... EXCEPTION WHEN duplicate_object THEN NULL; END $$
+//     for ALTER PUBLICATION ADD TABLE (no IF NOT EXISTS in PG)
 // ===================================================================
 
 const SUPABASE_MIGRATIONS = {
   '1.099': `-- Migration 1.099: Enable Supabase Realtime for all tables
 -- Required for cross-device live sync (postgres_changes subscriptions)
 
-ALTER PUBLICATION supabase_realtime ADD TABLE
-  tasks, projects, todos, habits, habit_completions,
-  birthdays, vestiaire, flashcards, flashcard_notes,
-  prompts, settings;
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE
+    tasks, projects, todos, habits, habit_completions,
+    birthdays, vestiaire, flashcards, flashcard_notes,
+    prompts, settings;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Bump schema version
 UPDATE settings SET value = '1.099', updated_at = now()
@@ -27,7 +40,10 @@ WHERE key = 'schema_version';`,
   '1.100': `-- Migration 1.100: Add lists, list_items, daily_visits to Realtime publication
 -- These tables were added to the schema but missing from the Realtime publication.
 
-ALTER PUBLICATION supabase_realtime ADD TABLE lists, list_items, daily_visits;
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE lists, list_items, daily_visits;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Bump schema version
 UPDATE settings SET value = '1.100', updated_at = now()
@@ -78,28 +94,40 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS owner_id UUID;
 ALTER TABLE prompts ADD COLUMN IF NOT EXISTS owner_id UUID;
 
 DROP POLICY IF EXISTS "allow all" ON projects;
+DROP POLICY IF EXISTS "owner or unclaimed" ON projects;
 CREATE POLICY "owner or unclaimed" ON projects USING (owner_id = auth.uid() OR owner_id IS NULL);
 DROP POLICY IF EXISTS "allow all" ON tasks;
+DROP POLICY IF EXISTS "owner or unclaimed" ON tasks;
 CREATE POLICY "owner or unclaimed" ON tasks USING (owner_id = auth.uid() OR owner_id IS NULL);
 DROP POLICY IF EXISTS "allow all" ON todos;
+DROP POLICY IF EXISTS "owner or unclaimed" ON todos;
 CREATE POLICY "owner or unclaimed" ON todos USING (owner_id = auth.uid() OR owner_id IS NULL);
 DROP POLICY IF EXISTS "allow all" ON habits;
+DROP POLICY IF EXISTS "owner or unclaimed" ON habits;
 CREATE POLICY "owner or unclaimed" ON habits USING (owner_id = auth.uid() OR owner_id IS NULL);
 DROP POLICY IF EXISTS "allow all" ON habit_completions;
+DROP POLICY IF EXISTS "owner or unclaimed" ON habit_completions;
 CREATE POLICY "owner or unclaimed" ON habit_completions USING (owner_id = auth.uid() OR owner_id IS NULL);
 DROP POLICY IF EXISTS "allow all" ON flashcard_notes;
+DROP POLICY IF EXISTS "owner or unclaimed" ON flashcard_notes;
 CREATE POLICY "owner or unclaimed" ON flashcard_notes USING (owner_id = auth.uid() OR owner_id IS NULL);
 DROP POLICY IF EXISTS "allow all" ON birthdays;
+DROP POLICY IF EXISTS "owner or unclaimed" ON birthdays;
 CREATE POLICY "owner or unclaimed" ON birthdays USING (owner_id = auth.uid() OR owner_id IS NULL);
 DROP POLICY IF EXISTS "allow all" ON vestiaire;
+DROP POLICY IF EXISTS "owner or unclaimed" ON vestiaire;
 CREATE POLICY "owner or unclaimed" ON vestiaire USING (owner_id = auth.uid() OR owner_id IS NULL);
 DROP POLICY IF EXISTS "allow all" ON lists;
+DROP POLICY IF EXISTS "owner or unclaimed" ON lists;
 CREATE POLICY "owner or unclaimed" ON lists USING (owner_id = auth.uid() OR owner_id IS NULL);
 DROP POLICY IF EXISTS "allow all" ON list_items;
+DROP POLICY IF EXISTS "owner or unclaimed" ON list_items;
 CREATE POLICY "owner or unclaimed" ON list_items USING (owner_id = auth.uid() OR owner_id IS NULL);
 DROP POLICY IF EXISTS "allow all" ON settings;
+DROP POLICY IF EXISTS "owner or unclaimed" ON settings;
 CREATE POLICY "owner or unclaimed" ON settings USING (owner_id = auth.uid() OR owner_id IS NULL);
 DROP POLICY IF EXISTS "allow all" ON prompts;
+DROP POLICY IF EXISTS "owner or unclaimed" ON prompts;
 CREATE POLICY "owner or unclaimed" ON prompts USING (owner_id = auth.uid() OR owner_id IS NULL);
 
 UPDATE settings SET value = '1.294', updated_at = now() WHERE key = 'schema_version';`,
@@ -138,11 +166,17 @@ ALTER TABLE sharing_groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sharing_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sharing_items ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "owner" ON sharing_groups;
 CREATE POLICY "owner" ON sharing_groups FOR ALL USING (auth_owner_id = auth.uid());
+DROP POLICY IF EXISTS "owner" ON sharing_members;
 CREATE POLICY "owner" ON sharing_members FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid()));
+DROP POLICY IF EXISTS "owner" ON sharing_items;
 CREATE POLICY "owner" ON sharing_items FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid()));
 
-ALTER PUBLICATION supabase_realtime ADD TABLE sharing_groups, sharing_members, sharing_items;
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE sharing_groups, sharing_members, sharing_items;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 UPDATE settings SET value = '1.295', updated_at = now() WHERE key = 'schema_version';`,
 
@@ -251,6 +285,7 @@ CREATE TABLE IF NOT EXISTS joined_groups (
 );
 
 ALTER TABLE joined_groups ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "owner or unclaimed" ON joined_groups;
 CREATE POLICY "owner or unclaimed" ON joined_groups FOR ALL USING (owner_id = auth.uid() OR owner_id IS NULL);
 
 UPDATE settings SET value = '1.297', updated_at = now() WHERE key = 'schema_version';`,

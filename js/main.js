@@ -2684,7 +2684,8 @@ function getPendingMigrationSQL(dbVer) {
     .filter(v => cmpVer(v, dbVer) > 0 && cmpVer(v, LATEST_COMPAT) <= 0)
     .sort((a, b) => cmpVer(a, b));
   if (!versions.length) return null;
-  return versions.map(v => SUPABASE_MIGRATIONS[v]).join('\n\n');
+  const sql = versions.map(v => SUPABASE_MIGRATIONS[v]).join('\n\n');
+  return sql + "\n\n-- Refresh PostgREST schema cache so new columns are visible immediately\nNOTIFY pgrst, 'reload schema';";
 }
 
 function checkSchemaVersion() {

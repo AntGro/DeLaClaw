@@ -1235,7 +1235,7 @@ async function syncSharedTodos() {
       const { data: existing } = await state.db.from('todos').select('id').eq('shared_id', sh.id).limit(1);
       if (existing?.length) continue;
       const { error } = await state.db.from('todos').insert({
-        text: '', category: '', priority: 'medium', done: 0,
+        text: '', category: '', priority: 'medium', done: false,
         shared_id: sh.id, shared_group_id: sh.group_id,
       });
       if (error) { console.warn('syncSharedTodos: failed to create pointer', sh.id, error); continue; }
@@ -1279,7 +1279,7 @@ async function shareTodoFromAdd(btn) {
       const pendingTodos = allTodos.filter(t => !t.done && (t.category || '') === category);
       const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
       const { data: localRow, error: localErr } = await state.db.from('todos').insert({
-        text: '', priority: 'medium', done: 0,
+        text: '', priority: 'medium', done: false,
         category,
         sort_order: minOrder,
         shared_id: sharedId,

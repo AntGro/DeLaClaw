@@ -885,7 +885,7 @@ ALTER TABLE "public"."vestiaire" ENABLE ROW LEVEL SECURITY;
 
 -- ===== SEED DATA =====
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.099')
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.100')
 ON CONFLICT ("key") DO UPDATE SET "value" = '1.099', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))

@@ -2011,20 +2011,20 @@ a.sharing-drive-link{text-decoration:none;}
 .auth-prompt-modal .auth-status{font-size:0.82rem;color:var(--success,#22c55e);margin-top:0.5rem;}
 
 /* ── Auth two-step flow ── */
-.auth-prompt-modal .auth-step{text-align:left;border:1px solid var(--border);border-radius:10px;padding:0.85rem 1rem;margin-bottom:0.75rem;transition:opacity 0.25s;}
-.auth-prompt-modal .auth-step-locked{opacity:0.45;pointer-events:none;}
-.auth-prompt-modal .auth-step-header{display:flex;align-items:center;gap:0.6rem;font-weight:600;font-size:0.92rem;margin-bottom:0.4rem;}
-.auth-prompt-modal .auth-step-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:0.75rem;font-weight:700;flex-shrink:0;}
-.auth-prompt-modal .auth-step-detail{font-size:0.82rem;color:var(--muted);margin:0 0 0.6rem;line-height:1.45;}
-.auth-prompt-modal .auth-site-url-value{display:flex;align-items:center;gap:0.5rem;background:color-mix(in srgb,var(--accent) 8%,var(--bg));border:1px solid color-mix(in srgb,var(--accent) 20%,var(--border));border-radius:6px;padding:0.4rem 0.65rem;margin-bottom:0.6rem;}
-.auth-prompt-modal .auth-site-url-value code{flex:1;font-size:0.85rem;font-weight:600;color:var(--text);word-break:break-all;}
-.auth-prompt-modal .auth-copy-url-btn{background:none;border:none;color:var(--muted);cursor:pointer;padding:2px;flex-shrink:0;}
-.auth-prompt-modal .auth-copy-url-btn:hover{color:var(--accent);}
-.auth-prompt-modal .auth-config-link{display:inline-flex;align-items:center;gap:0.35rem;font-size:0.82rem;color:var(--accent);font-weight:600;text-decoration:none;margin-bottom:0.65rem;}
-.auth-prompt-modal .auth-config-link:hover{text-decoration:underline;}
-.auth-prompt-modal .auth-toggle-label{display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;color:var(--text);user-select:none;}
-.auth-prompt-modal .auth-toggle-label input[type="checkbox"]{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;}
-.auth-prompt-modal .auth-step2-body{margin-top:0.5rem;}
+.auth-prompt-modal .auth-step,.auth-inline-prompt .auth-step{text-align:left;border:1px solid var(--border);border-radius:10px;padding:0.85rem 1rem;margin-bottom:0.75rem;transition:opacity 0.25s;}
+.auth-prompt-modal .auth-step-locked,.auth-inline-prompt .auth-step-locked{opacity:0.45;pointer-events:none;}
+.auth-prompt-modal .auth-step-header,.auth-inline-prompt .auth-step-header{display:flex;align-items:center;gap:0.6rem;font-weight:600;font-size:0.92rem;margin-bottom:0.4rem;}
+.auth-prompt-modal .auth-step-num,.auth-inline-prompt .auth-step-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:0.75rem;font-weight:700;flex-shrink:0;}
+.auth-prompt-modal .auth-step-detail,.auth-inline-prompt .auth-step-detail{font-size:0.82rem;color:var(--muted);margin:0 0 0.6rem;line-height:1.45;}
+.auth-prompt-modal .auth-site-url-value,.auth-inline-prompt .auth-site-url-value{display:flex;align-items:center;gap:0.5rem;background:color-mix(in srgb,var(--accent) 8%,var(--bg));border:1px solid color-mix(in srgb,var(--accent) 20%,var(--border));border-radius:6px;padding:0.4rem 0.65rem;margin-bottom:0.6rem;}
+.auth-prompt-modal .auth-site-url-value code,.auth-inline-prompt .auth-site-url-value code{flex:1;font-size:0.85rem;font-weight:600;color:var(--text);word-break:break-all;}
+.auth-prompt-modal .auth-copy-url-btn,.auth-inline-prompt .auth-copy-url-btn{background:none;border:none;color:var(--muted);cursor:pointer;padding:2px;flex-shrink:0;}
+.auth-prompt-modal .auth-copy-url-btn:hover,.auth-inline-prompt .auth-copy-url-btn:hover{color:var(--accent);}
+.auth-prompt-modal .auth-config-link,.auth-inline-prompt .auth-config-link{display:flex;align-items:center;gap:0.35rem;font-size:0.82rem;color:var(--accent);font-weight:600;text-decoration:none;margin-bottom:0.65rem;}
+.auth-prompt-modal .auth-config-link:hover,.auth-inline-prompt .auth-config-link:hover{text-decoration:underline;}
+.auth-prompt-modal .auth-toggle-label,.auth-inline-prompt .auth-toggle-label{display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;color:var(--text);user-select:none;}
+.auth-prompt-modal .auth-toggle-label input[type="checkbox"],.auth-inline-prompt .auth-toggle-label input[type="checkbox"]{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;}
+.auth-prompt-modal .auth-step2-body,.auth-inline-prompt .auth-step2-body{margin-top:0.5rem;}
 /* Inline auth prompt in Settings > Sharing */
 .auth-inline-prompt{text-align:center;padding:1.5rem 1rem;}
 .auth-inline-prompt h4{margin:0.5rem 0 0.25rem;}

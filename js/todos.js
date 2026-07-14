@@ -1215,7 +1215,18 @@ function getTodos() { return allTodos; }
  * - Shared TODO text/done/priority changed → update local todo
  * - Shared TODO deleted from Drive → delete local todo
  */
+let _syncingTodos = false;
 async function syncSharedTodos() {
+  if (_syncingTodos) return;
+  _syncingTodos = true;
+  try {
+    await _doSyncSharedTodos();
+  } finally {
+    _syncingTodos = false;
+  }
+}
+
+async function _doSyncSharedTodos() {
   if (!state.sharing || !state.db?.connected) return;
 
   const allShared = state.sharing.getAllSharedItems().filter(i => i.item_type === 'todo');

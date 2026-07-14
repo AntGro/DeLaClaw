@@ -451,7 +451,6 @@ export async function handleJoinHash(folderId) {
       // Drive: join completed directly
       showToast(t('sharing.joined_group', group.name || ''), 'success');
       renderSharingPane();
-      document.dispatchEvent(new CustomEvent('sharing-changed'));
     }
     return;
   }
@@ -504,7 +503,6 @@ function showJoinConfirmModal(group) {
       overlay.remove();
       showToast(t('sharing.joined_group', group.name || ''), 'success');
       renderSharingPane();
-      document.dispatchEvent(new CustomEvent('sharing-changed'));
     } catch (e) {
       console.warn('join confirm failed:', e);
       if (errEl) { errEl.textContent = t('sharing.join_failed'); errEl.style.display = ''; }
@@ -568,7 +566,6 @@ async function sharingOpenJoinPicker(folderId) {
           document.getElementById('sharingJoinModal')?.remove();
           showToast(t('sharing.joined_group', group.name || ''), 'success');
           renderSharingPane();
-          document.dispatchEvent(new CustomEvent('sharing-changed'));
           return;
         }
       }
@@ -591,7 +588,6 @@ async function sharingOpenJoinPicker(folderId) {
     document.getElementById('sharingJoinModal')?.remove();
     showToast(t('sharing.joined_group', group?.name || ''), 'success');
     renderSharingPane();
-    document.dispatchEvent(new CustomEvent('sharing-changed'));
   } catch (e) {
     showJoinError(e.message || t('sharing.join_failed'));
     if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
@@ -754,7 +750,6 @@ async function sharingCompleteSubmit(groupId, itemId) {
     await state.sharing.completeItem(groupId, itemId, doneBy);
     showToast(t('common.done') + '!', 'success');
     modal.remove();
-    document.dispatchEvent(new CustomEvent('sharing-changed'));
   } catch (e) {
     showToast(e.message, 'error');
     if (btn) { btn.disabled = false; btn.style.opacity = ''; }

@@ -59,7 +59,9 @@ export async function createSupabaseSharing(adapter, config) {
    * Used by B to talk to A's Supabase.
    */
   function _createRemoteClient(url, key) {
-    return window.supabase.createClient(url, key);
+    return window.supabase.createClient(url, key, {
+      auth: { persistSession: false },
+    });
   }
 
   function _getRemote(groupId) {
@@ -419,8 +421,11 @@ export async function createSupabaseSharing(adapter, config) {
       p_display_name: displayName,
     });
 
-    // Store connection on our own backend
+    // Store connection on our own backend — require auth (P0 fix 1.299)
     const authUser = getAuthUser();
+    if (!authUser) {
+      throw new Error('Auth required to join Supabase groups — sign in first. Anon joins must use localStorage.');
+    }
     await adapter.from('joined_groups').upsert({
       group_id: pj.groupId,
       member_id: pj.info.member_id,
@@ -430,7 +435,7 @@ export async function createSupabaseSharing(adapter, config) {
       remote_backend_type: 'supabase',
       remote_url: pj.url,
       remote_anon_key: pj.anonKey,
-      owner_id: authUser?.id || null,
+      owner_id: authUser.id,
     });
 
     // Set up remote client

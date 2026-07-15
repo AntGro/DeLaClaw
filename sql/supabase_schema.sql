@@ -877,13 +877,13 @@ CREATE POLICY "owner" ON "public"."sharing_members" FOR ALL USING ("group_id" IN
 
 CREATE POLICY "owner" ON "public"."sharing_items" FOR ALL USING ("group_id" IN (SELECT "id" FROM "public"."sharing_groups" WHERE "auth_owner_id" = "auth"."uid"()));
 
-CREATE POLICY "owner or unclaimed" ON "public"."joined_groups" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE POLICY "owner only" ON "public"."joined_groups" USING ("owner_id" = "auth"."uid"());
 
 
 -- ===== SEED DATA =====
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.297')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.297', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.299')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.299', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;

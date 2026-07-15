@@ -59,7 +59,9 @@ export async function createSupabaseSharing(adapter, config) {
    * Used by B to talk to A's Supabase.
    */
   function _createRemoteClient(url, key) {
-    return window.supabase.createClient(url, key);
+    return window.supabase.createClient(url, key, {
+      auth: { persistSession: false },
+    });
   }
 
   function _getRemote(groupId) {

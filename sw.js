@@ -1,6 +1,6 @@
 // Service Worker for DeLaClaw (PWA)
 // CACHE_VERSION is updated by the pre-commit hook from VERSION file
-const CACHE_VERSION = 'dlc-1.348';
+const CACHE_VERSION = 'dlc-1.349';
 
 const PRECACHE_URLS = [
   './',
@@ -44,6 +44,9 @@ const PRECACHE_URLS = [
   'js/version.js',
   'js/vestiaire.js',
   'js/welcome.js',
+  'vendor/supabase.js',
+  'vendor/three/build/three.module.js',
+  'vendor/three/examples/jsm/utils/BufferGeometryUtils.js',
 ];
 
 // Install: precache static assets

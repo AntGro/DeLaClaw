@@ -22,6 +22,7 @@ import { t, getLang } from './i18n.js';
 import { esc, escQ, showToast, showDeleteConfirm } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { LOGOS } from './backend-logos.js';
+import { decodeInviteEnvelope } from './sharing-envelope.js';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -281,6 +282,8 @@ function showInviteLinkModal(name, link, isNewGroup) {
   const hint = isNewGroup
     ? t('sharing.invite_link_hint', name)
     : t('sharing.member_link_hint', name);
+  // sec-003: warn that link contains secret & is single-use, stays in history
+  const warn = `<p class="sharing-warning" style="margin-top:10px;font-size:0.82rem;color:var(--warn,#d97706);background:color-mix(in srgb,var(--warn,#d97706) 12%, transparent);border:1px solid color-mix(in srgb,var(--warn,#d97706) 30%, transparent);border-radius:8px;padding:8px 10px">${lucideIcon('shield-alert', 12)} ${t('sharing.invite_secret_warn') || 'This link contains a secret token (single-use). Anyone with it can join. It stays in browser history — share privately and revoke after use.'}</p>`;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingInviteLinkModal';
@@ -292,6 +295,7 @@ function showInviteLinkModal(name, link, isNewGroup) {
       <input type="text" id="sharingInviteLinkInput" value="${esc(link)}" readonly onclick="this.select()">
       <button class="sharing-invite-btn" onclick="sharingCopyLinkValue()">${lucideIcon('copy', 14)} ${t('sharing.copy')}</button>
     </div>
+    ${warn}
     <div class="modal-actions">
       <button class="modal-save" onclick="document.getElementById('sharingInviteLinkModal').remove()">${t('common.close')}</button>
     </div>
@@ -419,7 +423,13 @@ async function sharingDeleteGroup(groupId) {
 export async function handleJoinHash(folderId) {
   if (!state.sharing) return;
 
-  // Check if already joined via this folderId
+  // Envelope decode helper (no legacy)
+  const getGidFromRef = (ref) => {
+    const env = decodeInviteEnvelope(ref);
+    return env?.g || null;
+  };
+
+  // Check if already joined via this folderId / envelope
   const existing = state.sharing.getGroupByFolderId?.(folderId);
   if (existing) {
     showToast(t('sharing.already_joined', existing.name || ''), 'info');
@@ -427,42 +437,36 @@ export async function handleJoinHash(folderId) {
     return;
   }
 
-  // For Supabase links, extract group ID and check if already joined
-  if (folderId && folderId.includes(':')) {
-    const parts = decodeURIComponent(folderId).split(':');
-    if (parts.length >= 4) {
-      const gid = parts[parts.length - 2];
-      const alreadyJoined = state.sharing.getAllGroups?.()?.find(g => g.id === gid);
-      if (alreadyJoined) {
-        showToast(t('sharing.already_joined', alreadyJoined.name || ''), 'info');
-        renderSharingPane();
-        return;
-      }
+  // For Supabase envelope, extract group ID and check if already joined
+  const gid = getGidFromRef(folderId);
+  if (gid) {
+    const alreadyJoined = state.sharing.getAllGroups?.()?.find(g => g.id === gid);
+    if (alreadyJoined) {
+      showToast(t('sharing.already_joined', alreadyJoined.name || ''), 'info');
+      renderSharingPane();
+      return;
     }
   }
 
-  // Try direct access first (works when Drive permission is already granted)
+  // Try direct access first
   const group = await state.sharing.tryDirectJoin(folderId);
   if (group) {
     if (group._pendingJoin) {
-      // Supabase: token verified but join not confirmed yet — show confirmation modal
       showJoinConfirmModal(group);
     } else {
-      // Drive: join completed directly
       showToast(t('sharing.joined_group', group.name || ''), 'success');
       renderSharingPane();
     }
     return;
   }
 
-  // Token invalid or already used
-  if (folderId && folderId.includes(':')) {
-    // Supabase link — verify_join_token returned nothing
+  // Token invalid — envelope was supabase but verify failed
+  if (gid) {
     showToast(t('sharing.join_token_used'), 'error');
     return;
   }
 
-  // Need Picker — show join modal (Drive)
+  // Drive flow
   if (!state.sharing.openJoinPicker) {
     showToast(t('sharing.join_failed'), 'error');
     return;

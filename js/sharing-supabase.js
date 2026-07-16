@@ -7,14 +7,18 @@
 // Two access paths:
 //   - OWNER (A): authenticated via magic link → direct table access
 //     through RLS (auth_owner_id = auth.uid())
-//   - MEMBER (B): unauthenticated → RPC functions with bearer token
+//   - MEMBER (B): unauthenticated → RPC functions with Bearer <redacted>
 //     (SECURITY DEFINER, see migration 1.296)
 //
 // Group data lives on the creator's Supabase project. Members store
 // connection details (URL, anon key, token) in their own `joined_groups`
 // table so they can reconnect without the invite link.
 //
+// Invite link format (sec-003 fix v1.348): base64url JSON envelope {v:1,b:'supabase',u,k,g,t}
+// Legacy colon format dropped per user decision (no backward compat).
 // ===================================================================
+
+import { encodeInviteEnvelope, decodeInviteEnvelope } from './sharing-envelope.js';
 
 /**
  * Create a Supabase sharing adapter.
@@ -362,22 +366,14 @@ export async function createSupabaseSharing(adapter, config) {
   }
 
   async function tryDirectJoin(connectionRef) {
-    // connectionRef format: "supabase:<url>:<anonKey>:<groupId>:<token>"
-    // (the "supabase:" prefix is already stripped by the caller)
-    // URL may be percent-encoded from the hash fragment
-    const decoded = decodeURIComponent(connectionRef);
-    const parts = decoded.split(':');
-    if (parts.length < 4) return null;
+    // Envelope only (sec-003 fix, no legacy per user decision)
+    const parsed = decodeInviteEnvelope(connectionRef);
+    if (!parsed || parsed.b !== 'supabase' || !parsed.u || !parsed.k || !parsed.g || !parsed.t) return null;
 
-    // Reconstruct the URL (it may contain colons in https://)
-    // Format after prefix strip: <url>:<anonKey>:<groupId>:<token>
-    // URL is everything up to the 3rd-from-last colon
-    const token = parts[parts.length - 1];
-    const gid = parts[parts.length - 2];
-    const key = parts[parts.length - 3];
-    const url = parts.slice(0, parts.length - 3).join(':');
-
-    if (!url || !key || !gid || !token) return null;
+    const url = parsed.u;
+    const key = parsed.k;
+    const gid = parsed.g;
+    const token = parsed.t;
 
     try {
       const remote = _createRemoteClient(url, key);
@@ -386,7 +382,6 @@ export async function createSupabaseSharing(adapter, config) {
       if (!data || data.length === 0) return null;
 
       const info = Array.isArray(data) ? data[0] : data;
-      // Store the parsed connection info for the join confirmation step
       _pendingJoin = { url, anonKey: key, groupId: gid, token, info, remote };
       return {
         id: info.group_id,
@@ -522,22 +517,27 @@ export async function createSupabaseSharing(adapter, config) {
   }
 
   function getGroupByFolderId(connectionRef) {
-    // For Supabase, connectionRef is the groupId
+    // For Supabase, connectionRef is the groupId (or envelope that contains g)
+    // Try envelope first for new links
+    const env = decodeInviteEnvelope(connectionRef);
+    if (env && env.g) return getAllGroups().find(g => g.id === env.g);
     return getAllGroups().find(g => g.id === connectionRef);
   }
 
   function getInviteLink(groupId) {
+    // Deprecated: returns envelope without token (will always fail verify — intentional, use getMemberInviteLink)
+    // Kept for interface compatibility. New code should use getMemberInviteLink.
     if (!supabaseUrl || !anonKey) return null;
-    return location.origin + location.pathname
-      + '#join=supabase:' + encodeURIComponent(supabaseUrl)
-      + ':' + anonKey + ':' + groupId;
+    const env = encodeInviteEnvelope({ v: 1, b: 'supabase', u: supabaseUrl, k: anonKey, g: groupId });
+    if (!env) return null;
+    return location.origin + location.pathname + '#join=' + env;
   }
 
   function getMemberInviteLink(groupId, token) {
     if (!supabaseUrl || !anonKey || !token) return null;
-    return location.origin + location.pathname
-      + '#join=supabase:' + encodeURIComponent(supabaseUrl)
-      + ':' + anonKey + ':' + groupId + ':' + token;
+    const env = encodeInviteEnvelope({ v: 1, b: 'supabase', u: supabaseUrl, k: anonKey, g: groupId, t: token });
+    if (!env) return null;
+    return location.origin + location.pathname + '#join=' + env;
   }
 
   function isJoinedViaLink(groupId) {

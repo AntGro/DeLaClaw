@@ -24,6 +24,29 @@ import { HABIT_CATEGORIES_KEY } from './state.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
 import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
 
+// --- sec-003 envelope decoder (inline, mirrors js/sharing-envelope.js, envelope-only no legacy) ---
+function _decodeInviteEnvelopeInline(str) {
+  if (!str || typeof str !== 'string') return null;
+  if (str.includes(':')) return null;
+  if (str.length < 20) return null;
+  if (!/^[A-Za-z0-9_-]+$/.test(str)) return null;
+  try {
+    let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4;
+    if (pad) b64 += '='.repeat(4 - pad);
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const json = new TextDecoder().decode(bytes);
+    const obj = JSON.parse(json);
+    if (!obj || obj.v !== 1 || !obj.g || obj.b !== 'supabase') return null;
+    return obj;
+  } catch { return null; }
+}
+function _isSupabaseJoinHash(joinHash) {
+  return !!_decodeInviteEnvelopeInline(joinHash);
+}
+
 // Last-updated tracking (declared early so renderLastUpdated can be called from updateStaticLabels)
 let _lastUpdatedAt = null;
 let _lastUpdatedTimer = null;
@@ -1401,7 +1424,8 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       const joinVal = location.hash.slice(6);
       history.replaceState(null, '', location.pathname + location.search);
       if (joinVal) {
-        // Supabase join: strip "supabase:" prefix before passing to handler
+        // Supabase join: strip "supabase:" prefix before passing to handler (legacy)
+        // New envelope has no prefix — pass as-is
         if (joinVal.startsWith('supabase:')) {
           handleJoinHash(joinVal.slice(9));
         } else {
@@ -1522,9 +1546,8 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   // Handle #join= invite links (both Drive and Supabase)
   if (location.hash.startsWith('#join=') && !state.sharing) {
-    // Even without auth, handle Supabase join links by initializing a minimal sharing adapter
     const joinHash = location.hash.slice(6);
-    if (joinHash.startsWith('supabase:') && mode !== 'googledrive') {
+    if (_isSupabaseJoinHash(joinHash) && mode !== 'googledrive') {
       try {
         const { createSharing } = await import('./sharing.js');
         state.sharing = await createSharing('supabase', {
@@ -1534,9 +1557,8 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
           anonKey: key,
         });
         state.sharing.loadAll().catch(() => {});
-        const ref = joinHash.slice(9); // strip "supabase:"
         history.replaceState(null, '', location.pathname + location.search);
-        handleJoinHash(ref);
+        handleJoinHash(joinHash);
       } catch (e) { console.warn('sharing join init:', e); }
     }
   }

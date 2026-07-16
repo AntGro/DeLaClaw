@@ -4,7 +4,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { ARCHIVED_PROJECTS_KEY } from './state.js';
-import { esc, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore } from './utils.js';
+import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText } from './item-utils.js';
 import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, refreshHabits } from './habits.js';
 import { getCategoryColor, getTodos, refreshTodos } from './todos.js';
@@ -293,17 +293,31 @@ function initWelcomeFocusHover() {
 // WELCOME — Habit action handlers (mirrors Habits page actions)
 // ===================================================================
 
-async function welcomeMarkHabitDone(habitId) {
+async function welcomeMarkHabitDone(habitId, btnEl) {
   if (!habitId) return;
-  const habit = (state.allHabits || []).find(c => c.id === habitId);
-  const now = new Date().toISOString();
-  const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: now });
-  if (error) { showToast(t('habits.failed_record'), 'error'); return; }
-  if (habit) await updateHabitNextDue(habitId, habit.frequency_rule, now);
-  showToast(t('habits.habit_done'), 'success');
-  await refreshHabits();
-  refreshWelcome();
-  renderWelcome();
+  // Per-id guard
+  const pendingSet = window._pendingWelcomeHabitDones || (window._pendingWelcomeHabitDones = new Set());
+  if (pendingSet.has(habitId)) return;
+  pendingSet.add(habitId);
+  const sel = `button.habit-done-btn[data-habit-id="${CSS && CSS.escape ? CSS.escape(habitId) : habitId.replace(/"/g, '\\"')}"]`;
+  const allBtns = document.querySelectorAll(sel);
+  const targetBtn = btnEl instanceof HTMLElement ? btnEl : (allBtns[0] || null);
+  const toToggle = new Set([...allBtns, ...(targetBtn ? [targetBtn] : [])]);
+  toToggle.forEach(b => { b.disabled = true; b.classList.add('saving','is-pending'); b.setAttribute('aria-busy','true'); });
+  try {
+    const habit = (state.allHabits || []).find(c => c.id === habitId);
+    const now = new Date().toISOString();
+    const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: now });
+    if (error) { showToast(t('habits.failed_record'), 'error'); return; }
+    if (habit) await updateHabitNextDue(habitId, habit.frequency_rule, now);
+    showToast(t('habits.habit_done'), 'success');
+    await refreshHabits();
+    refreshWelcome();
+    renderWelcome();
+  } finally {
+    pendingSet.delete(habitId);
+    toToggle.forEach(b => { b.disabled = false; b.classList.remove('saving','is-pending'); b.removeAttribute('aria-busy'); });
+  }
 }
 
 async function welcomeDeleteHabit(habitId) {
@@ -351,7 +365,7 @@ function renderFocusHabitItem(habit) {
         <span class="habit-frequency">${esc(formatFrequency(habit.frequency_rule))}</span>
       </div>
       <div class="habit-actions">
-        <button onclick="welcomeMarkHabitDone('${habit.id}')" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check", 16)}</button>
+        <button data-habit-id="${esc(habit.id)}" onclick="welcomeMarkHabitDone('${escQ(habit.id)}', this)" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check", 16)}</button>
         <button onclick="welcomeOpenHabitHistory('${habit.id}')" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list", 16)} ${completionCount}</button>
         <button onclick="window.editHabitInline('${habit.id}')" title="${t('common.edit')}">${lucideIcon("pencil", 16)}</button>
         <button onclick="welcomeDeleteHabit('${habit.id}')" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>

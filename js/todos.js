@@ -560,7 +560,7 @@ function renderTodoItem(td) {
       <span class="todo-text">${td.text.length > 150 ? truncateWithShowMore(td.text, 150, td.id, 'todo') : renderMd(td.text)}</span>${sharedHtml}
       ${td.done && td.updated_at ? `<span class="todo-completed-date">${new Date(td.updated_at).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })}</span>` : ''}
       <div class="todo-actions">
-        ${!td.done ? `<button onclick="toggleTodo('${td.id}', true)" title="${t('common.done')}">${lucideIcon("circle-check",16)}</button>` : `<button onclick="toggleTodo('${td.id}', false)" title="${t('common.undo')}">${lucideIcon("refresh-cw",16)}</button>`}
+        ${!td.done ? `<button data-todo-id="${esc(td.id)}" onclick="toggleTodo('${escQ(td.id)}', true, this)" title="${t('common.done')}" class="todo-done-btn">${lucideIcon("circle-check",16)}</button>` : `<button data-todo-id="${esc(td.id)}" onclick="toggleTodo('${escQ(td.id)}', false, this)" title="${t('common.undo')}" class="todo-undo-btn">${lucideIcon("refresh-cw",16)}</button>`}
         ${!td.done ? `<button onclick="openSnoozeModal('${td.id}')" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>` : ''}
         <button onclick="editTodoInline('${td.id}')" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button onclick="deleteTodo('${td.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
@@ -723,27 +723,42 @@ async function addTodoToCategory(inputEl) {
   await refreshTodos();
 }
 
-async function toggleTodo(id, done) {
-  const todo = allTodos.find(t => t.id === id);
+const _pendingTodoToggles = new Set();
 
-  if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-    // ─── Shared: write only to Drive ───
-    try {
-      if (done) {
-        const currentUser = await state.sharing.getCurrentUser();
-        await state.sharing.completeItem(todo.shared_group_id, todo.shared_id, [currentUser?.email || '']);
-      } else {
-        await state.sharing.uncompleteItem(todo.shared_group_id, todo.shared_id);
-      }
-    } catch (e) { console.warn('Failed to toggle shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
-  } else {
-    // ─── Normal: write to local DB ───
-    const { error } = await state.db.from('todos').update({ done }).eq('id', id);
-    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+async function toggleTodo(id, done, btnEl) {
+  if (!id) return;
+  if (_pendingTodoToggles.has(id)) return;
+  _pendingTodoToggles.add(id);
+
+  const sel = `button[data-todo-id="${CSS && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\\"')}"]`;
+  const allBtns = document.querySelectorAll(sel);
+  const targetBtn = btnEl instanceof HTMLElement ? btnEl : (allBtns[0] || null);
+  const toToggle = new Set([...allBtns, ...(targetBtn ? [targetBtn] : [])]);
+  toToggle.forEach(b => { b.disabled = true; b.classList.add('saving', 'is-pending'); b.setAttribute('aria-busy', 'true'); });
+
+  try {
+    const todo = allTodos.find(t => t.id === id);
+
+    if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+      try {
+        if (done) {
+          const currentUser = await state.sharing.getCurrentUser();
+          await state.sharing.completeItem(todo.shared_group_id, todo.shared_id, [currentUser?.email || '']);
+        } else {
+          await state.sharing.uncompleteItem(todo.shared_group_id, todo.shared_id);
+        }
+      } catch (e) { console.warn('Failed to toggle shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+    } else {
+      const { error } = await state.db.from('todos').update({ done }).eq('id', id);
+      if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    }
+
+    showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
+    await refreshTodos();
+  } finally {
+    _pendingTodoToggles.delete(id);
+    toToggle.forEach(b => { b.disabled = false; b.classList.remove('saving', 'is-pending'); b.removeAttribute('aria-busy'); });
   }
-
-  showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
-  await refreshTodos();
 }
 
 async function deleteTodo(id) {

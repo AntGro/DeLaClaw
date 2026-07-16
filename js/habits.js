@@ -872,7 +872,7 @@ function renderHabitItem(habit) {
       </div>
       <div class="habit-actions">
         ${promoteBtn}
-        ${!isDraft ? `<button onclick="markHabitDone('${habit.id}')" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
+        ${!isDraft ? `<button data-habit-id="${esc(habit.id)}" onclick="markHabitDone('${escQ(habit.id)}', this)" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
         <button onclick="openHabitHistory('${habit.id}')" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list",16)} ${completionCount}</button>
         <button onclick="openEditHabitModal('${habit.id}')" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button onclick="deleteHabit('${habit.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
@@ -1314,44 +1314,59 @@ async function promoteHabit(habitId) {
 
 
 // ===================================================================
-// HABIT DONE FLOW
+// HABIT DONE FLOW — per-id guard: disable button until fulfilled (core principle)
 // ===================================================================
-async function markHabitDone(habitId) {
+const _pendingHabitDones = new Set();
+
+async function markHabitDone(habitId, btnEl) {
   if (!habitId) return;
-  const habit = state.allHabits.find(c => c.id === habitId);
-  const now = new Date().toISOString();
+  if (_pendingHabitDones.has(habitId)) return;
+  _pendingHabitDones.add(habitId);
 
-  if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-    // ─── Shared habit: write only to Drive ───
-    try {
-      const user = await state.sharing.getCurrentUser();
-      const completion = {
-        id: crypto.randomUUID(),
-        completed_at: now,
-        completed_by: user?.email || '',
-      };
-      await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion);
-      // Recompute next_due on local pointer
-      await updateHabitNextDue(habitId, habit.frequency_rule, now);
-    } catch (e) {
-      console.warn('Failed to push shared habit completion to Drive:', e);
-      showToast(t('habits.failed_record'), 'error');
-      return;
-    }
-  } else {
-    // ─── Normal habit: write to local DB ───
-    const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: now });
-    if (error) { showToast(t('habits.failed_record'), 'error'); return; }
+  // Disable all matching buttons (safety across views)
+  const sel = `button.habit-done-btn[data-habit-id="${CSS && CSS.escape ? CSS.escape(habitId) : habitId.replace(/"/g, '\\"')}"]`;
+  const allBtns = document.querySelectorAll(sel);
+  const targetBtn = btnEl instanceof HTMLElement ? btnEl : (allBtns[0] || null);
+  const toToggle = new Set([...allBtns, ...(targetBtn ? [targetBtn] : [])]);
+  toToggle.forEach(b => { b.disabled = true; b.classList.add('saving', 'is-pending'); b.setAttribute('aria-busy', 'true'); });
 
-    if (habit) {
-      await updateHabitNextDue(habitId, habit.frequency_rule, now);
+  try {
+    const habit = state.allHabits.find(c => c.id === habitId);
+    const now = new Date().toISOString();
+
+    if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+      try {
+        const user = await state.sharing.getCurrentUser();
+        const completion = {
+          id: crypto.randomUUID(),
+          completed_at: now,
+          completed_by: user?.email || '',
+        };
+        await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion);
+        await updateHabitNextDue(habitId, habit.frequency_rule, now);
+      } catch (e) {
+        console.warn('Failed to push shared habit completion to Drive:', e);
+        showToast(t('habits.failed_record'), 'error');
+        return;
+      }
     } else {
-      await clearHabitNextDue(habitId);
-    }
-  }
+      const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: now });
+      if (error) { showToast(t('habits.failed_record'), 'error'); return; }
 
-  showToast(t('habits.habit_done'), 'success');
-  await refreshHabits();
+      if (habit) {
+        await updateHabitNextDue(habitId, habit.frequency_rule, now);
+      } else {
+        await clearHabitNextDue(habitId);
+      }
+    }
+
+    showToast(t('habits.habit_done'), 'success');
+    await refreshHabits();
+  } finally {
+    _pendingHabitDones.delete(habitId);
+    // Re-enable in case refresh didn't recreate buttons (e.g. on error)
+    toToggle.forEach(b => { b.disabled = false; b.classList.remove('saving', 'is-pending'); b.removeAttribute('aria-busy'); });
+  }
 }
 
 

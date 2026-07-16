@@ -351,14 +351,14 @@ function renderTask(task, isArchived = false) {
 
   let actionBtns = '';
   if (isDraft) {
-    actionBtns += `<button class="promote-btn" onclick="updateTaskStatus('${task.id}','todo')" title="${t('projects.promote_todo')}">▶ ${t('projects.promote_todo')}</button>`;
+    actionBtns += `<button class="promote-btn" data-task-id="${esc(task.id)}" onclick="updateTaskStatus('${escQ(task.id)}','todo', this)" title="${t('projects.promote_todo')}">▶ ${t('projects.promote_todo')}</button>`;
   }
   if (task.status === 'review') {
-    actionBtns += `<button onclick="updateTaskStatus('${task.id}','approved')" title="${t('projects.status_approved')}">${lucideIcon("circle-check",16)}</button>`;
+    actionBtns += `<button data-task-id="${esc(task.id)}" onclick="updateTaskStatus('${escQ(task.id)}','approved', this)" title="${t('projects.status_approved')}">${lucideIcon("circle-check",16)}</button>`;
     actionBtns += `<button onclick="openRevisionModal('${task.id}')" title="${t('projects.status_revision')}">${lucideIcon("refresh-cw",16)}</button>`;
   }
   if (task.status === 'approved' && isArchived) {
-    actionBtns += `<button onclick="updateTaskStatus('${task.id}','todo')" title="${t('common.reopen')}">${lucideIcon('undo-2', 14)}</button>`;
+    actionBtns += `<button data-task-id="${esc(task.id)}" onclick="updateTaskStatus('${escQ(task.id)}','todo', this)" title="${t('common.reopen')}">${lucideIcon('undo-2', 14)}</button>`;
   }
   actionBtns += `<button onclick="promptEditTask('${task.id}')" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>`;
   actionBtns += `<button onclick="deleteTask('${task.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`;
@@ -441,10 +441,32 @@ async function addTask(projectId) {
   else { showToast(t('toast.added'), 'success'); await refreshAll(); }
 }
 
-async function updateTaskStatus(id, status) {
-  const { error } = await state.db.from('tasks').update({ status }).eq('id', id);
-  if (error) showToast(t('toast.update_failed'), 'error');
-  else { showToast(t('toast.updated'), 'success'); await refreshAll(); }
+const _pendingTaskStatus = new Set();
+
+async function updateTaskStatus(id, status, btnEl) {
+  if (!id) return;
+  if (_pendingTaskStatus.has(id)) return;
+  _pendingTaskStatus.add(id);
+  const sel = `.task-item[data-task-id="${CSS && CSS.escape ? CSS.escape(id) : id}"] button`;
+  const allBtns = document.querySelectorAll(sel);
+  const targetBtn = btnEl instanceof HTMLElement ? btnEl : document.activeElement;
+  if (targetBtn && targetBtn.tagName === 'BUTTON') {
+    targetBtn.disabled = true;
+    targetBtn.classList.add('saving', 'is-pending');
+    targetBtn.setAttribute('aria-busy', 'true');
+  }
+  try {
+    const { error } = await state.db.from('tasks').update({ status }).eq('id', id);
+    if (error) showToast(t('toast.update_failed'), 'error');
+    else { showToast(t('toast.updated'), 'success'); await refreshAll(); }
+  } finally {
+    _pendingTaskStatus.delete(id);
+    if (targetBtn && targetBtn.tagName === 'BUTTON') {
+      targetBtn.disabled = false;
+      targetBtn.classList.remove('saving', 'is-pending');
+      targetBtn.removeAttribute('aria-busy');
+    }
+  }
 }
 
 async function promptEditTask(id) {
@@ -746,7 +768,7 @@ function expandTask(id) {
 
   let actions = '';
   if (tk.status === 'review') {
-    actions = `<div style="display:flex;gap:8px;margin-top:12px;"><button class="btn" onclick="updateTaskStatus('${tk.id}','approved');closeTaskExpandModal();">${lucideIcon("circle-check",16)} ${t('projects.status_approved')}</button><button class="btn" onclick="closeTaskExpandModal();openRevisionModal('${tk.id}');">${lucideIcon("refresh-cw",16)} ${t('projects.status_revision')}</button></div>`;
+    actions = `<div style="display:flex;gap:8px;margin-top:12px;"><button class="btn" data-task-id="${esc(tk.id)}" onclick="updateTaskStatus('${escQ(tk.id)}','approved', this);closeTaskExpandModal();">${lucideIcon("circle-check",16)} ${t('projects.status_approved')}</button><button class="btn" onclick="closeTaskExpandModal();openRevisionModal('${tk.id}');">${lucideIcon("refresh-cw",16)} ${t('projects.status_revision')}</button></div>`;
   }
 
   content.innerHTML = `

@@ -113,7 +113,8 @@ function setDemoCategoriesFromData(data) {
 // ACTION GUARD — prevents double-fire on async save/add/edit actions.
 // Wraps any async function so concurrent calls are silently dropped.
 // Also adds .saving class on the triggering button for visual feedback
-// (shimmer + disabled appearance via CSS).
+// (shimmer + disabled appearance via CSS) and disables it to enforce
+// core principle: one click → disable till fulfilled.
 // ===================================================================
 function guard(fn) {
   let inFlight = false;
@@ -121,14 +122,31 @@ function guard(fn) {
     if (inFlight) return;
     inFlight = true;
     // Find the triggering button for visual feedback
-    const active = document.activeElement;
-    const btn = (active && active.tagName === 'BUTTON') ? active
-      : document.querySelector('.modal-overlay[style*="flex"] button.modal-save');
-    if (btn) btn.classList.add('saving');
+    // Prefer explicit button passed as last arg (via this), else activeElement, else modal save
+    let btn = null;
+    // If last arg is an HTMLElement button (when caller passes `this`), use it
+    const lastArg = args[args.length - 1];
+    if (lastArg instanceof HTMLElement && lastArg.tagName === 'BUTTON') {
+      btn = lastArg;
+      args = args.slice(0, -1); // remove button from args
+    } else {
+      const active = document.activeElement;
+      btn = (active && active.tagName === 'BUTTON') ? active
+        : document.querySelector('.modal-overlay[style*="flex"] button.modal-save');
+    }
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('saving', 'is-pending');
+      btn.setAttribute('aria-busy', 'true');
+    }
     try { await fn.apply(this, args); }
     finally {
       inFlight = false;
-      if (btn) btn.classList.remove('saving');
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove('saving', 'is-pending');
+        btn.removeAttribute('aria-busy');
+      }
     }
   };
 }

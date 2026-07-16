@@ -6,7 +6,7 @@
 -- Name: rls_auto_enable(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
-CREATE FUNCTION "public"."rls_auto_enable"() RETURNS "event_trigger"
+CREATE OR REPLACE FUNCTION "public"."rls_auto_enable"() RETURNS "event_trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'pg_catalog'
     AS $$
@@ -39,7 +39,7 @@ $$;
 -- Name: update_updated_at(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
-CREATE FUNCTION "public"."update_updated_at"() RETURNS "trigger"
+CREATE OR REPLACE FUNCTION "public"."update_updated_at"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
 BEGIN

@@ -790,7 +790,18 @@ async function doLogin() {
     }
   } catch (e) {
     if (e.message === 'project_paused') {
-      err.innerHTML = `${t('toast.project_paused')} <a href="${e.dashboardUrl}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;">Check on Supabase ↗</a>`;
+      // Safe DOM — no innerHTML with URL interpolation (P0 sec-002)
+      const safeUrl = /^https:\/\/supabase\.com\/dashboard\/project\/[a-z0-9]+$/i.test(e.dashboardUrl) ? e.dashboardUrl : 'https://supabase.com/dashboard/projects';
+      err.textContent = '';
+      err.appendChild(document.createTextNode((t('toast.project_paused') ? t('toast.project_paused') + ' ' : 'Database paused — ')));
+      const a = document.createElement('a');
+      a.href = safeUrl;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.style.color = 'var(--accent)';
+      a.style.textDecoration = 'underline';
+      a.textContent = 'Check on Supabase ↗';
+      err.appendChild(a);
     } else if (e.message === 'google_not_loaded') {
       err.textContent = t('login.drive_gis_blocked') || 'Google sign-in is blocked. Disable your ad blocker or allow third-party scripts.';
     } else if (e.message === 'popup_closed_by_user' || e.message === 'access_denied') {
@@ -1119,7 +1130,18 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (e) {
         if (_setupLoginError) {
           if (e.message === 'project_paused') {
-            _setupLoginError.innerHTML = `${t('toast.project_paused')} <a href="${e.dashboardUrl}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;">Check on Supabase ↗</a>`;
+            // Safe DOM — no innerHTML with URL interpolation (P0 sec-002)
+            const safeUrl = /^https:\/\/supabase\.com\/dashboard\/project\/[a-z0-9]+$/i.test(e.dashboardUrl) ? e.dashboardUrl : 'https://supabase.com/dashboard/projects';
+            _setupLoginError.textContent = '';
+            _setupLoginError.appendChild(document.createTextNode((t('toast.project_paused') ? t('toast.project_paused') + ' ' : 'Database paused — ')));
+            const a = document.createElement('a');
+            a.href = safeUrl;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.style.color = 'var(--accent)';
+            a.style.textDecoration = 'underline';
+            a.textContent = 'Check on Supabase ↗';
+            _setupLoginError.appendChild(a);
           } else {
             _setupLoginError.textContent = t('toast.connection_failed') || 'Connection failed.';
           }
@@ -1307,14 +1329,29 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     const label = LABELS[mode] || mode;
     let href = null;
     if (mode === 'supabase') {
+      // Validate projectRef: alphanumeric only (from _projectRef regex)
       const projectRef = url.replace('https://', '').replace('.supabase.co', '');
-      href = `https://supabase.com/dashboard/project/${projectRef}`;
+      if (/^[a-z0-9]+$/i.test(projectRef)) {
+        href = `https://supabase.com/dashboard/project/${projectRef}`;
+      }
     } else if (mode === 'googledrive') {
       const fid = state.driveAdapter?.driveFolderId;
-      href = fid ? `https://drive.google.com/drive/folders/${fid}` : 'https://drive.google.com';
+      // Drive folder ID: allowlist alphanumeric + -_ (Google ID format)
+      if (fid && /^[\w-]+$/.test(fid)) {
+        href = `https://drive.google.com/drive/folders/${fid}`;
+      } else {
+        href = 'https://drive.google.com';
+      }
     }
-    if (href) {
-      footerBackend.innerHTML = `<a href="${href}" target="_blank" rel="noopener">${logo} <span>${label} ↗</span></a>`;
+    // Safe DOM: href set via property, logo is trusted SVG from LOGOS
+    footerBackend.textContent = '';
+    if (href && /^https:\/\/(supabase\.com|drive\.google\.com)\//.test(href)) {
+      const a = document.createElement('a');
+      a.href = href;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.innerHTML = `${logo} <span>${label} ↗</span>`;
+      footerBackend.appendChild(a);
     } else {
       footerBackend.innerHTML = `${logo} <span>${label}</span>`;
     }
@@ -3535,7 +3572,20 @@ async function exportToGoogleDrive() {
     // Show link to folder
     const linkEl = document.getElementById('driveBackupLink');
     if (linkEl) {
-      linkEl.innerHTML = `${lucideIcon('external-link', 14, 'var(--accent)')} <a href="https://drive.google.com/drive/folders/${folderId}" target="_blank" rel="noopener">Open ${DRIVE_FOLDER_NAME}</a>`;
+      // Safe DOM — validate folderId (P0 sec-002)
+      const safeFid = /^[\w-]+$/.test(folderId) ? folderId : '';
+      const safeHref = safeFid ? `https://drive.google.com/drive/folders/${safeFid}` : 'https://drive.google.com';
+      linkEl.textContent = '';
+      const iconSpan = document.createElement('span');
+      iconSpan.innerHTML = lucideIcon('external-link', 14, 'var(--accent)');
+      linkEl.appendChild(iconSpan);
+      linkEl.appendChild(document.createTextNode(' '));
+      const a = document.createElement('a');
+      a.href = safeHref;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = `Open ${DRIVE_FOLDER_NAME}`;
+      linkEl.appendChild(a);
       linkEl.style.display = '';
     }
   } catch (e) {

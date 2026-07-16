@@ -7,7 +7,7 @@
 <link rel="icon" type="image/png" href="icons/favicon.png">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- Content-Security-Policy: self-hosted vendor + Google Identity exception (Google forbids SRI, see https://developers.google.com/identity/gsi/web/guides/content-security-policy) -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com https://apis.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co https://*.supabase.in https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com; frame-src 'self' https://accounts.google.com https://content.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co https://*.supabase.in https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com; frame-src 'self' https://accounts.google.com https://content.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <!-- Vendor: self-hosted (was CDN) — 109KB supabase @2.45.4 + 1.3MB three @0.170.0 -->
 <script src="vendor/supabase.js"></script>
 <!-- Google Identity: must stay on CDN per ToS, no SRI per Google docs -->
@@ -22,23 +22,7 @@
 }
 </script>
 <link rel="stylesheet" href="style.css">
-<script>
-(function(){var h=location.hostname,d=h.startsWith('dev.')||h.includes('dev.delaclaw')||h==='localhost'||h==='127.0.0.1';var l=document.createElement('link');l.rel='manifest';l.href=d?'manifest-dev.json':'manifest.json';document.head.appendChild(l);})();
-</script>
-<script>
-// Capture Android/Chromium's native install prompt before the app module loads,
-// so the install banner can trigger it on demand. iOS Safari never fires this.
-window.__bipEvent = null;
-window.addEventListener('beforeinstallprompt', function(e){
-  e.preventDefault();
-  window.__bipEvent = e;
-  window.dispatchEvent(new Event('bip-ready'));
-});
-window.addEventListener('appinstalled', function(){
-  window.__bipEvent = null;
-  window.dispatchEvent(new Event('app-installed'));
-});
-</script>
+<script src="js/bootstrap.js"></script>
 <meta name="theme-color" content="#08090d">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -870,18 +854,6 @@ bun run server.js</pre>
 </div>
 
 <script type="module" src="js/main.js"></script>
-<script>
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('sw.js').then(function(reg){
-    // Force update check on every page load
-    reg.update();
-  });
-  // Auto-reload when a new service worker takes control (deploy update)
-  let refreshing = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if(!refreshing){ refreshing = true; location.reload(); }
-  });
-}
-</script>
+<script src="js/sw-register.js"></script>
 </body>
 </html>

@@ -368,7 +368,7 @@ function initGate() {
     btn.addEventListener('click', () => switchBackendMode(btn.dataset.mode));
   });
   // Wire up compare link
-  document.getElementById('backendCompareLink')?.addEventListener('click', showCompareModal);
+  document.getElementById('backendCompareLink')?.addEventListener('click', (e)=>{e.preventDefault(); showCompareModal();});
   // Hero demo button: click starts demo directly
   const heroDemoBtn = document.getElementById('heroDemoBtn');
   if (heroDemoBtn) {
@@ -420,7 +420,7 @@ function initGate() {
     doLogin();
   });
   // "I already have an account" link
-  document.getElementById('gateWelcomeLogin').addEventListener('click', () => {
+  document.getElementById('gateWelcomeLogin').addEventListener('click', (e) => { e.preventDefault();
     gateWelcome.style.display = 'none';
     document.getElementById('loginForm').style.display = 'flex';
     document.getElementById('gateGuideLink').style.display = '';
@@ -2992,7 +2992,7 @@ function showSignupOverlay() {
 
   const compareLink = document.createElement('a');
   compareLink.className = 'backend-compare-link';
-  compareLink.href = 'javascript:void(0)';
+  compareLink.href = '#';;
   compareLink.textContent = t('compare.link');
   compareLink.addEventListener('click', showCompareModal);
 
@@ -3146,9 +3146,10 @@ function showSignupOverlay() {
 
   const guideLink = document.createElement('a');
   guideLink.className = 'gate-guide-link';
-  guideLink.href = 'javascript:void(0)';
+  guideLink.href = '#';;
   guideLink.textContent = t('setup.guide_link');
-  guideLink.addEventListener('click', () => {
+  guideLink.addEventListener('click', (e) => {
+    e.preventDefault();
     closeSignupOverlay();
     clearStayConnectedCreds();
     location.hash = '#setup';

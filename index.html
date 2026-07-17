@@ -7,8 +7,8 @@
 <link rel="icon" type="image/png" href="icons/favicon.png">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- Content-Security-Policy: self-hosted vendor + Google Identity exception (Google forbids SRI, see https://developers.google.com/identity/gsi/web/guides/content-security-policy) -->
-<!-- FIXME sec-004 regression: 89 inline handlers in index.html + hundreds in js/*.js (onclick/onchange/oninput in innerHTML). Hash blocks them because presence of hash makes unsafe-inline ignored. Interim fix must be WITHOUT hash: unsafe-inline + unsafe-hashes. Final fix: remove ALL inline handlers -> script-src 'self' 'sha256-...' cdn. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-hashes' https://accounts.google.com https://apis.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com; frame-src 'self' https://accounts.google.com https://content.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<!-- CSP hardened: all inline handlers removed via delegation (Phase 1 index.html 109, Phase 2 js/*.js 254 → 0). Secure hash for importmap restored, unsafe-* removed. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com; frame-src 'self' https://accounts.google.com https://content.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <!-- Vendor: self-hosted (was CDN jsdelivr) — supabase @2.110.6 (203KB raw) + three @0.170.0 -->
 <script src="vendor/supabase.js"></script>
 <!-- Google Identity: must stay on CDN per ToS, no SRI per Google docs -->
@@ -91,9 +91,9 @@
     <div class="logo" id="gateLogo"></div>
     <h1 id="gateTitle">DeLaClaw</h1>
 
-    <form id="loginForm" method="post" action="https://antgro.github.io/command-center/" style="display:none;">
+    <form id="loginForm" method="post" action="" style="display:none;">
       <p class="gate-storage-hint" id="gateStorageHint" data-i18n="login.storage_hint">Choose where your data is stored.</p>
-      <a class="backend-compare-link" id="backendCompareLink" href="javascript:void(0)" data-i18n="compare.link">Compare options</a>
+      <a class="backend-compare-link" id="backendCompareLink" href="#" data-i18n="compare.link">Compare options</a>
       <div class="backend-picker" id="backendPicker">
         <button type="button" class="backend-option active" data-mode="googledrive" title="Google Drive"><span class="backend-option-label" data-i18n="login.mode_drive">Drive</span></button>
         <button type="button" class="backend-option" data-mode="supabase" title="Supabase"><span class="backend-option-label" data-i18n="login.mode_supabase">SB</span></button>
@@ -125,7 +125,7 @@
     <div id="gateWelcome" style="display:none;">
       <p class="gate-welcome-text" data-i18n="login.welcome_text">Your personal command center. Organize projects, todos, habits, and more — your data stays yours.</p>
       <button type="button" class="btn-primary gate-welcome-demo" id="gateWelcomeDemo" data-i18n="login.welcome_demo">Try the demo</button>
-      <a class="gate-welcome-login" id="gateWelcomeLogin" href="javascript:void(0)" data-i18n="login.welcome_login">I already have an account</a>
+      <a class="gate-welcome-login" id="gateWelcomeLogin" href="#" data-i18n="login.welcome_login">I already have an account</a>
     </div>
 
     <a class="gate-guide-link" id="gateGuideLink" href="#setup">New here? Get started</a>
@@ -216,7 +216,7 @@
           <h3 id="setupCloud3Title">Connect</h3>
           <p id="setupCloud3Desc">In your Supabase dashboard, go to <a href="https://supabase.com/dashboard/project/_/settings/api-keys" target="_blank" rel="noopener"><strong>Settings &rarr; API Keys</strong></a>. Copy the <strong>anon (public) key</strong> and paste it below.</p>
           <p class="setup-note" style="font-size:0.82rem;color:var(--muted);margin:0.25rem 0 0.75rem;line-height:1.4;"><strong>Want sharing?</strong> Set your <strong>Site URL</strong> in Supabase &rarr; Authentication &rarr; URL Configuration to your DeLaClaw URL.</p>
-          <form id="setupLoginForm" method="post" action="https://antgro.github.io/command-center/">
+          <form id="setupLoginForm" method="post" action="">
             <label for="setupLoginUrl" class="gate-label" id="setupLoginUrlLabel">Project URL</label>
             <input type="text" id="setupLoginUrl" name="username" placeholder="https://xyz.supabase.co" autocomplete="username">
             <label for="setupLoginKey" class="gate-label" id="setupLoginKeyLabel"><a target="_blank" rel="noopener" id="setupKeyLabelLink">API Key (anon)</a></label>

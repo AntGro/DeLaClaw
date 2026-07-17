@@ -68,8 +68,4 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - `docs-site/setup.md`, `architecture.md`, `contributing.md` must stay in sync with adapter changes.
 - No personal info, workspace config, memory files in public repo.
 
-## 8. First Run
-
-If `BOOTSTRAP.md` exists in home dir, follow it, then delete.
-
 Keep this file short, accurate, and alive. When you learn a durable lesson that prevents a bug, add it here.

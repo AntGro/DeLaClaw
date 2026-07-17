@@ -578,12 +578,12 @@ const PRIORITY_LEVELS = [
   { key: 'normal', color: null, icon: 'circle-off' },
 ];
 
-function openPriorityPicker(id, event) {
+function openPriorityPicker(id, event, triggerEl) {
   event.stopPropagation();
   closePriorityPicker();
   const todo = allTodos.find(t => t.id === id);
   if (!todo) return;
-  const btn = event.currentTarget;
+  const btn = triggerEl || (event.currentTarget instanceof HTMLElement && event.currentTarget !== document ? event.currentTarget : event.target?.closest('[data-action="open-priority-picker"]')) || event.target;
   const rect = btn.getBoundingClientRect();
 
   const picker = document.createElement('div');

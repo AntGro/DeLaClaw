@@ -108,7 +108,7 @@
       case 'open-quick-add-priority-picker': callWindow('openQuickAddPriorityPicker', [el, e]); break;
       case 'add-todo-from-add-row': { var inp = el.closest('.todo-cat-add')?.querySelector('.todo-cat-input'); if (inp) callWindow('addTodoToCategory', [inp]); } break;
       case 'share-todo-from-add': callWindow('shareTodoFromAdd', [el]); break;
-      case 'open-priority-picker': callWindow('openPriorityPicker', [getId(el), e]); break;
+      case 'open-priority-picker': callWindow('openPriorityPicker', [getId(el), e, el]); break;
       case 'toggle-todo': { var done = el.dataset.done === 'true'; callWindow('toggleTodo', [getId(el) || el.dataset.todoId, done, el]); } break;
       case 'open-snooze-modal': callWindow('openSnoozeModal', [getId(el)]); break;
       case 'edit-todo-inline': callWindow('editTodoInline', [getId(el)]); break;
@@ -130,7 +130,7 @@
       case 'open-habit-history': callWindow('openHabitHistory', [el.dataset.habitId||getId(el)]); break;
       case 'open-edit-habit-modal': callWindow('openEditHabitModal', [el.dataset.habitId||getId(el)]); break;
       case 'delete-habit': callWindow('deleteHabit', [el.dataset.habitId||getId(el)]); break;
-      case 'edit-habit-last-done': callWindow('editHabitLastDone', [el.dataset.habitId||getId(el), e]); break;
+      case 'edit-habit-last-done': callWindow('editHabitLastDone', [el.dataset.habitId||getId(el), e, el]); break;
       case 'edit-habit-inline': callWindow('editHabitInline', [el.dataset.habitId||getId(el)]); break;
       case 'close-add-habit-modal': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddHabitModal', []); break;
       case 'save-new-habit': callWindow('saveNewHabit', []); break;
@@ -271,7 +271,7 @@
       case 'submit-share-popover': callWindow('submitSharePopover', []); break;
       case 'sharing-complete-submit': callWindow('sharingCompleteSubmit', [el.dataset.groupId, el.dataset.itemId]); break;
       case 'welcome-set-priority': e.stopPropagation(); callWindow('welcomeSetPriority', [el.dataset.todoId||getId(el), el.dataset.priority]); break;
-      case 'welcome-open-priority-picker': callWindow('welcomeOpenPriorityPicker', [el.dataset.todoId||getId(el), e]); break;
+      case 'welcome-open-priority-picker': callWindow('welcomeOpenPriorityPicker', [el.dataset.todoId||getId(el), e, el]); break;
       case 'welcome-toggle-todo': { var wDone = el.dataset.done === 'true'; callWindow('welcomeToggleTodo', [el.dataset.todoId||getId(el), wDone]); } break;
       case 'welcome-snooze': callWindow('welcomeSnooze', [el.dataset.todoId||getId(el)]); break;
       case 'welcome-delete-todo': callWindow('welcomeDeleteTodo', [el.dataset.todoId||getId(el)]); break;

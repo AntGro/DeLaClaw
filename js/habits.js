@@ -1373,9 +1373,9 @@ async function markHabitDone(habitId, btnEl) {
 // ===================================================================
 // EDIT LAST DONE DATE — INLINE
 // ===================================================================
-function editHabitLastDone(habitId, event) {
+function editHabitLastDone(habitId, event, triggerEl) {
   event.stopPropagation();
-  const span = event.currentTarget;
+  const span = triggerEl || (event.currentTarget instanceof HTMLElement && event.currentTarget !== document ? event.currentTarget : event.target?.closest('[data-action="edit-habit-last-done"]')) || event.target;
   const lastDone = getHabitLastDone(habitId);
   const currentDateStr = lastDone ? localDateStr(lastDone) : '';
 

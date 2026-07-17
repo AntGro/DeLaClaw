@@ -146,12 +146,12 @@ const W_PRIORITY_LEVELS = [
   { key: 'normal', color: null, icon: 'circle-off' },
 ];
 
-function welcomeOpenPriorityPicker(id, event) {
+function welcomeOpenPriorityPicker(id, event, triggerEl) {
   event.stopPropagation();
   welcomeClosePriorityPicker();
   const todo = wTodos.find(t => t.id === id);
   if (!todo) return;
-  const btn = event.currentTarget;
+  const btn = triggerEl || (event.currentTarget instanceof HTMLElement && event.currentTarget !== document ? event.currentTarget : event.target?.closest('[data-action="welcome-open-priority-picker"]')) || event.target;
   const rect = btn.getBoundingClientRect();
 
   const picker = document.createElement('div');

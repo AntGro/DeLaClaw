@@ -411,7 +411,7 @@ function showCropModalForNew(file) {
   reader.readAsDataURL(file);
 
   document.getElementById('avatarCropCancelNew').addEventListener('click', () => overlay.remove());
-  document.getElementById('avatarCropSaveNew').addEventListener('click', () => {
+  document.getElementById("avatarCropSaveNew").addEventListener("click", () => {
     try {
       const size = 384;
       const canvas = document.createElement('canvas');
@@ -435,7 +435,7 @@ function showCropModalForNew(file) {
     } catch (err) {
       showToast('Crop failed: ' + err.message, 'error');
     }
-  };
+  });
 }
 
 function clearNewBirthdayAvatar() {
@@ -743,7 +743,7 @@ function showCropModal(file, id) {
     } catch (e) {
       showToast(t('toast.failed_to_save'), 'error');
     }
-  };
+  });
 
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 }

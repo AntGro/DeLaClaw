@@ -24,6 +24,7 @@
 </script>
 <link rel="stylesheet" href="style.css">
 <script src="js/bootstrap.js"></script>
+<script src="js/delegation.js"></script>
 <meta name="theme-color" content="#08090d">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -279,16 +280,16 @@ bun run server.js</pre>
 <!-- ===== APP ===== -->
 <div id="app">
   <header class="app-header">
-    <h1 class="app-title" onclick="switchView('welcome')" style="cursor:pointer;" title="Go to Today"><svg class="storm-logo header-logo" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"></svg><span class="app-title-text">DeLaClaw</span></h1>
+    <h1 class="app-title" data-action="switch-view" data-view="welcome" style="cursor:pointer;" title="Go to Today"><svg class="storm-logo header-logo" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"></svg><span class="app-title-text">DeLaClaw</span></h1>
     <div class="view-switcher">
-      <button class="view-tab" id="tabWelcome" onclick="switchView('welcome')"><span data-icon="home" data-size="18" data-color="currentColor"></span> <span class="tab-label">Today</span></button>
-      <button class="view-tab active" id="tabProjects" onclick="switchView('projects')"><span data-icon="layout-grid" data-size="18" data-color="currentColor"></span> <span class="tab-label">Projects</span></button>
-      <button class="view-tab" id="tabTodos" onclick="switchView('todos')"><span data-icon="list-checks" data-size="18" data-color="currentColor"></span> <span class="tab-label">TODOs</span></button>
-      <button class="view-tab" id="tabHabits" onclick="switchView('habits')"><span data-icon="repeat" data-size="18" data-color="currentColor"></span> <span class="tab-label">Habits</span></button>
-      <button class="view-tab" id="tabBirthdays" onclick="switchView('birthdays')"><span data-icon="cake" data-size="18" data-color="currentColor"></span> <span class="tab-label">Birthdays</span></button>
-      <button class="view-tab" id="tabVestiaire" onclick="switchView('vestiaire')"><span data-icon="shirt" data-size="18" data-color="currentColor"></span> <span class="tab-label">Wardrobe</span></button>
-      <button class="view-tab" id="tabFlashcards" onclick="switchView('flashcards')"><span data-icon="brain" data-size="18" data-color="currentColor"></span> <span class="tab-label">Memory</span></button>
-      <button class="view-tab" id="tabLists" onclick="switchView('lists')"><span data-icon="list" data-size="18" data-color="currentColor"></span> <span class="tab-label">Lists</span></button>
+      <button class="view-tab" id="tabWelcome" data-action="switch-view" data-view="welcome"><span data-icon="home" data-size="18" data-color="currentColor"></span> <span class="tab-label">Today</span></button>
+      <button class="view-tab active" id="tabProjects" data-action="switch-view" data-view="projects"><span data-icon="layout-grid" data-size="18" data-color="currentColor"></span> <span class="tab-label">Projects</span></button>
+      <button class="view-tab" id="tabTodos" data-action="switch-view" data-view="todos"><span data-icon="list-checks" data-size="18" data-color="currentColor"></span> <span class="tab-label">TODOs</span></button>
+      <button class="view-tab" id="tabHabits" data-action="switch-view" data-view="habits"><span data-icon="repeat" data-size="18" data-color="currentColor"></span> <span class="tab-label">Habits</span></button>
+      <button class="view-tab" id="tabBirthdays" data-action="switch-view" data-view="birthdays"><span data-icon="cake" data-size="18" data-color="currentColor"></span> <span class="tab-label">Birthdays</span></button>
+      <button class="view-tab" id="tabVestiaire" data-action="switch-view" data-view="vestiaire"><span data-icon="shirt" data-size="18" data-color="currentColor"></span> <span class="tab-label">Wardrobe</span></button>
+      <button class="view-tab" id="tabFlashcards" data-action="switch-view" data-view="flashcards"><span data-icon="brain" data-size="18" data-color="currentColor"></span> <span class="tab-label">Memory</span></button>
+      <button class="view-tab" id="tabLists" data-action="switch-view" data-view="lists"><span data-icon="list" data-size="18" data-color="currentColor"></span> <span class="tab-label">Lists</span></button>
     </div>
     <div class="header-actions">
       <div class="header-menu" id="headerMenu">
@@ -319,9 +320,9 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="projectFilters">
-          <button class="filter-btn active" data-filter="active" onclick="setProjectFilter('active')">Active</button>
-          <button class="filter-btn" data-filter="all" onclick="setProjectFilter('all')">All</button>
-          <select id="projectSortBy" class="page-sort" onchange="renderProjectGrid()">
+          <button class="filter-btn active" data-filter="active" data-action="set-project-filter" data-filter="active">Active</button>
+          <button class="filter-btn" data-filter="all" data-action="set-project-filter" data-filter="all">All</button>
+          <select id="projectSortBy" class="page-sort" data-action="sort-projects">
             <option value="manual">Manual order</option>
             <option value="name">Name</option>
             <option value="tasks">Task count</option>
@@ -329,12 +330,12 @@ bun run server.js</pre>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn" onclick="openPromptEditor()" title="Edit task-pickup prompt"><span data-icon="file-text" data-size="16"></span></button>
-        <button class="btn" onclick="toggleShowArchived()" id="archiveToggleBtn" title="Toggle archived"><span data-icon="package" data-size="16"></span></button>
-        <button class="btn" onclick="openAddProjectModal()" title="Add project"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-prompt-editor" title="Edit task-pickup prompt"><span data-icon="file-text" data-size="16"></span></button>
+        <button class="btn" data-action="toggle-archived" id="archiveToggleBtn" title="Toggle archived"><span data-icon="package" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-project" title="Add project"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search tasks…" oninput="filterProjects(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search tasks…" data-action="filter-projects"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -353,9 +354,9 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="todoFilters">
-          <button class="filter-btn active" data-filter="pending" onclick="setTodoFilter('pending')">Pending</button>
-          <button class="filter-btn" data-filter="outdated" onclick="setTodoFilter('outdated')"><span data-icon="alert-triangle" data-size="14" data-color="currentColor"></span> Outdated</button>
-          <select id="todoSortBy" class="page-sort" onchange="renderTodos()">
+          <button class="filter-btn active" data-filter="pending" data-action="set-todo-filter" data-filter="pending">Pending</button>
+          <button class="filter-btn" data-filter="outdated" data-action="set-todo-filter" data-filter="outdated"><span data-icon="alert-triangle" data-size="14" data-color="currentColor"></span> Outdated</button>
+          <select id="todoSortBy" class="page-sort" data-action="sort-todos">
             <option value="manual">Manual order</option>
             <option value="due">Due date</option>
             <option value="priority">Priority</option>
@@ -364,10 +365,10 @@ bun run server.js</pre>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn" onclick="openAddCategoryModal()" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-category" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search todos…" oninput="filterTodos(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search todos…" data-action="filter-todos"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -382,11 +383,11 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="habitFilters">
-          <button class="filter-btn active" data-filter="all" onclick="setHabitFilter('all')">All</button>
-          <button class="filter-btn" data-filter="overdue" onclick="setHabitFilter('overdue')">Overdue</button>
-          <button class="filter-btn" data-filter="today" onclick="setHabitFilter('today')">Today</button>
-          <button class="filter-btn" data-filter="tomorrow" onclick="setHabitFilter('tomorrow')">Tomorrow</button>
-          <select id="habitSortBy" class="page-sort" onchange="renderHabits()">
+          <button class="filter-btn active" data-filter="all" data-action="set-habit-filter" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="overdue" data-action="set-habit-filter" data-filter="overdue">Overdue</button>
+          <button class="filter-btn" data-filter="today" data-action="set-habit-filter" data-filter="today">Today</button>
+          <button class="filter-btn" data-filter="tomorrow" data-action="set-habit-filter" data-filter="tomorrow">Tomorrow</button>
+          <select id="habitSortBy" class="page-sort" data-action="sort-habits">
             <option value="due">Next due</option>
             <option value="name">Name</option>
             <option value="last-done">Last done</option>
@@ -395,14 +396,14 @@ bun run server.js</pre>
       </div>
       <div class="page-toolbar-right">
         <div class="habit-view-toggle" id="habitViewToggle">
-          <button class="active" data-view="list" onclick="setHabitViewMode('list')"><span data-icon="list" data-size="14"></span></button>
-          <button data-view="calendar" onclick="setHabitViewMode('calendar')"><span data-icon="calendar" data-size="14"></span></button>
+          <button class="active" data-view="list" data-action="set-habit-view-mode" data-view="list"><span data-icon="list" data-size="14"></span></button>
+          <button data-view="calendar" data-action="set-habit-view-mode" data-view="calendar"><span data-icon="calendar" data-size="14"></span></button>
         </div>
-        <button class="btn" onclick="openAddHabitModal()" title="Add habit"><span data-icon="plus" data-size="16"></span></button>
-        <button class="btn" onclick="openAddHabitCategoryModal()" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-habit" title="Add habit"><span data-icon="plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-habit-category" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search habits…" oninput="filterHabits(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search habits…" data-action="filter-habits"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -418,10 +419,10 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="birthdayFilters">
-          <button class="filter-btn active" data-filter="all" onclick="setBirthdayFilter('all')">All</button>
-          <button class="filter-btn" data-filter="upcoming" onclick="setBirthdayFilter('upcoming')">Upcoming</button>
-          <button class="filter-btn" data-filter="this-month" onclick="setBirthdayFilter('this-month')">This Month</button>
-          <select id="birthdaySortBy" class="page-sort" onchange="renderBirthdays()">
+          <button class="filter-btn active" data-filter="all" data-action="set-birthday-filter" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="upcoming" data-action="set-birthday-filter" data-filter="upcoming">Upcoming</button>
+          <button class="filter-btn" data-filter="this-month" data-action="set-birthday-filter" data-filter="this-month">This Month</button>
+          <select id="birthdaySortBy" class="page-sort" data-action="sort-birthdays">
             <option value="upcoming">Next birthday</option>
             <option value="name">Name</option>
             <option value="age">Age</option>
@@ -429,10 +430,10 @@ bun run server.js</pre>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn" onclick="openAddBirthdayModal()" title="Add birthday"><span data-icon="plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-birthday" title="Add birthday"><span data-icon="plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search birthdays…" oninput="filterBirthdays(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search birthdays…" data-action="filter-birthdays"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -447,11 +448,11 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="vestiaireFilters">
-          <button class="filter-btn active" data-filter="all" onclick="setVestiaireFilter('all')">All</button>
-          <button class="filter-btn" data-filter="owned" onclick="setVestiaireFilter('owned')">Owned</button>
-          <button class="filter-btn" data-filter="tried" onclick="setVestiaireFilter('tried')">Tried</button>
-          <button class="filter-btn" data-filter="wishlist" onclick="setVestiaireFilter('wishlist')">Wishlist</button>
-          <select id="vestiaireSortBy" class="page-sort" onchange="renderVestiaire()">
+          <button class="filter-btn active" data-filter="all" data-action="set-vestiaire-filter" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="owned" data-action="set-vestiaire-filter" data-filter="owned">Owned</button>
+          <button class="filter-btn" data-filter="tried" data-action="set-vestiaire-filter" data-filter="tried">Tried</button>
+          <button class="filter-btn" data-filter="wishlist" data-action="set-vestiaire-filter" data-filter="wishlist">Wishlist</button>
+          <select id="vestiaireSortBy" class="page-sort" data-action="sort-vestiaire">
             <option value="manual">Manual order</option>
             <option value="name">Name</option>
             <option value="brand">Brand</option>
@@ -459,11 +460,11 @@ bun run server.js</pre>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn" onclick="openAddVestiaireModal()" title="Add item"><span data-icon="plus" data-size="16"></span></button>
-        <button class="btn" onclick="openAddVestiaireCategoryModal()" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-vestiaire" title="Add item"><span data-icon="plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-vestiaire-category" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search wardrobe…" oninput="filterVestiaire(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search wardrobe…" data-action="filter-vestiaire"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -478,11 +479,11 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="flashcardFilters">
-          <button class="filter-btn active" data-filter="all" onclick="setFlashcardFilter('all')">All</button>
-          <button class="filter-btn" data-filter="due" onclick="setFlashcardFilter('due')">Due</button>
-          <button class="filter-btn" data-filter="new" onclick="setFlashcardFilter('new')">New</button>
-          <button class="filter-btn" data-filter="mastered" onclick="setFlashcardFilter('mastered')">Mastered</button>
-          <select id="flashcardSortBy" class="page-sort" onchange="renderFlashcards()">
+          <button class="filter-btn active" data-filter="all" data-action="set-flashcard-filter" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="due" data-action="set-flashcard-filter" data-filter="due">Due</button>
+          <button class="filter-btn" data-filter="new" data-action="set-flashcard-filter" data-filter="new">New</button>
+          <button class="filter-btn" data-filter="mastered" data-action="set-flashcard-filter" data-filter="mastered">Mastered</button>
+          <select id="flashcardSortBy" class="page-sort" data-action="sort-flashcards">
             <option value="default">Default</option>
             <option value="strength">Strength</option>
             <option value="last-reviewed">Last reviewed</option>
@@ -490,13 +491,13 @@ bun run server.js</pre>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn btn-labeled" id="flashcardPracticeAllBtn" onclick="startPractice('__all')"><span data-icon="play" data-size="14"></span> <span class="btn-label">Flashcards</span></button>
-        <button class="btn btn-labeled" id="flashcardTextPracticeAllBtn" onclick="startTextPractice('__all')" title="Revise texts"><span data-icon="book-open" data-size="14"></span> <span class="btn-label">Texts</span></button>
-        <button class="btn" onclick="openImportModal()" title="Import"><span data-icon="upload" data-size="16"></span></button>
-        <button class="btn" onclick="openAddFlashDeckModal()" title="New deck"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn btn-labeled" id="flashcardPracticeAllBtn" data-action="start-practice" data-scope="__all"><span data-icon="play" data-size="14"></span> <span class="btn-label">Flashcards</span></button>
+        <button class="btn btn-labeled" id="flashcardTextPracticeAllBtn" data-action="start-text-practice" data-scope="__all" title="Revise texts"><span data-icon="book-open" data-size="14"></span> <span class="btn-label">Texts</span></button>
+        <button class="btn" data-action="open-import" title="Import"><span data-icon="upload" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-flash-deck" title="New deck"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search…" oninput="filterFlashcards(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search…" data-action="filter-flashcards"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -510,16 +511,16 @@ bun run server.js</pre>
   <div id="listsView" style="display:none;">
     <div class="page-toolbar">
       <div class="page-toolbar-left">
-        <select id="listsSortBy" class="page-sort" onchange="renderLists()">
+        <select id="listsSortBy" class="page-sort" data-action="sort-lists">
           <option value="manual">Manual order</option>
           <option value="name">Name</option>
         </select>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn" onclick="openAddListModal()" title="Add list"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-list" title="Add list"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search items…" oninput="filterLists(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search items…" data-action="filter-lists"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -570,8 +571,8 @@ bun run server.js</pre>
       <label>Live URL (optional)</label>
       <input type="url" id="newProjectLive" placeholder="https://...">
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeAddProjectModal()">Cancel</button>
-        <button class="modal-save" onclick="saveNewProject()">Create</button>
+        <button class="modal-cancel" data-action="close-add-project">Cancel</button>
+        <button class="modal-save" data-action="save-new-project">Create</button>
       </div>
     </div>
   </div>
@@ -584,8 +585,8 @@ bun run server.js</pre>
       <textarea id="revisionFeedback" placeholder="What needs to change... (Enter to submit, Shift+Enter for new line)"></textarea>
       <input type="hidden" id="revisionTaskId">
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeRevisionModal()">Cancel</button>
-        <button class="modal-save" onclick="submitRevision()">Submit Revision</button>
+        <button class="modal-cancel" data-action="close-revision">Cancel</button>
+        <button class="modal-save" data-action="submit-revision">Submit Revision</button>
       </div>
     </div>
   </div>
@@ -597,8 +598,8 @@ bun run server.js</pre>
       <p class="prompt-hint">This prompt applies to all projects when Claw picks up tasks. Use it for general coding rules, style preferences, etc.</p>
       <textarea id="promptGlobalText" placeholder="e.g. Always create feature branches. Run tests before pushing. Prefer functional style..."></textarea>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closePromptEditor()">Cancel</button>
-        <button class="modal-save" onclick="saveGlobalPrompt()">Save</button>
+        <button class="modal-cancel" data-action="close-prompt-editor">Cancel</button>
+        <button class="modal-save" data-action="save-global-prompt">Save</button>
       </div>
     </div>
   </div>
@@ -611,8 +612,8 @@ bun run server.js</pre>
       <textarea id="promptProjectText" placeholder="Rules specific to this project..."></textarea>
       <input type="hidden" id="promptProjectId">
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeProjectPrompt()">Cancel</button>
-        <button class="modal-save" onclick="saveProjectPrompt()">Save</button>
+        <button class="modal-cancel" data-action="close-project-prompt">Cancel</button>
+        <button class="modal-save" data-action="save-project-prompt">Save</button>
       </div>
     </div>
   </div>
@@ -635,8 +636,8 @@ bun run server.js</pre>
       <label>Live URL</label>
       <input type="url" id="editProjectLive" placeholder="https://...">
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeEditProjectModal()">Cancel</button>
-        <button class="modal-save" onclick="saveEditProject()">Save</button>
+        <button class="modal-cancel" data-action="close-edit-project">Cancel</button>
+        <button class="modal-save" data-action="save-edit-project">Save</button>
       </div>
     </div>
   </div>
@@ -654,12 +655,12 @@ bun run server.js</pre>
       <h2><span data-icon="pencil" data-size="20"></span> Edit Category</h2>
       <input type="hidden" id="editCategoryOldName">
       <label>Category Name</label>
-      <input type="text" id="editCategoryName" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditCategory();}">
+      <input type="text" id="editCategoryName" maxlength="40" data-action="save-edit-category-on-enter">
       <label>Short Name (for nav buttons)</label>
-      <input type="text" id="editCategoryShortname" maxlength="20" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditCategory();}">
+      <input type="text" id="editCategoryShortname" maxlength="20" data-action="save-edit-category-on-enter">
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeEditCategoryModal()">Cancel</button>
-        <button class="modal-save" onclick="saveEditCategory()">Save</button>
+        <button class="modal-cancel" data-action="close-edit-category">Cancel</button>
+        <button class="modal-save" data-action="save-edit-category">Save</button>
       </div>
     </div>
   </div>
@@ -674,8 +675,8 @@ bun run server.js</pre>
       <p id="deleteConfirmMessage" class="delete-confirm-msg"></p>
       <div id="deleteConfirmDetail" class="delete-confirm-detail" style="display:none;"></div>
       <div class="modal-actions">
-        <button class="modal-cancel" id="deleteConfirmCancelBtn" onclick="closeDeleteConfirm()">Cancel</button>
-        <button class="modal-save delete-confirm-btn" id="deleteConfirmBtn" onclick="executeDeleteConfirm()">
+        <button class="modal-cancel" id="deleteConfirmCancelBtn" data-action="close-delete-confirm">Cancel</button>
+        <button class="modal-save delete-confirm-btn" id="deleteConfirmBtn" data-action="execute-delete-confirm">
           <svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
           <span id="deleteConfirmBtnText">Delete</span>
         </button>
@@ -694,29 +695,29 @@ bun run server.js</pre>
   <!-- Edit Habit Category Modal is created dynamically by js/habits.js -->
 
   <!-- Tab Config Modal -->
-  <div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettings()">
+  <div class="modal-overlay" id="settingsModal" data-action="overlay-close-settings">
     <div class="settings-container">
-      <button class="settings-close" onclick="closeSettings()"><span data-icon="x" data-size="18"></span></button>
+      <button class="settings-close" data-action="close-settings"><span data-icon="x" data-size="18"></span></button>
       <div class="settings-sidebar">
         <h2 id="settingsTitle">Settings</h2>
         <nav>
-          <button class="settings-nav-btn active" data-pane="general" onclick="switchSettingsPane('general')">
+          <button class="settings-nav-btn active" data-pane="general" data-action="switch-settings-pane" data-pane="general">
             <span data-icon="settings" data-size="16"></span>
             <span id="settingsNavGeneral">General</span>
           </button>
-          <button class="settings-nav-btn" data-pane="ai" onclick="switchSettingsPane('ai')">
+          <button class="settings-nav-btn" data-pane="ai" data-action="switch-settings-pane" data-pane="ai">
             <span data-icon="sparkles" data-size="16"></span>
             <span id="settingsNavAi">AI</span>
           </button>
-          <button class="settings-nav-btn" data-pane="data" onclick="switchSettingsPane('data')">
+          <button class="settings-nav-btn" data-pane="data" data-action="switch-settings-pane" data-pane="data">
             <span data-icon="hard-drive" data-size="16"></span>
             <span id="settingsNavData">Data</span>
           </button>
-          <button class="settings-nav-btn" data-pane="stats" onclick="switchSettingsPane('stats')">
+          <button class="settings-nav-btn" data-pane="stats" data-action="switch-settings-pane" data-pane="stats">
             <span data-icon="bar-chart-3" data-size="16"></span>
             <span id="settingsNavStats">Stats</span>
           </button>
-          <button class="settings-nav-btn" data-pane="sharing" onclick="switchSettingsPane('sharing')" id="settingsNavSharingBtn" style="display:none">
+          <button class="settings-nav-btn" data-pane="sharing" data-action="switch-settings-pane" data-pane="sharing" id="settingsNavSharingBtn" style="display:none">
             <span data-icon="users" data-size="16"></span>
             <span id="settingsNavSharing">Sharing</span>
           </button>
@@ -740,7 +741,7 @@ bun run server.js</pre>
           </div>
           <div class="setting-group">
             <div class="setting-group-label" id="settingsDisplayLabel">Display</div>
-            <div class="setting-toggle-row" id="themeToggle" onclick="toggleTheme()">
+            <div class="setting-toggle-row" id="themeToggle" data-action="toggle-theme">
               <span class="setting-toggle-icon"><span data-icon="moon" data-size="16"></span></span>
               <span class="setting-toggle-text" id="settingsThemeLabel">Toggle theme</span>
               <span class="setting-toggle-switch" id="themeSwitch"></span>
@@ -758,10 +759,10 @@ bun run server.js</pre>
               <label for="settingsNvidiaKey" id="settingsNvidiaKeyLabel">API Key</label>
               <div class="settings-api-key-row">
                 <input type="password" id="settingsNvidiaKey" placeholder="nvapi-..." autocomplete="off" spellcheck="false">
-                <button type="button" class="settings-key-btn" id="settingsToggleVis" onclick="toggleNvidiaKeyVisibility()" title="Show/Hide">
+                <button type="button" class="settings-key-btn" id="settingsToggleVis" data-action="toggle-nvidia-key-visibility" title="Show/Hide">
                   <span data-icon="eye" data-size="16"></span>
                 </button>
-                <button type="button" class="settings-key-btn settings-key-save" id="settingsSaveKey" onclick="saveNvidiaKey()">
+                <button type="button" class="settings-key-btn settings-key-save" id="settingsSaveKey" data-action="save-nvidia-key">
                   <span data-icon="check" data-size="16"></span>
                 </button>
               </div>
@@ -769,12 +770,12 @@ bun run server.js</pre>
             </div>
             <div class="setting-item">
               <label for="settingsNvidiaModel" id="settingsNvidiaModelLabel">Model</label>
-              <select id="settingsNvidiaModel" class="settings-select" onchange="handleModelChange()">
+              <select id="settingsNvidiaModel" class="settings-select" data-action="handle-model-change">
                 <option value="meta/llama-3.1-8b-instruct">meta/llama-3.1-8b-instruct</option>
               </select>
               <div id="settingsCustomModelRow" class="settings-api-key-row" style="display:none;margin-top:6px">
                 <input type="text" id="settingsCustomModel" class="settings-select" placeholder="org/model-name" spellcheck="false">
-                <button type="button" class="settings-key-btn settings-key-save" onclick="applyCustomModel()">
+                <button type="button" class="settings-key-btn settings-key-save" data-action="apply-custom-model">
                   <span data-icon="check" data-size="16"></span>
                 </button>
               </div>
@@ -783,7 +784,7 @@ bun run server.js</pre>
               <label id="settingsTestLabel">Test</label>
               <textarea id="settingsTestPrompt" class="settings-textarea" rows="2">What is the capital of France?</textarea>
               <div class="settings-test-actions">
-                <button type="button" class="settings-test-btn" onclick="testNvidiaApi()" id="settingsTestBtn">
+                <button type="button" class="settings-test-btn" data-action="test-nvidia-api" id="settingsTestBtn">
                   <span data-icon="play" data-size="14"></span>
                   <span id="settingsTestBtnLabel">Query</span>
                 </button>
@@ -793,7 +794,7 @@ bun run server.js</pre>
             <div class="setting-item nvidia-usage-section">
               <label id="settingsUsageLabel">Usage (24h)</label>
               <div id="nvidiaUsageStats" class="nvidia-usage-stats"></div>
-              <button type="button" class="settings-usage-toggle" id="nvidiaUsageToggle" onclick="toggleNvidiaUsageDetail()" style="display:none">
+              <button type="button" class="settings-usage-toggle" id="nvidiaUsageToggle" data-action="toggle-nvidia-usage" style="display:none">
                 <span data-icon="chevron-down" data-size="14"></span>
                 <span id="nvidiaUsageToggleLabel">By model</span>
               </button>
@@ -806,11 +807,11 @@ bun run server.js</pre>
           <div class="setting-group">
             <div class="setting-group-label" id="settingsBackupLabel">Backup</div>
             <p class="setting-hint" id="settingsBackupHint">Export all your data as a JSON file. Works with any setup.</p>
-            <button type="button" class="settings-data-btn" onclick="exportBackup()">
+            <button type="button" class="settings-data-btn" data-action="export-backup">
               <span data-icon="download" data-size="16"></span>
               <span id="settingsExportBtn">Export backup</span>
             </button>
-            <button type="button" class="settings-data-btn" onclick="exportToGoogleDrive()">
+            <button type="button" class="settings-data-btn" data-action="export-to-drive">
               <img class="backend-icon-img" src="https://www.gstatic.com/images/branding/productlogos/drive_2026/v1/web-48dp/logo_drive_2026_color_2x_web_48dp.png" alt="Google Drive" width="16" height="16">
               <span id="settingsDriveExportBtn">Save to Google Drive</span>
             </button>
@@ -819,7 +820,7 @@ bun run server.js</pre>
           <div class="setting-group">
             <div class="setting-group-label" id="settingsRestoreLabel">Restore</div>
             <p class="setting-hint" id="settingsRestoreHint">Import a previously exported backup. This replaces all current data.</p>
-            <button type="button" class="settings-data-btn" onclick="importBackup()">
+            <button type="button" class="settings-data-btn" data-action="import-backup">
               <span data-icon="upload" data-size="16"></span>
               <span id="settingsImportBtn">Import backup</span>
             </button>
@@ -845,7 +846,7 @@ bun run server.js</pre>
   </div>
 
   <!-- ===== AUTH PROMPT ===== -->
-  <div class="modal-overlay" id="authPromptOverlay" onclick="if(event.target===this){this.classList.remove('visible')}">
+  <div class="modal-overlay" id="authPromptOverlay" data-action="overlay-close-auth">
     <div class="modal auth-prompt-modal">
       <div class="auth-prompt-content" id="authPromptContent"></div>
     </div>

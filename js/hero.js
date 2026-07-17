@@ -426,7 +426,7 @@ export function initHero() {
         if (p < 1) requestAnimationFrame(step);
       }
       requestAnimationFrame(step);
-    };
+    });
   }
 }
 

@@ -23,9 +23,21 @@ echo "Updating to supabase-js@$SUPA_VER + three@$THREE_VER"
 curl -sSL "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@${SUPA_VER}/dist/umd/supabase.js" -o vendor/supabase.js
 echo "supabase $(wc -c < vendor/supabase.js) bytes"
 
-# three module + addons
-curl -sSL "https://cdn.jsdelivr.net/npm/three@${THREE_VER}/build/three.module.js" -o vendor/three/build/three.module.js
-curl -sSL "https://cdn.jsdelivr.net/npm/three@${THREE_VER}/examples/jsm/utils/BufferGeometryUtils.js" -o vendor/three/examples/jsm/utils/BufferGeometryUtils.js
+# three module + addons (skip if dir missing or version unchanged requested)
+if [ -n "$THREE_VER" ]; then
+  curl -sSL "https://cdn.jsdelivr.net/npm/three@${THREE_VER}/build/three.module.js" -o vendor/three/build/three.module.js
+  curl -sSL "https://cdn.jsdelivr.net/npm/three@${THREE_VER}/examples/jsm/utils/BufferGeometryUtils.js" -o vendor/three/examples/jsm/utils/BufferGeometryUtils.js
+  echo "three $(wc -c < vendor/three/build/three.module.js) bytes"
+fi
+
+# update index.html vendor comment (best-effort)
+if grep -q "Vendor: self-hosted" index.html; then
+  # replace the whole comment line with new versions
+  SUPA_SIZE_KB=$(du -k vendor/supabase.js | cut -f1)
+  # keep three comment as-is unless we updated it
+  sed -i.bak "s/<!-- Vendor: self-hosted.*/<!-- Vendor: self-hosted (was CDN jsdelivr) — supabase @${SUPA_VER} (${SUPA_SIZE_KB}KB raw) + three @${THREE_VER} -->/" index.html || true
+  rm -f index.html.bak
+fi
 
 # hashes for CSP/docs (optional)
 python3 << PY

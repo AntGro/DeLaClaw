@@ -39,6 +39,17 @@ if grep -q "Vendor: self-hosted" index.html; then
   rm -f index.html.bak
 fi
 
+# update docs-site/attributions.md versions (best-effort)
+if [ -f docs-site/attributions.md ]; then
+  sed -i.bak "s/@supabase\/supabase-js.*v[0-9.]*.*/@supabase\/supabase-js\` v${SUPA_VER}/" docs-site/attributions.md || true
+  sed -i.bak "s/\*\*Package\*\*: \`@supabase\/supabase-js\` v[0-9.]*/**Package**: \`@supabase\/supabase-js\` v${SUPA_VER}/" docs-site/attributions.md || true
+  sed -i.bak "s/supabase-js@[0-9.]*\/dist/supabase-js@${SUPA_VER}\/dist/" docs-site/attributions.md || true
+  sed -i.bak "s/three.*v0\.[0-9.]*.*$/three\` v${THREE_VER}/" docs-site/attributions.md || true
+  sed -i.bak "s/\*\*Package\*\*: \`three\` v[0-9.]*/**Package**: \`three\` v${THREE_VER}/" docs-site/attributions.md || true
+  sed -i.bak "s/three@[0-9.]*\`)/three@${THREE_VER}\`)/" docs-site/attributions.md || true
+  rm -f docs-site/attributions.md.bak
+fi
+
 # hashes for CSP/docs (optional)
 python3 << PY
 import hashlib, base64, pathlib

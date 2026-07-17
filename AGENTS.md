@@ -1,6 +1,6 @@
 # AGENTS.md — DeLaClaw Operating Manual
 
-For any coding agent (Human, Hatch, Claude, Cursor, Codex) working in this repo. This is the single source of truth for how DeLaClaw is built. Hatch also reads `~/AGENTS.md` globally — keep both in sync (this file is the repo canonical).
+For any coding agent (Human, Claude, Cursor, Codex) working in this repo. This is the single source of truth for how DeLaClaw is built. The global `~/AGENTS.md` is also read by agents — keep both in sync (this file is the repo canonical).
 
 ## 0. Purpose
 
@@ -68,7 +68,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - `docs-site/setup.md`, `architecture.md`, `contributing.md` must stay in sync with adapter changes.
 - No personal info, workspace config, memory files in public repo.
 
-## 8. First Run (Hatch)
+## 8. First Run
 
 If `BOOTSTRAP.md` exists in home dir, follow it, then delete.
 

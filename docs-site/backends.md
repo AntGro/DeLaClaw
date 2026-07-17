@@ -191,7 +191,7 @@ No cross-device sync. Drive, Local, and Demo are effectively single-device.
 
 ## 8. Agent Integration (Claw)
 
-The Claw agent (Hatch) interacts with DeLaClaw via Supabase REST API.
+The Claw agent interacts with DeLaClaw via Supabase REST API.
 
 ### Current capabilities
 
@@ -210,7 +210,7 @@ The agent polls on heartbeat interval (~30 min). No push notification from app t
 
 ### Other backends
 
-**Google Drive:** The agent accesses individual per-table JSON files in the `DeLaClaw/` Drive folder via the Google Drive API (OAuth handled by the Hatch connector).
+**Google Drive:** The agent accesses individual per-table JSON files in the `DeLaClaw/` Drive folder via the Google Drive API (OAuth via Drive `drive.file` scope).
 - **Per-table granularity** — the agent reads/writes only the table it needs (e.g., `tasks.json`), without touching others.
 - **ETag-based conflict resolution** — writes include an `If-Match` header. If the app flushed the same table since the agent's read, the write fails with 412 and the agent re-reads, merges (newer `updated_at` wins per record), and retries.
 - **Polling for changes** — the app polls Drive every 30s and re-fetches tables whose `modifiedTime` changed, so agent edits show up without a full reload.

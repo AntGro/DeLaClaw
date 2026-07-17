@@ -42,21 +42,30 @@ const DRIVE_TABLES = [
 ];
 
 // ── Google Identity Services helpers ────────────────────────────
+// sec: token scoped by clientId + dedup pending promise to avoid popup spam
 
 let _cachedToken = null;
+let _cachedClientId = null;
 let _tokenExpiry = 0;
+let _pendingPromise = null;
+let _pendingClientId = null;
 
-const _TOKEN_STORAGE_KEY = 'claw_drive_token';
+const _TOKEN_KEY_PREFIX = 'claw_drive_token:';
 
-function _persistToken(token, expiryMs) {
+function _tokenKey(clientId) {
+  // clientId is public — use as suffix to scope per OAuth client
+  return `${_TOKEN_KEY_PREFIX}${clientId || 'default'}`;
+}
+
+function _persistToken(token, expiryMs, clientId) {
   try {
-    sessionStorage.setItem(_TOKEN_STORAGE_KEY, JSON.stringify({ token, expiry: expiryMs }));
+    sessionStorage.setItem(_tokenKey(clientId), JSON.stringify({ token, expiry: expiryMs }));
   } catch (_) {}
 }
 
-function _loadPersistedToken() {
+function _loadPersistedToken(clientId) {
   try {
-    const raw = sessionStorage.getItem(_TOKEN_STORAGE_KEY);
+    const raw = sessionStorage.getItem(_tokenKey(clientId));
     if (!raw) return null;
     const { token, expiry } = JSON.parse(raw);
     // Still valid with ≥60s margin
@@ -65,26 +74,50 @@ function _loadPersistedToken() {
   return null;
 }
 
-function clearDriveTokenCache() {
+function clearDriveTokenCache(clientId) {
+  // If clientId given, clear only that scoped entry; otherwise clear all prefixed entries (defense on mode switch)
   _cachedToken = null;
+  _cachedClientId = null;
   _tokenExpiry = 0;
-  try { sessionStorage.removeItem(_TOKEN_STORAGE_KEY); } catch (_) {}
+  _pendingPromise = null;
+  _pendingClientId = null;
+  try {
+    if (clientId) {
+      sessionStorage.removeItem(_tokenKey(clientId));
+    } else {
+      // clear all scoped drive tokens
+      const toRemove = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const k = sessionStorage.key(i);
+        if (k && k.startsWith(_TOKEN_KEY_PREFIX)) toRemove.push(k);
+      }
+      toRemove.forEach(k => sessionStorage.removeItem(k));
+      // legacy unscoped key (pre-1.368)
+      sessionStorage.removeItem('claw_drive_token');
+    }
+  } catch (_) {}
 }
 
 function getGoogleAccessToken(clientId, promptIfNeeded = true) {
-  // 1. In-memory cache (same page lifecycle)
-  if (_cachedToken && Date.now() < _tokenExpiry - 60000) {
+  // 1. In-memory cache — scoped by clientId
+  if (_cachedToken && _cachedClientId === clientId && Date.now() < _tokenExpiry - 60000) {
     return Promise.resolve(_cachedToken);
   }
-  // 2. sessionStorage cache (survives refresh within the ~1h token lifetime)
-  const persisted = _loadPersistedToken();
+  // 2. sessionStorage cache (survives refresh within the ~1h token lifetime) — scoped
+  const persisted = _loadPersistedToken(clientId);
   if (persisted) {
     _cachedToken = persisted.token;
+    _cachedClientId = clientId;
     _tokenExpiry = persisted.expiry;
     return Promise.resolve(_cachedToken);
   }
-  // 3. Fresh OAuth flow
-  return new Promise((resolve, reject) => {
+  // 3. Dedup in-flight request — prevents popup spam on concurrent getToken()
+  if (_pendingPromise && _pendingClientId === clientId) {
+    return _pendingPromise;
+  }
+  // 4. Fresh OAuth flow — single flight
+  _pendingClientId = clientId;
+  _pendingPromise = new Promise((resolve, reject) => {
     if (typeof google === 'undefined' || !google.accounts) {
       reject(new Error('google_not_loaded'));
       return;
@@ -97,8 +130,9 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
           reject(new Error(resp.error));
         } else {
           _cachedToken = resp.access_token;
+          _cachedClientId = clientId;
           _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
-          _persistToken(_cachedToken, _tokenExpiry);
+          _persistToken(_cachedToken, _tokenExpiry, clientId);
           resolve(resp.access_token);
         }
       },
@@ -111,7 +145,11 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
     } else {
       client.requestAccessToken({ prompt: '' });
     }
+  }).finally(() => {
+    _pendingPromise = null;
+    _pendingClientId = null;
   });
+  return _pendingPromise;
 }
 
 // ── Drive API helpers ───────────────────────────────────────────
@@ -709,7 +747,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     destroy() {
       stopPolling();
       for (const t of Object.keys(saveTimers)) clearTimeout(saveTimers[t]);
-      clearDriveTokenCache();
+      clearDriveTokenCache(clientId);
     },
   };
 

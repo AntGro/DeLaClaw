@@ -1813,6 +1813,23 @@ async function importFlashcardsIntegrationTest() {
     assert(s.includes('anon key is public') || s.includes('RLS is the boundary'), 'state.js must document anon public + RLS');
   });
 
+  test('drive.js token scoped by clientId and dedup pending promise', () => {
+    const d = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf8');
+    assert(d.includes('_TOKEN_KEY_PREFIX'), 'must have _TOKEN_KEY_PREFIX');
+    assert(d.includes('_tokenKey(clientId)'), 'must have _tokenKey(clientId)');
+    assert(d.includes('claw_drive_token:'), 'token key must be scoped with prefix');
+    assert(d.includes('_pendingPromise'), 'must have _pendingPromise dedup');
+    assert(d.includes('_pendingClientId'), 'must scope pending by clientId');
+    assert(d.includes('_cachedClientId'), 'must scope cache by clientId');
+    assert(d.includes("sessionStorage.removeItem('claw_drive_token')") || d.includes('legacy unscoped key'), 'must clean legacy unscoped key');
+    assert(d.includes('clearDriveTokenCache(clientId)'), 'destroy must clear scoped token');
+  });
+
+  test('drive.js clearDriveTokenCache clears all scoped tokens when no arg', () => {
+    const d = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf8');
+    assert(d.includes('startsWith(_TOKEN_KEY_PREFIX)'), 'clear must iterate prefixed keys');
+  });
+
   // ===================================================================
   // SUMMARY
   // ===================================================================

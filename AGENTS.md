@@ -1,19 +1,75 @@
-# AGENTS.md
+# AGENTS.md — DeLaClaw Operating Manual
 
-Your operating manual for this workspace, written by you. Your main instructions cover how Hatch works in general. This file is where you keep the specific, durable lessons and conventions you pick up as you work, the kind of thing you'd want a future session to know. It's not about the user (that goes in `USER.md` and your memory) or your personality (that's `SOUL.md`); it's about how you get work done here.
+For any coding agent (Human, Hatch, Claude, Cursor, Codex) working in this repo. This is the single source of truth for how DeLaClaw is built. Hatch also reads `~/AGENTS.md` globally — keep both in sync (this file is the repo canonical).
 
-## First Run
-If `BOOTSTRAP.md` exists in your home directory, follow it to set yourself up, then delete it.
+## 0. Purpose
 
-## Conventions
-- **Supabase auth**: use the `anon_key` (`sb_publishable_*`) in BOTH `apikey:` and `Authorization: Bearer` headers. The `service_role_key` (`sb_secret_*`) doesn't resolve to a valid JWT in curl context. Confirmed working June 11, 2026.
-- **DeLaClaw commit checklist**: before writing the `Checked:` line, review the staged diff and decide each item individually — no batch-marking in either direction. Three states: `[x]` = diff touches this area, `[~]` = diff doesn't touch this area, bare item (no marker) = not yet decided — hook must reject. Lesson from v1.145: `tests` and `xss` were left unmarked by inertia when neither was impacted.
-- **DeLaClaw git hooks**: ALWAYS run `git config core.hooksPath .githooks` before committing to the DeLaClaw repo (`~/workspace/command-center`). Without this, the pre-commit (version bump, emoji lint) and commit-msg (checklist) hooks won't fire. This must be done on every fresh clone or subagent checkout. Discovered June 18, 2026 when a heartbeat commit bypassed all hooks.
-- **Core UX principle — one click → disable until fulfilled**: Every action button (Mark done, toggle done, save, delete confirm) MUST disable itself on click until the async action resolves. Use `guard()` in `js/main.js` (disables + `saving`/`is-pending` + `aria-busy`) for modal saves, and per-ID pending Sets (`_pendingHabitDones`, `_pendingTodoToggles`, `_pendingTaskStatus`) for list items to allow concurrent different IDs but block double-click on same ID. Always pass `this` from onclick and add `data-*-id` attributes for queryability. Enforced from v1.346. See user request July 16 2026.
+DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, ~17k LOC vanilla JS (ES modules). Own your data: Supabase | Local Bun+SQLite | Google Drive | Demo. PWA, offline-first via IndexedDB cache, dark/light, i18n (EN/FR/ES).
 
-Add an entry whenever you work something out worth keeping, for example:
-- a convention you've settled on ("keep data exports in `workspace/exports/` and clean them up monthly")
-- a tool or site quirk worth remembering ("site X hides its form behind a cookie banner; dismiss it first")
-- a workflow that worked, or a mistake not to repeat
+## 1. Core Product Principles
 
-It starts empty and is meant to grow slowly. Don't pad it; a short, accurate file beats a long, stale one.
+**1.1 Reuse components for unified style**
+- Never create one-off buttons, cards, modals, or inputs. Reuse existing CSS: `.view-tab`, `.page-empty-state`, `.modal`, `.settings-data-btn`, `.bucket-card`, `.usage-stats-container`, etc.
+- Icons: Lucide only, via `js/icons.js` (`data-icon`), never emoji in UI.
+- I18n: all user strings via `t()` in `js/i18n.js`, with EN/FR/ES keys. No hardcoded UI text in JS/HTML.
+- Styles: reuse CSS variables (`--cat-color`, `--bg`, `--text`, `--muted`). Solid header backgrounds with 6% tinted body (color-mix) since v1.348 overhaul.
+
+**1.2 Interaction guards — assume double-click**
+- When adding any interactive element (button, toggle, checkbox, link that mutates state), ask: what happens if it fires 2x before the first promise resolves? Does it duplicate a task, double-toggle, double-insert?
+- Rule: one-click → disable until fulfilled.
+  - Modal saves: use `guard()` in `js/main.js` (adds `disabled` + `saving`/`is-pending` + `aria-busy`).
+  - List items (habit DONE / TODO DONE / project task approve/promote): use per-ID pending Sets (`_pendingHabitDones`, `_pendingTodoToggles`, `_pendingTaskStatus`). Allow concurrent different IDs, block same ID double-click.
+  - Always pass `this` from `onclick="fn(id,this)"` and add `data-*-id` attribute for queryability.
+- Enforced from v1.346. Tests guard existence of debounce/pending logic.
+
+**1.3 Modular & abstract-first**
+- Adapter pattern: all business logic talks to `db.js` proxy, never directly to Supabase/Drive. Each backend in `js/adapters/` must implement the same surface: `.from(table).select/insert/update/delete`, plus auth helpers. Offline-cache wraps any adapter transparently.
+- Sharing protocols: Drive-based sharing (`js/sharing*.js`) must implement a common top-level interface/class (groups, invites, items, completions). Don't leak Drive-specific code into views (`todos.js`, `habits.js`, `lists.js` check `sharing` abstraction).
+- Don't add `if (backend === 'supabase')` in views. Add a method to the adapter interface instead.
+- Single responsibility: `utils.js` = generic helpers, `item-utils.js` = drag-drop + inline edit, `db.js` = activity tracking proxy only. Abstract first, implement second.
+
+## 2. UI / UX System
+
+- Welcome / Today aggregates focus TODOs, due habits, flashcard reviews, birthdays.
+- All pages share: search + clear button (CSS `:not(:placeholder-shown)`), drag-drop reorder, inline edit with note field, keyboard shortcuts.
+- Empty states use shared `.page-empty-state` (icon + title + hint + CTA) with i18n keys.
+
+## 3. Security
+
+- **XSS**: No `innerHTML` with user data unless escaped. Wrap all user fields (`name`, `text`, `note`, `brand`, etc.) in `esc()` when interpolating into template literals. `renderMd()` and `truncateWithShowMore()` already esc internally, don't double-wrap. `showDeleteConfirm` uses `.textContent` (safe).
+- **Safe DOM for URLs**: TODO/project links with user-provided URLs must use safe allowlist check, not raw `innerHTML`.
+- **CSP hardening (sec-004)**: Vendor JS self-hosted in `vendor/` (`supabase@2.110.6`, `three@0.170.0`). No `cdn.jsdelivr.net` for app code. CSP meta in `index.html`: `default-src 'self'; script-src 'self' 'sha256-...importmap...' accounts.google.com apis.google.com gstatic; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes.
+- **Google Identity exception**: GSI (`accounts.google.com/gsi/client` + `apis.google.com/js/api.js`) must stay CDN per Google ToS, no SRI allowed. Documented exception allowed only via CSP.
+- **Supabase auth quirk**: use `anon_key` (`sb_publishable_*`) in BOTH `apikey:` and `Authorization: Bearer` headers. `service_role_key` (`sb_secret_*`) doesn't resolve to JWT in curl context. Confirmed June 11, 2026.
+
+## 4. Backend & Data
+
+- Tables (16): `projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `nvidia_usage`.
+- Schema version in `settings` key `schema_version`, migrations in `migrations/`. Check `latest_compat` logic in `VERSION`.
+- Base schema + migrations must be runnable in Supabase SQL editor + local SQLite (`server/schema.sql`).
+- Vendor: `scripts/update-vendor.sh [supabase_ver] [three_ver]` updates `vendor/` + `index.html` comment + `docs-site/attributions.md`. Weekly GitHub Action `vendor-check.yml` opens PR to `dev` if new versions.
+
+## 5. Git, Versioning, Commit
+
+- **Target branch**: `dev` (preview at `dev.delaclaw.pages.dev`). `main` only when stable + user-approved. All PRs (including bot) target `dev`.
+- **Hooks**: ALWAYS `git config core.hooksPath .githooks` on fresh clone/subagent. Pre-commit bumps `VERSION` → updates `sw.js` CACHE_VERSION + blocks emoji. Commit-msg enforces `Checked:` trailer.
+- **VERSION file**: `latest` bumped every commit (X.YYY), `latest_compat` / `latest_compat_deprec` only on schema change. See `COMMIT_CHECKLIST.md`.
+- **Checked trailer**: Format `Checked: versioning [x], i18n [~], docs [~], readme [~], checklist [~], tests [~], welcome [~], prompts [~], xss [x]` — decide each individually, no batch-marking. `[x]` = diff touches area, `[~]` = does not. Bare item = rejected. Lesson v1.145: tests + xss left unmarked by inertia.
+- **Commit style**: `feat|fix|refactor|chore|ci|docs(scope): message`. Include test result (`142 passed`) when relevant.
+
+## 6. Testing
+
+- `bun tests/tests.js` (or `node`). 142 passed + 3 Playwright missing (expected, no browser in CI dev) is green. Covers: unit logic, adapter compliance, import/export, window-assignment guard, XSS esc usage.
+- PWA: `CACHE_VERSION` + `PRECACHE_URLS` in `sw.js` — `cache.addAll` fails entire install if any entry 404, so list must be exact. Include new `js/*.js` and `vendor/*` files.
+
+## 7. Docs
+
+- `docs-site/attributions.md` must list all third-party assets with correct load source (vendor/ vs CDN). Update when vendor versions change.
+- `docs-site/setup.md`, `architecture.md`, `contributing.md` must stay in sync with adapter changes.
+- No personal info, workspace config, memory files in public repo.
+
+## 8. First Run (Hatch)
+
+If `BOOTSTRAP.md` exists in home dir, follow it, then delete.
+
+Keep this file short, accurate, and alive. When you learn a durable lesson that prevents a bug, add it here.

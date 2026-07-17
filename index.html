@@ -8,7 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- Content-Security-Policy: self-hosted vendor + Google Identity exception (Google forbids SRI, see https://developers.google.com/identity/gsi/web/guides/content-security-policy) -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co https://*.supabase.in https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com; frame-src 'self' https://accounts.google.com https://content.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
-<!-- Vendor: self-hosted (was CDN) — 109KB supabase @2.45.4 + 1.3MB three @0.170.0 -->
+<!-- Vendor: self-hosted (was CDN jsdelivr) — supabase @2.110.6 (203KB raw) + three @0.170.0 -->
 <script src="vendor/supabase.js"></script>
 <!-- Google Identity: must stay on CDN per ToS, no SRI per Google docs -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>

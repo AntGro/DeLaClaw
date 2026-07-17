@@ -1782,6 +1782,38 @@ async function importFlashcardsIntegrationTest() {
   }
 
   // ===================================================================
+  // SECURITY: credential storage
+  // ===================================================================
+  console.log('\n-- Security: credential storage\n');
+
+  test('utils.js exports getSupabaseKeyRole and isServiceRoleKey', () => {
+    const u = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'utils.js'), 'utf8');
+    assert(u.includes('getSupabaseKeyRole'), 'utils.js must export getSupabaseKeyRole');
+    assert(u.includes('isServiceRoleKey'), 'utils.js must export isServiceRoleKey');
+    assert(u.includes('sb_secret_'), 'must check sb_secret_ prefix');
+    assert(u.includes('sb_publishable_'), 'must check sb_publishable_ prefix');
+  });
+
+  test('main.js saveStayConnectedCreds strips key for local/demo/drive and rejects service_role', () => {
+    const m = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    assert(m.includes("m === 'local'") && m.includes("key = ''"), 'saveStayConnectedCreds must strip key for local');
+    assert(m.includes('getSupabaseKeyRole') && m.includes('service_role'), 'must check service_role in saveStayConnectedCreds');
+  });
+
+  test('main.js doLogin rejects service_role before connect', () => {
+    const m = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const idxCheck = m.indexOf("err_service_role");
+    const idxConnect = m.indexOf("await connect(url, key, mode)");
+    assert(idxCheck !== -1, 'doLogin must reference login.err_service_role');
+    assert(idxCheck < idxConnect, 'service_role check must be before connect()');
+  });
+
+  test('state.js STAY_CONNECTED_KEY has security comment', () => {
+    const s = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'state.js'), 'utf8');
+    assert(s.includes('anon key is public') || s.includes('RLS is the boundary'), 'state.js must document anon public + RLS');
+  });
+
+  // ===================================================================
   // SUMMARY
   // ===================================================================
   console.log(`\n${'═'.repeat(50)}`);

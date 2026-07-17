@@ -68,6 +68,8 @@ const T = {
       connect: 'Connect',
       supabase_dashboard: 'Supabase Dashboard',
       log_out: 'Log out',
+      err_service_role: 'Use anon (publishable) key — service_role / secret keys are not allowed. They bypass RLS and must stay server-side.',
+      err_anon_only: 'Use anon (publishable) key. This key bypasses access controls.',
     },
     // ── Setup Guide ──
     setup: {
@@ -671,6 +673,8 @@ const T = {
       connect: 'Connexion',
       supabase_dashboard: 'Tableau de bord Supabase',
       log_out: 'Déconnexion',
+      err_service_role: 'Utilisez la clé anon (publishable) — les clés service_role / secret sont interdites. Elles contournent la RLS et doivent rester côté serveur.',
+      err_anon_only: 'Utilisez la clé anon (publishable). Cette clé contourne les contrôles d\'accès.',
     },
     setup: {
       guide_link: 'Première fois ? Commencer ici',
@@ -1259,6 +1263,8 @@ const T = {
       connect: 'Conectar',
       supabase_dashboard: 'Panel de Supabase',
       log_out: 'Cerrar sesión',
+      err_service_role: 'Usa la clave anon (publishable) — las claves service_role / secret no están permitidas. Eluden RLS y deben permanecer en el servidor.',
+      err_anon_only: 'Usa la clave anon (publishable). Esta clave elude los controles de acceso.',
     },
     setup: {
       guide_link: '¿Primera vez? Empieza aquí',

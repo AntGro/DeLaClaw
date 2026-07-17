@@ -9,7 +9,7 @@ import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 
-import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA } from './utils.js';
+import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals } from './todos.js';
@@ -758,6 +758,14 @@ function getStayConnectedCreds() {
     const raw = localStorage.getItem(STAY_CONNECTED_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    // Self-heal: purge if service_role was ever stored (pre-fix data)
+    if (parsed && parsed.key) {
+      const role = getSupabaseKeyRole(parsed.key);
+      if (role === 'service_role' || parsed.key.startsWith('sb_secret_')) {
+        try { localStorage.removeItem(STAY_CONNECTED_KEY); } catch {}
+        return null;
+      }
+    }
     if (parsed && parsed.mode === 'demo') return parsed;
     if (parsed && parsed.mode === 'googledrive') return parsed;
     if (parsed && parsed.url && (parsed.key || parsed.mode === 'local')) return parsed;
@@ -766,7 +774,20 @@ function getStayConnectedCreds() {
 }
 
 function saveStayConnectedCreds(url, key, mode) {
-  localStorage.setItem(STAY_CONNECTED_KEY, JSON.stringify({ url, key, mode: mode || 'supabase' }));
+  const m = mode || 'supabase';
+  // Defense in depth: never persist service_role, never persist key for local/demo/drive
+  if (m === 'local' || m === 'demo' || m === 'googledrive') {
+    key = '';
+  }
+  if (key) {
+    const role = getSupabaseKeyRole(key);
+    if (role === 'service_role' || key.startsWith('sb_secret_')) {
+      // Do not persist — caller should have already blocked, but belt-and-braces
+      return;
+    }
+  }
+  // For supabase, strip whitespace; for local/demo/drive key is already ''
+  localStorage.setItem(STAY_CONNECTED_KEY, JSON.stringify({ url, key: key || '', mode: m }));
 }
 
 function clearStayConnectedCreds() {
@@ -803,6 +824,14 @@ async function doLogin() {
   const err = document.getElementById('loginError');
   const mode = getSelectedMode();
   if (mode !== 'demo' && mode !== 'googledrive' && (!url || (!key && mode !== 'local'))) { err.textContent = t('toast.enter_name'); return; }
+  // sec: reject service_role / sb_secret_ — anon / sb_publishable_ only
+  if (mode === 'supabase' && key) {
+    const role = getSupabaseKeyRole(key);
+    if (role === 'service_role' || key.startsWith('sb_secret_')) {
+      err.textContent = t('login.err_service_role');
+      return;
+    }
+  }
   // Detect org URL
   if (/supabase\.com\/dashboard\/org\//i.test(url)) {
     err.innerHTML = t('toast.org_url_tip');
@@ -1154,6 +1183,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const key = _setupLoginKey?.value.trim();
       if (!url || !key) {
         if (_setupLoginError) _setupLoginError.textContent = t('toast.enter_name') || 'Please fill in both fields.';
+        return;
+      }
+      // sec: anon only
+      if (key && (getSupabaseKeyRole(key)==='service_role' || key.startsWith('sb_secret_'))) {
+        if (_setupLoginError) _setupLoginError.textContent = t('login.err_service_role');
         return;
       }
       if (_setupLoginError) _setupLoginError.textContent = t('toast.connecting') || 'Connecting…';
@@ -3128,6 +3162,11 @@ function showSignupOverlay() {
     if (activeMode !== 'googledrive') {
       const url = urlInput.value.trim();
       const key = keyInput.value.trim();
+      // sec: reject service_role even here
+      if (activeMode === 'supabase' && key && (getSupabaseKeyRole(key)==='service_role' || key.startsWith('sb_secret_'))) {
+        showToast(t('login.err_service_role'), 'error');
+        return;
+      }
       if (url) saveStayConnectedCreds(url, key, activeMode);
     }
     // Store chosen mode so the gate can pre-select it

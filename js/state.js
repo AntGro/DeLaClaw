@@ -37,6 +37,8 @@ export const THEME_KEY = 'claw_cc_theme';
 export const ARCHIVED_PROJECTS_KEY = 'claw_cc_archived_projects';
 export const SHOW_ARCHIVED_KEY = 'claw_cc_show_archived';
 export const CURRENT_VIEW_KEY = 'claw_cc_current_view';
+// Security note: anon key is public by design (PostgREST) — RLS is the boundary.
+// service_role / sb_secret_ must never be stored here (rejected in saveStayConnectedCreds).
 export const STAY_CONNECTED_KEY = 'claw_cc_stay_connected';
 export const MAX_TEXT_LEN = 5000;
 export const MAX_META_DISPLAY = 500;

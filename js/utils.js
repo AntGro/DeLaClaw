@@ -8,6 +8,30 @@ import { APP_VERSION } from './version.js';
 // ===================================================================
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML.replace(/"/g, '\x26quot;'); }
 function escQ(s) { return esc(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
+
+// ── Supabase key role detection (sec: reject service_role / sb_secret_ in localStorage) ──
+function getSupabaseKeyRole(key){
+  if(!key) return null;
+  const k = key.trim();
+  if(k.startsWith('sb_secret_')) return 'service_role';
+  if(k.startsWith('sb_publishable_')) return 'anon';
+  // legacy JWT: eyJ...
+  const parts = k.split('.');
+  if(parts.length===3){
+    try{
+      const b64 = parts[1].replace(/-/g,'+').replace(/_/g,'/');
+      const padded = b64 + '='.repeat((4 - b64.length % 4) % 4);
+      const json = JSON.parse(atob(padded));
+      return json.role || null;
+    }catch{ return null; }
+  }
+  return null;
+}
+
+function isServiceRoleKey(key){
+  const role = getSupabaseKeyRole(key);
+  return role==='service_role' || (key||'').trim().startsWith('sb_secret_');
+}
 function linkify(html) { return html.replace(/https?:\/\/[^\s<&]+/g, url => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`); }
 
 /** Lightweight markdown renderer: escapes HTML first, then applies markdown formatting */
@@ -531,6 +555,7 @@ export {
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, fetchAll,
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA,
+  getSupabaseKeyRole, isServiceRoleKey,
 };
 
 window.closeDeleteConfirm = closeDeleteConfirm;

@@ -401,7 +401,7 @@ export function initHero() {
   // ── Scroll indicator click → auto-scroll to gate ──
   const ind = document.getElementById('heroScrollInd');
   if (ind) {
-    ind.onclick = () => {
+    ind.addEventListener('click', () => {
       const spacer = document.querySelector('.hero-spacer');
       if (!spacer) return;
       const target = spacer.offsetTop + spacer.offsetHeight;

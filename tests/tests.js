@@ -472,10 +472,11 @@ test('Welcome habit dblclick calls canonical window.editHabitInline', () => {
 test('Welcome habit edit button calls window.editHabitInline (not modal)', () => {
   const welcome = jsFiles['welcome.js'];
   // The renderFocusHabitItem function should use editHabitInline for the pencil button
-  const editBtnMatch = welcome.match(/onclick=.*edit.*Habit.*pencil/g) || [];
+  // Support both legacy onclick and CSP delegated data-action
+  const editBtnMatch = welcome.match(/onclick=.*edit.*Habit.*pencil/g) || welcome.match(/data-action="edit-habit-inline"/g) || [];
   assert(editBtnMatch.length > 0, 'welcome.js: should have an edit button for habits with pencil icon');
-  // Must reference editHabitInline, not welcomeEditHabit or openEditHabitModal
-  const usesInline = editBtnMatch.some(m => m.includes('editHabitInline'));
+  // Must reference editHabitInline (directly or via delegation mapping), not welcomeEditHabit or openEditHabitModal
+  const usesInline = editBtnMatch.some(m => m.includes('editHabitInline') || m.includes('edit-habit-inline')) || welcome.includes('edit-habit-inline');
   assert(usesInline,
     'welcome.js: habit edit button must call editHabitInline, not welcomeEditHabit or openEditHabitModal');
   // Must NOT have welcomeEditHabit function defined
@@ -1080,7 +1081,8 @@ test('sharing-ui.js renderSharingPane has inline auth prompt for unauthenticated
 test('sharing-ui.js renderSharingPane shows signed-in badge for authenticated supabase', () => {
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
   assert(sui.includes('auth-signed-in-badge'), 'auth-signed-in-badge class missing');
-  assert(sui.includes('signOutFromSharing'), 'signOutFromSharing reference missing');
+  // Accept both direct function reference and delegated data-action
+  assert(sui.includes('signOutFromSharing') || sui.includes('sign-out-from-sharing'), 'signOutFromSharing reference missing (expected data-action or direct call)');
 });
 
 test('window.sendAuthFromSharing and window.signOutFromSharing are exposed', () => {

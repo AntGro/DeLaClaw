@@ -229,7 +229,7 @@ function renderDeckNavButtons() {
   const decks = [...new Set([...cardDecks, ...textDecks])].sort();
 
   // Draft nav button first
-  let html = `<button class="category-nav-btn" style="--cat-color:${DRAFT_COLOR}" onclick="navigateToFlashDeck('__drafts')">${lucideIcon('file-edit', 14, DRAFT_COLOR)} ${t('flashcards.draft')} (${allDrafts.length})</button>`;
+  let html = `<button class="category-nav-btn" style="--cat-color:${DRAFT_COLOR}" data-action="navigate-to-flash-deck" data-deck="__drafts">${lucideIcon('file-edit', 14, DRAFT_COLOR)} ${t('flashcards.draft')} (${allDrafts.length})</button>`;
 
   html += decks.map(deck => {
     const color = getDeckColor(deck);
@@ -240,7 +240,7 @@ function renderDeckNavButtons() {
     const count = type === 'text'
       ? allTexts.filter(tx => tx.deck === deck).length
       : allCards.filter(c => c.deck === deck).length;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" onclick="navigateToFlashDeck('${escQ(deck)}')" title="${esc(deck)}">${icon} ${esc(display)} (${count})</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-flash-deck" data-deck="${esc(deck)}" title="${esc(deck)}">${icon} ${esc(display)} (${count})</button>`;
   }).join('');
 
   container.innerHTML = html;
@@ -352,8 +352,8 @@ function renderDraftsBucket(q) {
       </div>
     </div>
     <div class="add-task">
-      <textarea placeholder="${t('flashcards.draft_placeholder')}" id="draftQuickInput" onkeydown="handleDraftInput(event)" rows="1" style="resize:none;overflow:hidden;"></textarea>
-      <button onclick="quickAddDraft()">${lucideIcon('plus', 16)}</button>
+      <textarea placeholder="${t('flashcards.draft_placeholder')}" id="draftQuickInput" data-action="handle-draft-input" rows="1" style="resize:none;overflow:hidden;"></textarea>
+      <button data-action="quick-add-draft">${lucideIcon('plus', 16)}</button>
     </div>
     <div class="task-list">
       ${drafts.length === 0 ? '<p class="empty-msg">' + t('flashcards.draft_hint') + '</p>' : ''}
@@ -376,16 +376,16 @@ function renderDraftItem(d) {
       <div class="fc-proposal-label">${lucideIcon('sparkles', 14, '#22c55e')} Proposed card:</div>
       <div class="fc-proposal-qa"><strong>Q:</strong> ${esc(d.proposed_front)}</div>
       <div class="fc-proposal-qa"><strong>A:</strong> ${esc(d.proposed_back)}</div>
-      <div class="fc-proposal-deck"><strong>${t('flashcards.deck')}:</strong> <select onchange="updateProposedDeck('${d.id}', this.value)">${deckOptions}</select></div>
+      <div class="fc-proposal-deck"><strong>${t('flashcards.deck')}:</strong> <select data-action="update-proposed-deck" data-id="${esc(d.id)}">${deckOptions}</select></div>
       <div class="fc-proposal-actions">
-        <button class="fc-proposal-accept" onclick="acceptProposal('${d.id}')" title="${t('flashcards.accept')}">${lucideIcon('check', 14, '#fff')} <span class="btn-label">${t('flashcards.accept')}</span></button>
-        <button class="fc-proposal-edit" onclick="editProposal('${d.id}')" title="${t('common.edit')}">${lucideIcon('pencil', 14)} <span class="btn-label">${t('common.edit')}</span></button>
-        <button class="fc-proposal-feedback-btn" onclick="toggleFeedbackInput('${d.id}')" title="${t('flashcards.feedback')}">${lucideIcon('message-square', 14)} <span class="btn-label">${t('flashcards.feedback')}</span></button>
-        <button class="fc-proposal-reject" onclick="rejectProposal('${d.id}')" title="${t('flashcards.reject')}">${lucideIcon('x', 14)} <span class="btn-label">${t('flashcards.reject')}</span></button>
+        <button class="fc-proposal-accept" data-action="accept-proposal" data-id="${esc(d.id)}" title="${t('flashcards.accept')}">${lucideIcon('check', 14, '#fff')} <span class="btn-label">${t('flashcards.accept')}</span></button>
+        <button class="fc-proposal-edit" data-action="edit-proposal" data-id="${esc(d.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 14)} <span class="btn-label">${t('common.edit')}</span></button>
+        <button class="fc-proposal-feedback-btn" data-action="toggle-feedback-input" data-id="${esc(d.id)}" title="${t('flashcards.feedback')}">${lucideIcon('message-square', 14)} <span class="btn-label">${t('flashcards.feedback')}</span></button>
+        <button class="fc-proposal-reject" data-action="reject-proposal" data-id="${esc(d.id)}" title="${t('flashcards.reject')}">${lucideIcon('x', 14)} <span class="btn-label">${t('flashcards.reject')}</span></button>
       </div>
       <div class="fc-feedback-area" id="feedbackArea-${d.id}" style="display:none;">
         <textarea class="fc-feedback-input" id="feedbackInput-${d.id}" placeholder="${t('flashcards.feedback_placeholder')}" rows="2"></textarea>
-        <button class="fc-feedback-submit" onclick="submitFeedback('${d.id}')">${lucideIcon('send', 14, '#fff')} ${t('flashcards.feedback')}</button>
+        <button class="fc-feedback-submit" data-action="submit-feedback" data-id="${esc(d.id)}">${lucideIcon('send', 14, '#fff')} ${t('flashcards.feedback')}</button>
       </div>
     </div>`;
   }
@@ -396,9 +396,9 @@ function renderDraftItem(d) {
       <span class="todo-text" style="cursor:text;">${esc(d.content.length > 120 ? d.content.slice(0, 120) + '…' : d.content)}</span>
       ${isPending ? `<span class="fc-status-badge fc-status-pending">${t('flashcards.generating')}</span>` : ''}
       <div class="todo-actions">
-        ${!hasProposal && !isPending ? `<button onclick="requestProposal('${d.id}')" title="${t('flashcards.propose')}">${lucideIcon('sparkles', 16)}</button>` : ''}
-        <button onclick="startInlineEditDraftById('${d.id}')" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
-        <button onclick="deleteDraft('${d.id}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        ${!hasProposal && !isPending ? `<button data-action="request-proposal" data-id="${esc(d.id)}" title="${t('flashcards.propose')}">${lucideIcon('sparkles', 16)}</button>` : ''}
+        <button data-action="start-inline-edit-draft" data-id="${esc(d.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
+        <button data-action="delete-draft" data-id="${esc(d.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>
     </div>
     ${proposalHtml}
@@ -465,7 +465,7 @@ function renderFlashcardDeck(deck, q) {
   const practiceCount = dueCount + newCount;
   let practiceButton = '';
   if (practiceCount > 0) {
-    practiceButton = `<button class="fc-practice-btn" onclick="startPractice('${escQ(deck)}')" title="${t('flashcards.practice')}">${lucideIcon('play', 14, '#fff')} ${practiceCount}</button>`;
+    practiceButton = `<button class="fc-practice-btn" data-action="start-practice" data-deck="${esc(deck)}" title="${t('flashcards.practice')}">${lucideIcon('play', 14, '#fff')} ${practiceCount}</button>`;
   } else {
     practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')} Caught up</span>`;
   }
@@ -479,10 +479,10 @@ function renderFlashcardDeck(deck, q) {
         </div>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="todo-cat-shortname-btn" onclick="promptFlashShortname('${escQ(deck)}')" title="${getFlashShortname(deck) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deck)}" title="${getFlashShortname(deck) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
         ${practiceButton}
-        <button class="archive-project-btn" onclick="openAddFlashcardModal('${escQ(deck)}')" title="${t('flashcards.add_card')}">${lucideIcon('plus', 16)}</button>
-        <button class="todo-cat-delete-btn" onclick="deleteDeck('${escQ(deck)}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        <button class="archive-project-btn" data-action="open-add-flashcard" data-deck="${esc(deck)}" title="${t('flashcards.add_card')}">${lucideIcon('plus', 16)}</button>
+        <button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deck)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>
     </div>
     <div class="task-list">
@@ -534,7 +534,7 @@ function renderTextDeck(deck, q) {
   const trPracticeCount = textDueCount + textNewCount;
   let practiceButton = '';
   if (trPracticeCount > 0) {
-    practiceButton = `<button class="fc-practice-btn tr-practice-btn" onclick="startTextPractice('${escQ(deck)}')" title="${t('text_revision.practice')}">${lucideIcon('book-open', 14, '#fff')} ${trPracticeCount}</button>`;
+    practiceButton = `<button class="fc-practice-btn tr-practice-btn" data-action="start-text-practice" data-deck="${esc(deck)}" title="${t('text_revision.practice')}">${lucideIcon('book-open', 14, '#fff')} ${trPracticeCount}</button>`;
   } else {
     practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')} Caught up</span>`;
   }
@@ -548,10 +548,10 @@ function renderTextDeck(deck, q) {
         </div>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="todo-cat-shortname-btn" onclick="promptFlashShortname('${escQ(deck)}')" title="${getFlashShortname(deck) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deck)}" title="${getFlashShortname(deck) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
         ${practiceButton}
-        <button class="archive-project-btn" onclick="openAddTextModal('${escQ(deck)}')" title="${t('text_revision.add_text')}">${lucideIcon('plus', 16)}</button>
-        <button class="todo-cat-delete-btn" onclick="deleteDeck('${escQ(deck)}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        <button class="archive-project-btn" data-action="open-add-text" data-deck="${esc(deck)}" title="${t('text_revision.add_text')}">${lucideIcon('plus', 16)}</button>
+        <button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deck)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>
     </div>
     <div class="task-list">
@@ -595,8 +595,8 @@ function renderFlashcardItem(c, color) {
         ${badge}
       </div>
       <div class="todo-actions">
-        <button onclick="openEditFlashcardModal('${c.id}')" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
-        <button onclick="deleteFlashcard('${c.id}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        <button data-action="open-edit-flashcard" data-id="${esc(c.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
+        <button data-action="delete-flashcard" data-id="${esc(c.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>
     </div>
   </div>`;
@@ -610,14 +610,14 @@ window.filterFlashcards = function(e) {
 // ── Draft CRUD ──
 window.openAddDraftModal = function() {
   closeAllFlashModals();
-  const html = `<div class="modal-overlay" id="addDraftModal" style="display:flex;" onclick="if(event.target===this)closeAddDraftModal()">
+  const html = `<div class="modal-overlay" id="addDraftModal" style="display:flex;" data-action="close-add-draft" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('file-edit', 18, DRAFT_COLOR)} ${t('flashcards.add_draft')}</h2>
       <label>${t('flashcards.what_to_learn')}</label>
       <textarea id="newDraftContent" rows="4" placeholder="${t('flashcards.learn_placeholder')}"></textarea>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeAddDraftModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewDraft()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-add-draft">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-new-draft">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -805,7 +805,7 @@ window.editProposal = function(id) {
   const deckOptions = [...new Set([...allCards.map(c => c.deck), currentDeck])].sort().map(dk =>
     `<option value="${esc(dk)}"${dk === currentDeck ? ' selected' : ''}>${esc(dk)}</option>`
   ).join('');
-  const html = `<div class="modal-overlay" id="editProposalModal" style="display:flex;" onclick="if(event.target===this)closeEditProposalModal()">
+  const html = `<div class="modal-overlay" id="editProposalModal" style="display:flex;" data-action="close-edit-proposal" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('pencil', 18, '#8b5cf6')} ${t('flashcards.edit_proposal')}</h2>
       <label>${t('flashcards.question')}</label>
@@ -815,8 +815,8 @@ window.editProposal = function(id) {
       <label>${t('flashcards.deck')}</label>
       <select id="editProposalDeck">${deckOptions}</select>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeEditProposalModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveEditedProposal('${draft.id}')">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-edit-proposal">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-edited-proposal" data-id="${esc(draft.id)}">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -853,7 +853,7 @@ window.updateProposedDeck = async function(id, deck) {
 // ── Flashcard CRUD ──
 window.openAddFlashcardModal = function(deck) {
   closeAllFlashModals();
-  const html = `<div class="modal-overlay" id="addFlashcardModal" style="display:flex;" onclick="if(event.target===this)closeAddFlashcardModal()">
+  const html = `<div class="modal-overlay" id="addFlashcardModal" style="display:flex;" data-action="close-add-flashcard" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('plus', 18, '#8b5cf6')} ${t('flashcards.add_card')}</h2>
       <input type="hidden" id="newFlashDeck" value="${esc(deck || 'General')}">
@@ -862,8 +862,8 @@ window.openAddFlashcardModal = function(deck) {
       <label>${t('flashcards.answer')}</label>
       <textarea id="newFlashBack" rows="3" placeholder="${t('flashcards.answer_placeholder')}"></textarea>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeAddFlashcardModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewFlashcard()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-add-flashcard">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-new-flashcard">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -892,7 +892,7 @@ window.openEditFlashcardModal = function(id) {
   closeAllFlashModals();
   const decks = [...new Set(allCards.map(c => c.deck))].sort();
   const deckOptions = decks.map(d => `<option value="${esc(d)}" ${d === card.deck ? 'selected' : ''}>${esc(d)}</option>`).join('');
-  const html = `<div class="modal-overlay" id="editFlashcardModal" style="display:flex;" onclick="if(event.target===this)closeEditFlashcardModal()">
+  const html = `<div class="modal-overlay" id="editFlashcardModal" style="display:flex;" data-action="close-edit-flashcard" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('pencil', 18, '#f59e0b')} ${t('flashcards.edit_card')}</h2>
       <input type="hidden" id="editFlashId" value="${id}">
@@ -903,8 +903,8 @@ window.openEditFlashcardModal = function(id) {
       <label>${t('flashcards.answer')}</label>
       <textarea id="editFlashBack" rows="3">${esc(card.back)}</textarea>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeEditFlashcardModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveEditFlashcard()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-edit-flashcard">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-edit-flashcard">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -940,20 +940,20 @@ window.deleteFlashcard = function(id) {
 // ── New Deck ──
 window.openAddFlashDeckModal = function() {
   closeAllFlashModals();
-  const html = `<div class="modal-overlay" id="addFlashDeckModal" style="display:flex;" onclick="if(event.target===this)closeAddFlashDeckModal()">
+  const html = `<div class="modal-overlay" id="addFlashDeckModal" style="display:flex;" data-action="close-add-flash-deck" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('brain', 18, '#06b6d4')} ${t('flashcards.new_deck')}</h2>
       <label>${t('flashcards.deck_name')}</label>
       <input type="text" id="newDeckName" placeholder="${t('flashcards.deck_placeholder')}">
       <label>${t('flashcards.deck_type')}</label>
       <div class="deck-type-selector">
-        <button class="deck-type-btn active" id="deckTypeFlashcard" onclick="selectDeckType('flashcard')">${lucideIcon('layers', 14)} ${t('flashcards.type_flashcard')}</button>
-        <button class="deck-type-btn" id="deckTypeText" onclick="selectDeckType('text')">${lucideIcon('book-open', 14)} ${t('flashcards.type_text')}</button>
+        <button class="deck-type-btn active" id="deckTypeFlashcard" data-action="select-deck-type" data-type="flashcard">${lucideIcon('layers', 14)} ${t('flashcards.type_flashcard')}</button>
+        <button class="deck-type-btn" id="deckTypeText" data-action="select-deck-type" data-type="text">${lucideIcon('book-open', 14)} ${t('flashcards.type_text')}</button>
       </div>
       <input type="hidden" id="newDeckType" value="flashcard">
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeAddFlashDeckModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewFlashDeck()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-add-flash-deck">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-new-flash-deck">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -1079,9 +1079,9 @@ function showNextCard() {
       ${practiceHeaderLogo()}
       <div class="practice-progress-bar"><div class="practice-progress-fill" style="width:${pct}%;"></div></div>
       <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${card.deck}</span></div>
-      <button class="practice-close" onclick="endPractice()">✕</button>
+      <button class="practice-close" data-action="end-practice">✕</button>
     </div>
-    <div class="practice-card-area" onclick="revealCard()">
+    <div class="practice-card-area" data-action="reveal-card">
       <div class="practice-card" id="practiceCard">
         <div class="practice-card-front">
           <div class="practice-card-label">${t('flashcards.question')}</div>
@@ -1095,10 +1095,10 @@ function showNextCard() {
     </div>
     <div class="practice-hint" id="practiceHint">${t('flashcards.tap_to_reveal')}</div>
     <div class="practice-buttons" id="practiceButtons" style="display:none;">
-      <button class="rating-btn rating-again" onclick="rateCard(1)"><span class="rating-num">1</span> ${t('flashcards.again')}</button>
-      <button class="rating-btn rating-hard" onclick="rateCard(2)"><span class="rating-num">2</span> ${t('flashcards.hard')}</button>
-      <button class="rating-btn rating-good" onclick="rateCard(3)"><span class="rating-num">3</span> ${t('flashcards.good')}</button>
-      <button class="rating-btn rating-easy" onclick="rateCard(4)"><span class="rating-num">4</span> ${t('flashcards.easy')}</button>
+      <button class="rating-btn rating-again" data-action="rate-card" data-rating="1"><span class="rating-num">1</span> ${t('flashcards.again')}</button>
+      <button class="rating-btn rating-hard" data-action="rate-card" data-rating="2"><span class="rating-num">2</span> ${t('flashcards.hard')}</button>
+      <button class="rating-btn rating-good" data-action="rate-card" data-rating="3"><span class="rating-num">3</span> ${t('flashcards.good')}</button>
+      <button class="rating-btn rating-easy" data-action="rate-card" data-rating="4"><span class="rating-num">4</span> ${t('flashcards.easy')}</button>
     </div>`;
   initMarquee();
 }
@@ -1153,7 +1153,7 @@ function showSessionSummary() {
   const hasMore = remainingPool.length > 0;
 
   const continueBtn = hasMore
-    ? `<button class="btn practice-continue-btn" onclick="startPractice('${escQ(sessionDeck || '')}')">${t('flashcards.continue_session')}</button>`
+    ? `<button class="btn practice-continue-btn" data-action="start-practice" data-deck="${esc(sessionDeck || '')}">${t('flashcards.continue_session')}</button>`
     : '';
 
   overlay.innerHTML = `
@@ -1168,7 +1168,7 @@ function showSessionSummary() {
       </div>
       <div class="practice-summary-actions">
         ${continueBtn}
-        <button class="btn practice-done-btn" onclick="endPractice()">${t('common.close')}</button>
+        <button class="btn practice-done-btn" data-action="end-practice">${t('common.close')}</button>
       </div>
     </div>`;
 }
@@ -1188,7 +1188,7 @@ function showAllCaughtUp(kind) {
       <h2>${t('flashcards.all_caught_up')}</h2>
       <p class="all-caught-up-detail">${subtitle}</p>
       <div class="practice-summary-actions">
-        <button class="btn practice-done-btn" onclick="endPractice()">${t('common.close')}</button>
+        <button class="btn practice-done-btn" data-action="end-practice">${t('common.close')}</button>
       </div>
     </div>`;
 }
@@ -1246,10 +1246,10 @@ function renderTextItem(tx, color) {
         ${progressBar}
       </div>
       <div class="todo-actions">
-        <button onclick="startTextPracticeForText('${tx.id}')" title="${t('text_revision.revise_this')}">${lucideIcon('book-open', 16)}</button>
+        <button data-action="start-text-practice-for-text" data-id="${esc(tx.id)}" title="${t('text_revision.revise_this')}">${lucideIcon('book-open', 16)}</button>
         <button class="tr-expand-toggle" data-text-id="${tx.id}" title="Expand">${lucideIcon('chevron-down', 16)}</button>
-        <button onclick="openEditTextModal('${tx.id}')" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
-        <button onclick="deleteText('${tx.id}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        <button data-action="open-edit-text" data-id="${esc(tx.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
+        <button data-action="delete-text" data-id="${esc(tx.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>
     </div>
     <div class="tr-text-body" id="trBody-${tx.id}" style="display:none;">
@@ -1280,7 +1280,7 @@ function splitTextIntoChunks(content, linesPerChunk) {
 // ── Add Text Modal ──
 window.openAddTextModal = function(deck) {
   closeAllFlashModals();
-  const html = `<div class="modal-overlay" id="addTextModal" style="display:flex;" onclick="if(event.target===this)closeAddTextModal()">
+  const html = `<div class="modal-overlay" id="addTextModal" style="display:flex;" data-action="close-add-text" data-overlay-close="true">
     <div class="modal modal-wide">
       <h2>${lucideIcon('file-text', 18, '#6366f1')} ${t('text_revision.add_text')}</h2>
       <input type="hidden" id="newTextDeck" value="${esc(deck || 'General')}">
@@ -1301,8 +1301,8 @@ window.openAddTextModal = function(deck) {
         </div>
       </div>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeAddTextModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewText()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-add-text">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-new-text">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -1364,7 +1364,7 @@ window.openEditTextModal = function(id) {
   closeAllFlashModals();
   const decks = [...new Set([...allTexts.map(t => t.deck), ...allCards.map(c => c.deck)])].sort();
   const deckOptions = decks.map(d => `<option value="${esc(d)}" ${d === tx.deck ? 'selected' : ''}>${esc(d)}</option>`).join('');
-  const html = `<div class="modal-overlay" id="editTextModal" style="display:flex;" onclick="if(event.target===this)closeEditTextModal()">
+  const html = `<div class="modal-overlay" id="editTextModal" style="display:flex;" data-action="close-edit-text" data-overlay-close="true">
     <div class="modal modal-wide">
       <h2>${lucideIcon('pencil', 18, '#f59e0b')} ${t('text_revision.edit_text')}</h2>
       <input type="hidden" id="editTextId" value="${id}">
@@ -1377,8 +1377,8 @@ window.openEditTextModal = function(id) {
       <label>${t('text_revision.content_label')}</label>
       <textarea id="editTextContent" rows="10" style="font-family:monospace;font-size:0.85rem;">${esc(tx.content)}</textarea>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeEditTextModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveEditText()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-edit-text">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-edit-text">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -1523,7 +1523,7 @@ function showTextPracticeOverlay(text, chunk) {
       ${practiceHeaderLogo()}
       <div class="practice-progress-bar"><div class="practice-progress-fill" style="width:100%;"></div></div>
       <div class="practice-meta"><span class="practice-meta-text">${esc(text.title)}${authorStr}</span></div>
-      <button class="practice-close" onclick="endTextPractice()">X</button>
+      <button class="practice-close" data-action="end-text-practice">X</button>
     </div>
     <div class="tr-practice-area">
       <div class="tr-context-section">
@@ -1531,11 +1531,11 @@ function showTextPracticeOverlay(text, chunk) {
         ${contextHtml}
       </div>
       <div class="tr-lines-container" id="trLinesContainer">
-        ${chunkLines.map((line, i) => `<div class="tr-line tr-line-masked${i === 0 ? ' tr-line-next' : ''}" data-line-idx="${i}" data-text="${esc(line || '\u00A0')}" onclick="handleLineClick(this)">${'• '.repeat(Math.max(1, Math.ceil((line || ' ').length / 6)))}</div>`).join('')}
+        ${chunkLines.map((line, i) => `<div class="tr-line tr-line-masked${i === 0 ? ' tr-line-next' : ''}" data-line-idx="${i}" data-text="${esc(line || '\u00A0')}" data-action="handle-line-click">${'• '.repeat(Math.max(1, Math.ceil((line || ' ').length / 6)))}</div>`).join('')}
       </div>
       <div class="tr-hint" id="trHint">${t('text_revision.tap_to_reveal')}</div>
       <div class="tr-submit-section" id="trSubmitSection" style="display:none;">
-        <button class="btn practice-done-btn" onclick="submitTextReview('${chunk.id}', ${chunkLines.length})">${t('text_revision.submit')}</button>
+        <button class="btn practice-done-btn" data-action="submit-text-review" data-id="${esc(chunk.id)}" data-lines="${chunkLines.length}">${t('text_revision.submit')}</button>
       </div>
     </div>`;
   initMarquee();
@@ -1641,10 +1641,10 @@ function showTextPracticeSummary(known, total, rating) {
 
   let actionButtons = '';
   if (sameTextMore) {
-    actionButtons += `<button class="btn practice-continue-btn" onclick="continueTextSameText()">${t('text_revision.continue_same_text')}</button>`;
+    actionButtons += `<button class="btn practice-continue-btn" data-action="continue-text-same-text">${t('text_revision.continue_same_text')}</button>`;
   }
   if (anyMore) {
-    actionButtons += `<button class="btn practice-continue-btn practice-continue-alt" onclick="startTextPractice('${escQ(trSessionDeck || '')}')">${t('text_revision.continue_another')}</button>`;
+    actionButtons += `<button class="btn practice-continue-btn practice-continue-alt" data-action="start-text-practice" data-deck="${esc(trSessionDeck || '')}">${t('text_revision.continue_another')}</button>`;
   }
 
   overlay.innerHTML = `
@@ -1659,7 +1659,7 @@ function showTextPracticeSummary(known, total, rating) {
       </div>
       <div class="practice-summary-actions">
         ${actionButtons}
-        <button class="btn practice-done-btn" onclick="endTextPractice()">${t('common.close')}</button>
+        <button class="btn practice-done-btn" data-action="end-text-practice">${t('common.close')}</button>
       </div>
     </div>`;
 }

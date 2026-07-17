@@ -164,7 +164,7 @@ function welcomeOpenPriorityPicker(id, event) {
     const dot = lv.color
       ? `<span class="priority-picker-dot" style="background:${lv.color}"></span>`
       : `${lucideIcon('circle-off', 14, 'var(--muted)')}`;
-    return `<div class="priority-picker-option${isActive ? ' active' : ''}" onclick="welcomeSetPriority('${id}','${lv.key}')">${dot}<span>${label}</span></div>`;
+    return `<div class="priority-picker-option${isActive ? ' active' : ''}" data-action="welcome-set-priority" data-todo-id="${esc(id)}" data-priority="${esc(lv.key)}">${dot}<span>${label}</span></div>`;
   }).join('');
 
   document.body.appendChild(picker);
@@ -227,7 +227,7 @@ function renderFocusTodoItem(td) {
   const flagIconName = td.priority === 'urgent' ? 'alert-triangle' : 'flag';
   const flagIcon = flagColor ? lucideIcon(flagIconName, 14, flagColor) : lucideIcon('flag', 14);
   const flagTitle = t('todos.set_priority');
-  const flagBtn = `<button class="todo-flag-btn ${isFlagged ? 'flagged' : ''}" onclick="welcomeOpenPriorityPicker('${td.id}', event)" title="${flagTitle}">${flagIcon}</button>`;
+  const flagBtn = `<button class="todo-flag-btn ${isFlagged ? 'flagged' : ''}" data-action="welcome-open-priority-picker" data-todo-id="${esc(td.id)}" title="${flagTitle}">${flagIcon}</button>`;
 
   let dueDateStr = '';
   if (td.due_date) {
@@ -260,10 +260,10 @@ function renderFocusTodoItem(td) {
       ${flagBtn}
       <span class="todo-text">${td.text.length > 150 ? truncateWithShowMore(td.text, 150, td.id, 'todo') : renderMd(td.text)}</span>
       <div class="todo-actions">
-        <button onclick="welcomeToggleTodo('${td.id}', true)" title="${t('common.done')}">${lucideIcon("circle-check", 16)}</button>
-        <button onclick="welcomeSnooze('${td.id}')" title="${t('todos.snooze')}">${lucideIcon("moon", 16)}</button>
-        <button onclick="window.editTodoInline('${td.id}')" title="${t('common.edit')}">${lucideIcon("pencil", 16)}</button>
-        <button onclick="welcomeDeleteTodo('${td.id}')" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>
+        <button data-action="welcome-toggle-todo" data-todo-id="${esc(td.id)}" data-done="true" title="${t('common.done')}">${lucideIcon("circle-check", 16)}</button>
+        <button data-action="welcome-snooze" data-todo-id="${esc(td.id)}" title="${t('todos.snooze')}">${lucideIcon("moon", 16)}</button>
+        <button data-action="edit-todo-inline" data-todo-id="${esc(td.id)}" title="${t('common.edit')}">${lucideIcon("pencil", 16)}</button>
+        <button data-action="welcome-delete-todo" data-todo-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>
       </div>
     </div>
     ${dueDateStr || snoozeInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}</div>` : ''}
@@ -365,10 +365,10 @@ function renderFocusHabitItem(habit) {
         <span class="habit-frequency">${esc(formatFrequency(habit.frequency_rule))}</span>
       </div>
       <div class="habit-actions">
-        <button data-habit-id="${esc(habit.id)}" onclick="welcomeMarkHabitDone('${escQ(habit.id)}', this)" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check", 16)}</button>
-        <button onclick="welcomeOpenHabitHistory('${habit.id}')" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list", 16)} ${completionCount}</button>
-        <button onclick="window.editHabitInline('${habit.id}')" title="${t('common.edit')}">${lucideIcon("pencil", 16)}</button>
-        <button onclick="welcomeDeleteHabit('${habit.id}')" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>
+        <button data-habit-id="${esc(habit.id)}" data-action="welcome-mark-habit-done" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check", 16)}</button>
+        <button data-action="welcome-open-habit-history" data-habit-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list", 16)} ${completionCount}</button>
+        <button data-action="edit-habit-inline" data-habit-id="${esc(habit.id)}" title="${t('common.edit')}">${lucideIcon("pencil", 16)}</button>
+        <button data-action="welcome-delete-habit" data-habit-id="${esc(habit.id)}" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>
       </div>
     </div>
     <div class="habit-meta">
@@ -570,21 +570,21 @@ function renderWelcome() {
   html += `<div class="welcome-nav-shortcuts">`;
   // TODOs bucket
   const todoPending = wTodos.filter(td => !td.done).length;
-  html += `<button class="category-nav-btn" style="--cat-color:#22c55e" onclick="scrollToWelcomeBucket('welcome-bucket-todos')" title="${esc(t('welcome.focus_todos'))}">${lucideIcon('list-checks', 12, '#22c55e')} ${esc(t('welcome.focus_todos'))}${todoPending > 0 ? ' (' + todoPending + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#22c55e" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-todos" title="${esc(t('welcome.focus_todos'))}">${lucideIcon('list-checks', 12, '#22c55e')} ${esc(t('welcome.focus_todos'))}${todoPending > 0 ? ' (' + todoPending + ')' : ''}</button>`;
   // Habits bucket
   const habitsDueNavCount = wHabits.filter(c => !c.is_draft && c.next_due && startOfDay(new Date(c.next_due)) <= todayStart).length;
-  html += `<button class="category-nav-btn" style="--cat-color:#ec4899" onclick="scrollToWelcomeBucket('welcome-bucket-habits')" title="${esc(t('welcome.habits_due'))}">${lucideIcon('repeat', 12, '#ec4899')} ${esc(t('welcome.habits_due'))}${habitsDueNavCount > 0 ? ' (' + habitsDueNavCount + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#ec4899" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-habits" title="${esc(t('welcome.habits_due'))}">${lucideIcon('repeat', 12, '#ec4899')} ${esc(t('welcome.habits_due'))}${habitsDueNavCount > 0 ? ' (' + habitsDueNavCount + ')' : ''}</button>`;
   // Flashcards bucket
   const fcDueNav = wFlashcards.filter(c => c.last_review && (!c.next_review || new Date(c.next_review) <= now)).length;
   const fcNewNav = wFlashcards.filter(c => !c.last_review).length;
   const fcTotalNav = fcDueNav + fcNewNav;
-  html += `<button class="category-nav-btn" style="--cat-color:#06b6d4" onclick="scrollToWelcomeBucket('welcome-bucket-flashcards')" title="${esc(t('welcome.flashcards'))}">${lucideIcon('brain', 12, '#06b6d4')} ${esc(t('welcome.flashcards'))}${fcTotalNav > 0 ? ' (' + fcTotalNav + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#06b6d4" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-flashcards" title="${esc(t('welcome.flashcards'))}">${lucideIcon('brain', 12, '#06b6d4')} ${esc(t('welcome.flashcards'))}${fcTotalNav > 0 ? ' (' + fcTotalNav + ')' : ''}</button>`;
   // Birthdays bucket
-  html += `<button class="category-nav-btn" style="--cat-color:#f97316" onclick="scrollToWelcomeBucket('welcome-bucket-birthdays')" title="${esc(t('welcome.upcoming_birthdays'))}">${lucideIcon('cake', 12, '#f97316')} ${esc(t('welcome.upcoming_birthdays'))}${upcomingBDs.length > 0 ? ' (' + upcomingBDs.length + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#f97316" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-birthdays" title="${esc(t('welcome.upcoming_birthdays'))}">${lucideIcon('cake', 12, '#f97316')} ${esc(t('welcome.upcoming_birthdays'))}${upcomingBDs.length > 0 ? ' (' + upcomingBDs.length + ')' : ''}</button>`;
   // Stats bucket
-  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" onclick="scrollToWelcomeBucket('welcome-bucket-stats')" title="${esc(t('welcome.stats'))}">${lucideIcon('bar-chart-3', 12, 'var(--accent)')} ${esc(t('welcome.stats'))}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-stats" title="${esc(t('welcome.stats'))}">${lucideIcon('bar-chart-3', 12, 'var(--accent)')} ${esc(t('welcome.stats'))}</button>`;
   // Calendar bucket
-  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" onclick="scrollToWelcomeBucket('welcome-bucket-calendar')" title="${esc(t('welcome.coming_up'))}">${lucideIcon('calendar-days', 12, 'var(--accent)')} ${esc(t('welcome.coming_up'))}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-calendar" title="${esc(t('welcome.coming_up'))}">${lucideIcon('calendar-days', 12, 'var(--accent)')} ${esc(t('welcome.coming_up'))}</button>`;
   html += `</div>`;
 
   // Focus TODOs + Habits due — side by side
@@ -621,14 +621,14 @@ function renderWelcome() {
   const todoCats = [...new Set(wTodos.map(td => td.category || ''))].sort();
   if (!todoCats.includes('')) todoCats.unshift('');
   html += `<div class="welcome-quick-add">`;
-  html += `<select class="welcome-quick-cat-select" onchange="this.nextElementSibling.dataset.category=this.value">`;
+  html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
   for (const cat of todoCats) {
     html += `<option value="${esc(cat)}">${esc(cat || 'General')}</option>`;
   }
   html += `</select>`;
-  html += `<input type="text" placeholder="${esc(t('todos.add_todo_placeholder'))}" maxlength="2000" class="todo-cat-input" data-category="${esc(todoCats[0])}" data-priority="medium" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addTodoToCategory(this);}">`;
-  html += `<button class="todo-add-priority-btn" onclick="openQuickAddPriorityPicker(this,event)" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>`;
-  html += `<button onclick="addTodoToCategory(this.closest('.welcome-quick-add').querySelector('.todo-cat-input'))">+</button>`;
+  html += `<input type="text" placeholder="${esc(t('todos.add_todo_placeholder'))}" maxlength="2000" class="todo-cat-input" data-category="${esc(todoCats[0])}" data-priority="medium" data-action="welcome-quick-add-todo-on-enter">`;
+  html += `<button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>`;
+  html += `<button data-action="welcome-add-todo-from-quick">+</button>`;
   html += `</div>`;
   html += `</div>`;
 
@@ -660,13 +660,13 @@ function renderWelcome() {
   const habitCats = [...new Set(wHabits.map(c => c.category || 'General'))].sort();
   if (!habitCats.includes('General')) habitCats.unshift('General');
   html += `<div class="welcome-quick-add">`;
-  html += `<select class="welcome-quick-cat-select" onchange="this.nextElementSibling.dataset.category=this.value">`;
+  html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
   for (const cat of habitCats) {
     html += `<option value="${esc(cat)}">${esc(cat)}</option>`;
   }
   html += `</select>`;
-  html += `<input type="text" placeholder="${esc(t('habits.quick_add_placeholder'))}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(habitCats[0])}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addHabitFromInput(this);}">`;
-  html += `<button onclick="addHabitFromInput(this.previousElementSibling)">+</button>`;
+  html += `<input type="text" placeholder="${esc(t('habits.quick_add_placeholder'))}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(habitCats[0])}" data-action="welcome-quick-add-habit-on-enter">`;
+  html += `<button data-action="welcome-add-habit-from-quick">+</button>`;
   html += `</div>`;
   html += `</div>`;
   html += `</div>`; // close welcome-grid
@@ -691,7 +691,7 @@ function renderWelcome() {
       html += `<div class="welcome-flash-detail">${esc(t('welcome.avg_retrievability'))}: ${Math.round(avgR * 100)}%</div>`;
     }
     if (dueCards.length > 0) {
-      html += `<button class="welcome-flash-btn welcome-flash-btn--secondary" onclick="goToPractice()">${lucideIcon('play', 14)} ${esc(t('welcome.continue_practicing'))}</button>`;
+      html += `<button class="welcome-flash-btn welcome-flash-btn--secondary" data-action="go-to-practice">${lucideIcon('play', 14)} ${esc(t('welcome.continue_practicing'))}</button>`;
     }
   } else if (dueCards.length > 0 || newCards.length > 0) {
     // Not practiced today — prompt to review
@@ -706,7 +706,7 @@ function renderWelcome() {
     if (reviewedCards.length > 0) {
       html += `<div class="welcome-flash-detail">${esc(t('welcome.avg_retrievability'))}: ${Math.round(avgR * 100)}%</div>`;
     }
-    html += `<button class="welcome-flash-btn welcome-flash-btn--primary" onclick="goToPractice()">${lucideIcon('play', 14)} ${esc(t('welcome.go_to_flashcards'))}</button>`;
+    html += `<button class="welcome-flash-btn welcome-flash-btn--primary" data-action="go-to-practice">${lucideIcon('play', 14)} ${esc(t('welcome.go_to_flashcards'))}</button>`;
   } else {
     html += `<div class="welcome-empty">${esc(t('welcome.up_to_date'))}</div>`;
     if (reviewedCards.length > 0) {
@@ -727,7 +727,7 @@ function renderWelcome() {
       html += `<div class="welcome-flash-done">${lucideIcon('circle-check', 16, '#22c55e')} ${esc(t('welcome.revised_today', textReviewedToday.length))}</div>`;
       if (textTotalDue > 0) {
         html += `<div class="welcome-flash-detail">${esc(t('welcome.chunks_still_due', textTotalDue))}</div>`;
-        html += `<button class="welcome-flash-btn welcome-flash-btn--secondary" onclick="goToRevise()">${lucideIcon('book-open', 14)} ${esc(t('welcome.continue_revising'))}</button>`;
+        html += `<button class="welcome-flash-btn welcome-flash-btn--secondary" data-action="go-to-revise">${lucideIcon('book-open', 14)} ${esc(t('welcome.continue_revising'))}</button>`;
       }
     } else if (textTotalDue > 0) {
       html += `<div class="welcome-flash-counts">`;
@@ -738,7 +738,7 @@ function renderWelcome() {
         html += `<span class="welcome-flash-new">${esc(t('welcome.new_chunks', textNewChunks.length))}</span>`;
       }
       html += `</div>`;
-      html += `<button class="welcome-flash-btn welcome-flash-btn--primary" onclick="goToRevise()">${lucideIcon('book-open', 14)} ${esc(t('welcome.revise_now'))}</button>`;
+      html += `<button class="welcome-flash-btn welcome-flash-btn--primary" data-action="go-to-revise">${lucideIcon('book-open', 14)} ${esc(t('welcome.revise_now'))}</button>`;
     } else {
       html += `<div class="welcome-flash-done">${lucideIcon('circle-check', 16, '#22c55e')} ${esc(t('welcome.texts_up_to_date'))}</div>`;
     }
@@ -757,7 +757,7 @@ function renderWelcome() {
       const avatarHtml = b.avatar_url
         ? `<img src="${b.avatar_url}" alt="${esc(b.name)}" class="welcome-birthday-avatar-img">`
         : lucideIcon('user', 16);
-      html += `<div class="welcome-item" onclick="switchView('birthdays')">`;
+      html += `<div class="welcome-item" data-action="switch-view" data-view="birthdays">`;
       html += `<div class="welcome-item-main">`;
       html += `<span class="welcome-birthday-avatar${b.daysUntil === 0 ? ' birthday-today-avatar' : ''}">${avatarHtml}</span>`;
       html += `<span class="welcome-item-text">${esc(b.name)}</span>`;
@@ -862,3 +862,6 @@ function scrollToWelcomeBucket(id) {
   }
 }
 window.scrollToWelcomeBucket = scrollToWelcomeBucket;
+
+// CSP delegation for welcome handled in js/delegation.js — no per-module listeners
+

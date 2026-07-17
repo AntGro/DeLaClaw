@@ -34,7 +34,7 @@ function renderProjectNavButtons(projects) {
   const container = document.getElementById('projectNavButtons');
   if (!container) return;
   container.innerHTML = projects.map(p =>
-    `<button class="category-nav-btn" style="--cat-color:${p.color}" onclick="navigateToProject('${p.id}')" title="Go to ${esc(p.name)}">${esc(p.shortname || p.name)}</button>`
+    `<button class="category-nav-btn" style="--cat-color:${p.color}" data-action="navigate-to-project" data-id="${esc(p.id)}" title="Go to ${esc(p.name)}">${esc(p.shortname || p.name)}</button>`
   ).join('');
 }
 
@@ -130,18 +130,23 @@ function renderArchivedProjects() {
   list.innerHTML = archivedProjects.map(p => `
     <div class="archived-project-item">
       <span>${esc(p.name)} <span style="color:var(--muted);font-size:0.72rem;">${esc(p.tech || '')}</span></span>
-      <button onclick="unarchiveProject('${p.id}')">Restore</button>
-      <button onclick="deleteProject('${p.id}','${escQ(p.name)}')" style="color:var(--red);">${t('common.delete')}</button>
+      <button data-action="unarchive-project" data-id="${esc(p.id)}">Restore</button>
+      <button data-action="delete-project" data-id="${esc(p.id)}" data-name="${esc(p.name)}" style="color:var(--red);">${t('common.delete')}</button>
     </div>
   `).join('');
   window.scrollTo(0, scrollY);
 }
 
 function copyProjectTitle(e, name) {
-  e.stopPropagation();
-  const text = 'Last project ' + name;
+  if (e && e.stopPropagation) e.stopPropagation();
+  // Support delegation: if name not passed, read from dataset
+  const el = e && e.currentTarget ? e.currentTarget : null;
+  const actionEl = e && e.target ? (e.target.closest && e.target.closest('[data-action="copy-project-title"]')) : null;
+  const resolvedName = name || (actionEl && actionEl.dataset.name) || (el && el.dataset && el.dataset.name) || '';
+  const text = 'Last project ' + resolvedName;
   navigator.clipboard.writeText(text).then(() => {
-    const tooltip = e.currentTarget.querySelector('.copy-tooltip');
+    const tipTarget = actionEl || el || (e && e.currentTarget);
+    const tooltip = tipTarget ? tipTarget.querySelector('.copy-tooltip') : null;
     if (tooltip) { tooltip.classList.add('show'); setTimeout(() => tooltip.classList.remove('show'), 1500); }
   });
 }
@@ -185,7 +190,7 @@ function buildProjectCards() {
       <div class="empty-icon">${lucideIcon('folder-kanban', 48, 'var(--muted)')}</div>
       <h3>${t('projects.empty_title')}</h3>
       <p>${t('projects.empty_hint')}</p>
-      <button class="empty-cta" onclick="openAddProjectModal()">${lucideIcon('plus', 16)} ${t('projects.empty_cta')}</button>
+      <button class="empty-cta" data-action="open-add-project">${lucideIcon('plus', 16)} ${t('projects.empty_cta')}</button>
     </div>`;
     renderArchivedProjects();
     renderProjectNavButtons([]);
@@ -198,28 +203,28 @@ function buildProjectCards() {
       <div class="project-card-header">
         <div style="display:flex;align-items:flex-start;gap:6px;">
           <div class="project-info">
-            <strong><span class="project-title-copy" onclick="copyProjectTitle(event, '${escQ(p.name)}')">${esc(p.name)}<span class="copy-tooltip">${t('common.copied')}</span></span></strong>
+            <strong><span class="project-title-copy" data-action="copy-project-title" data-name="${esc(p.name)}">${esc(p.name)}<span class="copy-tooltip">${t('common.copied')}</span></span></strong>
             <span class="tech">${esc(p.tech || '')}</span>
           </div>
         </div>
         <div class="project-header-actions">
           ${p.links.map(l => `<a class="project-link" href="${l.url}" target="_blank">${l.label} ↗</a>`).join(' ')}
-          <button class="expand-project-btn" onclick="toggleExpandProject('${p.id}')" title="Expand/collapse project" id="expand-btn-${p.id}">${lucideIcon('maximize-2', 14, 'currentColor')}</button>
-          <button class="prompt-project-btn" onclick="openProjectPrompt('${p.id}')" title="${t('projects.edit_prompt')}">${lucideIcon("file-text",16)}</button>
-          <button class="archive-project-btn" onclick="openEditProjectModal('${p.id}')" title="${t('projects.edit_project')}">${lucideIcon("pencil",16)}</button>
-          <button class="archive-project-btn" onclick="archiveProject('${p.id}')" title="${t('projects.toggle_archived')}">${lucideIcon("package")}</button>
+          <button class="expand-project-btn" data-action="toggle-expand-project" data-id="${esc(p.id)}" title="Expand/collapse project" id="expand-btn-${p.id}">${lucideIcon('maximize-2', 14, 'currentColor')}</button>
+          <button class="prompt-project-btn" data-action="open-project-prompt" data-id="${esc(p.id)}" title="${t('projects.edit_prompt')}">${lucideIcon("file-text",16)}</button>
+          <button class="archive-project-btn" data-action="open-edit-project" data-id="${esc(p.id)}" title="${t('projects.edit_project')}">${lucideIcon("pencil",16)}</button>
+          <button class="archive-project-btn" data-action="archive-project" data-id="${esc(p.id)}" title="${t('projects.toggle_archived')}">${lucideIcon("package")}</button>
         </div>
       </div>
       <div class="task-list" id="tasks-${p.id}"><p class="empty-msg">${t('common.loading')}</p></div>
-      <div class="archive-toggle" onclick="toggleArchivedTasks('${p.id}')" id="archive-toggle-${p.id}" style="display:none;">
+      <div class="archive-toggle" data-action="toggle-archived-tasks" data-id="${esc(p.id)}" id="archive-toggle-${p.id}" style="display:none;">
         <span class="arrow" id="archive-arrow-${p.id}">▶</span> ${t('projects.archived_tasks')} (<span id="archive-count-${p.id}">0</span>)
-        <button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllArchivedTasks('${p.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
+        <button class="delete-all-archived-btn" data-action="delete-all-archived-tasks" data-id="${esc(p.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
       <div class="archived-tasks" id="archived-tasks-${p.id}"></div>
       <div class="add-task">
-        <textarea placeholder="${t('projects.add_task_placeholder')}" maxlength="${MAX_TEXT_LEN}" id="input-${p.id}" onkeydown="handleTaskInput(event,'${p.id}')" oninput="updateCharCounter(this)" rows="1" style="resize:none;overflow:hidden;"></textarea>
-        <label class="draft-slider" title="${t('projects.status_draft')}"><input type="checkbox" id="draft-${p.id}" onchange="this.parentElement.classList.toggle('active',this.checked)"><span class="draft-slider-track"><span class="draft-slider-thumb"></span></span><span class="draft-slider-label">${t('projects.status_draft')}</span></label>
-        <button onclick="addTask('${p.id}')">${lucideIcon('plus', 16)}</button>
+        <textarea placeholder="${t('projects.add_task_placeholder')}" maxlength="${MAX_TEXT_LEN}" id="input-${p.id}" data-action="task-input" data-id="${esc(p.id)}" rows="1" style="resize:none;overflow:hidden;"></textarea>
+        <label class="draft-slider" title="${t('projects.status_draft')}"><input type="checkbox" id="draft-${p.id}" data-action="toggle-draft-slider"><span class="draft-slider-track"><span class="draft-slider-thumb"></span></span><span class="draft-slider-label">${t('projects.status_draft')}</span></label>
+        <button data-action="add-task" data-id="${esc(p.id)}">${lucideIcon('plus', 16)}</button>
       </div>
       <div class="char-counter" id="counter-${p.id}"></div>
     </div>
@@ -351,17 +356,17 @@ function renderTask(task, isArchived = false) {
 
   let actionBtns = '';
   if (isDraft) {
-    actionBtns += `<button class="promote-btn" data-task-id="${esc(task.id)}" onclick="updateTaskStatus('${escQ(task.id)}','todo', this)" title="${t('projects.promote_todo')}">▶ ${t('projects.promote_todo')}</button>`;
+    actionBtns += `<button class="promote-btn" data-task-id="${esc(task.id)}" data-action="update-task-status" data-id="${esc(task.id)}" data-status="todo" title="${t('projects.promote_todo')}">▶ ${t('projects.promote_todo')}</button>`;
   }
   if (task.status === 'review') {
-    actionBtns += `<button data-task-id="${esc(task.id)}" onclick="updateTaskStatus('${escQ(task.id)}','approved', this)" title="${t('projects.status_approved')}">${lucideIcon("circle-check",16)}</button>`;
-    actionBtns += `<button onclick="openRevisionModal('${task.id}')" title="${t('projects.status_revision')}">${lucideIcon("refresh-cw",16)}</button>`;
+    actionBtns += `<button data-task-id="${esc(task.id)}" data-action="update-task-status" data-id="${esc(task.id)}" data-status="approved" title="${t('projects.status_approved')}">${lucideIcon("circle-check",16)}</button>`;
+    actionBtns += `<button data-action="open-revision-modal" data-id="${esc(task.id)}" title="${t('projects.status_revision')}">${lucideIcon("refresh-cw",16)}</button>`;
   }
   if (task.status === 'approved' && isArchived) {
-    actionBtns += `<button data-task-id="${esc(task.id)}" onclick="updateTaskStatus('${escQ(task.id)}','todo', this)" title="${t('common.reopen')}">${lucideIcon('undo-2', 14)}</button>`;
+    actionBtns += `<button data-task-id="${esc(task.id)}" data-action="update-task-status" data-id="${esc(task.id)}" data-status="todo" title="${t('common.reopen')}">${lucideIcon('undo-2', 14)}</button>`;
   }
-  actionBtns += `<button onclick="promptEditTask('${task.id}')" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>`;
-  actionBtns += `<button onclick="deleteTask('${task.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`;
+  actionBtns += `<button data-action="prompt-edit-task" data-id="${esc(task.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>`;
+  actionBtns += `<button data-action="delete-task" data-id="${esc(task.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`;
 
   const draftClass = isDraft ? ' task-draft' : '';
 
@@ -768,7 +773,7 @@ function expandTask(id) {
 
   let actions = '';
   if (tk.status === 'review') {
-    actions = `<div style="display:flex;gap:8px;margin-top:12px;"><button class="btn" data-task-id="${esc(tk.id)}" onclick="updateTaskStatus('${escQ(tk.id)}','approved', this);closeTaskExpandModal();">${lucideIcon("circle-check",16)} ${t('projects.status_approved')}</button><button class="btn" onclick="closeTaskExpandModal();openRevisionModal('${tk.id}');">${lucideIcon("refresh-cw",16)} ${t('projects.status_revision')}</button></div>`;
+    actions = `<div style="display:flex;gap:8px;margin-top:12px;"><button class="btn" data-task-id="${esc(tk.id)}" data-action="approve-task-and-close" data-id="${esc(tk.id)}" data-status="approved">${lucideIcon("circle-check",16)} ${t('projects.status_approved')}</button><button class="btn" data-action="close-and-open-revision" data-id="${esc(tk.id)}">${lucideIcon("refresh-cw",16)} ${t('projects.status_revision')}</button></div>`;
   }
 
   content.innerHTML = `
@@ -777,7 +782,7 @@ function expandTask(id) {
     ${meta ? `<div class="task-full-meta">${meta}</div>` : ''}
     <div style="font-size:0.72rem;color:var(--muted);">Created: ${new Date(tk.created_at).toLocaleString()} · Status: ${tk.status}</div>
     ${actions}
-    <div style="margin-top:16px;text-align:right;"><button class="btn" onclick="closeTaskExpandModal()">${t('common.close')}</button></div>
+    <div style="margin-top:16px;text-align:right;"><button class="btn" data-action="close-task-expand">${t('common.close')}</button></div>
   `;
   document.getElementById('taskExpandModal').classList.add('visible');
 }
@@ -797,12 +802,12 @@ function openRevisionModal(taskId) {
   const ta = document.getElementById('revisionFeedback');
   ta.focus();
   // Enter submits, Shift+Enter inserts newline
-  ta.onkeydown = function(e) {
+  ta.addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       submitRevision();
     }
-  };
+  });
 }
 
 function closeRevisionModal() {
@@ -902,9 +907,11 @@ async function saveProjectPrompt() {
 // ===================================================================
 // ===================================================================
 function handleTaskInput(event, projectId) {
+  // Support delegation: projectId may be in dataset
+  const pid = projectId || (event && event.target && event.target.dataset && event.target.dataset.id) || (event && event.currentTarget && event.currentTarget.dataset && event.currentTarget.dataset.id);
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
-    addTask(projectId);
+    if (pid) addTask(pid);
     return;
   }
   // Shift+Enter: let the browser insert the newline, then auto-resize

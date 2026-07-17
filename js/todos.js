@@ -309,7 +309,7 @@ function renderTodos() {
       <div class="empty-icon">${lucideIcon('list-checks', 48, 'var(--muted)')}</div>
       <h3>${t('todos.empty_title')}</h3>
       <p>${t('todos.empty_hint')}</p>
-      <button class="empty-cta" onclick="showTodoGeneralCard()">${lucideIcon('plus', 16)} ${t('todos.empty_cta')}</button>
+      <button class="empty-cta" data-action="show-todo-general-card">${lucideIcon('plus', 16)} ${t('todos.empty_cta')}</button>
     </div>`;
     renderCategoryToolbarButtons([]);
     return;
@@ -362,7 +362,7 @@ function renderCategoryToolbarButtons(categoryList) {
     const shortname = getCategoryShortname(cat);
     const displayName = shortname || name;
     const color = getCategoryColor(cat);
-    return `<button class="category-nav-btn" style="--cat-color:${color}" onclick="navigateToCategory('${escQ(cat)}')" title="Go to ${esc(name)}">${esc(displayName)}</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-category" data-category="${esc(cat)}" title="Go to ${esc(name)}">${esc(displayName)}</button>`;
   }).join('');
 }
 
@@ -421,7 +421,7 @@ function renderCategoryCard(category) {
   const statsText = `${pending} ${t('todos.pending').toLowerCase()}` + (doneCount > 0 ? ` · ${doneCount} ${t('todos.done').toLowerCase()}` : '');
 
   const deleteBtn = !isGeneral
-    ? `<button class="todo-cat-delete-btn" onclick="deleteCategory('${escQ(category)}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
+    ? `<button class="todo-cat-delete-btn" data-action="delete-category" data-category="${esc(category)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
     : '';
 
   const activeEmptyMsg = displayActive.length === 0
@@ -437,9 +437,9 @@ function renderCategoryCard(category) {
   // Done toggle (collapsible, like archived tasks in projects)
   let doneToggle = '';
   if (doneCount > 0 && todoFilter !== 'done') {
-    const deleteAllBtn = `<button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllDoneTodos('${escapedCat}')" title="${t('todos.delete_all_done')}">${lucideIcon("trash-2",16)}</button>`;
+    const deleteAllBtn = `<button class="delete-all-archived-btn" data-action="delete-all-done" data-category="${esc(category)}" title="${t('todos.delete_all_done')}">${lucideIcon("trash-2",16)}</button>`;
     doneToggle = `
-      <div class="archive-toggle" onclick="toggleDoneTodos('${catId}')" id="done-toggle-${catId}">
+      <div class="archive-toggle" data-action="toggle-done-todos" data-cat-id="${esc(catId)}" id="done-toggle-${catId}">
         <span class="arrow" id="done-arrow-${catId}">▶</span> ${t('todos.done')} (${doneCount})
         ${deleteAllBtn}
       </div>
@@ -454,7 +454,7 @@ function renderCategoryCard(category) {
     : (activeEmptyMsg || displayActive.map(t => renderTodoItem(t)).join(''));
 
   const shortnameBtn = !isGeneral
-    ? `<button class="todo-cat-shortname-btn" onclick="openEditCategoryModal('${escQ(category)}')" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
+    ? `<button class="todo-cat-shortname-btn" data-action="open-edit-category-modal" data-category="${esc(category)}" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
     : '';
 
   return `<div class="project-card" id="${catId}" data-category="${esc(category)}" style="--cat-color:${catColor}">
@@ -471,10 +471,10 @@ function renderCategoryCard(category) {
       </div>
     </div>
     <div class="todo-cat-add">
-      <input type="text" placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(category)}" data-priority="medium" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addTodoToCategory(this);}" oninput="updateTodoCharCounter(this)">
-      <button class="todo-add-priority-btn" onclick="openQuickAddPriorityPicker(this,event)" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>
-      <button onclick="addTodoToCategory(this.closest('.todo-cat-add').querySelector('.todo-cat-input'))">${lucideIcon('plus', 16)}</button>
-      ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" onclick="shareTodoFromAdd(this)" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
+      <input type="text" placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(category)}" data-priority="medium" data-action="add-todo-to-category">
+      <button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>
+      <button data-action="add-todo-from-add-row">${lucideIcon('plus', 16)}</button>
+      ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-todo-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
     </div>
     <div class="char-counter" id="todo-counter-${catId}"></div>
     <div class="task-list todo-cat-list" data-category="${esc(category)}">
@@ -508,7 +508,7 @@ function renderTodoItem(td) {
   const flagIconName = td.priority === 'urgent' ? 'alert-triangle' : 'flag';
   const flagIcon = flagColor ? lucideIcon(flagIconName, 14, flagColor) : lucideIcon('flag', 14);
   const flagTitle = t('todos.set_priority');
-  const flagBtn = !td.done ? `<button class="todo-flag-btn ${isFlagged ? 'flagged' : ''}" onclick="openPriorityPicker('${td.id}', event)" title="${flagTitle}">${flagIcon}</button>` : '';
+  const flagBtn = !td.done ? `<button class="todo-flag-btn ${isFlagged ? 'flagged' : ''}" data-action="open-priority-picker" data-id="${esc(td.id)}" title="${flagTitle}">${flagIcon}</button>` : '';
 
   let dueDateStr = '';
   if (td.due_date) {
@@ -560,10 +560,10 @@ function renderTodoItem(td) {
       <span class="todo-text">${td.text.length > 150 ? truncateWithShowMore(td.text, 150, td.id, 'todo') : renderMd(td.text)}</span>${sharedHtml}
       ${td.done && td.updated_at ? `<span class="todo-completed-date">${new Date(td.updated_at).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })}</span>` : ''}
       <div class="todo-actions">
-        ${!td.done ? `<button data-todo-id="${esc(td.id)}" onclick="toggleTodo('${escQ(td.id)}', true, this)" title="${t('common.done')}" class="todo-done-btn">${lucideIcon("circle-check",16)}</button>` : `<button data-todo-id="${esc(td.id)}" onclick="toggleTodo('${escQ(td.id)}', false, this)" title="${t('common.undo')}" class="todo-undo-btn">${lucideIcon("refresh-cw",16)}</button>`}
-        ${!td.done ? `<button onclick="openSnoozeModal('${td.id}')" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>` : ''}
-        <button onclick="editTodoInline('${td.id}')" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
-        <button onclick="deleteTodo('${td.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
+        ${!td.done ? `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="true" title="${t('common.done')}" class="todo-done-btn">${lucideIcon("circle-check",16)}</button>` : `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="false" title="${t('common.undo')}" class="todo-undo-btn">${lucideIcon("refresh-cw",16)}</button>`}
+        ${!td.done ? `<button data-action="open-snooze-modal" data-id="${esc(td.id)}" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>` : ''}
+        <button data-action="edit-todo-inline" data-id="${esc(td.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
+        <button data-action="delete-todo" data-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
     </div>
     ${dueDateStr || snoozeInfo || outdatedInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}${outdatedInfo}</div>` : ''}
@@ -596,7 +596,7 @@ function openPriorityPicker(id, event) {
     const dot = lv.color
       ? `<span class="priority-picker-dot" style="background:${lv.color}"></span>`
       : `${lucideIcon('circle-off', 14, 'var(--muted)')}`;
-    return `<div class="priority-picker-option${isActive ? ' active' : ''}" onclick="setTodoPriority('${id}','${lv.key}')">${dot}<span>${label}</span></div>`;
+    return `<div class="priority-picker-option${isActive ? ' active' : ''}" data-action="set-todo-priority" data-id="${esc(id)}" data-priority="${esc(lv.key)}">${dot}<span>${label}</span></div>`;
   }).join('');
 
   document.body.appendChild(picker);
@@ -648,7 +648,7 @@ function openQuickAddPriorityPicker(btn, event) {
     const dot = lv.color
       ? `<span class="priority-picker-dot" style="background:${lv.color}"></span>`
       : `${lucideIcon('circle-off', 14, 'var(--muted)')}`;
-    return `<div class="priority-picker-option${isActive ? ' active' : ''}" onclick="setQuickAddPriority(this,'${lv.key}')">${dot}<span>${label}</span></div>`;
+    return `<div class="priority-picker-option${isActive ? ' active' : ''}" data-action="set-quick-add-priority" data-priority="${esc(lv.key)}">${dot}<span>${label}</span></div>`;
   }).join('');
 
   document.body.appendChild(picker);
@@ -842,7 +842,7 @@ async function editTodoInline(id, itemEl) {
   clearBtn.className = 'todo-edit-deadline-clear';
   clearBtn.textContent = '✕';
   clearBtn.title = t('common.close');
-  clearBtn.onclick = (e) => { e.stopPropagation(); deadlineInput.value = ''; };
+  clearBtn.addEventListener('click', (e) => { e.stopPropagation(); deadlineInput.value = ''; });
   deadlineRow.appendChild(deadlineLabel);
   deadlineRow.appendChild(deadlineInput);
   deadlineRow.appendChild(clearBtn);
@@ -930,13 +930,13 @@ function initTodoModals() {
   // Snooze Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'snoozeModal';
-  m1.innerHTML = `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button onclick="snoozeFor(1,'h')">${t('todos.snooze_1h')}</button><button onclick="snoozeFor(3,'h')">${t('todos.snooze_3h')}</button><button onclick="snoozeFor(1,'d')">${t('todos.snooze_1d')}</button><button onclick="snoozeFor(3,'d')">${t('todos.snooze_3d')}</button><button onclick="snoozeFor(7,'d')">${t('todos.snooze_1w')}</button><button onclick="snoozeFor(1,'M')">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">Or pick a date & time:</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" onclick="closeSnoozeModal()">${t('common.cancel')}</button><button class="modal-save" onclick="submitSnooze()">${t('todos.snooze')}</button></div></div>`;
+  m1.innerHTML = `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button data-action="snooze-for" data-amount="1" data-unit="h">${t('todos.snooze_1h')}</button><button data-action="snooze-for" data-amount="3" data-unit="h">${t('todos.snooze_3h')}</button><button data-action="snooze-for" data-amount="1" data-unit="d">${t('todos.snooze_1d')}</button><button data-action="snooze-for" data-amount="3" data-unit="d">${t('todos.snooze_3d')}</button><button data-action="snooze-for" data-amount="7" data-unit="d">${t('todos.snooze_1w')}</button><button data-action="snooze-for" data-amount="1" data-unit="M">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">Or pick a date & time:</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" data-action="close-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-snooze">${t('todos.snooze')}</button></div></div>`;
   app.appendChild(m1);
 
   // Add Category Modal
   const m2 = document.createElement('div');
   m2.className = 'modal-overlay'; m2.id = 'addCategoryModal';
-  m2.innerHTML = `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewCategory();}"><div class="modal-actions"><button class="modal-cancel" onclick="closeAddCategoryModal()">${t('common.cancel')}</button><button class="modal-save" onclick="saveNewCategory()">${t('common.add')}</button></div></div>`;
+  m2.innerHTML = `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="40" data-action="save-new-category-on-enter"><div class="modal-actions"><button class="modal-cancel" data-action="close-add-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-category">${t('common.add')}</button></div></div>`;
   app.appendChild(m2);
 }
 

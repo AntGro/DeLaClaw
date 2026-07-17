@@ -132,7 +132,7 @@ function renderBirthdays() {
       <div class="empty-icon">${lucideIcon('cake', 48, 'var(--muted)')}</div>
       <h3>${t('birthdays.empty_title')}</h3>
       <p>${t('birthdays.empty_hint')}</p>
-      <button class="empty-cta" onclick="openAddBirthdayModal()">${lucideIcon('plus', 16)} ${t('birthdays.add_first')}</button>
+      <button class="empty-cta" data-action="open-add-birthday">${lucideIcon('plus', 16)} ${t('birthdays.add_first')}</button>
     </div>`;
     document.getElementById('birthdayNavButtons').innerHTML = '';
     return;
@@ -187,7 +187,7 @@ function renderBirthdays() {
   const navContainer = document.getElementById('birthdayNavButtons');
   navContainer.innerHTML = sections.map(s => {
     const display = s.isUpcoming ? t('birthdays.soon') : (s.shortLabel || s.label);
-    return `<button class="category-nav-btn" style="--cat-color:${s.color}" onclick="navigateToBirthdaySection('${s.key}')" title="${s.label}">${display}</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${s.color}" data-action="navigate-to-birthday-section" data-key="${esc(s.key)}" title="${s.label}">${display}</button>`;
   }).join('');
 
   // Render grid
@@ -254,7 +254,7 @@ function renderBirthdayCard(b, isUpcoming) {
     : initial;
 
   return `<div class="bucket-item birthday-card ${days === 0 ? 'birthday-today' : ''} ${isUpcoming ? 'birthday-upcoming' : ''}" data-id="${b.id}">
-    <div class="birthday-avatar" onclick="handleAvatarClick('${b.id}')" title="${t('birthdays.change_photo')}">${avatarInner}</div>
+    <div class="birthday-avatar" data-action="handle-avatar-click" data-id="${esc(b.id)}" title="${t('birthdays.change_photo')}">${avatarInner}</div>
     <div class="birthday-info">
       <div class="birthday-name-row">
         <span class="birthday-name">${esc(b.name)}</span>
@@ -267,8 +267,8 @@ function renderBirthdayCard(b, isUpcoming) {
       </div>
     </div>
     <div class="birthday-actions">
-      <button onclick="openEditBirthdayModal('${b.id}')" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
-      <button onclick="deleteBirthday('${b.id}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+      <button data-action="open-edit-birthday" data-id="${esc(b.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
+      <button data-action="delete-birthday" data-id="${esc(b.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
     </div>
   </div>`;
 }
@@ -288,20 +288,20 @@ function initBirthdayModals() {
     <h2>${lucideIcon('cake', 20)} ${t('birthdays.add_birthday')}</h2>
     <label>${t('common.name')}</label>
     <input type="text" id="newBirthdayName" placeholder="${t('birthdays.name_placeholder')}" maxlength="200"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewBirthday();}">
+      data-action="save-new-birthday-on-enter">
     <label>${t('birthdays.birthday_label')}</label>
     <input type="date" id="newBirthdayDate">
     <label>${t('birthdays.note_label')}</label>
     <input type="text" id="newBirthdayNote" placeholder="${t('birthdays.note_placeholder')}" maxlength="500">
     <label>${t('birthdays.upload_photo')}</label>
     <div class="new-birthday-avatar-row">
-      <div class="new-birthday-avatar-preview" id="newBirthdayAvatarPreview" onclick="pickNewBirthdayAvatar()">${lucideIcon('user', 24)}</div>
-      <button type="button" class="btn new-birthday-avatar-btn" onclick="pickNewBirthdayAvatar()">${lucideIcon('upload', 14)} ${t('birthdays.upload_photo')}</button>
-      <button type="button" class="btn new-birthday-avatar-clear" id="newBirthdayAvatarClear" onclick="clearNewBirthdayAvatar()" style="display:none">${lucideIcon('x', 14)}</button>
+      <div class="new-birthday-avatar-preview" id="newBirthdayAvatarPreview" data-action="pick-new-birthday-avatar">${lucideIcon('user', 24)}</div>
+      <button type="button" class="btn new-birthday-avatar-btn" data-action="pick-new-birthday-avatar">${lucideIcon('upload', 14)} ${t('birthdays.upload_photo')}</button>
+      <button type="button" class="btn new-birthday-avatar-clear" id="newBirthdayAvatarClear" data-action="clear-new-birthday-avatar" style="display:none">${lucideIcon('x', 14)}</button>
     </div>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeAddBirthdayModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveNewBirthday()">${t('common.add')}</button>
+      <button class="modal-cancel" data-action="close-add-birthday">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-new-birthday">${t('common.add')}</button>
     </div>
   </div>`;
   app.appendChild(m1);
@@ -320,8 +320,8 @@ function initBirthdayModals() {
     <label>${t('birthdays.note_label')}</label>
     <input type="text" id="editBirthdayNote" maxlength="500">
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeEditBirthdayModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveEditBirthday()">${t('common.save')}</button>
+      <button class="modal-cancel" data-action="close-edit-birthday">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-birthday">${t('common.save')}</button>
     </div>
   </div>`;
   app.appendChild(m2);
@@ -337,11 +337,11 @@ function pickNewBirthdayAvatar() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
-  input.onchange = () => {
+  input.addEventListener('change', () => {
     const file = input.files[0];
     if (!file) return;
     showCropModalForNew(file);
-  };
+  });
   input.click();
 }
 
@@ -410,8 +410,8 @@ function showCropModalForNew(file) {
   };
   reader.readAsDataURL(file);
 
-  document.getElementById('avatarCropCancelNew').onclick = () => overlay.remove();
-  document.getElementById('avatarCropSaveNew').onclick = () => {
+  document.getElementById('avatarCropCancelNew').addEventListener('click', () => overlay.remove());
+  document.getElementById('avatarCropSaveNew').addEventListener('click', () => {
     try {
       const size = 384;
       const canvas = document.createElement('canvas');
@@ -615,11 +615,11 @@ function pickAvatarFile(id) {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
-  input.onchange = () => {
+  input.addEventListener('change', () => {
     const file = input.files[0];
     if (!file) return;
     showCropModal(file, id);
-  };
+  });
   input.click();
 }
 
@@ -720,8 +720,8 @@ function showCropModal(file, id) {
   }, { passive: false });
   container.addEventListener('touchend', e => { if (e.touches.length < 2) pinchDist0 = null; if (e.touches.length === 0) dragging = false; });
 
-  document.getElementById('avatarCropCancel').onclick = () => overlay.remove();
-  document.getElementById('avatarCropSave').onclick = async () => {
+  document.getElementById('avatarCropCancel').addEventListener('click', () => overlay.remove());
+  document.getElementById('avatarCropSave').addEventListener('click', async () => {
     try {
       const cw = container.clientWidth;
       const canvas = document.createElement('canvas');
@@ -761,17 +761,17 @@ function showAvatarPreview(id, url, name) {
     ? `<div class="avatar-preview-frame"><img src="${url}" alt="${esc(name)}" class="avatar-preview-img"></div>`
     : `<div class="avatar-preview-frame"><div class="avatar-preview-placeholder">${initial}</div></div>`;
   const removeBtn = hasPhoto
-    ? `<button class="avatar-action-btn avatar-remove-btn" onclick="removeAvatar('${id}')" title="${t('birthdays.remove_photo')}">${lucideIcon('trash-2', 18)}</button>`
+    ? `<button class="avatar-action-btn avatar-remove-btn" data-action="remove-avatar" data-id="${esc(id)}" title="${t('birthdays.remove_photo')}">${lucideIcon('trash-2', 18)}</button>`
     : '';
   overlay.innerHTML = `<div class="modal avatar-preview-modal">
     <h2>${esc(name)}</h2>
     ${previewContent}
     <div class="avatar-preview-actions">
-      <button class="avatar-action-btn" onclick="pickAvatarFile('${id}');document.getElementById('avatarPreviewOverlay').remove();" title="${hasPhoto ? t('birthdays.change_photo') : t('birthdays.upload_photo')}">${lucideIcon('upload', 18)}</button>
+      <button class="avatar-action-btn" data-action="pick-avatar-file" data-id="${esc(id)}" title="${hasPhoto ? t('birthdays.change_photo') : t('birthdays.upload_photo')}">${lucideIcon('upload', 18)}</button>
       ${removeBtn}
     </div>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="document.getElementById('avatarPreviewOverlay').remove()">${t('common.close')}</button>
+      <button class="modal-cancel" data-action="close-avatar-preview">${t('common.close')}</button>
     </div>
   </div>`;
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });

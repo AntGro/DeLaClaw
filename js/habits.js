@@ -742,7 +742,7 @@ function renderHabits() {
       <div class="empty-icon">${lucideIcon('calendar-check', 48, 'var(--muted)')}</div>
       <h3>${t('habits.empty_title')}</h3>
       <p>${t('habits.empty_hint')}</p>
-      <button class="empty-cta" onclick="openAddHabitModal()">${lucideIcon('plus', 16)} ${t('habits.empty_cta')}</button>
+      <button class="empty-cta" data-action="open-add-habit-modal">${lucideIcon('plus', 16)} ${t('habits.empty_cta')}</button>
     </div>`;
     renderHabitNavButtons([]);
     return;
@@ -789,7 +789,7 @@ function renderHabitNavButtons(categoryList) {
     const shortname = getHabitShortname(cat);
     const displayName = shortname || cat;
     const count = state.allHabits.filter(c => (c.category || 'General') === cat).length;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" onclick="navigateToHabitCategory('${escQ(cat)}')" title="${esc(cat)}">${esc(displayName)} (${count})</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-habit-category" data-category="${esc(cat)}" title="${esc(cat)}">${esc(displayName)} (${count})</button>`;
   }).join('');
 }
 
@@ -811,7 +811,7 @@ function renderHabitCategoryCard(category) {
   const statsText = `${totalInCat} habit${totalInCat !== 1 ? 's' : ''}` + (overdueCount > 0 ? ` · <span style="color:var(--red)">${overdueCount} ${t('habits.overdue').toLowerCase()}</span>` : '');
 
   const deleteBtn = !isGeneral
-    ? `<button class="todo-cat-delete-btn" onclick="deleteHabitCategory('${escQ(catName)}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
+    ? `<button class="todo-cat-delete-btn" data-action="delete-habit-category" data-category="${esc(catName)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
     : '';
 
   const escapedCat = escQ(catName);
@@ -829,13 +829,13 @@ function renderHabitCategoryCard(category) {
         </div>
       </div>
       <div class="todo-cat-header-actions">
-        <button class="todo-cat-shortname-btn" onclick="openEditHabitCategoryModal('${escapedCat}')" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="open-edit-habit-category-modal" data-category="${esc(catName)}" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>
         ${deleteBtn}
       </div>
     </div>
     <div class="todo-cat-add">
-      <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catName)}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addHabitFromInput(this);}">
-      <button onclick="addHabitFromInput(this.previousElementSibling)">${lucideIcon('plus', 16)}</button>
+      <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catName)}" data-action="add-habit-from-input">
+      <button data-action="add-habit-from-input">${lucideIcon('plus', 16)}</button>
     </div>
     <div class="task-list habit-list todo-cat-list">
       ${items}
@@ -854,7 +854,7 @@ function renderHabitItem(habit) {
     ? `${t('habits.last_done')}: ${lastDone.toLocaleDateString([], { month: 'short', day: 'numeric' })} (${formatHabitRelative(lastDone)})`
     : t('habits.never_done');
 
-  const promoteBtn = isDraft ? `<button onclick="promoteHabit('${habit.id}')" title="${t('habits.promote')}" class="habit-promote-btn">▶ ${t('habits.promote')}</button>` : '';
+  const promoteBtn = isDraft ? `<button data-action="promote-habit" data-id="${esc(habit.id)}" title="${t('habits.promote')}" class="habit-promote-btn">▶ ${t('habits.promote')}</button>` : '';
 
   // Shared habit badge
   const isShared = habit.shared_id && habit.shared_group_id;
@@ -872,15 +872,15 @@ function renderHabitItem(habit) {
       </div>
       <div class="habit-actions">
         ${promoteBtn}
-        ${!isDraft ? `<button data-habit-id="${esc(habit.id)}" onclick="markHabitDone('${escQ(habit.id)}', this)" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
-        <button onclick="openHabitHistory('${habit.id}')" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list",16)} ${completionCount}</button>
-        <button onclick="openEditHabitModal('${habit.id}')" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
-        <button onclick="deleteHabit('${habit.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
+        ${!isDraft ? `<button data-habit-id="${esc(habit.id)}" data-action="mark-habit-done" data-id="${esc(habit.id)}" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
+        <button data-action="open-habit-history" data-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list",16)} ${completionCount}</button>
+        <button data-action="open-edit-habit-modal" data-id="${esc(habit.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
+        <button data-action="delete-habit" data-id="${esc(habit.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
     </div>
     <div class="habit-meta">
       ${dueHtml}
-      ${!isDraft ? `<span class="habit-last-done habit-last-done-editable" onclick="editHabitLastDone('${habit.id}', event)" title="${t('habits.click_to_edit_last_done')}">${lastDoneStr}</span>` : ''}
+      ${!isDraft ? `<span class="habit-last-done habit-last-done-editable" data-action="edit-habit-last-done" data-id="${esc(habit.id)}" title="${t('habits.click_to_edit_last_done')}">${lastDoneStr}</span>` : ''}
     </div>
   </div>`;
 }
@@ -908,31 +908,31 @@ function initHabitModals() {
   // Add Habit Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'addHabitModal';
-  m1.innerHTML = `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><input type="text" id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="200" onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewHabit();}"><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><div id="newHabitGroupRow" style="display:none"><label>${t('sharing.group')}</label><select id="newHabitGroup"><option value="">${t('sharing.no_group')}</option></select></div><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" onclick="closeAddHabitModal()">${t('common.cancel')}</button><button class="modal-save" onclick="saveNewHabit()">${t("common.create")}</button></div></div>`;
+  m1.innerHTML = `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><input type="text" id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="200" data-action="save-new-habit-on-enter"><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><div id="newHabitGroupRow" style="display:none"><label>${t('sharing.group')}</label><select id="newHabitGroup"><option value="">${t('sharing.no_group')}</option></select></div><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit">${t("common.create")}</button></div></div>`;
   app.appendChild(m1);
 
   // Edit Habit Modal
   const m2 = document.createElement('div');
   m2.className = 'modal-overlay'; m2.id = 'editHabitModal';
-  m2.innerHTML = `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><input type="text" id="editHabitName" maxlength="200"><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><div class="modal-actions"><button class="modal-cancel" onclick="closeEditHabitModal()" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" onclick="saveEditHabit()" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
+  m2.innerHTML = `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><input type="text" id="editHabitName" maxlength="200"><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-modal" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
   app.appendChild(m2);
 
   // Habit History Modal
   const m3 = document.createElement('div');
   m3.className = 'modal-overlay'; m3.id = 'habitHistoryModal';
-  m3.innerHTML = `<div class="modal habit-history-modal"><h2>` + lucideIcon("clipboard-list",20) + ` ${t('habits.habit_history')}</h2><p id="habitHistoryName" style="font-size:0.88rem;color:var(--muted);margin-bottom:12px;"></p><div id="habitHistoryList"></div><div class="modal-actions"><button class="modal-cancel" onclick="closeHabitHistoryModal()">${t('common.close')}</button></div></div>`;
+  m3.innerHTML = `<div class="modal habit-history-modal"><h2>` + lucideIcon("clipboard-list",20) + ` ${t('habits.habit_history')}</h2><p id="habitHistoryName" style="font-size:0.88rem;color:var(--muted);margin-bottom:12px;"></p><div id="habitHistoryList"></div><div class="modal-actions"><button class="modal-cancel" data-action="close-habit-history-modal">${t('common.close')}</button></div></div>`;
   app.appendChild(m3);
 
   // Add Habit Category Modal
   const m5 = document.createElement('div');
   m5.className = 'modal-overlay'; m5.id = 'addHabitCategoryModal';
-  m5.innerHTML = `<div class="modal"><h2>` + lucideIcon("folder-plus",20) + ` ${t('habits.add_category')}</h2><label>${t('habits.category_name')}</label><input type="text" id="newHabitCategoryName" placeholder="${t('habits.category_placeholder')}" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewHabitCategory();}"><div class="modal-actions"><button class="modal-cancel" onclick="closeAddHabitCategoryModal()">${t('common.cancel')}</button><button class="modal-save" onclick="saveNewHabitCategory()">${t("common.create")}</button></div></div>`;
+  m5.innerHTML = `<div class="modal"><h2>` + lucideIcon("folder-plus",20) + ` ${t('habits.add_category')}</h2><label>${t('habits.category_name')}</label><input type="text" id="newHabitCategoryName" placeholder="${t('habits.category_placeholder')}" maxlength="40" data-action="save-new-habit-category-on-enter"><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit-category">${t("common.create")}</button></div></div>`;
   app.appendChild(m5);
 
   // Edit Habit Category Modal
   const m6 = document.createElement('div');
   m6.className = 'modal-overlay'; m6.id = 'editHabitCategoryModal';
-  m6.innerHTML = `<div class="modal"><h2>` + lucideIcon("pencil",20) + ` ${t('habits.edit_category')}</h2><input type="hidden" id="editHabitCatOldName"><label>${t('habits.category_name')}</label><input type="text" id="editHabitCatName" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditHabitCategory();}"><label>Shortname</label><input type="text" id="editHabitCatShortname" maxlength="20" placeholder="e.g. STR" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditHabitCategory();}"><label>${t('lists.color')}</label><input type="color" id="editHabitCatColor"><div class="modal-actions"><button class="modal-cancel" onclick="closeEditHabitCategoryModal()">${t('common.cancel')}</button><button class="modal-save" onclick="saveEditHabitCategory()">${t('common.save')}</button></div></div>`;
+  m6.innerHTML = `<div class="modal"><h2>` + lucideIcon("pencil",20) + ` ${t('habits.edit_category')}</h2><input type="hidden" id="editHabitCatOldName"><label>${t('habits.category_name')}</label><input type="text" id="editHabitCatName" maxlength="40" data-action="save-edit-habit-category-on-enter"><label>Shortname</label><input type="text" id="editHabitCatShortname" maxlength="20" placeholder="e.g. STR" data-action="save-edit-habit-category-on-enter"><label>${t('lists.color')}</label><input type="color" id="editHabitCatColor"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit-category">${t('common.save')}</button></div></div>`;
   app.appendChild(m6);
 }
 
@@ -1464,8 +1464,8 @@ function renderHabitHistoryList(habitId, habit) {
         <span class="habit-history-date">${lucideIcon("circle-check",16)} ${dateStr}</span>
         ${noteStr}
         <span class="habit-history-actions">
-          <button onclick="editHabitCompletion('${comp.id}')" title="${t('common.edit')}" class="habit-hist-btn">${lucideIcon("pencil",14,"#f59e0b")}</button>
-          <button onclick="deleteHabitCompletion('${comp.id}')" title="${t('common.delete')}" class="habit-hist-btn">${lucideIcon("trash-2",14,"#ef4444")}</button>
+          <button data-action="edit-habit-completion" data-id="${esc(comp.id)}" title="${t('common.edit')}" class="habit-hist-btn">${lucideIcon("pencil",14,"#f59e0b")}</button>
+          <button data-action="delete-habit-completion" data-id="${esc(comp.id)}" title="${t('common.delete')}" class="habit-hist-btn">${lucideIcon("trash-2",14,"#ef4444")}</button>
         </span>
       </div>`;
     }).join('');
@@ -1529,8 +1529,8 @@ async function editHabitCompletion(compId) {
       <label>${t('habits.edit_note')}</label>
       <input type="text" id="editCompNote_${compId}" value="${esc(noteVal)}" placeholder="${t('habits.note_optional')}" maxlength="500">
       <div class="habit-history-edit-actions">
-        <button onclick="saveHabitCompletion('${compId}')" class="modal-save">${t('common.save')}</button>
-        <button onclick="cancelEditCompletion()" class="modal-cancel">${t('common.cancel')}</button>
+        <button data-action="save-habit-completion" data-id="${esc(compId)}" class="modal-save">${t('common.save')}</button>
+        <button data-action="cancel-edit-completion" class="modal-cancel">${t('common.cancel')}</button>
       </div>
     </div>`;
 }
@@ -1771,11 +1771,11 @@ function _renderWeekView(container, dayNames, habitsByDay, today, locale) {
   let html = '';
   // Navigation
   html += `<div class="habit-cal-nav">`;
-  html += `<button onclick="navigateHabitCalendar(-1)" title="Previous">${lucideIcon('chevron-left', 18)}</button>`;
+  html += `<button data-action="navigate-habit-calendar" data-delta="-1" title="Previous">${lucideIcon('chevron-left', 18)}</button>`;
   html += `<span class="habit-cal-month-label">${esc(navLabel)}</span>`;
-  html += `<button onclick="navigateHabitCalendarToday()" title="Today" style="font-size:0.75rem;padding:4px 10px;">${esc(t('welcome.cal_today'))}</button>`;
-  html += `<button onclick="navigateHabitCalendar(1)" title="Next">${lucideIcon('chevron-right', 18)}</button>`;
-  html += `<button onclick="toggleHabitCalScale()" title="Month" class="habit-cal-scale-btn">${lucideIcon('calendar', 16)}</button>`;
+  html += `<button data-action="navigate-habit-calendar-today" title="Today" style="font-size:0.75rem;padding:4px 10px;">${esc(t('welcome.cal_today'))}</button>`;
+  html += `<button data-action="navigate-habit-calendar" data-delta="1" title="Next">${lucideIcon('chevron-right', 18)}</button>`;
+  html += `<button data-action="toggle-habit-cal-scale" title="Month" class="habit-cal-scale-btn">${lucideIcon('calendar', 16)}</button>`;
   html += `</div>`;
 
   // Week grid — vertical list on mobile, horizontal row on desktop
@@ -1802,7 +1802,7 @@ function _renderWeekView(container, dayNames, habitsByDay, today, locale) {
     }
     for (const it of allItems) {
       const overdueFlag = it.status === 'overdue' ? ' overdue' : '';
-      html += `<div class="habit-cal-item${overdueFlag}" style="--item-color:${it.color}" onclick="openEditHabitModal('${it.id}')" title="${esc(it.name)}">${esc(it.name)}</div>`;
+      html += `<div class="habit-cal-item${overdueFlag}" style="--item-color:${it.color}" data-action="open-edit-habit-modal" data-id="${esc(it.id)}" title="${esc(it.name)}">${esc(it.name)}</div>`;
     }
     html += `</div>`;
     html += `</div>`;
@@ -1847,11 +1847,11 @@ function _renderMonthView(container, dayNames, habitsByDay, today, locale) {
   let html = '';
   // Navigation
   html += `<div class="habit-cal-nav">`;
-  html += `<button onclick="navigateHabitCalendar(-1)" title="Previous">${lucideIcon('chevron-left', 18)}</button>`;
+  html += `<button data-action="navigate-habit-calendar" data-delta="-1" title="Previous">${lucideIcon('chevron-left', 18)}</button>`;
   html += `<span class="habit-cal-month-label">${esc(monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1))}</span>`;
-  html += `<button onclick="navigateHabitCalendarToday()" title="Today" style="font-size:0.75rem;padding:4px 10px;">${esc(t('welcome.cal_today'))}</button>`;
-  html += `<button onclick="navigateHabitCalendar(1)" title="Next">${lucideIcon('chevron-right', 18)}</button>`;
-  html += `<button onclick="toggleHabitCalScale()" title="Week" class="habit-cal-scale-btn">${lucideIcon('list', 16)}</button>`;
+  html += `<button data-action="navigate-habit-calendar-today" title="Today" style="font-size:0.75rem;padding:4px 10px;">${esc(t('welcome.cal_today'))}</button>`;
+  html += `<button data-action="navigate-habit-calendar" data-delta="1" title="Next">${lucideIcon('chevron-right', 18)}</button>`;
+  html += `<button data-action="toggle-habit-cal-scale" title="Week" class="habit-cal-scale-btn">${lucideIcon('list', 16)}</button>`;
   html += `</div>`;
 
   // Day headers
@@ -1879,7 +1879,7 @@ function _renderMonthView(container, dayNames, habitsByDay, today, locale) {
       for (let k = 0; k < Math.min(allItems.length, maxShow); k++) {
         const it = allItems[k];
         const overdueFlag = it.status === 'overdue' ? ' overdue' : '';
-        html += `<div class="habit-cal-item${overdueFlag}" style="--item-color:${it.color}" onclick="openEditHabitModal('${it.id}')" title="${esc(it.name)}">${esc(it.name)}</div>`;
+        html += `<div class="habit-cal-item${overdueFlag}" style="--item-color:${it.color}" data-action="open-edit-habit-modal" data-id="${esc(it.id)}" title="${esc(it.name)}">${esc(it.name)}</div>`;
       }
       if (allItems.length > maxShow) {
         html += `<div class="habit-cal-more">+${allItems.length - maxShow}</div>`;
@@ -1995,7 +1995,7 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
     html += `<div class="habit-cal-day-detail-list">`;
     for (const it of allItems) {
       const statusLabel = it.status === 'overdue' ? (t('habits.overdue') || 'Overdue') : it.status === 'due-today' ? (t('habits.due_today') || 'Due today') : '';
-      html += `<div class="habit-cal-detail-item" style="--item-color:${it.color}" onclick="openEditHabitModal('${it.id}')">`;
+      html += `<div class="habit-cal-detail-item" style="--item-color:${it.color}" data-action="open-edit-habit-modal" data-id="${esc(it.id)}">`;
       html += `<span class="habit-cal-detail-dot" style="background:${it.color}"></span>`;
       html += `<span class="habit-cal-detail-name">${esc(it.name)}</span>`;
       if (statusLabel) html += `<span class="habit-cal-detail-status">${esc(statusLabel)}</span>`;

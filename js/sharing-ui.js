@@ -109,7 +109,7 @@ export async function renderSharingPane() {
           <div id="sharingStep2Body" style="display:none">
             <input type="email" id="sharingAuthEmail" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
             <div class="auth-inline-error" id="sharingAuthError" style="display:none"></div>
-            <button class="auth-send-btn" id="sharingAuthSendBtn" onclick="window.sendAuthFromSharing()">${t('auth.send_magic_link')}</button>
+            <button class="auth-send-btn" id="sharingAuthSendBtn" data-action="send-auth-from-sharing">${t('auth.send_magic_link')}</button>
             <div class="auth-inline-status" id="sharingAuthStatus" style="display:none"></div>
           </div>
         </div>
@@ -159,7 +159,7 @@ export async function renderSharingPane() {
     const email = esc(state.authUser.email || '');
     authBadgeHtml = `<div class="setting-group">
       <div class="auth-signed-in-badge">${lucideIcon('shield-check', 14)} ${t('auth.signed_in_as', email)}</div>
-      <button class="btn-secondary sharing-danger-btn" onclick="window.signOutFromSharing()" style="font-size:0.8rem;padding:4px 12px;margin-top:0">${t('auth.sign_out')}</button>
+      <button class="btn-secondary sharing-danger-btn" data-action="sign-out-from-sharing" style="font-size:0.8rem;padding:4px 12px;margin-top:0">${t('auth.sign_out')}</button>
     </div>`;
   }
 
@@ -196,8 +196,8 @@ export async function renderSharingPane() {
         </div>
         <div class="sharing-group-actions">
           ${group.folderId ? `<a class="sharing-action-btn sharing-drive-link" href="https://drive.google.com/drive/folders/${encodeURIComponent(group.folderId)}" target="_blank" rel="noopener" title="${t('sharing.open_drive_folder')}">${LOGOS.googledrive(14)} ${t('sharing.open_drive_folder')}</a>` : ''}
-          ${inviteLink && isCreator && group.backendType !== 'supabase' ? `<button class="sharing-action-btn sharing-copy-link-btn" onclick="sharingCopyLink('${escQ(group.id)}')" title="${t('sharing.copy_link')}">${lucideIcon('link', 14)} ${t('sharing.copy_link')}</button>` : ''}
-          ${!isCreator ? `<button class="sharing-action-btn sharing-leave-btn" onclick="${isJoined ? `sharingUnjoinGroup('${escQ(group.id)}')` : `sharingLeaveGroup('${escQ(group.id)}')`}" title="${t('sharing.leave')}">${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>` : ''}
+          ${inviteLink && isCreator && group.backendType !== 'supabase' ? `<button class="sharing-action-btn sharing-copy-link-btn" data-action="sharing-copy-link" data-group-id="${esc(group.id)}" title="${t('sharing.copy_link')}">${lucideIcon('link', 14)} ${t('sharing.copy_link')}</button>` : ''}
+          ${!isCreator ? (isJoined ? `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-unjoin-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}">${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>` : `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-leave-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}">${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>`) : ''}
         </div>
       </div>
       <div class="sharing-members">`;
@@ -217,23 +217,23 @@ export async function renderSharingPane() {
       html += `<div class="sharing-member">
           ${avatarDot(member, 22)}
           <span class="sharing-member-email">${esc(member.email)}${statusHtml}</span>
-          ${canCopyLink ? `<button class="sharing-action-btn" onclick="sharingCopyMemberLink('${escQ(group.id)}','${escQ(member.token)}')" title="${t('sharing.copy_link')}" style="font-size:0.75rem;padding:2px 6px">${lucideIcon('link', 12)}</button>` : ''}
-          ${canRemove ? `<button class="sharing-remove-btn" onclick="sharingRemoveMember('${escQ(group.id)}','${escQ(member.email)}')" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
+          ${canCopyLink ? `<button class="sharing-action-btn" data-action="sharing-copy-member-link" data-group-id="${esc(group.id)}" data-token="${esc(member.token)}" title="${t('sharing.copy_link')}" style="font-size:0.75rem;padding:2px 6px">${lucideIcon('link', 12)}</button>` : ''}
+          ${canRemove ? `<button class="sharing-remove-btn" data-action="sharing-remove-member" data-group-id="${esc(group.id)}" data-email="${esc(member.email)}" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
         </div>`;
     }
 
     html += `</div>
       ${isCreator ? `<div class="sharing-invite-row">
-        <input type="text" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${t('sharing.invite_name_placeholder')}" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingInvite('${escQ(group.id)}');}">
-        <button class="sharing-invite-btn" onclick="sharingInvite('${escQ(group.id)}')">${lucideIcon('user-plus', 14)} ${t('sharing.invite')}</button>
+        <input type="text" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${t('sharing.invite_name_placeholder')}" data-action="sharing-invite-on-enter" data-group-id="${esc(group.id)}">
+        <button class="sharing-invite-btn" data-action="sharing-invite" data-group-id="${esc(group.id)}">${lucideIcon('user-plus', 14)} ${t('sharing.invite')}</button>
       </div>` : ''}
-      ${isCreator ? `<button class="sharing-delete-btn" onclick="sharingDeleteGroup('${escQ(group.id)}')">${lucideIcon('trash-2', 14)} ${t('sharing.delete_group')}</button>` : ''}
+      ${isCreator ? `<button class="sharing-delete-btn" data-action="sharing-delete-group" data-group-id="${esc(group.id)}">${lucideIcon('trash-2', 14)} ${t('sharing.delete_group')}</button>` : ''}
     </div>`;
   }
 
   html += `</div>
     <div class="sharing-bottom-actions">
-      <button class="sharing-action-btn" onclick="sharingCreateGroup()">${lucideIcon('plus', 14)} ${t('sharing.create_group')}</button>
+      <button class="sharing-action-btn" data-action="sharing-create-group">${lucideIcon('plus', 14)} ${t('sharing.create_group')}</button>
     </div>`;
 
   container.innerHTML = html;
@@ -245,14 +245,14 @@ async function sharingCreateGroup() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingCreateGroupModal';
-  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('users', 20)} ${t('sharing.create_group')}</h2>
     <label>${t('sharing.group_name')}</label>
-    <input type="text" id="sharingNewGroupName" placeholder="${t('sharing.group_name_placeholder')}" maxlength="60" onkeydown="if(event.key==='Enter'){event.preventDefault();sharingCreateGroupSubmit();}">
+    <input type="text" id="sharingNewGroupName" placeholder="${t('sharing.group_name_placeholder')}" maxlength="60" data-action="sharing-create-group-on-enter">
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="document.getElementById('sharingCreateGroupModal').remove()">${t('common.cancel')}</button>
-      <button class="modal-save" id="sharingCreateGroupBtn" onclick="sharingCreateGroupSubmit()">${t('common.create')}</button>
+      <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingCreateGroupModal">${t('common.cancel')}</button>
+      <button class="modal-save" id="sharingCreateGroupBtn" data-action="sharing-create-group-submit">${t('common.create')}</button>
     </div>
   </div>`;
   document.getElementById('app').appendChild(overlay);
@@ -287,17 +287,17 @@ function showInviteLinkModal(name, link, isNewGroup) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingInviteLinkModal';
-  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('link', 20)} ${title}</h2>
     <p>${hint}</p>
     <div class="sharing-invite-link-box">
-      <input type="text" id="sharingInviteLinkInput" value="${esc(link)}" readonly onclick="this.select()">
-      <button class="sharing-invite-btn" onclick="sharingCopyLinkValue()">${lucideIcon('copy', 14)} ${t('sharing.copy')}</button>
+      <input type="text" id="sharingInviteLinkInput" value="${esc(link)}" readonly data-action="select-all-on-click">
+      <button class="sharing-invite-btn" data-action="sharing-copy-link-value">${lucideIcon('copy', 14)} ${t('sharing.copy')}</button>
     </div>
     ${warn}
     <div class="modal-actions">
-      <button class="modal-save" onclick="document.getElementById('sharingInviteLinkModal').remove()">${t('common.close')}</button>
+      <button class="modal-save" data-action="close-modal" data-modal-id="sharingInviteLinkModal">${t('common.close')}</button>
     </div>
   </div>`;
   document.getElementById('app').appendChild(overlay);
@@ -479,7 +479,7 @@ function showJoinConfirmModal(group) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingJoinConfirmModal';
-  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   const ownerLine = group._creatorName
     ? `<p class="sharing-join-owner">${lucideIcon('user', 14)} ${t('sharing.join_confirm_owner', esc(group._creatorName))}</p>` : '';
   overlay.innerHTML = `<div class="modal">
@@ -491,7 +491,7 @@ function showJoinConfirmModal(group) {
       value="${esc(group._suggestedName || '')}" />
     <div id="joinConfirmError" class="sharing-join-error" style="display:none"></div>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="document.getElementById('sharingJoinConfirmModal').remove()">${t('common.cancel')}</button>
+      <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingJoinConfirmModal">${t('common.cancel')}</button>
       <button class="modal-save" id="joinConfirmBtn">${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}</button>
     </div>
   </div>`;
@@ -519,15 +519,15 @@ function showJoinPickerModal(folderId) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingJoinModal';
-  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('users', 20)} ${t('sharing.join_group')}</h2>
     <p>${t('sharing.join_picker_hint')}</p>
     <p class="sharing-join-file-list">${t('sharing.join_expected_files')}</p>
     <div id="sharingJoinError" class="sharing-join-error" style="display:none"></div>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="document.getElementById('sharingJoinModal').remove()">${t('common.cancel')}</button>
-      <button class="modal-save" id="sharingJoinPickerBtn" onclick="sharingOpenJoinPicker('${escQ(folderId)}')">${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}</button>
+      <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingJoinModal">${t('common.cancel')}</button>
+      <button class="modal-save" id="sharingJoinPickerBtn" data-action="sharing-open-join-picker" data-folder-id="${esc(folderId)}">${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}</button>
     </div>
   </div>`;
   document.getElementById('app').appendChild(overlay);
@@ -662,7 +662,7 @@ export function openSharePopover(anchorEl, onShare, opts = {}) {
           </label>
         `).join('')}
       </div>` : ''}
-      <button class="share-popover-submit" onclick="submitSharePopover()">${lucideIcon('share', 14)} ${t('sharing.share')}</button>
+      <button class="share-popover-submit" data-action="submit-share-popover">${lucideIcon('share', 14)} ${t('sharing.share')}</button>
     `;
 
     popover.querySelectorAll('input[name="shareGroup"]').forEach(radio => {
@@ -722,7 +722,7 @@ export function showCompletionModal(groupId, itemId, assignees, currentUserEmail
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingCompletionModal';
-  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 
   overlay.innerHTML = `<div class="modal sharing-completion-modal">
     <h2>${lucideIcon('circle-check', 20)} ${t('sharing.who_did_this')}</h2>
@@ -735,8 +735,8 @@ export function showCompletionModal(groupId, itemId, assignees, currentUserEmail
       `).join('')}
     </div>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="document.getElementById('sharingCompletionModal').remove()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="sharingCompleteSubmit('${escQ(groupId)}','${escQ(itemId)}')">${t('common.done')}</button>
+      <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingCompletionModal">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="sharing-complete-submit" data-group-id="${esc(groupId)}" data-item-id="${esc(itemId)}">${t('common.done')}</button>
     </div>
   </div>`;
 
@@ -769,7 +769,8 @@ export function applySettingsI18n() {
   if (navEl) navEl.textContent = t('sharing.title');
 }
 
-// ── Expose actions on window ────────────────────────────────────
+
+// ── Expose actions on window (CSP delegation handled in js/delegation.js) ──
 
 window.sharingCreateGroup = sharingCreateGroup;
 window.sharingCreateGroupSubmit = sharingCreateGroupSubmit;

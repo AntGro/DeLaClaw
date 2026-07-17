@@ -2797,9 +2797,9 @@ function checkSchemaVersion() {
 
   const sql = getPendingMigrationSQL(dbVer);
   const updateBtn = sql
-    ? `<button onclick="showMigrationModal()">${esc(t('schema.how_to_update'))}</button>`
+    ? `<button data-action="show-migration-modal">${esc(t('schema.how_to_update'))}</button>`
     : '';
-  banner.innerHTML = `${icon}<span>${label}</span>${updateBtn}<button onclick="dismissSchemaBanner()">${esc(t('schema.dismiss'))}</button>`;
+  banner.innerHTML = `${icon}<span>${label}</span>${updateBtn}<button data-action="dismiss-schema-banner">${esc(t('schema.dismiss'))}</button>`;
   document.body.prepend(banner);
   // Measure actual banner height and expose as CSS variable (handles multi-line text on mobile)
   const updateSchemaH = () => {
@@ -2865,8 +2865,8 @@ function showMigrationModal() {
       <li>${t('schema.step_3')}</li>
     </ol>
     <div class="migration-actions">
-      <button class="migration-check-btn" id="migrationCheckBtn" onclick="checkMigrationStatus()">${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}</button>
-      <button class="migration-close-btn" onclick="closeMigrationModal()">${esc(t('schema.close'))}</button>
+      <button class="migration-check-btn" id="migrationCheckBtn" data-action="check-migration-status">${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}</button>
+      <button class="migration-close-btn" data-action="close-migration-modal">${esc(t('schema.close'))}</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
@@ -2963,7 +2963,7 @@ function showCompareModal() {
       <table class="compare-table">${thead}${tbody}</table>
     </div>
     <p class="compare-footnote">${esc(t('compare.storage_note'))}</p>
-    <button class="compare-close-btn" onclick="closeCompareModal()">${esc(t('schema.close'))}</button>
+    <button class="compare-close-btn" data-action="close-compare-modal">${esc(t('schema.close'))}</button>
   </div>`;
   document.body.appendChild(overlay);
 }
@@ -3481,7 +3481,7 @@ async function generateBackupJSON() {
 }
 
 async function exportBackup() {
-  const btn = document.querySelector('.settings-data-btn[onclick="exportBackup()"]');
+  const btn = document.querySelector('.settings-data-btn[data-action="export-backup"]');
   if (btn) btn.disabled = true;
   try {
     const backup = await generateBackupJSON();
@@ -3570,7 +3570,7 @@ async function getOrCreateDriveFolder(token) {
 }
 
 async function exportToGoogleDrive() {
-  const btn = document.querySelector('.settings-data-btn[onclick="exportToGoogleDrive()"]');
+  const btn = document.querySelector('.settings-data-btn[data-action="export-to-drive"]');
   const label = document.getElementById('settingsDriveExportBtn');
   if (btn) btn.disabled = true;
   if (label) label.textContent = 'Authenticating…';
@@ -3649,7 +3649,7 @@ function importBackup() {
   const input = document.getElementById('backupFileInput');
   if (!input) return;
   input.value = '';
-  input.onchange = async () => {
+  input.addEventListener('change', async () => {
     const file = input.files[0];
     if (!file) return;
     showDeleteConfirm(
@@ -3663,12 +3663,12 @@ function importBackup() {
         btnIconSvg: '<svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
       }
     );
-  };
+  }, { once: true });
   input.click();
 }
 
 async function performImport(file) {
-  const btn = document.querySelector('.settings-data-btn[onclick="importBackup()"]');
+  const btn = document.querySelector('.settings-data-btn[data-action="import-backup"]');
   if (btn) btn.disabled = true;
 
   const progressEl = document.getElementById('importProgress');
@@ -4065,6 +4065,8 @@ window.closeMigrationModal = closeMigrationModal;
 window.checkMigrationStatus = checkMigrationStatus;
 window.showCompareModal = showCompareModal;
 window.closeCompareModal = closeCompareModal;
+
+// CSP delegation for main handled in js/delegation.js — no per-module listeners
 
 // --- Environment badge + dev favicon ---
 (function() {

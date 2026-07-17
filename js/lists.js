@@ -152,7 +152,7 @@ function renderLists() {
       <div class="empty-icon">${lucideIcon('list', 48, 'var(--muted)')}</div>
       <h3>${t('lists.empty_title')}</h3>
       <p>${t('lists.empty_hint')}</p>
-      <button class="empty-cta" onclick="openAddListModal()">${lucideIcon('plus', 16)} ${t('lists.empty_cta')}</button>
+      <button class="empty-cta" data-action="open-add-list">${lucideIcon('plus', 16)} ${t('lists.empty_cta')}</button>
     </div>`;
     renderListNavButtons([], {});
     return;
@@ -235,9 +235,9 @@ function renderListCard(list, items, idx) {
   // Quick-add input
   const quickAddHtml = `<div class="list-quick-add">
     <input type="text" class="list-quick-input" placeholder="${esc(t('lists.add_item'))}" maxlength="2000"
-      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();quickAddListItem(this,'${escQ(list.id)}');}">
-    <button class="list-quick-add-btn" onclick="quickAddListItem(this.previousElementSibling,'${escQ(list.id)}')" title="${esc(t('lists.add_item'))}">${lucideIcon('plus', 16)}</button>
-    ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" onclick="shareListItemFromAdd(this,'${escQ(list.id)}')" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
+      data-action="quick-add-input" data-list-id="${esc(list.id)}">
+    <button class="list-quick-add-btn" data-action="quick-add-list-item" data-list-id="${esc(list.id)}" title="${esc(t('lists.add_item'))}">${lucideIcon('plus', 16)}</button>
+    ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-list-item-from-add" data-list-id="${esc(list.id)}" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
   </div>`;
 
   return `<div class="project-card list-bucket" data-list-id="${esc(list.id)}" style="--cat-color:${color}">
@@ -248,10 +248,10 @@ function renderListCard(list, items, idx) {
         <span style="font-size:0.78rem;opacity:0.75;">(${count})</span>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="archive-project-btn" onclick="openEditListModal('${escQ(list.id)}')" title="${t('lists.edit_list')}">
+        <button class="archive-project-btn" data-action="open-edit-list" data-id="${esc(list.id)}" title="${t('lists.edit_list')}">
           ${lucideIcon('pencil', 14)}
         </button>
-        <button class="todo-cat-delete-btn" onclick="deleteList('${escQ(list.id)}')" title="${t('common.delete')}">
+        <button class="todo-cat-delete-btn" data-action="delete-list" data-id="${esc(list.id)}" title="${t('common.delete')}">
           ${lucideIcon('trash-2', 16)}
         </button>
       </div>
@@ -282,14 +282,14 @@ function renderListItem(item) {
 
   return `<div class="bucket-item list-item${checkedCls}" data-item-id="${item.id}">
     <div class="list-item-row">
-      <button class="list-check-btn" onclick="toggleListItemCheck('${escQ(item.id)}')" title="Toggle">${checkIcon}</button>
+      <button class="list-check-btn" data-action="toggle-list-item-check" data-id="${esc(item.id)}" title="Toggle">${checkIcon}</button>
       <div style="flex:1;min-width:0;">
         <span class="list-item-text">${truncateWithShowMore(item.text, 120, item.id, 'listtext')}</span>${sharedHtml}
         ${noteHtml}
       </div>
       <div class="list-item-actions">
-        <button onclick="editListItemInlineFull('${escQ(item.id)}')" title="Edit">${lucideIcon('pencil', 14)}</button>
-        <button onclick="deleteListItem('${escQ(item.id)}')" title="Delete">${lucideIcon('trash-2', 14)}</button>
+        <button data-action="edit-list-item-inline" data-id="${esc(item.id)}" title="Edit">${lucideIcon('pencil', 14)}</button>
+        <button data-action="delete-list-item" data-id="${esc(item.id)}" title="Delete">${lucideIcon('trash-2', 14)}</button>
       </div>
     </div>
   </div>`;
@@ -303,7 +303,7 @@ function renderListNavButtons(lists, grouped) {
     const color = getListColor(list, idx);
     const shortname = getListShortname(list.id);
     const displayName = shortname || list.name;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" onclick="navigateToList('${escQ(list.id)}')" title="${esc(list.name)} (${count})">${esc(displayName)} (${count})</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-list" data-id="${esc(list.id)}" title="${esc(list.name)} (${count})">${esc(displayName)} (${count})</button>`;
   }).join('');
 }
 
@@ -451,32 +451,77 @@ function editListItemInlineFull(id) {
 // ===================================================================
 
 async function quickAddListItem(inputEl, listId) {
-  const text = inputEl.value.trim();
+  // Support delegation: inputEl may be event or element, listId may be in dataset
+  let actualInput = null;
+  let actualListId = listId;
+
+  if (inputEl && inputEl.target) {
+    // Called as event handler wrapper via delegation - resolve
+    const el = inputEl.target.closest ? inputEl.target.closest('[data-action="quick-add-list-item"]') : null;
+    if (el) {
+      actualListId = el.dataset.listId || actualListId;
+      const wrapper = el.closest('.list-quick-add');
+      actualInput = wrapper ? wrapper.querySelector('.list-quick-input') : null;
+    }
+  } else if (typeof inputEl === 'string' && !listId) {
+    // Called as quickAddListItem(listId) from old onkeydown handler - not used anymore
+    actualListId = inputEl;
+    actualInput = null;
+  } else if (inputEl && inputEl.dataset && inputEl.dataset.listId) {
+    // inputEl is actually the input with data-list-id
+    actualInput = inputEl;
+    actualListId = inputEl.dataset.listId || listId;
+  } else {
+    actualInput = inputEl;
+  }
+
+  // If called via button click delegation, actualInput is the input element sibling
+  if (!actualInput && typeof actualListId === 'string') {
+    // fallback: try to find via DOM if we have listId but no input
+    // Will search for quick-input in same list-bucket
+    const card = document.querySelector(`.list-bucket[data-list-id="${actualListId}"]`);
+    if (card) actualInput = card.querySelector('.list-quick-input');
+  }
+
+  // If actualInput is still the button, find its sibling input
+  if (actualInput && actualInput.classList && actualInput.classList.contains('list-quick-add-btn')) {
+    const wrapper = actualInput.closest('.list-quick-add');
+    actualInput = wrapper ? wrapper.querySelector('.list-quick-input') : null;
+  }
+
+  // For quick-add-input Enter handler: actualInput is the input itself
+  if (actualInput && !actualListId) {
+    actualListId = actualInput.dataset.listId || actualInput.getAttribute('data-list-id');
+  }
+
+  const inputToUse = actualInput;
+  if (!inputToUse) return;
+  const text = inputToUse.value.trim();
   if (!text) return;
 
   // Show saving state on the quick-add row
-  const wrapper = inputEl.closest('.list-quick-add');
+  const wrapper = inputToUse.closest('.list-quick-add');
   const btn = wrapper && wrapper.querySelector('.list-quick-add-btn');
   const btnHtml = btn ? btn.innerHTML : '';
   if (btn) btn.innerHTML = `<span class="list-saving-spinner"></span>`;
-  inputEl.disabled = true;
+  inputToUse.disabled = true;
 
-  const items = (state.allListItems || []).filter(i => i.list_id === listId);
+  const items = (state.allListItems || []).filter(i => i.list_id === actualListId);
   const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
 
   const { error } = await state.db.from('list_items').insert({
-    list_id: listId,
+    list_id: actualListId,
     text,
     sort_order: maxOrder + 1,
   });
 
   // Restore input state
-  inputEl.disabled = false;
+  inputToUse.disabled = false;
   if (btn) btn.innerHTML = btnHtml;
 
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
-  inputEl.value = '';
+  inputToUse.value = '';
   showToast(t('toast.added'), 'success');
   await refreshLists();
 }
@@ -554,12 +599,12 @@ function initListModals() {
     <h2>${lucideIcon('list', 20)} ${t('lists.add_list')}</h2>
     <label>${t('common.name')}</label>
     <input type="text" id="newListName" placeholder="${t('lists.name_placeholder')}" maxlength="100"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewList();}">
+      data-action="save-new-list-on-enter">
     <label>${t('lists.color')}</label>
     <input type="color" id="newListColor" value="#14b8a6">
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeAddListModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveNewList()">${t('common.add')}</button>
+      <button class="modal-cancel" data-action="close-add-list">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-new-list">${t('common.add')}</button>
     </div>
   </div>`;
   app.appendChild(m1);
@@ -573,15 +618,15 @@ function initListModals() {
     <input type="hidden" id="editListId">
     <label>${t('common.name')}</label>
     <input type="text" id="editListName" maxlength="100"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditList();}">
+      data-action="save-edit-list-on-enter">
     <label>Shortname</label>
     <input type="text" id="editListShortname" maxlength="20" placeholder="e.g. GRC"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditList();}">
+      data-action="save-edit-list-on-enter">
     <label>${t('lists.color')}</label>
     <input type="color" id="editListColor">
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeEditListModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveEditList()">${t('common.save')}</button>
+      <button class="modal-cancel" data-action="close-edit-list">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-list">${t('common.save')}</button>
     </div>
   </div>`;
   app.appendChild(m2);
@@ -750,24 +795,35 @@ async function syncSharedListItems() {
 }
 
 async function shareListItemFromAdd(btn, listId) {
-  const addRow = btn.closest('.list-quick-add');
+  // Delegation support: btn may be element with dataset
+  let actualBtn = btn;
+  let actualListId = listId;
+  if (btn && btn.target) {
+    // event case
+    actualBtn = btn.target.closest ? btn.target.closest('[data-action="share-list-item-from-add"]') : btn.target;
+    actualListId = actualBtn ? actualBtn.dataset.listId : listId;
+  } else if (btn && btn.dataset && btn.dataset.listId) {
+    actualListId = btn.dataset.listId || listId;
+    actualBtn = btn;
+  }
+  const addRow = actualBtn ? actualBtn.closest('.list-quick-add') : null;
   if (!addRow) return;
   const input = addRow.querySelector('.list-quick-input');
   const text = input?.value.trim();
   if (!text) return;
 
   // Find list name for payload context
-  const listObj = (state.allLists || []).find(l => l.id === listId);
+  const listObj = (state.allLists || []).find(l => l.id === actualListId);
 
-  openSharePopover(btn, async (groupId) => {
+  openSharePopover(actualBtn, async (groupId) => {
     // Pre-generate UUID for pointer → Drive linkage
     const presetId = crypto.randomUUID();
 
     // 1. Insert local pointer FIRST (prevents race with syncSharedListItems)
-    const items = (state.allListItems || []).filter(i => i.list_id === listId);
+    const items = (state.allListItems || []).filter(i => i.list_id === actualListId);
     const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
     const { error: ptrErr } = await state.db.from('list_items').insert({
-      list_id: listId,
+      list_id: actualListId,
       text: '',
       sort_order: maxOrder + 1,
       shared_id: presetId,

@@ -177,7 +177,7 @@ function renderVestiaire() {
       <div class="empty-icon">${lucideIcon('shirt', 48, 'var(--muted)')}</div>
       <h3>${t('vestiaire.empty_title')}</h3>
       <p>${t('vestiaire.empty_hint')}</p>
-      <button class="empty-cta" onclick="openAddVestiaireCategoryModal()">${lucideIcon('plus', 16)} ${t('vestiaire.empty_cta')}</button>
+      <button class="empty-cta" data-action="open-add-vestiaire-category">${lucideIcon('plus', 16)} ${t('vestiaire.empty_cta')}</button>
     </div>`;
     renderVestiaireNavButtons([], []);
     return;
@@ -284,11 +284,11 @@ function renderCategoryCard(cat, items) {
         <span style="font-size:0.78rem;opacity:0.75;">(${count})</span>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="todo-cat-shortname-btn" onclick="openEditVestiaireCategoryModal('${escQ(cat)}')" title="${t('vestiaire.edit_category')}">${lucideIcon("pencil",14)}</button>
-        <button class="archive-project-btn" onclick="openAddVestiaireModal('${escapedCat}')" title="${t('vestiaire.add_to_category', escapedCat)}">
+        <button class="todo-cat-shortname-btn" data-action="open-edit-vestiaire-category" data-category="${esc(cat)}" title="${t('vestiaire.edit_category')}">${lucideIcon("pencil",14)}</button>
+        <button class="archive-project-btn" data-action="open-add-vestiaire" data-category="${escapedCat}" title="${t('vestiaire.add_to_category', escapedCat)}">
           ${lucideIcon('plus', 16)}
         </button>
-        <button class="todo-cat-delete-btn" onclick="deleteVestiaireCategory('${escapedCat}')" title="${t('vestiaire.delete_category')}">
+        <button class="todo-cat-delete-btn" data-action="delete-vestiaire-category" data-category="${escapedCat}" title="${t('vestiaire.delete_category')}">
           ${lucideIcon('trash-2', 16)}
         </button>
       </div>
@@ -301,8 +301,8 @@ function renderCategoryCard(cat, items) {
 
 function renderVestiaireItem(v) {
   const brandHtml = v.brand
-    ? `<span class="vest-brand" onclick="editVestiaireBrandInline('${v.id}')" title="${t('vestiaire.click_edit_brand')}">${esc(v.brand)}</span>`
-    : `<span class="vest-brand vest-brand-empty" onclick="editVestiaireBrandInline('${v.id}')" title="${t('vestiaire.click_add_brand')}">${t('vestiaire.add_brand')}</span>`;
+    ? `<span class="vest-brand" data-action="edit-vestiaire-brand-inline" data-id="${esc(v.id)}" title="${t('vestiaire.click_edit_brand')}">${esc(v.brand)}</span>`
+    : `<span class="vest-brand vest-brand-empty" data-action="edit-vestiaire-brand-inline" data-id="${esc(v.id)}" title="${t('vestiaire.click_add_brand')}">${t('vestiaire.add_brand')}</span>`;
   const metaParts = [];
   if (v.size) metaParts.push(`${lucideIcon('ruler', 12)} ${esc(v.size)}`);
   if (v.color) metaParts.push(`${lucideIcon('palette', 12)} ${esc(v.color)}`);
@@ -314,11 +314,11 @@ function renderVestiaireItem(v) {
   // Purchase status badge (click to cycle: none → Tried → Purchased → none)
   let statusBadge = '';
   if (v.purchase_status === 'achete') {
-    statusBadge = `<span class="vest-status-badge vest-status-achete" onclick="cycleVestiaireStatus('${v.id}')" title="${t('vestiaire.cycle_status')}">${t('vestiaire.purchased')}</span>`;
+    statusBadge = `<span class="vest-status-badge vest-status-achete" data-action="cycle-vestiaire-status" data-id="${esc(v.id)}" title="${t('vestiaire.cycle_status')}">${t('vestiaire.purchased')}</span>`;
   } else if (v.purchase_status === 'essaye') {
-    statusBadge = `<span class="vest-status-badge vest-status-essaye" onclick="cycleVestiaireStatus('${v.id}')" title="${t('vestiaire.cycle_status')}">${t('vestiaire.tried')}</span>`;
+    statusBadge = `<span class="vest-status-badge vest-status-essaye" data-action="cycle-vestiaire-status" data-id="${esc(v.id)}" title="${t('vestiaire.cycle_status')}">${t('vestiaire.tried')}</span>`;
   } else {
-    statusBadge = `<span class="vest-status-badge vest-status-none" onclick="cycleVestiaireStatus('${v.id}')" title="${t('vestiaire.set_status')}">○</span>`;
+    statusBadge = `<span class="vest-status-badge vest-status-none" data-action="cycle-vestiaire-status" data-id="${esc(v.id)}" title="${t('vestiaire.set_status')}">○</span>`;
   }
 
   const statusCls = v.purchase_status === 'achete' ? ' vest-purchased' : v.purchase_status === 'essaye' ? ' vest-tried' : '';
@@ -334,9 +334,9 @@ function renderVestiaireItem(v) {
         ${metaHtml}
       </div>
       <div class="vest-actions">
-        <button onclick="editVestiaireInline('${v.id}')" title="${t('vestiaire.edit_name')}">${lucideIcon('pencil', 14)}</button>
-        <button onclick="openEditVestiaireModal('${v.id}')" title="${t('vestiaire.edit_all_fields')}">${lucideIcon('settings', 14)}</button>
-        <button onclick="deleteVestiaire('${v.id}')" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
+        <button data-action="edit-vestiaire-inline" data-id="${esc(v.id)}" title="${t('vestiaire.edit_name')}">${lucideIcon('pencil', 14)}</button>
+        <button data-action="open-edit-vestiaire" data-id="${esc(v.id)}" title="${t('vestiaire.edit_all_fields')}">${lucideIcon('settings', 14)}</button>
+        <button data-action="delete-vestiaire" data-id="${esc(v.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
       </div>
     </div>
   </div>`;
@@ -350,7 +350,7 @@ function renderVestiaireNavButtons(cats, items) {
     const color = getCategoryColor(cat);
     const sn = getVestShortname(cat);
     const display = sn || cat;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" onclick="navigateToVestiaireCat('${escQ(cat)}')" title="${esc(cat)} (${count})">${esc(display)} (${count})</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-vestiaire-cat" data-category="${esc(cat)}" title="${esc(cat)} (${count})">${esc(display)} (${count})</button>`;
   }).join('');
 }
 
@@ -565,7 +565,7 @@ function initVestiaireModals() {
     <input type="hidden" id="newVestiaireCategory">
     <label>${t('common.name')}</label>
     <input type="text" id="newVestiaireName" placeholder="${t('vestiaire.name_placeholder')}" maxlength="200"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewVestiaire();}">
+      data-action="save-new-vestiaire-on-enter">
     <label>${t('vestiaire.brand')}</label>
     <input type="text" id="newVestiaireBrand" placeholder="${t('vestiaire.brand_placeholder')}" maxlength="200">
     <label>${t('vestiaire.size')}</label>
@@ -581,8 +581,8 @@ function initVestiaireModals() {
       <option value="achete">${t('vestiaire.purchased')}</option>
     </select>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeAddVestiaireModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveNewVestiaire()">${t('common.add')}</button>
+      <button class="modal-cancel" data-action="close-add-vestiaire">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-new-vestiaire">${t('common.add')}</button>
     </div>
   </div>`;
   app.appendChild(m1);
@@ -613,8 +613,8 @@ function initVestiaireModals() {
       <option value="achete">${t('vestiaire.purchased')}</option>
     </select>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeEditVestiaireModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveEditVestiaire()">${t('common.save')}</button>
+      <button class="modal-cancel" data-action="close-edit-vestiaire">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-vestiaire">${t('common.save')}</button>
     </div>
   </div>`;
   app.appendChild(m2);
@@ -627,10 +627,10 @@ function initVestiaireModals() {
     <h2>${lucideIcon('folder-plus', 20)} ${t('vestiaire.add_category')}</h2>
     <label>${t('common.name')}</label>
     <input type="text" id="newVestiaireCategoryName" placeholder="${t('vestiaire.category_placeholder')}" maxlength="40"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewVestiaireCategory();}">
+      data-action="save-new-vestiaire-category-on-enter">
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeAddVestiaireCategoryModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveNewVestiaireCategory()">${t('common.add')}</button>
+      <button class="modal-cancel" data-action="close-add-vestiaire-category">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-new-vestiaire-category">${t('common.add')}</button>
     </div>
   </div>`;
   app.appendChild(m3);
@@ -644,13 +644,13 @@ function initVestiaireModals() {
     <input type="hidden" id="editVestiaireCategoryOldName">
     <label>${t('common.name')}</label>
     <input type="text" id="editVestiaireCategoryName" maxlength="40"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditVestiaireCategory();}">
+      data-action="save-edit-vestiaire-category-on-enter">
     <label>${t('vestiaire.shortname')}</label>
     <input type="text" id="editVestiaireCategoryShortname" maxlength="20" placeholder="${t('vestiaire.shortname_placeholder')}"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditVestiaireCategory();}">
+      data-action="save-edit-vestiaire-category-on-enter">
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeEditVestiaireCategoryModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveEditVestiaireCategory()">${t('common.save')}</button>
+      <button class="modal-cancel" data-action="close-edit-vestiaire-category">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-vestiaire-category">${t('common.save')}</button>
     </div>
   </div>`;
   app.appendChild(m4);

@@ -381,7 +381,7 @@ function truncateWithShowMore(text, maxLen, id, field) {
     cut += remaining.slice(0, maxLen - vis);
   }
   const renderedFirstLine = renderMd(cut + '…');
-  return `<span id="meta-${id}-${field}-short">${renderedFirstLine} <button class="show-more-btn" onclick="expandMeta('${id}','${field}')" title="Show more">▼</button></span><span id="meta-${id}-${field}-full" style="display:none;">${renderedFull} <button class="show-more-btn" onclick="collapseMeta('${id}','${field}')" title="Show less">▲</button></span>`;
+  return `<span id="meta-${id}-${field}-short">${renderedFirstLine} <button class="show-more-btn" data-action="expand-meta" data-meta-id="${esc(id)}" data-meta-field="${esc(field)}" title="Show more">▼</button></span><span id="meta-${id}-${field}-full" style="display:none;">${renderedFull} <button class="show-more-btn" data-action="collapse-meta" data-meta-id="${esc(id)}" data-meta-field="${esc(field)}" title="Show less">▲</button></span>`;
 }
 
 function expandMeta(id, field) {
@@ -534,6 +534,9 @@ export {
 };
 
 window.closeDeleteConfirm = closeDeleteConfirm;
+
+// CSP delegation for utils handled in js/delegation.js — no per-module listeners
+
 window.executeDeleteConfirm = executeDeleteConfirm;
 window.expandMeta = expandMeta;
 window.collapseMeta = collapseMeta;

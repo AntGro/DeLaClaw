@@ -363,6 +363,7 @@ CREATE TABLE "public"."sharing_members" (
     "joined_at" timestamp with time zone,
     "expires_at" timestamp with time zone,
     "revoked_at" timestamp with time zone,
+    "auth_user_id" "uuid",
     "created_at" timestamp with time zone DEFAULT "now"()
 );
 
@@ -408,6 +409,7 @@ CREATE TABLE "public"."joined_groups" (
 --
 -- Name: verify_join_token; Type: FUNCTION; Schema: public; Owner: postgres
 -- 1.301: uses token_hash + expiry + revocation
+-- 1.399: creator attribution via auth_user_id
 --
 
 CREATE OR REPLACE FUNCTION "public"."verify_join_token"("p_token" "text")
@@ -428,14 +430,16 @@ $$;
 
 --
 -- Name: confirm_join; Type: FUNCTION; Schema: public; Owner: postgres
+-- 1.399: set auth_user_id on confirm for stable attribution
 --
 
 CREATE OR REPLACE FUNCTION "public"."confirm_join"("p_token" "text", "p_display_name" "text")
 RETURNS "void"
-LANGUAGE "sql" SECURITY DEFINER AS $$
+LANGUAGE "sql" SECURITY DEFINER SET search_path = public AS $$
   UPDATE sharing_members
   SET joined_at = now(),
-      display_name = COALESCE(NULLIF(p_display_name, ''), display_name)
+      display_name = COALESCE(NULLIF(p_display_name, ''), display_name),
+      auth_user_id = COALESCE(auth_user_id, auth.uid())
   WHERE token_hash = encode(digest(p_token, 'sha256'), 'hex')
     AND joined_at IS NULL
     AND revoked_at IS NULL
@@ -535,13 +539,14 @@ $$;
 
 --
 -- Name: get_group_members; Type: FUNCTION; Schema: public; Owner: postgres
+-- 1.399: include auth_user_id for stable attribution
 --
 
 CREATE OR REPLACE FUNCTION "public"."get_group_members"("p_token" "text", "p_group_id" "text")
 RETURNS TABLE("member_id" "text", "display_name" "text", "role" "text",
-              "joined_at" timestamp with time zone)
-LANGUAGE "sql" SECURITY DEFINER AS $$
-  SELECT sm.member_id, sm.display_name, sm.role, sm.joined_at
+              "joined_at" timestamp with time zone, "auth_user_id" "uuid")
+LANGUAGE "sql" SECURITY DEFINER SET search_path = public AS $$
+  SELECT sm.member_id, sm.display_name, sm.role, sm.joined_at, sm.auth_user_id
   FROM sharing_members sm
   WHERE sm.group_id = p_group_id
   AND EXISTS (
@@ -1011,10 +1016,12 @@ CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON "public"."list_item
 CREATE INDEX IF NOT EXISTS idx_sharing_groups_auth_owner_id ON "public"."sharing_groups" ("auth_owner_id");
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_id ON "public"."sharing_members" ("group_id");
 CREATE INDEX IF NOT EXISTS idx_sharing_members_token_hash ON "public"."sharing_members" ("token_hash");
+CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON "public"."sharing_members" ("auth_user_id");
+CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON "public"."sharing_members" ("group_id", "auth_user_id");
 CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON "public"."sharing_items" ("group_id");
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.398')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.398', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.399')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.399', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;

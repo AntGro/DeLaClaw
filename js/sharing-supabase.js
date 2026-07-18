@@ -137,7 +137,7 @@ export async function createSupabaseSharing(adapter, config) {
     if (!user) throw new Error('Auth required to create groups');
 
     const groupId = _uid8();
-    const creatorMemberId = _uid8();
+    const creatorMemberId = user.id; // breaking 1.399: stable uid, no LS
     const creatorToken = crypto.randomUUID();
     const creatorHash = await _hashToken(creatorToken);
 
@@ -161,6 +161,7 @@ export async function createSupabaseSharing(adapter, config) {
       display_name: displayName,
       role: 'creator',
       joined_at: new Date().toISOString(),
+      auth_user_id: user.id,
     };
     let { error: mErr } = await adapter.from('sharing_members').insert(memberPayload);
     if (mErr && /token_hash/i.test(mErr.message || '')) {
@@ -170,10 +171,13 @@ export async function createSupabaseSharing(adapter, config) {
       const retry = await adapter.from('sharing_members').insert(memberPayload);
       mErr = retry.error;
     }
-    if (mErr) throw new Error('Failed to add creator member: ' + mErr.message + (/(?:expires_at|token_hash|revoked_at)/i.test(mErr.message || '') ? ' — schema mismatch, run pending migrations from the banner' : ''));
-
-    // Store creator's member_id locally
-    localStorage.setItem('claw_member_' + groupId, creatorMemberId);
+    if (mErr && /auth_user_id/i.test(mErr.message || '')) {
+      // Pre-1.399 schema — column missing, retry without it (will be backfilled by migration)
+      delete memberPayload.auth_user_id;
+      const retry = await adapter.from('sharing_members').insert(memberPayload);
+      mErr = retry.error;
+    }
+    if (mErr) throw new Error('Failed to add creator member: ' + mErr.message + (/(?:expires_at|token_hash|revoked_at|auth_user_id)/i.test(mErr.message || '') ? ' — schema mismatch, run pending migrations from the banner' : ''));
 
     const group = {
       id: groupId,
@@ -185,6 +189,7 @@ export async function createSupabaseSharing(adapter, config) {
         role: 'creator',
         accepted: true,
         memberId: creatorMemberId,
+        authUserId: user.id,
         displayName,
       }],
     };
@@ -211,6 +216,7 @@ export async function createSupabaseSharing(adapter, config) {
             role: m.role,
             accepted: m.joined_at != null,
             memberId: m.member_id,
+            authUserId: m.auth_user_id || null,
             displayName: m.display_name,
             token: m.token,
           }));
@@ -271,6 +277,7 @@ export async function createSupabaseSharing(adapter, config) {
             role: m.role,
             accepted: m.joined_at != null,
             memberId: m.member_id,
+            authUserId: m.auth_user_id || null,
             displayName: m.display_name,
           }));
 
@@ -332,7 +339,7 @@ export async function createSupabaseSharing(adapter, config) {
     _ownedGroups = _ownedGroups.filter(g => g.id !== groupId);
     _allItems = _allItems.filter(i => i.group_id !== groupId);
     delete _memberCache[groupId];
-    localStorage.removeItem('claw_member_' + groupId);
+    // 1.399: no localStorage cleanup — attribution now in DB via auth_user_id
     _notifyUpdate();
   }
 
@@ -354,6 +361,7 @@ export async function createSupabaseSharing(adapter, config) {
       role: 'member',
       joined_at: null,
       expires_at: expiresAt,
+      auth_user_id: null,
     };
     let { error } = await adapter.from('sharing_members').insert(payload);
     if (error) {
@@ -380,7 +388,12 @@ export async function createSupabaseSharing(adapter, config) {
       const r3 = await adapter.from('sharing_members').insert(minimal);
       error = r3.error;
     }
-    if (error) throw new Error('Failed to invite: ' + error.message + (/(?:expires_at|token_hash)/i.test(error.message || '') ? ' — schema mismatch, run pending migrations' : ''));
+    if (error && /auth_user_id/i.test(error.message || '')) {
+      delete payload.auth_user_id;
+      const r4 = await adapter.from('sharing_members').insert(payload);
+      error = r4.error;
+    }
+    if (error) throw new Error('Failed to invite: ' + error.message + (/(?:expires_at|token_hash|auth_user_id)/i.test(error.message || '') ? ' — schema mismatch, run pending migrations' : ''));
 
     // Update local member cache
     if (_memberCache[groupId]) {
@@ -389,6 +402,7 @@ export async function createSupabaseSharing(adapter, config) {
         role: 'member',
         accepted: false,
         memberId,
+        authUserId: null,
         displayName,
         token,
       });
@@ -548,6 +562,7 @@ export async function createSupabaseSharing(adapter, config) {
       role: m.role,
       accepted: m.joined_at != null,
       memberId: m.member_id,
+      authUserId: m.auth_user_id || null,
       displayName: m.display_name,
     }));
 
@@ -649,9 +664,14 @@ export async function createSupabaseSharing(adapter, config) {
     if (remote) {
       return { type: 'rpc', client: remote.client, token: remote.token, memberId: remote.memberId };
     }
-    // Check if this is an owned group
+    // Owned group — breaking 1.399: lookup memberId via auth_user_id, no localStorage
     if (_ownedGroups.some(g => g.id === groupId)) {
-      const memberId = localStorage.getItem('claw_member_' + groupId);
+      const uid = getAuthUser()?.id;
+      const cache = _memberCache[groupId] || [];
+      // Prefer member whose auth_user_id matches current uid, fallback to creator role, fallback to uid itself (for new groups where member_id == uid)
+      const found = cache.find(m => m.authUserId === uid) || cache.find(m => m.role === 'creator') || null;
+      const memberId = found?.memberId || uid || null;
+      if (!memberId) throw new Error('Creator memberId not found — run migrations');
       return { type: 'direct', memberId };
     }
     throw new Error('Group not found: ' + groupId);
@@ -822,11 +842,12 @@ export async function createSupabaseSharing(adapter, config) {
               role: m.role,
               accepted: m.joined_at != null,
               memberId: m.member_id,
+              authUserId: m.auth_user_id || null,
               displayName: m.display_name,
               token: m.token,
             }));
             const oldMl = _memberCache[group.id] || [];
-            if (oldMl.length !== ml.length || JSON.stringify(oldMl.map(m => ({ e: m.email, a: m.accepted }))) !== JSON.stringify(ml.map(m => ({ e: m.email, a: m.accepted })))) {
+            if (oldMl.length !== ml.length || JSON.stringify(oldMl.map(m => ({ e: m.email, a: m.accepted, au: m.authUserId }))) !== JSON.stringify(ml.map(m => ({ e: m.email, a: m.accepted, au: m.authUserId })))) {
               changed = true;
             }
             group.members = ml;
@@ -869,10 +890,11 @@ export async function createSupabaseSharing(adapter, config) {
           role: m.role,
           accepted: m.joined_at != null,
           memberId: m.member_id,
+          authUserId: m.auth_user_id || null,
           displayName: m.display_name,
         }));
         const oldMl = _memberCache[group.id] || [];
-        if (oldMl.length !== ml.length || JSON.stringify(oldMl.map(m => ({ e: m.email, a: m.accepted }))) !== JSON.stringify(ml.map(m => ({ e: m.email, a: m.accepted })))) {
+        if (oldMl.length !== ml.length || JSON.stringify(oldMl.map(m => ({ e: m.email, a: m.accepted, au: m.authUserId }))) !== JSON.stringify(ml.map(m => ({ e: m.email, a: m.accepted, au: m.authUserId })))) {
           changed = true;
         }
         group.members = ml;

@@ -24,7 +24,6 @@ import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
 import { t } from '../i18n.js';
 
 export const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
-export const DRIVE_SCOPE = DRIVE_SCOPE_FILE;
 
 export function getDriveScope() {
   return DRIVE_SCOPE_FILE;

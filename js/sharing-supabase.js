@@ -19,7 +19,7 @@
 // ===================================================================
 
 import { encodeInviteEnvelope, decodeInviteEnvelope } from './sharing-envelope.js';
-import { getOrCreateSyncSecret, encryptText, decryptText, hashTokenClient, getKEK, storeWrappedSecret } from './crypto-sync.js';
+import { ensureSyncSecret, getSyncSecretWithSettings, encryptText, decryptText, hashTokenClient, getKEK, storeWrappedSecret } from './crypto-sync.js';
 
 /**
  * Create a Supabase sharing adapter.
@@ -64,11 +64,11 @@ export async function createSupabaseSharing(adapter, config) {
   }
 
   async function _encryptForJoined(token, anonKey) {
-    // >=1.301 only — dev branch assumes ciphertext columns exist, no plaintext fallback
-    const secret = getOrCreateSyncSecret();
+    // Option A (1.397): secret synced via settings for cross-device portability
+    const secret = await ensureSyncSecret(adapter);
     const encTok = await encryptText(token, secret);
     const encKey = await encryptText(anonKey, secret);
-    // Best-effort wrap backup with KEK
+    // Best-effort wrap backup with KEK (legacy, still useful)
     try { await storeWrappedSecret(); } catch {}
     return {
       token_ciphertext: encTok.ciphertext,
@@ -79,16 +79,16 @@ export async function createSupabaseSharing(adapter, config) {
   }
 
   async function _decryptJoinedRow(row) {
-    // >=1.301 only — ciphertext only, no plaintext fallback on dev
+    // Option A: try LS, then settings (cross-device), no plaintext fallback
     let token = null;
     let anonKey = null;
     try {
+      const secret = await getSyncSecretWithSettings(adapter);
+      if (!secret) return { token: null, anonKey: null };
       if (row.token_ciphertext && row.token_iv) {
-        const secret = getOrCreateSyncSecret();
         token = await decryptText(row.token_ciphertext, row.token_iv, secret);
       }
       if (row.remote_anon_key_ciphertext && row.remote_anon_key_iv) {
-        const secret = getOrCreateSyncSecret();
         anonKey = await decryptText(row.remote_anon_key_ciphertext, row.remote_anon_key_iv, secret);
       }
     } catch (e) {

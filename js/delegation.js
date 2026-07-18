@@ -1,6 +1,7 @@
 // Delegation for CSP-safe event handling — Phase 1 + Phase 2 unified
 // 4 document-level listeners (click, change, input, keydown)
 (function () {
+  var _searchTimers = {};
   function getActionEl(target) {
     if (!target) return null;
     if (target.dataset && target.dataset.action) return target;
@@ -323,15 +324,40 @@
     if (!el) return;
     var action = el.dataset.action;
     if (!action) return;
-    switch (action) {
-      case 'filter-projects': callWindow('filterProjects', [e]); break;
-      case 'filter-todos': callWindow('filterTodos', [e]); break;
-      case 'filter-habits': callWindow('filterHabits', [e]); break;
-      case 'filter-birthdays': callWindow('filterBirthdays', [e]); break;
-      case 'filter-vestiaire': callWindow('filterVestiaire', [e]); break;
-      case 'filter-flashcards': callWindow('filterFlashcards', [e]); break;
-      case 'filter-lists': callWindow('filterLists', [e]); break;
-      default: break;
+    // Debounce search inputs 150ms — filterProjects/Todos iterate full DOM on every keystroke
+    if (action.indexOf('filter-') === 0) {
+      var isClear = e.target.value === '';
+      if (isClear) {
+        clearTimeout(_searchTimers[action]);
+        switch (action) {
+          case 'filter-projects': callWindow('filterProjects', [e]); break;
+          case 'filter-todos': callWindow('filterTodos', [e]); break;
+          case 'filter-habits': callWindow('filterHabits', [e]); break;
+          case 'filter-birthdays': callWindow('filterBirthdays', [e]); break;
+          case 'filter-vestiaire': callWindow('filterVestiaire', [e]); break;
+          case 'filter-flashcards': callWindow('filterFlashcards', [e]); break;
+          case 'filter-lists': callWindow('filterLists', [e]); break;
+          default: break;
+        }
+        return;
+      }
+      clearTimeout(_searchTimers[action]);
+      var target = e.target;
+      _searchTimers[action] = setTimeout(function() {
+        // Use latest value at timeout
+        var fakeEvt = { target: target };
+        switch (action) {
+          case 'filter-projects': callWindow('filterProjects', [fakeEvt]); break;
+          case 'filter-todos': callWindow('filterTodos', [fakeEvt]); break;
+          case 'filter-habits': callWindow('filterHabits', [fakeEvt]); break;
+          case 'filter-birthdays': callWindow('filterBirthdays', [fakeEvt]); break;
+          case 'filter-vestiaire': callWindow('filterVestiaire', [fakeEvt]); break;
+          case 'filter-flashcards': callWindow('filterFlashcards', [fakeEvt]); break;
+          case 'filter-lists': callWindow('filterLists', [fakeEvt]); break;
+          default: break;
+        }
+      }, 150);
+      return;
     }
   }
   function handleKeydown(e) {

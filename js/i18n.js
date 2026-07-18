@@ -1214,7 +1214,7 @@ const T = {
       sign_in_to_share_hint: 'Prot\u00e9gez vos donn\u00e9es et partagez TODOs, habitudes et listes.',
       sending: 'Envoi\u2026',
       sent: 'Email envoyé !',
-      error: 'Impossible d'envoyer l'email. Vérifiez votre adresse.',
+      error: 'Impossible d\'envoyer l\'email. Vérifiez votre adresse.',
       rate_limit: 'Trop de requ\u00eates. Attendez quelques minutes.',
       site_url_hint: 'Premi\u00e8re fois\u00a0? Configurez votre <a href="{0}" target="_blank" rel="noopener">Site URL</a> pour ce site.',
       step_site_url: 'Configurer le Site URL',

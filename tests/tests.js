@@ -80,6 +80,60 @@ test('Balanced backticks in JS files (excluding markdown processors)', () => {
 });
 
 // ===================================================================
+// 2b. JS syntax valid — catches unescaped quotes like d'envoyer
+// ===================================================================
+test('All JS files are syntactically valid (no broken quotes)', () => {
+  let acorn = null;
+  try { acorn = require('acorn'); } catch {}
+  const hasBunTranspiler = typeof Bun !== 'undefined' && Bun.Transpiler;
+  let failures = [];
+  for (const [name, content] of Object.entries(jsFiles)) {
+    try {
+      if (hasBunTranspiler) {
+        const transpiler = new Bun.Transpiler({ loader: 'js' });
+        transpiler.transformSync(content);
+      } else if (acorn) {
+        acorn.parse(content, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true });
+      } else {
+        // Fallback: Node's vm can at least check for unclosed strings via Function? Skip strict check
+        // Do a lightweight heuristic for unescaped single-quote inside single-quoted string
+        // This catches the classic d'envoyer mistake
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          // naive: '...d'word pattern without escaping and without closing
+          // Look for '...[^\\]'? Actually check for single-quoted string containing unescaped '
+          // We'll try to parse single-quoted strings with a simple state machine
+          let inSingle = false;
+          let escaped = false;
+          for (let j = 0; j < line.length; j++) {
+            const ch = line[j];
+            if (escaped) { escaped = false; continue; }
+            if (ch === '\\') { escaped = true; continue; }
+            if (ch === "'" && !inSingle) { inSingle = true; continue; }
+            if (ch === "'" && inSingle) {
+              // look ahead: if next char is a letter and prev char is not space/comma/etc, likely unescaped
+              const next = line[j+1] || '';
+              const prev = line[j-1] || '';
+              // If inside an object value like: 'Impossible d'envoyer' -> after first close, next is letter
+              if (/[a-zA-Z]/.test(next) && /[a-zA-Z]/.test(prev)) {
+                throw new SyntaxError(`Unescaped apostrophe at ${name}:${i+1} -> ${line.trim().slice(0,80)}`);
+              }
+              inSingle = false;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      failures.push(`${name}: ${e.message}`);
+    }
+  }
+  if (failures.length) {
+    throw new Error('Syntax errors:\n' + failures.join('\n'));
+  }
+});
+
+// ===================================================================
 // 3. All window.X = X assignments reference defined functions
 // ===================================================================
 test('All window.fn = fn assignments reference defined identifiers', () => {

@@ -471,17 +471,7 @@ async function autoConnect(url, key, mode) {
       const form = document.getElementById('loginForm');
       if (form) form.style.display = 'flex';
       const err = document.getElementById('loginError');
-      if (err) {
-        err.textContent = '';
-        err.appendChild(document.createTextNode(t('toast.schema_missing') || 'Tables not found — run sql/supabase_schema.sql in Supabase SQL Editor.'));
-        const br = document.createElement('br');
-        err.appendChild(br);
-        const hint = document.createElement('span');
-        hint.style.fontSize = '0.85em';
-        hint.style.opacity = '0.8';
-        hint.textContent = t('toast.schema_missing_hint') || 'In Supabase: SQL Editor → New Query → paste schema file → Run.';
-        err.appendChild(hint);
-      }
+      renderSchemaMissingError(err, url);
       // Keep URL/key in form for user to retry after running schema
       const uEl = document.getElementById('username');
       const kEl = document.getElementById('password');
@@ -887,6 +877,81 @@ function normalizeSupabaseUrl(raw) {
   return raw;
 }
 
+function getSupabaseProjectRef(url) {
+  if (!url) return null;
+  const m1 = url.match(/https?:\/\/([a-z0-9]{20,})\.supabase\.co/i);
+  if (m1) return m1[1];
+  const m2 = url.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
+  if (m2) return m2[1];
+  return null;
+}
+
+function renderSchemaMissingError(container, projectUrl) {
+  if (!container) return;
+  container.textContent = '';
+  container.style.lineHeight = '1.4';
+  container.style.maxWidth = '360px';
+
+  const title = document.createElement('div');
+  title.textContent = t('toast.schema_missing') || 'Tables not found — run sql/supabase_schema.sql in Supabase SQL Editor.';
+  title.style.fontWeight = '600';
+  title.style.marginBottom = '2px';
+  container.appendChild(title);
+
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.flexWrap = 'wrap';
+  actions.style.gap = '8px';
+  actions.style.marginTop = '10px';
+
+  const ref = getSupabaseProjectRef(projectUrl);
+  const sqlEditorUrl = ref ? `https://supabase.com/dashboard/project/${ref}/sql/new` : 'https://supabase.com/dashboard/projects';
+
+  const openLink = document.createElement('a');
+  openLink.href = sqlEditorUrl;
+  openLink.target = '_blank';
+  openLink.rel = 'noopener';
+  openLink.textContent = t('toast.open_sql_editor') || 'Open SQL Editor ↗';
+  openLink.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border-radius:8px;background:var(--accent);color:#fff;text-decoration:none;font-size:0.85rem;font-weight:600;line-height:1;';
+  actions.appendChild(openLink);
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.textContent = t('toast.copy_schema') || t('setup.copy_btn') || 'Copy schema';
+  copyBtn.style.cssText = 'padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.85rem;font-weight:600;cursor:pointer;line-height:1;';
+  copyBtn.addEventListener('click', async () => {
+    const orig = copyBtn.textContent;
+    try {
+      let sql = window._SUPABASE_SCHEMA_CACHED || '';
+      if (!sql) {
+        const r = await fetch('./sql/supabase_schema.sql', { cache: 'no-store' });
+        if (!r.ok) throw new Error('fetch failed ' + r.status);
+        sql = await r.text();
+        window._SUPABASE_SCHEMA_CACHED = sql;
+      }
+      await navigator.clipboard.writeText(sql);
+      copyBtn.textContent = t('toast.copied') || t('setup.copy_done') || 'Copied!';
+      copyBtn.style.borderColor = 'var(--accent)';
+      setTimeout(() => {
+        copyBtn.textContent = orig;
+        copyBtn.style.borderColor = 'var(--border)';
+      }, 2000);
+    } catch {
+      window.open('https://raw.githubusercontent.com/AntGro/DeLaClaw/dev/sql/supabase_schema.sql', '_blank');
+    }
+  });
+  actions.appendChild(copyBtn);
+
+  container.appendChild(actions);
+
+  const hint = document.createElement('div');
+  hint.textContent = t('toast.schema_missing_hint') || 'Paste in SQL Editor → Run. Then retry Connect.';
+  hint.style.fontSize = '0.8em';
+  hint.style.opacity = '0.75';
+  hint.style.marginTop = '8px';
+  container.appendChild(hint);
+}
+
 async function doLogin() {
   const url = normalizeSupabaseUrl(document.getElementById('username').value.trim());
   const key = document.getElementById('password').value.trim();
@@ -930,16 +995,7 @@ async function doLogin() {
     }
   } catch (e) {
     if (e.message === 'schema_missing') {
-      // New Supabase project without tables — guide user to run schema SQL
-      err.textContent = '';
-      err.appendChild(document.createTextNode(t('toast.schema_missing') || 'Tables not found — run sql/supabase_schema.sql in Supabase SQL Editor.'));
-      const br = document.createElement('br');
-      err.appendChild(br);
-      const hint = document.createElement('span');
-      hint.style.fontSize = '0.85em';
-      hint.style.opacity = '0.8';
-      hint.textContent = t('toast.schema_missing_hint') || 'In Supabase: SQL Editor → New Query → paste schema file → Run.';
-      err.appendChild(hint);
+      renderSchemaMissingError(err, url);
     } else if (e.message === 'project_paused') {
       // Safe DOM — no innerHTML with URL interpolation (P0 sec-002)
       const safeUrl = /^https:\/\/supabase\.com\/dashboard\/project\/[a-z0-9]+$/i.test(e.dashboardUrl) ? e.dashboardUrl : 'https://supabase.com/dashboard/projects';
@@ -1286,15 +1342,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (e) {
         if (_setupLoginError) {
           if (e.message === 'schema_missing') {
-            _setupLoginError.textContent = '';
-            _setupLoginError.appendChild(document.createTextNode(t('toast.schema_missing') || 'Tables not found — run sql/supabase_schema.sql in Supabase SQL Editor.'));
-            const br = document.createElement('br');
-            _setupLoginError.appendChild(br);
-            const hint = document.createElement('span');
-            hint.style.fontSize = '0.85em';
-            hint.style.opacity = '0.8';
-            hint.textContent = t('toast.schema_missing_hint') || 'In Supabase: SQL Editor → New Query → paste schema file → Run.';
-            _setupLoginError.appendChild(hint);
+            renderSchemaMissingError(_setupLoginError, url);
           } else if (e.message === 'project_paused') {
             // Safe DOM — no innerHTML with URL interpolation (P0 sec-002)
             const safeUrl = /^https:\/\/supabase\.com\/dashboard\/project\/[a-z0-9]+$/i.test(e.dashboardUrl) ? e.dashboardUrl : 'https://supabase.com/dashboard/projects';

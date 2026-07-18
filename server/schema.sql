@@ -196,7 +196,7 @@ CREATE TABLE IF NOT EXISTS daily_visits (
 CREATE TABLE IF NOT EXISTS joined_groups (
   group_id TEXT PRIMARY KEY,
   member_id TEXT NOT NULL,
-  token TEXT NOT NULL,
+  token TEXT,
   display_name TEXT,
   group_name TEXT,
   remote_backend_type TEXT NOT NULL,

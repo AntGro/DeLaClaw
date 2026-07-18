@@ -8,6 +8,7 @@ import db from './db.js';
 import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
+import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
 
 import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
@@ -3731,7 +3732,6 @@ async function exportBackup() {
 }
 
 const GOOGLE_CLIENT_ID = '883846698493-5v6hfn0vvnq7mn5gua454cgvibbgqt8i.apps.googleusercontent.com';
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 function getGoogleAccessToken() {
   return new Promise((resolve, reject) => {
@@ -3741,7 +3741,7 @@ function getGoogleAccessToken() {
     }
     const client = google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
-      scope: DRIVE_SCOPE,
+      scope: DRIVE_SCOPE_FILE,
       callback: (resp) => {
         if (resp.error) reject(new Error(resp.error));
         else resolve(resp.access_token);

@@ -23,9 +23,10 @@ import { createDemoAdapter } from './demo.js';
 import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
 import { t } from '../i18n.js';
 
-const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
+export const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
+export const DRIVE_SCOPE = DRIVE_SCOPE_FILE;
 
-function getDriveScope() {
+export function getDriveScope() {
   return DRIVE_SCOPE_FILE;
 }
 const DRIVE_FOLDER_NAME = 'DeLaClaw';

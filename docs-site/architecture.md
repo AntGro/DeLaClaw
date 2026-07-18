@@ -169,6 +169,18 @@ Encrypted with WebCrypto AES-GCM 256 using a per-user `sync_secret` (32 random b
 
 Flow: `createGroup`/`inviteUser` → generate token + hash + expiry → store hash; `joinWithFileIds`/`tryDirectJoin` → `encryptForJoined(token, anonKey)` → upsert ciphertexts + plaintext fallback; `loadAll` → `decryptJoinedRow()` prefers decryption.
 
+### iOS PWA auth + OTP code (1.371+)
+
+Supabase magic links break on iOS PWA: Gmail/Outlook opens links in Chrome (or Safari), not the standalone PWA's WebKit context. Chrome's localStorage is isolated, so `supabase-js` would create the session in Chrome and the PWA would still be signed out.
+
+Since `1.371`, `auth.js` exposes:
+
+- `sendMagicLink()` — still sends a link ( `ConfirmationURL` ), but docs require template to also include `{{ .Token }}` 6-digit code.
+- `verifyOtpCode(email, token)` → `auth.verifyOtp({ email, token, type: 'email' })` — verifies the code **inside the PWA** so the session stays in the PWA's storage.
+- `main.js` auth prompt now shows OTP box after sending: input `type=text inputmode=numeric autocomplete=one-time-code` + Verify button, with i18n hints `otp_hint`, `link_hint`, etc. On iPhone, user copies code from Mail/Gmail and pastes in PWA.
+
+This is the recommended path for any PWA that can be opened from an external mail app.
+
 ### Defense: CSP + credential stripping
 
 - `style-src` keeps `unsafe-inline` for `style=` attrs, `script-src` is nonce/sha256 only since v1.350 (no `unsafe-inline`).

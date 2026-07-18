@@ -68,6 +68,25 @@ In **Authentication → Rate Limits**: keep defaults, or increase Magic Link lim
 2. Select **Supabase** on the login screen
 3. Enter your Project URL and anon key
 4. Enter your email → click **Send magic link** → open link from inbox
+
+#### iPhone PWA + Gmail/Outlook quirk (important since 1.371)
+
+On iOS, if you use DeLaClaw as a Home Screen PWA and receive the login email in Gmail (or Outlook):
+
+- **Gmail opens links in Chrome**, not in your PWA. Chrome's localStorage is isolated from the PWA's standalone WebKit context, so clicking the magic link creates a session **in Chrome, not in the PWA**. Your PWA stays signed out.
+- Same for Safari vs PWA since iOS 16: standalone PWA storage is separate from Safari tabs.
+
+**Fix**: DeLaClaw now shows a 6-digit code entry after you request the link.
+
+1. In the PWA, enter email → **Send magic link**
+2. Open Gmail/Apple Mail → open the email
+3. **Copy the 6-digit code** (e.g. `482913`) — don't just tap the link
+4. Return to PWA → paste code → **Verify code**
+
+The code is verified via `supabase.auth.verifyOtp({ email, token, type: 'email' })` inside the PWA, so the session stays in the PWA.
+
+> Your Supabase email template must include `{{ .Token }}` (the 6-digit code). In Dashboard → **Authentication → Email Templates → Magic Link**, ensure the template contains both the link button (`{{ .ConfirmationURL }}`) and the code line like `Your code is {{ .Token }}`. Default Supabase template already includes both. If you customized it to link-only, add the token back.
+
 5. Optionally check "Stay connected" to persist URL + anon key (the session itself is stored separately by Supabase Auth)
 
 ### Notes

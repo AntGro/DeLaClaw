@@ -43,6 +43,11 @@ export async function initAuth(adapter) {
  * Uses built-in Supabase SMTP (2 emails/hr — fine since only the
  * owner authenticates, once per device).
  *
+ * Supabase sends both a magic link AND a 6-digit OTP code. The code
+ * path is critical for iOS PWA: clicking the link in Gmail opens
+ * Chrome, not the standalone PWA, so the session would be lost.
+ * Users should enter the 6-digit code inside the PWA.
+ *
  * @param {Object} adapter
  * @param {string} email
  * @returns {Promise<{error: Object|null}>}
@@ -53,9 +58,32 @@ export async function sendMagicLink(adapter, email) {
     email,
     options: {
       emailRedirectTo: window.location.origin + window.location.pathname,
+      // We intentionally request the code, not just link. Supabase email
+      // template should contain {{ .Token }} (6-digit) alongside link.
     },
   });
   return { error };
+}
+
+/**
+ * Verify a 6-digit OTP code inside the current browser context.
+ * This is the PWA-safe path: token stays in the PWA, no cross-browser
+ * session loss when Gmail opens the link in Chrome.
+ *
+ * @param {Object} adapter
+ * @param {string} email
+ * @param {string} token — 6-digit code from email
+ * @returns {Promise<{user: Object|null, error: Object|null}>}
+ */
+export async function verifyOtpCode(adapter, email, token) {
+  const client = adapter.raw;
+  const cleanToken = (token || '').trim();
+  const { data, error } = await client.auth.verifyOtp({
+    email,
+    token: cleanToken,
+    type: 'email',
+  });
+  return { user: data?.user || data?.session?.user || null, session: data?.session || null, error };
 }
 
 /**

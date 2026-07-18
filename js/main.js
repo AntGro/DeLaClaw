@@ -660,13 +660,67 @@ function showAuthPrompt(rawAdapter, url, key) {
       <div class="auth-icon">${lucideIcon('mail', 28)}</div>
       <h3>${t('auth.check_inbox')}</h3>
       <p class="auth-hint">${t('auth.check_inbox_hint', esc(email))}</p>
-      <button class="auth-send-btn" id="authResendBtn">${t('auth.resend')}</button>
-      <div class="auth-status" id="authResendStatus" style="display:none"></div>
-      <button class="auth-skip" id="authCloseBtn">${t('auth.close')}</button>
+      <div class="auth-otp-box" style="margin:16px 0; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-subtle,#f8f9fa);">
+        <p class="auth-hint" style="font-size:0.9em; margin-bottom:8px;">${t('auth.otp_hint') || 'If you use iPhone PWA + Gmail: Gmail opens links in Chrome, so your session would be lost. Copy the 6-digit code from the email and paste it here instead.'}</p>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="text" id="authOtpInput" placeholder="${t('auth.otp_placeholder') || '123456'}" inputmode="numeric" autocomplete="one-time-code" maxlength="8" style="flex:1; padding:8px 10px; font-size:18px; letter-spacing:0.2em; text-align:center; border:1px solid var(--border); border-radius:6px;">
+          <button class="auth-send-btn" id="authVerifyBtn" style="white-space:nowrap;">${t('auth.verify_code') || 'Verify code'}</button>
+        </div>
+        <div class="auth-error" id="authOtpError" style="display:none; margin-top:8px;"></div>
+      </div>
+      <p class="auth-hint" style="font-size:0.85em; opacity:0.8;">${t('auth.link_hint') || 'You can also click the magic link if it opens in the same browser. On iOS PWA, prefer the code.'}</p>
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <button class="auth-send-btn" id="authResendBtn" style="flex:0;">${t('auth.resend')}</button>
+        <button class="auth-skip" id="authCloseBtn">${t('auth.close')}</button>
+      </div>
+      <div class="auth-status" id="authResendStatus" style="display:none; margin-top:8px;"></div>
     `;
     const resendBtn = content.querySelector('#authResendBtn');
     const closeBtn = content.querySelector('#authCloseBtn');
     const statusEl = content.querySelector('#authResendStatus');
+    const otpInput = content.querySelector('#authOtpInput');
+    const verifyBtn = content.querySelector('#authVerifyBtn');
+    const otpErrEl = content.querySelector('#authOtpError');
+
+    async function doVerify() {
+      const code = (otpInput?.value || '').trim();
+      if (!code || code.length < 6) {
+        if (otpErrEl) { otpErrEl.textContent = t('auth.otp_invalid') || 'Enter the 6-digit code from your email.'; otpErrEl.style.display = ''; }
+        return;
+      }
+      verifyBtn.disabled = true;
+      verifyBtn.textContent = t('auth.verifying') || 'Verifying...';
+      if (otpErrEl) otpErrEl.style.display = 'none';
+      try {
+        const { verifyOtpCode } = await import('./auth.js');
+        const { user, error } = await verifyOtpCode(rawAdapter, email, code);
+        if (error || !user) {
+          const msg = error?.message || '';
+          const isExpired = msg.toLowerCase().includes('expired');
+          otpErrEl.textContent = isExpired ? (t('auth.otp_expired') || 'Code expired — resend a new link.') : (t('auth.otp_invalid') || 'Invalid code. Check the 6-digit code from the email.');
+          otpErrEl.style.display = '';
+          verifyBtn.disabled = false;
+          verifyBtn.textContent = t('auth.verify_code') || 'Verify code';
+          return;
+        }
+        // Success — close prompt, session will be handled by onAuthStateChange + init logic
+        statusEl.textContent = t('auth.verified') || 'Verified! Signing you in...';
+        statusEl.style.display = '';
+        overlay.classList.remove('visible');
+        // Force reload to pick up session (initAuth runs on next connect)
+        window.location.reload();
+      } catch (e) {
+        console.warn('otp verify failed', e);
+        if (otpErrEl) { otpErrEl.textContent = t('auth.error'); otpErrEl.style.display = ''; }
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = t('auth.verify_code') || 'Verify code';
+      }
+    }
+
+    verifyBtn.addEventListener('click', doVerify);
+    otpInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doVerify(); });
+    // Auto-focus OTP for PWA users
+    setTimeout(() => { try { otpInput.focus(); } catch {} }, 100);
 
     resendBtn.addEventListener('click', async () => {
       resendBtn.disabled = true;

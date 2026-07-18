@@ -563,7 +563,7 @@ function showAuthPrompt(rawAdapter, url, key) {
     content.innerHTML = `
       <div class="auth-icon">${lucideIcon('lock', 28)}</div>
       <h3>${t('auth.sign_in')}</h3>
-      <p class="auth-hint">${t('auth.sign_in_hint')}</p>
+      <p class="auth-hint">${t('auth.sign_in_hint_mandatory')}</p>
 
       <div class="auth-step" id="authStep1">
         <div class="auth-step-header">
@@ -594,7 +594,7 @@ function showAuthPrompt(rawAdapter, url, key) {
         </div>
       </div>
 
-      <button class="auth-skip" id="authSkipBtn">${t('auth.skip')}</button>
+      <p class="auth-mandatory-note">${t('auth.mandatory_note')}</p>
     `;
     const confirmBox = content.querySelector('#authSiteUrlConfirm');
     const step2 = content.querySelector('#authStep2');
@@ -602,7 +602,6 @@ function showAuthPrompt(rawAdapter, url, key) {
     const emailEl = content.querySelector('#authEmail');
     const errEl = content.querySelector('#authError');
     const sendBtn = content.querySelector('#authSendBtn');
-    const skipBtn = content.querySelector('#authSkipBtn');
     const copyUrlBtn = content.querySelector('#authCopyUrlBtn');
 
     copyUrlBtn.addEventListener('click', () => {
@@ -648,11 +647,6 @@ function showAuthPrompt(rawAdapter, url, key) {
         sendBtn.disabled = false;
         sendBtn.textContent = t('auth.send_magic_link');
       }
-    });
-
-    skipBtn.addEventListener('click', () => {
-      localStorage.setItem('claw_auth_skipped', '1');
-      overlay.classList.remove('visible');
     });
 
     emailEl.addEventListener('keydown', (e) => {
@@ -1324,20 +1318,13 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       const { initAuth, claimOwnership } = await import('./auth.js');
       const authResult = await initAuth(state._rawSupabaseAdapter);
       state.authUser = authResult.user;
-      if (authResult.user && authResult.isNewAuth) {
+      if (authResult.user) {
         await claimOwnership(adapter, authResult.user.id);
       }
     } catch (e) { console.warn('auth init:', e); }
-    // Show auth prompt only if DB has owner_id (migration 1.294+)
-    if (!state.authUser && !localStorage.getItem('claw_auth_skipped')) {
-      try {
-        const { data: verRow } = await adapter.from('settings')
-          .select('value').eq('key', 'schema_version').maybeSingle();
-        const dbVer = verRow?.value || '0.00';
-        if (cmpVer(dbVer, '1.294') >= 0) {
-          showAuthPrompt(state._rawSupabaseAdapter, url, key);
-        }
-      } catch { /* DB too old or settings missing — skip prompt */ }
+    // Mandatory auth since 1.300 owner-only: show prompt if not signed in
+    if (!state.authUser) {
+      showAuthPrompt(state._rawSupabaseAdapter, url, key);
     }
     // Listen for late auth events (magic link callback may resolve after getSession)
     try {
@@ -2936,8 +2923,8 @@ async function checkMigrationStatus() {
         closeMigrationModal();
         checkSchemaVersion();
         markLastUpdated();
-        // Show auth prompt now that DB supports it
-        if (getSelectedMode() === 'supabase' && !state.authUser && !localStorage.getItem('claw_auth_skipped')) {
+        // Mandatory auth since 1.300 — show prompt if not signed in
+        if (getSelectedMode() === 'supabase' && !state.authUser) {
           showAuthPrompt(state._rawSupabaseAdapter);
         }
       }, 1500);

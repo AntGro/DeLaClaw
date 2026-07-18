@@ -590,6 +590,7 @@ const T = {
     auth: {
       sign_in: 'Sign in',
       sign_in_hint: 'Protect your data and enable sharing with a magic link.',
+      sign_in_hint_mandatory: 'Supabase mode requires sign-in to protect your private data. Your session stays active for 1 year.',
       email_placeholder: 'your@email.com',
       send_magic_link: 'Send magic link',
       skip: 'Skip',
@@ -613,6 +614,7 @@ const T = {
       step_magic_link: 'Sign in with magic link',
       sign_out: 'Sign out',
       signed_in_as: 'Signed in as {0}',
+      mandatory_note: 'Sign-in is required for Supabase. Use Drive backend if you prefer no auth.',
     },
   },
   fr: {
@@ -1180,6 +1182,7 @@ const T = {
     auth: {
       sign_in: 'Se connecter',
       sign_in_hint: 'Prot\u00e9gez vos donn\u00e9es et activez le partage avec un lien magique.',
+      sign_in_hint_mandatory: 'Le mode Supabase n\u00e9cessite une connexion pour prot\u00e9ger vos donn\u00e9es. Votre session reste active 1 an.',
       email_placeholder: 'votre@email.com',
       send_magic_link: 'Envoyer le lien',
       skip: 'Passer',
@@ -1203,6 +1206,7 @@ const T = {
       step_magic_link: 'Se connecter par lien magique',
       sign_out: 'Se d\u00e9connecter',
       signed_in_as: 'Connect\u00e9 en tant que {0}',
+      mandatory_note: 'Connexion obligatoire pour Supabase. Utilisez Drive si vous préférez sans auth.',
     },
   },
   es: {
@@ -1770,6 +1774,7 @@ const T = {
     auth: {
       sign_in: 'Iniciar sesi\u00f3n',
       sign_in_hint: 'Protege tus datos y habilita el uso compartido con un enlace m\u00e1gico.',
+      sign_in_hint_mandatory: 'El modo Supabase requiere iniciar sesión para proteger tus datos. Tu sesión dura 1 año.',
       email_placeholder: 'tu@email.com',
       send_magic_link: 'Enviar enlace',
       skip: 'Omitir',
@@ -1793,6 +1798,7 @@ const T = {
       step_magic_link: 'Iniciar sesi\u00f3n con enlace m\u00e1gico',
       sign_out: 'Cerrar sesi\u00f3n',
       signed_in_as: 'Conectado como {0}',
+      mandatory_note: 'Inicio de sesión obligatorio para Supabase. Usa Drive si prefieres sin auth.',
     },
   },
 };

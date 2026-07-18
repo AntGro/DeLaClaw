@@ -30,11 +30,9 @@ export async function initAuth(adapter) {
   const { data: { session } } = await client.auth.getSession();
 
   if (session) {
-    // Check if this is a brand new auth (no prior owner_id claim)
-    const { data: row } = await adapter.from('settings')
-      .select('owner_id').limit(1).maybeSingle();
-    const isNewAuth = row && row.owner_id == null;
-    return { user: session.user, isNewAuth };
+    // Since 1.300 owner-only, we can't reliably detect new auth via NULL rows.
+    // Always attempt claim_ownership() after sign-in (idempotent).
+    return { user: session.user, isNewAuth: true };
   }
 
   return { user: null, isNewAuth: false };
@@ -65,10 +63,20 @@ export async function sendMagicLink(adapter, email) {
  * Called once after first successful auth. Idempotent — already-claimed
  * rows are untouched.
  *
+ * For schema >= 1.300 this uses SECURITY DEFINER RPC claim_ownership()
+ * which works even after owner-only RLS. Falls back to direct UPDATE
+ * for older schemas.
+ *
  * @param {Object} adapter
  * @param {string} userId — auth.uid()
  */
 export async function claimOwnership(adapter, userId) {
+  // Try RPC first (1.300+) — SECURITY DEFINER, bypasses RLS
+  try {
+    const { error } = await adapter.rpc('claim_ownership');
+    if (!error) return;
+  } catch {}
+
   const tables = [
     'projects', 'tasks', 'todos', 'habits', 'habit_completions',
     'flashcard_notes', 'birthdays', 'vestiaire', 'lists', 'list_items',

@@ -827,35 +827,89 @@ ALTER TABLE "public"."joined_groups" ENABLE ROW LEVEL SECURITY;
 --
 -- ===== ROW LEVEL SECURITY: POLICIES =====
 --
--- Personal tables use "owner or unclaimed": owner_id = auth.uid() OR owner_id IS NULL.
--- The IS NULL fallback provides backward compatibility for users who haven't enabled auth.
+-- Personal tables use "owner only": owner_id = auth.uid().
+-- Supabase backend now requires mandatory auth — anon sees 0 rows.
+-- Use claim_ownership() SECURITY DEFINER to claim legacy NULL rows.
+-- Auto-set owner_id via trg_set_owner_id BEFORE INSERT trigger.
 --
 
--- ── Personal tables (owner or unclaimed) ──────────────────────
+-- ── Helper functions ──
+CREATE OR REPLACE FUNCTION set_owner_id()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.owner_id IS NULL THEN
+    NEW.owner_id := auth.uid();
+  END IF;
+  RETURN NEW;
+END;
+$$;
 
-CREATE POLICY "owner or unclaimed" ON "public"."birthdays" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE OR REPLACE FUNCTION claim_ownership()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE uid UUID := auth.uid();
+BEGIN
+  IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  UPDATE projects SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE tasks SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE todos SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE habits SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE habit_completions SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE flashcard_notes SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE birthdays SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE vestiaire SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE lists SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE list_items SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE settings SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE prompts SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE joined_groups SET owner_id = uid WHERE owner_id IS NULL;
+END;
+$$;
 
-CREATE POLICY "owner or unclaimed" ON "public"."flashcard_notes" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+-- ── Personal tables (owner only) ──────────────────────
 
-CREATE POLICY "owner or unclaimed" ON "public"."habit_completions" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE POLICY "owner only" ON "public"."birthdays" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."birthdays" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner or unclaimed" ON "public"."habits" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE POLICY "owner only" ON "public"."flashcard_notes" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."flashcard_notes" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner or unclaimed" ON "public"."list_items" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE POLICY "owner only" ON "public"."habit_completions" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."habit_completions" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner or unclaimed" ON "public"."lists" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE POLICY "owner only" ON "public"."habits" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."habits" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner or unclaimed" ON "public"."projects" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE POLICY "owner only" ON "public"."list_items" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."list_items" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner or unclaimed" ON "public"."prompts" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE POLICY "owner only" ON "public"."lists" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."lists" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner or unclaimed" ON "public"."settings" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE POLICY "owner only" ON "public"."projects" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."projects" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner or unclaimed" ON "public"."tasks" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE POLICY "owner only" ON "public"."prompts" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."prompts" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner or unclaimed" ON "public"."todos" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE POLICY "owner only" ON "public"."settings" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."settings" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner or unclaimed" ON "public"."vestiaire" USING ("owner_id" = "auth"."uid"() OR "owner_id" IS NULL);
+CREATE POLICY "owner only" ON "public"."tasks" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."tasks" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+
+CREATE POLICY "owner only" ON "public"."todos" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."todos" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+
+CREATE POLICY "owner only" ON "public"."vestiaire" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."vestiaire" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
 -- ── Tables without owner_id (open access) ─────────────────────
 
@@ -877,13 +931,14 @@ CREATE POLICY "owner" ON "public"."sharing_members" FOR ALL USING ("group_id" IN
 
 CREATE POLICY "owner" ON "public"."sharing_items" FOR ALL USING ("group_id" IN (SELECT "id" FROM "public"."sharing_groups" WHERE "auth_owner_id" = "auth"."uid"()));
 
-CREATE POLICY "owner only" ON "public"."joined_groups" USING ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner only" ON "public"."joined_groups" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."joined_groups" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
 
 -- ===== SEED DATA =====
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.299')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.299', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.300')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.300', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;

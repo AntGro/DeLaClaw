@@ -1024,6 +1024,29 @@ test('1.294 migration adds owner_id to all 12 personal tables', () => {
   }
 });
 
+test('1.300 migration enforces owner-only RLS and claim_ownership RPC', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.300_owner_only.sql'), 'utf-8');
+  assert(!sql.includes('CREATE POLICY "owner or unclaimed"'), '1.300 must not CREATE owner or unclaimed');
+  assert(sql.includes('CREATE POLICY "owner only"'), '1.300 must create owner only policies');
+  assert(sql.includes('set_owner_id()'), '1.300 must include set_owner_id trigger');
+  assert(sql.includes('claim_ownership()'), '1.300 must include claim_ownership function');
+});
+
+test('sql/supabase_schema.sql has owner-only for all personal tables + joined_groups', () => {
+  const schema = fs.readFileSync(path.join(__dirname, '..', 'sql', 'supabase_schema.sql'), 'utf-8');
+  assert(!schema.includes('owner or unclaimed'), 'supabase_schema.sql must not contain owner or unclaimed after 1.300');
+  const personal = ['birthdays','flashcard_notes','habit_completions','habits','list_items','lists','projects','prompts','settings','tasks','todos','vestiaire','joined_groups'];
+  let count = 0;
+  for (const t of personal) {
+    const re = new RegExp(`CREATE POLICY "owner only"[^;]*ON[^;]*${t}`, 'i');
+    assert(re.test(schema), `supabase_schema.sql missing owner only policy for ${t}`);
+    count++;
+  }
+  assert(count === 13, `expected 13 owner-only policies, counted ${count}`);
+  assert(schema.includes('trg_set_owner_id'), 'supabase_schema.sql must include trg_set_owner_id triggers');
+  assert(schema.includes('claim_ownership'), 'supabase_schema.sql must include claim_ownership function');
+});
+
 test('main.js handles #join=supabase: links', () => {
   const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
   assert(main.includes("joinVal.startsWith('supabase:')") || main.includes("joinHash.startsWith('supabase:')"),
@@ -1063,8 +1086,9 @@ test('main.js stores _rawSupabaseAdapter before wrapping', () => {
 
 test('main.js shows auth prompt after initAuth for unauthenticated users', () => {
   const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
-  assert(main.includes('claw_auth_skipped'), 'claw_auth_skipped check missing');
+  assert(!main.includes('claw_auth_skipped'), 'claw_auth_skipped must be removed - auth is mandatory since 1.300');
   assert(main.includes('showAuthPrompt('), 'showAuthPrompt call missing after initAuth');
+  assert(main.includes('sign_in_hint_mandatory'), 'mandatory auth hint missing from showAuthPrompt');
 });
 
 test('sharing-ui.js updateSharingNavVisibility shows for supabase mode', () => {

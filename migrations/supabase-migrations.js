@@ -498,6 +498,7 @@ CREATE INDEX IF NOT EXISTS idx_daily_visits_owner_id ON daily_visits(owner_id);
 
 UPDATE settings SET value = '1.398', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.398', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
   '1.399': `-- 1.399: stable creator attribution via auth_user_id, keep member_id random (global PK)
+CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public;
 ALTER TABLE sharing_members ADD COLUMN IF NOT EXISTS auth_user_id uuid;
 CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON sharing_members(auth_user_id);
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON sharing_members(group_id, auth_user_id);
@@ -512,9 +513,9 @@ CREATE OR REPLACE FUNCTION confirm_join(p_token text, p_display_name text)
 RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
   UPDATE sharing_members
   SET joined_at = now(),
-      display_name = COALESCE(NULLIF(p_display_name, ''), display_name),
+      display_name = COALESCE(NULLIF(p_display_name, ''::text), display_name),
       auth_user_id = COALESCE(auth_user_id, auth.uid())
-  WHERE token_hash = encode(digest(p_token, 'sha256'), 'hex')
+  WHERE token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
     AND joined_at IS NULL
     AND revoked_at IS NULL
     AND (expires_at IS NULL OR expires_at > now());
@@ -529,7 +530,7 @@ LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
   AND EXISTS (
     SELECT 1 FROM sharing_members sm2
     WHERE sm2.group_id = p_group_id
-    AND sm2.token_hash = encode(digest(p_token, 'sha256'), 'hex')
+    AND sm2.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
     AND sm2.joined_at IS NOT NULL
     AND sm2.revoked_at IS NULL
   );
@@ -538,6 +539,7 @@ $$;
 UPDATE settings SET value = '1.399', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.399', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
   '1.401': `-- 1.401 repair: 1.399 originally tried to set member_id = uid causing duplicate PK 23505 for users with >1 group
 -- If any creator was rewritten to auth_user_id::text, randomize back to unique 8-char and fix sharing_items FK
+CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public;
 
 DO $$
 BEGIN
@@ -585,14 +587,14 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- Refresh RPCs (idempotent)
+-- Refresh RPCs (idempotent) with casts
 CREATE OR REPLACE FUNCTION confirm_join(p_token text, p_display_name text)
 RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
   UPDATE sharing_members
   SET joined_at = now(),
-      display_name = COALESCE(NULLIF(p_display_name, ''), display_name),
+      display_name = COALESCE(NULLIF(p_display_name, ''::text), display_name),
       auth_user_id = COALESCE(auth_user_id, auth.uid())
-  WHERE token_hash = encode(digest(p_token, 'sha256'), 'hex')
+  WHERE token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
     AND joined_at IS NULL
     AND revoked_at IS NULL
     AND (expires_at IS NULL OR expires_at > now());
@@ -607,7 +609,7 @@ LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
   AND EXISTS (
     SELECT 1 FROM sharing_members sm2
     WHERE sm2.group_id = p_group_id
-    AND sm2.token_hash = encode(digest(p_token, 'sha256'), 'hex')
+    AND sm2.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
     AND sm2.joined_at IS NOT NULL
     AND sm2.revoked_at IS NULL
   );

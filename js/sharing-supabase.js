@@ -157,7 +157,9 @@ export async function createSupabaseSharing(adapter, config) {
     if (gErr) throw new Error('Failed to create group: ' + gErr.message);
 
     const displayName = user.user_metadata?.display_name || user.email.split('@')[0];
-    const { error: mErr } = await adapter.from('sharing_members').insert({
+    // Build payload without expires_at (creator never expires, column may not exist pre-1.301)
+    // Try with token_hash first, fallback without for older schemas.
+    let memberPayload = {
       member_id: creatorMemberId,
       group_id: groupId,
       token: creatorToken,
@@ -165,9 +167,16 @@ export async function createSupabaseSharing(adapter, config) {
       display_name: displayName,
       role: 'creator',
       joined_at: new Date().toISOString(),
-      expires_at: null,
-    });
-    if (mErr) throw new Error('Failed to add creator member: ' + mErr.message);
+    };
+    let { error: mErr } = await adapter.from('sharing_members').insert(memberPayload);
+    if (mErr && /token_hash/i.test(mErr.message || '')) {
+      // Schema <1.301 — column missing, retry without token_hash/expires_at
+      delete memberPayload.token_hash;
+      delete memberPayload.expires_at;
+      const retry = await adapter.from('sharing_members').insert(memberPayload);
+      mErr = retry.error;
+    }
+    if (mErr) throw new Error('Failed to add creator member: ' + mErr.message + (/(?:expires_at|token_hash|revoked_at)/i.test(mErr.message || '') ? ' — schema mismatch, run pending migrations from the banner' : ''));
 
     // Store creator's member_id locally
     localStorage.setItem('claw_member_' + groupId, creatorMemberId);
@@ -342,7 +351,7 @@ export async function createSupabaseSharing(adapter, config) {
     const tokenHash = await _hashToken(token);
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-    const { error } = await adapter.from('sharing_members').insert({
+    let payload = {
       member_id: memberId,
       group_id: groupId,
       token,
@@ -351,8 +360,33 @@ export async function createSupabaseSharing(adapter, config) {
       role: 'member',
       joined_at: null,
       expires_at: expiresAt,
-    });
-    if (error) throw new Error('Failed to invite: ' + error.message);
+    };
+    let { error } = await adapter.from('sharing_members').insert(payload);
+    if (error) {
+      const msg = (error.message || '').toLowerCase();
+      // Pre-1.301 schema has no expires_at / token_hash — retry with stripped columns
+      if (msg.includes('expires_at')) {
+        delete payload.expires_at;
+        const r2 = await adapter.from('sharing_members').insert(payload);
+        error = r2.error;
+      }
+    }
+    if (error && /token_hash/i.test(error.message || '')) {
+      delete payload.token_hash;
+      delete payload.expires_at;
+      // token_hash also missing implies older schema; retry minimal
+      let minimal = {
+        member_id: memberId,
+        group_id: groupId,
+        token,
+        display_name: displayName || null,
+        role: 'member',
+        joined_at: null,
+      };
+      const r3 = await adapter.from('sharing_members').insert(minimal);
+      error = r3.error;
+    }
+    if (error) throw new Error('Failed to invite: ' + error.message + (/(?:expires_at|token_hash)/i.test(error.message || '') ? ' — schema mismatch, run pending migrations' : ''));
 
     // Update local member cache
     if (_memberCache[groupId]) {

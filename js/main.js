@@ -904,7 +904,18 @@ async function doLogin() {
       } catch(e) {}
     }
   } catch (e) {
-    if (e.message === 'project_paused') {
+    if (e.message === 'schema_missing') {
+      // New Supabase project without tables — guide user to run schema SQL
+      err.textContent = '';
+      err.appendChild(document.createTextNode(t('toast.schema_missing') || 'Tables not found — run sql/supabase_schema.sql in Supabase SQL Editor.'));
+      const br = document.createElement('br');
+      err.appendChild(br);
+      const hint = document.createElement('span');
+      hint.style.fontSize = '0.85em';
+      hint.style.opacity = '0.8';
+      hint.textContent = t('toast.schema_missing_hint') || 'In Supabase: SQL Editor → New Query → paste schema file → Run.';
+      err.appendChild(hint);
+    } else if (e.message === 'project_paused') {
       // Safe DOM — no innerHTML with URL interpolation (P0 sec-002)
       const safeUrl = /^https:\/\/supabase\.com\/dashboard\/project\/[a-z0-9]+$/i.test(e.dashboardUrl) ? e.dashboardUrl : 'https://supabase.com/dashboard/projects';
       err.textContent = '';
@@ -1249,7 +1260,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       } catch (e) {
         if (_setupLoginError) {
-          if (e.message === 'project_paused') {
+          if (e.message === 'schema_missing') {
+            _setupLoginError.textContent = '';
+            _setupLoginError.appendChild(document.createTextNode(t('toast.schema_missing') || 'Tables not found — run sql/supabase_schema.sql in Supabase SQL Editor.'));
+            const br = document.createElement('br');
+            _setupLoginError.appendChild(br);
+            const hint = document.createElement('span');
+            hint.style.fontSize = '0.85em';
+            hint.style.opacity = '0.8';
+            hint.textContent = t('toast.schema_missing_hint') || 'In Supabase: SQL Editor → New Query → paste schema file → Run.';
+            _setupLoginError.appendChild(hint);
+          } else if (e.message === 'project_paused') {
             // Safe DOM — no innerHTML with URL interpolation (P0 sec-002)
             const safeUrl = /^https:\/\/supabase\.com\/dashboard\/project\/[a-z0-9]+$/i.test(e.dashboardUrl) ? e.dashboardUrl : 'https://supabase.com/dashboard/projects';
             _setupLoginError.textContent = '';
@@ -1339,7 +1360,18 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     adapter = createRestAdapter(url);
     // Test connection with raw adapter BEFORE wrapping with offline cache
     const { error } = await adapter.from('projects').select('id').limit(1);
-    if (error) throw new Error('Connection failed');
+    if (error) {
+      const st = error.status;
+      const m = String(error.message || '').toLowerCase();
+      const d = String(error.details || '').toLowerCase();
+      const missing = st === 404 || m.includes('does not exist') || d.includes('does not exist') || m.includes('not found');
+      if (missing) {
+        const e = new Error('schema_missing');
+        e.orig = error;
+        throw e;
+      }
+      throw new Error('Connection failed');
+    }
     const scopeRef = url.replace(/^https?:\/\//, '');
     adapter = wrapWithOfflineCache(adapter, `local:${scopeRef}`);
   } else {
@@ -1349,6 +1381,17 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     const { error } = await adapter.from('projects').select('id').limit(1);
     if (error) {
       const msg = String(error.message || '').toLowerCase();
+      const details = String(error.details || '').toLowerCase();
+      const combined = msg + ' ' + details;
+      const status = error.status;
+      const code = String(error.code || '');
+      const isSchemaMissing = status === 404 || code === '42P01' || code === 'PGRST205' ||
+        combined.includes('does not exist') || combined.includes('schema cache') || combined.includes('could not find');
+      if (isSchemaMissing) {
+        const e = new Error('schema_missing');
+        e.orig = error;
+        throw e;
+      }
       const isNetFail = msg.includes('fetch') || msg.includes('network') || msg.includes('cors') || msg.includes('err_failed');
       if (isNetFail && navigator.onLine) {
         const ref = url.replace('https://', '').replace('.supabase.co', '');

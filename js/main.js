@@ -669,15 +669,30 @@ function showAuthPrompt(rawAdapter, url, key) {
 
   // ── Check-inbox state ──
   function renderInbox(email) {
+    const isStandalonePWA = (() => { try { return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; } catch { return false; } })();
+    const pwaAckKey = 'cc-pwa-copy-hint-ack';
+    const pwaAlreadyAcked = (() => { try { return localStorage.getItem(pwaAckKey) === '1'; } catch { return true; } })();
+    const needsPwaAck = isStandalonePWA && !pwaAlreadyAcked;
+
     content.innerHTML = `
       <div class="auth-icon">${lucideIcon('mail', 28)}</div>
       <h3>${t('auth.check_inbox')}</h3>
       <p class="auth-hint">${t('auth.check_inbox_hint', esc(email))}</p>
+      <div id="authPwaHint" style="${needsPwaAck ? '' : 'display:none;'} margin:16px 0; padding:12px 14px; border:1px solid var(--accent); border-radius:10px; background:color-mix(in srgb, var(--accent) 8%, var(--bg));">
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div style="margin-top:2px;">${lucideIcon('smartphone', 20)}</div>
+          <div style="flex:1;">
+            <strong style="display:block; margin-bottom:4px; font-size:0.95em;">${t('auth.pwa_copy_title')}</strong>
+            <p style="margin:0 0 10px 0; font-size:0.9em; line-height:1.4; color:var(--text-muted);">${t('auth.pwa_copy_body')}</p>
+            <button id="authPwaAckBtn" class="auth-send-btn" style="width:auto; padding:6px 14px; font-size:0.9em;">${t('auth.pwa_copy_ack')}</button>
+          </div>
+        </div>
+      </div>
       <div class="auth-otp-box" style="margin:16px 0; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-subtle,#f8f9fa);">
         <p class="auth-hint" style="font-size:0.9em; margin-bottom:8px;">${t('auth.otp_hint')}</p>
         <div style="display:flex; gap:8px; align-items:center;">
-          <input type="text" id="authOtpInput" placeholder="${t('auth.otp_placeholder')}" inputmode="text" autocomplete="one-time-code" maxlength="500" style="flex:1; min-width:0; padding:10px 12px; font-size:14px; text-align:left; border:1px solid var(--border); border-radius:6px; overflow:hidden; text-overflow:ellipsis;">
-          <button class="auth-send-btn" id="authVerifyBtn" style="width:auto; flex:0 0 auto; white-space:nowrap;">${t('auth.verify_code')}</button>
+          <input type="text" id="authOtpInput" placeholder="${t('auth.otp_placeholder')}" inputmode="text" autocomplete="one-time-code" maxlength="500" style="flex:1; min-width:0; padding:10px 12px; font-size:14px; text-align:left; border:1px solid var(--border); border-radius:6px; overflow:hidden; text-overflow:ellipsis;" ${needsPwaAck ? 'disabled' : ''}>
+          <button class="auth-send-btn" id="authVerifyBtn" style="width:auto; flex:0 0 auto; white-space:nowrap;" ${needsPwaAck ? 'disabled' : ''}>${t('auth.verify_code')}</button>
         </div>
         <div class="auth-error" id="authOtpError" style="display:none; margin-top:8px;"></div>
       </div>
@@ -731,8 +746,22 @@ function showAuthPrompt(rawAdapter, url, key) {
 
     verifyBtn.addEventListener('click', doVerify);
     otpInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doVerify(); });
-    // Auto-focus OTP for PWA users
-    setTimeout(() => { try { otpInput.focus(); } catch {} }, 100);
+    // Auto-focus OTP for PWA users (only if not blocked by PWA ack)
+    if (!needsPwaAck) {
+      setTimeout(() => { try { otpInput.focus(); } catch {} }, 100);
+    }
+
+    const pwaAckBtn = content.querySelector('#authPwaAckBtn');
+    const pwaHint = content.querySelector('#authPwaHint');
+    if (pwaAckBtn) {
+      pwaAckBtn.addEventListener('click', () => {
+        try { localStorage.setItem(pwaAckKey, '1'); } catch {}
+        if (pwaHint) pwaHint.style.display = 'none';
+        verifyBtn.disabled = false;
+        otpInput.disabled = false;
+        setTimeout(() => { try { otpInput.focus(); } catch {} }, 50);
+      });
+    }
 
     resendBtn.addEventListener('click', async () => {
       resendBtn.disabled = true;

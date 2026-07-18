@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS flashcards (
   last_review TEXT,
   next_review TEXT,
   review_count INTEGER DEFAULT 0,
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -99,6 +100,7 @@ CREATE TABLE IF NOT EXISTS texts (
   content TEXT NOT NULL,
   lines_per_chunk INTEGER NOT NULL DEFAULT 4,
   context_lines INTEGER NOT NULL DEFAULT 3,
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -111,6 +113,7 @@ CREATE TABLE IF NOT EXISTS text_line_progress (
   last_review TEXT,
   next_review TEXT,
   review_count INTEGER NOT NULL DEFAULT 0,
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -159,6 +162,7 @@ CREATE TABLE IF NOT EXISTS nvidia_usage (
   model TEXT,
   tokens_in INTEGER,
   tokens_out INTEGER,
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -189,8 +193,10 @@ CREATE TABLE IF NOT EXISTS list_items (
 );
 
 CREATE TABLE IF NOT EXISTS daily_visits (
-  visit_date TEXT PRIMARY KEY,
-  created_at TEXT DEFAULT (datetime('now'))
+  visit_date TEXT NOT NULL,
+  owner_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (visit_date, owner_id)
 );
 
 CREATE TABLE IF NOT EXISTS joined_groups (

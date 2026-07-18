@@ -112,4 +112,30 @@ export const LOCAL_MIGRATIONS = {
     UPDATE joined_groups SET token = NULL, remote_anon_key = NULL WHERE token_ciphertext IS NOT NULL;
     DELETE FROM joined_groups WHERE owner_id IS NULL;
   `,
+  '1.398': `
+    -- 1.398: owner-only for previously open tables
+    ALTER TABLE flashcards ADD COLUMN owner_id TEXT;
+    ALTER TABLE texts ADD COLUMN owner_id TEXT;
+    ALTER TABLE text_line_progress ADD COLUMN owner_id TEXT;
+    ALTER TABLE nvidia_usage ADD COLUMN owner_id TEXT;
+    -- daily_visits: add owner_id, migrate to composite PK (visit_date, owner_id)
+    ALTER TABLE daily_visits ADD COLUMN owner_id TEXT;
+    -- Recreate daily_visits with composite PK to allow same date per owner
+    CREATE TABLE IF NOT EXISTS daily_visits_new (
+      visit_date TEXT NOT NULL,
+      owner_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (visit_date, owner_id)
+    );
+    INSERT OR IGNORE INTO daily_visits_new (visit_date, owner_id, created_at)
+      SELECT visit_date, owner_id, created_at FROM daily_visits;
+    DROP TABLE daily_visits;
+    ALTER TABLE daily_visits_new RENAME TO daily_visits;
+
+    CREATE INDEX IF NOT EXISTS idx_flashcards_owner_id ON flashcards(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_texts_owner_id ON texts(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_text_line_progress_owner_id ON text_line_progress(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_nvidia_usage_owner_id ON nvidia_usage(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_daily_visits_owner_id ON daily_visits(owner_id);
+  `,
 };

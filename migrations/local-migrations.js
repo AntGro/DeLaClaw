@@ -80,4 +80,10 @@ export const LOCAL_MIGRATIONS = {
       joined_at TEXT DEFAULT (datetime('now'))
     );
   `,
+  '1.301': `
+    ALTER TABLE joined_groups ADD COLUMN token_ciphertext TEXT;
+    ALTER TABLE joined_groups ADD COLUMN token_iv TEXT;
+    ALTER TABLE joined_groups ADD COLUMN remote_anon_key_ciphertext TEXT;
+    ALTER TABLE joined_groups ADD COLUMN remote_anon_key_iv TEXT;
+  `,
 };

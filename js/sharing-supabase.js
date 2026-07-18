@@ -19,6 +19,7 @@
 // ===================================================================
 
 import { encodeInviteEnvelope, decodeInviteEnvelope } from './sharing-envelope.js';
+import { getOrCreateSyncSecret, encryptText, decryptText, hashTokenClient, getKEK, storeWrappedSecret } from './crypto-sync.js';
 
 /**
  * Create a Supabase sharing adapter.
@@ -56,6 +57,50 @@ export async function createSupabaseSharing(adapter, config) {
     for (const cb of _updateCallbacks) {
       try { cb(); } catch (e) { console.warn('sharing update callback:', e); }
     }
+  }
+
+  async function _hashToken(token) {
+    try { return await hashTokenClient(token); } catch { return null; }
+  }
+
+  async function _encryptForJoined(token, anonKey) {
+    try {
+      const secret = getOrCreateSyncSecret();
+      const encTok = await encryptText(token, secret);
+      const encKey = await encryptText(anonKey, secret);
+      // Best-effort wrap backup with KEK
+      try { await storeWrappedSecret(); } catch {}
+      return {
+        token_ciphertext: encTok.ciphertext,
+        token_iv: encTok.iv,
+        remote_anon_key_ciphertext: encKey.ciphertext,
+        remote_anon_key_iv: encKey.iv,
+      };
+    } catch (e) {
+      console.warn('sharing encrypt failed, storing plaintext fallback', e);
+      return {};
+    }
+  }
+
+  async function _decryptJoinedRow(row) {
+    // Returns { token, anonKey } preferring decrypted ciphertext, fallback to plaintext cols
+    let token = row.token || null;
+    let anonKey = row.remote_anon_key || null;
+    try {
+      if (row.token_ciphertext && row.token_iv) {
+        const secret = getOrCreateSyncSecret();
+        const dec = await decryptText(row.token_ciphertext, row.token_iv, secret);
+        if (dec) token = dec;
+      }
+      if (row.remote_anon_key_ciphertext && row.remote_anon_key_iv) {
+        const secret = getOrCreateSyncSecret();
+        const dec = await decryptText(row.remote_anon_key_ciphertext, row.remote_anon_key_iv, secret);
+        if (dec) anonKey = dec;
+      }
+    } catch (e) {
+      console.warn('sharing decrypt failed, using plaintext fallback', e);
+    }
+    return { token, anonKey };
   }
 
   /**
@@ -100,6 +145,7 @@ export async function createSupabaseSharing(adapter, config) {
     const groupId = _uid8();
     const creatorMemberId = _uid8();
     const creatorToken = crypto.randomUUID();
+    const creatorHash = await _hashToken(creatorToken);
 
     // Direct INSERT (owner, RLS allows)
     const { error: gErr } = await adapter.from('sharing_groups').insert({
@@ -115,9 +161,11 @@ export async function createSupabaseSharing(adapter, config) {
       member_id: creatorMemberId,
       group_id: groupId,
       token: creatorToken,
+      token_hash: creatorHash,
       display_name: displayName,
       role: 'creator',
       joined_at: new Date().toISOString(),
+      expires_at: null,
     });
     if (mErr) throw new Error('Failed to add creator member: ' + mErr.message);
 
@@ -192,15 +240,20 @@ export async function createSupabaseSharing(adapter, config) {
       _joinedGroups = [];
       for (const jg of joined) {
         try {
-          const remote = _createRemoteClient(jg.remote_url, jg.remote_anon_key);
+          const { token, anonKey } = await _decryptJoinedRow(jg);
+          if (!token || !anonKey) {
+            console.warn('sharing: missing token/anonKey for joined group', jg.group_id);
+            continue;
+          }
+          const remote = _createRemoteClient(jg.remote_url, anonKey);
           _remoteClients[jg.group_id] = {
             client: remote,
-            token: jg.token,
+            token,
             memberId: jg.member_id,
           };
 
           const { data: members } = await remote.rpc('get_group_members', {
-            p_token: jg.token,
+            p_token: token,
             p_group_id: jg.group_id,
           });
 
@@ -231,7 +284,7 @@ export async function createSupabaseSharing(adapter, config) {
 
           // Load items
           const { data: items } = await remote.rpc('get_shared_items', {
-            p_token: jg.token,
+            p_token: token,
             p_group_id: jg.group_id,
           });
           if (items) {
@@ -286,14 +339,18 @@ export async function createSupabaseSharing(adapter, config) {
 
     const memberId = _uid8();
     const token = crypto.randomUUID();
+    const tokenHash = await _hashToken(token);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
     const { error } = await adapter.from('sharing_members').insert({
       member_id: memberId,
       group_id: groupId,
       token,
+      token_hash: tokenHash,
       display_name: displayName || null,
       role: 'member',
       joined_at: null,
+      expires_at: expiresAt,
     });
     if (error) throw new Error('Failed to invite: ' + error.message);
 
@@ -327,9 +384,16 @@ export async function createSupabaseSharing(adapter, config) {
     if (!member) throw new Error('Member not found');
     if (member.role === 'creator') throw new Error('Cannot remove the creator');
 
-    const { error } = await adapter.from('sharing_members')
-      .delete().eq('member_id', member.memberId);
-    if (error) throw new Error('Failed to remove member: ' + error.message);
+    const { error: revokeErr } = await adapter.rpc('revoke_member', {
+      p_group_id: groupId,
+      p_member_id: member.memberId,
+    });
+    if (revokeErr) {
+      // Fallback for old servers: delete directly (will fail under RLS if not owner, but try)
+      const { error } = await adapter.from('sharing_members')
+        .delete().eq('member_id', member.memberId);
+      if (error) throw new Error('Failed to remove member: ' + error.message);
+    }
 
     _memberCache[groupId] = members.filter(m => m.memberId !== member.memberId);
     const group = _ownedGroups.find(g => g.id === groupId);
@@ -421,15 +485,20 @@ export async function createSupabaseSharing(adapter, config) {
     if (!authUser) {
       throw new Error('Auth required to join Supabase groups — sign in first. Anon joins must use localStorage.');
     }
+    const encrypted = await _encryptForJoined(pj.token, pj.anonKey);
     await adapter.from('joined_groups').upsert({
       group_id: pj.groupId,
       member_id: pj.info.member_id,
       token: pj.token,
+      token_ciphertext: encrypted.token_ciphertext || null,
+      token_iv: encrypted.token_iv || null,
       display_name: displayName,
       group_name: pj.info.group_name,
       remote_backend_type: 'supabase',
       remote_url: pj.url,
       remote_anon_key: pj.anonKey,
+      remote_anon_key_ciphertext: encrypted.remote_anon_key_ciphertext || null,
+      remote_anon_key_iv: encrypted.remote_anon_key_iv || null,
       owner_id: authUser.id,
     });
 

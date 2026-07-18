@@ -352,9 +352,12 @@ CREATE TABLE "public"."sharing_members" (
     "member_id" "text" NOT NULL,
     "group_id" "text" NOT NULL,
     "token" "text" NOT NULL,
+    "token_hash" "text",
     "display_name" "text",
     "role" "text" NOT NULL DEFAULT 'member',
     "joined_at" timestamp with time zone,
+    "expires_at" timestamp with time zone,
+    "revoked_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"()
 );
 
@@ -383,11 +386,15 @@ CREATE TABLE "public"."joined_groups" (
     "group_id" "text" NOT NULL,
     "member_id" "text" NOT NULL,
     "token" "text" NOT NULL,
+    "token_ciphertext" "text",
+    "token_iv" "text",
     "display_name" "text",
     "group_name" "text",
     "remote_backend_type" "text" NOT NULL,
     "remote_url" "text",
     "remote_anon_key" "text",
+    "remote_anon_key_ciphertext" "text",
+    "remote_anon_key_iv" "text",
     "owner_id" "uuid",
     "joined_at" timestamp with time zone DEFAULT "now"()
 );
@@ -395,6 +402,7 @@ CREATE TABLE "public"."joined_groups" (
 
 --
 -- Name: verify_join_token; Type: FUNCTION; Schema: public; Owner: postgres
+-- 1.301: uses token_hash + expiry + revocation
 --
 
 CREATE OR REPLACE FUNCTION "public"."verify_join_token"("p_token" "text")
@@ -406,7 +414,10 @@ LANGUAGE "sql" SECURITY DEFINER AS $$
           WHERE cm.group_id = sg.id AND cm.role = 'creator' LIMIT 1)
   FROM sharing_members sm
   JOIN sharing_groups sg ON sg.id = sm.group_id
-  WHERE sm.token = p_token AND sm.joined_at IS NULL;
+  WHERE sm.token_hash = encode(digest(p_token, 'sha256'), 'hex')
+    AND sm.revoked_at IS NULL
+    AND (sm.expires_at IS NULL OR sm.expires_at > now())
+    AND sm.joined_at IS NULL;
 $$;
 
 
@@ -420,7 +431,10 @@ LANGUAGE "sql" SECURITY DEFINER AS $$
   UPDATE sharing_members
   SET joined_at = now(),
       display_name = COALESCE(NULLIF(p_display_name, ''), display_name)
-  WHERE token = p_token AND joined_at IS NULL;
+  WHERE token_hash = encode(digest(p_token, 'sha256'), 'hex')
+    AND joined_at IS NULL
+    AND revoked_at IS NULL
+    AND (expires_at IS NULL OR expires_at > now());
 $$;
 
 
@@ -438,8 +452,9 @@ LANGUAGE "sql" SECURITY DEFINER AS $$
   AND EXISTS (
     SELECT 1 FROM sharing_members sm
     WHERE sm.group_id = p_group_id
-    AND sm.token = p_token
+    AND sm.token_hash = encode(digest(p_token, 'sha256'), 'hex')
     AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
   );
 $$;
 
@@ -461,9 +476,10 @@ LANGUAGE "sql" SECURITY DEFINER AS $$
   WHERE EXISTS (
     SELECT 1 FROM sharing_members sm
     WHERE sm.group_id = p_group_id
-    AND sm.token = p_token
+    AND sm.token_hash = encode(digest(p_token, 'sha256'), 'hex')
     AND sm.member_id = p_member_id
     AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
   )
   RETURNING *;
 $$;
@@ -483,8 +499,9 @@ LANGUAGE "sql" SECURITY DEFINER AS $$
   AND EXISTS (
     SELECT 1 FROM sharing_members sm
     WHERE sm.group_id = si.group_id
-    AND sm.token = p_token
+    AND sm.token_hash = encode(digest(p_token, 'sha256'), 'hex')
     AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
   )
   RETURNING *;
 $$;
@@ -503,8 +520,9 @@ BEGIN
   AND EXISTS (
     SELECT 1 FROM sharing_members sm
     WHERE sm.group_id = si.group_id
-    AND sm.token = p_token
+    AND sm.token_hash = encode(digest(p_token, 'sha256'), 'hex')
     AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
   );
 END;
 $$;
@@ -524,8 +542,9 @@ LANGUAGE "sql" SECURITY DEFINER AS $$
   AND EXISTS (
     SELECT 1 FROM sharing_members sm2
     WHERE sm2.group_id = p_group_id
-    AND sm2.token = p_token
+    AND sm2.token_hash = encode(digest(p_token, 'sha256'), 'hex')
     AND sm2.joined_at IS NOT NULL
+    AND sm2.revoked_at IS NULL
   );
 $$;
 
@@ -539,9 +558,21 @@ RETURNS "void"
 LANGUAGE "plpgsql" SECURITY DEFINER AS $$
 BEGIN
   DELETE FROM sharing_members
-  WHERE token = p_token
-  AND role != 'creator';
+  WHERE token_hash = encode(digest(p_token, 'sha256'), 'hex')
+  AND role != 'creator'
+  AND joined_at IS NOT NULL
+  AND revoked_at IS NULL;
 END;
+$$;
+
+CREATE OR REPLACE FUNCTION "public"."revoke_member"("p_group_id" "text", "p_member_id" "text")
+RETURNS "void"
+LANGUAGE "sql" SECURITY DEFINER AS $$
+  UPDATE sharing_members
+  SET revoked_at = now()
+  WHERE group_id = p_group_id
+    AND member_id = p_member_id
+    AND role != 'creator';
 $$;
 
 
@@ -937,8 +968,8 @@ CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."joined_groups" FOR EA
 
 -- ===== SEED DATA =====
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.300')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.300', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.301')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.301', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;

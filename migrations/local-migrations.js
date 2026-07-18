@@ -107,4 +107,9 @@ export const LOCAL_MIGRATIONS = {
     CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON list_items(shared_id);
     CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_group_id);
   `,
+  '1.396': `
+    -- 1.396: drop plaintext fallback for joined_groups (assume >=1.301, ciphertext exists)
+    UPDATE joined_groups SET token = NULL, remote_anon_key = NULL WHERE token_ciphertext IS NOT NULL;
+    DELETE FROM joined_groups WHERE owner_id IS NULL;
+  `,
 };

@@ -64,41 +64,35 @@ export async function createSupabaseSharing(adapter, config) {
   }
 
   async function _encryptForJoined(token, anonKey) {
-    try {
-      const secret = getOrCreateSyncSecret();
-      const encTok = await encryptText(token, secret);
-      const encKey = await encryptText(anonKey, secret);
-      // Best-effort wrap backup with KEK
-      try { await storeWrappedSecret(); } catch {}
-      return {
-        token_ciphertext: encTok.ciphertext,
-        token_iv: encTok.iv,
-        remote_anon_key_ciphertext: encKey.ciphertext,
-        remote_anon_key_iv: encKey.iv,
-      };
-    } catch (e) {
-      console.warn('sharing encrypt failed, storing plaintext fallback', e);
-      return {};
-    }
+    // >=1.301 only — dev branch assumes ciphertext columns exist, no plaintext fallback
+    const secret = getOrCreateSyncSecret();
+    const encTok = await encryptText(token, secret);
+    const encKey = await encryptText(anonKey, secret);
+    // Best-effort wrap backup with KEK
+    try { await storeWrappedSecret(); } catch {}
+    return {
+      token_ciphertext: encTok.ciphertext,
+      token_iv: encTok.iv,
+      remote_anon_key_ciphertext: encKey.ciphertext,
+      remote_anon_key_iv: encKey.iv,
+    };
   }
 
   async function _decryptJoinedRow(row) {
-    // Returns { token, anonKey } preferring decrypted ciphertext, fallback to plaintext cols
-    let token = row.token || null;
-    let anonKey = row.remote_anon_key || null;
+    // >=1.301 only — ciphertext only, no plaintext fallback on dev
+    let token = null;
+    let anonKey = null;
     try {
       if (row.token_ciphertext && row.token_iv) {
         const secret = getOrCreateSyncSecret();
-        const dec = await decryptText(row.token_ciphertext, row.token_iv, secret);
-        if (dec) token = dec;
+        token = await decryptText(row.token_ciphertext, row.token_iv, secret);
       }
       if (row.remote_anon_key_ciphertext && row.remote_anon_key_iv) {
         const secret = getOrCreateSyncSecret();
-        const dec = await decryptText(row.remote_anon_key_ciphertext, row.remote_anon_key_iv, secret);
-        if (dec) anonKey = dec;
+        anonKey = await decryptText(row.remote_anon_key_ciphertext, row.remote_anon_key_iv, secret);
       }
     } catch (e) {
-      console.warn('sharing decrypt failed, using plaintext fallback', e);
+      console.warn('sharing decrypt failed', e);
     }
     return { token, anonKey };
   }
@@ -523,14 +517,14 @@ export async function createSupabaseSharing(adapter, config) {
     await adapter.from('joined_groups').upsert({
       group_id: pj.groupId,
       member_id: pj.info.member_id,
-      token: pj.token,
+      token: null,
       token_ciphertext: encrypted.token_ciphertext || null,
       token_iv: encrypted.token_iv || null,
       display_name: displayName,
       group_name: pj.info.group_name,
       remote_backend_type: 'supabase',
       remote_url: pj.url,
-      remote_anon_key: pj.anonKey,
+      remote_anon_key: null,
       remote_anon_key_ciphertext: encrypted.remote_anon_key_ciphertext || null,
       remote_anon_key_iv: encrypted.remote_anon_key_iv || null,
       owner_id: authUser.id,

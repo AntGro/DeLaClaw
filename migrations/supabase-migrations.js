@@ -385,6 +385,11 @@ CREATE INDEX IF NOT EXISTS idx_sharing_groups_auth_owner_id ON sharing_groups(au
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_id ON sharing_members(group_id);
 CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON sharing_items(group_id);
 UPDATE settings SET value = '1.393', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.393', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+
+  '1.396': `-- Migration 1.396: Remove plaintext fallback for joined_groups (>=1.301 assumed on dev)
+UPDATE joined_groups SET token = NULL, remote_anon_key = NULL WHERE token_ciphertext IS NOT NULL;
+DELETE FROM joined_groups WHERE owner_id IS NULL;
+UPDATE settings SET value = '1.396', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.396', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
 };
 
 export { SUPABASE_MIGRATIONS };

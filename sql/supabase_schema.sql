@@ -385,7 +385,7 @@ CREATE TABLE "public"."sharing_items" (
 CREATE TABLE "public"."joined_groups" (
     "group_id" "text" NOT NULL,
     "member_id" "text" NOT NULL,
-    "token" "text" NOT NULL,
+    "token" "text",
     "token_ciphertext" "text",
     "token_iv" "text",
     "display_name" "text",

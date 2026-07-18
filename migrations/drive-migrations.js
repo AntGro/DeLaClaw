@@ -70,4 +70,17 @@ export const DRIVE_MIGRATIONS = {
   // 1.393: indexes for owner_id / shared_id — perf only for Postgres/SQLite, no-op for Drive (in-memory)
   // Drive has no seq scans: whole tables are loaded into memory. Bump version only.
   '1.393': async (_store) => {},
+  '1.396': async (store) => {
+    // Remove plaintext fallback (>=1.301 assumed)
+    for (const row of (store.joined_groups || [])) {
+      if (row.token_ciphertext) {
+        row.token = null;
+        row.remote_anon_key = null;
+      }
+    }
+    // Delete owner_id IS NULL (legacy pre-1.299 rows)
+    if (store.joined_groups) {
+      store.joined_groups = store.joined_groups.filter(r => r.owner_id != null);
+    }
+  },
 };

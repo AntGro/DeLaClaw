@@ -318,8 +318,8 @@ UPDATE settings SET value = '1.299', updated_at = now() WHERE key = 'schema_vers
 NOTIFY pgrst, 'reload schema';`,
 
   '1.300': `-- Migration 1.300: Enforce owner-only RLS (mandatory auth for Supabase)
-CREATE OR REPLACE FUNCTION set_owner_id() RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$ BEGIN IF NEW.owner_id IS NULL THEN NEW.owner_id := auth.uid(); END IF; RETURN NEW; END; $$;
-CREATE OR REPLACE FUNCTION claim_ownership() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$ DECLARE uid UUID := auth.uid(); BEGIN IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF; UPDATE projects SET owner_id = uid WHERE owner_id IS NULL; UPDATE tasks SET owner_id = uid WHERE owner_id IS NULL; UPDATE todos SET owner_id = uid WHERE owner_id IS NULL; UPDATE habits SET owner_id = uid WHERE owner_id IS NULL; UPDATE habit_completions SET owner_id = uid WHERE owner_id IS NULL; UPDATE flashcard_notes SET owner_id = uid WHERE owner_id IS NULL; UPDATE birthdays SET owner_id = uid WHERE owner_id IS NULL; UPDATE vestiaire SET owner_id = uid WHERE owner_id IS NULL; UPDATE lists SET owner_id = uid WHERE owner_id IS NULL; UPDATE list_items SET owner_id = uid WHERE owner_id IS NULL; UPDATE settings SET owner_id = uid WHERE owner_id IS NULL; UPDATE prompts SET owner_id = uid WHERE owner_id IS NULL; UPDATE joined_groups SET owner_id = uid WHERE owner_id IS NULL; END; $$;
+CREATE OR REPLACE FUNCTION set_owner_id() RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$ BEGIN IF NEW.owner_id IS NULL THEN NEW.owner_id := auth.uid(); END IF; RETURN NEW; END; $$;
+CREATE OR REPLACE FUNCTION claim_ownership() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$ DECLARE uid UUID := auth.uid(); BEGIN IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF; UPDATE projects SET owner_id = uid WHERE owner_id IS NULL; UPDATE tasks SET owner_id = uid WHERE owner_id IS NULL; UPDATE todos SET owner_id = uid WHERE owner_id IS NULL; UPDATE habits SET owner_id = uid WHERE owner_id IS NULL; UPDATE habit_completions SET owner_id = uid WHERE owner_id IS NULL; UPDATE flashcard_notes SET owner_id = uid WHERE owner_id IS NULL; UPDATE birthdays SET owner_id = uid WHERE owner_id IS NULL; UPDATE vestiaire SET owner_id = uid WHERE owner_id IS NULL; UPDATE lists SET owner_id = uid WHERE owner_id IS NULL; UPDATE list_items SET owner_id = uid WHERE owner_id IS NULL; UPDATE settings SET owner_id = uid WHERE owner_id IS NULL; UPDATE prompts SET owner_id = uid WHERE owner_id IS NULL; UPDATE joined_groups SET owner_id = uid WHERE owner_id IS NULL; END; $$;
 DROP POLICY IF EXISTS "allow all" ON projects; DROP POLICY IF EXISTS "owner or unclaimed" ON projects; DROP POLICY IF EXISTS "owner only" ON projects; CREATE POLICY "owner only" ON projects FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid()); DROP TRIGGER IF EXISTS trg_set_owner_id ON projects; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON projects FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 DROP POLICY IF EXISTS "allow all" ON tasks; DROP POLICY IF EXISTS "owner or unclaimed" ON tasks; DROP POLICY IF EXISTS "owner only" ON tasks; CREATE POLICY "owner only" ON tasks FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid()); DROP TRIGGER IF EXISTS trg_set_owner_id ON tasks; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON tasks FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 DROP POLICY IF EXISTS "allow all" ON todos; DROP POLICY IF EXISTS "owner or unclaimed" ON todos; DROP POLICY IF EXISTS "owner only" ON todos; CREATE POLICY "owner only" ON todos FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid()); DROP TRIGGER IF EXISTS trg_set_owner_id ON todos; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON todos FOR EACH ROW EXECUTE FUNCTION set_owner_id();
@@ -433,7 +433,7 @@ END $$;
 ALTER TABLE daily_visits REPLICA IDENTITY DEFAULT;
 
 -- Update claim_ownership to include new tables
-CREATE OR REPLACE FUNCTION claim_ownership() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+CREATE OR REPLACE FUNCTION claim_ownership() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
 DECLARE uid UUID := auth.uid();
 BEGIN
   IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
@@ -498,7 +498,7 @@ CREATE INDEX IF NOT EXISTS idx_daily_visits_owner_id ON daily_visits(owner_id);
 
 UPDATE settings SET value = '1.398', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.398', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
   '1.399': `-- 1.399: stable creator attribution via auth_user_id, keep member_id random (global PK)
-CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
 ALTER TABLE sharing_members ADD COLUMN IF NOT EXISTS auth_user_id uuid;
 CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON sharing_members(auth_user_id);
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON sharing_members(group_id, auth_user_id);
@@ -510,7 +510,7 @@ WHERE sm.group_id = sg.id AND sm.role='creator' AND sm.auth_user_id IS NULL AND 
 
 -- RPCs updated for 1.399: confirm_join sets auth_user_id, get_group_members returns auth_user_id
 CREATE OR REPLACE FUNCTION confirm_join(p_token text, p_display_name text)
-RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   UPDATE sharing_members
   SET joined_at = now(),
       display_name = COALESCE(NULLIF(p_display_name, ''::text), display_name),
@@ -523,7 +523,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION get_group_members(p_token text, p_group_id text)
 RETURNS TABLE(member_id text, display_name text, role text, joined_at timestamp with time zone, auth_user_id uuid)
-LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   SELECT sm.member_id, sm.display_name, sm.role, sm.joined_at, sm.auth_user_id
   FROM sharing_members sm
   WHERE sm.group_id = p_group_id
@@ -539,7 +539,7 @@ $$;
 UPDATE settings SET value = '1.399', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.399', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
   '1.401': `-- 1.401 repair: 1.399 originally tried to set member_id = uid causing duplicate PK 23505 for users with >1 group
 -- If any creator was rewritten to auth_user_id::text, randomize back to unique 8-char and fix sharing_items FK
-CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
 
 DO $$
 BEGIN
@@ -589,7 +589,7 @@ END $$;
 
 -- Refresh RPCs (idempotent) with casts
 CREATE OR REPLACE FUNCTION confirm_join(p_token text, p_display_name text)
-RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   UPDATE sharing_members
   SET joined_at = now(),
       display_name = COALESCE(NULLIF(p_display_name, ''::text), display_name),
@@ -602,7 +602,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION get_group_members(p_token text, p_group_id text)
 RETURNS TABLE(member_id text, display_name text, role text, joined_at timestamp with time zone, auth_user_id uuid)
-LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   SELECT sm.member_id, sm.display_name, sm.role, sm.joined_at, sm.auth_user_id
   FROM sharing_members sm
   WHERE sm.group_id = p_group_id
@@ -620,12 +620,12 @@ CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON sharing_members(gro
 
 UPDATE settings SET value = '1.401', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.401', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
   '1.402': `-- 1.402: ensure pgcrypto for digest() + fix digest(text, unknown) error 42883
-CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
 
 -- Recreate all sharing RPCs with explicit ::text casts and search_path = public
 CREATE OR REPLACE FUNCTION verify_join_token(p_token text)
 RETURNS TABLE(group_id text, group_name text, member_id text, display_name text, backend_type text, creator_name text)
-LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   SELECT sg.id, sg.name, sm.member_id, sm.display_name, sg.backend_type,
          (SELECT cm.display_name FROM sharing_members cm WHERE cm.group_id = sg.id AND cm.role = 'creator' LIMIT 1)
   FROM sharing_members sm
@@ -637,7 +637,7 @@ LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
 $$;
 
 CREATE OR REPLACE FUNCTION confirm_join(p_token text, p_display_name text)
-RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   UPDATE sharing_members
   SET joined_at = now(),
       display_name = COALESCE(NULLIF(p_display_name, ''::text), display_name),
@@ -649,7 +649,7 @@ RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
 $$;
 
 CREATE OR REPLACE FUNCTION get_shared_items(p_token text, p_group_id text, p_item_type text DEFAULT NULL::text)
-RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   SELECT si.* FROM sharing_items si
   WHERE si.group_id = p_group_id
   AND (p_item_type IS NULL OR si.item_type = p_item_type)
@@ -663,7 +663,7 @@ RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = publ
 $$;
 
 CREATE OR REPLACE FUNCTION add_shared_item(p_token text, p_item_id text, p_group_id text, p_item_type text, p_payload jsonb, p_member_id text, p_parent_item_id text DEFAULT NULL::text)
-RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   INSERT INTO sharing_items (item_id, group_id, item_type, parent_item_id, payload, created_by)
   SELECT p_item_id, p_group_id, p_item_type, p_parent_item_id, p_payload, p_member_id
   WHERE EXISTS (
@@ -678,7 +678,7 @@ RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = publ
 $$;
 
 CREATE OR REPLACE FUNCTION update_shared_item(p_token text, p_item_id text, p_payload jsonb)
-RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   UPDATE sharing_items si
   SET payload = p_payload, updated_at = now()
   WHERE si.item_id = p_item_id
@@ -693,7 +693,7 @@ RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = publ
 $$;
 
 CREATE OR REPLACE FUNCTION delete_shared_item(p_token text, p_item_id text)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
 BEGIN
   DELETE FROM sharing_items si
   WHERE si.item_id = p_item_id
@@ -709,7 +709,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION get_group_members(p_token text, p_group_id text)
 RETURNS TABLE(member_id text, display_name text, role text, joined_at timestamp with time zone, auth_user_id uuid)
-LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   SELECT sm.member_id, sm.display_name, sm.role, sm.joined_at, sm.auth_user_id
   FROM sharing_members sm
   WHERE sm.group_id = p_group_id
@@ -723,7 +723,7 @@ LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
 $$;
 
 CREATE OR REPLACE FUNCTION leave_group(p_token text)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
 BEGIN
   DELETE FROM sharing_members
   WHERE token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
@@ -734,11 +734,133 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION revoke_member(p_group_id text, p_member_id text)
-RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   UPDATE sharing_members SET revoked_at = now() WHERE group_id = p_group_id AND member_id = p_member_id AND role != 'creator';
 $$;
 
 UPDATE settings SET value = '1.402', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.402', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+  '1.404': `-- 1.404: fix digest() visibility on fresh projects — pgcrypto may be in extensions schema, not public
+-- Ensure extension exists and recreate RPCs with search_path = public, extensions
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
+
+CREATE OR REPLACE FUNCTION verify_join_token(p_token text)
+RETURNS TABLE(group_id text, group_name text, member_id text, display_name text, backend_type text, creator_name text)
+LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  SELECT sg.id, sg.name, sm.member_id, sm.display_name, sg.backend_type,
+         (SELECT cm.display_name FROM sharing_members cm WHERE cm.group_id = sg.id AND cm.role = 'creator' LIMIT 1)
+  FROM sharing_members sm
+  JOIN sharing_groups sg ON sg.id = sm.group_id
+  WHERE sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm.revoked_at IS NULL
+    AND (sm.expires_at IS NULL OR sm.expires_at > now())
+    AND sm.joined_at IS NULL;
+$$;
+
+CREATE OR REPLACE FUNCTION confirm_join(p_token text, p_display_name text)
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  UPDATE sharing_members
+  SET joined_at = now(),
+      display_name = COALESCE(NULLIF(p_display_name, ''::text), display_name),
+      auth_user_id = COALESCE(auth_user_id, auth.uid())
+  WHERE token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND joined_at IS NULL
+    AND revoked_at IS NULL
+    AND (expires_at IS NULL OR expires_at > now());
+$$;
+
+CREATE OR REPLACE FUNCTION get_shared_items(p_token text, p_group_id text, p_item_type text DEFAULT NULL::text)
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  SELECT si.* FROM sharing_items si
+  WHERE si.group_id = p_group_id
+  AND (p_item_type IS NULL OR si.item_type = p_item_type)
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = p_group_id
+    AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION add_shared_item(p_token text, p_item_id text, p_group_id text, p_item_type text, p_payload jsonb, p_member_id text, p_parent_item_id text DEFAULT NULL::text)
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  INSERT INTO sharing_items (item_id, group_id, item_type, parent_item_id, payload, created_by)
+  SELECT p_item_id, p_group_id, p_item_type, p_parent_item_id, p_payload, p_member_id
+  WHERE EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = p_group_id
+    AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm.member_id = p_member_id
+    AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
+  )
+  RETURNING *;
+$$;
+
+CREATE OR REPLACE FUNCTION update_shared_item(p_token text, p_item_id text, p_payload jsonb)
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  UPDATE sharing_items si
+  SET payload = p_payload, updated_at = now()
+  WHERE si.item_id = p_item_id
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = si.group_id
+    AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
+  )
+  RETURNING *;
+$$;
+
+CREATE OR REPLACE FUNCTION delete_shared_item(p_token text, p_item_id text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+BEGIN
+  DELETE FROM sharing_items si
+  WHERE si.item_id = p_item_id
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = si.group_id
+    AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION get_group_members(p_token text, p_group_id text)
+RETURNS TABLE(member_id text, display_name text, role text, joined_at timestamp with time zone, auth_user_id uuid)
+LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  SELECT sm.member_id, sm.display_name, sm.role, sm.joined_at, sm.auth_user_id
+  FROM sharing_members sm
+  WHERE sm.group_id = p_group_id
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm2
+    WHERE sm2.group_id = p_group_id
+    AND sm2.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm2.joined_at IS NOT NULL
+    AND sm2.revoked_at IS NULL
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION leave_group(p_token text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+BEGIN
+  DELETE FROM sharing_members
+  WHERE token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+  AND role != 'creator'
+  AND joined_at IS NOT NULL
+  AND revoked_at IS NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION revoke_member(p_group_id text, p_member_id text)
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  UPDATE sharing_members SET revoked_at = now() WHERE group_id = p_group_id AND member_id = p_member_id AND role != 'creator';
+$$;
+
+UPDATE settings SET value = '1.404', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.404', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
 };
 
 export { SUPABASE_MIGRATIONS };

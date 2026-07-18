@@ -595,7 +595,7 @@ const T = {
     auth: {
       sign_in: 'Sign in',
       sign_in_hint: 'Protect your data and enable sharing.',
-      sign_in_hint_mandatory: 'Supabase mode requires sign-in to protect your private data. Your session stays active for 1 year.',
+      sign_in_hint_mandatory: 'Supabase mode requires sign-in to protect your private data.',
       email_placeholder: 'your@email.com',
       send_magic_link: 'Send code',
       skip: 'Skip',
@@ -1198,7 +1198,7 @@ const T = {
     auth: {
       sign_in: 'Se connecter',
       sign_in_hint: 'Prot\u00e9gez vos donn\u00e9es et activez le partage.',
-      sign_in_hint_mandatory: 'Le mode Supabase n\u00e9cessite une connexion pour prot\u00e9ger vos donn\u00e9es. Votre session reste active 1 an.',
+      sign_in_hint_mandatory: 'Le mode Supabase n\u00e9cessite une connexion pour prot\u00e9ger vos donn\u00e9es.',
       email_placeholder: 'votre@email.com',
       send_magic_link: 'Envoyer le code',
       skip: 'Passer',
@@ -1801,7 +1801,7 @@ const T = {
     auth: {
       sign_in: 'Iniciar sesi\u00f3n',
       sign_in_hint: 'Protege tus datos y habilita el uso compartido con un enlace m\u00e1gico.',
-      sign_in_hint_mandatory: 'El modo Supabase requiere iniciar sesión para proteger tus datos. Tu sesión dura 1 año.',
+      sign_in_hint_mandatory: 'El modo Supabase requiere iniciar sesi\u00f3n para proteger tus datos.',
       email_placeholder: 'tu@email.com',
       send_magic_link: 'Enviar enlace',
       skip: 'Omitir',

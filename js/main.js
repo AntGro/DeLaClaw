@@ -567,10 +567,10 @@ function showAuthPrompt(rawAdapter, url, key) {
   const content = document.getElementById('authPromptContent');
   if (!overlay || !content) return;
 
-  // Build Supabase dashboard URL for Site URL config
+  // Build Supabase dashboard URL for Site URL config — use direct url param first, fall back to stored creds
   const creds = (() => { try { return JSON.parse(localStorage.getItem(STAY_CONNECTED_KEY) || '{}'); } catch { return {}; } })();
-  const projRef = (creds.url || '').replace('https://', '').replace('.supabase.co', '');
-  const authConfigUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/url-configuration` : 'https://supabase.com/dashboard';
+  const projRef = getSupabaseProjectRef(url) || getSupabaseProjectRef(creds.url || '') || null;
+  const authConfigUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/url-configuration` : 'https://supabase.com/dashboard/projects';
 
   // ── Sign-in form state ──
   function renderForm() {

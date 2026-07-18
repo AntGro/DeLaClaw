@@ -44,6 +44,16 @@ function initials(name, email) {
   return (email || '?')[0].toUpperCase();
 }
 
+/** Extract Supabase project ref from URL (shared logic with main.js) */
+function getSupabaseProjectRef(url) {
+  if (!url) return null;
+  const m1 = url.match(/https?:\/\/([a-z0-9]{20,})\.supabase\.co/i);
+  if (m1) return m1[1];
+  const m2 = url.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
+  if (m2) return m2[1];
+  return null;
+}
+
 /** Small avatar circle HTML. */
 function avatarDot(member, size = 24) {
   const color = emailColor(member.email);
@@ -76,8 +86,8 @@ export async function renderSharingPane() {
     const dbReady = parseFloat(state.dbSchemaVersion || '0') >= 1.294;
     if (activeMode === 'supabase' && !state.authUser && dbReady) {
       const creds = (() => { try { return JSON.parse(localStorage.getItem(STAY_CONNECTED_KEY) || '{}'); } catch { return {}; } })();
-      const projRef = (creds.url || '').replace('https://', '').replace('.supabase.co', '');
-      const authConfigUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/url-configuration` : 'https://supabase.com/dashboard';
+      const projRef = getSupabaseProjectRef(creds.url || '') || null;
+      const authConfigUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/url-configuration` : 'https://supabase.com/dashboard/projects';
       const siteOrigin = location.origin;
       container.innerHTML = `<div class="auth-inline-prompt">
         <div class="auth-icon">${lucideIcon('lock', 28)}</div>

@@ -659,14 +659,13 @@ function showAuthPrompt(rawAdapter, url, key) {
       <h3>${t('auth.check_inbox')}</h3>
       <p class="auth-hint">${t('auth.check_inbox_hint', esc(email))}</p>
       <div class="auth-otp-box" style="margin:16px 0; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-subtle,#f8f9fa);">
-        <p class="auth-hint" style="font-size:0.9em; margin-bottom:8px;">${t('auth.otp_hint') || 'If you use iPhone PWA + Gmail: Gmail opens links in Chrome, so your session would be lost. Copy the 6-digit code from the email and paste it here instead.'}</p>
+        <p class="auth-hint" style="font-size:0.9em; margin-bottom:8px;">${t('auth.otp_hint')}</p>
         <div style="display:flex; gap:8px; align-items:center;">
-          <input type="text" id="authOtpInput" placeholder="${t('auth.otp_placeholder') || '123456'}" inputmode="numeric" autocomplete="one-time-code" maxlength="8" style="flex:1; padding:8px 10px; font-size:18px; letter-spacing:0.2em; text-align:center; border:1px solid var(--border); border-radius:6px;">
-          <button class="auth-send-btn" id="authVerifyBtn" style="white-space:nowrap;">${t('auth.verify_code') || 'Verify code'}</button>
+          <input type="text" id="authOtpInput" placeholder="${t('auth.otp_placeholder')}" inputmode="numeric" autocomplete="one-time-code" maxlength="8" style="flex:1; padding:8px 10px; font-size:18px; letter-spacing:0.2em; text-align:center; border:1px solid var(--border); border-radius:6px;">
+          <button class="auth-send-btn" id="authVerifyBtn" style="white-space:nowrap;">${t('auth.verify_code')}</button>
         </div>
         <div class="auth-error" id="authOtpError" style="display:none; margin-top:8px;"></div>
       </div>
-      <p class="auth-hint" style="font-size:0.85em; opacity:0.8;">${t('auth.link_hint') || 'You can also click the magic link if it opens in the same browser. On iOS PWA, prefer the code.'}</p>
       <div style="display:flex; gap:8px; margin-top:12px;">
         <button class="auth-send-btn" id="authResendBtn" style="flex:0;">${t('auth.resend')}</button>
         <button class="auth-skip" id="authCloseBtn">${t('auth.close')}</button>
@@ -695,7 +694,7 @@ function showAuthPrompt(rawAdapter, url, key) {
         if (error || !user) {
           const msg = error?.message || '';
           const isExpired = msg.toLowerCase().includes('expired');
-          otpErrEl.textContent = isExpired ? (t('auth.otp_expired') || 'Code expired — resend a new link.') : (t('auth.otp_invalid') || 'Invalid code. Check the 6-digit code from the email.');
+          otpErrEl.textContent = isExpired ? (t('auth.otp_expired') || 'Code expired — resend a new code.') : (t('auth.otp_invalid') || 'Invalid code. Check the 6-digit code from the email.');
           otpErrEl.style.display = '';
           verifyBtn.disabled = false;
           verifyBtn.textContent = t('auth.verify_code') || 'Verify code';

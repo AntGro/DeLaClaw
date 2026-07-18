@@ -1,16 +1,19 @@
 // ===================================================================
-// AUTH MODULE — Supabase magic-link authentication
+// AUTH MODULE — Supabase 6-digit OTP code authentication
 // ===================================================================
 //
-// D+E hybrid: the project owner (A) authenticates via magic link to
+// D+E hybrid: the project owner (A) authenticates via 6-digit code to
 // protect personal data. Group members (B) never authenticate — they
 // use bearer tokens via RPC functions.
 //
-// Auth flow:
-//   1. A enters email → signInWithOtp() sends magic link
-//   2. A clicks link → supabase-js auto-detects hash tokens
+// Auth flow (code-only, PWA-safe):
+//   1. A enters email → signInWithOtp() sends 6-digit code
+//   2. A enters code in same PWA context → verifyOtp({ email, token })
 //   3. Session stored in localStorage → auto-refreshes silently
 //   4. On first auth, claimOwnership() stamps all existing rows
+//
+// Why code-only: iOS PWA + Gmail opens magic links in Chrome, losing
+// the session (isolated storage). 6-digit code stays inside the PWA.
 //
 // Re-auth only needed if: localStorage cleared, new browser/device,
 // or refresh token explicitly revoked.
@@ -18,7 +21,7 @@
 
 /**
  * Initialize auth: check for existing session.
- * supabase-js auto-detects magic link callback hash fragments.
+ * supabase-js auto-detects session from storage / PKCE callback.
  *
  * @param {Object} adapter — Supabase adapter (must have .raw for auth)
  * @returns {Promise<{user: Object|null, isNewAuth: boolean}>}
@@ -26,7 +29,7 @@
 export async function initAuth(adapter) {
   const client = adapter.raw;
 
-  // supabase-js v2 detects magic link hash tokens automatically
+  // supabase-js v2 detects session automatically
   const { data: { session } } = await client.auth.getSession();
 
   if (session) {
@@ -39,14 +42,13 @@ export async function initAuth(adapter) {
 }
 
 /**
- * Send a magic link to the given email.
+ * Send a 6-digit verification code to the given email.
  * Uses built-in Supabase SMTP (2 emails/hr — fine since only the
  * owner authenticates, once per device).
  *
- * Supabase sends both a magic link AND a 6-digit OTP code. The code
- * path is critical for iOS PWA: clicking the link in Gmail opens
- * Chrome, not the standalone PWA, so the session would be lost.
- * Users should enter the 6-digit code inside the PWA.
+ * Email template must contain {{ .Token }} (code-only). Do NOT include
+ * {{ .ConfirmationURL }} — we no longer use magic links to avoid
+ * iOS PWA Chrome isolation issues.
  *
  * @param {Object} adapter
  * @param {string} email
@@ -57,9 +59,9 @@ export async function sendMagicLink(adapter, email) {
   const { error } = await client.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: window.location.origin + window.location.pathname,
-      // We intentionally request the code, not just link. Supabase email
-      // template should contain {{ .Token }} (6-digit) alongside link.
+      // No emailRedirectTo needed for code-only, but keep origin for
+      // fallback if template still contains a link.
+      shouldCreateUser: true,
     },
   });
   return { error };
@@ -68,7 +70,7 @@ export async function sendMagicLink(adapter, email) {
 /**
  * Verify a 6-digit OTP code inside the current browser context.
  * This is the PWA-safe path: token stays in the PWA, no cross-browser
- * session loss when Gmail opens the link in Chrome.
+ * session loss.
  *
  * @param {Object} adapter
  * @param {string} email

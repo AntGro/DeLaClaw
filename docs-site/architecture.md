@@ -173,13 +173,13 @@ Flow: `createGroup`/`inviteUser` → generate token + hash + expiry → store ha
 
 Supabase magic links break on iOS PWA: Gmail/Outlook opens links in Chrome (or Safari), not the standalone PWA's WebKit context. Chrome's localStorage is isolated, so `supabase-js` would create the session in Chrome and the PWA would still be signed out.
 
-Since `1.371`, `auth.js` exposes:
+Since `1.372+`, auth is code-only (no magic link):
 
-- `sendMagicLink()` — still sends a link ( `ConfirmationURL` ), but docs require template to also include `{{ .Token }}` 6-digit code.
-- `verifyOtpCode(email, token)` → `auth.verifyOtp({ email, token, type: 'email' })` — verifies the code **inside the PWA** so the session stays in the PWA's storage.
-- `main.js` auth prompt now shows OTP box after sending: input `type=text inputmode=numeric autocomplete=one-time-code` + Verify button, with i18n hints `otp_hint`, `link_hint`, etc. On iPhone, user copies code from Mail/Gmail and pastes in PWA.
+- `sendMagicLink()` (kept name for compat) → `signInWithOtp({ email })` which triggers email containing only `{{ .Token }}` 6-digit code. Template must NOT include `{{ .ConfirmationURL }}`.
+- `verifyOtpCode(email, token)` → `auth.verifyOtp({ email, token, type: 'email' })` — verifies inside the requesting PWA context, so it works even when Gmail opens links in Chrome (iOS storage isolation). No need to detect device type.
+- `main.js` auth prompt is now single-flow: email → send code → input `autocomplete=one-time-code` → verify → reload.
 
-This is the recommended path for any PWA that can be opened from an external mail app.
+This is PWA-safe for all devices, including iPhone Home Screen PWAs.
 
 ### Defense: CSP + credential stripping
 

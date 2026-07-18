@@ -89,14 +89,14 @@ These **must stay in sync**. The `draft` status bug (v1.105) was caused by the d
 |---|---|---|---|---|
 | **Adapter** | `supabase.js` (31 lines) — thin pass-through to `@supabase/supabase-js` | `drive.js` — wraps the demo adapter with per-table Drive persistence, ETag-based conflict resolution, and polling for external changes | `rest.js` (153 lines) — plain HTTP client with chainable PostgREST-like API | `demo.js` (292 lines) — full in-memory query builder with CHECK constraints |
 | **Architecture** | Direct Postgres queries via Supabase JS client | Stores one JSON file per table in a `DeLaClaw/` Drive folder. Reads/writes hit in-memory store (instant). Debounced per-table write-back flushes to Drive after 2s of inactivity. Polls Drive every 30s for external changes | `server/server.js` — Bun REST server + static file server. SQLite schema applied on startup via `CREATE TABLE IF NOT EXISTS` | Seeded with localized sample data from `demo-data.js` (EN/FR/ES). All operations run against in-memory JS objects. Nothing persists across refresh |
-| **Auth** | Anon key (`sb_publishable_*`) in both `apikey` and `Authorization: Bearer` headers. No user-level auth — key grants full access scoped by RLS (currently open: `USING (true) WITH CHECK (true)`) | Google OAuth 2.0 via Google Identity Services. Scope: `drive.file` (only files created by the app). "Stay connected" triggers silent re-auth on reload (`prompt: ''`); clears credentials on failure | None. ⚠️ Server binds to `0.0.0.0` by default, exposing the API to the local network | None |
-| **Session** | Stateless. Anon key doesn't expire. "Stay connected" saves `{ url, key, mode }` to localStorage | Token in memory. "Stay connected" saves client ID to localStorage | N/A | N/A |
+| **Auth** | **Since 1.300: mandatory magic-link**. Anon key still in Bearer header, but RLS is `owner only` (`owner_id = auth.uid()`). `set_owner_id()` + `claim_ownership()`. Invites store `token_hash=SHA256` + `expires_at` 24h + `revoked_at` (1.301) | Google OAuth 2.0 via Google Identity Services. Scope: `drive.file` (only files created by the app). "Stay connected" triggers silent re-auth on reload (`prompt: ''`); clears credentials on failure | None. ⚠️ Server binds to `0.0.0.0` by default, exposing the API to the local network | None |
+| **Session** | Auth session (access+refresh 1y) + `sync_secret` 32B (`localStorage`) encrypts `joined_groups` token+anon_key via AES-GCM (1.301) — KEK = SHA256(refresh_token) via `js/crypto-sync.js` | Token in memory. "Stay connected" saves client ID to localStorage | N/A | N/A |
 | **Realtime / Sync** | `postgres_changes` websocket subscription. Fires on INSERT/UPDATE/DELETE → calls `refreshAll()` or specific `refresh*()`. Edits in progress protected by `isEditing()` guard. Requires `supabase_realtime` publication (migration `1.099`) | Polls Drive every 30s via `files.list` — re-fetches only tables whose `modifiedTime` changed. Skips locally-dirty tables. External change callback available for UI refresh | None. Single-server, single-device | N/A |
 | **Offline** | `offline-cache.js` wrapper. Network failure → IndexedDB cache serves reads, writes fail silently, "Offline — read-only" banner. Cache scoped by `{mode}:{url}`. Tables in `EXCLUDE` set (`prompts`, `nvidia_usage`) not cached. No write queue — changes while offline are lost | None. Initial Drive fetch failure → connect fails. Mid-session flush failure → changes lost on reload | N/A — data is local. Server process dying → connection errors | N/A |
 | **Agent support** | ✅ Full. Claw agent reads/writes via REST API with same anon key. Heartbeat picks up `status=todo` / `status=revision` tasks | ✅ Agent reads/writes individual per-table JSON files via Drive API. Concurrent edits on different tables can't conflict. Same-table conflicts resolved via ETag optimistic locking (412 → merge by id, newer `updated_at` wins) | ⚠️ Possible in theory — REST API matches PostgREST shape. Not currently wired | ❌ N/A |
 | **Storage limits** | Free tier: 500 MB DB, 1 GB file storage, 2 GB bandwidth/month, 50 MB max upload. Row count unlimited | Free tier: 15 GB shared across Gmail/Drive/Photos. DeLaClaw JSON typically < 1 MB | SQLite limit: ~281 TB. Effectively unlimited | N/A |
-| **Security** | RLS on all tables (currently open policies). Anon key visible in client JS — acceptable for personal single-user tool, should not be shared | Inherits Google account security. `drive.file` scope → no access to user's other Drive files | No auth, no encryption at rest. Trusted local networks only. **TODO:** bind to `127.0.0.1`; add optional auth token | N/A |
-| **Setup** | Run `sql/supabase_schema.sql` in Supabase SQL Editor. Enter project URL + anon key in login form | Click "Connect with Google" → authorize → folder and data file created automatically | `cd server && bun run server.js`. Enter `http://localhost:3737` in login form | Click "Demo" on login screen, choose a sample dataset or start empty |
+| **Security** | **1.300**: owner-only RLS (`owner_id=auth.uid()`), `trg_set_owner_id`, `claim_ownership()`, mandatory auth. **1.301**: tokens hashed (`token_hash=SHA256`), 24h expiry, `revoke_member()` revocation, RPCs check hash+expiry+revocation, `joined_groups` encrypted (AES-GCM sync_secret). Service_role rejected, Drive tokens scoped. | Inherits Google account security. `drive.file` scope → no access to user's other Drive files | No auth, no encryption at rest. Trusted local networks only. **TODO:** bind to `127.0.0.1`; add optional auth token | N/A |
+| **Setup** | Run `sql/supabase_schema.sql` in SQL Editor. Enable Email provider + Magic Link, set Site URL `https://delaclaw.com` (+ `dev.delaclaw.pages.dev`, `localhost:3737`), refresh token 1y. Enter URL+anon key+magic link in app | Click "Connect with Google" → authorize → folder and data file created automatically | `cd server && bun run server.js`. Enter `http://localhost:3737` in login form | Click "Demo" on login screen, choose a sample dataset or start empty |
 | **Purpose** | Primary backend for full-featured use with cross-device sync and agent integration | Simple persistent backend — no database, no API keys, just a Google account | Self-hosted option for privacy-conscious users on trusted networks | Try DeLaClaw without any backend. Also serves as the Drive adapter's query engine |
 
 ---
@@ -292,20 +292,22 @@ Options:
 
 | Aspect | Supabase | Drive | Local | Demo |
 |--------|----------|-------|-------|------|
-| Auth | Anon key | Google OAuth | None | None |
+| Auth | **Since 1.300**: magic-link mandatory (`auth.uid()`), anon key in Bearer header but worthless without session | Google OAuth | None | None |
 | Encryption in transit | HTTPS | HTTPS | HTTP (localhost) | N/A |
-| Encryption at rest | Supabase-managed | Google-managed | None | N/A |
-| Access control | RLS (open policies) | `drive.file` scope | None — **open API** | N/A |
-| Key exposure | Anon key in JS | OAuth token in memory | N/A | N/A |
+| Encryption at rest | Supabase-managed + client-side AES-GCM for `joined_groups` (sync_secret, KEK=SHA256(refresh_token)) since 1.301 | Google-managed | None | N/A |
+| Access control | **Owner-only RLS** `owner_id=auth.uid()` (1.300) on 13 tables + `joined_groups`; Sharing RPCs check `token_hash`+expiry+revocation (1.301) | `drive.file` scope | None — **open API** | N/A |
+| Invite token storage | `token_hash=SHA256` + 24h expiry + `revoked_at` (1.301). Plaintext `token` column kept for compat but not used for lookups | N/A | N/A | N/A |
+| Key exposure | Anon key in invite envelope `{u,k,g,t}` — now safe because RLS requires auth.uid() | OAuth token in memory + scoped by clientId + dedup promise | N/A | N/A |
 
 ### Known risks
 
 1. **Local server on `0.0.0.0`:** Exposes the full API to the local network. Should default to `127.0.0.1`.
-2. **Open RLS policies:** All rows accessible to anyone with the anon key. Acceptable for single-user but blocks multi-user.
-3. **No HTTPS on local:** Data travels in plaintext on localhost. Fine for `127.0.0.1`; risky if bound to a network interface.
+2. **No HTTPS on local:** Data travels in plaintext on localhost. Fine for `127.0.0.1`; risky if bound to a network interface.
+3. **Drive token scope:** mitigated — tokens scoped by clientId and dedup promise since sec-003.
 
 ### Hardening roadmap
 
+- [x] Supabase: owner-only RLS (1.300) + hashed invites + encrypted joined_groups (1.301)
 - [ ] Local server: bind to `127.0.0.1` by default, optional `--host` flag
 - [ ] Local server: optional bearer token auth
 - [ ] Supabase: user-scoped RLS policies (when multi-user is needed)

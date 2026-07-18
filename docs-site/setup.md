@@ -33,21 +33,49 @@ Sign up at [supabase.com](https://supabase.com) and create a new project. Note y
 
 Open the **SQL Editor** in your Supabase dashboard.
 
-**New installs**: run `sql/supabase_schema.sql`. This is the complete current schema with all migrations folded in. It sets `schema_version` automatically.
+**New installs**: run `sql/supabase_schema.sql`. This is the complete current schema with all migrations folded in. It sets `schema_version` automatically and enables `pgcrypto` for invite token hashing.
 
-**Existing installs**: run any pending migrations in `migrations/` in order (files are named by target version, e.g. `1.099_enable_realtime.sql`). See `migrations/MIGRATION_GUIDE.md` for the full versioning system.
+**Existing installs**: run any pending migrations in `migrations/` in order (files are named by target version, e.g. `1.099_enable_realtime.sql`). See `migrations/MIGRATION_GUIDE.md` for the full versioning system. Since `1.300` mandatory auth and `1.301` hashed invites are security-critical, run them as soon as possible.
 
-### 3. Connect the app
+### 3. Configure Auth (mandatory since 1.300)
+
+DeLaClaw uses Supabase Auth with magic-link only (no password). Owner-only RLS means **no data is readable without a session**.
+
+In your Supabase dashboard → **Authentication → Providers**:
+
+1. Enable **Email** provider
+2. Disable email confirmations if you want instant magic-link login (or keep it enabled — DeLaClaw sends a magic link)
+3. Set **Site URL** to your deployed origin, e.g. `https://delaclaw.com`
+4. Under **Additional Redirect URLs**, add:
+   - `https://delaclaw.com`
+   - `https://dev.delaclaw.pages.dev` (preview)
+   - `http://localhost:3737` (local dev)
+   - any custom domain you self-host on
+
+In **Authentication → Settings**:
+
+- Enable **Magic Link** (Email OTP)
+- Set **JWT expiry** to 1 hour (default is fine)
+- Set **Refresh token lifetime** to **1 year** (`8760 hours` / `31536000 seconds`) — DeLaClaw stores the refresh token in localStorage and reuses it; a long lifetime avoids repeated email logins. Users can still log out explicitly.
+
+In **Authentication → Rate Limits**: keep defaults, or increase Magic Link limit to 10/hour if you test frequently.
+
+> Since 1.300, the "Skip" / anonymous path is removed for Supabase. You must sign in via magic link after entering URL + anon key. Your `owner_id` is set to `auth.uid()` on every insert via `trg_set_owner_id`, and `claim_ownership()` backfills legacy unclaimed rows on first login.
+
+### 4. Connect the app
 
 1. Open [delaclaw.com](https://delaclaw.com) (or serve `index.html` locally)
 2. Select **Supabase** on the login screen
 3. Enter your Project URL and anon key
-4. Optionally check "Stay connected" to persist credentials in the browser
+4. Enter your email → click **Send magic link** → open link from inbox
+5. Optionally check "Stay connected" to persist URL + anon key (the session itself is stored separately by Supabase Auth)
 
 ### Notes
 
-- Row Level Security (RLS) is enabled on all tables. The default policies allow all operations with the anon key. For multi-user setups, tighten the policies.
-- The app uses the Supabase JS client v2 loaded from CDN. No server-side code is needed.
+- **Security 1.300**: RLS is `owner only` on all 13 personal tables (`projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `joined_groups`). Policies are `FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid())`. Even if the anon key leaks inside an invite link, `B` cannot read `A`'s private tables.
+- **Security 1.301**: Invite tokens are never stored plaintext for lookups. `sharing_members` stores `token_hash = encode(digest(token,'sha256'),'hex')`, `expires_at` (24h) and `revoked_at`. All sharing RPCs (`verify_join_token`, `confirm_join`, `get_shared_items`, ...) verify hash + revocation + expiry.
+- **Encrypted joins**: `joined_groups` stores `token_ciphertext`/`token_iv` and `remote_anon_key_ciphertext/_iv` encrypted with a per-user `sync_secret` (WebCrypto AES-GCM, 32 bytes in localStorage `claw_sync_secret`). Plaintext columns remain only for fallback/migration.
+- The app uses the Supabase JS client v2 from CDN. No server-side code is needed.
 - Real-time subscriptions are enabled: changes from other tabs or devices appear automatically.
 - The app checks DB `schema_version` against the `VERSION` file and shows a banner if migrations are pending.
 

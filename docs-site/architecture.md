@@ -125,6 +125,56 @@ CHECK constraints are enforced at the database level:
 
 The demo adapter mirrors these constraints in JavaScript.
 
+## Security model (Supabase backend)
+
+### Threat: anon key in invite links
+
+Invite links are envelope `base64url JSON {v:1,b:'supabase',u,k,g,t}` containing `u=project URL`, `k=anon key`, `g=group_id`, `t=join token`. This envelope leaks `u+k` to any recipient. Requirement: **B must NOT read A's private tables even with A’s anon key**.
+
+### Defense: owner-only RLS (1.300)
+
+Since `1.300`, all personal tables have `owner_id UUID REFERENCES auth.users` and policy:
+
+```sql
+FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid())
+```
+
+Trigger `trg_set_owner_id` (`set_owner_id()` SECURITY DEFINER) forces `NEW.owner_id := auth.uid()` on INSERT if NULL. No anon read/write is possible. `claim_ownership()` backfills legacy NULL rows on first login. Login requires magic link (`auth.js` `initAuth()` always `isNewAuth:true`), no anonymous skip.
+
+### Defense: hashed invite tokens + expiry + revocation (1.301)
+
+`sharing_members` no longer looked up by plaintext `token`:
+
+- `token_hash TEXT = encode(digest(token,'sha256'),'hex')` — unique index
+- `expires_at TIMESTAMPTZ` — pending invites expire after 24h
+- `revoked_at TIMESTAMPTZ` — `revoke_member(p_group_id,p_member_id)` sets this, member is excluded from all checks
+
+All sharing RPCs (`verify_join_token`, `confirm_join`, `get_shared_items`, `add_shared_item`, `update_shared_item`, `delete_shared_item`, `get_group_members`, `leave_group`) now:
+
+```sql
+WHERE token_hash = encode(digest(p_token,'sha256'),'hex')
+  AND revoked_at IS NULL
+  AND (expires_at IS NULL OR expires_at > now())
+  AND joined_at IS NOT NULL -- where applicable
+```
+
+### Defense: encrypted joined_groups (1.301)
+
+The joiner's local `joined_groups` table previously stored `token` and `remote_anon_key` plaintext, readable if their own DB is exfiltrated. Since 1.301 it stores:
+
+- `token_ciphertext`, `token_iv`
+- `remote_anon_key_ciphertext`, `remote_anon_key_iv`
+
+Encrypted with WebCrypto AES-GCM 256 using a per-user `sync_secret` (32 random bytes, `localStorage.claw_sync_secret`). `js/crypto-sync.js` provides `getOrCreateSyncSecret()`, `encryptText()`, `decryptText()`, `hashTokenClient()`, `getKEK()` (= `SHA-256(refresh_token)`) and `storeWrappedSecret()` for KEK-wrapped backup. Code falls back to plaintext columns if decryption fails (migration compatibility).
+
+Flow: `createGroup`/`inviteUser` → generate token + hash + expiry → store hash; `joinWithFileIds`/`tryDirectJoin` → `encryptForJoined(token, anonKey)` → upsert ciphertexts + plaintext fallback; `loadAll` → `decryptJoinedRow()` prefers decryption.
+
+### Defense: CSP + credential stripping
+
+- `style-src` keeps `unsafe-inline` for `style=` attrs, `script-src` is nonce/sha256 only since v1.350 (no `unsafe-inline`).
+- `main.js` `saveStayConnectedCreds()` strips anon key for local/demo/drive, rejects `service_role` keys.
+- `drive.js` tokens scoped by `clientId`, dedup pending promise.
+
 ## Service worker
 
 `sw.js` implements a **network-first** strategy for all requests:

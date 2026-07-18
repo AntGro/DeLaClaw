@@ -622,7 +622,6 @@ const T = {
       otp_expired: 'Code expired \u2014 resend a new link.',
       sign_out: 'Sign out',
       signed_in_as: 'Signed in as {0}',
-      mandatory_note: 'Sign-in is required for Supabase. Use Drive backend if you prefer no auth.',
     },
   },
   fr: {
@@ -1222,7 +1221,6 @@ const T = {
       otp_expired: 'Code expir\u00e9 \u2014 renvoyez un nouveau lien.',
       sign_out: 'Se d\u00e9connecter',
       signed_in_as: 'Connect\u00e9 en tant que {0}',
-      mandatory_note: 'Connexion obligatoire pour Supabase. Utilisez Drive si vous préférez sans auth.',
     },
   },
   es: {
@@ -1822,7 +1820,6 @@ const T = {
       otp_expired: 'C\u00f3digo caducado \u2014 reenv\u00eda un nuevo enlace.',
       sign_out: 'Cerrar sesi\u00f3n',
       signed_in_as: 'Conectado como {0}',
-      mandatory_note: 'Inicio de sesión obligatorio para Supabase. Usa Drive si prefieres sin auth.',
     },
   },
 };

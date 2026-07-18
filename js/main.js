@@ -593,8 +593,6 @@ function showAuthPrompt(rawAdapter, url, key) {
           <button class="auth-send-btn" id="authSendBtn">${t('auth.send_magic_link')}</button>
         </div>
       </div>
-
-      <p class="auth-mandatory-note">${t('auth.mandatory_note')}</p>
     `;
     const confirmBox = content.querySelector('#authSiteUrlConfirm');
     const step2 = content.querySelector('#authStep2');

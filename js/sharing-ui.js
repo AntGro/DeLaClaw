@@ -88,6 +88,7 @@ export async function renderSharingPane() {
       const creds = (() => { try { return JSON.parse(localStorage.getItem(STAY_CONNECTED_KEY) || '{}'); } catch { return {}; } })();
       const projRef = getSupabaseProjectRef(creds.url || '') || null;
       const authConfigUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/url-configuration` : 'https://supabase.com/dashboard/projects';
+      const emailTemplatesUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/templates` : 'https://supabase.com/dashboard/projects';
       const siteOrigin = location.origin;
       container.innerHTML = `<div class="auth-inline-prompt">
         <div class="auth-icon">${lucideIcon('lock', 28)}</div>
@@ -104,7 +105,11 @@ export async function renderSharingPane() {
             <code id="sharingSiteUrlValue">${esc(siteOrigin)}</code>
             <button class="auth-copy-url-btn" id="sharingCopyUrlBtn" title="${t('sharing.copy')}">${lucideIcon('copy', 14)}</button>
           </div>
-          <a class="auth-config-link" href="${authConfigUrl}" target="_blank" rel="noopener">${lucideIcon('external-link', 14)} ${t('auth.open_supabase_settings')}</a>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+            <a class="auth-config-link" href="${authConfigUrl}" target="_blank" rel="noopener">${lucideIcon('external-link', 14)} ${t('auth.open_supabase_settings')}</a>
+            <a class="auth-config-link" href="${emailTemplatesUrl}" target="_blank" rel="noopener">${lucideIcon('mail', 14)} ${t('auth.open_email_templates')}</a>
+          </div>
+          <p class="auth-step-detail" style="margin-top:8px;font-size:0.85em;opacity:0.8">${esc(t('auth.email_template_hint'))}</p>
           <label class="auth-toggle-label" id="sharingConfirmLabel">
             <input type="checkbox" id="sharingSiteUrlConfirm">
             <span>${t('auth.site_url_confirmed')}</span>

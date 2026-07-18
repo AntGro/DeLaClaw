@@ -8,14 +8,22 @@
 //     token_ciphertext + token_iv in joined_groups.
 //   - KEK = SHA-256(refresh_token) — used to wrap sync_secret for backup
 //     so anon key + token leak alone is insufficient without session.
-//   - For migration: fallback to plaintext token columns if ciphertext
-//     missing or decryption fails.
+//   - 1.396: removed plaintext fallback, now ciphertext-only.
+//   - 1.397 (Option A): sync_secret itself is stored in settings table
+//     (owner-only RLS) for cross-device portability. LS is cache,
+//     settings is source of truth. Flow:
+//       LS has S -> use (and ensure settings has it)
+//       LS missing, DB has S -> load DB -> save LS
+//       neither -> generate S, save LS + DB
+//   This protects against single-table RLS leak, but not full DB dump
+//   (full dump already gives all personal data anyway).
 //
 // All ops use WebCrypto (async). No external deps.
 
 const LS_SECRET = 'claw_sync_secret';
 const LS_SECRET_WRAPPED = 'claw_sync_secret_wrapped';
 const LS_SECRET_WRAPPED_IV = 'claw_sync_secret_wrapped_iv';
+const SETTINGS_KEY = 'sync_secret';
 
 function _b64ToBytes(b64) {
   try {
@@ -29,6 +37,10 @@ function _bytesToB64(bytes) {
   let bin = '';
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin);
+}
+
+function _isValidSecretBytes(bytes) {
+  return bytes && bytes.length === 32;
 }
 
 async function _getKeyFromBytes(bytes) {
@@ -46,19 +58,26 @@ export async function sha256Hex(text) {
   return Array.from(h).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// ── Sync secret management ──────────────────────────────────────
+// ── Sync secret management (LS cache) ────────────────────────────
 
 export function getOrCreateSyncSecret() {
   let b64 = localStorage.getItem(LS_SECRET);
   if (b64) {
     const bytes = _b64ToBytes(b64);
-    if (bytes && bytes.length === 32) return bytes;
+    if (_isValidSecretBytes(bytes)) return bytes;
   }
   // Generate new 32-byte secret
   const fresh = new Uint8Array(32);
   crypto.getRandomValues(fresh);
   localStorage.setItem(LS_SECRET, _bytesToB64(fresh));
   return fresh;
+}
+
+export function getSyncSecretFromLS() {
+  const b64 = localStorage.getItem(LS_SECRET);
+  if (!b64) return null;
+  const bytes = _b64ToBytes(b64);
+  return _isValidSecretBytes(bytes) ? bytes : null;
 }
 
 export function hasSyncSecret() {
@@ -70,6 +89,117 @@ export function clearSyncSecret() {
   localStorage.removeItem(LS_SECRET);
   localStorage.removeItem(LS_SECRET_WRAPPED);
   localStorage.removeItem(LS_SECRET_WRAPPED_IV);
+}
+
+export function setSyncSecretBytes(bytes) {
+  if (!_isValidSecretBytes(bytes)) throw new Error('Invalid secret length');
+  localStorage.setItem(LS_SECRET, _bytesToB64(bytes));
+}
+
+// ── Settings-backed cross-device portability (Option A) ────────
+
+async function _fetchSettingsRow(adapter, key) {
+  if (!adapter) return null;
+  try {
+    // Try maybeSingle first (Supabase adapter), fallback to array
+    if (adapter.from) {
+      const q = adapter.from('settings').select('value').eq('key', key);
+      if (q.maybeSingle) {
+        const { data } = await q.maybeSingle();
+        return data || null;
+      } else {
+        const { data } = await q;
+        if (Array.isArray(data)) return data[0] || null;
+        return data || null;
+      }
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+export async function fetchSecretFromSettings(adapter) {
+  const row = await _fetchSettingsRow(adapter, SETTINGS_KEY);
+  if (!row || !row.value) return null;
+  const bytes = _b64ToBytes(row.value);
+  return _isValidSecretBytes(bytes) ? bytes : null;
+}
+
+export async function persistSecretToSettings(adapter, secretBytes) {
+  if (!adapter) return false;
+  const b64 = _bytesToB64(secretBytes);
+  try {
+    // Try upsert first
+    if (adapter.from) {
+      const res = await adapter.from('settings').upsert({ key: SETTINGS_KEY, value: b64 });
+      // upsert may return error in result, but we check no throw
+      if (res && !res.error) return true;
+    }
+  } catch {}
+  try {
+    // Fallback: update then insert (pattern used in todos.js)
+    const { data } = await adapter.from('settings').update({ value: b64, updated_at: new Date().toISOString() }).eq('key', SETTINGS_KEY).select();
+    if (data && (Array.isArray(data) ? data.length > 0 : !!data)) return true;
+    const ins = await adapter.from('settings').insert({ key: SETTINGS_KEY, value: b64 });
+    return !(ins && ins.error);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ensure we have a sync secret, with cross-device portability via settings.
+ * Flow:
+ *   1. LS has valid secret -> return it (and best-effort ensure settings has it)
+ *   2. LS missing, settings has -> load settings -> save LS -> return
+ *   3. Neither -> generate fresh -> save LS + settings -> return
+ */
+export async function ensureSyncSecret(adapter) {
+  // 1. LS cache
+  let secret = getSyncSecretFromLS();
+  if (secret) {
+    if (adapter) {
+      // Best-effort backfill to settings for cross-device (no await needed but we await)
+      try { await persistSecretToSettings(adapter, secret); } catch {}
+    }
+    return secret;
+  }
+  // 2. Try settings (cross-device)
+  if (adapter) {
+    try {
+      const fromSettings = await fetchSecretFromSettings(adapter);
+      if (fromSettings) {
+        setSyncSecretBytes(fromSettings);
+        return fromSettings;
+      }
+    } catch {}
+  }
+  // 3. Generate fresh
+  const fresh = new Uint8Array(32);
+  crypto.getRandomValues(fresh);
+  setSyncSecretBytes(fresh);
+  if (adapter) {
+    try { await persistSecretToSettings(adapter, fresh); } catch {}
+  }
+  return fresh;
+}
+
+/**
+ * Get secret if available (LS or settings) without generating a new one.
+ * Used for decryption path where we don't want to overwrite existing secret.
+ */
+export async function getSyncSecretWithSettings(adapter) {
+  let secret = getSyncSecretFromLS();
+  if (secret) return secret;
+  if (adapter) {
+    try {
+      const fromSettings = await fetchSecretFromSettings(adapter);
+      if (fromSettings) {
+        setSyncSecretBytes(fromSettings);
+        return fromSettings;
+      }
+    } catch {}
+  }
+  return null;
 }
 
 // ── KEK from refresh_token ──────────────────────────────────────

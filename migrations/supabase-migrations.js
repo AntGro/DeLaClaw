@@ -617,6 +617,126 @@ CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON sharing_members(a
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON sharing_members(group_id, auth_user_id);
 
 UPDATE settings SET value = '1.401', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.401', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+  '1.402': `-- 1.402: ensure pgcrypto for digest() + fix digest(text, unknown) error 42883
+CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public;
+
+-- Recreate all sharing RPCs with explicit ::text casts and search_path = public
+CREATE OR REPLACE FUNCTION verify_join_token(p_token text)
+RETURNS TABLE(group_id text, group_name text, member_id text, display_name text, backend_type text, creator_name text)
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT sg.id, sg.name, sm.member_id, sm.display_name, sg.backend_type,
+         (SELECT cm.display_name FROM sharing_members cm WHERE cm.group_id = sg.id AND cm.role = 'creator' LIMIT 1)
+  FROM sharing_members sm
+  JOIN sharing_groups sg ON sg.id = sm.group_id
+  WHERE sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm.revoked_at IS NULL
+    AND (sm.expires_at IS NULL OR sm.expires_at > now())
+    AND sm.joined_at IS NULL;
+$$;
+
+CREATE OR REPLACE FUNCTION confirm_join(p_token text, p_display_name text)
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  UPDATE sharing_members
+  SET joined_at = now(),
+      display_name = COALESCE(NULLIF(p_display_name, ''::text), display_name),
+      auth_user_id = COALESCE(auth_user_id, auth.uid())
+  WHERE token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND joined_at IS NULL
+    AND revoked_at IS NULL
+    AND (expires_at IS NULL OR expires_at > now());
+$$;
+
+CREATE OR REPLACE FUNCTION get_shared_items(p_token text, p_group_id text, p_item_type text DEFAULT NULL::text)
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT si.* FROM sharing_items si
+  WHERE si.group_id = p_group_id
+  AND (p_item_type IS NULL OR si.item_type = p_item_type)
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = p_group_id
+    AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION add_shared_item(p_token text, p_item_id text, p_group_id text, p_item_type text, p_payload jsonb, p_member_id text, p_parent_item_id text DEFAULT NULL::text)
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  INSERT INTO sharing_items (item_id, group_id, item_type, parent_item_id, payload, created_by)
+  SELECT p_item_id, p_group_id, p_item_type, p_parent_item_id, p_payload, p_member_id
+  WHERE EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = p_group_id
+    AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm.member_id = p_member_id
+    AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
+  )
+  RETURNING *;
+$$;
+
+CREATE OR REPLACE FUNCTION update_shared_item(p_token text, p_item_id text, p_payload jsonb)
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  UPDATE sharing_items si
+  SET payload = p_payload, updated_at = now()
+  WHERE si.item_id = p_item_id
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = si.group_id
+    AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
+  )
+  RETURNING *;
+$$;
+
+CREATE OR REPLACE FUNCTION delete_shared_item(p_token text, p_item_id text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  DELETE FROM sharing_items si
+  WHERE si.item_id = p_item_id
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = si.group_id
+    AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm.joined_at IS NOT NULL
+    AND sm.revoked_at IS NULL
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION get_group_members(p_token text, p_group_id text)
+RETURNS TABLE(member_id text, display_name text, role text, joined_at timestamp with time zone, auth_user_id uuid)
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT sm.member_id, sm.display_name, sm.role, sm.joined_at, sm.auth_user_id
+  FROM sharing_members sm
+  WHERE sm.group_id = p_group_id
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm2
+    WHERE sm2.group_id = p_group_id
+    AND sm2.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm2.joined_at IS NOT NULL
+    AND sm2.revoked_at IS NULL
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION leave_group(p_token text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  DELETE FROM sharing_members
+  WHERE token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+  AND role != 'creator'
+  AND joined_at IS NOT NULL
+  AND revoked_at IS NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION revoke_member(p_group_id text, p_member_id text)
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  UPDATE sharing_members SET revoked_at = now() WHERE group_id = p_group_id AND member_id = p_member_id AND role != 'creator';
+$$;
+
+UPDATE settings SET value = '1.402', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.402', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
 };
 
 export { SUPABASE_MIGRATIONS };

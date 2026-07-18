@@ -399,17 +399,34 @@ ALTER TABLE text_line_progress ADD COLUMN IF NOT EXISTS owner_id uuid;
 ALTER TABLE nvidia_usage ADD COLUMN IF NOT EXISTS owner_id uuid;
 ALTER TABLE daily_visits ADD COLUMN IF NOT EXISTS owner_id uuid;
 
--- daily_visits PK migration: from visit_date to (visit_date, owner_id)
--- Drop old PK, clean NULLs that would conflict, then add composite PK
+-- daily_visits: clean NULL visit_date while old PK still exists (has replica identity)
+DELETE FROM daily_visits WHERE visit_date IS NULL;
+
+-- daily_visits is in supabase_realtime publication which publishes deletes.
+-- After dropping PK it would have no replica identity, causing:
+-- ERROR 55000: cannot delete because it does not have a replica identity and publishes deletes
+-- So set REPLICA IDENTITY FULL before dropping PK and doing further deletes.
+ALTER TABLE daily_visits REPLICA IDENTITY FULL;
+
+-- Drop old PK (visit_date) to allow per-owner same date
 DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='daily_visits_pkey' AND table_name='daily_visits') THEN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='daily_visits_pkey' AND conrelid='daily_visits'::regclass) THEN
     ALTER TABLE daily_visits DROP CONSTRAINT daily_visits_pkey;
   END IF;
 END $$;
-DELETE FROM daily_visits WHERE visit_date IS NULL;
--- Keep only one row per (visit_date, owner_id) — dedup legacy global rows with NULL owner_id
+
+-- Existing rows have owner_id NULL (column newly added). Composite PK (visit_date, owner_id) requires NOT NULL,
+-- so we must remove NULL-owner rows before creating new PK. Daily_visits is low-value analytics, safe to reset.
+DELETE FROM daily_visits WHERE owner_id IS NULL;
+
+-- Dedup any remaining duplicate (visit_date, owner_id) pairs
 DELETE FROM daily_visits a USING daily_visits b WHERE a.ctid < b.ctid AND a.visit_date = b.visit_date AND COALESCE(a.owner_id::text,'') = COALESCE(b.owner_id::text,'');
+
+-- Add new composite PK
 ALTER TABLE daily_visits ADD CONSTRAINT daily_visits_pkey PRIMARY KEY (visit_date, owner_id);
+
+-- Reset replica identity to default (PK will be used)
+ALTER TABLE daily_visits REPLICA IDENTITY DEFAULT;
 
 -- Update claim_ownership to include new tables
 CREATE OR REPLACE FUNCTION claim_ownership() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$

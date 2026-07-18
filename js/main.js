@@ -681,7 +681,7 @@ function showAuthPrompt(rawAdapter, url, key) {
       <div class="auth-otp-box" style="margin:16px 0; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-subtle,#f8f9fa);">
         <p class="auth-hint" style="font-size:0.9em; margin-bottom:8px;">${t('auth.otp_hint')}</p>
         <div style="display:flex; gap:8px; align-items:center;">
-          <input type="text" id="authOtpInput" placeholder="${t('auth.otp_placeholder')}" inputmode="numeric" autocomplete="one-time-code" maxlength="8" style="flex:1; padding:8px 10px; font-size:18px; letter-spacing:0.2em; text-align:center; border:1px solid var(--border); border-radius:6px;">
+          <input type="text" id="authOtpInput" placeholder="${t('auth.otp_placeholder')}" inputmode="text" autocomplete="one-time-code" maxlength="500" style="flex:1; padding:8px 10px; font-size:16px; letter-spacing:0.1em; text-align:center; border:1px solid var(--border); border-radius:6px;">
           <button class="auth-send-btn" id="authVerifyBtn" style="white-space:nowrap;">${t('auth.verify_code')}</button>
         </div>
         <div class="auth-error" id="authOtpError" style="display:none; margin-top:8px;"></div>

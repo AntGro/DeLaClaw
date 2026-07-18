@@ -72,14 +72,45 @@ export async function sendMagicLink(adapter, email) {
  * This is the PWA-safe path: token stays in the PWA, no cross-browser
  * session loss.
  *
+ * Also accepts a full magic-link URL (fallback for projects without
+ * custom SMTP where template editing is locked). In that case we extract
+ * token_hash + type and verify via token_hash.
+ *
  * @param {Object} adapter
  * @param {string} email
- * @param {string} token — 6-digit code from email
+ * @param {string} token — 6-digit code from email OR full verify URL
  * @returns {Promise<{user: Object|null, error: Object|null}>}
  */
 export async function verifyOtpCode(adapter, email, token) {
   const client = adapter.raw;
-  const cleanToken = (token || '').trim();
+  const raw = (token || '').trim();
+
+  // ── Magic-link URL pasted? Extract token_hash ──
+  if (raw.includes('token=') || raw.startsWith('http')) {
+    try {
+      const url = new URL(raw.startsWith('http') ? raw : `https://dummy.com/?${raw}`);
+      const token_hash = url.searchParams.get('token') || url.searchParams.get('token_hash') || raw.match(/token=([^&]+)/)?.[1];
+      const type = url.searchParams.get('type') || 'signup';
+      if (token_hash) {
+        const { data, error } = await client.auth.verifyOtp({
+          token_hash,
+          type,
+        });
+        return { user: data?.user || data?.session?.user || null, session: data?.session || null, error };
+      }
+    } catch { /* fall through to normal code path */ }
+    // Also handle raw token_hash pasted (long string)
+    if (raw.length > 20 && !/^\d+$/.test(raw)) {
+      for (const t of ['signup', 'magiclink', 'email']) {
+        try {
+          const { data, error } = await client.auth.verifyOtp({ token_hash: raw, type: t });
+          if (!error && (data?.user || data?.session)) return { user: data.user || data.session.user, session: data.session, error: null };
+        } catch {}
+      }
+    }
+  }
+
+  const cleanToken = raw.trim();
   const { data, error } = await client.auth.verifyOtp({
     email,
     token: cleanToken,

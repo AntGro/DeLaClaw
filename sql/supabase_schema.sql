@@ -75,6 +75,7 @@ CREATE TABLE "public"."birthdays" (
 
 CREATE TABLE "public"."daily_visits" (
     "visit_date" "date" NOT NULL,
+    "owner_id" "uuid",
     "created_at" timestamp with time zone DEFAULT "now"()
 );
 
@@ -112,7 +113,8 @@ CREATE TABLE "public"."flashcards" (
     "next_review" timestamp with time zone,
     "review_count" integer DEFAULT 0,
     "created_at" timestamp with time zone DEFAULT "now"(),
-    "updated_at" timestamp with time zone DEFAULT "now"()
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "owner_id" "uuid"
 );
 
 
@@ -191,6 +193,7 @@ CREATE TABLE "public"."nvidia_usage" (
     "completion_tokens" integer DEFAULT 0,
     "total_tokens" integer DEFAULT 0,
     "status" integer NOT NULL,
+    "owner_id" "uuid",
     "created_at" timestamp with time zone DEFAULT "now"()
 );
 
@@ -271,6 +274,7 @@ CREATE TABLE "public"."text_line_progress" (
     "last_review" timestamp with time zone,
     "next_review" timestamp with time zone,
     "review_count" integer DEFAULT 0 NOT NULL,
+    "owner_id" "uuid",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
 );
 
@@ -287,6 +291,7 @@ CREATE TABLE "public"."texts" (
     "content" "text" NOT NULL,
     "lines_per_chunk" integer DEFAULT 4 NOT NULL,
     "context_lines" integer DEFAULT 3 NOT NULL,
+    "owner_id" "uuid",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
 );
 
@@ -605,7 +610,7 @@ ALTER TABLE ONLY "public"."habits"
 --
 
 ALTER TABLE ONLY "public"."daily_visits"
-    ADD CONSTRAINT "daily_visits_pkey" PRIMARY KEY ("visit_date");
+    ADD CONSTRAINT "daily_visits_pkey" PRIMARY KEY ("visit_date", "owner_id");
 
 
 --
@@ -893,13 +898,18 @@ BEGIN
   UPDATE todos SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE habits SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE habit_completions SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE flashcards SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE flashcard_notes SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE texts SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE text_line_progress SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE birthdays SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE vestiaire SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE lists SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE list_items SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE settings SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE prompts SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE nvidia_usage SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE daily_visits SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE joined_groups SET owner_id = uid WHERE owner_id IS NULL;
 END;
 $$;
@@ -942,17 +952,22 @@ CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."todos" FOR EACH ROW E
 CREATE POLICY "owner only" ON "public"."vestiaire" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."vestiaire" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
--- ── Tables without owner_id (open access) ─────────────────────
+-- ── Previously open tables — now owner-only (1.398 fix) ─────────
 
-CREATE POLICY "Allow all access to daily_visits" ON "public"."daily_visits" USING (true) WITH CHECK (true);
+CREATE POLICY "owner only" ON "public"."daily_visits" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."daily_visits" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "allow_all_flashcards" ON "public"."flashcards" USING (true) WITH CHECK (true);
+CREATE POLICY "owner only" ON "public"."flashcards" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."flashcards" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "allow_all_nvidia_usage" ON "public"."nvidia_usage" USING (true) WITH CHECK (true);
+CREATE POLICY "owner only" ON "public"."nvidia_usage" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."nvidia_usage" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "allow_all_text_line_progress" ON "public"."text_line_progress" USING (true) WITH CHECK (true);
+CREATE POLICY "owner only" ON "public"."text_line_progress" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."text_line_progress" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "allow_all_texts" ON "public"."texts" USING (true) WITH CHECK (true);
+CREATE POLICY "owner only" ON "public"."texts" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."texts" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
 -- ── Sharing tables ────────────────────────────────────────────
 
@@ -974,13 +989,18 @@ CREATE INDEX IF NOT EXISTS idx_tasks_owner_id ON "public"."tasks" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_todos_owner_id ON "public"."todos" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_habits_owner_id ON "public"."habits" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_habit_completions_owner_id ON "public"."habit_completions" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_flashcards_owner_id ON "public"."flashcards" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_flashcard_notes_owner_id ON "public"."flashcard_notes" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_texts_owner_id ON "public"."texts" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_text_line_progress_owner_id ON "public"."text_line_progress" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_birthdays_owner_id ON "public"."birthdays" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_vestiaire_owner_id ON "public"."vestiaire" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_lists_owner_id ON "public"."lists" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_list_items_owner_id ON "public"."list_items" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_prompts_owner_id ON "public"."prompts" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_settings_owner_id ON "public"."settings" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_nvidia_usage_owner_id ON "public"."nvidia_usage" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_daily_visits_owner_id ON "public"."daily_visits" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_joined_groups_owner_id ON "public"."joined_groups" ("owner_id");
 CREATE INDEX IF NOT EXISTS idx_todos_shared_id ON "public"."todos" ("shared_id");
 CREATE INDEX IF NOT EXISTS idx_todos_shared_group_id ON "public"."todos" ("shared_group_id");
@@ -993,8 +1013,8 @@ CREATE INDEX IF NOT EXISTS idx_sharing_members_group_id ON "public"."sharing_mem
 CREATE INDEX IF NOT EXISTS idx_sharing_members_token_hash ON "public"."sharing_members" ("token_hash");
 CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON "public"."sharing_items" ("group_id");
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.393')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.393', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.398')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.398', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;

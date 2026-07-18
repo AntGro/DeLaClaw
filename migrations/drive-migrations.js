@@ -83,4 +83,13 @@ export const DRIVE_MIGRATIONS = {
       store.joined_groups = store.joined_groups.filter(r => r.owner_id != null);
     }
   },
+  '1.398': async (store) => {
+    // 1.398: add owner_id to previously open tables — ensure field exists
+    // No data deletion needed, Drive is single-user single-tenant
+    for (const tbl of ['flashcards', 'texts', 'text_line_progress', 'nvidia_usage', 'daily_visits']) {
+      for (const row of (store[tbl] || [])) {
+        if (row.owner_id == null) row.owner_id = null; // ensure key exists for future claim logic if needed
+      }
+    }
+  },
 };

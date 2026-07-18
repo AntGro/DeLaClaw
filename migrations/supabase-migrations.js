@@ -390,6 +390,92 @@ UPDATE settings SET value = '1.393', updated_at = now() WHERE key = 'schema_vers
 UPDATE joined_groups SET token = NULL, remote_anon_key = NULL WHERE token_ciphertext IS NOT NULL;
 DELETE FROM joined_groups WHERE owner_id IS NULL;
 UPDATE settings SET value = '1.396', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.396', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+
+  '1.398': `-- Migration 1.398: Enforce owner-only RLS on previously open tables (flashcards, texts, text_line_progress, nvidia_usage, daily_visits)
+-- Add owner_id columns
+ALTER TABLE flashcards ADD COLUMN IF NOT EXISTS owner_id uuid;
+ALTER TABLE texts ADD COLUMN IF NOT EXISTS owner_id uuid;
+ALTER TABLE text_line_progress ADD COLUMN IF NOT EXISTS owner_id uuid;
+ALTER TABLE nvidia_usage ADD COLUMN IF NOT EXISTS owner_id uuid;
+ALTER TABLE daily_visits ADD COLUMN IF NOT EXISTS owner_id uuid;
+
+-- daily_visits PK migration: from visit_date to (visit_date, owner_id)
+-- Drop old PK, clean NULLs that would conflict, then add composite PK
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='daily_visits_pkey' AND table_name='daily_visits') THEN
+    ALTER TABLE daily_visits DROP CONSTRAINT daily_visits_pkey;
+  END IF;
+END $$;
+DELETE FROM daily_visits WHERE visit_date IS NULL;
+-- Keep only one row per (visit_date, owner_id) — dedup legacy global rows with NULL owner_id
+DELETE FROM daily_visits a USING daily_visits b WHERE a.ctid < b.ctid AND a.visit_date = b.visit_date AND COALESCE(a.owner_id::text,'') = COALESCE(b.owner_id::text,'');
+ALTER TABLE daily_visits ADD CONSTRAINT daily_visits_pkey PRIMARY KEY (visit_date, owner_id);
+
+-- Update claim_ownership to include new tables
+CREATE OR REPLACE FUNCTION claim_ownership() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE uid UUID := auth.uid();
+BEGIN
+  IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  UPDATE projects SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE tasks SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE todos SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE habits SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE habit_completions SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE flashcards SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE flashcard_notes SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE texts SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE text_line_progress SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE birthdays SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE vestiaire SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE lists SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE list_items SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE settings SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE prompts SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE nvidia_usage SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE daily_visits SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE joined_groups SET owner_id = uid WHERE owner_id IS NULL;
+END;
+$$;
+
+-- Drop old allow_all policies
+DROP POLICY IF EXISTS "Allow all access to daily_visits" ON daily_visits;
+DROP POLICY IF EXISTS "allow_all_flashcards" ON flashcards;
+DROP POLICY IF EXISTS "allow_all_nvidia_usage" ON nvidia_usage;
+DROP POLICY IF EXISTS "allow_all_text_line_progress" ON text_line_progress;
+DROP POLICY IF EXISTS "allow_all_texts" ON texts;
+DROP POLICY IF EXISTS "owner only" ON flashcards;
+DROP POLICY IF EXISTS "owner only" ON texts;
+DROP POLICY IF EXISTS "owner only" ON text_line_progress;
+DROP POLICY IF EXISTS "owner only" ON nvidia_usage;
+DROP POLICY IF EXISTS "owner only" ON daily_visits;
+
+-- Create owner-only policies
+CREATE POLICY "owner only" ON flashcards FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+CREATE POLICY "owner only" ON texts FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+CREATE POLICY "owner only" ON text_line_progress FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+CREATE POLICY "owner only" ON nvidia_usage FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+CREATE POLICY "owner only" ON daily_visits FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+
+-- Triggers to auto-set owner_id
+DROP TRIGGER IF EXISTS trg_set_owner_id ON flashcards;
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON flashcards FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON texts;
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON texts FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON text_line_progress;
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON text_line_progress FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON nvidia_usage;
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON nvidia_usage FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON daily_visits;
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON daily_visits FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+
+-- Indexes for owner_id lookups
+CREATE INDEX IF NOT EXISTS idx_flashcards_owner_id ON flashcards(owner_id);
+CREATE INDEX IF NOT EXISTS idx_texts_owner_id ON texts(owner_id);
+CREATE INDEX IF NOT EXISTS idx_text_line_progress_owner_id ON text_line_progress(owner_id);
+CREATE INDEX IF NOT EXISTS idx_nvidia_usage_owner_id ON nvidia_usage(owner_id);
+CREATE INDEX IF NOT EXISTS idx_daily_visits_owner_id ON daily_visits(owner_id);
+
+UPDATE settings SET value = '1.398', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.398', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
 };
 
 export { SUPABASE_MIGRATIONS };

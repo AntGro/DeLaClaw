@@ -2897,7 +2897,12 @@ async function recordDailyVisit() {
   try {
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    await state.db.from('daily_visits').upsert({ visit_date: today }, { onConflict: 'visit_date' });
+    try {
+      await state.db.from('daily_visits').upsert({ visit_date: today }, { onConflict: 'visit_date,owner_id' });
+    } catch {
+      // fallback for pre-1.398 DBs with old PK
+      await state.db.from('daily_visits').upsert({ visit_date: today }, { onConflict: 'visit_date' });
+    }
   } catch (e) { console.warn('Could not record visit:', e.message); }
 }
 

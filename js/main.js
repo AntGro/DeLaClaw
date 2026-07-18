@@ -907,20 +907,13 @@ function renderSchemaMissingError(container, projectUrl) {
   const ref = getSupabaseProjectRef(projectUrl);
   const sqlEditorUrl = ref ? `https://supabase.com/dashboard/project/${ref}/sql/new` : 'https://supabase.com/dashboard/projects';
 
-  const openLink = document.createElement('a');
-  openLink.href = sqlEditorUrl;
-  openLink.target = '_blank';
-  openLink.rel = 'noopener';
-  openLink.textContent = t('toast.open_sql_editor') || 'Open SQL Editor ↗';
-  openLink.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border-radius:8px;background:var(--accent);color:#fff;text-decoration:none;font-size:0.85rem;font-weight:600;line-height:1;';
-  actions.appendChild(openLink);
-
+  // Primary: Copy schema (nice UI) — first left to right
   const copyBtn = document.createElement('button');
   copyBtn.type = 'button';
-  copyBtn.textContent = t('toast.copy_schema') || t('setup.copy_btn') || 'Copy schema';
-  copyBtn.style.cssText = 'padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.85rem;font-weight:600;cursor:pointer;line-height:1;';
+  const copyLabel = t('toast.copy_schema') || t('setup.copy_btn') || 'Copy schema';
+  copyBtn.innerHTML = `${lucideIcon('copy', 14)} ${copyLabel}`;
+  copyBtn.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:0.85rem;font-weight:600;cursor:pointer;line-height:1;box-shadow:0 2px 8px rgba(0,0,0,0.12);transition:all 0.15s;';
   copyBtn.addEventListener('click', async () => {
-    const orig = copyBtn.textContent;
     try {
       let sql = window._SUPABASE_SCHEMA_CACHED || '';
       if (!sql) {
@@ -930,22 +923,33 @@ function renderSchemaMissingError(container, projectUrl) {
         window._SUPABASE_SCHEMA_CACHED = sql;
       }
       await navigator.clipboard.writeText(sql);
-      copyBtn.textContent = t('toast.copied') || t('setup.copy_done') || 'Copied!';
-      copyBtn.style.borderColor = 'var(--accent)';
+      copyBtn.innerHTML = `${lucideIcon('check', 14)} ${t('toast.copied') || t('setup.copy_done') || 'Copied!'}`;
+      copyBtn.style.opacity = '0.9';
       setTimeout(() => {
-        copyBtn.textContent = orig;
-        copyBtn.style.borderColor = 'var(--border)';
+        copyBtn.innerHTML = `${lucideIcon('copy', 14)} ${copyLabel}`;
+        copyBtn.style.opacity = '1';
       }, 2000);
     } catch {
       window.open('https://raw.githubusercontent.com/AntGro/DeLaClaw/dev/sql/supabase_schema.sql', '_blank');
     }
   });
+  copyBtn.addEventListener('mouseenter', () => { copyBtn.style.transform = 'translateY(-1px)'; copyBtn.style.boxShadow = '0 4px 14px rgba(0,0,0,0.18)'; });
+  copyBtn.addEventListener('mouseleave', () => { copyBtn.style.transform = 'none'; copyBtn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)'; });
   actions.appendChild(copyBtn);
+
+  // Secondary: Open SQL Editor
+  const openLink = document.createElement('a');
+  openLink.href = sqlEditorUrl;
+  openLink.target = '_blank';
+  openLink.rel = 'noopener';
+  openLink.innerHTML = `${lucideIcon('external-link', 14)} ${t('toast.open_sql_editor') || 'Open SQL Editor'}`;
+  openLink.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);text-decoration:none;font-size:0.85rem;font-weight:600;line-height:1;transition:all 0.15s;';
+  actions.appendChild(openLink);
 
   container.appendChild(actions);
 
   const hint = document.createElement('div');
-  hint.textContent = t('toast.schema_missing_hint') || 'Paste in SQL Editor → Run. Then retry Connect.';
+  hint.textContent = t('toast.schema_missing_hint') || 'Paste in SQL Editor → Run, then retry Connect.';
   hint.style.fontSize = '0.8em';
   hint.style.opacity = '0.75';
   hint.style.marginTop = '8px';

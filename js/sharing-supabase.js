@@ -200,6 +200,16 @@ export async function createSupabaseSharing(adapter, config) {
   }
 
   async function loadAll() {
+    // 1.399 breaking cleanup: purge legacy LS keys (creator attribution now DB-backed)
+    try {
+      const toRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('claw_member_')) toRemove.push(k);
+      }
+      toRemove.forEach(k => localStorage.removeItem(k));
+    } catch { /* ignore */ }
+
     // 1. Load owned groups (direct table access, requires auth)
     if (_isOwner()) {
       const { data: groups } = await adapter.from('sharing_groups').select('*');

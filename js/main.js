@@ -67,7 +67,6 @@ const SCOPED_LS_KEYS = [
   'claw_cc_habit_categories',
   'claw_cc_tab_visibility',
   'claw_cc_tab_order',
-  'claw_cc_compact_nav',
   'claw_cc_vestiaire_categories',
   'claw_cc_vest_shortnames',
   'claw_flash_shortnames',

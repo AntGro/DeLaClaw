@@ -137,7 +137,7 @@ export async function createSupabaseSharing(adapter, config) {
     if (!user) throw new Error('Auth required to create groups');
 
     const groupId = _uid8();
-    const creatorMemberId = user.id; // breaking 1.399: stable uid, no LS
+    const creatorMemberId = _uid8(); // 1.401 fix: keep random globally-unique PK, use auth_user_id for stable lookup
     const creatorToken = crypto.randomUUID();
     const creatorHash = await _hashToken(creatorToken);
 

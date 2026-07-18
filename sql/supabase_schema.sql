@@ -1020,8 +1020,8 @@ CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON "public"."sharing
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON "public"."sharing_members" ("group_id", "auth_user_id");
 CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON "public"."sharing_items" ("group_id");
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.399')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.399', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.401')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.401', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;

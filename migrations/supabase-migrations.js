@@ -497,7 +497,7 @@ CREATE INDEX IF NOT EXISTS idx_nvidia_usage_owner_id ON nvidia_usage(owner_id);
 CREATE INDEX IF NOT EXISTS idx_daily_visits_owner_id ON daily_visits(owner_id);
 
 UPDATE settings SET value = '1.398', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.398', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
-  '1.399': `-- 1.399 breaking: stable creator attribution via auth_user_id, drop localStorage dependency
+  '1.399': `-- 1.399: stable creator attribution via auth_user_id, keep member_id random (global PK)
 ALTER TABLE sharing_members ADD COLUMN IF NOT EXISTS auth_user_id uuid;
 CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON sharing_members(auth_user_id);
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON sharing_members(group_id, auth_user_id);
@@ -506,29 +506,6 @@ CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON sharing_members(gro
 UPDATE sharing_members sm SET auth_user_id = sg.auth_owner_id
 FROM sharing_groups sg
 WHERE sm.group_id = sg.id AND sm.role='creator' AND sm.auth_user_id IS NULL AND sg.auth_owner_id IS NOT NULL;
-
--- Breaking cleanup: normalize creator member_id to auth_user_id::text where possible (optional, keeps FK consistent)
--- We need to handle sharing_items.created_by FK — drop it temporarily, update, re-add
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='sharing_items_created_by_fkey') THEN
-    ALTER TABLE sharing_items DROP CONSTRAINT sharing_items_created_by_fkey;
-  END IF;
-END $$;
-
--- Update sharing_items created_by that still point to old random creator ids
-UPDATE sharing_items si SET created_by = sm.auth_user_id::text
-FROM sharing_members sm
-WHERE si.group_id = sm.group_id AND si.created_by = sm.member_id AND sm.role='creator' AND sm.auth_user_id IS NOT NULL AND sm.member_id != sm.auth_user_id::text;
-
--- Now update creator member_id to auth_user_id::text
-UPDATE sharing_members SET member_id = auth_user_id::text WHERE role='creator' AND auth_user_id IS NOT NULL AND member_id != auth_user_id::text;
-
--- Re-add FK (member_id -> optional, but keep)
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='sharing_items_created_by_fkey') THEN
-    ALTER TABLE sharing_items ADD CONSTRAINT sharing_items_created_by_fkey FOREIGN KEY (created_by) REFERENCES sharing_members(member_id);
-  END IF;
-END $$;
 
 -- RPCs updated for 1.399: confirm_join sets auth_user_id, get_group_members returns auth_user_id
 CREATE OR REPLACE FUNCTION confirm_join(p_token text, p_display_name text)
@@ -558,9 +535,88 @@ LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
   );
 $$;
 
--- verify_join_token unchanged but ensure it still works (no need to alter)
-
 UPDATE settings SET value = '1.399', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.399', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+  '1.401': `-- 1.401 repair: 1.399 originally tried to set member_id = uid causing duplicate PK 23505 for users with >1 group
+-- If any creator was rewritten to auth_user_id::text, randomize back to unique 8-char and fix sharing_items FK
+
+DO $$
+BEGIN
+  -- Ensure column exists (idempotent if 1.399 failed mid-way)
+  BEGIN
+    ALTER TABLE sharing_members ADD COLUMN IF NOT EXISTS auth_user_id uuid;
+  EXCEPTION WHEN duplicate_column THEN NULL;
+  END;
+
+  -- Ensure FK is not blocking updates: drop it temporarily if exists
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='sharing_items_created_by_fkey') THEN
+    ALTER TABLE sharing_members DROP CONSTRAINT IF EXISTS sharing_items_created_by_fkey;
+    ALTER TABLE sharing_items DROP CONSTRAINT IF EXISTS sharing_items_created_by_fkey;
+  END IF;
+END $$;
+
+-- Backfill auth_user_id again
+UPDATE sharing_members sm SET auth_user_id = sg.auth_owner_id
+FROM sharing_groups sg
+WHERE sm.group_id = sg.id AND sm.role='creator' AND sm.auth_user_id IS NULL AND sg.auth_owner_id IS NOT NULL;
+
+-- Fix: for any member where member_id = auth_user_id::text (leftover from broken 1.399), generate a new random 8-char id and update referencing items
+DO $$
+DECLARE
+  rec RECORD;
+  new_id text;
+BEGIN
+  FOR rec IN SELECT member_id, group_id, auth_user_id FROM sharing_members WHERE role='creator' AND auth_user_id IS NOT NULL AND member_id = auth_user_id::text
+  LOOP
+    new_id := substr(md5(random()::text || rec.group_id), 1, 8);
+    -- avoid collision
+    WHILE EXISTS (SELECT 1 FROM sharing_members WHERE member_id = new_id) LOOP
+      new_id := substr(md5(random()::text || clock_timestamp()::text), 1, 8);
+    END LOOP;
+
+    UPDATE sharing_items SET created_by = new_id WHERE group_id = rec.group_id AND created_by = rec.member_id;
+    UPDATE sharing_members SET member_id = new_id WHERE group_id = rec.group_id AND member_id = rec.member_id;
+  END LOOP;
+END $$;
+
+-- Re-add FK if missing
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='sharing_items_created_by_fkey') THEN
+    ALTER TABLE sharing_items ADD CONSTRAINT sharing_items_created_by_fkey FOREIGN KEY (created_by) REFERENCES sharing_members(member_id);
+  END IF;
+END $$;
+
+-- Refresh RPCs (idempotent)
+CREATE OR REPLACE FUNCTION confirm_join(p_token text, p_display_name text)
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  UPDATE sharing_members
+  SET joined_at = now(),
+      display_name = COALESCE(NULLIF(p_display_name, ''), display_name),
+      auth_user_id = COALESCE(auth_user_id, auth.uid())
+  WHERE token_hash = encode(digest(p_token, 'sha256'), 'hex')
+    AND joined_at IS NULL
+    AND revoked_at IS NULL
+    AND (expires_at IS NULL OR expires_at > now());
+$$;
+
+CREATE OR REPLACE FUNCTION get_group_members(p_token text, p_group_id text)
+RETURNS TABLE(member_id text, display_name text, role text, joined_at timestamp with time zone, auth_user_id uuid)
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT sm.member_id, sm.display_name, sm.role, sm.joined_at, sm.auth_user_id
+  FROM sharing_members sm
+  WHERE sm.group_id = p_group_id
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm2
+    WHERE sm2.group_id = p_group_id
+    AND sm2.token_hash = encode(digest(p_token, 'sha256'), 'hex')
+    AND sm2.joined_at IS NOT NULL
+    AND sm2.revoked_at IS NULL
+  );
+$$;
+
+CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON sharing_members(auth_user_id);
+CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON sharing_members(group_id, auth_user_id);
+
+UPDATE settings SET value = '1.401', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.401', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
 };
 
 export { SUPABASE_MIGRATIONS };

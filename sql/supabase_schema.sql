@@ -149,7 +149,9 @@ CREATE TABLE "public"."habits" (
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
     "is_draft" boolean DEFAULT false,
-    "owner_id" "uuid"
+    "owner_id" "uuid",
+    "shared_id" "text",
+    "shared_group_id" "text"
 );
 
 
@@ -166,7 +168,9 @@ CREATE TABLE "public"."list_items" (
     "sort_order" integer DEFAULT 0,
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
-    "owner_id" "uuid"
+    "owner_id" "uuid",
+    "shared_id" "text",
+    "shared_group_id" "text"
 );
 
 
@@ -317,7 +321,9 @@ CREATE TABLE "public"."todos" (
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
     CONSTRAINT "todos_priority_check" CHECK (("priority" = ANY (ARRAY['urgent'::"text", 'high'::"text", 'medium'::"text", 'low'::"text", 'normal'::"text"]))),
-    "owner_id" "uuid"
+    "owner_id" "uuid",
+    "shared_id" "text",
+    "shared_group_id" "text"
 );
 
 
@@ -1028,8 +1034,8 @@ CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON "public"."sharing
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON "public"."sharing_members" ("group_id", "auth_user_id");
 CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON "public"."sharing_items" ("group_id");
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.404')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.404', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.405')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.405', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;

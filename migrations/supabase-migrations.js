@@ -861,6 +861,23 @@ RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions 
 $$;
 
 UPDATE settings SET value = '1.404', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.404', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+  '1.405': `-- 1.405: fix fresh schema missing shared_id/shared_group_id columns (habits, todos, list_items)
+-- These were added in 1.270/1.273/1.287 but sql/supabase_schema.sql dump was out of sync, causing ERROR 42703 on fresh init when creating indexes
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS shared_id text;
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS shared_group_id text;
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS shared_id text;
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS shared_group_id text;
+ALTER TABLE list_items ADD COLUMN IF NOT EXISTS shared_id text;
+ALTER TABLE list_items ADD COLUMN IF NOT EXISTS shared_group_id text;
+
+CREATE INDEX IF NOT EXISTS idx_todos_shared_id ON todos(shared_id);
+CREATE INDEX IF NOT EXISTS idx_todos_shared_group_id ON todos(shared_group_id);
+CREATE INDEX IF NOT EXISTS idx_habits_shared_id ON habits(shared_id);
+CREATE INDEX IF NOT EXISTS idx_habits_shared_group_id ON habits(shared_group_id);
+CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON list_items(shared_id);
+CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_group_id);
+
+UPDATE settings SET value = '1.405', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.405', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
 };
 
 export { SUPABASE_MIGRATIONS };

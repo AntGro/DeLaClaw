@@ -968,8 +968,33 @@ CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."joined_groups" FOR EA
 
 -- ===== SEED DATA =====
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.301')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.301', "updated_at" = now();
+-- ===== INDEXES (perf — avoid seq scans on RLS owner_id lookups + shared pointers) =====
+CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON "public"."projects" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_tasks_owner_id ON "public"."tasks" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_todos_owner_id ON "public"."todos" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_habits_owner_id ON "public"."habits" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_habit_completions_owner_id ON "public"."habit_completions" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_flashcard_notes_owner_id ON "public"."flashcard_notes" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_birthdays_owner_id ON "public"."birthdays" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_vestiaire_owner_id ON "public"."vestiaire" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_lists_owner_id ON "public"."lists" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_list_items_owner_id ON "public"."list_items" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_prompts_owner_id ON "public"."prompts" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_settings_owner_id ON "public"."settings" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_joined_groups_owner_id ON "public"."joined_groups" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_todos_shared_id ON "public"."todos" ("shared_id");
+CREATE INDEX IF NOT EXISTS idx_todos_shared_group_id ON "public"."todos" ("shared_group_id");
+CREATE INDEX IF NOT EXISTS idx_habits_shared_id ON "public"."habits" ("shared_id");
+CREATE INDEX IF NOT EXISTS idx_habits_shared_group_id ON "public"."habits" ("shared_group_id");
+CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON "public"."list_items" ("shared_id");
+CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON "public"."list_items" ("shared_group_id");
+CREATE INDEX IF NOT EXISTS idx_sharing_groups_auth_owner_id ON "public"."sharing_groups" ("auth_owner_id");
+CREATE INDEX IF NOT EXISTS idx_sharing_members_group_id ON "public"."sharing_members" ("group_id");
+CREATE INDEX IF NOT EXISTS idx_sharing_members_token_hash ON "public"."sharing_members" ("token_hash");
+CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON "public"."sharing_items" ("group_id");
+
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.393')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.393', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;

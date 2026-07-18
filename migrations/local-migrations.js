@@ -86,4 +86,25 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE joined_groups ADD COLUMN remote_anon_key_ciphertext TEXT;
     ALTER TABLE joined_groups ADD COLUMN remote_anon_key_iv TEXT;
   `,
+  '1.393': `
+    CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_owner_id ON tasks(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_todos_owner_id ON todos(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_habits_owner_id ON habits(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_habit_completions_owner_id ON habit_completions(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_flashcard_notes_owner_id ON flashcard_notes(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_birthdays_owner_id ON birthdays(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_vestiaire_owner_id ON vestiaire(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_lists_owner_id ON lists(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_list_items_owner_id ON list_items(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_prompts_owner_id ON prompts(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_settings_owner_id ON settings(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_joined_groups_owner_id ON joined_groups(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_todos_shared_id ON todos(shared_id);
+    CREATE INDEX IF NOT EXISTS idx_todos_shared_group_id ON todos(shared_group_id);
+    CREATE INDEX IF NOT EXISTS idx_habits_shared_id ON habits(shared_id);
+    CREATE INDEX IF NOT EXISTS idx_habits_shared_group_id ON habits(shared_group_id);
+    CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON list_items(shared_id);
+    CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_group_id);
+  `,
 };

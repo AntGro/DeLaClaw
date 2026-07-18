@@ -67,4 +67,7 @@ export const DRIVE_MIGRATIONS = {
     // Delete legacy file
     await ctx.deleteFile(tok, legacyFile.id);
   },
+  // 1.393: indexes for owner_id / shared_id — perf only for Postgres/SQLite, no-op for Drive (in-memory)
+  // Drive has no seq scans: whole tables are loaded into memory. Bump version only.
+  '1.393': async (_store) => {},
 };

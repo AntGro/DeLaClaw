@@ -46,4 +46,3 @@ export const TODO_MAX_LEN = 2000;
 export const HABIT_CATEGORIES_KEY = 'claw_cc_habit_categories';
 export const TAB_VISIBILITY_KEY = 'claw_cc_tab_visibility';
 export const TAB_ORDER_KEY = 'claw_cc_tab_order';
-export const COMPACT_NAV_KEY = 'claw_cc_compact_nav';

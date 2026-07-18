@@ -399,16 +399,16 @@ ALTER TABLE text_line_progress ADD COLUMN IF NOT EXISTS owner_id uuid;
 ALTER TABLE nvidia_usage ADD COLUMN IF NOT EXISTS owner_id uuid;
 ALTER TABLE daily_visits ADD COLUMN IF NOT EXISTS owner_id uuid;
 
--- daily_visits: clean NULL visit_date while old PK still exists (has replica identity)
-DELETE FROM daily_visits WHERE visit_date IS NULL;
-
 -- daily_visits is in supabase_realtime publication which publishes deletes.
--- After dropping PK it would have no replica identity, causing:
+-- If PK is dropped (as in a previous failed run) it has no replica identity, causing:
 -- ERROR 55000: cannot delete because it does not have a replica identity and publishes deletes
--- So set REPLICA IDENTITY FULL before dropping PK and doing further deletes.
+-- Set FULL up-front to allow deletes even when PK is missing.
 ALTER TABLE daily_visits REPLICA IDENTITY FULL;
 
--- Drop old PK (visit_date) to allow per-owner same date
+-- Clean NULL visit_date while we can (old PK may already be dropped from failed run)
+DELETE FROM daily_visits WHERE visit_date IS NULL;
+
+-- Drop old PK (visit_date) to allow per-owner same date — idempotent
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='daily_visits_pkey' AND conrelid='daily_visits'::regclass) THEN
     ALTER TABLE daily_visits DROP CONSTRAINT daily_visits_pkey;
@@ -423,7 +423,11 @@ DELETE FROM daily_visits WHERE owner_id IS NULL;
 DELETE FROM daily_visits a USING daily_visits b WHERE a.ctid < b.ctid AND a.visit_date = b.visit_date AND COALESCE(a.owner_id::text,'') = COALESCE(b.owner_id::text,'');
 
 -- Add new composite PK
-ALTER TABLE daily_visits ADD CONSTRAINT daily_visits_pkey PRIMARY KEY (visit_date, owner_id);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='daily_visits_pkey' AND conrelid='daily_visits'::regclass) THEN
+    ALTER TABLE daily_visits ADD CONSTRAINT daily_visits_pkey PRIMARY KEY (visit_date, owner_id);
+  END IF;
+END $$;
 
 -- Reset replica identity to default (PK will be used)
 ALTER TABLE daily_visits REPLICA IDENTITY DEFAULT;

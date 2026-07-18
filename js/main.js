@@ -456,12 +456,37 @@ async function autoConnect(url, key, mode) {
   try {
     await connect(url, key, mode, /* skipDemoChooser */ true, { silentAuth: mode === 'googledrive' });
   } catch (e) {
+    console.warn('[DeLaClaw] autoConnect failed:', e.message, e.orig || e);
     if (mode === 'googledrive') {
       // Silent OAuth refresh failed (common on mobile — Safari ITP blocks
       // third-party cookies in the GIS iframe). Show a minimal reconnect
       // screen instead of the full hero/gate. The "Reconnect" tap provides
       // the user gesture the browser needs for the OAuth popup.
       showDriveReconnectScreen(url, key);
+      return;
+    }
+    if (e.message === 'schema_missing') {
+      // New project without schema — don't clear creds, show actionable message
+      showHero();
+      const form = document.getElementById('loginForm');
+      if (form) form.style.display = 'flex';
+      const err = document.getElementById('loginError');
+      if (err) {
+        err.textContent = '';
+        err.appendChild(document.createTextNode(t('toast.schema_missing') || 'Tables not found — run sql/supabase_schema.sql in Supabase SQL Editor.'));
+        const br = document.createElement('br');
+        err.appendChild(br);
+        const hint = document.createElement('span');
+        hint.style.fontSize = '0.85em';
+        hint.style.opacity = '0.8';
+        hint.textContent = t('toast.schema_missing_hint') || 'In Supabase: SQL Editor → New Query → paste schema file → Run.';
+        err.appendChild(hint);
+      }
+      // Keep URL/key in form for user to retry after running schema
+      const uEl = document.getElementById('username');
+      const kEl = document.getElementById('password');
+      if (uEl) uEl.value = url;
+      if (kEl) kEl.value = key;
       return;
     }
     // Stored credentials are stale — clear them and show the full login form
@@ -1361,10 +1386,11 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     // Test connection with raw adapter BEFORE wrapping with offline cache
     const { error } = await adapter.from('projects').select('id').limit(1);
     if (error) {
-      const st = error.status;
+      console.warn('[DeLaClaw] local projects check failed:', error);
+      const st = error.status || error.statusCode;
       const m = String(error.message || '').toLowerCase();
       const d = String(error.details || '').toLowerCase();
-      const missing = st === 404 || m.includes('does not exist') || d.includes('does not exist') || m.includes('not found');
+      const missing = st === 404 || m.includes('does not exist') || d.includes('does not exist') || m.includes('not found') || m.includes('could not find') || m.includes('schema');
       if (missing) {
         const e = new Error('schema_missing');
         e.orig = error;
@@ -1380,13 +1406,14 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     // Test connection with raw adapter BEFORE wrapping with offline cache
     const { error } = await adapter.from('projects').select('id').limit(1);
     if (error) {
+      console.warn('[DeLaClaw] supabase projects check failed:', error);
       const msg = String(error.message || '').toLowerCase();
       const details = String(error.details || '').toLowerCase();
       const combined = msg + ' ' + details;
-      const status = error.status;
-      const code = String(error.code || '');
-      const isSchemaMissing = status === 404 || code === '42P01' || code === 'PGRST205' ||
-        combined.includes('does not exist') || combined.includes('schema cache') || combined.includes('could not find');
+      const status = error.status || error.statusCode;
+      const code = String(error.code || '').toUpperCase();
+      const isSchemaMissing = status === 404 || code === '42P01' || code.startsWith('PGRST') ||
+        combined.includes('does not exist') || combined.includes('schema cache') || combined.includes('could not find') || combined.includes('not found');
       if (isSchemaMissing) {
         const e = new Error('schema_missing');
         e.orig = error;

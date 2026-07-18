@@ -359,6 +359,32 @@ CREATE OR REPLACE FUNCTION get_group_members(p_token TEXT, p_group_id TEXT) RETU
 CREATE OR REPLACE FUNCTION leave_group(p_token TEXT) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN DELETE FROM sharing_members WHERE token_hash = encode(digest(p_token, 'sha256'), 'hex') AND role != 'creator' AND joined_at IS NOT NULL AND revoked_at IS NULL; END; $$;
 CREATE OR REPLACE FUNCTION revoke_member(p_group_id TEXT, p_member_id TEXT) RETURNS void LANGUAGE sql SECURITY DEFINER AS $$ UPDATE sharing_members SET revoked_at = now() WHERE group_id = p_group_id AND member_id = p_member_id AND role != 'creator'; $$;
 UPDATE settings SET value = '1.301', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.301', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+
+  '1.393': `-- Migration 1.393: Add indexes for owner_id and shared_id to avoid seq scans as data grows
+-- owner_id is used in every RLS policy (owner_id = auth.uid()) — without an index every query seq scans the whole table
+CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_owner_id ON tasks(owner_id);
+CREATE INDEX IF NOT EXISTS idx_todos_owner_id ON todos(owner_id);
+CREATE INDEX IF NOT EXISTS idx_habits_owner_id ON habits(owner_id);
+CREATE INDEX IF NOT EXISTS idx_habit_completions_owner_id ON habit_completions(owner_id);
+CREATE INDEX IF NOT EXISTS idx_flashcard_notes_owner_id ON flashcard_notes(owner_id);
+CREATE INDEX IF NOT EXISTS idx_birthdays_owner_id ON birthdays(owner_id);
+CREATE INDEX IF NOT EXISTS idx_vestiaire_owner_id ON vestiaire(owner_id);
+CREATE INDEX IF NOT EXISTS idx_lists_owner_id ON lists(owner_id);
+CREATE INDEX IF NOT EXISTS idx_list_items_owner_id ON list_items(owner_id);
+CREATE INDEX IF NOT EXISTS idx_prompts_owner_id ON prompts(owner_id);
+CREATE INDEX IF NOT EXISTS idx_settings_owner_id ON settings(owner_id);
+CREATE INDEX IF NOT EXISTS idx_joined_groups_owner_id ON joined_groups(owner_id);
+CREATE INDEX IF NOT EXISTS idx_todos_shared_id ON todos(shared_id);
+CREATE INDEX IF NOT EXISTS idx_todos_shared_group_id ON todos(shared_group_id);
+CREATE INDEX IF NOT EXISTS idx_habits_shared_id ON habits(shared_id);
+CREATE INDEX IF NOT EXISTS idx_habits_shared_group_id ON habits(shared_group_id);
+CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON list_items(shared_id);
+CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_group_id);
+CREATE INDEX IF NOT EXISTS idx_sharing_groups_auth_owner_id ON sharing_groups(auth_owner_id);
+CREATE INDEX IF NOT EXISTS idx_sharing_members_group_id ON sharing_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON sharing_items(group_id);
+UPDATE settings SET value = '1.393', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.393', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
 };
 
 export { SUPABASE_MIGRATIONS };

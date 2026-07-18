@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS projects (
   tech TEXT,
   links TEXT, -- JSON array
   sort_order INTEGER DEFAULT 0,
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -21,6 +22,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   hatch_response TEXT,
   context TEXT,
   sort_order INTEGER DEFAULT 0,
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -36,6 +38,7 @@ CREATE TABLE IF NOT EXISTS todos (
   sort_order INTEGER DEFAULT 0,
   shared_id TEXT,
   shared_group_id TEXT,
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -49,6 +52,7 @@ CREATE TABLE IF NOT EXISTS habits (
   next_due TEXT,
   shared_id TEXT,
   shared_group_id TEXT,
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -58,6 +62,7 @@ CREATE TABLE IF NOT EXISTS habit_completions (
   habit_id TEXT REFERENCES habits(id) ON DELETE CASCADE,
   completed_at TEXT,
   completed_by TEXT,
+  owner_id TEXT,
   note TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -82,6 +87,7 @@ CREATE TABLE IF NOT EXISTS flashcard_notes (
   proposed_back TEXT,
   proposed_deck TEXT,
   proposal_status TEXT DEFAULT 'pending' CHECK (proposal_status IN ('pending', 'ready', 'accepted', 'rejected')),
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -115,6 +121,7 @@ CREATE TABLE IF NOT EXISTS birthdays (
   note TEXT,
   avatar_url TEXT,
   category TEXT DEFAULT '',
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -128,6 +135,7 @@ CREATE TABLE IF NOT EXISTS vestiaire (
   note TEXT,
   purchase_status TEXT,
   sort_order INTEGER DEFAULT 0,
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -135,12 +143,14 @@ CREATE TABLE IF NOT EXISTS vestiaire (
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT,
+  owner_id TEXT,
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS prompts (
   key TEXT PRIMARY KEY,
   text TEXT,
+  owner_id TEXT,
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -159,6 +169,7 @@ CREATE TABLE IF NOT EXISTS lists (
   icon TEXT,
   sort_order INTEGER DEFAULT 0,
   archived INTEGER DEFAULT 0,
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -170,6 +181,9 @@ CREATE TABLE IF NOT EXISTS list_items (
   checked INTEGER DEFAULT 0,
   note TEXT,
   sort_order INTEGER DEFAULT 0,
+  shared_id TEXT,
+  shared_group_id TEXT,
+  owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -178,3 +192,41 @@ CREATE TABLE IF NOT EXISTS daily_visits (
   visit_date TEXT PRIMARY KEY,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS joined_groups (
+  group_id TEXT PRIMARY KEY,
+  member_id TEXT NOT NULL,
+  token TEXT NOT NULL,
+  display_name TEXT,
+  group_name TEXT,
+  remote_backend_type TEXT NOT NULL,
+  remote_url TEXT,
+  remote_anon_key TEXT,
+  owner_id TEXT,
+  token_ciphertext TEXT,
+  token_iv TEXT,
+  remote_anon_key_ciphertext TEXT,
+  remote_anon_key_iv TEXT,
+  joined_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ── Indexes for owner_id and shared_id — avoid full scans as tables grow ──
+CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_owner_id ON tasks(owner_id);
+CREATE INDEX IF NOT EXISTS idx_todos_owner_id ON todos(owner_id);
+CREATE INDEX IF NOT EXISTS idx_habits_owner_id ON habits(owner_id);
+CREATE INDEX IF NOT EXISTS idx_habit_completions_owner_id ON habit_completions(owner_id);
+CREATE INDEX IF NOT EXISTS idx_flashcard_notes_owner_id ON flashcard_notes(owner_id);
+CREATE INDEX IF NOT EXISTS idx_birthdays_owner_id ON birthdays(owner_id);
+CREATE INDEX IF NOT EXISTS idx_vestiaire_owner_id ON vestiaire(owner_id);
+CREATE INDEX IF NOT EXISTS idx_lists_owner_id ON lists(owner_id);
+CREATE INDEX IF NOT EXISTS idx_list_items_owner_id ON list_items(owner_id);
+CREATE INDEX IF NOT EXISTS idx_prompts_owner_id ON prompts(owner_id);
+CREATE INDEX IF NOT EXISTS idx_settings_owner_id ON settings(owner_id);
+CREATE INDEX IF NOT EXISTS idx_joined_groups_owner_id ON joined_groups(owner_id);
+CREATE INDEX IF NOT EXISTS idx_todos_shared_id ON todos(shared_id);
+CREATE INDEX IF NOT EXISTS idx_todos_shared_group_id ON todos(shared_group_id);
+CREATE INDEX IF NOT EXISTS idx_habits_shared_id ON habits(shared_id);
+CREATE INDEX IF NOT EXISTS idx_habits_shared_group_id ON habits(shared_group_id);
+CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON list_items(shared_id);
+CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_group_id);

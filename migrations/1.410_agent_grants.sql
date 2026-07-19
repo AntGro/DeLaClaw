@@ -384,7 +384,7 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- Bump version
-UPDATE settings SET value = '1.410', updated_at = now() WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.410', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 INSERT INTO settings (key, value, owner_id, updated_at)
 VALUES ('schema_version', '1.410', NULL, now())
 ON CONFLICT (key) DO NOTHING;

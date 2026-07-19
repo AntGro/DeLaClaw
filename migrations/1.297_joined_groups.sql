@@ -24,4 +24,4 @@ CREATE POLICY "owner or unclaimed" ON joined_groups
   FOR ALL USING (owner_id = auth.uid() OR owner_id IS NULL);
 
 -- Bump schema version
-UPDATE settings SET value = '1.297', updated_at = now() WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.297', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();

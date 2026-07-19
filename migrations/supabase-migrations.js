@@ -34,8 +34,7 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- Bump schema version
-UPDATE settings SET value = '1.099', updated_at = now()
-WHERE key = 'schema_version';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.099', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();`,
 
   '1.100': `-- Migration 1.100: Add lists, list_items, daily_visits to Realtime publication
 -- These tables were added to the schema but missing from the Realtime publication.
@@ -46,8 +45,7 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- Bump schema version
-UPDATE settings SET value = '1.100', updated_at = now()
-WHERE key = 'schema_version';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.100', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();`,
 
   '1.270': `-- Migration 1.270: Add shared habit columns
 -- habits: shared_id + shared_group_id link a local habit to a shared Drive item
@@ -58,8 +56,7 @@ ALTER TABLE habits ADD COLUMN IF NOT EXISTS shared_group_id TEXT;
 ALTER TABLE habit_completions ADD COLUMN IF NOT EXISTS completed_by TEXT;
 
 -- Bump schema version
-UPDATE settings SET value = '1.270', updated_at = now()
-WHERE key = 'schema_version';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.270', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();`,
 
   '1.273': `-- Migration 1.273: Add shared TODO columns
 -- todos: shared_id + shared_group_id link a local todo to a shared Drive item
@@ -68,16 +65,14 @@ ALTER TABLE todos ADD COLUMN IF NOT EXISTS shared_id TEXT;
 ALTER TABLE todos ADD COLUMN IF NOT EXISTS shared_group_id TEXT;
 
 -- Bump schema version
-UPDATE settings SET value = '1.273', updated_at = now()
-WHERE key = 'schema_version';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.273', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();`,
 
   '1.287': `-- Shared list items: thin pointer model
 ALTER TABLE list_items ADD COLUMN IF NOT EXISTS shared_id TEXT;
 ALTER TABLE list_items ADD COLUMN IF NOT EXISTS shared_group_id TEXT;
 
 -- Bump schema version
-UPDATE settings SET value = '1.287', updated_at = now()
-WHERE key = 'schema_version';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.287', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();`,
 
   '1.294': `-- Migration 1.294: Add owner_id to personal tables + rewrite RLS
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_id UUID;
@@ -130,7 +125,7 @@ DROP POLICY IF EXISTS "allow all" ON prompts;
 DROP POLICY IF EXISTS "owner or unclaimed" ON prompts;
 CREATE POLICY "owner or unclaimed" ON prompts USING (owner_id = auth.uid() OR owner_id IS NULL);
 
-UPDATE settings SET value = '1.294', updated_at = now() WHERE key = 'schema_version';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.294', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();`,
 
   '1.295': `-- Migration 1.295: Sharing tables for D+E hybrid
 CREATE TABLE IF NOT EXISTS sharing_groups (
@@ -178,7 +173,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
-UPDATE settings SET value = '1.295', updated_at = now() WHERE key = 'schema_version';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.295', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();`,
 
   '1.296': `-- Migration 1.296: RPC functions for token-based member access
 CREATE OR REPLACE FUNCTION verify_join_token(p_token TEXT)
@@ -268,7 +263,7 @@ BEGIN
 END;
 $$;
 
-UPDATE settings SET value = '1.296', updated_at = now() WHERE key = 'schema_version';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.296', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();`,
 
   '1.297': `-- Migration 1.297: Persistent token storage for joined groups
 CREATE TABLE IF NOT EXISTS joined_groups (
@@ -288,7 +283,7 @@ ALTER TABLE joined_groups ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "owner or unclaimed" ON joined_groups;
 CREATE POLICY "owner or unclaimed" ON joined_groups FOR ALL USING (owner_id = auth.uid() OR owner_id IS NULL);
 
-UPDATE settings SET value = '1.297', updated_at = now() WHERE key = 'schema_version';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.297', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();`,
 
   '1.298': `-- Migration 1.298: Add creator_name to verify_join_token RPC
 -- Return type changes (5 -> 6 cols) so DROP is required
@@ -306,7 +301,7 @@ LANGUAGE "sql" SECURITY DEFINER AS $$
   WHERE sm.token = p_token AND sm.joined_at IS NULL;
 $$;
 
-UPDATE settings SET value = '1.298', updated_at = now() WHERE key = 'schema_version';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.298', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();`,
 
   '1.299': `-- Migration 1.299: Fix joined_groups RLS leak (P0)
 -- Previous policy allowed anon to read all owner_id IS NULL rows
@@ -314,7 +309,7 @@ DELETE FROM joined_groups WHERE owner_id IS NULL;
 DROP POLICY IF EXISTS "owner or unclaimed" ON joined_groups;
 DROP POLICY IF EXISTS "owner only" ON joined_groups;
 CREATE POLICY "owner only" ON joined_groups FOR ALL USING (owner_id = auth.uid());
-UPDATE settings SET value = '1.299', updated_at = now() WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.299', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 NOTIFY pgrst, 'reload schema';`,
 
   '1.300': `-- Migration 1.300: Enforce owner-only RLS (mandatory auth for Supabase)
@@ -333,7 +328,7 @@ DROP POLICY IF EXISTS "allow all" ON list_items; DROP POLICY IF EXISTS "owner or
 DROP POLICY IF EXISTS "allow all" ON settings; DROP POLICY IF EXISTS "owner or unclaimed" ON settings; DROP POLICY IF EXISTS "owner only" ON settings; CREATE POLICY "owner only" ON settings FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid()); DROP TRIGGER IF EXISTS trg_set_owner_id ON settings; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON settings FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 DROP POLICY IF EXISTS "allow all" ON prompts; DROP POLICY IF EXISTS "owner or unclaimed" ON prompts; DROP POLICY IF EXISTS "owner only" ON prompts; CREATE POLICY "owner only" ON prompts FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid()); DROP TRIGGER IF EXISTS trg_set_owner_id ON prompts; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON prompts FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 DROP POLICY IF EXISTS "owner or unclaimed" ON joined_groups; DROP POLICY IF EXISTS "owner only" ON joined_groups; CREATE POLICY "owner only" ON joined_groups FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid()); DROP TRIGGER IF EXISTS trg_set_owner_id ON joined_groups; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON joined_groups FOR EACH ROW EXECUTE FUNCTION set_owner_id();
-UPDATE settings SET value = '1.300', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.300', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.300', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(); INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.300', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
 
   '1.301': `-- Migration 1.301: Hash sharing invite tokens, add expiry/revocation, prep joined_groups encryption
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -358,7 +353,7 @@ CREATE OR REPLACE FUNCTION delete_shared_item(p_token TEXT, p_item_id TEXT) RETU
 CREATE OR REPLACE FUNCTION get_group_members(p_token TEXT, p_group_id TEXT) RETURNS TABLE(member_id TEXT, display_name TEXT, role TEXT, joined_at TIMESTAMPTZ) LANGUAGE sql SECURITY DEFINER AS $$ SELECT sm.member_id, sm.display_name, sm.role, sm.joined_at FROM sharing_members sm WHERE sm.group_id = p_group_id AND EXISTS ( SELECT 1 FROM sharing_members sm2 WHERE sm2.group_id = p_group_id AND sm2.token_hash = encode(digest(p_token, 'sha256'), 'hex') AND sm2.joined_at IS NOT NULL AND sm2.revoked_at IS NULL ); $$;
 CREATE OR REPLACE FUNCTION leave_group(p_token TEXT) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN DELETE FROM sharing_members WHERE token_hash = encode(digest(p_token, 'sha256'), 'hex') AND role != 'creator' AND joined_at IS NOT NULL AND revoked_at IS NULL; END; $$;
 CREATE OR REPLACE FUNCTION revoke_member(p_group_id TEXT, p_member_id TEXT) RETURNS void LANGUAGE sql SECURITY DEFINER AS $$ UPDATE sharing_members SET revoked_at = now() WHERE group_id = p_group_id AND member_id = p_member_id AND role != 'creator'; $$;
-UPDATE settings SET value = '1.301', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.301', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.301', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(); INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.301', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
 
   '1.393': `-- Migration 1.393: Add indexes for owner_id and shared_id to avoid seq scans as data grows
 -- owner_id is used in every RLS policy (owner_id = auth.uid()) — without an index every query seq scans the whole table
@@ -384,12 +379,12 @@ CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_g
 CREATE INDEX IF NOT EXISTS idx_sharing_groups_auth_owner_id ON sharing_groups(auth_owner_id);
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_id ON sharing_members(group_id);
 CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON sharing_items(group_id);
-UPDATE settings SET value = '1.393', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.393', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.393', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(); INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.393', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
 
   '1.396': `-- Migration 1.396: Remove plaintext fallback for joined_groups (>=1.301 assumed on dev)
 UPDATE joined_groups SET token = NULL, remote_anon_key = NULL WHERE token_ciphertext IS NOT NULL;
 DELETE FROM joined_groups WHERE owner_id IS NULL;
-UPDATE settings SET value = '1.396', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.396', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.396', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(); INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.396', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
 
   '1.398': `-- Migration 1.398: Enforce owner-only RLS on previously open tables (flashcards, texts, text_line_progress, nvidia_usage, daily_visits)
 -- Add owner_id columns
@@ -496,7 +491,7 @@ CREATE INDEX IF NOT EXISTS idx_text_line_progress_owner_id ON text_line_progress
 CREATE INDEX IF NOT EXISTS idx_nvidia_usage_owner_id ON nvidia_usage(owner_id);
 CREATE INDEX IF NOT EXISTS idx_daily_visits_owner_id ON daily_visits(owner_id);
 
-UPDATE settings SET value = '1.398', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.398', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.398', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(); INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.398', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
   '1.399': `-- 1.399: stable creator attribution via auth_user_id, keep member_id random (global PK)
 CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
 ALTER TABLE sharing_members ADD COLUMN IF NOT EXISTS auth_user_id uuid;
@@ -536,7 +531,7 @@ LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
   );
 $$;
 
-UPDATE settings SET value = '1.399', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.399', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.399', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(); INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.399', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
   '1.401': `-- 1.401 repair: 1.399 originally tried to set member_id = uid causing duplicate PK 23505 for users with >1 group
 -- If any creator was rewritten to auth_user_id::text, randomize back to unique 8-char and fix sharing_items FK
 CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
@@ -618,7 +613,7 @@ $$;
 CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON sharing_members(auth_user_id);
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON sharing_members(group_id, auth_user_id);
 
-UPDATE settings SET value = '1.401', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.401', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.401', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(); INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.401', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
   '1.402': `-- 1.402: ensure pgcrypto for digest() + fix digest(text, unknown) error 42883
 CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
 
@@ -738,7 +733,7 @@ RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions 
   UPDATE sharing_members SET revoked_at = now() WHERE group_id = p_group_id AND member_id = p_member_id AND role != 'creator';
 $$;
 
-UPDATE settings SET value = '1.402', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.402', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.402', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(); INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.402', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
   '1.404': `-- 1.404: fix digest() visibility on fresh projects — pgcrypto may be in extensions schema, not public
 -- Ensure extension exists and recreate RPCs with search_path = public, extensions
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -860,7 +855,7 @@ RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions 
   UPDATE sharing_members SET revoked_at = now() WHERE group_id = p_group_id AND member_id = p_member_id AND role != 'creator';
 $$;
 
-UPDATE settings SET value = '1.404', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.404', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.404', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(); INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.404', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
   '1.405': `-- 1.405: fix fresh schema missing shared_id/shared_group_id columns (habits, todos, list_items)
 -- These were added in 1.270/1.273/1.287 but sql/supabase_schema.sql dump was out of sync, causing ERROR 42703 on fresh init when creating indexes
 ALTER TABLE habits ADD COLUMN IF NOT EXISTS shared_id text;
@@ -877,7 +872,7 @@ CREATE INDEX IF NOT EXISTS idx_habits_shared_group_id ON habits(shared_group_id)
 CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON list_items(shared_id);
 CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_group_id);
 
-UPDATE settings SET value = '1.405', updated_at = now() WHERE key = 'schema_version'; INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.405', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.405', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(); INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.405', NULL, now()) ON CONFLICT (key) DO NOTHING; NOTIFY pgrst, 'reload schema';`,
   '1.410': `-- Migration 1.410: Agent grants — multi-token access for external agents (Claude Code, Codex, etc.)
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public;
@@ -1180,7 +1175,7 @@ CREATE POLICY "owner or agent" ON sharing_items FOR ALL USING (group_id IN (SELE
 
 DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE agent_grants; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-UPDATE settings SET value = '1.410', updated_at = now() WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.410', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.410', NULL, now()) ON CONFLICT (key) DO NOTHING;
 NOTIFY pgrst, 'reload schema';`,
 };

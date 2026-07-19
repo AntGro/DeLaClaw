@@ -32,7 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_sharing_members_group_id ON sharing_members(group
 CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON sharing_items(group_id);
 
 -- Bump schema version
-UPDATE settings SET value = '1.393', updated_at = now() WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.393', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.393', now()) ON CONFLICT (key) DO NOTHING;
 
 NOTIFY pgrst, 'reload schema';

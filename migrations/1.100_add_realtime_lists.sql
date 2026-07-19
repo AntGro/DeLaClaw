@@ -4,5 +4,4 @@
 ALTER PUBLICATION supabase_realtime ADD TABLE lists, list_items, daily_visits;
 
 -- Bump schema version
-UPDATE settings SET value = '1.100', updated_at = now()
-WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.100', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();

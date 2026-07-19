@@ -162,6 +162,6 @@ LANGUAGE sql SECURITY DEFINER AS $$
 $$;
 
 -- Bump schema version
-UPDATE settings SET value = '1.301', updated_at = now() WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.301', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 INSERT INTO settings (key, value, owner_id, updated_at) VALUES ('schema_version', '1.301', NULL, now()) ON CONFLICT (key) DO NOTHING;
 NOTIFY pgrst, 'reload schema';

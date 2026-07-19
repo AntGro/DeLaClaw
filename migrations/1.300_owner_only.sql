@@ -152,7 +152,7 @@ DROP TRIGGER IF EXISTS trg_set_owner_id ON joined_groups;
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON joined_groups FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
 -- Bump version
-UPDATE settings SET value = '1.300', updated_at = now() WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.300', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 INSERT INTO settings (key, value, owner_id, updated_at)
 VALUES ('schema_version', '1.300', NULL, now())
 ON CONFLICT (key) DO NOTHING;

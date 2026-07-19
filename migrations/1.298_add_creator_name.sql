@@ -16,4 +16,4 @@ LANGUAGE "sql" SECURITY DEFINER AS $$
   WHERE sm.token = p_token AND sm.joined_at IS NULL;
 $$;
 
-UPDATE settings SET value = '1.298', updated_at = now() WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.298', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();

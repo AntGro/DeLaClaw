@@ -5,5 +5,4 @@ ALTER TABLE todos ADD COLUMN IF NOT EXISTS shared_id TEXT;
 ALTER TABLE todos ADD COLUMN IF NOT EXISTS shared_group_id TEXT;
 
 -- Bump schema version
-UPDATE settings SET value = '1.273', updated_at = now()
-WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.273', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();

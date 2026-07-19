@@ -4,7 +4,7 @@ DELETE FROM joined_groups WHERE owner_id IS NULL;
 DROP POLICY IF EXISTS "owner or unclaimed" ON joined_groups;
 DROP POLICY IF EXISTS "owner only" ON joined_groups;
 CREATE POLICY "owner only" ON joined_groups FOR ALL USING (owner_id = auth.uid());
-UPDATE settings SET value = '1.299', updated_at = now() WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.299', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 
 -- Refresh PostgREST schema cache so new policy is visible immediately
 NOTIFY pgrst, 'reload schema';

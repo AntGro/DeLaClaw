@@ -7,5 +7,4 @@ ALTER TABLE habits ADD COLUMN IF NOT EXISTS shared_group_id TEXT;
 ALTER TABLE habit_completions ADD COLUMN IF NOT EXISTS completed_by TEXT;
 
 -- Bump schema version
-UPDATE settings SET value = '1.270', updated_at = now()
-WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.270', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();

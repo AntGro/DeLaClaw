@@ -62,4 +62,4 @@ DROP POLICY IF EXISTS "allow all" ON prompts;
 CREATE POLICY "owner or unclaimed" ON prompts USING (owner_id = auth.uid() OR owner_id IS NULL);
 
 -- Bump schema version
-UPDATE settings SET value = '1.294', updated_at = now() WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.294', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();

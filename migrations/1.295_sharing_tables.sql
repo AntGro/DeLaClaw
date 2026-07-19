@@ -55,4 +55,4 @@ CREATE POLICY "owner" ON sharing_items
 ALTER PUBLICATION supabase_realtime ADD TABLE sharing_groups, sharing_members, sharing_items;
 
 -- Bump schema version
-UPDATE settings SET value = '1.295', updated_at = now() WHERE key = 'schema_version';
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.295', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();

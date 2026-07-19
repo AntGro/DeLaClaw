@@ -737,7 +737,17 @@ async function deleteList(listId) {
 
 // ── Shared List Items — sync pointers ─────────────────────────────
 
+let _syncingListItems = false;
 async function syncSharedListItems() {
+  if (_syncingListItems) return;
+  _syncingListItems = true;
+  try {
+    await _doSyncSharedListItems();
+  } finally {
+    _syncingListItems = false;
+  }
+}
+async function _doSyncSharedListItems() {
   if (!state.sharing || !state.db.connected) return;
 
   const sharedItems = state.sharing.getAllSharedItems().filter(i => i.item_type === 'list_item');

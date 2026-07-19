@@ -2030,7 +2030,17 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
  * - Shared habit deleted from Drive → delete local pointer
  * - Data (name, frequency, completions) is read live from Drive in refreshHabits()
  */
+let _syncingHabits = false;
 async function syncSharedHabits() {
+  if (_syncingHabits) return;
+  _syncingHabits = true;
+  try {
+    await _doSyncSharedHabits();
+  } finally {
+    _syncingHabits = false;
+  }
+}
+async function _doSyncSharedHabits() {
   if (!state.sharing || !state.db?.connected) return;
 
   const sharedHabits = state.sharing.getAllSharedHabits();

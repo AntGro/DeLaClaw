@@ -1151,6 +1151,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return `${base}#join=${e.folderId}`;
     },
 
+    /** Member invite link (Drive: same as getInviteLink, token unused). */
+    getMemberInviteLink(groupId, _token) {
+      return this.getInviteLink(groupId);
+    },
+
     /** Find a group by its Drive folder ID (for duplicate join detection). */
     getGroupByFolderId(folderId) {
       for (const [, e] of _groups) {

@@ -64,6 +64,9 @@ export const SHARING_INTERFACE = {
   getAllSharedTodos:         'fn',   // () => SharedItem[]
   getAllSharedListItems:     'fn',   // () => SharedItem[]
 
+  // ── Items — invite links ────────────────────────────────────
+  getMemberInviteLink:       'any',  // (groupId, token) => string|null | null for Drive (uses getInviteLink)
+
   // ── Items — CRUD ────────────────────────────────────────────
   addItem:                  'fn',   // (groupId, itemData) => Promise<SharedItem>
   updateItem:               'fn',   // (groupId, itemId, changes) => Promise<SharedItem>

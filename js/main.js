@@ -20,6 +20,7 @@ import { refreshVestiaire, renderVestiaire, initVestiaireModals } from './vestia
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals } from './lists.js';
 import { updateSharingNavVisibility, renderSharingPane, handleJoinHash, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
+import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
 import { HABIT_CATEGORIES_KEY } from './state.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
@@ -2416,6 +2417,7 @@ function updateStaticLabels() {
   const settingsPaneStatsTitle = document.getElementById('settingsPaneStatsTitle');
   if (settingsPaneStatsTitle) settingsPaneStatsTitle.textContent = t('menu.settings_stats');
   applySharingI18n();
+  applyAgentsI18n();
   const settingsDisplayLabel = document.getElementById('settingsDisplayLabel');
   if (settingsDisplayLabel) settingsDisplayLabel.textContent = t('menu.settings_display');
   const settingsNvidiaKeyLabel = document.getElementById('settingsNvidiaKeyLabel');
@@ -2767,6 +2769,7 @@ function switchSettingsPane(paneKey) {
   if (paneKey === 'ai') { populateNvidiaModels(); loadNvidiaUsage(); }
   if (paneKey === 'stats') { loadUsageStats(); }
   if (paneKey === 'sharing') { renderSharingPane(); }
+  if (paneKey === 'agents') { renderAgentsPane(); }
 }
 
 function renderTabConfigList() {

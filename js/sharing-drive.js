@@ -2,7 +2,7 @@
 // DRIVE SHARING ADAPTER — implements SharingInterface for Google Drive
 // ===================================================================
 
-import { deepEqual as _deepEqual } from './utils.js';
+import { deepEqual } from './utils.js';
 //
 // See sharing-interface.js for the abstract contract this implements.
 //
@@ -218,7 +218,7 @@ function _itemsChangedDrive(oldArr, newArr) {
   for (const n of newArr) {
     const o = oldById.get(n.id);
     if (!o) return true;
-    if (!_deepEqual(o, n)) return true;
+    if (!deepEqual(o, n)) return true;
   }
   return false;
 }
@@ -1012,7 +1012,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
             e.notFoundStrikes = 0;  // successful fetch — reset 404 counter
             if (meta.modifiedTime > (e.gMeta.modifiedTime || '')) {
               const { data, etag } = await driveDownload(tok, e.gMeta.fileId);
-              if (data && !_deepEqual(data, e.group)) {
+              if (data && !deepEqual(data, e.group)) {
                 Object.assign(e.group, data);
                 e.gMeta.etag = etag;
                 e.gMeta.modifiedTime = meta.modifiedTime;

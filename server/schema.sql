@@ -236,3 +236,18 @@ CREATE INDEX IF NOT EXISTS idx_habits_shared_id ON habits(shared_id);
 CREATE INDEX IF NOT EXISTS idx_habits_shared_group_id ON habits(shared_group_id);
 CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON list_items(shared_id);
 CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_group_id);
+
+-- 1.410 agent grants (parity with Supabase)
+CREATE TABLE IF NOT EXISTS agent_grants (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  owner_id TEXT,
+  display_name TEXT NOT NULL,
+  token_hash TEXT UNIQUE NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'full',
+  last_used_at TEXT,
+  expires_at TEXT,
+  revoked_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_agent_grants_owner_id ON agent_grants(owner_id);
+CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON agent_grants(token_hash);

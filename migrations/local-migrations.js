@@ -138,4 +138,19 @@ export const LOCAL_MIGRATIONS = {
     CREATE INDEX IF NOT EXISTS idx_nvidia_usage_owner_id ON nvidia_usage(owner_id);
     CREATE INDEX IF NOT EXISTS idx_daily_visits_owner_id ON daily_visits(owner_id);
   `,
+  '1.410': `
+    CREATE TABLE IF NOT EXISTS agent_grants (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      owner_id TEXT,
+      display_name TEXT NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'full',
+      last_used_at TEXT,
+      expires_at TEXT,
+      revoked_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_grants_owner_id ON agent_grants(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON agent_grants(token_hash);
+  `,
 };

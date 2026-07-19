@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-07-19T19:17:24.576Z from 37 modules (v1.409). Total LOC 25068. Do not hand-edit.
+> Generated 2026-07-19T19:59:58.112Z from 38 modules (v1.411). Total LOC 25381. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -23,12 +23,12 @@
 | vestiaire | 904 | settings,vestiaire | allVestiaire,currentView,db,demoMode,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | - | 21 | 49 |
 | welcome | 868 | habit_completions,habits,todos | PROJECTS,allBirthdays,allHabitCompletions,allHabits,allVestiaire,currentView,db,js | flashcards,habits,i18n,icons,item-utils,state,todos,utils | main.js | modal,app-header,btn,toast | pendingSet | 78 | 49 |
 
-## Core modules (29)
+## Core modules (30)
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 4319 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,backend-logos,birthdays,db | - | esc:37,guard+pendingSet,window:8 |
-| i18n | 1898 | - |  | birthdays.js,demo-chooser.js,drive.js,flashcards.js | pendingSet |
+| main | 4322 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:37,guard+pendingSet,window:8 |
+| i18n | 1982 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
 | sharing-drive | 1192 | - | utils | main.js,sharing.js | - |
 | sharing-supabase | 1070 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
 | sharing-ui | 798 | - | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:33,pendingSet,window:8 |
@@ -36,20 +36,21 @@
 | utils | 588 | flashcards,x | i18n,icons,state,version | - | esc:7,window:4 |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 459 | - | i18n,icons,utils | - | - |
-| item-utils | 448 | - | db,i18n,utils | birthdays.js,demo-chooser.js,flashcards.js,habits.js | - |
+| item-utils | 448 | - | db,i18n,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | delegation | 404 | - |  | - | window:1 |
 | offline-cache | 299 | - | ./state,state.js | main.js | - |
 | crypto-sync | 297 | settings |  | sharing-supabase.js | - |
 | demo | 293 | x |  | drive.js | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
+| agents-ui | 224 | agent_grants | db,i18n,icons,state | main.js | esc:30,window:3 |
 | auth | 206 | settings |  | - | - |
-| icons | 193 | - |  | birthdays.js,demo-chooser.js,flashcards.js,habits.js | - |
+| icons | 195 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | storm3d | 185 | - |  | hero.js | - |
 | rest | 154 | x |  | main.js | - |
-| db | 118 | projects | db | db.js,item-utils.js,main.js,state.js | pendingSet |
+| db | 118 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
 | sharing-interface | 111 | - |  | sharing.js | - |
 | sharing | 64 | - | sharing-drive,sharing-interface | - | - |
-| state | 49 | - | db | birthdays.js,flashcards.js,habits.js,lists.js | window:1 |
+| state | 49 | - | db | agents-ui.js,birthdays.js,flashcards.js,habits.js | window:1 |
 | supabase | 45 | - |  | - | - |
 | sharing-envelope | 44 | - |  | sharing-supabase.js,sharing-ui.js | - |
 | backend-logos | 26 | - |  | main.js,sharing-ui.js | - |

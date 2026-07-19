@@ -20,7 +20,7 @@
 
 import { encodeInviteEnvelope, decodeInviteEnvelope } from './sharing-envelope.js';
 import { ensureSyncSecret, getSyncSecretWithSettings, encryptText, decryptText, hashTokenClient, getKEK, storeWrappedSecret } from './crypto-sync.js';
-import { deepEqual as _deepEqual } from './utils.js';
+import { deepEqual } from './utils.js';
 
 /**
  * Create a Supabase sharing adapter.
@@ -852,7 +852,7 @@ export async function createSupabaseSharing(adapter, config) {
       const o = oldById.get(n.id);
       if (!o) return true;
       if (o.group_id !== n.group_id || o.type !== n.type || o.parent_item_id !== n.parent_item_id || o.created_by !== n.created_by) return true;
-      if (!_deepEqual(o.payload, n.payload)) return true;
+      if (!deepEqual(o.payload, n.payload)) return true;
     }
     return false;
   }

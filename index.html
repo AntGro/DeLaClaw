@@ -721,6 +721,10 @@ bun run server.js</pre>
             <span data-icon="users" data-size="16"></span>
             <span id="settingsNavSharing">Sharing</span>
           </button>
+          <button class="settings-nav-btn" data-pane="agents" data-action="switch-settings-pane" data-pane="agents" id="settingsNavAgentsBtn">
+            <span data-icon="bot" data-size="16"></span>
+            <span id="settingsNavAgents">Agents</span>
+          </button>
         </nav>
       </div>
       <div class="settings-content">
@@ -840,6 +844,10 @@ bun run server.js</pre>
         <div class="settings-pane" id="settingsPane-sharing">
           <h3 id="settingsPaneSharingTitle">Sharing</h3>
           <div id="sharingPaneContent"></div>
+        </div>
+        <div class="settings-pane" id="settingsPane-agents">
+          <h3 id="settingsPaneAgentsTitle">Agents</h3>
+          <div id="agentsPaneContent"></div>
         </div>
       </div>
     </div>

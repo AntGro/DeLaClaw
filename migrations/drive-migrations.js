@@ -92,4 +92,8 @@ export const DRIVE_MIGRATIONS = {
       }
     }
   },
+  '1.410': async (store) => {
+    // 1.410: agent_grants – no-op for Drive (single-user), bump version only
+    if (!store.agent_grants) store.agent_grants = [];
+  },
 };

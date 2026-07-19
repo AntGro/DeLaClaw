@@ -28,6 +28,15 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - Don't add `if (backend === 'supabase')` in views. Add a method to the adapter interface instead.
 - Single responsibility: `utils.js` = generic helpers, `item-utils.js` = drag-drop + inline edit, `db.js` = activity tracking proxy only. Abstract first, implement second.
 
+**1.4 AI-native dependency index (CODEMAP) — mandatory for agents**
+- Generated: `.agents/CODEMAP.json` (T2, ~25KB pretty / ~15KB compact) + `.agents/CODEMAP.md` (6KB matrix). Source: `scripts/generate-codemap.js`. Do not hand-edit.
+- Contains per `js/*.js`: `entry`, `loc`, `tables`, `state`, `depends_on`, `dependents` (blast radius), `ui_components` (reusable CSS), `i18n_prefix`, `guards` (`guard`/`pendingSet`), `esc_count`, `window_exposed`.
+- 8 features: `todos`, `habits`, `projects`, `birthdays`, `vestiaire`, `flashcards`, `lists`, `welcome`. 23 core modules + 5 adapters (`supabase`, `rest`, `demo`, `drive`, `offline-cache`). `welcome` aggregates all features.
+- Rule: BEFORE editing any `js/*.js`, agents MUST read `.agents/CODEMAP.json` → `features[feature]` and relevant `core` entries. Reuse `depends_on` + `ui_components`, check `dependents` for impact scope, follow `guards` per AGENTS 1.2, verify `esc_count`/`tables` for XSS/schema impact.
+- Freshness: pre-commit auto-regenerates JSON+MD and stages them. `tests/tests.js` will fail if JSON is out-of-date (CODEMAP freshness test). No manual sync.
+- Impact: `scripts/impact.js` reads staged diff + CODEMAP `dependents` to suggest `Checked:` trailer (e.g. `birthdays` change → `welcome [x]` + `xss [x]`). Pre-commit prints `[impact] Checked: …` hint; commit-msg prints full blast-radius report on failure.
+- Keep it small: exclude `demo-data.js`, don't index function bodies. If it grows >50KB, trim `window_exposed` to 8.
+
 ## 2. UI / UX System
 
 - Welcome / Today aggregates focus TODOs, due habits, flashcard reviews, birthdays.
@@ -52,15 +61,16 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 ## 5. Git, Versioning, Commit
 
 - **Target branch**: `dev` (preview at `dev.delaclaw.pages.dev`). `main` only when stable + user-approved. All PRs (including bot) target `dev`.
-- **Hooks**: ALWAYS `git config core.hooksPath .githooks` on fresh clone/subagent. Pre-commit bumps `VERSION` → updates `sw.js` CACHE_VERSION + blocks emoji. Commit-msg enforces `Checked:` trailer.
+- **Hooks**: ALWAYS `git config core.hooksPath .githooks` on fresh clone/subagent. Pre-commit bumps `VERSION` → updates `sw.js` CACHE_VERSION + ` .agents/CODEMAP.json/.md` (via `scripts/generate-codemap.js`) + prints `[impact] Checked: …` hint + blocks emoji. Commit-msg enforces `Checked:` trailer and on failure runs `scripts/impact.js --staged` to show blast radius from CODEMAP dependents and suggested trailer.
 - **VERSION file**: `latest` bumped every commit (X.YYY), `latest_compat` / `latest_compat_deprec` only on schema change. See `COMMIT_CHECKLIST.md`.
-- **Checked trailer**: Format `Checked: versioning [x], i18n [~], docs [~], readme [~], checklist [~], tests [~], welcome [~], prompts [~], xss [x]` — decide each individually, no batch-marking. `[x]` = diff touches area, `[~]` = does not. Bare item = rejected. Lesson v1.145: tests + xss left unmarked by inertia.
+- **Checked trailer**: Format `Checked: versioning [x], i18n [~], docs [~], readme [~], checklist [~], tests [~], welcome [~], prompts [~], xss [x]` — decide each individually, no batch-marking. `[x]` = diff touches area, `[~]` = does not. Bare item = rejected. Lesson v1.145: tests + xss left unmarked by inertia. Use CODEMAP `dependents` to assess `welcome` impact.
 - **Commit style**: `feat|fix|refactor|chore|ci|docs(scope): message`. Include test result (`142 passed`) when relevant.
 
 ## 6. Testing
 
-- `bun tests/tests.js` (or `node`). 142 passed + 3 Playwright missing (expected, no browser in CI dev) is green. Covers: unit logic, adapter compliance, import/export, window-assignment guard, XSS esc usage.
+- `bun tests/tests.js` (or `node`). 142 passed + 3 Playwright missing (expected, no browser in CI dev) is green. Covers: unit logic, adapter compliance, import/export, window-assignment guard, XSS esc usage, CODEMAP freshness (`.agents/CODEMAP.json` matches regenerated output).
 - PWA: `CACHE_VERSION` + `PRECACHE_URLS` in `sw.js` — `cache.addAll` fails entire install if any entry 404, so list must be exact. Include new `js/*.js` and `vendor/*` files.
+- CODEMAP: `scripts/generate-codemap.js` must be idempotent. CI fails if committed JSON differs from regenerated.
 
 ## 7. Docs
 

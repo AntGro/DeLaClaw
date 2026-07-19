@@ -93,6 +93,29 @@ sed -i "s/^const CACHE_VERSION = .*/const CACHE_VERSION = 'dlc-${latest}';/" "$R
 
 git add "$VERSION_JS" "$REPO_ROOT/sw.js"
 
+# ── CODEMAP regeneration (AI-native index) ─────────────────────
+# Regenerate .agents/CODEMAP.json + .md from current source.
+# Ensures dependency graph stays fresh. No failure if script missing (CI has fallback).
+if [ -f "$REPO_ROOT/scripts/generate-codemap.js" ]; then
+  if command -v node >/dev/null 2>&1; then
+    node "$REPO_ROOT/scripts/generate-codemap.js" >/dev/null 2>&1 || true
+  elif command -v bun >/dev/null 2>&1; then
+    bun "$REPO_ROOT/scripts/generate-codemap.js" >/dev/null 2>&1 || true
+  fi
+  if [ -f "$REPO_ROOT/.agents/CODEMAP.json" ]; then
+    git add "$REPO_ROOT/.agents/CODEMAP.json" "$REPO_ROOT/.agents/CODEMAP.md" 2>/dev/null || true
+  fi
+fi
+
+# ── Impact hint (Phase 2) ──────────────────────────────────────
+# Show a one-line impact hint to help fill the Checked: trailer.
+# Non-blocking — real enforcement happens in commit-msg.
+if [ -f "$REPO_ROOT/scripts/impact.js" ]; then
+  if command -v node >/dev/null 2>&1; then
+    node "$REPO_ROOT/scripts/impact.js" --staged --format=checked 2>/dev/null | sed 's/^/  [impact] /' || true
+  fi
+fi
+
 # ── No-emoji lint ──────────────────────────────────────────────
 # Scan staged diffs in JS/HTML/CSS for pictographic emoji (U+1F300+).
 # Basic UI symbols (✓ ✕ ▶ etc.) are allowed.

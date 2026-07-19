@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-07-19T19:59:58.112Z from 38 modules (v1.411). Total LOC 25381. Do not hand-edit.
+> Generated 2026-07-19T20:12:19.307Z from 38 modules (v1.412). Total LOC 25423. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -28,7 +28,7 @@
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
 | main | 4322 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:37,guard+pendingSet,window:8 |
-| i18n | 1982 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
+| i18n | 2036 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
 | sharing-drive | 1192 | - | utils | main.js,sharing.js | - |
 | sharing-supabase | 1070 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
 | sharing-ui | 798 | - | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:33,pendingSet,window:8 |
@@ -42,9 +42,9 @@
 | crypto-sync | 297 | settings |  | sharing-supabase.js | - |
 | demo | 293 | x |  | drive.js | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
-| agents-ui | 224 | agent_grants | db,i18n,icons,state | main.js | esc:30,window:3 |
+| agents-ui | 210 | agent_grants | db,i18n,icons,state | main.js | esc:32,window:4 |
 | auth | 206 | settings |  | - | - |
-| icons | 195 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
+| icons | 197 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | storm3d | 185 | - |  | hero.js | - |
 | rest | 154 | x |  | main.js | - |
 | db | 118 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |

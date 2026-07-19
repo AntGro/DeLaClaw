@@ -833,6 +833,49 @@ export async function createSupabaseSharing(adapter, config) {
 
   // ── Sync ────────────────────────────────────────────────────
 
+  function _deepEqual(a, b) {
+    if (a === b) return true;
+    if (a == null || b == null) return false;
+    if (typeof a !== typeof b) return false;
+    if (typeof a !== 'object') return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    if (Array.isArray(a)) {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (!_deepEqual(a[i], b[i])) return false;
+      return true;
+    }
+    const ak = Object.keys(a), bk = Object.keys(b);
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) {
+      if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+      if (!_deepEqual(a[k], b[k])) return false;
+    }
+    return true;
+  }
+
+  function _membersChanged(oldMl, ml) {
+    if (oldMl.length !== ml.length) return true;
+    const oldById = new Map(oldMl.map(m => [m.memberId, m]));
+    for (const m of ml) {
+      const o = oldById.get(m.memberId);
+      if (!o) return true;
+      if (o.email !== m.email || o.accepted !== m.accepted || o.authUserId !== m.authUserId || o.role !== m.role || o.displayName !== m.displayName) return true;
+    }
+    return false;
+  }
+
+  function _itemsChanged(old, newItems) {
+    if (old.length !== newItems.length) return true;
+    const oldById = new Map(old.map(it => [it.id, it]));
+    for (const n of newItems) {
+      const o = oldById.get(n.id);
+      if (!o) return true;
+      if (o.group_id !== n.group_id || o.type !== n.type || o.parent_item_id !== n.parent_item_id || o.created_by !== n.created_by) return true;
+      if (!_deepEqual(o.payload, n.payload)) return true;
+    }
+    return false;
+  }
+
   async function poll() {
     if (!_loaded) return;
     let changed = false;
@@ -857,7 +900,7 @@ export async function createSupabaseSharing(adapter, config) {
               token: m.token,
             }));
             const oldMl = _memberCache[group.id] || [];
-            if (oldMl.length !== ml.length || JSON.stringify(oldMl.map(m => ({ e: m.email, a: m.accepted, au: m.authUserId }))) !== JSON.stringify(ml.map(m => ({ e: m.email, a: m.accepted, au: m.authUserId })))) {
+            if (_membersChanged(oldMl, ml)) {
               changed = true;
             }
             group.members = ml;
@@ -867,7 +910,7 @@ export async function createSupabaseSharing(adapter, config) {
           if (items) {
             const old = _allItems.filter(i => i.group_id === group.id);
             const newItems = items.map(it => _mapItem(it));
-            if (JSON.stringify(old) !== JSON.stringify(newItems)) {
+            if (_itemsChanged(old, newItems)) {
               _allItems = _allItems.filter(i => i.group_id !== group.id);
               _allItems.push(...newItems);
               changed = true;
@@ -904,7 +947,7 @@ export async function createSupabaseSharing(adapter, config) {
           displayName: m.display_name,
         }));
         const oldMl = _memberCache[group.id] || [];
-        if (oldMl.length !== ml.length || JSON.stringify(oldMl.map(m => ({ e: m.email, a: m.accepted, au: m.authUserId }))) !== JSON.stringify(ml.map(m => ({ e: m.email, a: m.accepted, au: m.authUserId })))) {
+        if (_membersChanged(oldMl, ml)) {
           changed = true;
         }
         group.members = ml;
@@ -918,7 +961,7 @@ export async function createSupabaseSharing(adapter, config) {
         if (items) {
           const old = _allItems.filter(i => i.group_id === group.id);
           const newItems = items.map(it => _mapItem(it));
-          if (JSON.stringify(old) !== JSON.stringify(newItems)) {
+          if (_itemsChanged(old, newItems)) {
             _allItems = _allItems.filter(i => i.group_id !== group.id);
             _allItems.push(...newItems);
             changed = true;

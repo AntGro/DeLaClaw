@@ -42,9 +42,7 @@ How to connect (for you, the AI agent):
 
 3. You have full read/write access scoped to my account (RLS is owner-or-agent). Tables: projects, tasks, todos, habits, habit_completions, birthdays, vestiaire, flashcards, flashcard_notes, lists, list_items, texts, prompts, settings, agent_grants.
 
-4. Keep credentials secret. Never log the Agent Token or commit it. To confirm, SELECT tasks limit 1.
-
-Paste this whole block into the agent you want to enable (Claude Code, Codex CLI, etc.).`;
+4. Keep credentials secret. Never log the Agent Token or commit it. To confirm, SELECT tasks limit 1.`;
 }
 
 async function fetchGrants() {

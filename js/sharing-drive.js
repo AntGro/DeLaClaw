@@ -1,6 +1,8 @@
 // ===================================================================
 // DRIVE SHARING ADAPTER — implements SharingInterface for Google Drive
 // ===================================================================
+
+import { deepEqual as _deepEqual } from './utils.js';
 //
 // See sharing-interface.js for the abstract contract this implements.
 //
@@ -208,26 +210,6 @@ function mergeItems(local, remote) {
     }
   }
   return Array.from(map.values());
-}
-
-function _deepEqual(a, b) {
-  if (a === b) return true;
-  if (a == null || b == null) return false;
-  if (typeof a !== typeof b) return false;
-  if (typeof a !== 'object') return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  if (Array.isArray(a)) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (!_deepEqual(a[i], b[i])) return false;
-    return true;
-  }
-  const ak = Object.keys(a), bk = Object.keys(b);
-  if (ak.length !== bk.length) return false;
-  for (const k of ak) {
-    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
-    if (!_deepEqual(a[k], b[k])) return false;
-  }
-  return true;
 }
 
 function _itemsChangedDrive(oldArr, newArr) {

@@ -42,6 +42,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - Location: `docs-site/adrs/` — numbered `0001-*.md`, `0002-*.md` …
 - Public, NOT agent-only — captures *why* a decision was made, vs contracts which capture *what* must stay true.
 - Agents SHOULD read relevant ADR before major refactor: adapter change → `0002-byob-pluggable-backends.md`, build/tooling/hosting → `0001-no-build-github-pages-byob.md`.
+- If a change introduces a significant architectural decision (new pattern, trade-off, cost model, security boundary), agents MUST surface a proposal for a new ADR in chat/review rather than silently pushing an ADR alongside the code. ADR creation is a discussion, not an implementation detail.
 - Not enforced on every edit like CODEMAP/contracts, but provides rationale to avoid re-litigating past decisions.
 
 ## 2. UI / UX System

@@ -292,8 +292,8 @@ function showInviteLinkModal(name, link, isNewGroup) {
   const hint = isNewGroup
     ? t('sharing.invite_link_hint', name)
     : t('sharing.member_link_hint', name);
-  // sec-003: warn that link contains secret & is single-use, stays in history
-  const warn = `<p class="sharing-warning" style="margin-top:10px;font-size:0.82rem;color:var(--warn,#d97706);background:color-mix(in srgb,var(--warn,#d97706) 12%, transparent);border:1px solid color-mix(in srgb,var(--warn,#d97706) 30%, transparent);border-radius:8px;padding:8px 10px">${lucideIcon('shield-alert', 12)} ${t('sharing.invite_secret_warn') || 'This link contains a secret token (single-use). Anyone with it can join. It stays in browser history — share privately and revoke after use.'}</p>`;
+  // sec-003: warn that invite link is sensitive and single-use
+  const warn = `<p class="sharing-warning" style="margin-top:10px;font-size:0.82rem;color:var(--warn,#d97706);background:color-mix(in srgb,var(--warn,#d97706) 12%, transparent);border:1px solid color-mix(in srgb,var(--warn,#d97706) 30%, transparent);border-radius:8px;padding:8px 10px">${lucideIcon('shield-alert', 12)} ${t('sharing.invite_secret_warn') || 'Anyone with this single-use link can join — share privately.'}</p>`;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingInviteLinkModal';

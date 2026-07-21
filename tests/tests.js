@@ -609,6 +609,24 @@ test('Welcome TODO dblclick calls canonical window.editTodoInline', () => {
 });
 
 // ===================================================================
+// 24b. Welcome TODO items render shared group badge like TODO page
+// ===================================================================
+test('Welcome TODO items render shared group badge like TODO page', () => {
+  const welcome = jsFiles['welcome.js'];
+  assert(welcome.includes("import { sharedBadge } from './sharing-ui.js';"),
+    'welcome.js: must import sharedBadge from sharing-ui.js');
+  const fnMatch = welcome.match(/function\s+renderFocusTodoItem\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+  assert(fnMatch, 'welcome.js: renderFocusTodoItem not found');
+  const fn = fnMatch[1];
+  assert(fn.includes('td.shared_id') && fn.includes('td.shared_group_id'),
+    'welcome.js: focus TODO rendering must detect shared TODO pointers');
+  assert(fn.includes('state.sharing.getAllGroups()') && fn.includes('sharedBadge'),
+    'welcome.js: focus TODO rendering must use sharedBadge with the sharing group name');
+  assert(fn.includes('</span>${sharedHtml}') || fn.includes('</span>${ sharedHtml }'),
+    'welcome.js: focus TODO text row must append the shared badge beside the TODO text');
+});
+
+// ===================================================================
 // 25. edit*Inline functions accept optional itemEl parameter (scoped querySelector)
 // ===================================================================
 test('edit*Inline functions accept optional itemEl parameter for scoped querySelector', () => {

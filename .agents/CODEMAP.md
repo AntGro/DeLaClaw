@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-07-21T01:13:48.636Z from 38 modules (v1.425). Total LOC 25583. Do not hand-edit.
+> Generated 2026-07-21T09:46:40.601Z from 38 modules (v1.426). Total LOC 25592. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -21,7 +21,7 @@
 | projects | 981 | projects,prompts,tasks | PROJECTS,allTasks,db,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,btn,project-card,card-header,empty-state,toast | pendingSet | 35 | 35 |
 | todos | 1400 | settings,todos | currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | habits.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 24 | 48 |
 | vestiaire | 904 | settings,vestiaire | allVestiaire,currentView,db,demoMode,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | - | 21 | 49 |
-| welcome | 868 | habit_completions,habits,todos | PROJECTS,allBirthdays,allHabitCompletions,allHabits,allVestiaire,currentView,db,js | flashcards,habits,i18n,icons,item-utils,state,todos,utils | main.js | modal,app-header,btn,toast | pendingSet | 78 | 49 |
+| welcome | 877 | habit_completions,habits,todos | PROJECTS,allBirthdays,allHabitCompletions,allHabits,allVestiaire,currentView,db,js | flashcards,habits,i18n,icons,item-utils,sharing-ui,state,todos,utils | main.js | modal,app-header,btn,toast | pendingSet | 78 | 49 |
 
 ## Core modules (30)
 

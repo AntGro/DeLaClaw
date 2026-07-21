@@ -352,25 +352,8 @@ function initListItemDragDrop(listId, listEl) {
   });
 }
 
-async function editListItemInline(id) {
-  const el = document.querySelector(`.list-item[data-item-id="${id}"] .list-item-text`);
-  if (!el) return;
-  const item = (state.allListItems || []).find(x => x.id === id);
-  if (!item) return;
-
-  inlineEditText(el, item.text, {
-    maxLength: 2000,
-    saveFn: async (newText) => {
-      const { error } = await state.db.from('list_items').update({
-        text: newText,
-        updated_at: new Date().toISOString(),
-      }).eq('id', id);
-      if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
-      item.text = newText;
-      showToast(t('toast.updated'), 'success');
-    },
-    refreshFn: renderLists,
-  });
+function editListItemInline(id) {
+  return editListItemInlineFull(id);
 }
 
 function editListItemInlineFull(id) {
@@ -526,34 +509,51 @@ async function quickAddListItem(inputEl, listId) {
   await refreshLists();
 }
 
-async function toggleListItemCheck(id) {
-  const item = (state.allListItems || []).find(x => x.id === id);
-  if (!item) return;
-  const newVal = item.checked ? 0 : 1;
+const _pendingListItemToggles = new Set();
 
-  // Shared → Drive only
-  if (item.shared_id && item.shared_group_id && state.sharing) {
-    try {
-      if (newVal) {
-        const currentUser = await state.sharing.getCurrentUser();
-        await state.sharing.completeItem(item.shared_group_id, item.shared_id, [currentUser?.email]);
-      } else {
-        await state.sharing.uncompleteItem(item.shared_group_id, item.shared_id);
-      }
-      item.checked = newVal;
-      renderLists();
-    } catch (e) { showToast(e.message, 'error'); }
-    return;
+async function toggleListItemCheck(id, btnEl) {
+  if (!id) return;
+  if (_pendingListItemToggles.has(id)) return;
+  _pendingListItemToggles.add(id);
+
+  const safeId = CSS && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\"');
+  const allBtns = document.querySelectorAll(`button[data-action="toggle-list-item-check"][data-id="${safeId}"]`);
+  const targetBtn = btnEl instanceof HTMLElement ? btnEl : (allBtns[0] || null);
+  const toToggle = new Set([...allBtns, ...(targetBtn ? [targetBtn] : [])]);
+  toToggle.forEach(b => { b.disabled = true; b.classList.add('saving', 'is-pending'); b.setAttribute('aria-busy', 'true'); });
+
+  try {
+    const item = (state.allListItems || []).find(x => x.id === id);
+    if (!item) return;
+    const newVal = item.checked ? 0 : 1;
+
+    // Shared → Drive only
+    if (item.shared_id && item.shared_group_id && state.sharing) {
+      try {
+        if (newVal) {
+          const currentUser = await state.sharing.getCurrentUser();
+          await state.sharing.completeItem(item.shared_group_id, item.shared_id, [currentUser?.email || '']);
+        } else {
+          await state.sharing.uncompleteItem(item.shared_group_id, item.shared_id);
+        }
+        item.checked = newVal;
+        renderLists();
+      } catch (e) { showToast(e.message, 'error'); }
+      return;
+    }
+
+    // Normal → local DB
+    const { error } = await state.db.from('list_items').update({
+      checked: newVal,
+      updated_at: new Date().toISOString(),
+    }).eq('id', id);
+    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    item.checked = newVal;
+    renderLists();
+  } finally {
+    _pendingListItemToggles.delete(id);
+    toToggle.forEach(b => { b.disabled = false; b.classList.remove('saving', 'is-pending'); b.removeAttribute('aria-busy'); });
   }
-
-  // Normal → local DB
-  const { error } = await state.db.from('list_items').update({
-    checked: newVal,
-    updated_at: new Date().toISOString(),
-  }).eq('id', id);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-  item.checked = newVal;
-  renderLists();
 }
 
 async function deleteListItem(id) {
@@ -888,6 +888,7 @@ window.navigateToList = navigateToList;
 window.renderLists = renderLists;
 window.quickAddListItem = quickAddListItem;
 window.toggleListItemCheck = toggleListItemCheck;
+window.editListItemInline = editListItemInline;
 window.editListItemInlineFull = editListItemInlineFull;
 window.deleteListItem = deleteListItem;
 window.filterLists = function(e) { listSearchQuery = e.target.value; renderLists(); };

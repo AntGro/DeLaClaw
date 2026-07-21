@@ -64,6 +64,12 @@ export async function createSupabaseSharing(adapter, config) {
     try { return await hashTokenClient(token); } catch { return null; }
   }
 
+  function _normalizeDoneBy(doneBy) {
+    if (Array.isArray(doneBy)) return doneBy.filter(Boolean);
+    if (doneBy) return [doneBy];
+    return [getCurrentUser().email];
+  }
+
   async function _encryptForJoined(token, anonKey) {
     // Option A (1.397): secret synced via settings for cross-device portability
     const secret = await ensureSyncSecret(adapter);
@@ -788,7 +794,7 @@ export async function createSupabaseSharing(adapter, config) {
     if (!existing) throw new Error('Item not found');
     const payload = Object.assign({}, existing.payload, {
       done: true,
-      done_by: [doneBy || getCurrentUser().email],
+      done_by: _normalizeDoneBy(doneBy),
       done_at: new Date().toISOString(),
     });
     return updateItem(groupId, itemId, { payload });

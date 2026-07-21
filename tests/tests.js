@@ -782,6 +782,109 @@ test('editHabitInline updates shared habits through sharing API', () => {
 });
 
 // ===================================================================
+// 25c. List item edit action uses shared-aware inline editor
+// ===================================================================
+test('List item edit action uses shared-aware inline editor', () => {
+  const lists = jsFiles['lists.js'];
+  const delegation = jsFiles['delegation.js'];
+
+  const aliasMatch = lists.match(/function\s+editListItemInline\s*\(([^)]*)\)\s*\{([\s\S]*?)\n\}/);
+  assert(aliasMatch, 'lists.js: editListItemInline alias not found');
+  assert(aliasMatch[2].includes('editListItemInlineFull'),
+    'lists.js: editListItemInline must delegate to shared-aware editListItemInlineFull');
+
+  assert(lists.includes('window.editListItemInline = editListItemInline'),
+    'lists.js: editListItemInline must be exposed for backward-compatible callers');
+  assert(lists.includes('window.editListItemInlineFull = editListItemInlineFull'),
+    'lists.js: editListItemInlineFull must remain exposed');
+
+  const actionMatch = delegation.match(/case 'edit-list-item-inline':[\s\S]*?break;/);
+  assert(actionMatch, 'delegation.js: edit-list-item-inline action not found');
+  assert(actionMatch[0].includes("callWindow('editListItemInlineFull'"),
+    'delegation.js: pencil edit action must route directly to editListItemInlineFull');
+});
+
+// ===================================================================
+// 25d. editListItemInlineFull updates shared list items through sharing API
+// ===================================================================
+test('editListItemInlineFull updates shared list items through sharing API', () => {
+  const lists = jsFiles['lists.js'];
+  const start = lists.indexOf('function editListItemInlineFull');
+  const end = lists.indexOf('// ===================================================================\n// CRUD — ITEMS', start);
+  assert(start !== -1 && end !== -1, 'lists.js: editListItemInlineFull block not found');
+  const fn = lists.slice(start, end);
+
+  assert(fn.includes('item.shared_id') && fn.includes('item.shared_group_id') && fn.includes('state.sharing'),
+    'lists.js: editListItemInlineFull must detect shared list-item pointers');
+  assert(fn.includes('state.sharing.updateItem'),
+    'lists.js: editListItemInlineFull must update shared list items through sharing.updateItem');
+  assert(fn.includes('currentPayload') && fn.includes('...currentPayload') && fn.includes('...drivePayload'),
+    'lists.js: editListItemInlineFull must merge text/note into the existing shared payload');
+
+  const sharedIdx = fn.indexOf('if (item.shared_id');
+  const normalIdx = fn.indexOf('// Normal', sharedIdx);
+  const sharedBranch = fn.slice(sharedIdx, normalIdx);
+  assert(!/state\.db\.from\(['"]list_items['"]\)\.update/.test(sharedBranch),
+    'lists.js: editListItemInlineFull shared branch must not write text/note only to the local pointer');
+});
+
+// ===================================================================
+// 25e. toggleListItemCheck has per-item pending guard and button state
+// ===================================================================
+test('toggleListItemCheck has per-item pending guard and button state', () => {
+  const lists = jsFiles['lists.js'];
+  assert(lists.includes('const _pendingListItemToggles = new Set()'),
+    'lists.js: toggleListItemCheck must use a per-item pending Set');
+
+  const start = lists.indexOf('async function toggleListItemCheck');
+  const end = lists.indexOf('async function deleteListItem', start);
+  assert(start !== -1 && end !== -1, 'lists.js: toggleListItemCheck block not found');
+  const fn = lists.slice(start, end);
+
+  const params = fn.match(/async function toggleListItemCheck\s*\(([^)]*)\)/)?.[1] || '';
+  assert(params.includes('btnEl'),
+    'lists.js: toggleListItemCheck must accept btnEl so the clicked button can be disabled');
+  assert(fn.includes('_pendingListItemToggles.has(id)') && fn.includes('_pendingListItemToggles.add(id)'),
+    'lists.js: toggleListItemCheck must block duplicate clicks for the same item');
+  assert(fn.includes('disabled = true') && fn.includes("setAttribute('aria-busy', 'true')"),
+    'lists.js: toggleListItemCheck must disable matching buttons while saving');
+  assert(fn.includes('finally') && fn.includes('_pendingListItemToggles.delete(id)') && fn.includes("removeAttribute('aria-busy')"),
+    'lists.js: toggleListItemCheck must clean up pending state in finally');
+
+  const delegation = jsFiles['delegation.js'];
+  const actionMatch = delegation.match(/case 'toggle-list-item-check':[\s\S]*?break;/);
+  assert(actionMatch, 'delegation.js: toggle-list-item-check action not found');
+  assert(/getId\(el\),\s*el/.test(actionMatch[0]),
+    'delegation.js: toggle-list-item-check must pass the clicked element through');
+});
+
+// ===================================================================
+// 25f. Sharing adapters normalize completeItem(doneBy) without nested arrays
+// ===================================================================
+test('Sharing adapters normalize completeItem(doneBy) without nested arrays', () => {
+  const supabase = jsFiles['sharing-supabase.js'];
+  const drive = jsFiles['sharing-drive.js'];
+
+  assert(supabase.includes('function _normalizeDoneBy(doneBy)'),
+    'sharing-supabase.js: completeItem must use a doneBy normalization helper');
+  assert(supabase.includes('Array.isArray(doneBy)') && supabase.includes('done_by: _normalizeDoneBy(doneBy)'),
+    'sharing-supabase.js: completeItem must preserve arrays instead of wrapping them');
+  assert(!supabase.includes('done_by: [doneBy || getCurrentUser().email]'),
+    'sharing-supabase.js: completeItem must not wrap doneBy blindly');
+
+  const start = drive.indexOf('async completeItem(groupId, itemId, doneBy)');
+  const end = drive.indexOf('async uncompleteItem', start);
+  assert(start !== -1 && end !== -1, 'sharing-drive.js: completeItem block not found');
+  const fn = drive.slice(start, end);
+  assert(fn.includes('Array.isArray(doneBy)') && fn.includes('normalizedDoneBy'),
+    'sharing-drive.js: completeItem must normalize string/array doneBy values');
+  assert(fn.includes('done_by: normalizedDoneBy'),
+    'sharing-drive.js: completeItem must write the flattened normalized array');
+  assert(!/done_by:\s*doneBy/.test(fn),
+    'sharing-drive.js: completeItem must not write raw doneBy directly');
+});
+
+// ===================================================================
 // 26. Inline edit callbacks use refreshFn (not renderFn) for data refresh
 // ===================================================================
 test('Inline edit callbacks use refreshFn (not renderFn) for data refresh', () => {

@@ -39,7 +39,7 @@ Open the **SQL Editor** in your Supabase dashboard.
 
 ### 3. Configure Auth (mandatory since 1.300)
 
-DeLaClaw uses Supabase Auth with **6-digit code only** (no password, no magic link). Owner-only RLS means **no data is readable without a session**.
+DeLaClaw uses Supabase Auth email sign-in. Owner-only RLS means **no data is readable without a session**.
 
 In your Supabase dashboard → **Authentication → Providers**:
 
@@ -53,37 +53,23 @@ In your Supabase dashboard → **Authentication → Providers**:
 
 In **Authentication → Settings**:
 
-- Enable Email OTP (6-digit code)
+- Keep email sign-in enabled
 - Set **JWT expiry** to 1 hour (default)
 - Set **Refresh token lifetime** to **1 year** (`8760 hours` / `31536000 seconds`) — DeLaClaw stores the refresh token in localStorage; long lifetime avoids repeated logins.
 
-In **Authentication → Email Templates → Magic Link** (used for OTP emails):
+Default Supabase confirmation emails work: the app asks the user to paste the confirmation link back into DeLaClaw, so verification happens inside the app context. If you use custom SMTP/templates, keep a confirmation link or token in the email that can be pasted into the app.
 
-Set it to **code-only** — this fixes iOS PWA + Gmail quirk where Gmail opens links in Chrome (isolated storage → session lost):
-
-**Subject:** `{{ .Token }} is your DeLaClaw code`
-
-**Body:**
-```html
-<h2>DeLaClaw sign-in</h2>
-<p>Your verification code is:</p>
-<h1 style="font-size:32px; letter-spacing:6px; text-align:center;">{{ .Token }}</h1>
-<p>Enter this code in the app. Expires in 60 minutes.</p>
-```
-
-Do NOT include `{{ .ConfirmationURL }}` — code-only is sufficient and works on all devices.
-
-> Since 1.300, the "Skip" anonymous path is removed. You must sign in via code after entering URL + anon key. `owner_id = auth.uid()` enforced via `trg_set_owner_id`, and `claim_ownership()` backfills legacy rows.
+> Since 1.300, the "Skip" anonymous path is removed. You must sign in by email after entering URL + anon key. `owner_id = auth.uid()` is enforced via `trg_set_owner_id`, and `claim_ownership()` backfills legacy rows.
 
 ### 4. Connect the app
 
 1. Open [delaclaw.com](https://delaclaw.com) (or serve `index.html` locally)
 2. Select **Supabase** on the login screen, enter Project URL + anon key
-3. Enter your email → **Send code**
-4. Open email → copy 6-digit code → paste in app → **Verify code**
+3. Enter your email → **Send link**
+4. Open email → copy the confirmation link → paste it in the app → **Verify**
 5. Optionally check "Stay connected" to persist URL + anon key (session itself stored separately by Supabase Auth)
 
-This code-only flow works identically on desktop, Android, and **iPhone PWA** (no Chrome isolation issue).
+This paste-to-verify flow works identically on desktop, Android, and **iPhone PWA** because the session is created inside the app context.
 
 ### Notes
 

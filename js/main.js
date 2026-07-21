@@ -713,7 +713,7 @@ function showAuthPrompt(rawAdapter, url, key) {
     async function doVerify() {
       const code = (otpInput?.value || '').trim();
       if (!code || code.length < 6) {
-        if (otpErrEl) { otpErrEl.textContent = t('auth.otp_invalid') || 'Enter the 6-digit code from your email.'; otpErrEl.style.display = ''; }
+        if (otpErrEl) { otpErrEl.textContent = t('auth.otp_invalid') || 'Paste the confirmation link or token from your email.'; otpErrEl.style.display = ''; }
         return;
       }
       verifyBtn.disabled = true;
@@ -725,10 +725,10 @@ function showAuthPrompt(rawAdapter, url, key) {
         if (error || !user) {
           const msg = error?.message || '';
           const isExpired = msg.toLowerCase().includes('expired');
-          otpErrEl.textContent = isExpired ? (t('auth.otp_expired') || 'Code expired — resend a new code.') : (t('auth.otp_invalid') || 'Invalid code. Check the 6-digit code from the email.');
+          otpErrEl.textContent = isExpired ? (t('auth.otp_expired') || 'Link expired — resend a new one.') : (t('auth.otp_invalid') || 'Invalid link or token. Check the email and paste it again.');
           otpErrEl.style.display = '';
           verifyBtn.disabled = false;
-          verifyBtn.textContent = t('auth.verify_code') || 'Verify code';
+          verifyBtn.textContent = t('auth.verify_code') || 'Verify';
           return;
         }
         // Success — close prompt, session will be handled by onAuthStateChange + init logic
@@ -741,13 +741,13 @@ function showAuthPrompt(rawAdapter, url, key) {
         console.warn('otp verify failed', e);
         if (otpErrEl) { otpErrEl.textContent = t('auth.error'); otpErrEl.style.display = ''; }
         verifyBtn.disabled = false;
-        verifyBtn.textContent = t('auth.verify_code') || 'Verify code';
+        verifyBtn.textContent = t('auth.verify_code') || 'Verify';
       }
     }
 
     verifyBtn.addEventListener('click', doVerify);
     otpInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doVerify(); });
-    // Auto-focus OTP for PWA users (only if not blocked by PWA ack)
+    // Auto-focus verification input for PWA users (only if not blocked by PWA ack)
     if (!needsPwaAck) {
       setTimeout(() => { try { otpInput.focus(); } catch {} }, 100);
     }

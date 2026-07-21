@@ -169,17 +169,17 @@ Encrypted with WebCrypto AES-GCM 256 using a per-user `sync_secret` (32 random b
 
 Flow: `createGroup`/`inviteUser` → generate token + hash + expiry → store hash; `joinWithFileIds`/`tryDirectJoin` → `encryptForJoined(token, anonKey)` → upsert ciphertexts + plaintext fallback; `loadAll` → `decryptJoinedRow()` prefers decryption.
 
-### iOS PWA auth + OTP code (1.371+)
+### iOS PWA auth paste-to-verify (1.371+)
 
-Supabase magic links break on iOS PWA: Gmail/Outlook opens links in Chrome (or Safari), not the standalone PWA's WebKit context. Chrome's localStorage is isolated, so `supabase-js` would create the session in Chrome and the PWA would still be signed out.
+Supabase email links can break on iOS PWA when Gmail/Outlook opens them in Chrome or Safari instead of the standalone PWA's WebKit context. Browser storage is isolated, so `supabase-js` may create the session outside the PWA while the app remains signed out.
 
-Since `1.372+`, auth is code-only (no magic link):
+DeLaClaw avoids relying on external link opening:
 
-- `sendMagicLink()` (kept name for compat) → `signInWithOtp({ email })` which triggers email containing only `{{ .Token }}` 6-digit code. Template must NOT include `{{ .ConfirmationURL }}`.
-- `verifyOtpCode(email, token)` → `auth.verifyOtp({ email, token, type: 'email' })` — verifies inside the requesting PWA context, so it works even when Gmail opens links in Chrome (iOS storage isolation). No need to detect device type.
-- `main.js` auth prompt is now single-flow: email → send code → input `autocomplete=one-time-code` → verify → reload.
+- `sendMagicLink()` (kept name for compat) → `signInWithOtp({ email })`, which sends Supabase's normal auth email.
+- `verifyOtpCode(email, token)` accepts a pasted confirmation URL, PKCE `?code=` URL, raw token hash, or email token and verifies it inside the requesting PWA context.
+- `main.js` auth prompt flow: email → send auth email → paste confirmation link/token → verify → reload.
 
-This is PWA-safe for all devices, including iPhone Home Screen PWAs.
+Default Supabase confirmation links work; custom token templates are optional. The important invariant is that verification happens inside the app context.
 
 ### Defense: CSP + credential stripping
 

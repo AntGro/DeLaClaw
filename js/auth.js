@@ -1,19 +1,19 @@
 // ===================================================================
-// AUTH MODULE — Supabase 6-digit OTP code authentication
+// AUTH MODULE — Supabase email authentication
 // ===================================================================
 //
-// D+E hybrid: the project owner (A) authenticates via 6-digit code to
+// D+E hybrid: the project owner (A) authenticates by email to
 // protect personal data. Group members (B) never authenticate — they
 // use bearer tokens via RPC functions.
 //
-// Auth flow (code-only, PWA-safe):
-//   1. A enters email → signInWithOtp() sends 6-digit code
-//   2. A enters code in same PWA context → verifyOtp({ email, token })
+// Auth flow (PWA-safe):
+//   1. A enters email → signInWithOtp() sends a Supabase auth email
+//   2. A pastes the confirmation link or token in the same PWA context
 //   3. Session stored in localStorage → auto-refreshes silently
 //   4. On first auth, claimOwnership() stamps all existing rows
 //
-// Why code-only: iOS PWA + Gmail opens magic links in Chrome, losing
-// the session (isolated storage). 6-digit code stays inside the PWA.
+// Why paste-to-verify: iOS PWA + Gmail can open links outside the
+// standalone app, losing the session to isolated browser storage.
 //
 // Re-auth only needed if: localStorage cleared, new browser/device,
 // or refresh token explicitly revoked.
@@ -54,13 +54,13 @@ export async function initAuth(adapter) {
 }
 
 /**
- * Send a 6-digit verification code to the given email.
+ * Send a Supabase auth email to the given address.
  * Uses built-in Supabase SMTP (2 emails/hr — fine since only the
  * owner authenticates, once per device).
  *
- * Email template must contain {{ .Token }} (code-only). Do NOT include
- * {{ .ConfirmationURL }} — we no longer use magic links to avoid
- * iOS PWA Chrome isolation issues.
+ * Default Supabase confirmation links are supported. Custom templates
+ * may use a token, as long as the pasted email content can be verified
+ * inside the app.
  *
  * @param {Object} adapter
  * @param {string} email
@@ -71,8 +71,8 @@ export async function sendMagicLink(adapter, email) {
   const { error } = await client.auth.signInWithOtp({
     email,
     options: {
-      // No emailRedirectTo needed for code-only, but keep origin for
-      // fallback if template still contains a link.
+      // No explicit emailRedirectTo; the project Site URL controls the
+      // default redirect target for confirmation links.
       shouldCreateUser: true,
     },
   });
@@ -80,15 +80,15 @@ export async function sendMagicLink(adapter, email) {
 }
 
 /**
- * Verify a 6-digit OTP code inside the current browser context.
+ * Verify pasted email auth content inside the current browser context.
  * Accepts:
- *  - 6-digit code (email OTP)
+ *  - email token
  *  - full magic-link URL (https://xxx.supabase.co/auth/v1/verify?token=...&type=...)
  *  - redirected URL with ?code=... (PKCE)
  *
  * @param {Object} adapter
  * @param {string} email
- * @param {string} token — 6-digit code from email OR full verify URL
+ * @param {string} token — email token OR full verify URL
  * @returns {Promise<{user: Object|null, error: Object|null}>}
  */
 export async function verifyOtpCode(adapter, email, token) {

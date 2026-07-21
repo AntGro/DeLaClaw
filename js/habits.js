@@ -902,9 +902,6 @@ function formatHabitRelative(d) {
 function initHabitModals() {
   const app = document.getElementById('app');
 
-  // Re-render shared habits when sharing data changes
-  document.addEventListener('sharing-changed', () => syncSharedHabits());
-
   // Add Habit Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'addHabitModal';
@@ -2044,7 +2041,16 @@ async function _doSyncSharedHabits() {
   if (!state.sharing || !state.db?.connected) return;
 
   const sharedHabits = state.sharing.getAllSharedHabits();
-  const localShared = (state.allHabits || []).filter(h => h.shared_id);
+  // Read local pointers from DB so startup sync works before refreshHabits()
+  // has populated state.allHabits.
+  let localShared = [];
+  try {
+    const rows = await fetchAll(() => state.db.from('habits').select('id,shared_id,shared_group_id'));
+    localShared = (rows || []).filter(h => h.shared_id);
+  } catch (e) {
+    console.warn('syncSharedHabits: failed to load local pointers', e);
+    localShared = (state.allHabits || []).filter(h => h.shared_id);
+  }
   const localBySharedId = new Map(localShared.map(h => [h.shared_id, h]));
   const driveSharedIds = new Set(sharedHabits.map(h => h.id));
 
@@ -2083,7 +2089,7 @@ async function _doSyncSharedHabits() {
 
 window.syncSharedHabits = syncSharedHabits;
 
-export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, initHabitHoverDelay, isStructuredRule, STRUCTURED_PREFIXES };
+export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, initHabitHoverDelay, isStructuredRule, STRUCTURED_PREFIXES, syncSharedHabits };
 
 window.setHabitFilter = setHabitFilter;
 window.openAddHabitModal = openAddHabitModal;

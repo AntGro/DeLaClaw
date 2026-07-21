@@ -13,12 +13,12 @@ import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
 import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
-import { refreshTodos, renderTodos, getTodoCounts, initTodoModals } from './todos.js';
-import { refreshHabits, renderHabits, initHabitModals } from './habits.js';
+import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
+import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
 import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthdays.js';
 import { refreshVestiaire, renderVestiaire, initVestiaireModals } from './vestiaire.js';
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
-import { refreshLists, renderLists, initListModals } from './lists.js';
+import { refreshLists, renderLists, initListModals, syncSharedListItems } from './lists.js';
 import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
 import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
@@ -1385,6 +1385,22 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   state.supabaseUrl = url;
   state.supabaseKey = key;
 
+  let initialSharingLoad = Promise.resolve();
+  const loadInitialSharing = (label = 'sharing') => {
+    if (!state.sharing?.loadAll) {
+      initialSharingLoad = Promise.resolve();
+      return initialSharingLoad;
+    }
+    initialSharingLoad = state.sharing.loadAll()
+      .catch(e => console.warn(`${label} loadAll:`, e));
+    return initialSharingLoad;
+  };
+  const loadSharingAndNotify = (label = 'sharing') => {
+    const p = loadInitialSharing(label);
+    p.then(() => document.dispatchEvent(new CustomEvent('sharing-changed')));
+    return p;
+  };
+
   // For demo mode, resolve the chooser BEFORE any state changes.
   // If the user cancels, nothing was modified — clean exit.
   let demoData = null;
@@ -1527,9 +1543,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
                 supabaseUrl: url,
                 anonKey: key,
               });
-              state.sharing.loadAll().then(() => {
-                document.dispatchEvent(new CustomEvent('sharing-changed'));
-              }).catch(e => console.warn('sharing loadAll:', e));
+              loadSharingAndNotify('sharing');
               state.sharing.startPolling();
               state.sharing.onUpdate(() => {
                 document.dispatchEvent(new CustomEvent('sharing-changed'));
@@ -1684,9 +1698,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
           openJoinPicker: (folderId) => state.driveAdapter.openSharedFolderPicker(folderId),
         },
       });
-      state.sharing.loadAll().then(() => {
-        document.dispatchEvent(new CustomEvent('sharing-changed'));
-      }).catch(e => console.warn('sharing loadAll:', e));
+      loadInitialSharing('sharing');
       state.sharing.startPolling();
       state.sharing.onUpdate(() => {
         document.dispatchEvent(new CustomEvent('sharing-changed'));
@@ -1707,9 +1719,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
         supabaseUrl: url,
         anonKey: key,
       });
-      state.sharing.loadAll().then(() => {
-        document.dispatchEvent(new CustomEvent('sharing-changed'));
-      }).catch(e => console.warn('supabase sharing loadAll:', e));
+      loadInitialSharing('supabase sharing');
       state.sharing.startPolling();
       state.sharing.onUpdate(() => {
         document.dispatchEvent(new CustomEvent('sharing-changed'));
@@ -1722,12 +1732,18 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   // Always update sharing nav visibility (even if sharing init failed or was skipped)
   updateSharingNavVisibility();
 
+  // Ensure shared groups/items are loaded before the first feature refresh.
+  // Otherwise local shared pointers render as blank rows until the next poll.
+  await initialSharingLoad;
+
   // Initialize TODOs
   initTodoModals();
+  if (state.sharing) await syncSharedTodos();
   await refreshTodos();
 
   // Initialize Habits
   initHabitModals();
+  if (state.sharing) await syncSharedHabits();
   await refreshHabits();
 
   // Initialize Birthdays
@@ -1744,6 +1760,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   // Initialize Lists
   initListModals();
+  if (state.sharing) await syncSharedListItems();
   await refreshLists();
 
   // Re-render Welcome now that all data (birthdays, habits, flashcards…) is loaded.
@@ -1756,10 +1773,20 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   markLastUpdated();
 
   // Listen for sharing updates (Drive sharing module polls and fires sharing-changed)
-  document.addEventListener('sharing-changed', () => {
-    refreshTodos().then(renderTodos);
-    refreshHabits().then(renderHabits);
-    refreshLists().then(renderLists);
+  document.addEventListener('sharing-changed', async () => {
+    try {
+      await syncSharedTodos();
+      await refreshTodos();
+      renderTodos();
+      await syncSharedHabits();
+      await refreshHabits();
+      renderHabits();
+      await syncSharedListItems();
+      await refreshLists();
+      renderLists();
+    } catch (e) {
+      console.warn('sharing refresh:', e);
+    }
     // Re-render sharing pane if it's currently visible
     const sharingPane = document.getElementById('settingsPane-sharing');
     if (sharingPane?.classList.contains('active')) renderSharingPane();

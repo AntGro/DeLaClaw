@@ -187,8 +187,59 @@ test('All named imports resolve to exports in target files', () => {
   }
 });
 
+
 // ===================================================================
-// 5. Default imports resolve
+// 5. Sharing startup sync waits for loaded shared data
+// ===================================================================
+test('Sharing startup sync waits for loadAll before first feature refresh', () => {
+  const main = jsFiles['main.js'];
+  assert(main.includes('let initialSharingLoad = Promise.resolve()'),
+    'main.js must track the initial sharing load promise');
+  assert(main.indexOf('await initialSharingLoad') !== -1,
+    'main.js must await initialSharingLoad before initial feature refreshes');
+  assert(main.indexOf('await initialSharingLoad') < main.indexOf('await refreshTodos()'),
+    'main.js must await sharing load before the first refreshTodos()');
+  assert(main.includes('if (state.sharing) await syncSharedTodos();\n  await refreshTodos();'),
+    'TODO startup must sync shared pointers before refreshTodos()');
+  assert(main.includes('if (state.sharing) await syncSharedHabits();\n  await refreshHabits();'),
+    'Habit startup must sync shared pointers before refreshHabits()');
+  assert(main.includes('if (state.sharing) await syncSharedListItems();\n  await refreshLists();'),
+    'List startup must sync shared pointers before refreshLists()');
+});
+
+test('Sharing refresh handler centralizes sync before render', () => {
+  const main = jsFiles['main.js'];
+  const handlerIdx = main.indexOf("document.addEventListener('sharing-changed', async () =>");
+  assert(handlerIdx !== -1, 'main.js must own a single async sharing-changed handler');
+  const handler = main.slice(handlerIdx, main.indexOf('  // Show demo banner', handlerIdx));
+  for (const seq of [
+    ['syncSharedTodos', 'refreshTodos', 'renderTodos'],
+    ['syncSharedHabits', 'refreshHabits', 'renderHabits'],
+    ['syncSharedListItems', 'refreshLists', 'renderLists'],
+  ]) {
+    const positions = seq.map(name => handler.indexOf(name));
+    assert(positions.every(pos => pos !== -1), `sharing handler missing ${seq.join(' / ')}`);
+    assert(positions[0] < positions[1] && positions[1] < positions[2],
+      `sharing handler must run ${seq.join(' -> ')}`);
+  }
+  assert(!jsFiles['todos.js'].includes("document.addEventListener('sharing-changed'"),
+    'todos.js must not register its own sharing-changed listener');
+  assert(!jsFiles['habits.js'].includes("document.addEventListener('sharing-changed'"),
+    'habits.js must not register its own sharing-changed listener');
+  assert(!jsFiles['lists.js'].includes("document.addEventListener('sharing-changed'"),
+    'lists.js must not register its own sharing-changed listener');
+});
+
+test('Shared TODO sync reads local pointers from DB, not startup cache', () => {
+  const todos = jsFiles['todos.js'];
+  assert(todos.includes("state.db.from('todos').select('id,shared_id,shared_group_id')"),
+    'syncSharedTodos must load local shared pointers from the DB');
+  assert(!todos.includes('const localShared = allTodos.filter(t => t.shared_id)'),
+    'syncSharedTodos must not depend on allTodos cache at startup');
+});
+
+// ===================================================================
+// 6. Default imports resolve
 // ===================================================================
 test('Default imports resolve to default exports', () => {
   for (const [name, content] of Object.entries(jsFiles)) {

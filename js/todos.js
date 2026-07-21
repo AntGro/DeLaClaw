@@ -924,9 +924,6 @@ async function editTodoInline(id, itemEl) {
 function initTodoModals() {
   const app = document.getElementById('app');
 
-  // Re-render shared TODOs when sharing data changes (poll, join, etc.)
-  document.addEventListener('sharing-changed', () => syncSharedTodos());
-
   // Snooze Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'snoozeModal';
@@ -1245,8 +1242,16 @@ async function _doSyncSharedTodos() {
   if (!state.sharing || !state.db?.connected) return;
 
   const allShared = state.sharing.getAllSharedItems().filter(i => i.item_type === 'todo');
-  // Index local shared todos by shared_id
-  const localShared = allTodos.filter(t => t.shared_id);
+  // Index local shared todos by shared_id from DB, not the in-memory allTodos cache.
+  // Startup sync runs before refreshTodos(), so the cache may still be empty.
+  let localShared = [];
+  try {
+    const rows = await fetchAll(() => state.db.from('todos').select('id,shared_id,shared_group_id'));
+    localShared = (rows || []).filter(t => t.shared_id);
+  } catch (e) {
+    console.warn('syncSharedTodos: failed to load local pointers', e);
+    localShared = (allTodos || []).filter(t => t.shared_id);
+  }
   const localBySharedId = new Map(localShared.map(t => [t.shared_id, t]));
 
   // Track which shared_ids still exist on Drive (for deletion detection)
@@ -1340,7 +1345,7 @@ async function shareTodoFromAdd(btn) {
 
 window.shareTodoFromAdd = shareTodoFromAdd;
 
-export { refreshTodos, renderTodos, getCategoryColor, getCategoryColors, setCategoryColor, loadTodoCategoryMeta, initTodoModals, getTodoCounts, getTodos };
+export { refreshTodos, renderTodos, getCategoryColor, getCategoryColors, setCategoryColor, loadTodoCategoryMeta, initTodoModals, getTodoCounts, getTodos, syncSharedTodos };
 
 window.setTodoFilter = setTodoFilter;
 window.addTodoToCategory = addTodoToCategory;

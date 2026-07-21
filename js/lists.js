@@ -585,12 +585,6 @@ async function deleteListItem(id) {
 function initListModals() {
   const app = document.getElementById('app');
 
-  // Re-render shared list items when sharing data changes
-  document.addEventListener('sharing-changed', async () => {
-    await syncSharedListItems();
-    await refreshLists();
-  });
-
   // Add List Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay';
@@ -765,14 +759,34 @@ async function _doSyncSharedListItems() {
 
   const existingSharedIds = new Set(localPointers.map(p => p.shared_id));
 
+  let localLists = state.allLists || [];
+  if (localLists.length === 0) {
+    try {
+      localLists = await fetchAll(() => state.db
+        .from('lists')
+        .select('id,name,sort_order')
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true }));
+    } catch { localLists = []; }
+  }
+
+  let localItemsForOrder = state.allListItems || [];
+  if (localItemsForOrder.length === 0) {
+    try {
+      localItemsForOrder = await fetchAll(() => state.db
+        .from('list_items')
+        .select('id,list_id,sort_order'));
+    } catch { localItemsForOrder = []; }
+  }
+
   // Create pointers for new shared items
   for (const sh of sharedItems) {
     if (existingSharedIds.has(sh.id)) continue;
 
     // Find the best local list — match by list_name in payload, or use first list
     const listName = sh.payload?.list_name || '';
-    let targetList = (state.allLists || []).find(l => l.name === listName);
-    if (!targetList) targetList = (state.allLists || [])[0];
+    let targetList = localLists.find(l => l.name === listName);
+    if (!targetList) targetList = localLists[0];
     if (!targetList) continue; // No lists exist to place item into
 
     // DB check to prevent race duplicates
@@ -784,7 +798,7 @@ async function _doSyncSharedListItems() {
       if (existing && existing.length > 0) continue;
     } catch { /* proceed */ }
 
-    const items = (state.allListItems || []).filter(i => i.list_id === targetList.id);
+    const items = localItemsForOrder.filter(i => i.list_id === targetList.id);
     const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
 
     await state.db.from('list_items').insert({

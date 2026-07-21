@@ -7,7 +7,7 @@ import state, { ARCHIVED_PROJECTS_KEY } from './state.js';
 import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText } from './item-utils.js';
 import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, refreshHabits } from './habits.js';
-import { getCategoryColor, getTodos, refreshTodos } from './todos.js';
+import { getCategoryColor, getTodos } from './todos.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
 
@@ -115,28 +115,16 @@ document.addEventListener('habits-changed', () => {
 
 // ── Welcome-specific TODO action handlers ──
 
-async function welcomeToggleTodo(id, done) {
-  const { error } = await state.db.from('todos').update({ done }).eq('id', id);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-  showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
-  await refreshTodos();
-  refreshWelcome();
-  renderWelcome();
+function welcomeToggleTodo(id, done, btnEl) {
+  if (typeof window.toggleTodo === 'function') {
+    return window.toggleTodo(id, done, btnEl);
+  }
 }
 
-async function welcomeDeleteTodo(id) {
-  showDeleteConfirm(
-    t('common.delete'),
-    'Delete this TODO? This cannot be undone.',
-    async () => {
-      const { error } = await state.db.from('todos').delete().eq('id', id);
-      if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
-      showToast(t('toast.deleted'), 'info');
-      await refreshTodos();
-      refreshWelcome();
-      renderWelcome();
-    }
-  );
+function welcomeDeleteTodo(id) {
+  if (typeof window.deleteTodo === 'function') {
+    return window.deleteTodo(id);
+  }
 }
 
 const W_PRIORITY_LEVELS = [
@@ -188,15 +176,11 @@ function welcomeClosePriorityPicker() {
   if (el) el.remove();
 }
 
-async function welcomeSetPriority(id, level) {
+function welcomeSetPriority(id, level) {
   welcomeClosePriorityPicker();
-  const { error } = await state.db.from('todos').update({ priority: level }).eq('id', id);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-  const label = t(`todos.priority_${level}`) || level;
-  showToast(label, 'success');
-  await refreshTodos();
-  refreshWelcome();
-  renderWelcome();
+  if (typeof window.setTodoPriority === 'function') {
+    return window.setTodoPriority(id, level);
+  }
 }
 
 function welcomeSnooze(id) {

@@ -627,6 +627,56 @@ test('Welcome TODO items render shared group badge like TODO page', () => {
 });
 
 // ===================================================================
+// 24c. Welcome TODO actions delegate to canonical TODO handlers (shared-aware)
+// ===================================================================
+test('Welcome TODO actions delegate to canonical shared-aware handlers', () => {
+  const welcome = jsFiles['welcome.js'];
+  const getFn = (name) => {
+    const match = welcome.match(new RegExp(`function\\s+${name}\\s*\\(([^)]*)\\)\\s*\\{([\\s\\S]*?)\\n\\}`));
+    assert(match, `welcome.js: ${name} function not found`);
+    return { params: match[1], body: match[2] };
+  };
+
+  const toggle = getFn('welcomeToggleTodo');
+  assert(toggle.params.includes('btnEl'),
+    'welcome.js: welcomeToggleTodo must accept btnEl so canonical toggleTodo can apply its pending UI guard');
+  assert(toggle.body.includes('window.toggleTodo') && toggle.body.includes('btnEl'),
+    'welcome.js: welcomeToggleTodo must delegate to window.toggleTodo(id, done, btnEl)');
+
+  const del = getFn('welcomeDeleteTodo');
+  assert(del.body.includes('window.deleteTodo'),
+    'welcome.js: welcomeDeleteTodo must delegate to window.deleteTodo so shared TODO deletes propagate');
+
+  const priority = getFn('welcomeSetPriority');
+  assert(priority.body.includes('welcomeClosePriorityPicker()'),
+    'welcome.js: welcomeSetPriority must close the welcome priority picker before delegating');
+  assert(priority.body.includes('window.setTodoPriority'),
+    'welcome.js: welcomeSetPriority must delegate to window.setTodoPriority so shared TODO priority updates propagate');
+
+  for (const [name, fn] of Object.entries({ welcomeToggleTodo: toggle, welcomeDeleteTodo: del, welcomeSetPriority: priority })) {
+    assert(!/state\.db\.from\(['"]todos['"]\)\.update/.test(fn.body),
+      `welcome.js: ${name} must not update todos locally; use canonical shared-aware handler`);
+    assert(!/state\.db\.from\(['"]todos['"]\)\.delete/.test(fn.body),
+      `welcome.js: ${name} must not delete todos locally; use canonical shared-aware handler`);
+    assert(!fn.body.includes('refreshTodos()'),
+      `welcome.js: ${name} must not manually refresh todos; canonical handler dispatches todos-changed`);
+  }
+});
+
+// ===================================================================
+// 24d. Welcome TODO toggle delegation passes the clicked button element
+// ===================================================================
+test('Welcome TODO toggle delegation passes clicked button element', () => {
+  const delegation = jsFiles['delegation.js'];
+  const actionMatch = delegation.match(/case 'welcome-toggle-todo':[\s\S]*?break;/);
+  assert(actionMatch, 'delegation.js: welcome-toggle-todo action not found');
+  assert(actionMatch[0].includes("callWindow('welcomeToggleTodo'"),
+    'delegation.js: welcome-toggle-todo must call welcomeToggleTodo');
+  assert(/wDone\s*,\s*el/.test(actionMatch[0]),
+    'delegation.js: welcome-toggle-todo must pass el through for canonical toggleTodo pending UI guard');
+});
+
+// ===================================================================
 // 25. edit*Inline functions accept optional itemEl parameter (scoped querySelector)
 // ===================================================================
 test('edit*Inline functions accept optional itemEl parameter for scoped querySelector', () => {

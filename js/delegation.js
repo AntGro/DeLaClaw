@@ -278,7 +278,7 @@
       case 'sharing-complete-submit': callWindow('sharingCompleteSubmit', [el.dataset.groupId, el.dataset.itemId]); break;
       case 'welcome-set-priority': e.stopPropagation(); callWindow('welcomeSetPriority', [el.dataset.todoId||getId(el), el.dataset.priority]); break;
       case 'welcome-open-priority-picker': callWindow('welcomeOpenPriorityPicker', [el.dataset.todoId||getId(el), e, el]); break;
-      case 'welcome-toggle-todo': { var wDone = el.dataset.done === 'true'; callWindow('welcomeToggleTodo', [el.dataset.todoId||getId(el), wDone]); } break;
+      case 'welcome-toggle-todo': { var wDone = el.dataset.done === 'true'; callWindow('welcomeToggleTodo', [el.dataset.todoId||getId(el), wDone, el]); } break;
       case 'welcome-snooze': callWindow('welcomeSnooze', [el.dataset.todoId||getId(el)]); break;
       case 'welcome-delete-todo': callWindow('welcomeDeleteTodo', [el.dataset.todoId||getId(el)]); break;
       case 'welcome-mark-habit-done': callWindow('welcomeMarkHabitDone', [el.dataset.habitId||getId(el), el]); break;

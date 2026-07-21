@@ -228,7 +228,7 @@ export async function renderSharingPane() {
       html += `<div class="sharing-member">
           ${avatarDot(member, 22)}
           <span class="sharing-member-email">${esc(member.email)}${statusHtml}</span>
-          ${canCopyCode ? `<button class="sharing-action-btn" data-action="sharing-copy-member-code" data-group-id="${esc(group.id)}" data-token="${esc(member.token)}" title="${t('sharing.copy_code')}" style="font-size:0.75rem;padding:2px 6px">${lucideIcon('key', 12)}</button>` : ''}
+          ${canCopyCode ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-copy-member-code" data-group-id="${esc(group.id)}" data-token="${esc(member.token)}" title="${t('sharing.copy_code')}" aria-label="${t('sharing.copy_code')}">${lucideIcon('key', 12)}</button>` : ''}
           ${canRemove ? `<button class="sharing-remove-btn" data-action="sharing-remove-member" data-group-id="${esc(group.id)}" data-email="${esc(member.email)}" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
         </div>`;
     }

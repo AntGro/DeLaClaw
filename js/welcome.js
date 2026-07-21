@@ -4,9 +4,9 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { ARCHIVED_PROJECTS_KEY } from './state.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore } from './utils.js';
+import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText } from './item-utils.js';
-import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, refreshHabits } from './habits.js';
+import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount } from './habits.js';
 import { getCategoryColor, getTodos } from './todos.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
@@ -286,48 +286,16 @@ function initWelcomeFocusHover() {
 // WELCOME — Habit action handlers (mirrors Habits page actions)
 // ===================================================================
 
-async function welcomeMarkHabitDone(habitId, btnEl) {
-  if (!habitId) return;
-  // Per-id guard
-  const pendingSet = window._pendingWelcomeHabitDones || (window._pendingWelcomeHabitDones = new Set());
-  if (pendingSet.has(habitId)) return;
-  pendingSet.add(habitId);
-  const sel = `button.habit-done-btn[data-habit-id="${CSS && CSS.escape ? CSS.escape(habitId) : habitId.replace(/"/g, '\\"')}"]`;
-  const allBtns = document.querySelectorAll(sel);
-  const targetBtn = btnEl instanceof HTMLElement ? btnEl : (allBtns[0] || null);
-  const toToggle = new Set([...allBtns, ...(targetBtn ? [targetBtn] : [])]);
-  toToggle.forEach(b => { b.disabled = true; b.classList.add('saving','is-pending'); b.setAttribute('aria-busy','true'); });
-  try {
-    const habit = (state.allHabits || []).find(c => c.id === habitId);
-    const now = new Date().toISOString();
-    const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: now });
-    if (error) { showToast(t('habits.failed_record'), 'error'); return; }
-    if (habit) await updateHabitNextDue(habitId, habit.frequency_rule, now);
-    showToast(t('habits.habit_done'), 'success');
-    await refreshHabits();
-    refreshWelcome();
-    renderWelcome();
-  } finally {
-    pendingSet.delete(habitId);
-    toToggle.forEach(b => { b.disabled = false; b.classList.remove('saving','is-pending'); b.removeAttribute('aria-busy'); });
+function welcomeMarkHabitDone(habitId, btnEl) {
+  if (typeof window.markHabitDone === 'function') {
+    return window.markHabitDone(habitId, btnEl);
   }
 }
 
-async function welcomeDeleteHabit(habitId) {
-  const habit = (state.allHabits || []).find(c => c.id === habitId);
-  if (!habit) return;
-  showDeleteConfirm(
-    t('common.delete'),
-    `Delete "${habit.name}"? All completion history will be lost.`,
-    async () => {
-      const { error } = await state.db.from('habits').delete().eq('id', habitId);
-      if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
-      showToast(t('habits.habit_deleted'), 'info');
-      await refreshHabits();
-      refreshWelcome();
-      renderWelcome();
-    }
-  );
+function welcomeDeleteHabit(habitId) {
+  if (typeof window.deleteHabit === 'function') {
+    return window.deleteHabit(habitId);
+  }
 }
 
 function welcomeOpenHabitHistory(habitId) {
@@ -349,12 +317,19 @@ function renderFocusHabitItem(habit) {
 
   const lastDoneStr = lastDone
     ? `${t('habits.last_done')}: ${lastDone.toLocaleDateString([], { month: 'short', day: 'numeric' })} (${formatHabitRelative(lastDone)})`
-    : 'Never done';
+    : t('habits.never_done');
+
+  const isShared = habit.shared_id && habit.shared_group_id;
+  let sharedHtml = '';
+  if (isShared && state.sharing) {
+    const group = state.sharing.getAllGroups().find(g => g.id === habit.shared_group_id);
+    sharedHtml = sharedBadge(group?.name || '');
+  }
 
   return `<div class="bucket-item habit-item habit-status-${status}" data-habit-id="${habit.id}">
     <div class="habit-row">
       <div class="habit-info">
-        <span class="habit-name">${esc(habit.name)}</span>
+        <span class="habit-name">${esc(habit.name)}</span>${sharedHtml}
         <span class="habit-frequency">${esc(formatFrequency(habit.frequency_rule))}</span>
       </div>
       <div class="habit-actions">

@@ -1143,8 +1143,28 @@ function editHabitInline(habitId, itemEl) {
         if (extra.category !== (habit.category || 'General')) updates.category = extra.category;
       }
       if (Object.keys(updates).length > 0) {
-        const { error } = await state.db.from('habits').update(updates).eq('id', habitId);
-        if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+        if (habit.shared_id && habit.shared_group_id && state.sharing) {
+          if (updates.category !== undefined) {
+            const { error } = await state.db.from('habits').update({ category: updates.category }).eq('id', habitId);
+            if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+          }
+          const sharedUpdates = {};
+          if (updates.name !== undefined) sharedUpdates.name = updates.name;
+          if (updates.frequency_rule !== undefined) sharedUpdates.frequency_rule = updates.frequency_rule;
+          if (updates.category !== undefined) sharedUpdates.creator_category = updates.category;
+          try {
+            if (Object.keys(sharedUpdates).length > 0) {
+              await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, sharedUpdates);
+            }
+          } catch (e) {
+            console.warn('Failed to update shared habit:', e);
+            showToast(t('toast.update_failed'), 'error');
+            return;
+          }
+        } else {
+          const { error } = await state.db.from('habits').update(updates).eq('id', habitId);
+          if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+        }
         if (updates.frequency_rule) {
           const lastDone = getHabitLastDone(habitId);
           await updateHabitNextDue(habitId, updates.frequency_rule, lastDone);
@@ -1220,7 +1240,7 @@ async function saveEditHabit() {
         creator_category: cat,
       });
     } catch (e) {
-      console.warn('Failed to update shared habit on Drive:', e);
+      console.warn('Failed to update shared habit:', e);
       showToast(t('toast.update_failed'), 'error');
       return;
     }

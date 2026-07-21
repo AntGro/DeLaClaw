@@ -593,6 +593,68 @@ test('Welcome habit edit button calls window.editHabitInline (not modal)', () =>
 });
 
 // ===================================================================
+// 23c. Welcome habit items render shared group badge like Habits page
+// ===================================================================
+test('Welcome habit items render shared group badge like Habits page', () => {
+  const welcome = jsFiles['welcome.js'];
+  assert(welcome.includes("import { sharedBadge } from './sharing-ui.js';"),
+    'welcome.js: must import sharedBadge from sharing-ui.js');
+  const fnMatch = welcome.match(/function\s+renderFocusHabitItem\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+  assert(fnMatch, 'welcome.js: renderFocusHabitItem not found');
+  const fn = fnMatch[1];
+  assert(fn.includes('habit.shared_id') && fn.includes('habit.shared_group_id'),
+    'welcome.js: focus habit rendering must detect shared habit pointers');
+  assert(fn.includes('state.sharing.getAllGroups()') && fn.includes('sharedBadge'),
+    'welcome.js: focus habit rendering must use sharedBadge with the sharing group name');
+  assert(fn.includes('</span>${sharedHtml}') || fn.includes('</span>${ sharedHtml }'),
+    'welcome.js: focus habit name row must append the shared badge beside the habit name');
+});
+
+// ===================================================================
+// 23d. Welcome habit actions delegate to canonical Habit handlers (shared-aware)
+// ===================================================================
+test('Welcome habit actions delegate to canonical shared-aware handlers', () => {
+  const welcome = jsFiles['welcome.js'];
+  const getFn = (name) => {
+    const match = welcome.match(new RegExp(`function\\s+${name}\\s*\\(([^)]*)\\)\\s*\\{([\\s\\S]*?)\\n\\}`));
+    assert(match, `welcome.js: ${name} function not found`);
+    return { params: match[1], body: match[2] };
+  };
+
+  const done = getFn('welcomeMarkHabitDone');
+  assert(done.params.includes('btnEl'),
+    'welcome.js: welcomeMarkHabitDone must accept btnEl so canonical markHabitDone can apply its pending UI guard');
+  assert(done.body.includes('window.markHabitDone') && done.body.includes('btnEl'),
+    'welcome.js: welcomeMarkHabitDone must delegate to window.markHabitDone(habitId, btnEl)');
+
+  const del = getFn('welcomeDeleteHabit');
+  assert(del.body.includes('window.deleteHabit'),
+    'welcome.js: welcomeDeleteHabit must delegate to window.deleteHabit so shared habit deletes propagate');
+
+  for (const [name, fn] of Object.entries({ welcomeMarkHabitDone: done, welcomeDeleteHabit: del })) {
+    assert(!/state\.db\.from\(['"]habit_completions['"]\)\.insert/.test(fn.body),
+      `welcome.js: ${name} must not insert local completions; use canonical shared-aware handler`);
+    assert(!/state\.db\.from\(['"]habits['"]\)\.delete/.test(fn.body),
+      `welcome.js: ${name} must not delete habits locally; use canonical shared-aware handler`);
+    assert(!fn.body.includes('refreshHabits()'),
+      `welcome.js: ${name} must not manually refresh habits; canonical handler dispatches habits-changed`);
+  }
+});
+
+// ===================================================================
+// 23e. Welcome habit done delegation passes the clicked button element
+// ===================================================================
+test('Welcome habit done delegation passes clicked button element', () => {
+  const delegation = jsFiles['delegation.js'];
+  const actionMatch = delegation.match(/case 'welcome-mark-habit-done':[\s\S]*?break;/);
+  assert(actionMatch, 'delegation.js: welcome-mark-habit-done action not found');
+  assert(actionMatch[0].includes("callWindow('welcomeMarkHabitDone'"),
+    'delegation.js: welcome-mark-habit-done must call welcomeMarkHabitDone');
+  assert(/habitId\|\|getId\(el\),\s*el/.test(actionMatch[0]),
+    'delegation.js: welcome-mark-habit-done must pass el through for canonical markHabitDone pending UI guard');
+});
+
+// ===================================================================
 // 24. Welcome TODO dblclick calls canonical window.editTodoInline (not a local duplicate)
 // ===================================================================
 test('Welcome TODO dblclick calls canonical window.editTodoInline', () => {
@@ -693,6 +755,30 @@ test('edit*Inline functions accept optional itemEl parameter for scoped querySel
   assert(todoMatch, 'todos.js: editTodoInline function not found');
   assert(todoMatch[1].includes('itemEl'),
     'todos.js: editTodoInline must accept itemEl parameter for scoped querySelector');
+});
+
+// ===================================================================
+// 25b. editHabitInline updates shared habits through sharing API
+// ===================================================================
+test('editHabitInline updates shared habits through sharing API', () => {
+  const habits = jsFiles['habits.js'];
+  const start = habits.indexOf('function editHabitInline');
+  const end = habits.indexOf('function openEditHabitModal', start);
+  assert(start !== -1 && end !== -1, 'habits.js: editHabitInline block not found');
+  const fn = habits.slice(start, end);
+
+  assert(fn.includes('habit.shared_id') && fn.includes('habit.shared_group_id') && fn.includes('state.sharing'),
+    'habits.js: editHabitInline must detect shared habit pointers');
+  assert(fn.includes('state.sharing.updateSharedHabit'),
+    'habits.js: editHabitInline must update shared habits through updateSharedHabit');
+  assert(fn.includes('creator_category'),
+    'habits.js: editHabitInline must preserve shared habit creator_category when category changes');
+  assert(fn.includes("state.db.from('habits').update({ category: updates.category })"),
+    'habits.js: editHabitInline must update only the local category pointer for shared habits');
+
+  const sharedBranch = fn.slice(fn.indexOf('if (habit.shared_id'), fn.indexOf('} else {', fn.indexOf('if (habit.shared_id')));
+  assert(!/state\.db\.from\(['"]habits['"]\)\.update\(updates\)/.test(sharedBranch),
+    'habits.js: editHabitInline shared branch must not write the full updates object only to local DB');
 });
 
 // ===================================================================

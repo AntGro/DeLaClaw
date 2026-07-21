@@ -2,7 +2,7 @@
 // SHARING UI — Settings pane, share popovers, completion modal
 // ===================================================================
 //
-// Renders the sharing settings pane (groups, invite links, trusted
+// Renders the sharing settings pane (groups, invite codes, trusted
 // contacts) and provides helpers for share badges, share-to-group
 // popovers, and multi-assignee completion modals used by
 // todos.js, habits.js, lists.js.
@@ -12,14 +12,14 @@
 //
 // HYBRID MODEL:
 //   - Sharing is always available with Drive backend (no scope gate)
-//   - Groups + invite links work with drive.file scope
+//   - Groups + invite codes work with drive.file scope
 //   - Auto-discovery (trusted contacts) is optional (full drive scope)
-//   - Join via invite link uses Google Picker for drive.file access
+//   - Join via invite code uses Google Picker for drive.file access
 // ===================================================================
 
 import state, { STAY_CONNECTED_KEY } from './state.js';
-import { t, getLang } from './i18n.js';
-import { esc, escQ, showToast, showDeleteConfirm } from './utils.js';
+import { t } from './i18n.js';
+import { esc, showToast, showDeleteConfirm } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { LOGOS } from './backend-logos.js';
 import { decodeInviteEnvelope } from './sharing-envelope.js';
@@ -196,7 +196,8 @@ export async function renderSharingPane() {
     const itemCount = state.sharing.getItems(group.id).length;
     const memberStr = memberCount === 1 ? t('sharing.member') : t('sharing.members', memberCount);
     const itemStr = itemCount === 1 ? t('sharing.shared_item') : t('sharing.shared_items', itemCount);
-    const inviteLink = state.sharing.getInviteLink(group.id);
+    const inviteCode = isCreator ? state.sharing.getInviteLink(group.id) : null;
+    const invitePlaceholder = group.backendType === 'supabase' ? t('sharing.invite_name_placeholder') : t('sharing.invite_placeholder');
 
     html += `<div class="sharing-group-card">
       <div class="sharing-group-header">
@@ -206,7 +207,7 @@ export async function renderSharingPane() {
         </div>
         <div class="sharing-group-actions">
           ${group.folderId ? `<a class="sharing-action-btn sharing-drive-link" href="https://drive.google.com/drive/folders/${encodeURIComponent(group.folderId)}" target="_blank" rel="noopener" title="${t('sharing.open_drive_folder')}">${LOGOS.googledrive(14)} ${t('sharing.open_drive_folder')}</a>` : ''}
-          ${inviteLink && isCreator && group.backendType !== 'supabase' ? `<button class="sharing-action-btn sharing-copy-link-btn" data-action="sharing-copy-link" data-group-id="${esc(group.id)}" title="${t('sharing.copy_link')}">${lucideIcon('link', 14)} ${t('sharing.copy_link')}</button>` : ''}
+          ${inviteCode ? `<button class="sharing-action-btn sharing-copy-link-btn" data-action="sharing-copy-code" data-group-id="${esc(group.id)}" title="${t('sharing.copy_code')}">${lucideIcon('key', 14)} ${t('sharing.copy_code')}</button>` : ''}
           ${!isCreator ? (isJoined ? `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-unjoin-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}">${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>` : `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-leave-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}">${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>`) : ''}
         </div>
       </div>
@@ -223,18 +224,18 @@ export async function renderSharingPane() {
         : isCreatorMember ? ` <span class="sharing-member-creator">${lucideIcon('crown', 12)} ${t('sharing.creator')}</span>`
         : hasJoined ? ` <span class="sharing-member-joined">${lucideIcon('check', 12)}</span>`
         : ` <span class="sharing-member-pending">${t('sharing.pending')}</span>`;
-      const canCopyLink = isCreator && !isYou && !hasJoined && member.token && state.sharing.getMemberInviteLink;
+      const canCopyCode = isCreator && !isYou && !hasJoined && member.token && state.sharing.getMemberInviteLink;
       html += `<div class="sharing-member">
           ${avatarDot(member, 22)}
           <span class="sharing-member-email">${esc(member.email)}${statusHtml}</span>
-          ${canCopyLink ? `<button class="sharing-action-btn" data-action="sharing-copy-member-link" data-group-id="${esc(group.id)}" data-token="${esc(member.token)}" title="${t('sharing.copy_link')}" style="font-size:0.75rem;padding:2px 6px">${lucideIcon('link', 12)}</button>` : ''}
+          ${canCopyCode ? `<button class="sharing-action-btn" data-action="sharing-copy-member-code" data-group-id="${esc(group.id)}" data-token="${esc(member.token)}" title="${t('sharing.copy_code')}" style="font-size:0.75rem;padding:2px 6px">${lucideIcon('key', 12)}</button>` : ''}
           ${canRemove ? `<button class="sharing-remove-btn" data-action="sharing-remove-member" data-group-id="${esc(group.id)}" data-email="${esc(member.email)}" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
         </div>`;
     }
 
     html += `</div>
       ${isCreator ? `<div class="sharing-invite-row">
-        <input type="text" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${t('sharing.invite_name_placeholder')}" data-action="sharing-invite-on-enter" data-group-id="${esc(group.id)}">
+        <input type="text" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${invitePlaceholder}" data-action="sharing-invite-on-enter" data-group-id="${esc(group.id)}">
         <button class="sharing-invite-btn" data-action="sharing-invite" data-group-id="${esc(group.id)}">${lucideIcon('user-plus', 14)} ${t('sharing.invite')}</button>
       </div>` : ''}
       ${isCreator ? `<button class="sharing-delete-btn" data-action="sharing-delete-group" data-group-id="${esc(group.id)}">${lucideIcon('trash-2', 14)} ${t('sharing.delete_group')}</button>` : ''}
@@ -244,6 +245,7 @@ export async function renderSharingPane() {
   html += `</div>
     <div class="sharing-bottom-actions">
       <button class="sharing-action-btn" data-action="sharing-create-group">${lucideIcon('plus', 14)} ${t('sharing.create_group')}</button>
+      <button class="sharing-action-btn" data-action="sharing-open-join-code">${lucideIcon('log-in', 14)} ${t('sharing.join_group')}</button>
     </div>`;
 
   container.innerHTML = html;
@@ -286,35 +288,37 @@ async function sharingCreateGroupSubmit() {
   }
 }
 
-/** Show a modal with an invite link (after group creation or member invite). */
-function showInviteLinkModal(name, link, isNewGroup) {
+/** Show a modal with an invite code (after group creation or member invite). */
+function showInviteCodeModal(name, code, isNewGroup) {
+  const env = decodeInviteEnvelope(code);
+  const isSingleUse = env?.b !== 'googledrive';
   const title = isNewGroup ? t('sharing.group_created') : t('sharing.member_added');
   const hint = isNewGroup
-    ? t('sharing.invite_link_hint', name)
-    : t('sharing.member_link_hint', name);
-  // sec-003: warn that invite link is sensitive and single-use
-  const warn = `<p class="sharing-warning" style="margin-top:10px;font-size:0.82rem;color:var(--warn,#d97706);background:color-mix(in srgb,var(--warn,#d97706) 12%, transparent);border:1px solid color-mix(in srgb,var(--warn,#d97706) 30%, transparent);border-radius:8px;padding:8px 10px">${lucideIcon('shield-alert', 12)} ${t('sharing.invite_secret_warn') || 'Anyone with this single-use link can join — share privately.'}</p>`;
+    ? t('sharing.invite_code_hint', name)
+    : t('sharing.member_code_hint', name);
+  const warn = `<p class="sharing-warning" style="margin-top:10px;font-size:0.82rem;color:var(--warn,#d97706);background:color-mix(in srgb,var(--warn,#d97706) 12%, transparent);border:1px solid color-mix(in srgb,var(--warn,#d97706) 30%, transparent);border-radius:8px;padding:8px 10px">${lucideIcon('shield-alert', 12)} ${t(isSingleUse ? 'sharing.invite_secret_warn' : 'sharing.invite_drive_warn')}</p>`;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
-  overlay.id = 'sharingInviteLinkModal';
+  overlay.id = 'sharingInviteCodeModal';
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   overlay.innerHTML = `<div class="modal">
-    <h2>${lucideIcon('link', 20)} ${title}</h2>
+    <h2>${lucideIcon('key', 20)} ${title}</h2>
     <p>${hint}</p>
-    <div class="sharing-invite-link-box">
-      <input type="text" id="sharingInviteLinkInput" value="${esc(link)}" readonly data-action="select-all-on-click">
-      <button class="sharing-invite-btn" data-action="sharing-copy-link-value">${lucideIcon('copy', 14)} ${t('sharing.copy')}</button>
+    <div class="sharing-invite-link-box sharing-invite-code-box">
+      <textarea id="sharingInviteCodeInput" class="sharing-code-textarea" rows="4" readonly data-action="select-all-on-click">${esc(code)}</textarea>
+      <button class="sharing-invite-btn" data-action="sharing-copy-code-value">${lucideIcon('copy', 14)} ${t('sharing.copy')}</button>
     </div>
     ${warn}
     <div class="modal-actions">
-      <button class="modal-save" data-action="close-modal" data-modal-id="sharingInviteLinkModal">${t('common.close')}</button>
+      <button class="modal-save" data-action="close-modal" data-modal-id="sharingInviteCodeModal">${t('common.close')}</button>
     </div>
   </div>`;
   document.getElementById('app').appendChild(overlay);
+  setTimeout(() => document.getElementById('sharingInviteCodeInput')?.select(), 50);
 }
 
-function sharingCopyLinkValue() {
-  const input = document.getElementById('sharingInviteLinkInput');
+function sharingCopyCodeValue() {
+  const input = document.getElementById('sharingInviteCodeInput');
   if (input) {
     navigator.clipboard.writeText(input.value).then(() => {
       showToast(t('common.copied'), 'success');
@@ -322,26 +326,26 @@ function sharingCopyLinkValue() {
   }
 }
 
-async function sharingCopyLink(groupId) {
-  const link = state.sharing?.getInviteLink(groupId);
-  if (link) {
+async function sharingCopyCode(groupId) {
+  const code = state.sharing?.getInviteLink(groupId);
+  if (code) {
     try {
-      await navigator.clipboard.writeText(link);
+      await navigator.clipboard.writeText(code);
       showToast(t('common.copied'), 'success');
     } catch {
-      showInviteLinkModal('', link);
+      showInviteCodeModal('', code, true);
     }
   }
 }
 
-async function sharingCopyMemberLink(groupId, token) {
-  const link = state.sharing?.getMemberInviteLink?.(groupId, token);
-  if (link) {
+async function sharingCopyMemberCode(groupId, token) {
+  const code = state.sharing?.getMemberInviteLink?.(groupId, token);
+  if (code) {
     try {
-      await navigator.clipboard.writeText(link);
+      await navigator.clipboard.writeText(code);
       showToast(t('common.copied'), 'success');
     } catch {
-      showInviteLinkModal('', link);
+      showInviteCodeModal('', code);
     }
   }
 }
@@ -351,23 +355,24 @@ async function sharingInvite(groupId) {
   const name = input?.value.trim();
   if (!name) return;
   const btn = input?.nextElementSibling;
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+  if (btn?.disabled) return;
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; btn.setAttribute('aria-busy', 'true'); }
   try {
     const result = await state.sharing.inviteUser(groupId, name);
     input.value = '';
-    // Build per-member invite link with token
-    const memberLink = state.sharing.getMemberInviteLink
-      ? state.sharing.getMemberInviteLink(groupId, result.token)
-      : null;
+    const inviteCode = result?.inviteCode
+      || (result?.token && state.sharing.getMemberInviteLink ? state.sharing.getMemberInviteLink(groupId, result.token, result.expiresAt) : null)
+      || state.sharing.getInviteLink?.(groupId)
+      || null;
     renderSharingPane();
-    if (memberLink) {
-      showInviteLinkModal(name, memberLink);
+    if (inviteCode) {
+      showInviteCodeModal(name, inviteCode);
     } else {
       showToast(t('sharing.member_added'), 'success');
     }
   } catch (e) {
     showToast(e.message, 'error');
-    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.removeAttribute('aria-busy'); }
   }
 }
 
@@ -427,39 +432,61 @@ async function sharingDeleteGroup(groupId) {
   );
 }
 
-// ── Join via invite link (#join=<folderId>) ─────────────────────
+// ── Join via invite code ───────────────────────────────────────
 
-/** Handle the #join= hash, called from main.js after Drive init. */
-export async function handleJoinHash(folderId) {
-  if (!state.sharing) return;
+function showJoinCodeError(msg, errEl) {
+  if (errEl) {
+    errEl.textContent = msg;
+    errEl.style.display = '';
+  } else {
+    showToast(msg, 'error');
+  }
+}
 
-  // Envelope decode helper (no legacy)
-  const getGidFromRef = (ref) => {
-    const env = decodeInviteEnvelope(ref);
-    return env?.g || null;
-  };
+export async function handleJoinCode(rawCode, opts = {}) {
+  const errEl = opts.errorEl || null;
+  const code = String(rawCode || '').trim();
+  const env = decodeInviteEnvelope(code);
+  if (!env) {
+    showJoinCodeError(t('sharing.join_code_invalid'), errEl);
+    return false;
+  }
+  if (!state.sharing) {
+    showJoinCodeError(t('sharing.join_unavailable'), errEl);
+    return false;
+  }
 
-  // Check if already joined via this folderId / envelope
-  const existing = state.sharing.getGroupByFolderId?.(folderId);
+  const activeMode = localStorage.getItem('claw_cc_active_mode');
+  if (env.b === 'supabase' && activeMode !== 'supabase') {
+    showJoinCodeError(t('sharing.join_backend_supabase'), errEl);
+    return false;
+  }
+  if (env.b === 'googledrive' && activeMode !== 'googledrive') {
+    showJoinCodeError(t('sharing.join_backend_drive'), errEl);
+    return false;
+  }
+
+  const connectionRef = env.b === 'googledrive' ? env.f : code;
+
+  // Check if already joined via this folderId / invite code.
+  const existing = state.sharing.getGroupByFolderId?.(connectionRef);
   if (existing) {
     showToast(t('sharing.already_joined', existing.name || ''), 'info');
     renderSharingPane();
-    return;
+    return true;
   }
 
-  // For Supabase envelope, extract group ID and check if already joined
-  const gid = getGidFromRef(folderId);
-  if (gid) {
-    const alreadyJoined = state.sharing.getAllGroups?.()?.find(g => g.id === gid);
+  // For Supabase, also check local group cache by group id before verifying token.
+  if (env.g) {
+    const alreadyJoined = state.sharing.getAllGroups?.()?.find(g => g.id === env.g);
     if (alreadyJoined) {
       showToast(t('sharing.already_joined', alreadyJoined.name || ''), 'info');
       renderSharingPane();
-      return;
+      return true;
     }
   }
 
-  // Try direct access first
-  const group = await state.sharing.tryDirectJoin(folderId);
+  const group = await state.sharing.tryDirectJoin(connectionRef);
   if (group) {
     if (group._pendingJoin) {
       showJoinConfirmModal(group);
@@ -467,22 +494,68 @@ export async function handleJoinHash(folderId) {
       showToast(t('sharing.joined_group', group.name || ''), 'success');
       renderSharingPane();
     }
-    return;
+    return true;
   }
 
-  // Token invalid — envelope was supabase but verify failed
-  if (gid) {
-    showToast(t('sharing.join_token_used'), 'error');
-    return;
+  if (env.b === 'supabase') {
+    showJoinCodeError(t('sharing.join_code_used'), errEl);
+    return false;
   }
 
-  // Drive flow
   if (!state.sharing.openJoinPicker) {
-    showToast(t('sharing.join_failed'), 'error');
-    return;
+    showJoinCodeError(t('sharing.join_failed'), errEl);
+    return false;
   }
 
-  showJoinPickerModal(folderId);
+  showJoinPickerModal(connectionRef);
+  return true;
+}
+
+function sharingOpenJoinCodeModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay visible';
+  overlay.id = 'sharingJoinCodeModal';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.innerHTML = `<div class="modal">
+    <h2>${lucideIcon('log-in', 20)} ${t('sharing.join_group')}</h2>
+    <p>${t('sharing.join_code_hint')}</p>
+    <label for="sharingJoinCodeInput">${t('sharing.invite_code_label')}</label>
+    <textarea id="sharingJoinCodeInput" class="sharing-code-textarea" rows="4" placeholder="${t('sharing.invite_code_placeholder')}" data-action="sharing-join-code-on-enter"></textarea>
+    <div id="sharingJoinCodeError" class="sharing-join-error" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingJoinCodeModal">${t('common.cancel')}</button>
+      <button class="modal-save" id="sharingJoinCodeBtn" data-action="sharing-join-code-submit">${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}</button>
+    </div>
+  </div>`;
+  document.getElementById('app').appendChild(overlay);
+  setTimeout(() => document.getElementById('sharingJoinCodeInput')?.focus(), 50);
+}
+
+async function sharingJoinCodeSubmit() {
+  const modal = document.getElementById('sharingJoinCodeModal');
+  const input = document.getElementById('sharingJoinCodeInput');
+  const errEl = document.getElementById('sharingJoinCodeError');
+  const btn = document.getElementById('sharingJoinCodeBtn');
+  const code = input?.value.trim() || '';
+  if (errEl) errEl.style.display = 'none';
+  if (!code) {
+    showJoinCodeError(t('sharing.join_code_invalid'), errEl);
+    return;
+  }
+  if (btn?.disabled) return;
+  if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
+  try {
+    const ok = await handleJoinCode(code, { errorEl: errEl });
+    if (ok) modal?.remove();
+  } catch (e) {
+    console.warn('join code failed:', e);
+    showJoinCodeError(e.message || t('sharing.join_failed'), errEl);
+  } finally {
+    if (btn && document.body.contains(btn)) {
+      btn.disabled = false;
+      btn.innerHTML = `${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}`;
+    }
+  }
 }
 
 function showJoinConfirmModal(group) {
@@ -496,7 +569,7 @@ function showJoinConfirmModal(group) {
     <h2>${lucideIcon('users', 20)} ${t('sharing.join_confirm_title')}</h2>
     <p>${t('sharing.join_confirm_hint', esc(group.name || ''))}</p>
     ${ownerLine}
-    <input type="text" id="joinDisplayName" class="sharing-input"
+    <input type="text" id="joinDisplayName" class="sharing-invite-input"
       placeholder="${t('sharing.join_confirm_name')}"
       value="${esc(group._suggestedName || '')}" />
     <div id="joinConfirmError" class="sharing-join-error" style="display:none"></div>
@@ -510,6 +583,7 @@ function showJoinConfirmModal(group) {
     const btn = document.getElementById('joinConfirmBtn');
     const errEl = document.getElementById('joinConfirmError');
     if (errEl) errEl.style.display = 'none';
+    if (btn?.disabled) return;
     if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
     try {
       const displayName = document.getElementById('joinDisplayName')?.value.trim() || '';
@@ -520,7 +594,7 @@ function showJoinConfirmModal(group) {
     } catch (e) {
       console.warn('join confirm failed:', e);
       if (errEl) { errEl.textContent = t('sharing.join_failed'); errEl.style.display = ''; }
-      if (btn) { btn.disabled = false; btn.textContent = `${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}`; }
+      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}`; }
     }
   });
 }
@@ -557,12 +631,10 @@ async function sharingOpenJoinPicker(folderId) {
   try {
     const docs = await state.sharing.openJoinPicker(folderId);
     if (!docs) {
-      // User cancelled — keep modal open, reset button
       if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
       return;
     }
 
-    // Map Picker results to fileIds
     const fileIds = {};
     for (const d of docs) {
       const key = d.name.replace('.json', '');
@@ -572,7 +644,6 @@ async function sharingOpenJoinPicker(folderId) {
     }
 
     if (!fileIds.group) {
-      // User may have selected the folder itself — try direct access now
       const folderDoc = docs.find(d => d.mimeType === 'application/vnd.google-apps.folder');
       if (folderDoc) {
         const group = await state.sharing.tryDirectJoin(folderDoc.id);
@@ -588,7 +659,6 @@ async function sharingOpenJoinPicker(folderId) {
       return;
     }
 
-    // Check all required files are selected
     const required = ['group', 'todos', 'habits', 'lists'];
     const missing = required.filter(k => !fileIds[k]);
     if (missing.length > 0) {
@@ -789,9 +859,14 @@ window.sharingRemoveMember = sharingRemoveMember;
 window.sharingLeaveGroup = sharingLeaveGroup;
 window.sharingUnjoinGroup = sharingUnjoinGroup;
 window.sharingDeleteGroup = sharingDeleteGroup;
-window.sharingCopyLink = sharingCopyLink;
-window.sharingCopyMemberLink = sharingCopyMemberLink;
-window.sharingCopyLinkValue = sharingCopyLinkValue;
+window.sharingCopyCode = sharingCopyCode;
+window.sharingCopyMemberCode = sharingCopyMemberCode;
+window.sharingCopyCodeValue = sharingCopyCodeValue;
+window.sharingOpenJoinCodeModal = sharingOpenJoinCodeModal;
+window.sharingJoinCodeSubmit = sharingJoinCodeSubmit;
+window.sharingCopyLink = sharingCopyCode;
+window.sharingCopyMemberLink = sharingCopyMemberCode;
+window.sharingCopyLinkValue = sharingCopyCodeValue;
 window.sharingOpenJoinPicker = sharingOpenJoinPicker;
 window.submitSharePopover = submitSharePopover;
 window.sharingCompleteSubmit = sharingCompleteSubmit;

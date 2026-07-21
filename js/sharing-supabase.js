@@ -12,10 +12,10 @@
 //
 // Group data lives on the creator's Supabase project. Members store
 // connection details (URL, anon key, token) in their own `joined_groups`
-// table so they can reconnect without the invite link.
+// table so they can reconnect without the invite code.
 //
-// Invite link format (sec-003 fix v1.348): base64url JSON envelope {v:1,b:'supabase',u,k,g,t}
-// Legacy colon format dropped per user decision (no backward compat).
+// Invite code format (sec-003/sec-005): DLC1.<base64url JSON envelope>
+// Payload: {v:1,b:'supabase',u,k,g,t,x}; opaque/obfuscated access code, not encryption.
 // ===================================================================
 
 import { encodeInviteEnvelope, decodeInviteEnvelope } from './sharing-envelope.js';
@@ -28,8 +28,8 @@ import { deepEqual } from './utils.js';
  * @param {Object} adapter — the user's own Supabase/Drive/Local adapter
  * @param {Object} config
  * @param {Function} config.getAuthUser — () => auth user object or null
- * @param {string}   config.supabaseUrl — project URL (for invite links)
- * @param {string}   config.anonKey — project anon key (for invite links)
+ * @param {string}   config.supabaseUrl — project URL (for invite codes)
+ * @param {string}   config.anonKey — project anon key (for invite codes)
  * @returns {Promise<SharingAdapter>}
  */
 export async function createSupabaseSharing(adapter, config) {
@@ -426,7 +426,8 @@ export async function createSupabaseSharing(adapter, config) {
     }
 
     _notifyUpdate();
-    return { memberId, token };
+    const inviteCode = getMemberInviteLink(groupId, token, expiresAt);
+    return { memberId, token, expiresAt, inviteCode };
   }
 
   async function removeUser(groupId, email) {
@@ -647,20 +648,23 @@ export async function createSupabaseSharing(adapter, config) {
     return getAllGroups().find(g => g.id === connectionRef);
   }
 
-  function getInviteLink(groupId) {
-    // Deprecated: returns envelope without token (will always fail verify — intentional, use getMemberInviteLink)
+  function getInviteLink(_groupId) {
+    // Supabase invites are member-scoped and single-use; there is no reusable group code.
     // Kept for interface compatibility. New code should use getMemberInviteLink.
-    if (!supabaseUrl || !anonKey) return null;
-    const env = encodeInviteEnvelope({ v: 1, b: 'supabase', u: supabaseUrl, k: anonKey, g: groupId });
-    if (!env) return null;
-    return location.origin + location.pathname + '#join=' + env;
+    return null;
   }
 
-  function getMemberInviteLink(groupId, token) {
+  function getMemberInviteLink(groupId, token, expiresAt = null) {
     if (!supabaseUrl || !anonKey || !token) return null;
-    const env = encodeInviteEnvelope({ v: 1, b: 'supabase', u: supabaseUrl, k: anonKey, g: groupId, t: token });
-    if (!env) return null;
-    return location.origin + location.pathname + '#join=' + env;
+    return encodeInviteEnvelope({
+      v: 1,
+      b: 'supabase',
+      u: supabaseUrl,
+      k: anonKey,
+      g: groupId,
+      t: token,
+      ...(expiresAt ? { x: expiresAt } : {}),
+    });
   }
 
   function isJoinedViaLink(groupId) {

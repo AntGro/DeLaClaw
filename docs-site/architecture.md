@@ -127,9 +127,9 @@ The demo adapter mirrors these constraints in JavaScript.
 
 ## Security model (Supabase backend)
 
-### Threat: anon key in invite links
+### Threat: anon key in invite codes
 
-Invite links are envelope `base64url JSON {v:1,b:'supabase',u,k,g,t}` containing `u=project URL`, `k=anon key`, `g=group_id`, `t=join token`. This envelope leaks `u+k` to any recipient. Requirement: **B must NOT read A's private tables even with A’s anon key**.
+Invite codes are opaque strings with a `DLC1.` prefix and a base64url JSON envelope `{v:1,b:'supabase',u,k,g,t}` containing `u=project URL`, `k=anon key`, `g=group_id`, `t=join token`. This obfuscates the payload for UX, but is not encryption: it still leaks `u+k` to any recipient. Requirement: **B must NOT read A's private tables even with A’s anon key**.
 
 ### Defense: owner-only RLS (1.300)
 

@@ -704,6 +704,37 @@ export function assigneeDots(assignees, maxShow = 3) {
 
 // ── Share-to-group popover ──────────────────────────────────────
 
+function positionSharePopover(popover, anchorEl) {
+  const rect = anchorEl.getBoundingClientRect();
+  const margin = 8;
+  const gap = 4;
+  const viewportW = document.documentElement.clientWidth || window.innerWidth;
+  const viewportH = window.innerHeight || document.documentElement.clientHeight;
+  const maxViewportHeight = Math.max(0, viewportH - margin * 2);
+
+  popover.style.position = 'fixed';
+  popover.style.zIndex = '300';
+  popover.style.setProperty('--share-popover-max-height', `${maxViewportHeight}px`);
+
+  const popW = popover.offsetWidth;
+  const naturalH = Math.min(popover.scrollHeight, maxViewportHeight);
+  const availableBelow = Math.max(0, viewportH - rect.bottom - gap - margin);
+  const availableAbove = Math.max(0, rect.top - gap - margin);
+  const openAbove = naturalH > availableBelow && availableAbove > availableBelow;
+  const available = openAbove ? availableAbove : availableBelow;
+  const maxH = Math.min(naturalH, Math.max(96, available), maxViewportHeight);
+
+  popover.style.setProperty('--share-popover-max-height', `${maxH}px`);
+
+  const preferredTop = openAbove ? rect.top - gap - maxH : rect.bottom + gap;
+  const top = Math.max(margin, Math.min(preferredTop, viewportH - margin - maxH));
+  const preferredLeft = rect.left + rect.width / 2 - popW / 2;
+  const left = Math.max(margin, Math.min(preferredLeft, viewportW - margin - popW));
+
+  popover.style.top = `${top}px`;
+  popover.style.left = `${left}px`;
+}
+
 /** Open a share-to-group popover near the given button element. */
 export function openSharePopover(anchorEl, onShare, opts = {}) {
   closeSharePopover();
@@ -716,6 +747,7 @@ export function openSharePopover(anchorEl, onShare, opts = {}) {
   const popover = document.createElement('div');
   popover.className = 'share-popover';
   popover.id = 'sharePopover';
+  popover.style.visibility = 'hidden';
 
   let selectedGroupId = groups[0].id;
 
@@ -724,24 +756,30 @@ export function openSharePopover(anchorEl, onShare, opts = {}) {
     const members = selectedGroup.members || [];
 
     popover.innerHTML = `
-      <div class="share-popover-section">
-        <div class="share-popover-label">${t('sharing.share_to')}</div>
-        ${groups.map(g => `
-          <label class="share-popover-radio">
-            <input type="radio" name="shareGroup" value="${esc(g.id)}" ${g.id === selectedGroupId ? 'checked' : ''}>
-            ${esc(g.name)}
-          </label>
-        `).join('')}
+      <div class="share-popover-body">
+        <div class="share-popover-section">
+          <div class="share-popover-label">${t('sharing.share_to')}</div>
+          <div class="share-popover-option-list share-popover-group-list">
+            ${groups.map(g => `
+              <label class="share-popover-radio">
+                <input type="radio" name="shareGroup" value="${esc(g.id)}" ${g.id === selectedGroupId ? 'checked' : ''}>
+                ${esc(g.name)}
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        ${showAssignees ? `<div class="share-popover-section">
+          <div class="share-popover-label">${t('sharing.assign_to')}</div>
+          <div class="share-popover-option-list share-popover-member-list">
+            ${members.map(m => `
+              <label class="share-popover-check">
+                <input type="checkbox" value="${esc(m.email)}" checked>
+                ${esc(m.email)}
+              </label>
+            `).join('')}
+          </div>
+        </div>` : ''}
       </div>
-      ${showAssignees ? `<div class="share-popover-section">
-        <div class="share-popover-label">${t('sharing.assign_to')}</div>
-        ${members.map(m => `
-          <label class="share-popover-check">
-            <input type="checkbox" value="${esc(m.email)}" checked>
-            ${esc(m.email)}
-          </label>
-        `).join('')}
-      </div>` : ''}
       <button class="share-popover-submit" data-action="submit-share-popover">${lucideIcon('share', 14)} ${t('sharing.share')}</button>
     `;
 
@@ -751,20 +789,15 @@ export function openSharePopover(anchorEl, onShare, opts = {}) {
         renderPopover();
       });
     });
+
+    if (popover.isConnected) positionSharePopover(popover, anchorEl);
   };
 
   renderPopover();
 
-  const rect = anchorEl.getBoundingClientRect();
-  popover.style.position = 'fixed';
-  popover.style.top = `${rect.bottom + 4}px`;
-  popover.style.zIndex = '300';
   document.body.appendChild(popover);
-
-  // Clamp horizontal position so the popover stays within the viewport
-  const popW = popover.offsetWidth;
-  const maxLeft = window.innerWidth - popW - 8;
-  popover.style.left = `${Math.max(8, Math.min(rect.left - 120, maxLeft))}px`;
+  positionSharePopover(popover, anchorEl);
+  popover.style.visibility = '';
 
   popover._onShare = onShare;
 

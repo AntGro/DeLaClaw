@@ -1330,6 +1330,33 @@ test('sharing uses pasted DLC1 invite codes instead of #join links', () => {
   assert(!main.includes('#join='), 'main.js must not keep URL-hash invite join handling');
 });
 
+
+test('share popover is viewport-bound with scrollable group and member lists', () => {
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(sui.includes('function positionSharePopover'), 'sharing-ui.js missing share popover positioning helper');
+  assert(sui.includes('window.innerHeight') && sui.includes('availableBelow') && sui.includes('availableAbove'),
+    'sharing-ui.js must compute vertical viewport space for the share popover');
+  assert(sui.includes('--share-popover-max-height'),
+    'sharing-ui.js must set a max-height CSS variable for the share popover');
+  assert(sui.includes('share-popover-body'),
+    'sharing-ui.js must keep share popover body separate from the submit button');
+  assert(sui.includes('share-popover-option-list share-popover-group-list'),
+    'sharing-ui.js must wrap share groups in a scrollable option list');
+  assert(sui.includes('share-popover-option-list share-popover-member-list'),
+    'sharing-ui.js must wrap share members in a scrollable option list');
+
+  assert(/\.share-popover\{[^}]*max-height:var\(--share-popover-max-height/.test(styleCss),
+    'style.css: .share-popover must respect viewport max-height');
+  assert(/\.share-popover\{[^}]*display:flex[^}]*flex-direction:column[^}]*overflow:hidden/.test(styleCss),
+    'style.css: .share-popover must be a clipped vertical flex container');
+  assert(/\.share-popover-body\{[^}]*overflow-y:auto/.test(styleCss),
+    'style.css: .share-popover-body must scroll when content is tall');
+  assert(/\.share-popover-option-list\{[^}]*max-height:[^}]*overflow-y:auto/.test(styleCss),
+    'style.css: share popover group/member option lists must be scrollable');
+  assert(/\.share-popover-submit\{[^}]*flex-shrink:0/.test(styleCss),
+    'style.css: share popover submit button must stay visible outside scrolling content');
+});
+
 // ── Auth Prompt UI ──
 
 test('index.html has authPromptOverlay modal', () => {

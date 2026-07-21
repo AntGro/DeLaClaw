@@ -816,10 +816,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      */
     async completeItem(groupId, itemId, doneBy) {
       const user = await ensureUser();
-      if (!doneBy?.length) doneBy = [user.email];
+      const normalizedDoneBy = (Array.isArray(doneBy) ? doneBy : [doneBy]).filter(Boolean);
+      if (!normalizedDoneBy.length) normalizedDoneBy.push(user.email);
       return this.updateItem(groupId, itemId, {
         done: true,
-        done_by: doneBy,
+        done_by: normalizedDoneBy,
         done_at: new Date().toISOString(),
       });
     },

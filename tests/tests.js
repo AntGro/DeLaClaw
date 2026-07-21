@@ -1038,6 +1038,20 @@ test('sharing-supabase.js references all expected RPC function names', () => {
   }
 });
 
+test('sharing-supabase inviteUser returns a member-scoped invite code', () => {
+  const content = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
+  assert(content.includes('inviteCode'), 'inviteUser should return inviteCode');
+  assert(content.includes('getMemberInviteLink(groupId, token, expiresAt)'), 'inviteUser should build a member-scoped code with expiry');
+  assert(!content.includes("'#join='"), 'sharing-supabase.js must not generate URL hash invite links');
+});
+
+test('Drive sharing invite code encodes folder id in DLC1 envelope', () => {
+  const content = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  assert(content.includes("b: 'googledrive'"), 'sharing-drive.js missing googledrive invite-code envelope');
+  assert(content.includes('f: e.folderId'), 'sharing-drive.js invite code must carry folder id');
+  assert(!content.includes('`${base}#join='), 'sharing-drive.js must not generate URL hash invite links');
+});
+
 test('state.js includes authUser property', () => {
   const content = fs.readFileSync(path.join(JS_DIR, 'state.js'), 'utf-8');
   assert(content.includes('authUser'), 'state.js missing authUser property');
@@ -1101,10 +1115,14 @@ test('sql/supabase_schema.sql has owner-only for all personal tables + joined_gr
   assert(schema.includes('claim_ownership'), 'supabase_schema.sql must include claim_ownership function');
 });
 
-test('main.js handles #join=supabase: links', () => {
+test('sharing uses pasted DLC1 invite codes instead of #join links', () => {
   const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
-  assert(main.includes("joinVal.startsWith('supabase:')") || main.includes("joinHash.startsWith('supabase:')"),
-    'main.js missing supabase join link handler');
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const env = fs.readFileSync(path.join(JS_DIR, 'sharing-envelope.js'), 'utf-8');
+  assert(env.includes('DLC1.'), 'sharing-envelope.js missing DLC1 invite-code prefix');
+  assert(sui.includes('handleJoinCode'), 'sharing-ui.js missing pasted invite-code handler');
+  assert(sui.includes('sharing-open-join-code'), 'sharing-ui.js missing Join group paste entry point');
+  assert(!main.includes('#join='), 'main.js must not keep URL-hash invite join handling');
 });
 
 // ── Auth Prompt UI ──

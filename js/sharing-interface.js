@@ -64,7 +64,7 @@ export const SHARING_INTERFACE = {
   getAllSharedTodos:         'fn',   // () => SharedItem[]
   getAllSharedListItems:     'fn',   // () => SharedItem[]
 
-  // ── Items — invite links ────────────────────────────────────
+  // ── Items — invite codes ────────────────────────────────────
   getMemberInviteLink:       'any',  // (groupId, token) => string|null | null for Drive (uses getInviteLink)
 
   // ── Items — CRUD ────────────────────────────────────────────

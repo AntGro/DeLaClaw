@@ -3,6 +3,7 @@
 // ===================================================================
 
 import { deepEqual } from './utils.js';
+import { encodeInviteEnvelope } from './sharing-envelope.js';
 //
 // See sharing-interface.js for the abstract contract this implements.
 //
@@ -10,7 +11,7 @@ import { deepEqual } from './utils.js';
 //
 //   1. LINK JOIN (drive.file scope — default, no scary permissions)
 //      A creates group → A invites B by email (shares folder) →
-//      A sends B invite link (#join=<folderId>) → B opens link →
+//      A sends B invite code → B pastes code →
 //      Google Picker opens → B selects the shared files →
 //      Picker grants drive.file access → B saves file IDs in
 //      DeLaClaw/joined-groups.json → done.
@@ -20,7 +21,7 @@ import { deepEqual } from './utils.js';
 //      B's app auto-discovers via sharedWithMe query → loads group.
 //
 // Both paths produce the same GroupEntry. A single group can have
-// members using either path. Invite links always work regardless of
+// members using either path. Invite codes always work regardless of
 // scope.
 //
 // Scenarios (A=Alice, B=Bob, C=Carol, D=Dave):
@@ -28,8 +29,8 @@ import { deepEqual } from './utils.js';
 //   S1: A(file) creates group, invites B(file) via link
 //       A creates folder+files (app owns → drive.file OK)
 //       A shares folder with B (app owns → OK)
-//       A copies link → sends to B
-//       B opens #join → Picker → selects files → joined
+//       A copies invite code → sends to B
+//       B pastes invite code → Picker → selects files → joined
 //
 //   S2: B leaves a joined group
 //       B removes from joined-groups.json → polling stops
@@ -303,10 +304,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   //   typeData: { todos: [], habits: [], lists: [] },
   //   typeMeta: { todos: { fileId, etag, modifiedTime }, ... },
   //   gMeta: { fileId, etag, modifiedTime },
-  //   joinedViaLink: boolean,   // true if joined via invite link
+  //   joinedViaLink: boolean,   // true if joined via invite code
   // }
 
-  // ── Joined groups (link-join, works with drive.file) ──
+  // ── Joined groups (code-join, works with drive.file) ──
 
   let _joinedGroups = [];       // [{ folderId, groupId, fileIds: { group, todos, habits, lists }, joinedAt }]
   let _joinedMeta = {};         // { fileId, etag }
@@ -1143,15 +1144,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       emit('group-left', { groupId });
     },
 
-    /** Get the invite link for a group. */
+    /** Get the invite code for a group. */
     getInviteLink(groupId) {
       const e = _groups.get(groupId);
       if (!e) return null;
-      const base = location.origin + location.pathname;
-      return `${base}#join=${e.folderId}`;
+      return encodeInviteEnvelope({ v: 1, b: 'googledrive', f: e.folderId });
     },
 
-    /** Member invite link (Drive: same as getInviteLink, token unused). */
+    /** Member invite code (Drive: same as getInviteLink, token unused). */
     getMemberInviteLink(groupId, _token) {
       return this.getInviteLink(groupId);
     },
@@ -1164,7 +1164,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return null;
     },
 
-    /** Check if a group was joined via invite link. */
+    /** Check if a group was joined via invite code. */
     isJoinedViaLink(groupId) {
       return _groups.get(groupId)?.joinedViaLink === true;
     },

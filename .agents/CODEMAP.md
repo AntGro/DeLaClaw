@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-07-21T00:06:13.795Z from 38 modules (v1.423). Total LOC 25449. Do not hand-edit.
+> Generated 2026-07-21T00:52:15.889Z from 38 modules (v1.424). Total LOC 25531. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,17 +27,17 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 4322 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:37,guard+pendingSet,window:8 |
-| i18n | 2036 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
-| sharing-drive | 1197 | - | utils | main.js,sharing.js | - |
-| sharing-supabase | 1070 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
-| sharing-ui | 798 | - | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:33,pendingSet,window:8 |
+| main | 4254 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:37,guard+pendingSet,window:8 |
+| i18n | 2072 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
+| sharing-drive | 1197 | - | sharing-envelope,utils | main.js,sharing.js | - |
+| sharing-supabase | 1074 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
+| sharing-ui | 873 | - | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:33,pendingSet,window:8 |
 | drive | 759 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
 | utils | 588 | flashcards,x | i18n,icons,state,version | - | esc:7,window:4 |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 459 | - | i18n,icons,utils | - | - |
 | item-utils | 448 | - | db,i18n,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
-| delegation | 404 | - |  | - | window:1 |
+| delegation | 410 | - |  | - | window:1 |
 | offline-cache | 299 | - | ./state,state.js | main.js | - |
 | crypto-sync | 297 | settings |  | sharing-supabase.js | - |
 | demo | 293 | x |  | drive.js | - |
@@ -49,10 +49,10 @@
 | rest | 154 | x |  | main.js | - |
 | db | 118 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
 | sharing-interface | 114 | - |  | sharing.js | - |
+| sharing-envelope | 73 | - |  | sharing-drive.js,sharing-supabase.js,sharing-ui.js | - |
 | sharing | 64 | - | sharing-drive,sharing-interface | - | - |
 | state | 49 | - | db | agents-ui.js,birthdays.js,flashcards.js,habits.js | window:1 |
 | supabase | 45 | - |  | - | - |
-| sharing-envelope | 44 | - |  | sharing-supabase.js,sharing-ui.js | - |
 | backend-logos | 26 | - |  | main.js,sharing-ui.js | - |
 | bootstrap | 26 | - |  | - | - |
 | sw-register | 16 | - |  | - | - |

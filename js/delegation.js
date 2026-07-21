@@ -258,16 +258,21 @@
       case 'save-edit-vestiaire-category': callWindow('saveEditVestiaireCategory', []); break;
       case 'send-auth-from-sharing': callWindow('sendAuthFromSharing', []); break;
       case 'sign-out-from-sharing': callWindow('signOutFromSharing', []); break;
-      case 'sharing-copy-link': callWindow('sharingCopyLink', [getId(el)||el.dataset.groupId]); break;
+      case 'sharing-copy-code':
+      case 'sharing-copy-link': callWindow('sharingCopyCode', [getId(el)||el.dataset.groupId]); break;
       case 'sharing-leave-group': callWindow('sharingLeaveGroup', [el.dataset.groupId||getId(el)]); break;
       case 'sharing-unjoin-group': callWindow('sharingUnjoinGroup', [el.dataset.groupId||getId(el)]); break;
-      case 'sharing-copy-member-link': callWindow('sharingCopyMemberLink', [el.dataset.groupId, el.dataset.token]); break;
+      case 'sharing-copy-member-code':
+      case 'sharing-copy-member-link': callWindow('sharingCopyMemberCode', [el.dataset.groupId, el.dataset.token]); break;
       case 'sharing-remove-member': callWindow('sharingRemoveMember', [el.dataset.groupId, el.dataset.email||el.dataset.memberEmail]); break;
       case 'sharing-invite': callWindow('sharingInvite', [el.dataset.groupId||getId(el)]); break;
       case 'sharing-delete-group': callWindow('sharingDeleteGroup', [el.dataset.groupId||getId(el)]); break;
       case 'sharing-create-group': callWindow('sharingCreateGroup', []); break;
       case 'sharing-create-group-submit': callWindow('sharingCreateGroupSubmit', []); break;
-      case 'sharing-copy-link-value': callWindow('sharingCopyLinkValue', []); break;
+      case 'sharing-copy-code-value':
+      case 'sharing-copy-link-value': callWindow('sharingCopyCodeValue', []); break;
+      case 'sharing-open-join-code': callWindow('sharingOpenJoinCodeModal', []); break;
+      case 'sharing-join-code-submit': callWindow('sharingJoinCodeSubmit', []); break;
       case 'sharing-open-join-picker': callWindow('sharingOpenJoinPicker', [el.dataset.folderId||getId(el)]); break;
       case 'submit-share-popover': callWindow('submitSharePopover', []); break;
       case 'sharing-complete-submit': callWindow('sharingCompleteSubmit', [el.dataset.groupId, el.dataset.itemId]); break;
@@ -380,6 +385,7 @@
         case 'save-new-birthday-on-enter': e.preventDefault(); callWindow('saveNewBirthday', []); break;
         case 'sharing-invite-on-enter': e.preventDefault(); if (window.sharingInvite) { var gid = el.dataset.groupId||el.dataset.id; window.sharingInvite(gid); } break;
         case 'sharing-create-group-on-enter': e.preventDefault(); callWindow('sharingCreateGroupSubmit', []); break;
+        case 'sharing-join-code-on-enter': if ((e.ctrlKey || e.metaKey) && window.sharingJoinCodeSubmit) { e.preventDefault(); window.sharingJoinCodeSubmit(); } break;
         case 'add-todo-to-category': e.preventDefault(); if (window.addTodoToCategory) window.addTodoToCategory(el); break;
         case 'add-habit-from-input': e.preventDefault(); if (window.addHabitFromInput) window.addHabitFromInput(el); break;
         case 'handle-draft-input': e.preventDefault(); if (window.quickAddDraft) window.quickAddDraft(); break;

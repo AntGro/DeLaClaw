@@ -19,35 +19,12 @@ import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthda
 import { refreshVestiaire, renderVestiaire, initVestiaireModals } from './vestiaire.js';
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals } from './lists.js';
-import { updateSharingNavVisibility, renderSharingPane, handleJoinHash, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
+import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
 import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
 import { HABIT_CATEGORIES_KEY } from './state.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
 import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
-
-// --- sec-003 envelope decoder (inline, mirrors js/sharing-envelope.js, envelope-only no legacy) ---
-function _decodeInviteEnvelopeInline(str) {
-  if (!str || typeof str !== 'string') return null;
-  if (str.includes(':')) return null;
-  if (str.length < 20) return null;
-  if (!/^[A-Za-z0-9_-]+$/.test(str)) return null;
-  try {
-    let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
-    const pad = b64.length % 4;
-    if (pad) b64 += '='.repeat(4 - pad);
-    const binary = atob(b64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const json = new TextDecoder().decode(bytes);
-    const obj = JSON.parse(json);
-    if (!obj || obj.v !== 1 || !obj.g || obj.b !== 'supabase') return null;
-    return obj;
-  } catch { return null; }
-}
-function _isSupabaseJoinHash(joinHash) {
-  return !!_decodeInviteEnvelopeInline(joinHash);
-}
 
 // Last-updated tracking (declared early so renderLastUpdated can be called from updateStaticLabels)
 let _lastUpdatedAt = null;
@@ -397,8 +374,7 @@ function initGate() {
   localStorage.removeItem('claw_signup_mode');
   // Set login hash (user is on the login page) — preserve #setup if present
   // Skip hero when returning from signup — go straight to the login form
-  const isJoinLink = window.location.hash.startsWith('#join=');
-  if (window.location.hash !== '#setup' && !signupMode && !isJoinLink) {
+  if (window.location.hash !== '#setup' && !signupMode) {
     history.replaceState(null, '', '#login');
     showHero();
   }
@@ -1643,21 +1619,6 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   // Listen for back/forward navigation
   window.addEventListener('hashchange', () => {
-    // Handle #join= invite links while app is running
-    if (location.hash.startsWith('#join=') && state.sharing) {
-      const joinVal = location.hash.slice(6);
-      history.replaceState(null, '', location.pathname + location.search);
-      if (joinVal) {
-        // Supabase join: strip "supabase:" prefix before passing to handler (legacy)
-        // New envelope has no prefix — pass as-is
-        if (joinVal.startsWith('supabase:')) {
-          handleJoinHash(joinVal.slice(9));
-        } else {
-          handleJoinHash(joinVal);
-        }
-      }
-      return;
-    }
     const raw = location.hash.replace('#', '');
     const h = validViews.includes(raw) ? raw : 'welcome';
     if (h !== state.currentView) switchView(h);
@@ -1732,17 +1693,6 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       });
       updateSharingNavVisibility();
 
-      // Handle #join=<folderId> invite link
-      if (location.hash.startsWith('#join=')) {
-        const joinFolderId = location.hash.slice(6);
-        history.replaceState(null, '', location.pathname + location.search);
-        if (joinFolderId) {
-          // Wait for loadAll to finish before joining
-          state.sharing.loadAll().then(() => {
-            handleJoinHash(joinFolderId);
-          }).catch(e => console.warn('sharing join after load:', e));
-        }
-      }
     } catch (e) { console.warn('sharing init:', e); }
   }
 
@@ -1768,24 +1718,6 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     } catch (e) { console.warn('supabase sharing init:', e); state._sharingInitError = e; }
   }
 
-  // Handle #join= invite links (both Drive and Supabase)
-  if (location.hash.startsWith('#join=') && !state.sharing) {
-    const joinHash = location.hash.slice(6);
-    if (_isSupabaseJoinHash(joinHash) && mode !== 'googledrive') {
-      try {
-        const { createSharing } = await import('./sharing.js');
-        state.sharing = await createSharing('supabase', {
-          adapter,
-          getAuthUser: () => state.authUser || null,
-          supabaseUrl: url,
-          anonKey: key,
-        });
-        state.sharing.loadAll().catch(() => {});
-        history.replaceState(null, '', location.pathname + location.search);
-        handleJoinHash(joinHash);
-      } catch (e) { console.warn('sharing join init:', e); }
-    }
-  }
 
   // Always update sharing nav visibility (even if sharing init failed or was skipped)
   updateSharingNavVisibility();
@@ -4085,9 +4017,9 @@ function switchView(view) {
   }
   state.currentView = view;
   localStorage.setItem(CURRENT_VIEW_KEY, view);
-  // Sync URL hash (no reload) — but preserve #join= invite links
+  // Sync URL hash (no reload)
   const newHash = '#' + view;
-  if (location.hash !== newHash && !location.hash.startsWith('#join=')) history.replaceState(null, '', newHash);
+  if (location.hash !== newHash) history.replaceState(null, '', newHash);
   const welcomeView = document.getElementById('welcomeView');
   const projectsView = document.getElementById('projectsView');
   const todosView = document.getElementById('todosView');

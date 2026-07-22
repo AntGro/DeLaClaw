@@ -819,10 +819,14 @@ async function _doSyncSharedListItems() {
 }
 
 async function shareListItemFromAdd(btn, listId) {
-  // Delegation support: btn may be element with dataset
+  // Delegation support: btn may be an event, button element, or legacy list id.
   let actualBtn = btn;
   let actualListId = listId;
-  if (btn && btn.target) {
+  if (typeof btn === 'string') {
+    actualListId = btn;
+    const safeListId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(btn) : btn.replace(/"/g, '\"');
+    actualBtn = document.querySelector(`[data-action="share-list-item-from-add"][data-list-id="${safeListId}"]`);
+  } else if (btn && btn.target) {
     // event case
     actualBtn = btn.target.closest ? btn.target.closest('[data-action="share-list-item-from-add"]') : btn.target;
     actualListId = actualBtn ? actualBtn.dataset.listId : listId;
@@ -830,7 +834,7 @@ async function shareListItemFromAdd(btn, listId) {
     actualListId = btn.dataset.listId || listId;
     actualBtn = btn;
   }
-  const addRow = actualBtn ? actualBtn.closest('.list-quick-add') : null;
+  const addRow = actualBtn && typeof actualBtn.closest === 'function' ? actualBtn.closest('.list-quick-add') : null;
   if (!addRow) return;
   const input = addRow.querySelector('.list-quick-input');
   const text = input?.value.trim();

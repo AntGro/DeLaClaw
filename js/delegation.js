@@ -237,7 +237,7 @@
       case 'save-new-list': callWindow('saveNewList', []); break;
       case 'close-edit-list': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditListModal', []); break;
       case 'save-edit-list': callWindow('saveEditList', []); break;
-      case 'share-list-item-from-add': callWindow('shareListItemFromAdd', [el.dataset.listId||el]); break;
+      case 'share-list-item-from-add': callWindow('shareListItemFromAdd', [el, el.dataset.listId||getId(el)]); break;
       case 'open-add-vestiaire': callWindow('openAddVestiaireModal', []); break;
       case 'navigate-to-vestiaire-cat': callWindow('navigateToVestiaireCat', [getCat(el)]); break;
       case 'open-add-vestiaire-category': callWindow('openAddVestiaireCategoryModal', []); break;

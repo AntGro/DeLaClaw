@@ -897,7 +897,27 @@ test('toggleListItemCheck has per-item pending guard and button state', () => {
 });
 
 // ===================================================================
-// 25f. Sharing adapters normalize completeItem(doneBy) without nested arrays
+// 25f. Shared list add action passes the clicked button element
+// ===================================================================
+test('Shared list add action passes clicked button element', () => {
+  const lists = jsFiles['lists.js'];
+  const delegation = jsFiles['delegation.js'];
+
+  const actionMatch = delegation.match(/case 'share-list-item-from-add':[\s\S]*?break;/);
+  assert(actionMatch, 'delegation.js: share-list-item-from-add action not found');
+  assert(/shareListItemFromAdd',\s*\[el,\s*el\.dataset\.listId\|\|getId\(el\)\]/.test(actionMatch[0]),
+    'delegation.js: share-list-item-from-add must pass the clicked button, not only the list id');
+
+  const start = lists.indexOf('async function shareListItemFromAdd');
+  const end = lists.indexOf('window.shareListItemFromAdd', start);
+  assert(start !== -1 && end !== -1, 'lists.js: shareListItemFromAdd block not found');
+  const fn = lists.slice(start, end);
+  assert(fn.includes("typeof btn === 'string'") && fn.includes("typeof actualBtn.closest === 'function'"),
+    'lists.js: shareListItemFromAdd must tolerate legacy list-id calls without calling closest() on a string');
+});
+
+// ===================================================================
+// 25g. Sharing adapters normalize completeItem(doneBy) without nested arrays
 // ===================================================================
 test('Sharing adapters normalize completeItem(doneBy) without nested arrays', () => {
   const supabase = jsFiles['sharing-supabase.js'];

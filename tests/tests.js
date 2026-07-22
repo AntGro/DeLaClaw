@@ -242,6 +242,18 @@ test('Shared habit next_due updates are idempotent during refresh', () => {
     'refreshHabits must await shared habit next_due updates to avoid dangling writes');
 });
 
+test('Habit quick-add button resolves the sibling input before adding', () => {
+  const delegation = jsFiles['delegation.js'];
+  const actionMatch = delegation.match(/case 'add-habit-from-input':[\s\S]*?break;/);
+  assert(actionMatch, 'delegation.js: add-habit-from-input action not found');
+  assert(actionMatch[0].includes("querySelector('.habit-add-input, .todo-cat-input')"),
+    'delegation.js: add-habit-from-input button clicks must pass the sibling input, not the button');
+
+  const habits = jsFiles['habits.js'];
+  assert(habits.includes("if (!inputEl || typeof inputEl.value !== 'string') return;"),
+    'habits.js: addHabitFromInput must ignore non-input callers defensively');
+});
+
 test('Footer DB size RPC caches missing optional capability', () => {
   const utils = jsFiles['utils.js'];
   assert(utils.includes('DB_SIZE_REFRESH_MS'),

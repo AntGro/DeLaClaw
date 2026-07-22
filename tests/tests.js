@@ -1437,10 +1437,41 @@ test('sharing.js factory includes supabase case (not commented out)', () => {
   assert(hasActiveCase, "sharing.js: 'supabase' case is missing or commented out");
 });
 
-test('sw.js caches auth.js and sharing-supabase.js', () => {
+test('sw.js JS precache list matches source modules, with demo data explicit', () => {
   const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
-  assert(sw.includes("'js/auth.js'"), 'sw.js missing cache entry for auth.js');
-  assert(sw.includes("'js/sharing-supabase.js'"), 'sw.js missing cache entry for sharing-supabase.js');
+  const block = sw.match(/const PRECACHE_URLS = \[([\s\S]*?)\];/);
+  assert(block, 'sw.js missing PRECACHE_URLS block');
+
+  const precache = new Set(
+    [...block[1].matchAll(/['"]([^'"]+)['"]/g)]
+      .map(m => m[1].replace(/^\.\//, ''))
+  );
+
+  const collect = (dir) => {
+    const entries = [];
+    for (const name of fs.readdirSync(dir)) {
+      const fullPath = path.join(dir, name);
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) entries.push(...collect(fullPath));
+      else if (name.endsWith('.js')) {
+        entries.push(path.relative(path.join(__dirname, '..'), fullPath).split(path.sep).join('/'));
+      }
+    }
+    return entries;
+  };
+
+  // demo-data.js is a large seed dataset with its own offline policy.
+  // Keep it cached for offline demo mode, but exclude it from this module parity guard.
+  assert(precache.has('js/demo-data.js'), 'sw.js must keep demo data cached for offline demo mode');
+
+  const ignored = new Set(['js/demo-data.js']);
+  const expected = collect(JS_DIR).filter(file => !ignored.has(file)).sort();
+  const actual = [...precache].filter(file => file.startsWith('js/') && file.endsWith('.js') && !ignored.has(file)).sort();
+
+  const missing = expected.filter(file => !precache.has(file));
+  const stale = actual.filter(file => !expected.includes(file));
+  assert(missing.length === 0, `sw.js missing JS precache entries: ${missing.join(', ')}`);
+  assert(stale.length === 0, `sw.js has stale JS precache entries: ${stale.join(', ')}`);
 });
 
 test('auth.js claimOwnership includes joined_groups table', () => {

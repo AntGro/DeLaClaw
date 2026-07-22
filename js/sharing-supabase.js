@@ -629,8 +629,59 @@ export async function createSupabaseSharing(adapter, config) {
     return _allItems;
   }
 
+  function _groupName(groupId) {
+    return getAllGroups().find(g => g.id === groupId)?.name || '';
+  }
+
+  function _normalizeSharedHabit(item) {
+    const payload = item.payload || {};
+    const childCompletions = _allItems
+      .filter(i => i.item_type === 'habit_completion' && i.parent_item_id === item.id)
+      .map(i => ({
+        ...(i.payload || {}),
+        id: i.payload?.id || i.id,
+        _item_id: i.id,
+        created_by: i.created_by,
+        created_at: i.created_at,
+        updated_at: i.updated_at,
+      }));
+
+    // Legacy Supabase habits may still have their first completions embedded
+    // in the habit payload. Keep reading them, but new writes use child items.
+    const merged = [];
+    const seen = new Set();
+    for (const completion of childCompletions) {
+      const key = completion.id || completion.completed_at;
+      if (key) seen.add(key);
+      merged.push(completion);
+    }
+    for (const completion of (Array.isArray(payload.completions) ? payload.completions : [])) {
+      const key = completion.id || completion.completed_at;
+      if (key && seen.has(key)) continue;
+      if (key) seen.add(key);
+      merged.push(completion);
+    }
+    merged.sort((a, b) => String(a.completed_at || '').localeCompare(String(b.completed_at || '')));
+
+    return {
+      ...payload,
+      id: item.id,
+      item_type: 'habit',
+      group_id: item.group_id,
+      group_name: item.group_name || _groupName(item.group_id),
+      created_by: payload.created_by || item.created_by,
+      created_at: payload.created_at || item.created_at,
+      updated_at: item.updated_at || payload.updated_at,
+      completions: merged,
+      _payload_id: payload.id || null,
+      _shared_item: item,
+    };
+  }
+
   function getAllSharedHabits() {
-    return _allItems.filter(i => i.item_type === 'habit');
+    return _allItems
+      .filter(i => i.item_type === 'habit')
+      .map(_normalizeSharedHabit);
   }
 
   function getAllSharedTodos() {
@@ -700,7 +751,7 @@ export async function createSupabaseSharing(adapter, config) {
 
   async function addItem(groupId, itemData) {
     const w = await _getItemWriter(groupId);
-    const itemId = itemData.id || _uid8();
+    const itemId = itemData.id || crypto.randomUUID();
     const payload = itemData.payload || {};
 
     if (w.type === 'rpc') {
@@ -814,14 +865,73 @@ export async function createSupabaseSharing(adapter, config) {
   // ── Habit-specific ──────────────────────────────────────────
 
   async function addSharedHabit(groupId, habitData) {
-    return addItem(groupId, {
+    const sharedId = habitData.id || crypto.randomUUID();
+    const { completions = [], ...habitPayload } = habitData;
+    const item = await addItem(groupId, {
+      id: sharedId,
       item_type: 'habit',
-      payload: habitData,
+      payload: { ...habitPayload, id: sharedId, completions: [] },
     });
+    for (const completion of completions) {
+      await addSharedHabitCompletion(groupId, sharedId, completion);
+    }
+    return getAllSharedHabits().find(h => h.id === sharedId) || item;
+  }
+
+  async function _replaceSharedHabitCompletions(groupId, sharedId, completions) {
+    const desired = Array.isArray(completions) ? completions : [];
+    const existing = _allItems.filter(i =>
+      i.item_type === 'habit_completion' && i.parent_item_id === sharedId);
+    const usedItemIds = new Set();
+
+    for (const completion of desired) {
+      const completionId = completion.id || crypto.randomUUID();
+      const existingItem = existing.find(i =>
+        !usedItemIds.has(i.id) && (
+          i.id === completionId ||
+          i.payload?.id === completionId ||
+          (!completion.id && i.payload?.completed_at === completion.completed_at)
+        ));
+      const payload = { ...completion, id: completionId };
+      if (existingItem) {
+        usedItemIds.add(existingItem.id);
+        await updateItem(groupId, existingItem.id, { payload });
+      } else {
+        const added = await addItem(groupId, {
+          id: completionId,
+          item_type: 'habit_completion',
+          parent_item_id: sharedId,
+          payload,
+        });
+        usedItemIds.add(added.id);
+      }
+    }
+
+    for (const item of existing) {
+      if (!usedItemIds.has(item.id)) {
+        await deleteItem(groupId, item.id);
+      }
+    }
   }
 
   async function updateSharedHabit(groupId, sharedId, changes) {
-    return updateItem(groupId, sharedId, { payload: changes });
+    const { completions, ...habitChanges } = changes || {};
+    const existing = _allItems.find(i => i.id === sharedId && i.item_type === 'habit');
+    let updated = existing || null;
+
+    if (Object.keys(habitChanges).length > 0 || Object.prototype.hasOwnProperty.call(changes || {}, 'completions')) {
+      const payload = { ...(existing?.payload || {}), ...habitChanges };
+      // Completions live as child sharing_items on Supabase. Clear any legacy
+      // embedded array when completions are rewritten so there is one source.
+      if (Object.prototype.hasOwnProperty.call(changes || {}, 'completions')) payload.completions = [];
+      updated = await updateItem(groupId, sharedId, { payload });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(changes || {}, 'completions')) {
+      await _replaceSharedHabitCompletions(groupId, sharedId, completions);
+    }
+
+    return getAllSharedHabits().find(h => h.id === sharedId) || updated;
   }
 
   async function deleteSharedHabit(groupId, sharedId) {
@@ -835,10 +945,12 @@ export async function createSupabaseSharing(adapter, config) {
   }
 
   async function addSharedHabitCompletion(groupId, sharedId, completion) {
+    const completionId = completion.id || crypto.randomUUID();
     return addItem(groupId, {
+      id: completionId,
       item_type: 'habit_completion',
       parent_item_id: sharedId,
-      payload: completion,
+      payload: { ...completion, id: completionId },
     });
   }
 

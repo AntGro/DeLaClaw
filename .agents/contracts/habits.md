@@ -54,6 +54,8 @@ User jobs:
 ## Sharing
 - Supabase sharing via `sharing_items` type=habits
 - `syncSharedHabits()` merges completions by habit_id + date
+- Shared habit IDs are canonical: the shared record id is the value stored in every local pointer's `shared_id`
+- `creator_category` is origin metadata only. Local deck/category placement remains personal and must not rewrite `creator_category`
 - Leaving group → local completions stay
 
 ## Cross-Feature Edges

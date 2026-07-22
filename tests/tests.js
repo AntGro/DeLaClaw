@@ -809,14 +809,58 @@ test('editHabitInline updates shared habits through sharing API', () => {
     'habits.js: editHabitInline must detect shared habit pointers');
   assert(fn.includes('state.sharing.updateSharedHabit'),
     'habits.js: editHabitInline must update shared habits through updateSharedHabit');
-  assert(fn.includes('creator_category'),
-    'habits.js: editHabitInline must preserve shared habit creator_category when category changes');
+  assert(!fn.includes('creator_category'),
+    'habits.js: editHabitInline must not rewrite creator_category when local deck changes');
   assert(fn.includes("state.db.from('habits').update({ category: updates.category })"),
     'habits.js: editHabitInline must update only the local category pointer for shared habits');
 
   const sharedBranch = fn.slice(fn.indexOf('if (habit.shared_id'), fn.indexOf('} else {', fn.indexOf('if (habit.shared_id')));
   assert(!/state\.db\.from\(['"]habits['"]\)\.update\(updates\)/.test(sharedBranch),
     'habits.js: editHabitInline shared branch must not write the full updates object only to local DB');
+});
+
+// ===================================================================
+// 25bb. Supabase shared habits use one canonical id and normalized shape
+// ===================================================================
+test('Supabase shared habits use canonical ids and normalize habit payloads', () => {
+  const supabase = jsFiles['sharing-supabase.js'];
+  const addStart = supabase.indexOf('async function addSharedHabit');
+  const addEnd = supabase.indexOf('async function _replaceSharedHabitCompletions', addStart);
+  assert(addStart !== -1 && addEnd !== -1, 'sharing-supabase.js: addSharedHabit block not found');
+  const addFn = supabase.slice(addStart, addEnd);
+
+  assert(addFn.includes('const sharedId = habitData.id || crypto.randomUUID()'),
+    'sharing-supabase.js: addSharedHabit must keep the caller-provided shared habit id or mint a full UUID');
+  assert(addFn.includes('id: sharedId'),
+    'sharing-supabase.js: addSharedHabit must write the same id to sharing_items');
+  assert(addFn.includes('payload: { ...habitPayload, id: sharedId, completions: [] }'),
+    'sharing-supabase.js: addSharedHabit must store habit fields in payload with the canonical id');
+  assert(supabase.includes('const itemId = itemData.id || crypto.randomUUID()'),
+    'sharing-supabase.js: shared item fallback ids must be full UUIDs, not short ids');
+
+  const getStart = supabase.indexOf('function _normalizeSharedHabit');
+  const getEnd = supabase.indexOf('function getAllSharedTodos', getStart);
+  assert(getStart !== -1 && getEnd !== -1, 'sharing-supabase.js: normalized shared habit block not found');
+  const getFn = supabase.slice(getStart, getEnd);
+  assert(getFn.includes('...payload') && getFn.includes('id: item.id') && getFn.includes("item_type: 'habit'"),
+    'sharing-supabase.js: getAllSharedHabits must expose habit payload fields at top level');
+  assert(getFn.includes("i.item_type === 'habit_completion'") && getFn.includes('parent_item_id === item.id'),
+    'sharing-supabase.js: getAllSharedHabits must attach child habit completions');
+  assert(getFn.includes('_payload_id: payload.id || null'),
+    'sharing-supabase.js: normalized habits must expose legacy payload ids for pointer repair');
+
+  const habits = jsFiles['habits.js'];
+  const saveStart = habits.indexOf('async function saveNewHabit');
+  const saveEnd = habits.indexOf('function editHabitInline', saveStart);
+  const saveFn = habits.slice(saveStart, saveEnd);
+  assert(saveFn.includes('shared_id: sharedId') && saveFn.includes('id: sharedId'),
+    'habits.js: local shared habit pointer and shared habit item must use the same id');
+
+  const syncStart = habits.indexOf('async function _doSyncSharedHabits');
+  const syncEnd = habits.indexOf('window.syncSharedHabits', syncStart);
+  const syncFn = habits.slice(syncStart, syncEnd);
+  assert(syncFn.includes('legacySharedId') && syncFn.includes('_payload_id'),
+    'habits.js: syncSharedHabits must repair old Supabase pointers keyed by payload id');
 });
 
 // ===================================================================

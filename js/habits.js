@@ -114,15 +114,7 @@ async function saveEditHabitCategory() {
       habitsToUpdate.forEach(c => { c.category = newName; });
     }
 
-    // Update creator_category on Drive for any shared habits in the renamed deck
-    if (state.sharing) {
-      const sharedInCat = habitsToUpdate.filter(c => c.shared_id && c.shared_group_id);
-      for (const h of sharedInCat) {
-        try {
-          await state.sharing.updateSharedHabit(h.shared_group_id, h.shared_id, { creator_category: newName });
-        } catch (e) { console.warn('Failed to update creator_category on Drive:', e); }
-      }
-    }
+    // Shared habit deck placement is local. Keep creator_category as origin metadata.
   }
 
   closeEditHabitCategoryModal();
@@ -611,7 +603,7 @@ async function refreshHabits() {
           for (const c of sh.completions) {
             // Avoid duplicates (use shared habit id + completed_at as key)
             const exists = state.allHabitCompletions.some(
-              lc => lc.habit_id === habit.id && lc.completed_at === c.completed_at
+              lc => lc.habit_id === habit.id && (lc.id === c.id || lc.completed_at === c.completed_at)
             );
             if (!exists) {
               state.allHabitCompletions.push({
@@ -1028,7 +1020,7 @@ async function saveNewHabit() {
   if (!freq) { showToast(t('habits.enter_frequency'), 'error'); return; }
 
   if (groupId && state.sharing) {
-    // ─── Shared habit: pointer locally + canonical data on Drive ───
+    // ─── Shared habit: local pointer + canonical shared data ───
     const sharedId = crypto.randomUUID();
     // Insert local pointer FIRST to prevent syncSharedHabits race
     // (addSharedHabit emits sharing-changed before we return here)
@@ -1036,7 +1028,11 @@ async function saveNewHabit() {
       name: '', frequency_rule: '', category: cat, is_draft: 0,
       shared_id: sharedId, shared_group_id: groupId,
     }).select().single();
-    if (pointerErr) { console.warn('Failed to create local pointer:', pointerErr); }
+    if (pointerErr) {
+      console.warn('Failed to create local pointer:', pointerErr);
+      showToast(t('toast.failed_to_add') + ': ' + pointerErr.message, 'error');
+      return;
+    }
     try {
       const user = await state.sharing.getCurrentUser();
       const sharedItem = {
@@ -1059,8 +1055,8 @@ async function saveNewHabit() {
       }
       await state.sharing.addSharedHabit(groupId, sharedItem);
     } catch (e) {
-      console.warn('Failed to write shared habit to Drive:', e);
-      // Clean up the local pointer since Drive write failed
+      console.warn('Failed to write shared habit:', e);
+      // Clean up the local pointer since the shared write failed
       if (pointerData?.id) await state.db.from('habits').delete().eq('id', pointerData.id);
       showToast(t('toast.failed_to_add') + ' (shared)', 'error');
       return;
@@ -1162,7 +1158,6 @@ function editHabitInline(habitId, itemEl) {
           const sharedUpdates = {};
           if (updates.name !== undefined) sharedUpdates.name = updates.name;
           if (updates.frequency_rule !== undefined) sharedUpdates.frequency_rule = updates.frequency_rule;
-          if (updates.category !== undefined) sharedUpdates.creator_category = updates.category;
           try {
             if (Object.keys(sharedUpdates).length > 0) {
               await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, sharedUpdates);
@@ -1241,21 +1236,20 @@ async function saveEditHabit() {
   if (!freq) { showToast(t('habits.enter_frequency'), 'error'); return; }
 
   if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-    // ─── Shared habit: name/frequency to Drive, category stays local ───
+    // ─── Shared habit: name/frequency to shared storage, category stays local ───
     // Update local pointer's category (deck placement)
     await state.db.from('habits').update({ category: cat }).eq('id', id);
     try {
       await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, {
         name,
         frequency_rule: freq,
-        creator_category: cat,
       });
     } catch (e) {
       console.warn('Failed to update shared habit:', e);
       showToast(t('toast.update_failed'), 'error');
       return;
     }
-    // Handle last done date change — write to Drive completions
+    // Handle last done date change — write to shared completions
     const prevLastDone = getHabitLastDone(id);
     const prevDateStr = prevLastDone ? localDateStr(prevLastDone) : '';
     if (lastDoneVal && lastDoneVal !== prevDateStr) {
@@ -1274,7 +1268,7 @@ async function saveEditHabit() {
           }
           await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: comps });
         }
-      } catch (e) { console.warn('Failed to update shared completion on Drive:', e); }
+      } catch (e) { console.warn('Failed to update shared completion:', e); }
     }
     // Recompute next_due on local pointer
     const lastDone = lastDoneVal ? new Date(lastDoneVal + 'T12:00:00').toISOString() : (getHabitLastDone(id)?.toISOString() || null);
@@ -1373,7 +1367,7 @@ async function markHabitDone(habitId, btnEl) {
         await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion);
         await updateHabitNextDue(habitId, habit.frequency_rule, now);
       } catch (e) {
-        console.warn('Failed to push shared habit completion to Drive:', e);
+        console.warn('Failed to push shared habit completion:', e);
         showToast(t('habits.failed_record'), 'error');
         return;
       }
@@ -1511,12 +1505,12 @@ async function deleteHabitCompletion(compId) {
     'Are you sure you want to delete this completion record?',
     async () => {
       if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-        // ─── Shared: remove from Drive completions array ───
+        // ─── Shared: remove from shared completions ───
         try {
           const sharedHabits = state.sharing.getAllSharedHabits();
           const sh = sharedHabits.find(h => h.id === habit.shared_id);
           if (sh?.completions) {
-            const idx = sh.completions.findIndex(c => c.completed_at === comp.completed_at);
+            const idx = sh.completions.findIndex(c => c.id === comp.id || c.completed_at === comp.completed_at);
             if (idx >= 0) sh.completions.splice(idx, 1);
             await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: sh.completions });
             // Recompute next_due from new latest completion (or null if none left)
@@ -1575,14 +1569,14 @@ async function saveHabitCompletion(compId) {
   const newNote = noteEl ? noteEl.value.trim() : null;
 
   if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-    // ─── Shared: update in Drive completions array ───
+    // ─── Shared: update in shared completions ───
     try {
       const sharedHabits = state.sharing.getAllSharedHabits();
       const sh = sharedHabits.find(h => h.id === habit.shared_id);
       if (sh?.completions) {
-        const driveComp = sh.completions.find(c => c.completed_at === oldCompletedAt);
-        if (driveComp) {
-          driveComp.completed_at = newDate;
+        const sharedComp = sh.completions.find(c => c.id === comp.id || c.completed_at === oldCompletedAt);
+        if (sharedComp) {
+          sharedComp.completed_at = newDate;
           await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: sh.completions });
           // Recompute next_due from latest completion
           const latest = sh.completions[sh.completions.length - 1]?.completed_at || null;
@@ -2054,9 +2048,9 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
  */
 /**
  * Sync shared habits: manage local pointers only.
- * - New shared habit on Drive with no local pointer → create pointer in "General"
- * - Shared habit deleted from Drive → delete local pointer
- * - Data (name, frequency, completions) is read live from Drive in refreshHabits()
+ * - New shared habit with no local pointer → create pointer in "General"
+ * - Shared habit deleted from shared storage → delete local pointer
+ * - Data (name, frequency, completions) is read live from shared storage in refreshHabits()
  */
 let _syncingHabits = false;
 async function syncSharedHabits() {
@@ -2087,19 +2081,41 @@ async function _doSyncSharedHabits() {
 
   let needsRefresh = false;
 
-  // Create pointers for new shared habits
+  // Create or repair pointers for shared habits
   for (const sh of sharedHabits) {
-    if (!localBySharedId.has(sh.id)) {
-      // Double-check DB to avoid race with saveNewHabit (which inserts pointer after Drive write)
-      const { data: existing } = await state.db.from('habits').select('id').eq('shared_id', sh.id).limit(1);
-      if (existing?.length) continue;
-      const { error } = await state.db.from('habits').insert({
-        name: '', frequency_rule: '', category: 'General', is_draft: 0,
-        shared_id: sh.id, shared_group_id: sh.group_id,
-      });
-      if (error) { console.warn('syncSharedHabits: failed to create pointer', sh.id, error); continue; }
+    const currentPointer = localBySharedId.get(sh.id);
+
+    // Repair old Supabase pointers created before the shared record id was canonical.
+    // Prefer the legacy pointer because it preserves the creator's local deck.
+    const legacySharedId = sh._payload_id && sh._payload_id !== sh.id ? sh._payload_id : null;
+    const legacyPointer = legacySharedId ? localBySharedId.get(legacySharedId) : null;
+    if (legacyPointer) {
+      if (currentPointer && currentPointer.id !== legacyPointer.id) {
+        await state.db.from('habits').delete().eq('id', currentPointer.id);
+      }
+      const { error } = await state.db.from('habits')
+        .update({ shared_id: sh.id, shared_group_id: sh.group_id })
+        .eq('id', legacyPointer.id);
+      if (error) { console.warn('syncSharedHabits: failed to repair pointer', sh.id, error); continue; }
+      legacyPointer.shared_id = sh.id;
+      legacyPointer.shared_group_id = sh.group_id;
+      localBySharedId.delete(legacySharedId);
+      localBySharedId.set(sh.id, legacyPointer);
       needsRefresh = true;
+      continue;
     }
+
+    if (currentPointer) continue;
+
+    // Double-check DB to avoid races with local pointer creation.
+    const { data: existing } = await state.db.from('habits').select('id').eq('shared_id', sh.id).limit(1);
+    if (existing?.length) continue;
+    const { error } = await state.db.from('habits').insert({
+      name: '', frequency_rule: '', category: 'General', is_draft: 0,
+      shared_id: sh.id, shared_group_id: sh.group_id,
+    });
+    if (error) { console.warn('syncSharedHabits: failed to create pointer', sh.id, error); continue; }
+    needsRefresh = true;
   }
 
   // Delete pointers for removed shared habits

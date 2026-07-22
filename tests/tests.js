@@ -1043,6 +1043,38 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
   }
 });
 
+
+test('Drag clones are globally tagged and cleaned before drag-enabled re-renders', () => {
+  const itemUtils = jsFiles['item-utils.js'];
+  assert(itemUtils.includes('DRAG_CLONE_SELECTOR'),
+    'item-utils.js must expose a clone selector for stale drag artifact cleanup');
+  assert(itemUtils.includes("clone.dataset.dragClone = 'true'"),
+    'item-utils.js must tag temporary drag clones with data-drag-clone="true"');
+  assert(itemUtils.includes('registerDragCleanup'),
+    'item-utils.js must register document/window cleanup callbacks for active drags');
+  for (const eventName of ['pointerup', 'pointercancel', 'visibilitychange', 'keydown', 'blur', 'contextmenu']) {
+    assert(itemUtils.includes(eventName),
+      `item-utils.js global drag cleanup must handle ${eventName}`);
+  }
+
+  const renderChecks = {
+    'lists.js': 'function renderLists',
+    'todos.js': 'function renderTodos',
+    'projects.js': 'function buildProjectCards',
+    'vestiaire.js': 'function renderVestiaire',
+  };
+  for (const [file, marker] of Object.entries(renderChecks)) {
+    const src = jsFiles[file];
+    assert(src.includes('cleanupDragArtifacts'), `${file} must import/use cleanupDragArtifacts before replacing drag-enabled DOM`);
+    const renderStart = src.indexOf(marker);
+    assert(renderStart !== -1, `${file}: missing ${marker}`);
+    const firstInnerHtml = src.indexOf('innerHTML', renderStart);
+    const cleanupIdx = src.indexOf('cleanupDragArtifacts()', renderStart);
+    assert(cleanupIdx !== -1 && firstInnerHtml !== -1 && cleanupIdx < firstInnerHtml,
+      `${file}: cleanupDragArtifacts() must run before the first render-time innerHTML replacement`);
+  }
+});
+
 // ===================================================================
 // 31. CHECK constraint parity across all backends (Supabase ↔ Demo ↔ SQLite)
 // ===================================================================

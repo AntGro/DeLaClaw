@@ -3,7 +3,7 @@ import { lucideIcon } from './icons.js';
 import state, { ARCHIVED_PROJECTS_KEY, SHOW_ARCHIVED_KEY, MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
 import { esc, escQ, linkify, renderMd, showToast, showDeleteConfirm,
          updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
-import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
+import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 
 // ===================================================================
 // state.PROJECTS (loaded from Supabase)
@@ -167,6 +167,8 @@ function renderProjectGrid() {
 
 function buildProjectCards() {
   const grid = document.getElementById('projectGrid');
+  if (!grid) return;
+  cleanupDragArtifacts();
   const archivedIds = getArchivedProjectIds();
   let visibleProjects = projectFilter === 'all'
     ? [...state.PROJECTS]
@@ -263,6 +265,7 @@ async function refreshAll() {
 }
 
 function renderAllTasks() {
+  cleanupDragArtifacts();
   const archivedIds = getArchivedProjectIds();
   const visibleProjects = state.PROJECTS.filter(p => !archivedIds.includes(p.id));
 
@@ -570,6 +573,7 @@ async function saveNewProject() {
 // ===================================================================
 function initProjectDragDrop() {
   const grid = document.getElementById('projectGrid');
+  if (!grid) return;
   const cards = grid.querySelectorAll('.project-card');
   let dragState = null;
 
@@ -580,6 +584,42 @@ function initProjectDragDrop() {
     let pressTimer = null;
     let startX = 0, startY = 0;
     let activated = false;
+    let unregisterCleanup = null;
+
+    const unregisterGlobalCleanup = () => {
+      if (unregisterCleanup) {
+        unregisterCleanup();
+        unregisterCleanup = null;
+      }
+    };
+
+    const finishDrag = async ({ complete = true } = {}) => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      unregisterGlobalCleanup();
+      const activeState = dragState && dragState.el === card ? dragState : null;
+      if (!activeState) return;
+
+      if (activeState.clone) activeState.clone.remove();
+      card.classList.remove('dragging');
+      unmarkDragSource(card);
+      let targetId = null;
+      grid.querySelectorAll('.project-card').forEach(el => {
+        if (el.classList.contains('drag-over')) { targetId = el.dataset.project; }
+        el.classList.remove('drag-over');
+      });
+      const draggedId = activeState.id;
+      try {
+        if (activeState.pointerId && header.hasPointerCapture?.(activeState.pointerId)) header.releasePointerCapture(activeState.pointerId);
+      } catch (_) {}
+      dragState = null;
+      setDragging(false);
+      window.getSelection()?.removeAllRanges();
+      if (complete && targetId && targetId !== draggedId) await reorderProjects(draggedId, targetId);
+    };
+
+    const cancelDrag = () => {
+      void finishDrag({ complete: false });
+    };
 
     header.addEventListener('pointerdown', e => {
       if (e.target.closest('button, a, input, textarea, select, .project-header-actions')) return;
@@ -588,30 +628,37 @@ function initProjectDragDrop() {
       startY = e.clientY;
       activated = false;
 
+      unregisterGlobalCleanup();
+      unregisterCleanup = registerDragCleanup(({ complete }) => {
+        void finishDrag({ complete });
+      });
+
       pressTimer = setTimeout(() => {
         activated = true;
         const rect = card.getBoundingClientRect();
         setDragging(true);
         dragState = { el: card, id: card.dataset.project, offsetY: e.clientY - rect.top, offsetX: e.clientX - rect.left, clone: null, pointerId: e.pointerId };
 
-        const clone = card.cloneNode(true);
+        const clone = markDragClone(card.cloneNode(true));
         clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;opacity:0.85;z-index:1000;pointer-events:none;box-shadow:0 4px 20px rgba(0,0,0,0.3);border-radius:12px;border:2px solid var(--accent);transition:none;`;
         document.body.appendChild(clone);
         dragState.clone = clone;
+        markDragSource(card);
         card.classList.add('dragging');
-        header.setPointerCapture(e.pointerId);
+        try { header.setPointerCapture(e.pointerId); } catch (_) {}
       }, LONG_PRESS_MS);
     });
 
     header.addEventListener('pointermove', e => {
       if (pressTimer && !activated) {
         if (Math.abs(e.clientX - startX) > DRAG_THRESHOLD || Math.abs(e.clientY - startY) > DRAG_THRESHOLD) {
-          clearTimeout(pressTimer); pressTimer = null;
+          clearTimeout(pressTimer); pressTimer = null; unregisterGlobalCleanup();
         }
         return;
       }
       if (!dragState || dragState.el !== card) return;
       e.preventDefault();
+      if (!dragState.clone) return;
       dragState.clone.style.top = (e.clientY - dragState.offsetY) + 'px';
       dragState.clone.style.left = (e.clientX - dragState.offsetX) + 'px';
       grid.querySelectorAll('.project-card:not(.dragging)').forEach(el => {
@@ -621,33 +668,9 @@ function initProjectDragDrop() {
       });
     });
 
-    const finishDrag = async () => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      if (!dragState || dragState.el !== card) return;
-      if (dragState.clone) dragState.clone.remove();
-      card.classList.remove('dragging');
-      let targetId = null;
-      grid.querySelectorAll('.project-card').forEach(el => {
-        if (el.classList.contains('drag-over')) { targetId = el.dataset.project; el.classList.remove('drag-over'); }
-      });
-      const draggedId = dragState.id;
-      dragState = null;
-      setDragging(false);
-      if (targetId && targetId !== draggedId) await reorderProjects(draggedId, targetId);
-    };
-
-    header.addEventListener('pointerup', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } finishDrag(); });
-    header.addEventListener('pointercancel', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } finishDrag(); });
-    header.addEventListener('lostpointercapture', () => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      if (dragState && dragState.el === card) {
-        if (dragState.clone) dragState.clone.remove();
-        card.classList.remove('dragging');
-        grid.querySelectorAll('.project-card').forEach(el => el.classList.remove('drag-over'));
-        dragState = null;
-        setDragging(false);
-      }
-    });
+    header.addEventListener('pointerup', () => { void finishDrag({ complete: true }); });
+    header.addEventListener('pointercancel', cancelDrag);
+    header.addEventListener('lostpointercapture', cancelDrag);
   });
 }
 

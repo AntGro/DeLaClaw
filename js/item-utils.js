@@ -14,6 +14,76 @@ export function setDragging(v) { isDragging = v; }
 
 export const LONG_PRESS_MS = 250;
 export const DRAG_THRESHOLD = 5;
+export const DRAG_CLONE_SELECTOR = '[data-drag-clone="true"]';
+export const DRAG_SOURCE_SELECTOR = '[data-drag-source="true"]';
+
+const dragCleanupCallbacks = new Set();
+let dragCleanupListenersBound = false;
+
+export function markDragClone(clone) {
+  clone.dataset.dragClone = 'true';
+  clone.setAttribute('aria-hidden', 'true');
+  return clone;
+}
+
+export function markDragSource(el) {
+  if (el) el.dataset.dragSource = 'true';
+}
+
+export function unmarkDragSource(el) {
+  if (el) delete el.dataset.dragSource;
+}
+
+function removeDragArtifacts() {
+  document.querySelectorAll(DRAG_CLONE_SELECTOR).forEach(el => el.remove());
+  document.querySelectorAll(DRAG_SOURCE_SELECTOR).forEach(el => {
+    el.classList.remove('dragging');
+    unmarkDragSource(el);
+  });
+  document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+  document.body.style.userSelect = '';
+  document.body.style.webkitUserSelect = '';
+  setDragging(false);
+}
+
+function runDragCleanups({ complete = false } = {}) {
+  const callbacks = Array.from(dragCleanupCallbacks);
+  for (const cleanup of callbacks) {
+    try { cleanup({ complete }); }
+    catch (e) { console.warn('Drag cleanup failed:', e); }
+  }
+  removeDragArtifacts();
+}
+
+function ensureDragCleanupListeners() {
+  if (dragCleanupListenersBound) return;
+  dragCleanupListenersBound = true;
+  document.addEventListener('pointerup', () => runDragCleanups({ complete: true }));
+  document.addEventListener('pointercancel', () => runDragCleanups({ complete: false }));
+  document.addEventListener('contextmenu', () => runDragCleanups({ complete: false }));
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) runDragCleanups({ complete: false });
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') runDragCleanups({ complete: false });
+  });
+  window.addEventListener('blur', () => runDragCleanups({ complete: false }));
+}
+
+export function registerDragCleanup(cleanup) {
+  ensureDragCleanupListeners();
+  dragCleanupCallbacks.add(cleanup);
+  return () => dragCleanupCallbacks.delete(cleanup);
+}
+
+export function cleanupDragArtifacts() {
+  runDragCleanups({ complete: false });
+}
+
+export function resetDragVisuals() {
+  removeDragArtifacts();
+}
+
 
 // ===================================================================
 // HOVER DELAY — show action buttons on hover / single-click
@@ -128,6 +198,7 @@ export function initItemDragDrop(container, {
   idAttr,
   onReorder,
 }) {
+  cleanupDragArtifacts();
   let dragState = null;
 
   container.querySelectorAll(itemSelector).forEach(item => {
@@ -137,6 +208,54 @@ export function initItemDragDrop(container, {
     let startX = 0, startY = 0;
     let activated = false;
     let preventScroll = null;
+    let unregisterCleanup = null;
+
+    const unregisterGlobalCleanup = () => {
+      if (unregisterCleanup) {
+        unregisterCleanup();
+        unregisterCleanup = null;
+      }
+    };
+
+    const cleanup = (wasDrag) => {
+      unregisterGlobalCleanup();
+      if (preventScroll) { item.removeEventListener('touchmove', preventScroll); preventScroll = null; }
+      item.style.touchAction = 'pan-y';
+      document.body.style.userSelect = '';
+      document.body.style.webkitUserSelect = '';
+      if (wasDrag) window.getSelection()?.removeAllRanges();
+    };
+
+    const finishDrag = async ({ complete = true } = {}) => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      const activeState = dragState && dragState.el === item ? dragState : null;
+      if (!activeState) { cleanup(false); return; }
+
+      if (activeState.clone) activeState.clone.remove();
+      item.classList.remove('dragging');
+      unmarkDragSource(item);
+
+      let targetId = null;
+      container.querySelectorAll(itemSelector).forEach(el => {
+        if (el.classList.contains('drag-over')) { targetId = el.dataset[idAttr]; }
+        el.classList.remove('drag-over');
+      });
+      const draggedId = activeState.id;
+      try {
+        if (activeState.pointerId && item.hasPointerCapture?.(activeState.pointerId)) item.releasePointerCapture(activeState.pointerId);
+      } catch (_) {}
+      dragState = null;
+      setDragging(false);
+      cleanup(true);
+      if (complete && targetId && targetId !== draggedId) {
+        try { await onReorder(draggedId, targetId); }
+        catch (e) { console.error('Item reorder failed:', e); }
+      }
+    };
+
+    const cancelDrag = () => {
+      void finishDrag({ complete: false });
+    };
 
     item.addEventListener('pointerdown', e => {
       if (e.target.closest(excludeSelector)) return;
@@ -144,6 +263,11 @@ export function initItemDragDrop(container, {
       startX = e.clientX;
       startY = e.clientY;
       activated = false;
+
+      unregisterGlobalCleanup();
+      unregisterCleanup = registerDragCleanup(({ complete }) => {
+        void finishDrag({ complete });
+      });
 
       // Prevent scrolling once long-press activates
       preventScroll = (ev) => { if (activated) ev.preventDefault(); };
@@ -154,15 +278,16 @@ export function initItemDragDrop(container, {
         e.preventDefault();
         item.style.touchAction = 'none';
         const rect = item.getBoundingClientRect();
-        isDragging = true;
+        setDragging(true);
         document.body.style.userSelect = 'none';
         document.body.style.webkitUserSelect = 'none';
         dragState = { el: item, id: item.dataset[idAttr], offsetY: e.clientY - rect.top, clone: null, pointerId: e.pointerId };
 
-        const clone = item.cloneNode(true);
+        const clone = markDragClone(item.cloneNode(true));
         clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;opacity:0.85;z-index:1000;pointer-events:none;box-shadow:0 4px 20px rgba(0,0,0,0.3);background:var(--surface);border-radius:8px;border:2px solid var(--accent);transition:none;`;
         document.body.appendChild(clone);
         dragState.clone = clone;
+        markDragSource(item);
         item.classList.add('dragging');
         try { item.setPointerCapture(e.pointerId); } catch (_) {}
       }, LONG_PRESS_MS);
@@ -173,11 +298,13 @@ export function initItemDragDrop(container, {
         if (Math.abs(e.clientX - startX) > DRAG_THRESHOLD || Math.abs(e.clientY - startY) > DRAG_THRESHOLD) {
           clearTimeout(pressTimer);
           pressTimer = null;
+          cleanup(false);
         }
         return;
       }
       if (!dragState || dragState.el !== item) return;
       e.preventDefault();
+      if (!dragState.clone) return;
       dragState.clone.style.top = (e.clientY - dragState.offsetY) + 'px';
 
       // Auto-scroll
@@ -193,47 +320,11 @@ export function initItemDragDrop(container, {
       });
     });
 
-    const cleanup = (wasDrag) => {
-      if (preventScroll) { item.removeEventListener('touchmove', preventScroll); preventScroll = null; }
-      item.style.touchAction = 'pan-y';
-      document.body.style.userSelect = '';
-      document.body.style.webkitUserSelect = '';
-      if (wasDrag) window.getSelection()?.removeAllRanges();
-    };
-
-    const finishDrag = async () => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      if (!dragState || dragState.el !== item) { cleanup(false); return; }
-      if (dragState.clone) dragState.clone.remove();
-      item.classList.remove('dragging');
-
-      let targetId = null;
-      container.querySelectorAll(itemSelector).forEach(el => {
-        if (el.classList.contains('drag-over')) { targetId = el.dataset[idAttr]; el.classList.remove('drag-over'); }
-      });
-      const draggedId = dragState.id;
-      dragState = null;
-      isDragging = false;
-      cleanup(true);
-      if (targetId && targetId !== draggedId) await onReorder(draggedId, targetId);
-    };
-
-    item.addEventListener('pointerup', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } finishDrag(); });
-    item.addEventListener('pointercancel', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } finishDrag(); });
-    item.addEventListener('lostpointercapture', () => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      if (dragState && dragState.el === item) {
-        if (dragState.clone) dragState.clone.remove();
-        item.classList.remove('dragging');
-        container.querySelectorAll(itemSelector).forEach(el => el.classList.remove('drag-over'));
-        dragState = null;
-        isDragging = false;
-        cleanup();
-      }
-    });
+    item.addEventListener('pointerup', () => { void finishDrag({ complete: true }); });
+    item.addEventListener('pointercancel', cancelDrag);
+    item.addEventListener('lostpointercapture', cancelDrag);
   });
 }
-
 
 // ===================================================================
 // REORDER ITEMS — splice array, move DOM, sync to Supabase

@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
 import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
-import { scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 
 // ===================================================================
@@ -161,6 +161,7 @@ function setVestiaireFilter(filter) {
 function renderVestiaire() {
   const grid = document.getElementById('vestiaireGrid');
   if (!grid) return;
+  cleanupDragArtifacts();
 
   let items = state.allVestiaire || [];
   let cats = getVestiaireCategories();

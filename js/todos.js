@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN } from './state.js';
 import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
-import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
+import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
@@ -301,6 +301,7 @@ function getFilteredTodosForCategory(category) {
 function renderTodos() {
   const grid = document.getElementById('todoCategoryGrid');
   if (!grid) return;
+  cleanupDragArtifacts();
 
   // Show page-level empty state when user has zero TODOs and no custom categories
   const categories = getCategories();
@@ -1101,6 +1102,44 @@ function initCategoryDragDrop() {
     let pressTimer = null;
     let startX = 0, startY = 0;
     let activated = false;
+    let unregisterCleanup = null;
+
+    const unregisterGlobalCleanup = () => {
+      if (unregisterCleanup) {
+        unregisterCleanup();
+        unregisterCleanup = null;
+      }
+    };
+
+    const finishDrag = async ({ complete = true } = {}) => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      unregisterGlobalCleanup();
+      const activeState = dragState && dragState.el === card ? dragState : null;
+      if (!activeState) return;
+
+      if (activeState.clone) activeState.clone.remove();
+      card.classList.remove('dragging');
+      unmarkDragSource(card);
+      let targetCategory = null;
+      grid.querySelectorAll('.project-card').forEach(el => {
+        if (el.classList.contains('drag-over')) { targetCategory = el.dataset.category || ''; }
+        el.classList.remove('drag-over');
+      });
+      const draggedCategory = activeState.category;
+      try {
+        if (activeState.pointerId && header.hasPointerCapture?.(activeState.pointerId)) header.releasePointerCapture(activeState.pointerId);
+      } catch (_) {}
+      dragState = null;
+      setDragging(false);
+      window.getSelection()?.removeAllRanges();
+      if (complete && targetCategory !== null && targetCategory !== draggedCategory && draggedCategory !== '' && targetCategory !== '') {
+        await reorderCategories(draggedCategory, targetCategory);
+      }
+    };
+
+    const cancelDrag = () => {
+      void finishDrag({ complete: false });
+    };
 
     header.addEventListener('pointerdown', e => {
       if (e.target.closest('button, a, input, textarea, select, .todo-cat-header-actions')) return;
@@ -1109,29 +1148,36 @@ function initCategoryDragDrop() {
       startY = e.clientY;
       activated = false;
 
+      unregisterGlobalCleanup();
+      unregisterCleanup = registerDragCleanup(({ complete }) => {
+        void finishDrag({ complete });
+      });
+
       pressTimer = setTimeout(() => {
         activated = true;
         const rect = card.getBoundingClientRect();
         setDragging(true);
-        dragState = { el: card, category, offsetY: e.clientY - rect.top, offsetX: e.clientX - rect.left, clone: null };
-        const clone = card.cloneNode(true);
+        dragState = { el: card, category, offsetY: e.clientY - rect.top, offsetX: e.clientX - rect.left, clone: null, pointerId: e.pointerId };
+        const clone = markDragClone(card.cloneNode(true));
         clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;opacity:0.85;z-index:1000;pointer-events:none;box-shadow:0 4px 20px rgba(0,0,0,0.3);border-radius:12px;border:2px solid var(--accent);transition:none;`;
         document.body.appendChild(clone);
         dragState.clone = clone;
+        markDragSource(card);
         card.classList.add('dragging');
-        header.setPointerCapture(e.pointerId);
+        try { header.setPointerCapture(e.pointerId); } catch (_) {}
       }, LONG_PRESS_MS);
     });
 
     header.addEventListener('pointermove', e => {
       if (pressTimer && !activated) {
         if (Math.abs(e.clientX - startX) > DRAG_THRESHOLD || Math.abs(e.clientY - startY) > DRAG_THRESHOLD) {
-          clearTimeout(pressTimer); pressTimer = null;
+          clearTimeout(pressTimer); pressTimer = null; unregisterGlobalCleanup();
         }
         return;
       }
       if (!dragState || dragState.el !== card) return;
       e.preventDefault();
+      if (!dragState.clone) return;
       dragState.clone.style.top = (e.clientY - dragState.offsetY) + 'px';
       dragState.clone.style.left = (e.clientX - dragState.offsetX) + 'px';
       grid.querySelectorAll('.project-card:not(.dragging)').forEach(el => {
@@ -1141,35 +1187,9 @@ function initCategoryDragDrop() {
       });
     });
 
-    const finishDrag = async () => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      if (!dragState || dragState.el !== card) return;
-      if (dragState.clone) dragState.clone.remove();
-      card.classList.remove('dragging');
-      let targetCategory = null;
-      grid.querySelectorAll('.project-card').forEach(el => {
-        if (el.classList.contains('drag-over')) { targetCategory = el.dataset.category || ''; el.classList.remove('drag-over'); }
-      });
-      const draggedCategory = dragState.category;
-      dragState = null;
-      setDragging(false);
-      if (targetCategory !== null && targetCategory !== draggedCategory && draggedCategory !== '' && targetCategory !== '') {
-        await reorderCategories(draggedCategory, targetCategory);
-      }
-    };
-
-    header.addEventListener('pointerup', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } finishDrag(); });
-    header.addEventListener('pointercancel', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } finishDrag(); });
-    header.addEventListener('lostpointercapture', () => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      if (dragState && dragState.el === card) {
-        if (dragState.clone) dragState.clone.remove();
-        card.classList.remove('dragging');
-        grid.querySelectorAll('.project-card').forEach(el => el.classList.remove('drag-over'));
-        dragState = null;
-        setDragging(false);
-      }
-    });
+    header.addEventListener('pointerup', () => { void finishDrag({ complete: true }); });
+    header.addEventListener('pointercancel', cancelDrag);
+    header.addEventListener('lostpointercapture', cancelDrag);
   });
 }
 
@@ -1381,6 +1401,7 @@ window.showTodoGeneralCard = function() {
   // Force render the normal view (General card) even when empty, then focus the input
   const grid = document.getElementById('todoCategoryGrid');
   if (!grid) return;
+  cleanupDragArtifacts();
   const categoryList = [''];
   grid.innerHTML = renderCategoryCard('');
   const catId = categoryToDomId('');

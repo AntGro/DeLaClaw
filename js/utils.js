@@ -32,8 +32,6 @@ function isServiceRoleKey(key){
   const role = getSupabaseKeyRole(key);
   return role==='service_role' || (key||'').trim().startsWith('sb_secret_');
 }
-function linkify(html) { return html.replace(/https?:\/\/[^\s<&]+/g, url => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`); }
-
 function deepEqual(a, b) {
   if (a === b) return true;
   if (a == null || b == null) return false;
@@ -635,7 +633,7 @@ function isMobileUA() {
 }
 
 export {
-  esc, escQ, linkify, deepEqual, renderMd, showToast, formatRelativeDate,
+  esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
   showDeleteConfirm, closeDeleteConfirm, executeDeleteConfirm,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, fetchAll,

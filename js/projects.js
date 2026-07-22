@@ -1,7 +1,7 @@
 import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
 import state, { ARCHIVED_PROJECTS_KEY, SHOW_ARCHIVED_KEY, MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
-import { esc, escQ, linkify, renderMd, showToast, showDeleteConfirm,
+import { esc, escQ, renderMd, showToast, showDeleteConfirm,
          updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
 import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 

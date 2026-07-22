@@ -230,6 +230,32 @@ test('Sharing refresh handler centralizes sync before render', () => {
     'lists.js must not register its own sharing-changed listener');
 });
 
+test('Shared habit next_due updates are idempotent during refresh', () => {
+  const habits = jsFiles['habits.js'];
+  assert(habits.includes('function normalizeHabitNextDue'),
+    'habits.js must normalize next_due before comparing stored and computed values');
+  assert(habits.includes('currentNextDue === nextDue'),
+    'updateHabitNextDue must skip DB writes when next_due is unchanged');
+  assert(habits.includes('if (habit) habit.next_due = nextDue'),
+    'updateHabitNextDue must update in-memory state after a successful write');
+  assert(habits.includes('await updateHabitNextDue(habit.id, sh.frequency_rule'),
+    'refreshHabits must await shared habit next_due updates to avoid dangling writes');
+});
+
+test('Footer DB size RPC caches missing optional capability', () => {
+  const utils = jsFiles['utils.js'];
+  assert(utils.includes('DB_SIZE_REFRESH_MS'),
+    'utils.js must throttle footer DB size refreshes');
+  assert(utils.includes('_dbSizeByBackend'),
+    'utils.js must cache DB size state per backend');
+  assert(utils.includes('isMissingDbSizeRpc'),
+    'utils.js must detect missing optional db_size_mb RPC');
+  assert(utils.includes('!dbSizeState.unavailable && !dbSizeState.inFlight && stale'),
+    'updateFooterStats must block unavailable, in-flight, and fresh db_size_mb requests');
+  assert((utils.match(/state\.db\.rpc\('db_size_mb'\)/g) || []).length === 1,
+    'updateFooterStats should have a single guarded db_size_mb call site');
+});
+
 test('Shared TODO sync reads local pointers from DB, not startup cache', () => {
   const todos = jsFiles['todos.js'];
   assert(todos.includes("state.db.from('todos').select('id,shared_id,shared_group_id')"),

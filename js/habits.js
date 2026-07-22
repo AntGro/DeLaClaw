@@ -319,19 +319,29 @@ function ordinalSuffix(n) {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
+function normalizeHabitNextDue(value) {
+  return value ? String(value).slice(0, 10) : null;
+}
+
 async function updateHabitNextDue(habitId, frequencyRule, lastDoneDate) {
-  if (isStructuredRule(frequencyRule)) {
-    const nextDue = computeNextDue(frequencyRule, lastDoneDate);
-    const { error } = await state.db.from('habits').update({ next_due: nextDue }).eq('id', habitId);
-    if (error) console.warn('Failed to update next_due:', error.message);
-  } else {
-    await clearHabitNextDue(habitId);
+  const nextDue = isStructuredRule(frequencyRule)
+    ? normalizeHabitNextDue(computeNextDue(frequencyRule, lastDoneDate))
+    : null;
+  const habit = state.allHabits.find(h => String(h.id) === String(habitId));
+  const currentNextDue = normalizeHabitNextDue(habit?.next_due);
+
+  if (habit && currentNextDue === nextDue) return;
+
+  const { error } = await state.db.from('habits').update({ next_due: nextDue }).eq('id', habitId);
+  if (error) {
+    console.warn(nextDue ? 'Failed to update next_due:' : 'Failed to clear next_due:', error.message);
+    return;
   }
+  if (habit) habit.next_due = nextDue;
 }
 
 async function clearHabitNextDue(habitId) {
-  const { error } = await state.db.from('habits').update({ next_due: null }).eq('id', habitId);
-  if (error) console.warn('Failed to clear next_due:', error.message);
+  await updateHabitNextDue(habitId, '', null);
 }
 
 // ===================================================================
@@ -618,10 +628,10 @@ async function refreshHabits() {
           state.allHabitCompletions.sort((a, b) => b.completed_at.localeCompare(a.completed_at));
           // Compute next_due from latest completion
           const latest = sh.completions[sh.completions.length - 1];
-          updateHabitNextDue(habit.id, sh.frequency_rule, latest.completed_at);
+          await updateHabitNextDue(habit.id, sh.frequency_rule, latest.completed_at);
         } else {
           // No completions yet — compute first next_due from now
-          updateHabitNextDue(habit.id, sh.frequency_rule, null);
+          await updateHabitNextDue(habit.id, sh.frequency_rule, null);
         }
       }
     }

@@ -96,4 +96,8 @@ export const DRIVE_MIGRATIONS = {
     // 1.410: agent_grants – no-op for Drive (single-user), bump version only
     if (!store.agent_grants) store.agent_grants = [];
   },
+  '1.436': async (_store) => {
+    // 1.436: Supabase sharing-only invited_label migration.
+    // Drive shared group JSON is normalized lazily by js/sharing-drive.js.
+  },
 };

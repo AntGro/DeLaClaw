@@ -64,10 +64,65 @@ export async function createSupabaseSharing(adapter, config) {
     try { return await hashTokenClient(token); } catch { return null; }
   }
 
-  function _normalizeDoneBy(doneBy) {
+  function _fallbackDisplayName(value, fallback = 'Member') {
+    const v = String(value || '').trim();
+    if (!v) return fallback;
+    return v.includes('@') ? v.split('@')[0] : v;
+  }
+
+  function _normalizeMember(row = {}) {
+    const memberId = row.member_id || row.memberId || row.id || _uid8();
+    const role = row.role || 'member';
+    const joinedAt = row.joined_at ?? row.joinedAt ?? null;
+    const revokedAt = row.revoked_at ?? row.revokedAt ?? null;
+    const invitedLabel = row.invited_label ?? row.invitedLabel ?? null;
+    const rawDisplay = row.display_name ?? row.displayName ?? row.name ?? null;
+    const displayName = _fallbackDisplayName(rawDisplay || invitedLabel || memberId);
+    return {
+      memberId,
+      role,
+      status: revokedAt ? 'revoked' : (joinedAt ? 'joined' : 'pending'),
+      displayName,
+      invitedLabel,
+      joinedAt,
+      authUserId: row.auth_user_id || row.authUserId || null,
+      token: row.token || null,
+    };
+  }
+
+  function _publicMember(member, { includeInviteToken = false } = {}) {
+    const m = _normalizeMember(member);
+    const out = {
+      memberId: m.memberId,
+      role: m.role,
+      status: m.status,
+      displayName: m.displayName,
+      invitedLabel: m.invitedLabel,
+      joinedAt: m.joinedAt,
+    };
+    if (includeInviteToken && m.token) out.token = m.token;
+    return out;
+  }
+
+  function _safeGroup(group, opts = {}) {
+    if (!group) return null;
+    return {
+      id: group.id,
+      name: group.name,
+      backendType: group.backendType,
+      created_by: typeof group.created_by === 'string'
+        ? group.created_by
+        : (group.created_by?.memberId || group.members?.find(m => m.role === 'creator' || m.role === 'owner')?.memberId || null),
+      members: (group.members || []).map(m => _publicMember(m, opts)),
+      ...(group.folderId ? { folderId: group.folderId } : {}),
+      ...(group._isJoined ? { _isJoined: true } : {}),
+    };
+  }
+
+  function _normalizeDoneBy(doneBy, groupId = null) {
     if (Array.isArray(doneBy)) return doneBy.filter(Boolean);
     if (doneBy) return [doneBy];
-    return [getCurrentUser().email];
+    return [getCurrentMember(groupId)?.memberId].filter(Boolean);
   }
 
   async function _encryptForJoined(token, anonKey) {
@@ -132,11 +187,11 @@ export async function createSupabaseSharing(adapter, config) {
     const user = getAuthUser();
     if (user) {
       return {
-        email: user.email,
-        displayName: user.user_metadata?.display_name || user.email.split('@')[0],
+        backendUserId: user.id,
+        displayName: user.user_metadata?.display_name || _fallbackDisplayName(user.email, 'Member'),
       };
     }
-    return { email: 'anonymous', displayName: 'Anonymous' };
+    return { displayName: 'Anonymous' };
   }
 
   async function createGroup(name) {
@@ -166,11 +221,17 @@ export async function createSupabaseSharing(adapter, config) {
       token: creatorToken,
       token_hash: creatorHash,
       display_name: displayName,
+      invited_label: displayName,
       role: 'creator',
       joined_at: new Date().toISOString(),
       auth_user_id: user.id,
     };
     let { error: mErr } = await adapter.from('sharing_members').insert(memberPayload);
+    if (mErr && /invited_label/i.test(mErr.message || '')) {
+      delete memberPayload.invited_label;
+      const retry = await adapter.from('sharing_members').insert(memberPayload);
+      mErr = retry.error;
+    }
     if (mErr && /token_hash/i.test(mErr.message || '')) {
       // Schema <1.301 — column missing, retry without token_hash/expires_at
       delete memberPayload.token_hash;
@@ -186,19 +247,20 @@ export async function createSupabaseSharing(adapter, config) {
     }
     if (mErr) throw new Error('Failed to add creator member: ' + mErr.message + (/(?:expires_at|token_hash|revoked_at|auth_user_id)/i.test(mErr.message || '') ? ' — schema mismatch, run pending migrations from the banner' : ''));
 
+    const creatorMember = _normalizeMember({
+      member_id: creatorMemberId,
+      role: 'creator',
+      joined_at: new Date().toISOString(),
+      auth_user_id: user.id,
+      display_name: displayName,
+      invited_label: displayName,
+    });
     const group = {
       id: groupId,
       name,
       backendType: 'supabase',
-      created_by: { email: user.email },
-      members: [{
-        email: user.email,
-        role: 'creator',
-        accepted: true,
-        memberId: creatorMemberId,
-        authUserId: user.id,
-        displayName,
-      }],
+      created_by: creatorMemberId,
+      members: [creatorMember],
     };
     _ownedGroups.push(group);
     _memberCache[groupId] = group.members;
@@ -228,22 +290,13 @@ export async function createSupabaseSharing(adapter, config) {
           const { data: items } = await adapter.from('sharing_items')
             .select('*').eq('group_id', g.id);
 
-          const memberList = (members || []).map(m => ({
-            email: m.display_name || m.member_id,
-            role: m.role,
-            accepted: m.joined_at != null,
-            memberId: m.member_id,
-            authUserId: m.auth_user_id || null,
-            displayName: m.display_name,
-            token: m.token,
-          }));
-
-          const creatorEmail = getAuthUser()?.email || '';
+          const memberList = (members || []).map(m => _normalizeMember(m));
+          const creatorMemberId = memberList.find(m => m.role === 'creator' || m.role === 'owner')?.memberId || null;
           _ownedGroups.push({
             id: g.id,
             name: g.name,
             backendType: g.backend_type,
-            created_by: { email: creatorEmail },
+            created_by: creatorMemberId,
             members: memberList,
           });
 
@@ -289,20 +342,13 @@ export async function createSupabaseSharing(adapter, config) {
             continue;
           }
 
-          const memberList = (members || []).map(m => ({
-            email: m.display_name || m.member_id,
-            role: m.role,
-            accepted: m.joined_at != null,
-            memberId: m.member_id,
-            authUserId: m.auth_user_id || null,
-            displayName: m.display_name,
-          }));
-
+          const memberList = (members || []).map(m => _normalizeMember(m));
+          const creatorMemberId = memberList.find(m => m.role === 'creator' || m.role === 'owner')?.memberId || null;
           _joinedGroups.push({
             id: jg.group_id,
             name: jg.group_name,
             backendType: jg.remote_backend_type,
-            created_by: { email: memberList.find(m => m.role === 'creator')?.email || '' },
+            created_by: creatorMemberId,
             members: memberList,
             _isJoined: true,
           });
@@ -374,21 +420,25 @@ export async function createSupabaseSharing(adapter, config) {
       group_id: groupId,
       token,
       token_hash: tokenHash,
-      display_name: displayName || null,
+      display_name: null,
+      invited_label: displayName || null,
       role: 'member',
       joined_at: null,
       expires_at: expiresAt,
       auth_user_id: null,
     };
     let { error } = await adapter.from('sharing_members').insert(payload);
-    if (error) {
-      const msg = (error.message || '').toLowerCase();
+    if (error && /invited_label/i.test(error.message || '')) {
+      payload.display_name = payload.invited_label;
+      delete payload.invited_label;
+      const r1 = await adapter.from('sharing_members').insert(payload);
+      error = r1.error;
+    }
+    if (error && /expires_at/i.test(error.message || '')) {
       // Pre-1.301 schema has no expires_at / token_hash — retry with stripped columns
-      if (msg.includes('expires_at')) {
-        delete payload.expires_at;
-        const r2 = await adapter.from('sharing_members').insert(payload);
-        error = r2.error;
-      }
+      delete payload.expires_at;
+      const r2 = await adapter.from('sharing_members').insert(payload);
+      error = r2.error;
     }
     if (error && /token_hash/i.test(error.message || '')) {
       delete payload.token_hash;
@@ -414,15 +464,14 @@ export async function createSupabaseSharing(adapter, config) {
 
     // Update local member cache
     if (_memberCache[groupId]) {
-      _memberCache[groupId].push({
-        email: displayName || memberId,
+      _memberCache[groupId].push(_normalizeMember({
+        member_id: memberId,
         role: 'member',
-        accepted: false,
-        memberId,
-        authUserId: null,
-        displayName,
+        joined_at: null,
+        invited_label: displayName || null,
+        display_name: null,
         token,
-      });
+      }));
     }
 
     // Update group in owned list
@@ -436,11 +485,9 @@ export async function createSupabaseSharing(adapter, config) {
     return { memberId, token, expiresAt, inviteCode };
   }
 
-  async function removeUser(groupId, email) {
-    // Find the member by email/displayName
+  async function removeUser(groupId, memberId) {
     const members = _memberCache[groupId] || [];
-    const member = members.find(m =>
-      m.email === email || m.displayName === email);
+    const member = members.find(m => m.memberId === memberId);
     if (!member) throw new Error('Member not found');
     if (member.role === 'creator') throw new Error('Cannot remove the creator');
 
@@ -513,7 +560,7 @@ export async function createSupabaseSharing(adapter, config) {
         backendType: info.backend_type,
         members: [],
         _pendingJoin: true,
-        _suggestedName: info.display_name,
+        _suggestedName: info.display_name || info.invited_label || '',
         _creatorName: info.creator_name || '',
       };
     } catch (e) {
@@ -532,7 +579,7 @@ export async function createSupabaseSharing(adapter, config) {
     const pj = _pendingJoin;
     _pendingJoin = null;
 
-    const displayName = fileIds?.displayName || pj.info.display_name || '';
+    const displayName = fileIds?.displayName || pj.info.display_name || pj.info.invited_label || '';
 
     // Confirm join on remote
     await pj.remote.rpc('confirm_join', {
@@ -575,20 +622,14 @@ export async function createSupabaseSharing(adapter, config) {
       p_group_id: pj.groupId,
     });
 
-    const memberList = (members || []).map(m => ({
-      email: m.display_name || m.member_id,
-      role: m.role,
-      accepted: m.joined_at != null,
-      memberId: m.member_id,
-      authUserId: m.auth_user_id || null,
-      displayName: m.display_name,
-    }));
+    const memberList = (members || []).map(m => _normalizeMember(m));
+    const creatorMemberId = memberList.find(m => m.role === 'creator' || m.role === 'owner')?.memberId || null;
 
     const group = {
       id: pj.groupId,
       name: pj.info.group_name,
       backendType: 'supabase',
-      created_by: { email: memberList.find(m => m.role === 'creator')?.email || '' },
+      created_by: creatorMemberId,
       members: memberList,
       _isJoined: true,
     };
@@ -618,11 +659,28 @@ export async function createSupabaseSharing(adapter, config) {
   // ── Queries ─────────────────────────────────────────────────
 
   function getAllGroups() {
-    return [..._ownedGroups, ..._joinedGroups];
+    return [..._ownedGroups, ..._joinedGroups].map(g => _safeGroup(g, { includeInviteToken: true }));
   }
 
   function getGroup(groupId) {
     return getAllGroups().find(g => g.id === groupId) || null;
+  }
+
+  function getCurrentMember(groupId) {
+    const remote = _getRemote(groupId);
+    if (remote?.memberId) {
+      return (_memberCache[groupId] || []).find(m => m.memberId === remote.memberId) || null;
+    }
+    const uid = getAuthUser()?.id;
+    if (!uid) return null;
+    return (_memberCache[groupId] || []).find(m => m.authUserId === uid)
+      || (_memberCache[groupId] || []).find(m => m.role === 'creator' || m.role === 'owner')
+      || null;
+  }
+
+  function getAgentSafeGroup(groupId) {
+    const group = [..._ownedGroups, ..._joinedGroups].find(g => g.id === groupId) || null;
+    return _safeGroup(group);
   }
 
   function getAllSharedItems() {
@@ -845,7 +903,7 @@ export async function createSupabaseSharing(adapter, config) {
     if (!existing) throw new Error('Item not found');
     const payload = Object.assign({}, existing.payload, {
       done: true,
-      done_by: _normalizeDoneBy(doneBy),
+      done_by: _normalizeDoneBy(doneBy, groupId),
       done_at: new Date().toISOString(),
     });
     return updateItem(groupId, itemId, { payload });
@@ -962,7 +1020,7 @@ export async function createSupabaseSharing(adapter, config) {
     for (const m of ml) {
       const o = oldById.get(m.memberId);
       if (!o) return true;
-      if (o.email !== m.email || o.accepted !== m.accepted || o.authUserId !== m.authUserId || o.role !== m.role || o.displayName !== m.displayName) return true;
+      if (o.status !== m.status || o.authUserId !== m.authUserId || o.role !== m.role || o.displayName !== m.displayName || o.invitedLabel !== m.invitedLabel) return true;
     }
     return false;
   }
@@ -993,15 +1051,7 @@ export async function createSupabaseSharing(adapter, config) {
             .select('*').eq('group_id', group.id);
 
           if (members) {
-            const ml = members.map(m => ({
-              email: m.display_name || m.member_id,
-              role: m.role,
-              accepted: m.joined_at != null,
-              memberId: m.member_id,
-              authUserId: m.auth_user_id || null,
-              displayName: m.display_name,
-              token: m.token,
-            }));
+            const ml = members.map(m => _normalizeMember(m));
             const oldMl = _memberCache[group.id] || [];
             if (_membersChanged(oldMl, ml)) {
               changed = true;
@@ -1041,14 +1091,7 @@ export async function createSupabaseSharing(adapter, config) {
           continue;
         }
 
-        const ml = members.map(m => ({
-          email: m.display_name || m.member_id,
-          role: m.role,
-          accepted: m.joined_at != null,
-          memberId: m.member_id,
-          authUserId: m.auth_user_id || null,
-          displayName: m.display_name,
-        }));
+        const ml = members.map(m => _normalizeMember(m));
         const oldMl = _memberCache[group.id] || [];
         if (_membersChanged(oldMl, ml)) {
           changed = true;
@@ -1162,6 +1205,8 @@ export async function createSupabaseSharing(adapter, config) {
     unjoinGroup,
     getAllGroups,
     getGroup,
+    getCurrentMember,
+    getAgentSafeGroup,
     getAllSharedItems,
     getAllSharedHabits,
     getAllSharedTodos,

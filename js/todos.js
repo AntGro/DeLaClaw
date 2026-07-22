@@ -743,8 +743,7 @@ async function toggleTodo(id, done, btnEl) {
     if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
       try {
         if (done) {
-          const currentUser = await state.sharing.getCurrentUser();
-          await state.sharing.completeItem(todo.shared_group_id, todo.shared_id, [currentUser?.email || '']);
+          await state.sharing.completeItem(todo.shared_group_id, todo.shared_id);
         } else {
           await state.sharing.uncompleteItem(todo.shared_group_id, todo.shared_id);
         }

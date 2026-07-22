@@ -237,7 +237,7 @@
       case 'save-new-list': callWindow('saveNewList', []); break;
       case 'close-edit-list': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditListModal', []); break;
       case 'save-edit-list': callWindow('saveEditList', []); break;
-      case 'share-list-item-from-add': callWindow('shareListItemFromAdd', [el.dataset.listId||el]); break;
+      case 'share-list-item-from-add': callWindow('shareListItemFromAdd', [el, el.dataset.listId||getId(el)]); break;
       case 'open-add-vestiaire': callWindow('openAddVestiaireModal', []); break;
       case 'navigate-to-vestiaire-cat': callWindow('navigateToVestiaireCat', [getCat(el)]); break;
       case 'open-add-vestiaire-category': callWindow('openAddVestiaireCategoryModal', []); break;
@@ -264,7 +264,7 @@
       case 'sharing-unjoin-group': callWindow('sharingUnjoinGroup', [el.dataset.groupId||getId(el)]); break;
       case 'sharing-copy-member-code':
       case 'sharing-copy-member-link': callWindow('sharingCopyMemberCode', [el.dataset.groupId, el.dataset.token]); break;
-      case 'sharing-remove-member': callWindow('sharingRemoveMember', [el.dataset.groupId, el.dataset.email||el.dataset.memberEmail]); break;
+      case 'sharing-remove-member': callWindow('sharingRemoveMember', [el.dataset.groupId, el.dataset.memberId]); break;
       case 'sharing-invite': callWindow('sharingInvite', [el.dataset.groupId||getId(el)]); break;
       case 'sharing-delete-group': callWindow('sharingDeleteGroup', [el.dataset.groupId||getId(el)]); break;
       case 'sharing-create-group': callWindow('sharingCreateGroup', []); break;

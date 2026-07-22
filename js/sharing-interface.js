@@ -10,20 +10,25 @@
 // Data shapes
 // -----------
 //
-// SharingUser   { email: string, displayName?: string, name?: string }
+// SharingUser   { memberId?: string, displayName: string, backendUserId?: string }
 //
-// GroupMember   { email: string, role: 'creator'|'owner'|'member',
-//                 joined_at?: string, displayName?: string, name?: string }
+// GroupMember   { memberId: string, role: 'creator'|'owner'|'member',
+//                 status: 'pending'|'joined'|'revoked', displayName: string,
+//                 invitedLabel?: string, joinedAt?: string|null }
 //
 // Group         { id: string, name: string, backendType: string,
-//                 created_by: { email: string, name?: string },
-//                 members: GroupMember[], folderId?: string }
+//                 created_by: string|null, members: GroupMember[], folderId?: string }
 //
 // SharedItem    { id: string, group_id: string, group_name?: string,
 //                 item_type: 'todo'|'habit'|'list_item',
-//                 payload?: object, done: boolean, done_by?: string[],
-//                 created_by: string, created_at: string,
+//                 payload?: object, assignees?: string[], done: boolean,
+//                 done_by?: string[], created_by: string, created_at: string,
 //                 updated_at: string }
+//
+// Identity invariant:
+// Emails are permission material, not identity. Shared identity is
+// memberId + group-local displayName. Raw emails must not be stored in
+// shared group state or emitted into agent-readable data.
 //
 // ===================================================================
 
@@ -41,8 +46,8 @@ export const SHARING_INTERFACE = {
   deleteGroup:              'fn',   // (groupId) => Promise<void>
 
   // ── Groups — membership ─────────────────────────────────────
-  inviteUser:               'fn',   // (groupId, email) => Promise<void>
-  removeUser:               'fn',   // (groupId, email) => Promise<void>
+  inviteUser:               'fn',   // (groupId, inviteTargetOrLabel) => Promise<void>
+  removeUser:               'fn',   // (groupId, memberId) => Promise<void>
   leaveGroup:               'fn',   // (groupId) => Promise<void>
 
   // ── Groups — join flow ──────────────────────────────────────
@@ -53,6 +58,8 @@ export const SHARING_INTERFACE = {
   // ── Groups — queries ────────────────────────────────────────
   getAllGroups:              'fn',   // () => Group[]
   getGroup:                 'fn',   // (groupId) => Group|null
+  getCurrentMember:         'fn',   // (groupId) => GroupMember|null | Promise<GroupMember|null>
+  getAgentSafeGroup:        'fn',   // (groupId) => Group|null
   getItems:                 'fn',   // (groupId, itemType?) => SharedItem[]
   getGroupByFolderId:       'fn',   // (connectionRef) => Group|undefined
   getInviteLink:            'fn',   // (groupId) => string|null

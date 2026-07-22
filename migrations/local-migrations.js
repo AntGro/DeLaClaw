@@ -153,4 +153,8 @@ export const LOCAL_MIGRATIONS = {
     CREATE INDEX IF NOT EXISTS idx_agent_grants_owner_id ON agent_grants(owner_id);
     CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON agent_grants(token_hash);
   `,
+  '1.436': `
+    -- Supabase sharing-only member identity migration; local backend has no sharing_members table.
+    SELECT 1;
+  `,
 };

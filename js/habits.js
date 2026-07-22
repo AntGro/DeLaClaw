@@ -1038,14 +1038,14 @@ async function saveNewHabit() {
     }).select().single();
     if (pointerErr) { console.warn('Failed to create local pointer:', pointerErr); }
     try {
-      const user = await state.sharing.getCurrentUser();
+      const currentMember = await state.sharing.getCurrentMember(groupId);
       const sharedItem = {
         id: sharedId,
         item_type: 'habit',
         name,
         frequency_rule: freq,
         creator_category: cat,
-        created_by: user?.email || '',
+        created_by: currentMember?.memberId || '',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         completions: [],
@@ -1054,7 +1054,7 @@ async function saveNewHabit() {
         sharedItem.completions.push({
           id: crypto.randomUUID(),
           completed_at: new Date(lastDoneVal).toISOString(),
-          completed_by: user?.email || '',
+          completed_by: currentMember?.memberId || '',
         });
       }
       await state.sharing.addSharedHabit(groupId, sharedItem);
@@ -1260,7 +1260,7 @@ async function saveEditHabit() {
     const prevDateStr = prevLastDone ? localDateStr(prevLastDone) : '';
     if (lastDoneVal && lastDoneVal !== prevDateStr) {
       try {
-        const user = await state.sharing.getCurrentUser();
+        const currentMember = await state.sharing.getCurrentMember(habit.shared_group_id);
         const sharedHabits = state.sharing.getAllSharedHabits();
         const sh = sharedHabits.find(h => h.id === habit.shared_id);
         if (sh) {
@@ -1270,7 +1270,7 @@ async function saveEditHabit() {
             // Update latest completion
             comps[comps.length - 1].completed_at = newIso;
           } else {
-            comps.push({ id: crypto.randomUUID(), completed_at: newIso, completed_by: user?.email || '' });
+            comps.push({ id: crypto.randomUUID(), completed_at: newIso, completed_by: currentMember?.memberId || '' });
           }
           await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: comps });
         }
@@ -1364,11 +1364,11 @@ async function markHabitDone(habitId, btnEl) {
 
     if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
       try {
-        const user = await state.sharing.getCurrentUser();
+        const currentMember = await state.sharing.getCurrentMember(habit.shared_group_id);
         const completion = {
           id: crypto.randomUUID(),
           completed_at: now,
-          completed_by: user?.email || '',
+          completed_by: currentMember?.memberId || '',
         };
         await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion);
         await updateHabitNextDue(habitId, habit.frequency_rule, now);

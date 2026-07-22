@@ -532,8 +532,7 @@ async function toggleListItemCheck(id, btnEl) {
     if (item.shared_id && item.shared_group_id && state.sharing) {
       try {
         if (newVal) {
-          const currentUser = await state.sharing.getCurrentUser();
-          await state.sharing.completeItem(item.shared_group_id, item.shared_id, [currentUser?.email || '']);
+          await state.sharing.completeItem(item.shared_group_id, item.shared_id);
         } else {
           await state.sharing.uncompleteItem(item.shared_group_id, item.shared_id);
         }

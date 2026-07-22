@@ -370,6 +370,7 @@ CREATE TABLE "public"."sharing_members" (
     "token" "text" NOT NULL,
     "token_hash" "text",
     "display_name" "text",
+    "invited_label" "text",
     "role" "text" NOT NULL DEFAULT 'member',
     "joined_at" timestamp with time zone,
     "expires_at" timestamp with time zone,
@@ -426,9 +427,9 @@ CREATE TABLE "public"."joined_groups" (
 
 CREATE OR REPLACE FUNCTION "public"."verify_join_token"("p_token" "text")
 RETURNS TABLE("group_id" "text", "group_name" "text", "member_id" "text",
-              "display_name" "text", "backend_type" "text", "creator_name" "text")
+              "display_name" "text", "invited_label" "text", "backend_type" "text", "creator_name" "text")
 LANGUAGE "sql" SECURITY DEFINER SET search_path = public, extensions AS $$
-  SELECT sg.id, sg.name, sm.member_id, sm.display_name, sg.backend_type,
+  SELECT sg.id, sg.name, sm.member_id, sm.display_name, sm.invited_label, sg.backend_type,
          (SELECT cm.display_name FROM sharing_members cm
           WHERE cm.group_id = sg.id AND cm.role = 'creator' LIMIT 1)
   FROM sharing_members sm
@@ -451,7 +452,7 @@ RETURNS "void"
 LANGUAGE "sql" SECURITY DEFINER SET search_path = public, extensions AS $$
   UPDATE sharing_members
   SET joined_at = now(),
-      display_name = COALESCE(NULLIF(p_display_name, ''::text), display_name),
+      display_name = COALESCE(NULLIF(p_display_name, ''::text), display_name, invited_label),
       auth_user_id = COALESCE(auth_user_id, auth.uid())
   WHERE token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
     AND joined_at IS NULL
@@ -557,10 +558,10 @@ $$;
 --
 
 CREATE OR REPLACE FUNCTION "public"."get_group_members"("p_token" "text", "p_group_id" "text")
-RETURNS TABLE("member_id" "text", "display_name" "text", "role" "text",
+RETURNS TABLE("member_id" "text", "display_name" "text", "invited_label" "text", "role" "text",
               "joined_at" timestamp with time zone, "auth_user_id" "uuid")
 LANGUAGE "sql" SECURITY DEFINER SET search_path = public, extensions AS $$
-  SELECT sm.member_id, sm.display_name, sm.role, sm.joined_at, sm.auth_user_id
+  SELECT sm.member_id, sm.display_name, sm.invited_label, sm.role, sm.joined_at, sm.auth_user_id
   FROM sharing_members sm
   WHERE sm.group_id = p_group_id
   AND EXISTS (
@@ -1034,8 +1035,8 @@ CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON "public"."sharing
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON "public"."sharing_members" ("group_id", "auth_user_id");
 CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON "public"."sharing_items" ("group_id");
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.405')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.405', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.436')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.436', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;

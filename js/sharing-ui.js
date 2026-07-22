@@ -26,22 +26,27 @@ import { decodeInviteEnvelope } from './sharing-envelope.js';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-/** Generate a deterministic color from a string (email). */
-function emailColor(email) {
+/** Generate a deterministic color from a stable member id. */
+function memberColor(seed) {
   let hash = 0;
-  for (let i = 0; i < email.length; i++) hash = (hash * 31 + email.charCodeAt(i)) | 0;
+  seed = String(seed || 'member');
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
   const hues = [210, 340, 150, 30, 270, 190, 50, 310, 80, 230];
   return `oklch(0.65 0.15 ${hues[Math.abs(hash) % hues.length]})`;
 }
 
-/** Initials from display name or email. */
-function initials(name, email) {
+/** Initials from display name. */
+function initials(name, fallback = '?') {
   if (name && name.includes(' ')) {
     const parts = name.split(/\s+/);
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
   if (name) return name[0].toUpperCase();
-  return (email || '?')[0].toUpperCase();
+  return String(fallback || '?')[0].toUpperCase();
+}
+
+function memberLabel(member) {
+  return member?.displayName || member?.invitedLabel || member?.name || member?.memberId || 'Member';
 }
 
 /** Extract Supabase project ref from URL (shared logic with main.js) */
@@ -56,9 +61,10 @@ function getSupabaseProjectRef(url) {
 
 /** Small avatar circle HTML. */
 function avatarDot(member, size = 24) {
-  const color = emailColor(member.email);
-  const ini = initials(member.name || member.display_name, member.email);
-  return `<span class="sharing-avatar" style="width:${size}px;height:${size}px;background:${color};font-size:${Math.round(size * 0.42)}px" title="${esc(member.email)}">${esc(ini)}</span>`;
+  const label = memberLabel(member);
+  const color = memberColor(member?.memberId || label);
+  const ini = initials(label, member?.memberId);
+  return `<span class="sharing-avatar" style="width:${size}px;height:${size}px;background:${color};font-size:${Math.round(size * 0.42)}px" title="${esc(label)}">${esc(ini)}</span>`;
 }
 
 // ── Settings Pane ────────────────────────────────────────────────
@@ -175,7 +181,7 @@ export async function renderSharingPane() {
 
   // Get current user identity
   try {
-    if (!_currentUser) _currentUser = await state.sharing.getCurrentUser();
+    _currentUser = await state.sharing.getCurrentUser();
   } catch { _currentUser = null; }
 
   let html = authBadgeHtml;
@@ -190,7 +196,9 @@ export async function renderSharingPane() {
   }
 
   for (const group of groups) {
-    const isCreator = _currentUser && group.created_by?.email === _currentUser.email;
+    let currentMember = null;
+    try { currentMember = await state.sharing.getCurrentMember(group.id); } catch { currentMember = null; }
+    const isCreator = !!currentMember && currentMember.memberId === group.created_by;
     const isJoined = state.sharing.isJoinedViaLink(group.id);
     const memberCount = group.members?.length || 0;
     const itemCount = state.sharing.getItems(group.id).length;
@@ -214,12 +222,11 @@ export async function renderSharingPane() {
       <div class="sharing-members">`;
 
     for (const member of (group.members || [])) {
-      const isYou = _currentUser && (member.email === _currentUser.email
-        || member.displayName === _currentUser.email
-        || member.displayName === _currentUser.email?.split('@')[0]);
+      const isYou = !!currentMember && member.memberId === currentMember.memberId;
       const canRemove = isCreator && !isYou;
-      const hasJoined = member.role === 'owner' || member.role === 'creator' || !!member.accepted || !!member.joined_at;
+      const hasJoined = member.status === 'joined' || member.role === 'owner' || member.role === 'creator' || !!member.joinedAt || !!member.joined_at;
       const isCreatorMember = member.role === 'creator';
+      const label = memberLabel(member);
       const statusHtml = isYou ? ` <span class="sharing-you">(${t('sharing.you')})</span>`
         : isCreatorMember ? ` <span class="sharing-member-creator">${lucideIcon('crown', 12)} ${t('sharing.creator')}</span>`
         : hasJoined ? ` <span class="sharing-member-joined">${lucideIcon('check', 12)}</span>`
@@ -227,9 +234,9 @@ export async function renderSharingPane() {
       const canCopyCode = isCreator && !isYou && !hasJoined && member.token && state.sharing.getMemberInviteLink;
       html += `<div class="sharing-member">
           ${avatarDot(member, 22)}
-          <span class="sharing-member-email">${esc(member.email)}${statusHtml}</span>
+          <span class="sharing-member-email">${esc(label)}${statusHtml}</span>
           ${canCopyCode ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-copy-member-code" data-group-id="${esc(group.id)}" data-token="${esc(member.token)}" title="${t('sharing.copy_code')}" aria-label="${t('sharing.copy_code')}">${lucideIcon('key', 12)}</button>` : ''}
-          ${canRemove ? `<button class="sharing-remove-btn" data-action="sharing-remove-member" data-group-id="${esc(group.id)}" data-email="${esc(member.email)}" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
+          ${canRemove ? `<button class="sharing-remove-btn" data-action="sharing-remove-member" data-group-id="${esc(group.id)}" data-member-id="${esc(member.memberId)}" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
         </div>`;
     }
 
@@ -376,13 +383,16 @@ async function sharingInvite(groupId) {
   }
 }
 
-async function sharingRemoveMember(groupId, email) {
+async function sharingRemoveMember(groupId, memberId) {
+  const group = state.sharing?.getGroup?.(groupId);
+  const member = (group?.members || []).find(m => m.memberId === memberId);
+  const label = memberLabel(member);
   showDeleteConfirm(
     t('sharing.remove_member'),
-    t('sharing.remove_member_confirm', email),
+    t('sharing.remove_member_confirm', label),
     async () => {
       try {
-        await state.sharing.removeUser(groupId, email);
+        await state.sharing.removeUser(groupId, memberId);
         showToast(t('sharing.member_removed'), 'info');
         renderSharingPane();
       } catch (e) { showToast(e.message, 'error'); }
@@ -691,9 +701,8 @@ export function assigneeDots(assignees, maxShow = 3) {
   let html = '<span class="assignee-dots">';
   const show = assignees.slice(0, maxShow);
   for (const a of show) {
-    const email = typeof a === 'string' ? a : a.email;
-    const name = typeof a === 'string' ? '' : (a.name || a.display_name || '');
-    html += avatarDot({ email, name }, 18);
+    const member = typeof a === 'string' ? { memberId: a, displayName: a } : a;
+    html += avatarDot(member, 18);
   }
   if (assignees.length > maxShow) {
     html += `<span class="assignee-overflow">+${assignees.length - maxShow}</span>`;
@@ -773,8 +782,8 @@ export function openSharePopover(anchorEl, onShare, opts = {}) {
           <div class="share-popover-option-list share-popover-member-list">
             ${members.map(m => `
               <label class="share-popover-check">
-                <input type="checkbox" value="${esc(m.email)}" checked>
-                ${esc(m.email)}
+                <input type="checkbox" value="${esc(m.memberId)}" checked>
+                ${esc(memberLabel(m))}
               </label>
             `).join('')}
           </div>
@@ -831,7 +840,7 @@ function submitSharePopover() {
 // ── Completion modal ────────────────────────────────────────────
 
 /** Show "who did this?" modal for multi-assignee items. */
-export function showCompletionModal(groupId, itemId, assignees, currentUserEmail) {
+export async function showCompletionModal(groupId, itemId, assignees, currentMemberId) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingCompletionModal';
@@ -840,12 +849,14 @@ export function showCompletionModal(groupId, itemId, assignees, currentUserEmail
   overlay.innerHTML = `<div class="modal sharing-completion-modal">
     <h2>${lucideIcon('circle-check', 20)} ${t('sharing.who_did_this')}</h2>
     <div class="sharing-completion-list">
-      ${assignees.map(email => `
+      ${assignees.map(memberId => {
+        const member = state.sharing?.getGroup?.(groupId)?.members?.find(m => m.memberId === memberId) || { memberId, displayName: memberId };
+        return `
         <label class="share-popover-check">
-          <input type="checkbox" value="${esc(email)}" ${email === currentUserEmail ? 'checked' : ''}>
-          ${esc(email)}
-        </label>
-      `).join('')}
+          <input type="checkbox" value="${esc(memberId)}" ${memberId === currentMemberId ? 'checked' : ''}>
+          ${esc(memberLabel(member))}
+        </label>`;
+      }).join('')}
     </div>
     <div class="modal-actions">
       <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingCompletionModal">${t('common.cancel')}</button>

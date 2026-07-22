@@ -903,9 +903,9 @@ test('Sharing adapters normalize completeItem(doneBy) without nested arrays', ()
   const supabase = jsFiles['sharing-supabase.js'];
   const drive = jsFiles['sharing-drive.js'];
 
-  assert(supabase.includes('function _normalizeDoneBy(doneBy)'),
+  assert(supabase.includes('function _normalizeDoneBy(doneBy, groupId = null)'),
     'sharing-supabase.js: completeItem must use a doneBy normalization helper');
-  assert(supabase.includes('Array.isArray(doneBy)') && supabase.includes('done_by: _normalizeDoneBy(doneBy)'),
+  assert(supabase.includes('Array.isArray(doneBy)') && supabase.includes('done_by: _normalizeDoneBy(doneBy, groupId)'),
     'sharing-supabase.js: completeItem must preserve arrays instead of wrapping them');
   assert(!supabase.includes('done_by: [doneBy || getCurrentUser().email]'),
     'sharing-supabase.js: completeItem must not wrap doneBy blindly');
@@ -920,6 +920,37 @@ test('Sharing adapters normalize completeItem(doneBy) without nested arrays', ()
     'sharing-drive.js: completeItem must write the flattened normalized array');
   assert(!/done_by:\s*doneBy/.test(fn),
     'sharing-drive.js: completeItem must not write raw doneBy directly');
+});
+
+test('sharing member identity is memberId-based and agent-safe', () => {
+  const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const supabase = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
+
+  assert(iface.includes('Emails are permission material, not identity'),
+    'sharing-interface.js must document the memberId/displayName identity invariant');
+  assert(iface.includes('getCurrentMember') && iface.includes('getAgentSafeGroup'),
+    'sharing interface must expose current-member and agent-safe group APIs');
+
+  assert(sui.includes('data-member-id') && !sui.includes('data-email'),
+    'sharing-ui.js must remove members by memberId, not email/display string');
+  assert(sui.includes('state.sharing.getCurrentMember(group.id)'),
+    'sharing-ui.js must ask the adapter for current group membership');
+
+  assert(drive.includes('Do not persist raw email in group.json'),
+    'sharing-drive.js must treat invite email as permission material only');
+  assert(!drive.includes(`email,\n          name: email`),
+    'sharing-drive.js must not write raw invite email into group.json members');
+
+  assert(supabase.includes('invited_label') && supabase.includes('getAgentSafeGroup'),
+    'sharing-supabase.js must preserve invited_label separately and expose agent-safe serialization');
+
+  const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.436_member_identity.sql'), 'utf-8');
+  assert(migration.includes('DROP FUNCTION IF EXISTS verify_join_token(text)'),
+    '1.436 migration must drop verify_join_token before changing RETURNS TABLE shape');
+  assert(migration.includes('DROP FUNCTION IF EXISTS get_group_members(text, text)'),
+    '1.436 migration must drop get_group_members before changing RETURNS TABLE shape');
 });
 
 // ===================================================================

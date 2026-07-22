@@ -25,6 +25,8 @@ Sharing is implemented behind a backend adapter interface, not as conditional lo
   - Drive: files/folders + permission ACLs
   - Supabase: tables with RLS enforcing owner and group membership
 - Synchronization preserves set semantics — order does not affect sharing state
+- Member identity is adapter-owned and group-local: shared state exposes `memberId`, `displayName`, `invitedLabel`, role/status, and join timestamps; raw emails remain permission material only
+- Views use `getCurrentMember(groupId)` for "you" detection and `removeUser(groupId, memberId)` for removal; agents use `getAgentSafeGroup(groupId)` to avoid invite tokens or backend permission details
 
 All mutating views check the sharing abstraction; no backend conditionals in feature code — new behavior is added to the adapter interface instead.
 

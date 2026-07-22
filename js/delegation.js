@@ -125,7 +125,7 @@
       case 'navigate-to-habit-category': callWindow('navigateToHabitCategory', [getCat(el)]); break;
       case 'delete-habit-category': callWindow('deleteHabitCategory', [getCat(el)]); break;
       case 'open-edit-habit-category-modal': callWindow('openEditHabitCategoryModal', [getCat(el)]); break;
-      case 'add-habit-from-input': callWindow('addHabitFromInput', [el]); break;
+      case 'add-habit-from-input': { var hInp = el.matches && el.matches('input, textarea') ? el : el.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.habit-add-input, .todo-cat-input'); if (hInp) callWindow('addHabitFromInput', [hInp]); } break;
       case 'promote-habit': callWindow('promoteHabit', [getId(el)||el.dataset.habitId]); break;
       case 'mark-habit-done': callWindow('markHabitDone', [el.dataset.habitId||getId(el), el]); break;
       case 'open-habit-history': callWindow('openHabitHistory', [el.dataset.habitId||getId(el)]); break;

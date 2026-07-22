@@ -981,6 +981,7 @@ function populateHabitCategorySelect(selectId) {
 }
 
 async function addHabitFromInput(inputEl) {
+  if (!inputEl || typeof inputEl.value !== 'string') return;
   const name = inputEl.value.trim();
   if (!name) return;
   const category = inputEl.dataset.category || 'General';

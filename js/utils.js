@@ -271,6 +271,46 @@ document.addEventListener('keydown', e => {
 // FOOTER STATS
 // ===================================================================
 // ===================================================================
+const DB_SIZE_REFRESH_MS = 60 * 1000;
+const _dbSizeByBackend = new Map();
+
+function dbSizeBackendKey() {
+  if (state.demoMode) return 'demo';
+  if (state.driveMode) return 'googledrive';
+  return document.getElementById('username')?.value?.trim() || 'default';
+}
+
+function dbSizeStateForCurrentBackend() {
+  const key = dbSizeBackendKey();
+  if (!_dbSizeByBackend.has(key)) {
+    _dbSizeByBackend.set(key, { text: '—', fetchedAt: 0, unavailable: false, inFlight: null });
+  }
+  return _dbSizeByBackend.get(key);
+}
+
+function isMissingDbSizeRpc(error) {
+  if (!error) return false;
+  const code = String(error.code || '').toUpperCase();
+  const status = error.status || error.statusCode;
+  const msg = String(error.message || error.error || '').toLowerCase();
+  const details = String(error.details || '').toLowerCase();
+  const combined = `${msg} ${details}`;
+  return status === 404
+    || code === 'PGRST202'
+    || code === '42883'
+    || (combined.includes('db_size_mb') && (
+      combined.includes('could not find')
+      || combined.includes('not found')
+      || combined.includes('does not exist')
+      || combined.includes('unknown rpc')
+    ));
+}
+
+function setDbSizeText(text) {
+  const el = document.getElementById('dbSizeMb');
+  if (el) el.textContent = text;
+}
+
 function updateFooterStats(viewCountsGetter) {
   const container = document.getElementById('dbStatsContainer');
   if (!container) return;
@@ -312,12 +352,37 @@ function updateFooterStats(viewCountsGetter) {
     const projectRef = urlInput.value.replace('https://', '').replace('.supabase.co', '');
     document.getElementById('supabaseDashLink').href = `https://supabase.com/dashboard/project/${projectRef}`;
   }
-  // Fetch DB size via RPC (only relevant for Supabase/Local backends)
+  // Fetch DB size via RPC (only relevant for Supabase/Local backends).
+  // Some Supabase projects do not install the optional db_size_mb() function;
+  // cache that capability miss so realtime footer refreshes do not spam 404s.
   if (state.db.connected && !state.demoMode && !state.driveMode) {
-    state.db.rpc('db_size_mb').then(({ data, error }) => {
-      const el = document.getElementById('dbSizeMb');
-      if (el) el.textContent = (error || data == null) ? '—' : `${data} MB`;
-    });
+    const dbSizeState = dbSizeStateForCurrentBackend();
+    setDbSizeText(dbSizeState.text);
+
+    const stale = Date.now() - dbSizeState.fetchedAt > DB_SIZE_REFRESH_MS;
+    if (!dbSizeState.unavailable && !dbSizeState.inFlight && stale) {
+      dbSizeState.inFlight = state.db.rpc('db_size_mb')
+        .then(({ data, error }) => {
+          const rpcError = error || (data && typeof data === 'object' && data.error ? data : null);
+          if (rpcError) {
+            if (isMissingDbSizeRpc(rpcError)) dbSizeState.unavailable = true;
+            dbSizeState.text = '—';
+          } else {
+            dbSizeState.text = data == null ? '—' : `${data} MB`;
+          }
+          dbSizeState.fetchedAt = Date.now();
+          setDbSizeText(dbSizeState.text);
+        })
+        .catch(error => {
+          if (isMissingDbSizeRpc(error)) dbSizeState.unavailable = true;
+          dbSizeState.text = '—';
+          dbSizeState.fetchedAt = Date.now();
+          setDbSizeText(dbSizeState.text);
+        })
+        .finally(() => {
+          dbSizeState.inFlight = null;
+        });
+    }
   }
   // Estimate data size for Google Drive from in-memory store
   if (state.driveMode && state.driveAdapter && state.driveAdapter._store) {

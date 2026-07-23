@@ -692,6 +692,7 @@ const T = {
       pwa_copy_ack: 'Got it',
       sign_out: 'Sign out',
       signed_in_as: 'Signed in as {0}',
+      email_mismatch: 'This project is linked to a different email. Use the same email on all devices.',
     },
   },
   fr: {
@@ -1361,6 +1362,7 @@ const T = {
       pwa_copy_ack: 'Compris',
       sign_out: 'Se d\u00e9connecter',
       signed_in_as: 'Connect\u00e9 en tant que {0}',
+      email_mismatch: 'Ce projet est li\u00e9 \u00e0 une autre adresse email. Utilisez la m\u00eame adresse sur tous vos appareils.',
     },
   },
   es: {
@@ -2030,6 +2032,7 @@ const T = {
       pwa_copy_ack: 'Entendido',
       sign_out: 'Cerrar sesi\u00f3n',
       signed_in_as: 'Conectado como {0}',
+      email_mismatch: 'Este proyecto est\u00e1 vinculado a otro email. Usa el mismo email en todos los dispositivos.',
     },
   },
 };

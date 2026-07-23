@@ -13,6 +13,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - Icons: Lucide only, via `js/icons.js` (`data-icon`), never emoji in UI.
 - I18n: all user strings via `t()` in `js/i18n.js`, with EN/FR/ES keys. No hardcoded UI text in JS/HTML.
 - Styles: reuse CSS variables (`--cat-color`, `--bg`, `--text`, `--muted`). Solid header backgrounds with 6% tinted body (color-mix) since v1.348 overhaul.
+- Theme compatibility: all new CSS must work in both dark and light mode. Never hardcode colours — use CSS variables (`--bg`, `--text`, `--muted`, `--accent`, `--surface`, `--surface2`, etc.). Test visibility and contrast in both themes; `color-mix` tints that look fine in light mode can vanish on dark surfaces.
 
 **1.2 Interaction guards — assume double-click**
 - When adding any interactive element (button, toggle, checkbox, link that mutates state), ask: what happens if it fires 2x before the first promise resolves? Does it duplicate a task, double-toggle, double-insert?

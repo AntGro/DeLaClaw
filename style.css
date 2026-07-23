@@ -964,6 +964,9 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
   .todo-cat-add{padding:10px 12px 8px;}
   .todo-cat-input{padding:10px 12px;}
   .todo-cat-add button{width:32px;height:32px;}
+  .list-quick-add{padding:10px 12px 8px;}
+  .list-quick-input{padding:10px 12px;}
+  .list-quick-add-btn{width:32px;height:32px;}
   .todo-cat-header-actions{opacity:1;}
 
   /* Bucket items: bigger tap targets on mobile */
@@ -1716,11 +1719,11 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .list-item-actions.visible{max-width:80px;opacity:1;pointer-events:auto;}
 .list-item-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;}
 .list-item-actions button:hover{background:var(--surface2);}
-.list-quick-add{padding:4px 16px 12px;display:flex;gap:6px;align-items:center;}
-.list-quick-input{flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.82rem;font-family:inherit;}
+.list-quick-add{padding:10px 16px 10px;display:flex;gap:6px;align-items:center;}
+.list-quick-input{flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.84rem;font-family:inherit;line-height:1.4;}
 .list-quick-input:focus{outline:none;border-color:var(--accent);}
-.list-quick-add-btn{background:none;border:1px solid var(--border);border-radius:6px;padding:5px 8px;cursor:pointer;color:var(--muted);transition:all 0.15s;display:flex;align-items:center;justify-content:center;}
-.list-quick-add-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--surface2);}
+.list-quick-add-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;width:34px;height:34px;padding:0;cursor:pointer;color:var(--muted);transition:all 0.15s;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0;}
+.list-quick-add-btn:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface));}
 .list-saving-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin-save 0.6s linear infinite;}
 @keyframes spin-save{to{transform:rotate(360deg);}}
 @media(max-width:600px){

@@ -649,6 +649,92 @@ function getHabitCompletions(habitId) {
   return state.allHabitCompletions.filter(c => c.habit_id === habitId);
 }
 
+function habitDateInputToIso(value) {
+  return new Date(value + 'T12:00:00').toISOString();
+}
+
+function sortHabitCompletionList(completions) {
+  return [...(completions || [])].sort((a, b) =>
+    String(a.completed_at || '').localeCompare(String(b.completed_at || ''))
+  );
+}
+
+function latestHabitCompletion(completions) {
+  const sorted = sortHabitCompletionList(completions);
+  return sorted[sorted.length - 1] || null;
+}
+
+function getLatestLocalHabitCompletion(habitId) {
+  return latestHabitCompletion(getHabitCompletions(habitId));
+}
+
+function getSharedHabitForLocalHabit(habit) {
+  if (!habit?.shared_id || !state.sharing) return null;
+  return state.sharing.getAllSharedHabits().find(h => h.id === habit.shared_id) || null;
+}
+
+async function getSharedHabitCompletionActor(groupId) {
+  if (typeof state.sharing?.getCurrentMemberId === 'function') {
+    const memberId = await state.sharing.getCurrentMemberId(groupId);
+    if (memberId) return memberId;
+  }
+  if (typeof state.sharing?.getCurrentMember === 'function') {
+    const member = await state.sharing.getCurrentMember(groupId);
+    if (member?.memberId) return member.memberId;
+  }
+  return '';
+}
+
+async function setSharedHabitLastDone(habit, newIso) {
+  const sh = getSharedHabitForLocalHabit(habit);
+  if (!sh) throw new Error('Shared habit not found');
+
+  const completions = sortHabitCompletionList(sh.completions).map(c => ({ ...c }));
+  if (newIso) {
+    const latest = completions[completions.length - 1];
+    if (latest) {
+      latest.completed_at = newIso;
+    } else {
+      completions.push({
+        id: crypto.randomUUID(),
+        completed_at: newIso,
+        completed_by: await getSharedHabitCompletionActor(habit.shared_group_id),
+      });
+    }
+  } else if (completions.length > 0) {
+    completions.pop();
+  }
+
+  const nextCompletions = sortHabitCompletionList(completions);
+  await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions });
+  return latestHabitCompletion(nextCompletions)?.completed_at || null;
+}
+
+async function setLocalHabitLastDone(habitId, newIso) {
+  const latest = getLatestLocalHabitCompletion(habitId);
+  const projected = getHabitCompletions(habitId).map(c => ({ ...c }));
+
+  if (newIso) {
+    if (latest) {
+      const { error } = await state.db.from('habit_completions').update({ completed_at: newIso }).eq('id', latest.id);
+      if (error) throw new Error(error.message || 'Failed to update completion');
+      const idx = projected.findIndex(c => c.id === latest.id);
+      if (idx >= 0) projected[idx].completed_at = newIso;
+    } else {
+      const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: newIso });
+      if (error) throw new Error(error.message || 'Failed to add completion');
+      projected.push({ id: crypto.randomUUID(), habit_id: habitId, completed_at: newIso });
+    }
+  } else if (latest) {
+    const { error } = await state.db.from('habit_completions').delete().eq('id', latest.id);
+    if (error) throw new Error(error.message || 'Failed to delete completion');
+    const idx = projected.findIndex(c => c.id === latest.id);
+    if (idx >= 0) projected.splice(idx, 1);
+  }
+
+  return latestHabitCompletion(projected)?.completed_at || null;
+}
+
 function habitDueStatus(habit) {
   if (!habit.next_due) return 'no-date';
   const now = new Date();
@@ -1034,14 +1120,14 @@ async function saveNewHabit() {
       return;
     }
     try {
-      const currentMember = await state.sharing.getCurrentMember(groupId);
+      const actor = await getSharedHabitCompletionActor(groupId);
       const sharedItem = {
         id: sharedId,
         item_type: 'habit',
         name,
         frequency_rule: freq,
         creator_category: cat,
-        created_by: currentMember?.memberId || '',
+        created_by: actor,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         completions: [],
@@ -1049,8 +1135,8 @@ async function saveNewHabit() {
       if (lastDoneVal) {
         sharedItem.completions.push({
           id: crypto.randomUUID(),
-          completed_at: new Date(lastDoneVal).toISOString(),
-          completed_by: currentMember?.memberId || '',
+          completed_at: habitDateInputToIso(lastDoneVal),
+          completed_by: actor,
         });
       }
       await state.sharing.addSharedHabit(groupId, sharedItem);
@@ -1235,70 +1321,41 @@ async function saveEditHabit() {
   if (!name) { showToast(t('habits.enter_habit_name'), 'error'); return; }
   if (!freq) { showToast(t('habits.enter_frequency'), 'error'); return; }
 
+  const prevLastDone = getHabitLastDone(id);
+  const prevDateStr = prevLastDone ? localDateStr(prevLastDone) : '';
+  let latestForNextDue = lastDoneVal ? habitDateInputToIso(lastDoneVal) : (prevLastDone?.toISOString() || null);
+
   if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-    // ─── Shared habit: name/frequency to shared storage, category stays local ───
-    // Update local pointer's category (deck placement)
     await state.db.from('habits').update({ category: cat }).eq('id', id);
     try {
       await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, {
         name,
         frequency_rule: freq,
       });
+      if (lastDoneVal !== prevDateStr) {
+        latestForNextDue = await setSharedHabitLastDone(habit, lastDoneVal ? habitDateInputToIso(lastDoneVal) : null);
+      }
     } catch (e) {
       console.warn('Failed to update shared habit:', e);
       showToast(t('toast.update_failed'), 'error');
       return;
     }
-    // Handle last done date change — write to shared completions
-    const prevLastDone = getHabitLastDone(id);
-    const prevDateStr = prevLastDone ? localDateStr(prevLastDone) : '';
-    if (lastDoneVal && lastDoneVal !== prevDateStr) {
-      try {
-        const currentMember = await state.sharing.getCurrentMember(habit.shared_group_id);
-        const sharedHabits = state.sharing.getAllSharedHabits();
-        const sh = sharedHabits.find(h => h.id === habit.shared_id);
-        if (sh) {
-          const newIso = new Date(lastDoneVal + 'T12:00:00').toISOString();
-          const comps = sh.completions || [];
-          if (comps.length > 0) {
-            // Update latest completion
-            comps[comps.length - 1].completed_at = newIso;
-          } else {
-            comps.push({ id: crypto.randomUUID(), completed_at: newIso, completed_by: currentMember?.memberId || '' });
-          }
-          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: comps });
-        }
-      } catch (e) { console.warn('Failed to update shared completion:', e); }
-    }
-    // Recompute next_due on local pointer
-    const lastDone = lastDoneVal ? new Date(lastDoneVal + 'T12:00:00').toISOString() : (getHabitLastDone(id)?.toISOString() || null);
-    await updateHabitNextDue(id, freq, lastDone);
   } else {
-    // ─── Normal habit ───
     const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: cat }).eq('id', id);
     if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
 
-    // Handle last done date change
-    const prevLastDone = getHabitLastDone(id);
-    const prevDateStr = prevLastDone ? localDateStr(prevLastDone) : '';
     if (lastDoneVal !== prevDateStr) {
-      if (lastDoneVal) {
-        const newDate = new Date(lastDoneVal + 'T12:00:00');
-        const newIso = newDate.toISOString();
-        const latestComp = state.allHabitCompletions.find(c => c.habit_id === id);
-        if (latestComp) {
-          await state.db.from('habit_completions').update({ completed_at: newIso }).eq('id', latestComp.id);
-        } else {
-          await state.db.from('habit_completions').insert({ habit_id: id, completed_at: newIso });
-        }
+      try {
+        latestForNextDue = await setLocalHabitLastDone(id, lastDoneVal ? habitDateInputToIso(lastDoneVal) : null);
+      } catch (e) {
+        console.warn('Failed to update habit completion:', e);
+        showToast(t('toast.update_failed'), 'error');
+        return;
       }
     }
-
-    // Compute next_due
-    const lastDone = lastDoneVal ? new Date(lastDoneVal + 'T12:00:00').toISOString() : getHabitLastDone(id);
-    await updateHabitNextDue(id, freq, lastDone);
   }
 
+  await updateHabitNextDue(id, freq, latestForNextDue);
   closeEditHabitModal();
   showToast(t('habits.habit_updated'), 'success');
   await refreshHabits();
@@ -1358,11 +1415,10 @@ async function markHabitDone(habitId, btnEl) {
 
     if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
       try {
-        const currentMember = await state.sharing.getCurrentMember(habit.shared_group_id);
         const completion = {
           id: crypto.randomUUID(),
           completed_at: now,
-          completed_by: currentMember?.memberId || '',
+          completed_by: await getSharedHabitCompletionActor(habit.shared_group_id),
         };
         await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion);
         await updateHabitNextDue(habitId, habit.frequency_rule, now);
@@ -1412,49 +1468,44 @@ function editHabitLastDone(habitId, event, triggerEl) {
   span.replaceWith(input);
   input.focus();
 
+  let didSave = false;
   async function save() {
+    if (didSave) return;
+    didSave = true;
     const newVal = input.value;
-    if (!newVal) {
-      // Cancelled / cleared — restore
-      await refreshHabits();
-      return;
-    }
-    const newDate = new Date(newVal + 'T12:00:00');
-    const newIso = newDate.toISOString();
-
-    // Find the most recent completion for this habit
-    const latestComp = state.allHabitCompletions.find(c => c.habit_id === habitId);
-
-    if (latestComp) {
-      // Update existing completion date
-      const { error } = await state.db.from('habit_completions').update({ completed_at: newIso }).eq('id', latestComp.id);
-      if (error) { showToast(t('toast.failed_to_update'), 'error'); await refreshHabits(); return; }
-    } else {
-      // No completions yet — create one
-      const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: newIso });
-      if (error) { showToast(t('toast.failed_to_add'), 'error'); await refreshHabits(); return; }
-    }
-
-    // Recompute next_due
+    const newIso = newVal ? habitDateInputToIso(newVal) : null;
     const habit = state.allHabits.find(c => c.id === habitId);
-    if (habit) {
-      await updateHabitNextDue(habitId, habit.frequency_rule, newIso);
-    }
 
-    showToast(t('habits.last_done_updated'), 'success');
+    try {
+      let latestForNextDue = newIso;
+      if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+        latestForNextDue = await setSharedHabitLastDone(habit, newIso);
+      } else {
+        latestForNextDue = await setLocalHabitLastDone(habitId, newIso);
+      }
+
+      if (habit) {
+        await updateHabitNextDue(habitId, habit.frequency_rule, latestForNextDue);
+      }
+
+      showToast(t('habits.last_done_updated'), 'success');
+    } catch (e) {
+      console.warn('Failed to update habit completion:', e);
+      showToast(t('toast.failed_to_update'), 'error');
+    }
     await refreshHabits();
   }
 
   input.addEventListener('change', save);
   input.addEventListener('blur', () => {
     // Small delay to avoid race with change event
-    setTimeout(() => { if (document.contains(input)) refreshHabits(); }, 150);
+    setTimeout(() => { if (!didSave && document.contains(input)) refreshHabits(); }, 150);
   });
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { refreshHabits(); }
+    if (e.key === 'Escape') { didSave = true; refreshHabits(); }
+    if (e.key === 'Enter') { save(); }
   });
 }
-
 
 // ===================================================================
 // HABIT HISTORY

@@ -364,16 +364,15 @@ export async function createSupabaseSharing(adapter, config) {
 
           const memberList = (members || []).map(m => _normalizeMember(m));
           const creatorMemberId = memberList.find(m => m.role === 'creator' || m.role === 'owner')?.memberId || null;
+          const activeMembers = _cacheMembers(jg.group_id, memberList);
           _joinedGroups.push({
             id: jg.group_id,
             name: jg.group_name,
             backendType: jg.remote_backend_type,
             created_by: creatorMemberId,
-            members: memberList,
+            members: activeMembers,
             _isJoined: true,
           });
-
-          _memberCache[jg.group_id] = memberList;
 
           // Load items
           const { data: items } = await remote.rpc('get_shared_items', {
@@ -1121,11 +1120,11 @@ export async function createSupabaseSharing(adapter, config) {
 
         const ml = members.map(m => _normalizeMember(m));
         const oldMl = _memberCache[group.id] || [];
-        if (_membersChanged(oldMl, ml)) {
+        const activeMembers = _cacheMembers(group.id, ml);
+        if (_membersChanged(oldMl, activeMembers)) {
           changed = true;
         }
-        group.members = ml;
-        _memberCache[group.id] = ml;
+        group.members = activeMembers;
 
         const { data: items } = await remote.client.rpc('get_shared_items', {
           p_token: remote.token,

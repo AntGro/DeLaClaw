@@ -680,6 +680,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return { displayName: user.name || fallbackDisplayName(user.email), backendUserId: 'googledrive' };
     },
 
+    async getCurrentMemberId(groupId) {
+      return currentMemberId(groupId);
+    },
+
     // ─── Groups ───
 
     /** Create a new shared group. Returns the group object. */

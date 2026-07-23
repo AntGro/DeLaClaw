@@ -194,6 +194,15 @@ export async function createSupabaseSharing(adapter, config) {
     return { displayName: 'Anonymous' };
   }
 
+  async function getCurrentMemberId(groupId) {
+    try {
+      const w = await _getItemWriter(groupId);
+      return w.memberId || null;
+    } catch {
+      return null;
+    }
+  }
+
   async function createGroup(name) {
     const user = getAuthUser();
     if (!user) throw new Error('Auth required to create groups');
@@ -1194,6 +1203,7 @@ export async function createSupabaseSharing(adapter, config) {
 
   return {
     getCurrentUser,
+    getCurrentMemberId,
     createGroup,
     loadAll,
     deleteGroup,

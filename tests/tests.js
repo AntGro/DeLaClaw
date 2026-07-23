@@ -1061,6 +1061,62 @@ test('Edit habit modal includes last-done date field', () => {
     'openEditHabitModal should populate the editHabitLastDone input');
 });
 
+test('Shared habit last-done edits write to shared completions and can clear latest completion', () => {
+  const habitsJs = jsFiles['habits.js'];
+  const helperStart = habitsJs.indexOf('async function setSharedHabitLastDone');
+  const helperEnd = habitsJs.indexOf('async function setLocalHabitLastDone', helperStart);
+  assert(helperStart !== -1 && helperEnd !== -1, 'habits.js: setSharedHabitLastDone helper not found');
+  const helper = habitsJs.slice(helperStart, helperEnd);
+  assert(helper.includes('state.sharing.updateSharedHabit') && helper.includes('{ completions: nextCompletions }'),
+    'habits.js: shared last-done edits must rewrite shared completions, not only local completions');
+  assert(helper.includes('completions.pop()'),
+    'habits.js: clearing shared last-done must remove the latest shared completion');
+
+  const saveStart = habitsJs.indexOf('async function saveEditHabit');
+  const saveEnd = habitsJs.indexOf('async function deleteHabit', saveStart);
+  const saveFn = habitsJs.slice(saveStart, saveEnd);
+  assert(saveFn.includes('setSharedHabitLastDone') && saveFn.includes('setLocalHabitLastDone'),
+    'habits.js: saveEditHabit must route last-done changes through shared/local helpers');
+
+  const inlineStart = habitsJs.indexOf('function editHabitLastDone');
+  const inlineEnd = habitsJs.indexOf('function openHabitHistory', inlineStart);
+  const inlineFn = habitsJs.slice(inlineStart, inlineEnd);
+  assert(inlineFn.includes('setSharedHabitLastDone') && inlineFn.includes('setLocalHabitLastDone'),
+    'habits.js: inline last-done edit must route through shared/local helpers');
+  assert(inlineFn.includes('let didSave = false') && inlineFn.includes('if (didSave) return'),
+    'habits.js: inline last-done edit must guard change+blur double saves');
+});
+
+test('Shared habit completions use group member ids, not account emails', () => {
+  const habitsJs = jsFiles['habits.js'];
+  const drive = jsFiles['sharing-drive.js'];
+  const supabase = jsFiles['sharing-supabase.js'];
+  const iface = jsFiles['sharing-interface.js'];
+
+  assert(iface.includes('getCurrentMemberId'),
+    'sharing-interface.js must expose getCurrentMemberId for shared completion authorship');
+
+  const actorStart = habitsJs.indexOf('async function getSharedHabitCompletionActor');
+  const actorEnd = habitsJs.indexOf('async function setSharedHabitLastDone', actorStart);
+  const actorFn = habitsJs.slice(actorStart, actorEnd);
+  assert(actorFn.includes('getCurrentMemberId') && actorFn.includes('getCurrentMember'),
+    'habits.js: shared completion actor must resolve the current group member id');
+  assert(!actorFn.includes('getCurrentUser') && !actorFn.includes('.email'),
+    'habits.js: shared completion actor must not fall back to account email');
+
+  const driveStart = drive.indexOf('async getCurrentMemberId');
+  const driveEnd = drive.indexOf('// ─── Groups', driveStart);
+  const driveFn = drive.slice(driveStart, driveEnd);
+  assert(driveFn.includes('currentMemberId(groupId)') && !driveFn.includes('ensureUser') && !driveFn.includes('.email'),
+    'sharing-drive.js: getCurrentMemberId must return the group member id, not the account email');
+
+  const sbStart = supabase.indexOf('async function getCurrentMemberId');
+  const sbEnd = supabase.indexOf('async function createGroup', sbStart);
+  const sbFn = supabase.slice(sbStart, sbEnd);
+  assert(sbFn.includes('_getItemWriter(groupId)') && sbFn.includes('w.memberId'),
+    'sharing-supabase.js: getCurrentMemberId must return the item writer member id');
+});
+
 // ===================================================================
 // 28. No duplicate IDs between index.html static modals and JS-created modals
 // ===================================================================

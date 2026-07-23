@@ -39,6 +39,7 @@
 export const SHARING_INTERFACE = {
   // ── Identity ────────────────────────────────────────────────
   getCurrentUser:           'fn',   // () => SharingUser | Promise<SharingUser>
+  getCurrentMemberId:       'fn',   // (groupId) => Promise<string|null>
 
   // ── Groups — lifecycle ──────────────────────────────────────
   createGroup:              'fn',   // (name: string) => Promise<Group>

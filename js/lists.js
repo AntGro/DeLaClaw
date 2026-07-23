@@ -379,6 +379,7 @@ function editListItemInlineFull(id) {
   const extras = document.createElement('div');
   extras.className = 'inline-edit-extras';
 
+  // Note row
   const row = document.createElement('div');
   row.className = 'inline-edit-row inline-edit-row-note';
   const label = document.createElement('label');
@@ -404,14 +405,44 @@ function editListItemInlineFull(id) {
   row.appendChild(input);
   extras.appendChild(row);
 
+  // List selector row — move item between lists
+  const allLists = state.allLists || [];
+  if (allLists.length > 1) {
+    const listRow = document.createElement('div');
+    listRow.className = 'inline-edit-row';
+    const listLabel = document.createElement('label');
+    listLabel.className = 'inline-edit-label';
+    listLabel.textContent = t('common.list');
+    const listSelect = document.createElement('select');
+    listSelect.className = 'inline-edit-input';
+    allLists
+      .filter(l => l.name !== SHARED_LIST_NAME || l.id === item.list_id)
+      .forEach(l => {
+        const opt = document.createElement('option');
+        opt.value = l.id;
+        opt.textContent = l.name === SHARED_LIST_NAME ? t('sharing.shared') : l.name;
+        if (l.id === item.list_id) opt.selected = true;
+        listSelect.appendChild(opt);
+      });
+    listRow.appendChild(listLabel);
+    listRow.appendChild(listSelect);
+    extras.appendChild(listRow);
+  }
+
+  const listSelect = extras.querySelector('select');
+
   inlineEditText(el, item.text, {
     maxLength: 2000,
     extraEl: extras,
-    collectExtra: () => ({ note: input.value.trim() }),
+    collectExtra: () => ({
+      note: input.value.trim(),
+      list_id: listSelect ? listSelect.value : item.list_id,
+    }),
     saveFn: async (newText, extra) => {
       const updates = {};
       if (newText !== item.text) updates.text = newText;
       if (extra && (extra.note || '') !== (item.note || '')) updates.note = extra.note || null;
+      if (extra && extra.list_id && extra.list_id !== item.list_id) updates.list_id = extra.list_id;
       if (Object.keys(updates).length === 0) return;
 
       // Shared → text & note go to Drive payload
@@ -422,6 +453,10 @@ function editListItemInlineFull(id) {
         if (Object.keys(drivePayload).length > 0) {
           const currentPayload = item._shared?.payload || {};
           await state.sharing.updateItem(item.shared_group_id, item.shared_id, { payload: { ...currentPayload, ...drivePayload } });
+        }
+        // list_id is local-only — update pointer directly
+        if ('list_id' in updates) {
+          await state.db.from('list_items').update({ list_id: updates.list_id }).eq('id', id);
         }
         Object.assign(item, updates);
         showToast(t('toast.updated'), 'success');

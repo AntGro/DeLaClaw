@@ -906,8 +906,12 @@ test('editListItemInlineFull updates shared list items through sharing API', () 
   const sharedIdx = fn.indexOf('if (item.shared_id');
   const normalIdx = fn.indexOf('// Normal', sharedIdx);
   const sharedBranch = fn.slice(sharedIdx, normalIdx);
-  assert(!/state\.db\.from\(['"]list_items['"]\)\.update/.test(sharedBranch),
-    'lists.js: editListItemInlineFull shared branch must not write text/note only to the local pointer');
+  // Shared branch may write list_id locally (pointer reassignment), but must not write text/note only to local pointer
+  const localUpdates = [...sharedBranch.matchAll(/state\.db\.from\(['"]list_items['"]\)\.update\(([^)]*)\)/g)];
+  localUpdates.forEach(m => {
+    assert(m[1].includes('list_id'),
+      'lists.js: editListItemInlineFull shared branch local DB write must be for list_id only, not text/note');
+  });
 });
 
 // ===================================================================

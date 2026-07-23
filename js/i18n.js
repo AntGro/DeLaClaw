@@ -11,7 +11,7 @@ const T = {
     // ── Common ──
     common: {
       save: 'Save', cancel: 'Cancel', delete: 'Delete', add: 'Add', edit: 'Edit',
-      close: 'Close', create: 'Create', name: 'Name', note: 'Note', notes: 'Notes', category: 'Category',
+      close: 'Close', create: 'Create', name: 'Name', note: 'Note', notes: 'Notes', category: 'Category', list: 'List',
       search: 'Search', optional: 'optional', done: 'Done', undo: 'Undo', rename: 'Rename',
       update: 'Update', activate: 'Activate', confirm: 'Confirm', reopen: 'Reopen',
       copied: 'Copied!', loading: 'Loading…', all: 'All',
@@ -694,7 +694,7 @@ const T = {
   fr: {
     common: {
       save: 'Enregistrer', cancel: 'Annuler', delete: 'Supprimer', add: 'Ajouter', edit: 'Modifier',
-      close: 'Fermer', create: 'Créer', name: 'Nom', note: 'Note', notes: 'Notes', category: 'Catégorie',
+      close: 'Fermer', create: 'Créer', name: 'Nom', note: 'Note', notes: 'Notes', category: 'Catégorie', list: 'Liste',
       search: 'Rechercher', optional: 'optionnel', done: 'Fait', undo: 'Annuler', rename: 'Renommer',
       update: 'Mettre à jour', activate: 'Activer', confirm: 'Confirmer', reopen: 'Rouvrir',
       copied: 'Copié !', loading: 'Chargement…', all: 'Tous',
@@ -1360,7 +1360,7 @@ const T = {
   es: {
     common: {
       save: 'Guardar', cancel: 'Cancelar', delete: 'Eliminar', add: 'Añadir', edit: 'Editar',
-      close: 'Cerrar', create: 'Crear', name: 'Nombre', note: 'Nota', notes: 'Notas', category: 'Categoría',
+      close: 'Cerrar', create: 'Crear', name: 'Nombre', note: 'Nota', notes: 'Notas', category: 'Categoría', list: 'Lista',
       search: 'Buscar', optional: 'opcional', done: 'Hecho', undo: 'Deshacer', rename: 'Renombrar',
       update: 'Actualizar', activate: 'Activar', confirm: 'Confirmar', reopen: 'Reabrir',
       copied: '¡Copiado!', loading: 'Cargando…', all: 'Todos',

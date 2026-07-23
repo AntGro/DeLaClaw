@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-07-23T21:31:13.370Z from 38 modules (v1.443). Total LOC 26356. Do not hand-edit.
+> Generated 2026-07-23T21:39:52.133Z from 38 modules (v1.444). Total LOC 26386. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,13 +27,13 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 4281 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:37,guard+pendingSet,window:8 |
-| i18n | 2072 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
-| sharing-drive | 1358 | - | sharing-envelope,utils | main.js,sharing.js | - |
-| sharing-supabase | 1247 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
+| main | 4287 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:37,guard+pendingSet,window:8 |
+| i18n | 2075 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
+| sharing-drive | 1371 | - | sharing-envelope,utils | main.js,sharing.js | - |
+| sharing-supabase | 1251 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
 | sharing-ui | 917 | - | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:33,pendingSet,window:8 |
 | drive | 759 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
-| utils | 651 | flashcards,x | i18n,icons,state,version | - | esc:7,window:4 |
+| utils | 655 | flashcards,x | i18n,icons,state,version | - | esc:7,window:4 |
 | item-utils | 539 | - | db,i18n,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 459 | - | i18n,icons,utils | - | - |

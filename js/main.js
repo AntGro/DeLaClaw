@@ -1798,6 +1798,12 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     }
   });
 
+  // Notify user when a group is removed remotely (kicked or group deleted)
+  document.addEventListener('sharing-group-removed-remotely', (e) => {
+    const name = e.detail?.groupName || '';
+    showToast(t('sharing.group_removed_remotely', name), 'info');
+  });
+
   // Show demo banner if in demo mode
   if (mode === 'demo') initDemoBanner();
 

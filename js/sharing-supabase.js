@@ -346,8 +346,10 @@ export async function createSupabaseSharing(adapter, config) {
           });
 
           if (!members || members.length === 0) {
-            // Group deleted or token revoked — clean up
+            // Group deleted or token revoked — clean up + notify
+            const groupName = jg.group_name || jg.group_id;
             await _cleanupJoinedGroup(jg.group_id);
+            try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName } })); } catch {}
             continue;
           }
 
@@ -1094,8 +1096,10 @@ export async function createSupabaseSharing(adapter, config) {
         });
 
         if (!members || members.length === 0) {
-          // Group deleted or token revoked
+          // Group deleted or token revoked — notify user
+          const groupName = group.name || group.id;
           await _cleanupJoinedGroup(group.id);
+          try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName } })); } catch {}
           changed = true;
           continue;
         }

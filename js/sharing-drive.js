@@ -1195,8 +1195,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // Clean up groups whose files are gone (deleted by creator or access revoked)
       if (staleGroupIds.length) {
         for (const gid of staleGroupIds) {
+          const groupName = _groups.get(gid)?.group?.name || gid;
           _groups.delete(gid);
           emit('group-deleted', { groupId: gid });
+          try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName } })); } catch {}
         }
         // Purge from joined-groups.json
         const before = _joinedGroups.length;
@@ -1297,8 +1299,19 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return group;
     },
 
-    /** Leave a joined group (removes from joined-groups.json). */
+    /** Leave a joined group (removes from joined-groups.json + group.json). */
     async unjoinGroup(groupId) {
+      // Remove self from remote group.json member list (best-effort)
+      const e = _groups.get(groupId);
+      if (e) {
+        try {
+          const currentMember = await getCurrentMemberInternal(groupId);
+          if (currentMember) {
+            e.group.members = e.group.members.filter(m => m.memberId !== currentMember.memberId);
+            await saveGroup(groupId);
+          }
+        } catch (err) { console.warn('sharing: unjoin group.json cleanup failed (non-fatal):', err); }
+      }
       _joinedGroups = _joinedGroups.filter(j => j.groupId !== groupId);
       await saveJoinedGroups();
       _groups.delete(groupId);

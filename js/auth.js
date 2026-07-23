@@ -203,3 +203,61 @@ export async function signOut(adapter) {
 export function onAuthStateChange(adapter, callback) {
   return adapter.raw.auth.onAuthStateChange(callback);
 }
+
+// ===================================================================
+// EMAIL GUARD — prevent multi-email data splits (sec-006)
+// ===================================================================
+// After first successful auth, stores SHA-256(email.lower()) in
+// auth_email_guard (no RLS). Subsequent logins check against it
+// before sending the magic link. Mismatch → blocked.
+// ===================================================================
+
+/**
+ * SHA-256 hash of a lowercased, trimmed email.
+ * @param {string} email
+ * @returns {Promise<string>} — hex-encoded hash
+ */
+export async function hashEmail(email) {
+  const data = new TextEncoder().encode(email.toLowerCase().trim());
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Check whether the entered email matches the stored guard hash.
+ * @param {Object} adapter — Supabase adapter
+ * @param {string} email
+ * @returns {Promise<{allowed: boolean, guarded: boolean}>}
+ *   allowed: true if email matches or no guard exists yet
+ *   guarded: true if a guard row exists (first auth already happened)
+ */
+export async function checkEmailGuard(adapter, email) {
+  try {
+    const { data, error } = await adapter.from('auth_email_guard')
+      .select('email_hash').limit(1).maybeSingle();
+    if (error || !data) return { allowed: true, guarded: false };
+    const hash = await hashEmail(email);
+    return { allowed: hash === data.email_hash, guarded: true };
+  } catch {
+    // Table may not exist (pre-migration) — allow
+    return { allowed: true, guarded: false };
+  }
+}
+
+/**
+ * Store the email guard hash after first successful auth.
+ * No-op if a guard already exists.
+ * @param {Object} adapter — Supabase adapter
+ * @param {string} email
+ */
+export async function setEmailGuard(adapter, email) {
+  try {
+    const { data } = await adapter.from('auth_email_guard')
+      .select('email_hash').limit(1).maybeSingle();
+    if (data) return; // already set
+    const hash = await hashEmail(email);
+    await adapter.from('auth_email_guard').insert({ email_hash: hash });
+  } catch {
+    // Table may not exist (pre-migration) — silently skip
+  }
+}

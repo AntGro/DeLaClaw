@@ -620,7 +620,16 @@ function showAuthPrompt(rawAdapter, url, key) {
       sendBtn.textContent = t('auth.sending');
       errEl.style.display = 'none';
       try {
-        const { sendMagicLink } = await import('./auth.js');
+        // ── Email guard: block mismatched email before sending ──
+        const { checkEmailGuard, sendMagicLink } = await import('./auth.js');
+        const { allowed } = await checkEmailGuard(rawAdapter, email);
+        if (!allowed) {
+          errEl.textContent = t('auth.email_mismatch');
+          errEl.style.display = '';
+          sendBtn.disabled = false;
+          sendBtn.textContent = t('auth.send_magic_link');
+          return;
+        }
         const { error } = await sendMagicLink(rawAdapter, email);
         if (error) {
           const isRateLimit = error.status === 429 || (error.message || '').toLowerCase().includes('rate');
@@ -708,6 +717,11 @@ function showAuthPrompt(rawAdapter, url, key) {
           return;
         }
         // Success — close prompt, session will be handled by onAuthStateChange + init logic
+        // Store email guard hash (no-op if already set)
+        try {
+          const { setEmailGuard } = await import('./auth.js');
+          await setEmailGuard(rawAdapter, email);
+        } catch { /* guard table may not exist yet */ }
         statusEl.textContent = t('auth.verified') || 'Verified! Signing you in...';
         statusEl.style.display = '';
         overlay.classList.remove('visible');

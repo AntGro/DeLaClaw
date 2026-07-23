@@ -1278,4 +1278,23 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 NOTIFY pgrst, 'reload schema';
 `,};
 
+// ── 1.453: auth email guard — prevent multi-email data splits ──
+SUPABASE_MIGRATIONS['1.453_auth_email_guard'] = {
+  version: '1.453',
+  sql: `
+CREATE TABLE IF NOT EXISTS auth_email_guard (
+  email_hash TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+GRANT SELECT ON auth_email_guard TO anon;
+GRANT SELECT, INSERT ON auth_email_guard TO authenticated;
+
+INSERT INTO settings (key, value, updated_at)
+VALUES ('schema_version', '1.453', now())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+
+NOTIFY pgrst, 'reload schema';
+`,};
+
 export { SUPABASE_MIGRATIONS };

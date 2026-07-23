@@ -295,10 +295,11 @@ function renderListItem(item) {
   }
 
   return `<div class="bucket-item list-item${checkedCls}" data-item-id="${item.id}">
+    ${sharedHtml}
     <div class="list-item-row">
       <button class="list-check-btn" data-action="toggle-list-item-check" data-id="${esc(item.id)}" title="Toggle">${checkIcon}</button>
       <div style="flex:1;min-width:0;">
-        <span class="list-item-text">${truncateWithShowMore(item.text, 120, item.id, 'listtext')}</span>${sharedHtml}
+        <span class="list-item-text">${truncateWithShowMore(item.text, 120, item.id, 'listtext')}</span>
         ${noteHtml}
       </div>
       <div class="list-item-actions">

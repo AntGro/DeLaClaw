@@ -968,9 +968,10 @@ function renderHabitItem(habit) {
   }
 
   return `<div class="bucket-item habit-item habit-status-${status}" data-habit-id="${habit.id}">
+    ${sharedHtml}
     <div class="habit-row">
       <div class="habit-info">
-        <div class="habit-name-row"><span class="habit-name">${esc(habit.name)}</span>${sharedHtml}</div>
+        <span class="habit-name">${esc(habit.name)}</span>
         <span class="habit-frequency">${esc(formatFrequency(habit.frequency_rule))}</span>
       </div>
       <div class="habit-actions">

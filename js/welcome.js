@@ -249,9 +249,10 @@ function renderFocusTodoItem(td) {
   }
 
   return `<div class="${classes}" data-todo-id="${td.id}">
+    ${sharedHtml}
     <div class="todo-row">
       ${flagBtn}
-      <span class="todo-text">${td.text.length > 150 ? truncateWithShowMore(td.text, 150, td.id, 'todo') : renderMd(td.text)}</span>${sharedHtml}
+      <span class="todo-text">${td.text.length > 150 ? truncateWithShowMore(td.text, 150, td.id, 'todo') : renderMd(td.text)}</span>
       <div class="todo-actions">
         <button data-action="welcome-toggle-todo" data-todo-id="${esc(td.id)}" data-done="true" title="${t('common.done')}">${lucideIcon("circle-check", 16)}</button>
         <button data-action="welcome-snooze" data-todo-id="${esc(td.id)}" title="${t('todos.snooze')}">${lucideIcon("moon", 16)}</button>
@@ -327,9 +328,10 @@ function renderFocusHabitItem(habit) {
   }
 
   return `<div class="bucket-item habit-item habit-status-${status}" data-habit-id="${habit.id}">
+    ${sharedHtml}
     <div class="habit-row">
       <div class="habit-info">
-        <span class="habit-name">${esc(habit.name)}</span>${sharedHtml}
+        <span class="habit-name">${esc(habit.name)}</span>
         <span class="habit-frequency">${esc(formatFrequency(habit.frequency_rule))}</span>
       </div>
       <div class="habit-actions">

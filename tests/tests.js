@@ -644,8 +644,8 @@ test('Welcome habit items render shared group badge like Habits page', () => {
     'welcome.js: focus habit rendering must detect shared habit pointers');
   assert(fn.includes('state.sharing.getAllGroups()') && fn.includes('sharedBadge'),
     'welcome.js: focus habit rendering must use sharedBadge with the sharing group name');
-  assert(fn.includes('</span>${sharedHtml}') || fn.includes('</span>${ sharedHtml }'),
-    'welcome.js: focus habit name row must append the shared badge beside the habit name');
+  assert(fn.includes('${sharedHtml}'),
+    'welcome.js: focus habit must render the shared badge');
 });
 
 // ===================================================================
@@ -722,8 +722,8 @@ test('Welcome TODO items render shared group badge like TODO page', () => {
     'welcome.js: focus TODO rendering must detect shared TODO pointers');
   assert(fn.includes('state.sharing.getAllGroups()') && fn.includes('sharedBadge'),
     'welcome.js: focus TODO rendering must use sharedBadge with the sharing group name');
-  assert(fn.includes('</span>${sharedHtml}') || fn.includes('</span>${ sharedHtml }'),
-    'welcome.js: focus TODO text row must append the shared badge beside the TODO text');
+  assert(fn.includes('${sharedHtml}'),
+    'welcome.js: focus TODO must render the shared badge');
 });
 
 // ===================================================================

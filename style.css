@@ -816,7 +816,6 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 
 .habit-row{display:flex;align-items:center;gap:10px;}
 .habit-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
-.habit-name-row{display:flex;align-items:center;gap:6px;min-width:0;}
 .habit-name{font-size:0.88rem;font-weight:600;line-height:1.3;overflow-wrap:break-word;word-break:break-word;}
 .habit-frequency{font-size:0.75rem;color:var(--muted);font-style:italic;}
 
@@ -1976,7 +1975,7 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-empty-actions{display:flex;gap:8px;justify-content:center;margin-top:8px;}
 .sharing-join-btn{border-color:var(--muted);}
 .sharing-avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff;font-weight:600;flex-shrink:0;line-height:1;}
-.shared-badge{font-size:0.72rem;color:var(--muted);background:color-mix(in srgb, var(--accent) 8%, transparent);padding:1px 6px;border-radius:4px;display:inline-flex;align-items:center;gap:3px;white-space:nowrap;flex-shrink:0;}
+.shared-badge{font-size:0.68rem;color:var(--muted);background:color-mix(in srgb, var(--accent) 8%, transparent);padding:2px 8px;border-radius:4px;display:flex;align-items:center;gap:4px;white-space:nowrap;width:fit-content;margin-bottom:4px;letter-spacing:0.02em;}
 .assignee-dots{display:inline-flex;align-items:center;gap:-2px;margin-left:4px;}
 .assignee-dots .sharing-avatar{margin-left:-4px;border:2px solid var(--bg);}
 .assignee-dots .sharing-avatar:first-child{margin-left:0;}

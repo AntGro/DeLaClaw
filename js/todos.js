@@ -322,7 +322,7 @@ function renderTodos() {
 
   // Dynamically include the Shared deck if any received items exist
   const hasSharedItems = allTodos.some(t => t.category === SHARED_CATEGORY);
-  if (hasSharedItems) categoryList.push(SHARED_CATEGORY);
+  if (hasSharedItems) categoryList.unshift(SHARED_CATEGORY);
 
   // Render category navigation buttons in toolbar
   renderCategoryToolbarButtons(categoryList);

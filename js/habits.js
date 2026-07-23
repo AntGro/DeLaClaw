@@ -842,7 +842,7 @@ function renderHabits() {
 
   // Dynamically include the Shared deck if any received habits exist
   const hasSharedItems = state.allHabits.some(c => c.category === SHARED_CATEGORY);
-  if (hasSharedItems) categoryList.push(SHARED_CATEGORY);
+  if (hasSharedItems) categoryList.unshift(SHARED_CATEGORY);
 
   let html = '';
   for (const cat of categoryList) {

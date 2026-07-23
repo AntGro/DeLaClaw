@@ -189,6 +189,12 @@ function renderLists() {
     ? sortedLists.filter(l => (grouped[l.id] || []).length > 0 || l.name.toLowerCase().includes(listSearchQuery.toLowerCase()))
     : sortedLists;
   visibleLists = visibleLists.filter(l => l.name !== SHARED_LIST_NAME || (grouped[l.id] || []).length > 0);
+  // Shared list always first when visible
+  visibleLists.sort((a, b) => {
+    const aShared = a.name === SHARED_LIST_NAME ? 0 : 1;
+    const bShared = b.name === SHARED_LIST_NAME ? 0 : 1;
+    return aShared - bShared;
+  });
 
   renderListNavButtons(sortedLists, grouped);
 
@@ -308,6 +314,12 @@ function renderListNavButtons(lists, grouped) {
   if (!container) return;
   // Hide shared list from nav when empty
   const navLists = lists.filter(l => l.name !== SHARED_LIST_NAME || (grouped[l.id] || []).length > 0);
+  // Shared list always first in nav when visible
+  navLists.sort((a, b) => {
+    const aShared = a.name === SHARED_LIST_NAME ? 0 : 1;
+    const bShared = b.name === SHARED_LIST_NAME ? 0 : 1;
+    return aShared - bShared;
+  });
   container.innerHTML = navLists.map((list, idx) => {
     const count = (grouped[list.id] || []).length;
     const color = getListColor(list, idx);

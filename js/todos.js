@@ -17,6 +17,7 @@ const CATEGORY_COLORS_KEY = 'todo_category_colors';
 const DEFAULT_CATEGORY_PALETTE = ['#3b82f6', '#ef4444', '#22c55e', '#eab308', '#8b5cf6', '#ec4899', '#f97316', '#14b8a6', '#6366f1', '#84cc16'];
 const CATEGORY_SHORTNAMES_KEY = 'todo_category_shortnames';
 const GENERAL_CATEGORY_COLOR = '#6c6f7e';
+const SHARED_CATEGORY = '__shared__';
 
 // DB keys for settings table
 const TODO_COLORS_DB_KEY = 'todo_category_colors';
@@ -181,7 +182,7 @@ function syncCategoriesFromTodos() {
   const knownSet = new Set(known.map(c => c.toLowerCase()));
   const discovered = new Set();
   allTodos.forEach(t => {
-    if (t.category && !knownSet.has(t.category.toLowerCase())) {
+    if (t.category && t.category !== SHARED_CATEGORY && !knownSet.has(t.category.toLowerCase())) {
       discovered.add(t.category);
     }
   });
@@ -319,6 +320,10 @@ function renderTodos() {
   // Always show General first, then user categories
   const categoryList = ['', ...categories];
 
+  // Dynamically include the Shared deck if any received items exist
+  const hasSharedItems = allTodos.some(t => t.category === SHARED_CATEGORY);
+  if (hasSharedItems) categoryList.push(SHARED_CATEGORY);
+
   // Render category navigation buttons in toolbar
   renderCategoryToolbarButtons(categoryList);
 
@@ -397,7 +402,8 @@ function updateTodoCharCounter(input) {
 
 function renderCategoryCard(category) {
   const catId = categoryToDomId(category);
-  const catName = category || 'General';
+  const isSharedDeck = category === SHARED_CATEGORY;
+  const catName = isSharedDeck ? t('sharing.shared') : (category || 'General');
   const isGeneral = !category;
   const shortname = getCategoryShortname(category);
   const allInCat = allTodos.filter(t => (t.category || '') === category);
@@ -421,7 +427,7 @@ function renderCategoryCard(category) {
 
   const statsText = `${pending} ${t('todos.pending').toLowerCase()}` + (doneCount > 0 ? ` · ${doneCount} ${t('todos.done').toLowerCase()}` : '');
 
-  const deleteBtn = !isGeneral
+  const deleteBtn = (!isGeneral && !isSharedDeck)
     ? `<button class="todo-cat-delete-btn" data-action="delete-category" data-category="${esc(category)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
     : '';
 
@@ -431,7 +437,7 @@ function renderCategoryCard(category) {
 
   const escapedCat = escQ(category);
 
-  const catColor = getCategoryColor(category);
+  const catColor = isSharedDeck ? '#a78bfa' : getCategoryColor(category);
 
   const catDragHandle = '';
 
@@ -454,16 +460,26 @@ function renderCategoryCard(category) {
     ? (displayDone.length === 0 ? `<p class="empty-msg">${t('todos.no_items')}</p>` : displayDone.map(t2 => renderTodoItem(t2)).join(''))
     : (activeEmptyMsg || displayActive.map(t => renderTodoItem(t)).join(''));
 
-  const shortnameBtn = !isGeneral
+  const shortnameBtn = (!isGeneral && !isSharedDeck)
     ? `<button class="todo-cat-shortname-btn" data-action="open-edit-category-modal" data-category="${esc(category)}" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
     : '';
+
+  const headerIcon = isSharedDeck ? `${lucideIcon('users', 16)} ` : '';
+
+  const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
+      <input type="text" placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(category)}" data-priority="medium" data-action="add-todo-to-category">
+      <button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>
+      <button data-action="add-todo-from-add-row">${lucideIcon('plus', 16)}</button>
+      ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-todo-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
+    </div>
+    <div class="char-counter" id="todo-counter-${catId}"></div>`;
 
   return `<div class="project-card" id="${catId}" data-category="${esc(category)}" style="--cat-color:${catColor}">
     <div class="todo-cat-header">
       <div class="todo-cat-header-left">
         ${catDragHandle}
         <div class="todo-cat-info">
-          <h3 class="todo-cat-name">${esc(catName)}</h3>
+          <h3 class="todo-cat-name">${headerIcon}${esc(catName)}</h3>
           <span class="todo-cat-stats">${statsText}</span>
         </div>
       </div>
@@ -471,13 +487,7 @@ function renderCategoryCard(category) {
         ${shortnameBtn}${deleteBtn}
       </div>
     </div>
-    <div class="todo-cat-add">
-      <input type="text" placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(category)}" data-priority="medium" data-action="add-todo-to-category">
-      <button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>
-      <button data-action="add-todo-from-add-row">${lucideIcon('plus', 16)}</button>
-      ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-todo-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
-    </div>
-    <div class="char-counter" id="todo-counter-${catId}"></div>
+    ${addRow}
     <div class="task-list todo-cat-list" data-category="${esc(category)}">
       ${mainListContent}
     </div>
@@ -856,10 +866,12 @@ async function editTodoInline(id, itemEl) {
   const catSelect = document.createElement('select');
   catSelect.className = 'inline-edit-input';
   const cats = ['', ...getCategories()];
+  // Include Shared in dropdown if the todo is in the shared deck (so user can move it out)
+  if (todo.category === SHARED_CATEGORY && !cats.includes(SHARED_CATEGORY)) cats.push(SHARED_CATEGORY);
   cats.forEach(c => {
     const opt = document.createElement('option');
     opt.value = c;
-    opt.textContent = c || 'General';
+    opt.textContent = c === SHARED_CATEGORY ? t('sharing.shared') : (c || 'General');
     if (c === (todo.category || '')) opt.selected = true;
     catSelect.appendChild(opt);
   });
@@ -1285,7 +1297,7 @@ async function _doSyncSharedTodos() {
       const { data: existing } = await state.db.from('todos').select('id').eq('shared_id', sh.id).limit(1);
       if (existing?.length) continue;
       const { error } = await state.db.from('todos').insert({
-        text: '', category: '', priority: 'medium', done: false,
+        text: '', category: SHARED_CATEGORY, priority: 'medium', done: false,
         shared_id: sh.id, shared_group_id: sh.group_id,
       });
       if (error) { console.warn('syncSharedTodos: failed to create pointer', sh.id, error); continue; }
@@ -1364,7 +1376,7 @@ async function shareTodoFromAdd(btn) {
 
 window.shareTodoFromAdd = shareTodoFromAdd;
 
-export { refreshTodos, renderTodos, getCategoryColor, getCategoryColors, setCategoryColor, loadTodoCategoryMeta, initTodoModals, getTodoCounts, getTodos, syncSharedTodos };
+export { refreshTodos, renderTodos, getCategoryColor, getCategoryColors, setCategoryColor, loadTodoCategoryMeta, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY };
 
 window.setTodoFilter = setTodoFilter;
 window.addTodoToCategory = addTodoToCategory;

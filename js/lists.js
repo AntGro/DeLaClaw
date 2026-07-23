@@ -184,9 +184,11 @@ function renderLists() {
   });
 
   // Also filter lists when searching — hide lists with no matching items
-  const visibleLists = listSearchQuery
+  // Always hide the Shared list when it has no items
+  let visibleLists = listSearchQuery
     ? sortedLists.filter(l => (grouped[l.id] || []).length > 0 || l.name.toLowerCase().includes(listSearchQuery.toLowerCase()))
     : sortedLists;
+  visibleLists = visibleLists.filter(l => l.name !== SHARED_LIST_NAME || (grouped[l.id] || []).length > 0);
 
   renderListNavButtons(sortedLists, grouped);
 
@@ -225,6 +227,9 @@ function renderLists() {
 function renderListCard(list, items, idx) {
   const color = getListColor(list, idx);
   const count = items.length;
+  const isSharedList = list.name === SHARED_LIST_NAME;
+  const displayName = isSharedList ? t('sharing.shared') : list.name;
+  const listIcon = isSharedList ? 'users' : (list.icon || 'list');
 
   let itemsHtml = '';
   if (count === 0 && !listSearchQuery) {
@@ -233,29 +238,31 @@ function renderListCard(list, items, idx) {
     itemsHtml = items.map(item => renderListItem(item)).join('');
   }
 
-  // Quick-add input
-  const quickAddHtml = `<div class="list-quick-add">
+  // Quick-add input — not shown for the auto-managed Shared list
+  const quickAddHtml = isSharedList ? '' : `<div class="list-quick-add">
     <input type="text" class="list-quick-input" placeholder="${esc(t('lists.add_item'))}" maxlength="2000"
       data-action="quick-add-input" data-list-id="${esc(list.id)}">
     <button class="list-quick-add-btn" data-action="quick-add-list-item" data-list-id="${esc(list.id)}" title="${esc(t('lists.add_item'))}">${lucideIcon('plus', 16)}</button>
     ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-list-item-from-add" data-list-id="${esc(list.id)}" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
   </div>`;
 
-  return `<div class="project-card list-bucket" data-list-id="${esc(list.id)}" style="--cat-color:${color}">
-    <div class="project-card-header">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span>${lucideIcon(list.icon || 'list', 18)}</span>
-        <strong style="font-size:1rem;">${esc(list.name)}</strong>
-        <span style="font-size:0.78rem;opacity:0.75;">(${count})</span>
-      </div>
-      <div class="project-header-actions" style="opacity:1;">
+  const headerActions = isSharedList ? '' : `<div class="project-header-actions" style="opacity:1;">
         <button class="archive-project-btn" data-action="open-edit-list" data-id="${esc(list.id)}" title="${t('lists.edit_list')}">
           ${lucideIcon('pencil', 14)}
         </button>
         <button class="todo-cat-delete-btn" data-action="delete-list" data-id="${esc(list.id)}" title="${t('common.delete')}">
           ${lucideIcon('trash-2', 16)}
         </button>
+      </div>`;
+
+  return `<div class="project-card list-bucket" data-list-id="${esc(list.id)}" style="--cat-color:${color}">
+    <div class="project-card-header">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span>${lucideIcon(listIcon, 18)}</span>
+        <strong style="font-size:1rem;">${esc(displayName)}</strong>
+        <span style="font-size:0.78rem;opacity:0.75;">(${count})</span>
       </div>
+      ${headerActions}
     </div>
     <div class="task-list list-item-list" data-list-id="${esc(list.id)}">
       ${itemsHtml}
@@ -299,12 +306,15 @@ function renderListItem(item) {
 function renderListNavButtons(lists, grouped) {
   const container = document.getElementById('listsNavButtons');
   if (!container) return;
-  container.innerHTML = lists.map((list, idx) => {
+  // Hide shared list from nav when empty
+  const navLists = lists.filter(l => l.name !== SHARED_LIST_NAME || (grouped[l.id] || []).length > 0);
+  container.innerHTML = navLists.map((list, idx) => {
     const count = (grouped[list.id] || []).length;
     const color = getListColor(list, idx);
     const shortname = getListShortname(list.id);
-    const displayName = shortname || list.name;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-list" data-id="${esc(list.id)}" title="${esc(list.name)} (${count})">${esc(displayName)} (${count})</button>`;
+    const isSharedList = list.name === SHARED_LIST_NAME;
+    const displayName = isSharedList ? t('sharing.shared') : (shortname || list.name);
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-list" data-id="${esc(list.id)}" title="${esc(isSharedList ? t('sharing.shared') : list.name)} (${count})">${esc(displayName)} (${count})</button>`;
   }).join('');
 }
 
@@ -732,6 +742,37 @@ async function deleteList(listId) {
 // ── Shared List Items — sync pointers ─────────────────────────────
 
 let _syncingListItems = false;
+// ── Shared list: auto-created landing list for received shared items ──
+const SHARED_LIST_NAME = '__shared__';
+
+async function getOrCreateSharedList(localLists) {
+  // Look for existing shared list (by internal name)
+  let existing = localLists.find(l => l.name === SHARED_LIST_NAME);
+  if (existing) return existing;
+
+  const maxOrder = localLists.reduce((m, l) => Math.max(m, l.sort_order || 0), 0);
+  const { data: created, error } = await state.db.from('lists').insert({
+    name: SHARED_LIST_NAME,
+    color: '#a78bfa',
+    icon: 'users',
+    sort_order: maxOrder + 1,
+  }).select().single();
+
+  if (error) {
+    console.warn('getOrCreateSharedList: failed to create', error);
+    return null;
+  }
+
+  let result = created;
+  if (!result?.id) {
+    // Fallback: query for it
+    const rows = await fetchAll(() => state.db.from('lists').select('id,name,sort_order,color,icon').eq('name', SHARED_LIST_NAME));
+    result = rows?.[0] || null;
+  }
+  if (result) localLists.push(result);
+  return result;
+}
+
 async function syncSharedListItems() {
   if (_syncingListItems) return;
   _syncingListItems = true;
@@ -779,15 +820,12 @@ async function _doSyncSharedListItems() {
     } catch { localItemsForOrder = []; }
   }
 
-  // Create pointers for new shared items
+  // Create pointers for new shared items — always land in the "Shared" list
   for (const sh of sharedItems) {
     if (existingSharedIds.has(sh.id)) continue;
 
-    // Find the best local list — match by list_name in payload, or use first list
-    const listName = sh.payload?.list_name || '';
-    let targetList = localLists.find(l => l.name === listName);
-    if (!targetList) targetList = localLists[0];
-    if (!targetList) continue; // No lists exist to place item into
+    let targetList = await getOrCreateSharedList(localLists);
+    if (!targetList) continue;
 
     // DB check to prevent race duplicates
     try {

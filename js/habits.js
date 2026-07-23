@@ -22,6 +22,7 @@ let habitCalWeekStart = null; // Date object for the start of the current week v
 const HABIT_SHORTNAMES_KEY = 'claw_habit_shortnames';
 const HABIT_SHORTNAMES_DB_KEY = 'habit_category_shortnames';
 let _habitShortnames = {};
+const SHARED_CATEGORY = '__shared__';
 
 function getHabitShortnames() { return _habitShortnames; }
 function getHabitShortname(catName) {
@@ -560,7 +561,7 @@ function syncHabitCategoriesFromData() {
   const knownSet = new Set(known.map(c => c.toLowerCase()));
   const discovered = new Set();
   state.allHabits.forEach(c => {
-    if (c.category && c.category !== 'General' && !knownSet.has(c.category.toLowerCase())) {
+    if (c.category && c.category !== 'General' && c.category !== SHARED_CATEGORY && !knownSet.has(c.category.toLowerCase())) {
       discovered.add(c.category);
     }
   });
@@ -839,6 +840,10 @@ function renderHabits() {
   const categories = getHabitCategories();
   const categoryList = ['General', ...categories];
 
+  // Dynamically include the Shared deck if any received habits exist
+  const hasSharedItems = state.allHabits.some(c => c.category === SHARED_CATEGORY);
+  if (hasSharedItems) categoryList.push(SHARED_CATEGORY);
+
   let html = '';
   for (const cat of categoryList) {
     // Skip empty categories when searching
@@ -889,42 +894,51 @@ function navigateToHabitCategory(cat) {
 }
 
 function renderHabitCategoryCard(category) {
-  const catName = category || 'General';
-  const isGeneral = catName === 'General';
+  const isSharedDeck = category === SHARED_CATEGORY;
+  const catName = isSharedDeck ? t('sharing.shared') : (category || 'General');
+  const isGeneral = !isSharedDeck && (catName === 'General');
   const habitsInCat = getFilteredHabitsForCategory(category);
-  const totalInCat = state.allHabits.filter(c => (c.category || 'General') === catName).length;
-  const overdueCount = state.allHabits.filter(c => (c.category || 'General') === catName && habitDueStatus(c) === 'overdue').length;
+  const totalInCat = state.allHabits.filter(c => (c.category || 'General') === (isSharedDeck ? SHARED_CATEGORY : catName)).length;
+  const overdueCount = state.allHabits.filter(c => (c.category || 'General') === (isSharedDeck ? SHARED_CATEGORY : catName) && habitDueStatus(c) === 'overdue').length;
 
-  const catColor = getCategoryColor(catName);
+  const catColor = isSharedDeck ? '#a78bfa' : getCategoryColor(catName);
   const statsText = `${totalInCat} habit${totalInCat !== 1 ? 's' : ''}` + (overdueCount > 0 ? ` · <span style="color:var(--red)">${overdueCount} ${t('habits.overdue').toLowerCase()}</span>` : '');
 
-  const deleteBtn = !isGeneral
+  const deleteBtn = (!isGeneral && !isSharedDeck)
     ? `<button class="todo-cat-delete-btn" data-action="delete-habit-category" data-category="${esc(catName)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
     : '';
 
-  const escapedCat = escQ(catName);
+  const escapedCat = escQ(isSharedDeck ? SHARED_CATEGORY : catName);
 
   const items = habitsInCat.length === 0
     ? '<p class="empty-msg">No habits here</p>'
     : habitsInCat.map(c => renderHabitItem(c)).join('');
 
-  return `<div class="project-card" data-category="${esc(catName)}" style="--cat-color:${catColor}">
+  const headerIcon = isSharedDeck ? `${lucideIcon('users', 16)} ` : '';
+
+  const editBtn = !isSharedDeck
+    ? `<button class="todo-cat-shortname-btn" data-action="open-edit-habit-category-modal" data-category="${esc(isSharedDeck ? SHARED_CATEGORY : catName)}" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
+    : '';
+
+  const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
+      <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catName)}" data-action="add-habit-from-input">
+      <button data-action="add-habit-from-input">${lucideIcon('plus', 16)}</button>
+    </div>`;
+
+  return `<div class="project-card" data-category="${esc(isSharedDeck ? SHARED_CATEGORY : catName)}" style="--cat-color:${catColor}">
     <div class="todo-cat-header">
       <div class="todo-cat-header-left">
         <div class="todo-cat-info">
-          <h3 class="todo-cat-name">${esc(catName)}</h3>
+          <h3 class="todo-cat-name">${headerIcon}${esc(catName)}</h3>
           <span class="todo-cat-stats">${statsText}</span>
         </div>
       </div>
       <div class="todo-cat-header-actions">
-        <button class="todo-cat-shortname-btn" data-action="open-edit-habit-category-modal" data-category="${esc(catName)}" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>
+        ${editBtn}
         ${deleteBtn}
       </div>
     </div>
-    <div class="todo-cat-add">
-      <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catName)}" data-action="add-habit-from-input">
-      <button data-action="add-habit-from-input">${lucideIcon('plus', 16)}</button>
-    </div>
+    ${addRow}
     <div class="task-list habit-list todo-cat-list">
       ${items}
     </div>
@@ -1055,7 +1069,14 @@ function closeAddHabitModal() {
 function populateHabitCategorySelect(selectId) {
   const sel = document.getElementById(selectId);
   const cats = ['General', ...getHabitCategories()];
-  sel.innerHTML = cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  // Include Shared in dropdown if any habit uses it (so user can move habits in/out)
+  if (state.allHabits.some(h => h.category === SHARED_CATEGORY) && !cats.includes(SHARED_CATEGORY)) {
+    cats.push(SHARED_CATEGORY);
+  }
+  sel.innerHTML = cats.map(c => {
+    const label = c === SHARED_CATEGORY ? t('sharing.shared') : c;
+    return `<option value="${esc(c)}">${esc(label)}</option>`;
+  }).join('');
 }
 
 async function addHabitFromInput(inputEl) {
@@ -2162,7 +2183,7 @@ async function _doSyncSharedHabits() {
     const { data: existing } = await state.db.from('habits').select('id').eq('shared_id', sh.id).limit(1);
     if (existing?.length) continue;
     const { error } = await state.db.from('habits').insert({
-      name: '', frequency_rule: '', category: 'General', is_draft: 0,
+      name: '', frequency_rule: '', category: SHARED_CATEGORY, is_draft: 0,
       shared_id: sh.id, shared_group_id: sh.group_id,
     });
     if (error) { console.warn('syncSharedHabits: failed to create pointer', sh.id, error); continue; }

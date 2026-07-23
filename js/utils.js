@@ -230,13 +230,9 @@ function closeDeleteConfirm() {
 
 async function executeDeleteConfirm() {
   if (_deleteConfirmCallback) {
-    const btn = document.getElementById('deleteConfirmBtn');
-    if (btn?.disabled) return;          // guard: already running
-    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
     const cb = _deleteConfirmCallback;
     closeDeleteConfirm();
-    try { await cb(); }
-    finally { if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); } }
+    await cb();
   }
 }
 

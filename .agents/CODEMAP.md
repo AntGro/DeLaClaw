@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-07-23T22:03:33.786Z from 38 modules (v1.445). Total LOC 26388. Do not hand-edit.
+> Generated 2026-07-23T22:05:19.258Z from 38 modules (v1.446). Total LOC 26384. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -33,7 +33,7 @@
 | sharing-supabase | 1251 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
 | sharing-ui | 917 | - | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:33,pendingSet,window:8 |
 | drive | 759 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
-| utils | 655 | flashcards,x | i18n,icons,state,version | - | esc:7,window:4 |
+| utils | 651 | flashcards,x | i18n,icons,state,version | - | esc:7,window:4 |
 | item-utils | 539 | - | db,i18n,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 459 | - | i18n,icons,utils | - | - |

@@ -880,9 +880,10 @@ function renderHabitNavButtons(categoryList) {
   container.innerHTML = categoryList.map(cat => {
     const color = getCategoryColor(cat);
     const shortname = getHabitShortname(cat);
-    const displayName = shortname || cat;
+    const isShared = cat === SHARED_CATEGORY;
+    const displayName = isShared ? t('sharing.shared') : (shortname || cat);
     const count = state.allHabits.filter(c => (c.category || 'General') === cat).length;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-habit-category" data-category="${esc(cat)}" title="${esc(cat)}">${esc(displayName)} (${count})</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-habit-category" data-category="${esc(cat)}" title="${esc(isShared ? t('sharing.shared') : cat)}">${esc(displayName)} (${count})</button>`;
   }).join('');
 }
 

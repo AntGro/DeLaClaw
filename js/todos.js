@@ -364,9 +364,10 @@ function renderCategoryToolbarButtons(categoryList) {
   const container = document.getElementById('todoNavButtons');
   if (!container) return;
   container.innerHTML = categoryList.map(cat => {
-    const name = cat || 'General';
+    const isShared = cat === SHARED_CATEGORY;
+    const name = isShared ? t('sharing.shared') : (cat || 'General');
     const shortname = getCategoryShortname(cat);
-    const displayName = shortname || name;
+    const displayName = isShared ? t('sharing.shared') : (shortname || name);
     const color = getCategoryColor(cat);
     return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-category" data-category="${esc(cat)}" title="Go to ${esc(name)}">${esc(displayName)}</button>`;
   }).join('');

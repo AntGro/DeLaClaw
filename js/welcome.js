@@ -575,7 +575,8 @@ function renderWelcome() {
     const catKeys = Object.keys(todosByCategory);
     for (const cat of catKeys) {
       const catColor = getCategoryColor(cat);
-      const catName = cat || 'General';
+      const isShared = cat.toLowerCase() === '__shared__';
+      const catName = isShared ? t('sharing.shared') : (cat || 'General');
       if (catKeys.length > 1 || cat) {
         html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(catName)}</div>`;
       }
@@ -591,7 +592,9 @@ function renderWelcome() {
   html += `<div class="welcome-quick-add">`;
   html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
   for (const cat of todoCats) {
-    html += `<option value="${esc(cat)}">${esc(cat || 'General')}</option>`;
+    const isShared = cat.toLowerCase() === '__shared__';
+    const label = isShared ? t('sharing.shared') : (cat || 'General');
+    html += `<option value="${esc(cat)}">${esc(label)}</option>`;
   }
   html += `</select>`;
   html += `<input type="text" placeholder="${esc(t('todos.add_todo_placeholder'))}" maxlength="2000" class="todo-cat-input" data-category="${esc(todoCats[0])}" data-priority="medium" data-action="welcome-quick-add-todo-on-enter">`;
@@ -617,7 +620,9 @@ function renderWelcome() {
     const habitCatKeys = Object.keys(habitsByCategory).sort();
     for (const cat of habitCatKeys) {
       const catColor = getCategoryColor(cat);
-      html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(cat)}</div>`;
+      const isShared = cat.toLowerCase() === '__shared__';
+      const catLabel = isShared ? t('sharing.shared') : cat;
+      html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(catLabel)}</div>`;
       for (const ch of habitsByCategory[cat]) {
         html += renderFocusHabitItem(ch);
       }

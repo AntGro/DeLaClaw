@@ -1710,7 +1710,7 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 /* ── Lists Page ── */
 .list-item-list{padding:0 16px 4px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;}
 .project-card-header + .list-item-list{padding-top:10px;}
-.list-item{display:flex;align-items:flex-start;justify-content:space-between;border-left:3px solid var(--muted);padding-left:10px;margin-bottom:4px;}
+.list-item{display:flex;flex-direction:column;align-items:stretch;border-left:3px solid var(--muted);padding-left:10px;margin-bottom:4px;}
 .list-item-checked{opacity:0.5;}
 .list-item-checked .list-item-text{text-decoration:line-through;}
 .list-item-row{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px;}

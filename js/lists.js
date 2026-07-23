@@ -270,10 +270,10 @@ function renderListCard(list, items, idx) {
       </div>
       ${headerActions}
     </div>
+    ${quickAddHtml}
     <div class="task-list list-item-list" data-list-id="${esc(list.id)}">
       ${itemsHtml}
     </div>
-    ${quickAddHtml}
   </div>`;
 }
 

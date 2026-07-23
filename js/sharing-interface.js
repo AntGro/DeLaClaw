@@ -65,6 +65,7 @@ export const SHARING_INTERFACE = {
   getGroupByFolderId:       'fn',   // (connectionRef) => Group|undefined
   getInviteLink:            'fn',   // (groupId) => string|null
   isJoinedViaLink:          'fn',   // (groupId) => boolean
+  getRevokedMembers:        'fn',   // (groupId) => GroupMember[]  (status='revoked')
 
   // ── Items — queries ─────────────────────────────────────────
   getAllSharedItems:         'fn',   // (itemType?) => SharedItem[]

@@ -1343,6 +1343,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return _groups.get(groupId)?.joinedViaLink === true;
     },
 
+    getRevokedMembers(/* groupId */) {
+      return [];  // Drive does hard-delete, no revoked state
+    },
+
     // ─── Backend capabilities (injected, backend-agnostic) ───
 
     /** Open a backend-specific file picker for join-via-link.

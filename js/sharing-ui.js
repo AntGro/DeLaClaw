@@ -240,6 +240,25 @@ export async function renderSharingPane() {
         </div>`;
     }
 
+    // Revoked members toggle (archive-toggle pattern)
+    const revokedMembers = state.sharing?.getRevokedMembers?.(group.id) || [];
+    if (isCreator && revokedMembers.length > 0) {
+      const toggleId = `revoked-toggle-${group.id}`;
+      const listId = `revoked-list-${group.id}`;
+      html += `<div class="archive-toggle" data-action="toggle-revoked-members" data-group-id="${esc(group.id)}" id="${toggleId}">
+          <span class="arrow" id="revoked-arrow-${esc(group.id)}">▶</span> ${t('sharing.removed')} (${revokedMembers.length})
+        </div>
+        <div class="archived-tasks" id="${listId}">`;
+      for (const member of revokedMembers) {
+        const label = memberLabel(member);
+        html += `<div class="sharing-member sharing-member-revoked">
+            ${avatarDot(member, 22)}
+            <span class="sharing-member-email">${esc(label)} <span class="sharing-member-revoked-tag">${t('sharing.revoked')}</span></span>
+          </div>`;
+      }
+      html += `</div>`;
+    }
+
     html += `</div>
       ${isCreator ? `<div class="sharing-invite-row">
         <input type="text" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${invitePlaceholder}" data-action="sharing-invite-on-enter" data-group-id="${esc(group.id)}">
@@ -896,6 +915,13 @@ export function applySettingsI18n() {
 
 // ── Expose actions on window (CSP delegation handled in js/delegation.js) ──
 
+function toggleRevokedMembers(groupId) {
+  const container = document.getElementById(`revoked-list-${groupId}`);
+  const arrow = document.getElementById(`revoked-arrow-${groupId}`);
+  if (container) container.classList.toggle('visible');
+  if (arrow) arrow.classList.toggle('open');
+}
+
 window.sharingCreateGroup = sharingCreateGroup;
 window.sharingCreateGroupSubmit = sharingCreateGroupSubmit;
 window.sharingInvite = sharingInvite;
@@ -912,5 +938,6 @@ window.sharingCopyLink = sharingCopyCode;
 window.sharingCopyMemberLink = sharingCopyMemberCode;
 window.sharingCopyLinkValue = sharingCopyCodeValue;
 window.sharingOpenJoinPicker = sharingOpenJoinPicker;
+window.toggleRevokedMembers = toggleRevokedMembers;
 window.submitSharePopover = submitSharePopover;
 window.sharingCompleteSubmit = sharingCompleteSubmit;

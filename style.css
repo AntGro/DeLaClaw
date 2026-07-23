@@ -1961,6 +1961,8 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-member-joined{color:#22c55e;margin-left:2px;}
 .sharing-member-creator{color:var(--accent);font-size:0.82rem;margin-left:2px;display:inline-flex;align-items:center;gap:2px;}
 .sharing-member-pending{color:var(--muted);font-size:0.84rem;font-style:italic;margin-left:4px;}
+.sharing-member-revoked{opacity:0.5;}
+.sharing-member-revoked-tag{color:var(--muted);font-size:0.84rem;font-style:italic;margin-left:4px;}
 .sharing-remove-btn{border:none;background:transparent;cursor:pointer;color:var(--muted);padding:2px;line-height:1;border-radius:4px;transition:color 0.15s;}
 .sharing-remove-btn:hover{color:#ef4444;}
 .sharing-invite-row{display:flex;gap:6px;margin-bottom:8px;}

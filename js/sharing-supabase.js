@@ -39,7 +39,8 @@ export async function createSupabaseSharing(adapter, config) {
   let _ownedGroups = [];   // Groups created by this user (on their own Supabase)
   let _joinedGroups = [];  // Groups joined from other Supabase projects
   let _allItems = [];      // Cached shared items across all groups
-  let _memberCache = {};   // groupId -> members array
+  let _memberCache = {};   // groupId -> active+pending members array
+  let _revokedCache = {};  // groupId -> revoked members array
   let _remoteClients = {}; // groupId -> { client, token, memberId }
   let _pollTimer = null;
   let _realtimeChannel = null;
@@ -49,6 +50,15 @@ export async function createSupabaseSharing(adapter, config) {
   const POLL_MS = 30000;
 
   // ── Helpers ─────────────────────────────────────────────────
+
+  /** Split normalized member list and cache active vs revoked. */
+  function _cacheMembers(groupId, allNormalized) {
+    const active = allNormalized.filter(m => m.status !== 'revoked');
+    const revoked = allNormalized.filter(m => m.status === 'revoked');
+    _memberCache[groupId] = active;
+    _revokedCache[groupId] = revoked;
+    return active;
+  }
 
   function _uid8() {
     return crypto.randomUUID().slice(0, 8);
@@ -299,17 +309,16 @@ export async function createSupabaseSharing(adapter, config) {
           const { data: items } = await adapter.from('sharing_items')
             .select('*').eq('group_id', g.id);
 
-          const memberList = (members || []).map(m => _normalizeMember(m));
-          const creatorMemberId = memberList.find(m => m.role === 'creator' || m.role === 'owner')?.memberId || null;
+          const allNormalized = (members || []).map(m => _normalizeMember(m));
+          const creatorMemberId = allNormalized.find(m => m.role === 'creator' || m.role === 'owner')?.memberId || null;
+          const activeMembers = _cacheMembers(g.id, allNormalized);
           _ownedGroups.push({
             id: g.id,
             name: g.name,
             backendType: g.backend_type,
             created_by: creatorMemberId,
-            members: memberList,
+            members: activeMembers,
           });
-
-          _memberCache[g.id] = memberList;
 
           // Merge items
           if (items) {
@@ -413,6 +422,7 @@ export async function createSupabaseSharing(adapter, config) {
     _ownedGroups = _ownedGroups.filter(g => g.id !== groupId);
     _allItems = _allItems.filter(i => i.group_id !== groupId);
     delete _memberCache[groupId];
+    delete _revokedCache[groupId];
     // 1.399: no localStorage cleanup — attribution now in DB via auth_user_id
     _notifyUpdate();
   }
@@ -514,6 +524,10 @@ export async function createSupabaseSharing(adapter, config) {
     }
 
     _memberCache[groupId] = members.filter(m => m.memberId !== member.memberId);
+    // Track as revoked for "show removed" toggle
+    const revoked = { ...member, status: 'revoked' };
+    if (!_revokedCache[groupId]) _revokedCache[groupId] = [];
+    _revokedCache[groupId].push(revoked);
     const group = _ownedGroups.find(g => g.id === groupId);
     if (group) group.members = _memberCache[groupId];
     _notifyUpdate();
@@ -544,6 +558,7 @@ export async function createSupabaseSharing(adapter, config) {
     _joinedGroups = _joinedGroups.filter(g => g.id !== groupId);
     _allItems = _allItems.filter(i => i.group_id !== groupId);
     delete _memberCache[groupId];
+    delete _revokedCache[groupId];
     delete _remoteClients[groupId];
   }
 
@@ -1062,13 +1077,13 @@ export async function createSupabaseSharing(adapter, config) {
             .select('*').eq('group_id', group.id);
 
           if (members) {
-            const ml = members.map(m => _normalizeMember(m));
+            const allNorm = members.map(m => _normalizeMember(m));
             const oldMl = _memberCache[group.id] || [];
-            if (_membersChanged(oldMl, ml)) {
+            const activeMembers = _cacheMembers(group.id, allNorm);
+            if (_membersChanged(oldMl, activeMembers)) {
               changed = true;
             }
-            group.members = ml;
-            _memberCache[group.id] = ml;
+            group.members = activeMembers;
           }
 
           if (items) {
@@ -1203,6 +1218,10 @@ export async function createSupabaseSharing(adapter, config) {
     _updateCallbacks.push(fn);
   }
 
+  function getRevokedMembers(groupId) {
+    return _revokedCache[groupId] || [];
+  }
+
   // ── Return adapter ──────────────────────────────────────────
 
   return {
@@ -1245,6 +1264,7 @@ export async function createSupabaseSharing(adapter, config) {
     startPolling,
     stopPolling,
     onUpdate,
+    getRevokedMembers,
     openJoinPicker: null,
   };
 }

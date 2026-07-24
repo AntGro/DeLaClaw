@@ -632,6 +632,90 @@ function isMobileUA() {
   return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 }
 
+// ── Supabase project ref extraction ─────────────────────────────
+function getSupabaseProjectRef(url) {
+  if (!url) return null;
+  const m1 = url.match(/https?:\/\/([a-z0-9]{20,})\.supabase\.co/i);
+  if (m1) return m1[1];
+  const m2 = url.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
+  if (m2) return m2[1];
+  return null;
+}
+
+// ── Shared Supabase Site-URL + magic-link auth steps ────────────
+/**
+ * Build the two-step Site URL confirmation + magic-link email HTML
+ * shared by showAuthPrompt (main.js) and renderSharingPane (sharing-ui.js).
+ *
+ * @param {string} prefix   ID prefix for DOM elements ('auth' | 'sharingAuth')
+ * @param {string} authConfigUrl  Supabase dashboard auth-config URL
+ * @param {object} [opts]
+ * @param {string} [opts.sendAction]  data-action attribute for the send button
+ * @param {boolean} [opts.showStatus] append a status div after the send button
+ * @returns {{ html: string, wireUp: (container: Element) => void }}
+ */
+function buildAuthSteps(prefix, authConfigUrl, opts = {}) {
+  const siteOrigin = location.origin;
+  const sendAttrs = opts.sendAction ? ` data-action="${esc(opts.sendAction)}"` : '';
+  const statusHtml = opts.showStatus ? `\n        <div class="auth-inline-status" id="${prefix}Status" style="display:none"></div>` : '';
+  const errorClass = opts.showStatus ? 'auth-inline-error' : 'auth-error';
+  const html = `
+    <div class="auth-step" id="${prefix}Step1">
+      <div class="auth-step-header">
+        <span class="auth-step-num">1</span>
+        <span>${t('auth.step_site_url')}</span>
+      </div>
+      <p class="auth-step-detail">${t('auth.step_site_url_detail')}</p>
+      <div class="auth-site-url-value">
+        <code id="${prefix}SiteUrlValue">${esc(siteOrigin)}</code>
+        <button class="auth-copy-url-btn" id="${prefix}CopyUrlBtn" title="${t('sharing.copy')}">${lucideIcon('copy', 14)}</button>
+      </div>
+      <a class="auth-config-link" href="${authConfigUrl}" target="_blank" rel="noopener">${lucideIcon('external-link', 14)} ${t('auth.open_supabase_settings')}</a>
+      <label class="auth-toggle-label" id="${prefix}ConfirmLabel">
+        <input type="checkbox" id="${prefix}SiteUrlConfirm">
+        <span>${t('auth.site_url_confirmed')}</span>
+      </label>
+    </div>
+    <div class="auth-step auth-step-locked" id="${prefix}Step2">
+      <div class="auth-step-header">
+        <span class="auth-step-num">2</span>
+        <span>${t('auth.step_magic_link')}</span>
+      </div>
+      <div id="${prefix}Step2Body" style="display:none">
+        <input type="email" id="${prefix}Email" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
+        <div class="${errorClass}" id="${prefix}Error" style="display:none"></div>
+        <button class="auth-send-btn" id="${prefix}SendBtn"${sendAttrs}>${t('auth.send_magic_link')}</button>${statusHtml}
+      </div>
+    </div>`;
+
+  function wireUp(container) {
+    const confirmBox = container.querySelector(`#${prefix}SiteUrlConfirm`);
+    const step2 = container.querySelector(`#${prefix}Step2`);
+    const step2Body = container.querySelector(`#${prefix}Step2Body`);
+    const copyBtn = container.querySelector(`#${prefix}CopyUrlBtn`);
+    const emailEl = container.querySelector(`#${prefix}Email`);
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(siteOrigin).then(() => showToast(t('common.copied'), 'success'));
+      });
+    }
+    if (confirmBox) {
+      confirmBox.addEventListener('change', () => {
+        if (confirmBox.checked) {
+          step2.classList.remove('auth-step-locked');
+          step2Body.style.display = '';
+          if (emailEl) emailEl.focus();
+        } else {
+          step2.classList.add('auth-step-locked');
+          step2Body.style.display = 'none';
+        }
+      });
+    }
+  }
+
+  return { html, wireUp };
+}
+
 export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
   showDeleteConfirm, closeDeleteConfirm, executeDeleteConfirm,
@@ -639,6 +723,7 @@ export {
   isEditing, balanceGrid, fetchAll,
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA,
   getSupabaseKeyRole, isServiceRoleKey,
+  getSupabaseProjectRef, buildAuthSteps,
 };
 
 window.closeDeleteConfirm = closeDeleteConfirm;

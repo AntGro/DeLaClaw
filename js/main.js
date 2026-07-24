@@ -10,7 +10,7 @@ import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
 
-import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole } from './utils.js';
+import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
@@ -551,63 +551,17 @@ function showAuthPrompt(rawAdapter, url, key) {
 
   // ── Sign-in form state ──
   function renderForm() {
-    const siteOrigin = location.origin;
+    const steps = buildAuthSteps('auth', authConfigUrl);
     content.innerHTML = `
       <div class="auth-icon">${lucideIcon('lock', 28)}</div>
       <h3>${t('auth.sign_in')}</h3>
       <p class="auth-hint">${t('auth.sign_in_hint_mandatory')}</p>
-
-      <div class="auth-step" id="authStep1">
-        <div class="auth-step-header">
-          <span class="auth-step-num">1</span>
-          <span>${t('auth.step_site_url')}</span>
-        </div>
-        <p class="auth-step-detail">${t('auth.step_site_url_detail')}</p>
-        <div class="auth-site-url-value">
-          <code id="authSiteUrlValue">${esc(siteOrigin)}</code>
-          <button class="auth-copy-url-btn" id="authCopyUrlBtn" title="${t('sharing.copy')}">${lucideIcon('copy', 14)}</button>
-        </div>
-        <a class="auth-config-link" href="${authConfigUrl}" target="_blank" rel="noopener">${lucideIcon('external-link', 14)} ${t('auth.open_supabase_settings')}</a>
-        <label class="auth-toggle-label" id="authConfirmLabel">
-          <input type="checkbox" id="authSiteUrlConfirm">
-          <span>${t('auth.site_url_confirmed')}</span>
-        </label>
-      </div>
-
-      <div class="auth-step auth-step-locked" id="authStep2">
-        <div class="auth-step-header">
-          <span class="auth-step-num">2</span>
-          <span>${t('auth.step_magic_link')}</span>
-        </div>
-        <div class="auth-step2-body" id="authStep2Body" style="display:none">
-          <input type="email" id="authEmail" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
-          <div class="auth-error" id="authError" style="display:none"></div>
-          <button class="auth-send-btn" id="authSendBtn">${t('auth.send_magic_link')}</button>
-        </div>
-      </div>
+      ${steps.html}
     `;
-    const confirmBox = content.querySelector('#authSiteUrlConfirm');
-    const step2 = content.querySelector('#authStep2');
-    const step2Body = content.querySelector('#authStep2Body');
+    steps.wireUp(content);
     const emailEl = content.querySelector('#authEmail');
     const errEl = content.querySelector('#authError');
     const sendBtn = content.querySelector('#authSendBtn');
-    const copyUrlBtn = content.querySelector('#authCopyUrlBtn');
-
-    copyUrlBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(siteOrigin).then(() => showToast(t('common.copied'), 'success'));
-    });
-
-    confirmBox.addEventListener('change', () => {
-      if (confirmBox.checked) {
-        step2.classList.remove('auth-step-locked');
-        step2Body.style.display = '';
-        emailEl.focus();
-      } else {
-        step2.classList.add('auth-step-locked');
-        step2Body.style.display = 'none';
-      }
-    });
 
     sendBtn.addEventListener('click', async () => {
       const email = emailEl.value.trim();
@@ -897,14 +851,6 @@ function normalizeSupabaseUrl(raw) {
   return raw;
 }
 
-function getSupabaseProjectRef(url) {
-  if (!url) return null;
-  const m1 = url.match(/https?:\/\/([a-z0-9]{20,})\.supabase\.co/i);
-  if (m1) return m1[1];
-  const m2 = url.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
-  if (m2) return m2[1];
-  return null;
-}
 
 function renderSchemaMissingError(container, projectUrl) {
   if (!container) return;

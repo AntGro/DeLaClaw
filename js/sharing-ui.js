@@ -19,7 +19,7 @@
 
 import state, { STAY_CONNECTED_KEY } from './state.js';
 import { t } from './i18n.js';
-import { esc, showToast, showDeleteConfirm } from './utils.js';
+import { esc, showToast, showDeleteConfirm, getSupabaseProjectRef, buildAuthSteps } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { LOGOS } from './backend-logos.js';
 import { decodeInviteEnvelope } from './sharing-envelope.js';
@@ -50,15 +50,6 @@ function memberLabel(member) {
 }
 
 /** Extract Supabase project ref from URL (shared logic with main.js) */
-function getSupabaseProjectRef(url) {
-  if (!url) return null;
-  const m1 = url.match(/https?:\/\/([a-z0-9]{20,})\.supabase\.co/i);
-  if (m1) return m1[1];
-  const m2 = url.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
-  if (m2) return m2[1];
-  return null;
-}
-
 /** Small avatar circle HTML. */
 function avatarDot(member, size = 24) {
   const label = memberLabel(member);
@@ -104,65 +95,14 @@ export async function renderSharingPane() {
       const creds = (() => { try { return JSON.parse(localStorage.getItem(STAY_CONNECTED_KEY) || '{}'); } catch { return {}; } })();
       const projRef = getSupabaseProjectRef(creds.url || '') || null;
       const authConfigUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/url-configuration` : 'https://supabase.com/dashboard/projects';
-      const siteOrigin = location.origin;
+      const steps = buildAuthSteps('sharingAuth', authConfigUrl, { sendAction: 'send-auth-from-sharing', showStatus: true });
       container.innerHTML = `<div class="auth-inline-prompt">
         <div class="auth-icon">${lucideIcon('lock', 28)}</div>
         <h4>${t('auth.sign_in_to_share')}</h4>
         <p class="auth-inline-hint">${t('auth.sign_in_to_share_hint')}</p>
-
-        <div class="auth-step" id="sharingStep1">
-          <div class="auth-step-header">
-            <span class="auth-step-num">1</span>
-            <span>${t('auth.step_site_url')}</span>
-          </div>
-          <p class="auth-step-detail">${t('auth.step_site_url_detail')}</p>
-          <div class="auth-site-url-value">
-            <code id="sharingSiteUrlValue">${esc(siteOrigin)}</code>
-            <button class="auth-copy-url-btn" id="sharingCopyUrlBtn" title="${t('sharing.copy')}">${lucideIcon('copy', 14)}</button>
-          </div>
-          <a class="auth-config-link" href="${authConfigUrl}" target="_blank" rel="noopener">${lucideIcon('external-link', 14)} ${t('auth.open_supabase_settings')}</a>
-          <label class="auth-toggle-label" id="sharingConfirmLabel">
-            <input type="checkbox" id="sharingSiteUrlConfirm">
-            <span>${t('auth.site_url_confirmed')}</span>
-          </label>
-        </div>
-
-        <div class="auth-step auth-step-locked" id="sharingStep2">
-          <div class="auth-step-header">
-            <span class="auth-step-num">2</span>
-            <span>${t('auth.step_magic_link')}</span>
-          </div>
-          <div id="sharingStep2Body" style="display:none">
-            <input type="email" id="sharingAuthEmail" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
-            <div class="auth-inline-error" id="sharingAuthError" style="display:none"></div>
-            <button class="auth-send-btn" id="sharingAuthSendBtn" data-action="send-auth-from-sharing">${t('auth.send_magic_link')}</button>
-            <div class="auth-inline-status" id="sharingAuthStatus" style="display:none"></div>
-          </div>
-        </div>
+        ${steps.html}
       </div>`;
-      // Wire up step 1 → step 2 unlock
-      const confirmBox = container.querySelector('#sharingSiteUrlConfirm');
-      const step2 = container.querySelector('#sharingStep2');
-      const step2Body = container.querySelector('#sharingStep2Body');
-      const copyUrlBtn = container.querySelector('#sharingCopyUrlBtn');
-      if (copyUrlBtn) {
-        copyUrlBtn.addEventListener('click', () => {
-          navigator.clipboard.writeText(siteOrigin).then(() => showToast(t('common.copied'), 'success'));
-        });
-      }
-      if (confirmBox) {
-        confirmBox.addEventListener('change', () => {
-          if (confirmBox.checked) {
-            step2.classList.remove('auth-step-locked');
-            step2Body.style.display = '';
-            const emailEl = container.querySelector('#sharingAuthEmail');
-            if (emailEl) emailEl.focus();
-          } else {
-            step2.classList.add('auth-step-locked');
-            step2Body.style.display = 'none';
-          }
-        });
-      }
+      steps.wireUp(container);
     } else if (activeMode === 'supabase' && state.authUser) {
       // Authenticated but sharing adapter failed to initialise
       const errMsg = state._sharingInitError ? esc(String(state._sharingInitError.message || state._sharingInitError)) : '';

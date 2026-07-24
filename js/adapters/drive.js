@@ -473,17 +473,26 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         }
 
         // Run each migration, bump schema_version after each success
+        // Progress model: bar reaches 100% only after the last upload completes.
+        // Total units = sum of (1 migration run + N dirty flushes) across all migrations.
+        // We can't know dirty counts ahead of time, so we use a two-level scheme:
+        // outer progress = migration index (shown in message), inner = per-table flush.
+        let completedUnits = 0;
+        // Pessimistic total: 1 (run) + 1 (settings flush) per migration; adjusted per step
+        let totalUnits = toRun.length * 2;
+
         for (let i = 0; i < toRun.length; i++) {
           const version = toRun[i];
-          emit('migrating', t('menu.drive_migrating', version), i + 1, toRun.length);
+          emit('migrating', t('menu.drive_migrating', version), completedUnits, totalUnits);
 
-          // Snapshot table lengths + content hashes to detect which tables changed
+          // Snapshot tables to detect which ones changed
           const snapshots = {};
           for (const table of DRIVE_TABLES) {
             snapshots[table] = JSON.stringify(inner._store[table] || []);
           }
 
           await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
+          completedUnits++; // migration function done
 
           // Update schema_version in memory
           const entry = (inner._store.settings || []).find(s => s.key === 'schema_version');
@@ -503,13 +512,20 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             }
           }
 
+          // Adjust totalUnits: replace the pessimistic 1 flush with actual dirty count
+          totalUnits += dirtyTables.size - 1;
+
           const flushTok = await getToken();
           if (flushTok) {
+            let flushed = 0;
             for (const table of dirtyTables) {
               const fileName = `${table}.json`;
               const meta = fileMeta[table] || {};
               const result = await uploadFile(flushTok, folderId, meta.fileId, fileName, inner._store[table] || []);
               fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+              flushed++;
+              completedUnits++;
+              emit('migrating', t('menu.drive_migrating_sync', version, flushed, dirtyTables.size), completedUnits, totalUnits);
             }
           }
         }

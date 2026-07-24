@@ -62,7 +62,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 
 ## 4. Backend & Data
 
-- Tables (16): `projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `nvidia_usage`.
+- Tables (22 Supabase / 19 Local): 16 personal (`projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `nvidia_usage`) + `daily_visits`, `joined_groups`, `agent_grants` (all backends) + `sharing_groups`, `sharing_members`, `sharing_items` (Supabase only).
 - Schema version in `settings` key `schema_version`, migrations in `migrations/`. Check `latest_compat` logic in `VERSION`.
 - Base schema + migrations must be runnable in Supabase SQL editor + local SQLite (`server/schema.sql`).
 - Vendor: `scripts/update-vendor.sh [supabase_ver] [three_ver]` updates `vendor/` + `index.html` comment + `docs-site/attributions.md`. Weekly GitHub Action `vendor-check.yml` opens PR to `dev` if new versions.

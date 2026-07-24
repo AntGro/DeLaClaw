@@ -9,7 +9,7 @@ Browser
   |
   index.html ── loads ── js/main.js (bootstrap)
   |                         |
-  style.css               js/supabase.js (shared state)
+  style.css               js/state.js (shared state)
   |                         |
   sw.js (service worker)  js/db.js (adapter abstraction)
                             |
@@ -17,7 +17,6 @@ Browser
             |           |   |           |               |
     adapters/       adapters/   adapters/       adapters/
     supabase.js     rest.js     demo.js         drive.js
-            |           |       |               |
     (Supabase)   (Bun+SQLite) (in-memory) (in-memory + Drive)
             |
     adapters/offline-cache.js (wraps any adapter)
@@ -41,11 +40,11 @@ Every call to `db.from()` wraps the result in a `tracked()` Proxy. This Proxy in
 
 Each adapter implements the same interface:
 
-| Method | Supabase | REST | Demo |
-|---|---|---|---|
-| `from(table)` | Supabase PostgREST builder | HTTP `QueryBuilder` class | In-memory array filter |
-| `channel(name)` | Supabase Realtime | No-op | No-op |
-| `rpc(fn, params)` | Supabase RPC | HTTP POST | No-op |
+| Method | Supabase | REST | Demo | Drive |
+|---|---|---|---|---|
+| `from(table)` | Supabase PostgREST builder | HTTP `QueryBuilder` class | In-memory array filter | In-memory (delegates to demo engine) |
+| `channel(name)` | Supabase Realtime | No-op | No-op | No-op |
+| `rpc(fn, params)` | Supabase RPC | HTTP POST | No-op | No-op |
 
 The chainable query builder supports: `.select()`, `.insert()`, `.update()`, `.delete()`, `.upsert()`, `.eq()`, `.neq()`, `.gt()`, `.gte()`, `.lt()`, `.lte()`, `.is()`, `.order()`, `.limit()`, `.single()`.
 
@@ -65,13 +64,13 @@ A transparent wrapper that can be applied to any adapter. It intercepts `adapter
 
 Cache details:
 - Scoped by backend mode and URL (e.g. `supabase:<project-ref>`)
-- 14 of 16 tables cached automatically; `prompts` and `nvidia_usage` are excluded
+- All tables cached automatically; `prompts` and `nvidia_usage` are excluded
 - `birthdays.avatar_url` is stripped from cache (base64 images, 30-80 KB each)
 - New tables are included without code changes (exclusion list, not inclusion list)
 
 ## State management
 
-All shared state lives in `js/supabase.js` as a single exported `state` object:
+All shared state lives in `js/state.js` as a single exported `state` object:
 
 ```javascript
 const state = {
@@ -97,26 +96,32 @@ There is no virtual DOM, no reactivity system, and no framework state management
 
 ## Database schema
 
-16 tables, all with the same structure across SQLite and PostgreSQL:
+22 tables on Supabase, 19 on Local SQLite (sharing server tables are Supabase-only):
 
-| Table | Purpose | Key relationships |
-|---|---|---|
-| `projects` | Project metadata (name, color, links, sort order) | -- |
-| `tasks` | Tasks within projects | `project` -> `projects.id` |
-| `todos` | Standalone TODOs with priority and due dates | -- |
-| `habits` | Habit definitions with scheduling rules | -- |
-| `habit_completions` | Completion log for habits | `habit_id` -> `habits.id` |
-| `flashcards` | SRS flashcards with FSRS scheduling data | -- |
-| `flashcard_notes` | Draft notes with AI proposal workflow | -- |
-| `texts` | Full texts for memorization (chunked) | -- |
-| `text_line_progress` | Per-chunk SRS progress for texts | `text_id` -> `texts.id` |
-| `birthdays` | Birthday records with optional avatars | -- |
-| `vestiaire` | Wardrobe inventory | -- |
-| `lists` | Checklist containers | -- |
-| `list_items` | Items within lists | `list_id` -> `lists.id` |
-| `settings` | Key-value store (schema version, preferences) | -- |
-| `prompts` | AI prompt templates | -- |
-| `nvidia_usage` | API token usage tracking | -- |
+| Table | Purpose | Key relationships | Backend |
+|---|---|---|---|
+| `projects` | Project metadata (name, color, links, sort order) | -- | All |
+| `tasks` | Tasks within projects | `project` -> `projects.id` | All |
+| `todos` | Standalone TODOs with priority and due dates | -- | All |
+| `habits` | Habit definitions with scheduling rules | -- | All |
+| `habit_completions` | Completion log for habits | `habit_id` -> `habits.id` | All |
+| `flashcards` | SRS flashcards with FSRS scheduling data | -- | All |
+| `flashcard_notes` | Draft notes with AI proposal workflow | -- | All |
+| `texts` | Full texts for memorization (chunked) | -- | All |
+| `text_line_progress` | Per-chunk SRS progress for texts | `text_id` -> `texts.id` | All |
+| `birthdays` | Birthday records with optional avatars | -- | All |
+| `vestiaire` | Wardrobe inventory | -- | All |
+| `lists` | Checklist containers | -- | All |
+| `list_items` | Items within lists | `list_id` -> `lists.id` | All |
+| `settings` | Key-value store (schema version, preferences) | -- | All |
+| `prompts` | AI prompt templates | -- | All |
+| `nvidia_usage` | API token usage tracking | -- | All |
+| `daily_visits` | Login/visit tracking | -- | All |
+| `joined_groups` | Groups the user has joined (encrypted tokens) | -- | All |
+| `agent_grants` | AI agent permission grants | -- | All |
+| `sharing_groups` | Shared group definitions | -- | Supabase only |
+| `sharing_members` | Group membership with hashed invite tokens | `group_id` -> `sharing_groups.id` | Supabase only |
+| `sharing_items` | Shared items (TODOs, habits, list items) | `group_id` -> `sharing_groups.id` | Supabase only |
 
 CHECK constraints are enforced at the database level:
 - `tasks.status`: `todo`, `in-progress`, `review`, `approved`, `revision`
@@ -230,15 +235,24 @@ CNAME                      GitHub Pages custom domain
 
 js/
   main.js                  Bootstrap, view switching, settings, login, footer
-  supabase.js              Shared state object
+  state.js                 Shared state object
   db.js                    Adapter abstraction with activity tracking
   version.js               Auto-generated version constants
   adapters/
     supabase.js            Supabase PostgREST adapter
     rest.js                Local Bun+SQLite REST adapter
     demo.js                In-memory adapter
-    drive.js               Google Drive adapter (in-memory + Drive JSON persistence)
+    drive.js               Google Drive adapter (in-memory + per-table JSON persistence)
     offline-cache.js       IndexedDB caching layer
+  auth.js                  Supabase email auth (magic link / OTP paste-to-verify)
+  crypto-sync.js           AES-GCM encryption for joined_groups tokens
+  sharing.js               Sharing factory (selects Supabase or Drive adapter)
+  sharing-interface.js     Sharing adapter interface contract
+  sharing-supabase.js      Supabase sharing adapter (RPC-based)
+  sharing-drive.js         Google Drive sharing adapter (per-table JSON)
+  sharing-envelope.js      DLC1 invite-code encode/decode
+  sharing-ui.js            Sharing UI: settings pane, share popovers, completion modal
+  delegation.js            Cross-module action delegation for shared items
   welcome.js               Today dashboard
   projects.js              Project boards + task management
   todos.js                 TODO management
@@ -247,23 +261,27 @@ js/
   birthdays.js             Birthday tracker
   vestiaire.js             Wardrobe inventory
   lists.js                 Checklists
+  agents-ui.js             Agent task board UI
   i18n.js                  Translation strings (en/fr/es)
   icons.js                 Lucide icon rendering + path data
   utils.js                 Shared utilities (escaping, toasts, markdown)
   item-utils.js            Drag-and-drop, inline editing, hover actions
+  backend-logos.js         Backend picker logo SVGs
   hero.js                  Landing page animations
   logo.js                  Logo animation engine
   storm3d.js               Three.js hero particle effect
   demo-chooser.js          Demo dataset selector UI
   demo-data.js             Sample data for demo mode
+  bootstrap.js             ES module loader (extracted from inline script)
+  sw-register.js           Service worker registration
 
 server/
   server.js                Bun HTTP server (PostgREST-compatible API)
-  schema.sql               SQLite schema (16 tables)
+  schema.sql               SQLite schema (19 tables)
 
-migrations/                Incremental SQL migrations (001-007)
+migrations/                Incremental schema migrations (21 files)
 tests/
-  tests.js                 54 tests (unit + adapter + integration + e2e)
+  tests.js                 179 tests (unit + adapter + integration + e2e)
 .githooks/
   pre-commit               VERSION enforcement + code generation
 ```

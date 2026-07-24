@@ -250,7 +250,7 @@ function renderBirthdayCard(b, isUpcoming) {
 
   const initial = (b.name || '?').charAt(0).toUpperCase();
   const avatarInner = b.avatar_url
-    ? `<img src="${b.avatar_url}" alt="${esc(b.name)}" class="birthday-avatar-img">`
+    ? `<img src="${esc(b.avatar_url)}" alt="${esc(b.name)}" class="birthday-avatar-img">`
     : initial;
 
   return `<div class="bucket-item birthday-card ${days === 0 ? 'birthday-today' : ''} ${isUpcoming ? 'birthday-upcoming' : ''}" data-id="${b.id}">
@@ -427,9 +427,12 @@ function showCropModalForNew(file) {
       const srcS = (ringR * 2) / imgW * img.naturalWidth;
       ctx.drawImage(img, srcX, srcY, srcS, srcS, 0, 0, size, size);
       newBirthdayAvatarDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      // Show preview
+      // Show preview (DOM API — no innerHTML with URL)
       const preview = document.getElementById('newBirthdayAvatarPreview');
-      preview.innerHTML = `<img src="${newBirthdayAvatarDataUrl}" alt="avatar">`;
+      const previewImg = document.createElement('img');
+      previewImg.src = newBirthdayAvatarDataUrl;
+      previewImg.alt = 'avatar';
+      preview.replaceChildren(previewImg);
       document.getElementById('newBirthdayAvatarClear').style.display = '';
       overlay.remove();
     } catch (err) {
@@ -758,7 +761,7 @@ function showAvatarPreview(id, url, name) {
   const initial = (name || '?').charAt(0).toUpperCase();
   const hasPhoto = !!url;
   const previewContent = hasPhoto
-    ? `<div class="avatar-preview-frame"><img src="${url}" alt="${esc(name)}" class="avatar-preview-img"></div>`
+    ? `<div class="avatar-preview-frame"><img src="${esc(url)}" alt="${esc(name)}" class="avatar-preview-img"></div>`
     : `<div class="avatar-preview-frame"><div class="avatar-preview-placeholder">${initial}</div></div>`;
   const removeBtn = hasPhoto
     ? `<button class="avatar-action-btn avatar-remove-btn" data-action="remove-avatar" data-id="${esc(id)}" title="${t('birthdays.remove_photo')}">${lucideIcon('trash-2', 18)}</button>`

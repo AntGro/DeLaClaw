@@ -19,9 +19,9 @@ The simplest persistent backend — no database, no API keys.
 1. Open [delaclaw.com](https://delaclaw.com) or serve `index.html` locally
 2. Select **Drive** in the backend picker and click **Connect with Google**
 3. Sign in with your Google account and grant the `drive.file` scope (lets DeLaClaw access only files it creates)
-4. DeLaClaw creates a `DeLaClaw/` folder in your Google Drive containing a single `delaclaw-data.json` file
+4. DeLaClaw creates a `DeLaClaw/` folder in your Google Drive containing one JSON file per table (e.g. `todos.json`, `habits.json`, `settings.json`)
 
-All data loads into memory on connect and writes back to Drive with a 2-second debounce after each mutation. The JSON file is a plain export of all tables — you can download, inspect, or delete it from Drive at any time.
+All data loads into memory on connect and writes back to Drive with a 2-second debounce per table after each mutation. The JSON files are plain exports — you can download, inspect, or delete them from Drive at any time.
 
 ## Supabase (cloud PostgreSQL)
 

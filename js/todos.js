@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN } from './state.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
+import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, createSettingsAccessor } from './utils.js';
 import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -19,101 +19,53 @@ const CATEGORY_SHORTNAMES_KEY = 'todo_category_shortnames';
 const GENERAL_CATEGORY_COLOR = '#6c6f7e';
 const SHARED_CATEGORY = '__shared__';
 
-// DB keys for settings table
-const TODO_COLORS_DB_KEY = 'todo_category_colors';
-const TODO_SHORTNAMES_DB_KEY = 'todo_category_shortnames';
-let _todoCategoryColors = {};
-let _todoCategoryShortnames = {};
+// DB-synced settings accessors (replaces manual load/save boilerplate)
+const _colorsAccessor = createSettingsAccessor('todo_category_colors', CATEGORY_COLORS_KEY);
+const _shortnamesAccessor = createSettingsAccessor('todo_category_shortnames', CATEGORY_SHORTNAMES_KEY);
 
-function getCategoryColors() { return _todoCategoryColors; }
+function getCategoryColors() { return _colorsAccessor.get(); }
 
 async function loadTodoCategoryMeta() {
-  // Try DB first, fall back to localStorage
-  if (state.db.connected) {
-    try {
-      const { data: d1 } = await state.db.from('settings').select('key,value').eq('key', TODO_COLORS_DB_KEY);
-      const { data: d2 } = await state.db.from('settings').select('key,value').eq('key', TODO_SHORTNAMES_DB_KEY);
-      const data = [...(d1 || []), ...(d2 || [])];
-      if (data.length) {
-        for (const row of data) {
-          if (row.key === TODO_COLORS_DB_KEY && row.value) {
-            _todoCategoryColors = JSON.parse(row.value);
-            localStorage.setItem(CATEGORY_COLORS_KEY, row.value);
-          }
-          if (row.key === TODO_SHORTNAMES_DB_KEY && row.value) {
-            _todoCategoryShortnames = JSON.parse(row.value);
-            localStorage.setItem(CATEGORY_SHORTNAMES_KEY, row.value);
-          }
-        }
-        return;
-      }
-    } catch (e) { console.warn('Could not load todo category meta from DB:', e.message); }
-  }
-  try { _todoCategoryColors = JSON.parse(localStorage.getItem(CATEGORY_COLORS_KEY) || '{}'); } catch { _todoCategoryColors = {}; }
-  try { _todoCategoryShortnames = JSON.parse(localStorage.getItem(CATEGORY_SHORTNAMES_KEY) || '{}'); } catch { _todoCategoryShortnames = {}; }
+  await _colorsAccessor.load();
+  await _shortnamesAccessor.load();
 }
 
-async function saveCategoryColors(map) {
-  _todoCategoryColors = map;
-  const json = JSON.stringify(map);
-  localStorage.setItem(CATEGORY_COLORS_KEY, json);
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings')
-        .update({ value: json, updated_at: new Date().toISOString() })
-        .eq('key', TODO_COLORS_DB_KEY).select();
-      if (!data || data.length === 0) {
-        await state.db.from('settings')
-          .insert({ key: TODO_COLORS_DB_KEY, value: json, updated_at: new Date().toISOString() });
-      }
-    } catch (e) { console.warn('Could not save todo colors to DB:', e.message); }
-  }
-}
+
 
 function getCategoryColor(catName) {
+  const colors = _colorsAccessor.get();
   if (!catName) return GENERAL_CATEGORY_COLOR;
-  if (_todoCategoryColors[catName]) return _todoCategoryColors[catName];
+  if (colors[catName]) return colors[catName];
   // Auto-assign a color from the palette
-  const usedColors = new Set(Object.values(_todoCategoryColors));
-  const available = DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c)) || DEFAULT_CATEGORY_PALETTE[Object.keys(_todoCategoryColors).length % DEFAULT_CATEGORY_PALETTE.length];
-  _todoCategoryColors[catName] = available;
-  saveCategoryColors(_todoCategoryColors);
+  const usedColors = new Set(Object.values(colors));
+  const available = DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c)) || DEFAULT_CATEGORY_PALETTE[Object.keys(colors).length % DEFAULT_CATEGORY_PALETTE.length];
+  colors[catName] = available;
+  _colorsAccessor.save(colors);
   return available;
 }
 
 function setCategoryColor(catName, color) {
-  _todoCategoryColors[catName] = color;
-  saveCategoryColors(_todoCategoryColors);
+  const colors = _colorsAccessor.get();
+  colors[catName] = color;
+  _colorsAccessor.save(colors);
 }
 
-function getCategoryShortnames() { return _todoCategoryShortnames; }
+function getCategoryShortnames() { return _shortnamesAccessor.get(); }
 
 async function saveCategoryShortnames(map) {
-  _todoCategoryShortnames = map;
-  const json = JSON.stringify(map);
-  localStorage.setItem(CATEGORY_SHORTNAMES_KEY, json);
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings')
-        .update({ value: json, updated_at: new Date().toISOString() })
-        .eq('key', TODO_SHORTNAMES_DB_KEY).select();
-      if (!data || data.length === 0) {
-        await state.db.from('settings')
-          .insert({ key: TODO_SHORTNAMES_DB_KEY, value: json, updated_at: new Date().toISOString() });
-      }
-    } catch (e) { console.warn('Could not save todo shortnames to DB:', e.message); }
-  }
+  await _shortnamesAccessor.save(map);
 }
 
 function getCategoryShortname(catName) {
   if (!catName) return null;
-  return _todoCategoryShortnames[catName] || null;
+  return _shortnamesAccessor.get()[catName] || null;
 }
 
 function setCategoryShortname(catName, shortname) {
-  if (shortname) { _todoCategoryShortnames[catName] = shortname; }
-  else { delete _todoCategoryShortnames[catName]; }
-  saveCategoryShortnames(_todoCategoryShortnames);
+  const map = _shortnamesAccessor.get();
+  if (shortname) { map[catName] = shortname; }
+  else { delete map[catName]; }
+  _shortnamesAccessor.save(map);
 }
 
 function openEditCategoryModal(catName) {
@@ -997,7 +949,7 @@ async function deleteCategory(name) {
     // Clean up color
     const colorMap = getCategoryColors();
     delete colorMap[name];
-    saveCategoryColors(colorMap);
+    _colorsAccessor.save(colorMap);
     showToast(t('toast.deleted'), 'info');
     await refreshTodos();
   });

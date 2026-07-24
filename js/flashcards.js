@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state from './state.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, isMobileUA } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, isMobileUA, createSettingsAccessor } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
@@ -106,55 +106,23 @@ const DECK_COLORS = [
 ];
 
 // ── Shortnames (synced via settings table, localStorage fallback) ──
-const FLASH_SHORTNAMES_KEY = 'claw_flash_shortnames';
-const FLASH_SHORTNAMES_DB_KEY = 'flash_shortnames';
-let _shortnames = {};
+const _flashShortnamesAccessor = createSettingsAccessor('flash_shortnames', 'claw_flash_shortnames');
 
-function getFlashShortnames() { return _shortnames; }
+function getFlashShortnames() { return _flashShortnamesAccessor.get(); }
 
 function getFlashShortname(deckName) {
   if (!deckName) return '';
-  return _shortnames[deckName] || '';
+  return _flashShortnamesAccessor.get()[deckName] || '';
 }
 
 async function loadFlashShortnames() {
-  // Try DB first
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings').select('value').eq('key', FLASH_SHORTNAMES_DB_KEY);
-      if (data && data.length > 0 && data[0].value) {
-        _shortnames = JSON.parse(data[0].value);
-        localStorage.setItem(FLASH_SHORTNAMES_KEY, data[0].value);
-        return;
-      }
-    } catch (e) { console.warn('Could not load shortnames from DB:', e.message); }
-  }
-  // Fallback to localStorage
-  try { _shortnames = JSON.parse(localStorage.getItem(FLASH_SHORTNAMES_KEY) || '{}'); } catch { _shortnames = {}; }
-}
-
-async function saveFlashShortnames(map) {
-  _shortnames = map;
-  const json = JSON.stringify(map);
-  localStorage.setItem(FLASH_SHORTNAMES_KEY, json);
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings')
-        .update({ value: json, updated_at: new Date().toISOString() })
-        .eq('key', FLASH_SHORTNAMES_DB_KEY)
-        .select();
-      if (!data || data.length === 0) {
-        await state.db.from('settings')
-          .insert({ key: FLASH_SHORTNAMES_DB_KEY, value: json, updated_at: new Date().toISOString() });
-      }
-    } catch (e) { console.warn('Could not save shortnames to DB:', e.message); }
-  }
+  await _flashShortnamesAccessor.load();
 }
 
 async function setFlashShortname(deckName, shortname) {
-  const map = { ..._shortnames };
+  const map = { ..._flashShortnamesAccessor.get() };
   if (shortname) { map[deckName] = shortname; } else { delete map[deckName]; }
-  await saveFlashShortnames(map);
+  await _flashShortnamesAccessor.save(map);
 }
 
 async function promptFlashShortname(deckName) {
@@ -200,11 +168,12 @@ async function refreshFlashcards() {
     }
   }
   // Prune orphan shortnames (deck was renamed or deleted)
+  const shortnames = _flashShortnamesAccessor.get();
   const liveDecks = new Set([...allCards.map(c => c.deck), ...allTexts.map(t => t.deck)]);
-  const orphans = Object.keys(_shortnames).filter(k => !liveDecks.has(k));
+  const orphans = Object.keys(shortnames).filter(k => !liveDecks.has(k));
   if (orphans.length) {
-    for (const k of orphans) delete _shortnames[k];
-    await saveFlashShortnames(_shortnames);
+    for (const k of orphans) delete shortnames[k];
+    await _flashShortnamesAccessor.save(shortnames);
   }
   if (state.currentView === 'flashcards') renderFlashcards();
 }

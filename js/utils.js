@@ -632,6 +632,56 @@ function isMobileUA() {
   return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 }
 
+// ── Settings accessor factory (DB + localStorage sync) ──────────
+/**
+ * Create a synced accessor for a JSON object stored in the `settings` table
+ * with localStorage fallback. Eliminates the load/save boilerplate duplicated
+ * across todos, habits, lists, vestiaire, and flashcards.
+ *
+ * @param {string} dbKey  Key in the `settings` table
+ * @param {string} lsKey  localStorage key
+ * @returns {{ load: () => Promise<object>, save: (map: object) => Promise<void>, get: () => object }}
+ */
+function createSettingsAccessor(dbKey, lsKey) {
+  let _cache = {};
+
+  async function load() {
+    if (state.db.connected) {
+      try {
+        const { data } = await state.db.from('settings').select('value').eq('key', dbKey);
+        if (data && data.length > 0 && data[0].value) {
+          _cache = JSON.parse(data[0].value);
+          localStorage.setItem(lsKey, data[0].value);
+          return _cache;
+        }
+      } catch (e) { console.warn(`Could not load ${dbKey} from DB:`, e.message); }
+    }
+    try { _cache = JSON.parse(localStorage.getItem(lsKey) || '{}'); } catch { _cache = {}; }
+    return _cache;
+  }
+
+  async function save(map) {
+    _cache = map;
+    const json = JSON.stringify(map);
+    localStorage.setItem(lsKey, json);
+    if (state.db.connected) {
+      try {
+        const { data } = await state.db.from('settings')
+          .update({ value: json, updated_at: new Date().toISOString() })
+          .eq('key', dbKey).select();
+        if (!data || data.length === 0) {
+          await state.db.from('settings')
+            .insert({ key: dbKey, value: json, updated_at: new Date().toISOString() });
+        }
+      } catch (e) { console.warn(`Could not save ${dbKey} to DB:`, e.message); }
+    }
+  }
+
+  function get() { return _cache; }
+
+  return { load, save, get };
+}
+
 // ── Supabase project ref extraction ─────────────────────────────
 function getSupabaseProjectRef(url) {
   if (!url) return null;
@@ -723,7 +773,7 @@ export {
   isEditing, balanceGrid, fetchAll,
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA,
   getSupabaseKeyRole, isServiceRoleKey,
-  getSupabaseProjectRef, buildAuthSteps,
+  getSupabaseProjectRef, buildAuthSteps, createSettingsAccessor,
 };
 
 window.closeDeleteConfirm = closeDeleteConfirm;

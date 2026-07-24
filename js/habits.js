@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { HABIT_CATEGORIES_KEY } from './state.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, createSettingsAccessor } from './utils.js';
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { getCategoryColor, setCategoryColor } from './todos.js';
 import { t, getLang } from './i18n.js';
@@ -19,51 +19,25 @@ let habitCalSelectedDay = null; // ISO string of selected day (mobile tap-to-exp
 let habitCalScale = 'month'; // 'month' or 'week'
 let habitCalWeekStart = null; // Date object for the start of the current week view (today-based)
 // ── Shortnames (synced via settings table) ──
-const HABIT_SHORTNAMES_KEY = 'claw_habit_shortnames';
-const HABIT_SHORTNAMES_DB_KEY = 'habit_category_shortnames';
-let _habitShortnames = {};
 const SHARED_CATEGORY = '__shared__';
 
-function getHabitShortnames() { return _habitShortnames; }
+// DB-synced settings accessor
+const _habitShortnamesAccessor = createSettingsAccessor('habit_category_shortnames', 'claw_habit_shortnames');
+
+function getHabitShortnames() { return _habitShortnamesAccessor.get(); }
 function getHabitShortname(catName) {
   if (!catName) return '';
-  return _habitShortnames[catName] || '';
+  return _habitShortnamesAccessor.get()[catName] || '';
 }
 
 async function loadHabitShortnames() {
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings').select('value').eq('key', HABIT_SHORTNAMES_DB_KEY);
-      if (data && data.length > 0 && data[0].value) {
-        _habitShortnames = JSON.parse(data[0].value);
-        localStorage.setItem(HABIT_SHORTNAMES_KEY, data[0].value);
-        return;
-      }
-    } catch (e) { console.warn('Could not load habit shortnames from DB:', e.message); }
-  }
-  try { _habitShortnames = JSON.parse(localStorage.getItem(HABIT_SHORTNAMES_KEY) || '{}'); } catch { _habitShortnames = {}; }
-}
-
-async function saveHabitShortnames(map) {
-  _habitShortnames = map;
-  const json = JSON.stringify(map);
-  localStorage.setItem(HABIT_SHORTNAMES_KEY, json);
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings')
-        .update({ value: json, updated_at: new Date().toISOString() })
-        .eq('key', HABIT_SHORTNAMES_DB_KEY).select();
-      if (!data || data.length === 0) {
-        await state.db.from('settings')
-          .insert({ key: HABIT_SHORTNAMES_DB_KEY, value: json, updated_at: new Date().toISOString() });
-      }
-    } catch (e) { console.warn('Could not save habit shortnames to DB:', e.message); }
-  }
+  await _habitShortnamesAccessor.load();
 }
 
 function setHabitShortname(catName, shortname) {
-  if (shortname) { _habitShortnames[catName] = shortname; } else { delete _habitShortnames[catName]; }
-  saveHabitShortnames(_habitShortnames);
+  const map = _habitShortnamesAccessor.get();
+  if (shortname) { map[catName] = shortname; } else { delete map[catName]; }
+  _habitShortnamesAccessor.save(map);
 }
 function openEditHabitCategoryModal(catName) {
   document.getElementById('editHabitCatOldName').value = catName;

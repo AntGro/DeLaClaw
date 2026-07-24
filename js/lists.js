@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, truncateWithShowMore, fetchAll } from './utils.js';
+import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, truncateWithShowMore, fetchAll, createSettingsAccessor } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
@@ -12,9 +12,8 @@ import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 let listSearchQuery = '';
 
 // Shortnames
-const LIST_SHORTNAMES_LS_KEY = 'list_shortnames';
-const LIST_SHORTNAMES_DB_KEY = 'list_shortnames';
-let _listShortnames = {};
+// DB-synced settings accessor
+const _listShortnamesAccessor = createSettingsAccessor('list_shortnames', 'list_shortnames');
 
 // Distinct colors for list cards (cycles)
 const LIST_COLORS = [
@@ -40,41 +39,16 @@ function getListColor(list, idx) {
 // ===================================================================
 
 async function loadListShortnames() {
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings').select('key,value').eq('key', LIST_SHORTNAMES_DB_KEY);
-      if (data && data.length && data[0].value) {
-        _listShortnames = JSON.parse(data[0].value);
-        localStorage.setItem(LIST_SHORTNAMES_LS_KEY, data[0].value);
-        return;
-      }
-    } catch (e) { console.warn('Could not load list shortnames from DB:', e.message); }
-  }
-  try { _listShortnames = JSON.parse(localStorage.getItem(LIST_SHORTNAMES_LS_KEY) || '{}'); } catch { _listShortnames = {}; }
+  await _listShortnamesAccessor.load();
 }
 
-async function saveListShortnames() {
-  const json = JSON.stringify(_listShortnames);
-  localStorage.setItem(LIST_SHORTNAMES_LS_KEY, json);
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings')
-        .update({ value: json, updated_at: new Date().toISOString() })
-        .eq('key', LIST_SHORTNAMES_DB_KEY).select();
-      if (!data || data.length === 0) {
-        await state.db.from('settings')
-          .insert({ key: LIST_SHORTNAMES_DB_KEY, value: json, updated_at: new Date().toISOString() });
-      }
-    } catch (e) { console.warn('Could not save list shortnames to DB:', e.message); }
-  }
-}
-
-function getListShortname(listId) { return _listShortnames[listId] || null; }
+function getListShortname(listId) { return _listShortnamesAccessor.get()[listId] || null; }
 
 function setListShortname(listId, shortname) {
-  if (shortname) { _listShortnames[listId] = shortname; }
-  else { delete _listShortnames[listId]; }
-  saveListShortnames();
+  const map = _listShortnamesAccessor.get();
+  if (shortname) { map[listId] = shortname; }
+  else { delete map[listId]; }
+  _listShortnamesAccessor.save(map);
 }
 
 

@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, createSettingsAccessor } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 
@@ -12,50 +12,23 @@ const DEFAULT_CATEGORIES = [];
 let vestSearchQuery = '';
 let vestFilter = 'all';
 const VESTIAIRE_CATEGORIES_KEY = 'claw_cc_vestiaire_categories';
-const VEST_SHORTNAMES_KEY = 'claw_cc_vest_shortnames';
-const VEST_SHORTNAMES_DB_KEY = 'vest_category_shortnames';
-let _vestShortnames = {};
+// DB-synced settings accessor
+const _vestShortnamesAccessor = createSettingsAccessor('vest_category_shortnames', 'claw_cc_vest_shortnames');
 
 // ── Category shortnames (synced via settings table) ──
-function getVestShortnames() { return _vestShortnames; }
+function getVestShortnames() { return _vestShortnamesAccessor.get(); }
 function getVestShortname(catName) {
-  return _vestShortnames[catName] || '';
+  return _vestShortnamesAccessor.get()[catName] || '';
 }
 
 async function loadVestShortnames() {
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings').select('value').eq('key', VEST_SHORTNAMES_DB_KEY);
-      if (data && data.length > 0 && data[0].value) {
-        _vestShortnames = JSON.parse(data[0].value);
-        localStorage.setItem(VEST_SHORTNAMES_KEY, data[0].value);
-        return;
-      }
-    } catch (e) { console.warn('Could not load vest shortnames from DB:', e.message); }
-  }
-  try { _vestShortnames = JSON.parse(localStorage.getItem(VEST_SHORTNAMES_KEY) || '{}'); } catch { _vestShortnames = {}; }
-}
-
-async function saveVestShortnames(map) {
-  _vestShortnames = map;
-  const json = JSON.stringify(map);
-  localStorage.setItem(VEST_SHORTNAMES_KEY, json);
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings')
-        .update({ value: json, updated_at: new Date().toISOString() })
-        .eq('key', VEST_SHORTNAMES_DB_KEY).select();
-      if (!data || data.length === 0) {
-        await state.db.from('settings')
-          .insert({ key: VEST_SHORTNAMES_DB_KEY, value: json, updated_at: new Date().toISOString() });
-      }
-    } catch (e) { console.warn('Could not save vest shortnames to DB:', e.message); }
-  }
+  await _vestShortnamesAccessor.load();
 }
 
 function setVestShortname(catName, shortname) {
-  if (shortname) _vestShortnames[catName] = shortname; else delete _vestShortnames[catName];
-  saveVestShortnames(_vestShortnames);
+  const map = _vestShortnamesAccessor.get();
+  if (shortname) map[catName] = shortname; else delete map[catName];
+  _vestShortnamesAccessor.save(map);
 }
 function promptVestShortname(catName) {
   const current = getVestShortname(catName) || '';

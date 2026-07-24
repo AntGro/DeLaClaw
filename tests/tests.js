@@ -212,16 +212,21 @@ test('Sharing refresh handler centralizes sync before render', () => {
   const handlerIdx = main.indexOf("document.addEventListener('sharing-changed', async () =>");
   assert(handlerIdx !== -1, 'main.js must own a single async sharing-changed handler');
   const handler = main.slice(handlerIdx, main.indexOf('  // Show demo banner', handlerIdx));
+  // syncShared* own their internal refresh; the handler just syncs then renders
   for (const seq of [
-    ['syncSharedTodos', 'refreshTodos', 'renderTodos'],
-    ['syncSharedHabits', 'refreshHabits', 'renderHabits'],
-    ['syncSharedListItems', 'refreshLists', 'renderLists'],
+    ['syncSharedTodos', 'renderTodos'],
+    ['syncSharedHabits', 'renderHabits'],
+    ['syncSharedListItems', 'renderLists'],
   ]) {
     const positions = seq.map(name => handler.indexOf(name));
     assert(positions.every(pos => pos !== -1), `sharing handler missing ${seq.join(' / ')}`);
-    assert(positions[0] < positions[1] && positions[1] < positions[2],
+    assert(positions[0] < positions[1],
       `sharing handler must run ${seq.join(' -> ')}`);
   }
+  // refreshX must NOT appear in the handler (sync functions own their refresh)
+  assert(!handler.includes('refreshTodos'), 'sharing handler must not call refreshTodos (owned by syncSharedTodos)');
+  assert(!handler.includes('refreshHabits'), 'sharing handler must not call refreshHabits (owned by syncSharedHabits)');
+  assert(!handler.includes('refreshLists'), 'sharing handler must not call refreshLists (owned by syncSharedListItems)');
   assert(!jsFiles['todos.js'].includes("document.addEventListener('sharing-changed'"),
     'todos.js must not register its own sharing-changed listener');
   assert(!jsFiles['habits.js'].includes("document.addEventListener('sharing-changed'"),

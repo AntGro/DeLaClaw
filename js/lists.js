@@ -868,6 +868,8 @@ async function _doSyncSharedListItems() {
     } catch { localItemsForOrder = []; }
   }
 
+  let needsRefresh = false;
+
   // Create pointers for new shared items — always land in the "Shared" list
   for (const sh of sharedItems) {
     if (existingSharedIds.has(sh.id)) continue;
@@ -894,13 +896,19 @@ async function _doSyncSharedListItems() {
       shared_id: sh.id,
       shared_group_id: sh.group_id,
     });
+    needsRefresh = true;
   }
 
   // Remove pointers for deleted shared items
   for (const ptr of localPointers) {
     if (!sharedById.has(ptr.shared_id)) {
       await state.db.from('list_items').delete().eq('id', ptr.id);
+      needsRefresh = true;
     }
+  }
+
+  if (needsRefresh) {
+    await refreshLists();
   }
 }
 

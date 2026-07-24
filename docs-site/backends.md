@@ -9,7 +9,7 @@ DeLaClaw supports four backend adapters. This document is the single source of t
 | Backend | Storage | Auth | Sync | Offline | Agent support |
 |---------|---------|------|------|---------|---------------|
 | **Supabase** | Postgres (cloud) | Anon key | Realtime (websocket) | IndexedDB cache | ✅ Full (REST API) |
-| **Google Drive** | Single JSON file | OAuth 2.0 | None (single-device) | In-memory only | ⚠️ Via JSON blob (see §8) |
+| **Google Drive** | Per-table JSON files | OAuth 2.0 | None (single-device) | In-memory only | ⚠️ Via per-table JSON (see §8) |
 | **Local** | SQLite (Bun server) | None | None (single-device) | N/A (is local) | ⚠️ Possible via REST |
 | **Demo** | In-memory | None | None | N/A | ❌ |
 
@@ -237,7 +237,7 @@ The agent polls on heartbeat interval (~30 min). No push notification from app t
 | Backend | Limit | What counts |
 |---------|-------|-------------|
 | Supabase free | 500 MB database | All tables + indexes |
-| Drive free | 15 GB shared | Single JSON file (typically < 1 MB) |
+| Drive free | 15 GB shared | Per-table JSON files (typically < 1 MB total) |
 | Local SQLite | Disk space | Single `.db` file |
 | Demo | Browser memory | Ephemeral |
 

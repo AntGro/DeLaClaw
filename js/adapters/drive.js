@@ -476,6 +476,13 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         for (let i = 0; i < toRun.length; i++) {
           const version = toRun[i];
           emit('migrating', t('menu.drive_migrating', version), i + 1, toRun.length);
+
+          // Snapshot table lengths + content hashes to detect which tables changed
+          const snapshots = {};
+          for (const table of DRIVE_TABLES) {
+            snapshots[table] = JSON.stringify(inner._store[table] || []);
+          }
+
           await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
 
           // Update schema_version in memory
@@ -487,10 +494,18 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             inner._store.settings.push({ key: 'schema_version', value: version });
           }
 
-          // Flush all tables + settings to Drive
+          // Flush only tables that actually changed + settings (for version bump)
+          const dirtyTables = new Set(['settings']);
+          for (const table of DRIVE_TABLES) {
+            if (table === 'settings') continue;
+            if (JSON.stringify(inner._store[table] || []) !== snapshots[table]) {
+              dirtyTables.add(table);
+            }
+          }
+
           const flushTok = await getToken();
           if (flushTok) {
-            for (const table of DRIVE_TABLES) {
+            for (const table of dirtyTables) {
               const fileName = `${table}.json`;
               const meta = fileMeta[table] || {};
               const result = await uploadFile(flushTok, folderId, meta.fileId, fileName, inner._store[table] || []);

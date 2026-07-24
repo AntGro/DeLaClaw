@@ -87,6 +87,16 @@ export async function renderSharingPane() {
 
   const activeMode = localStorage.getItem('claw_cc_active_mode');
 
+  // Drive sharing is not yet ready — show "coming soon" placeholder
+  if (activeMode === 'googledrive') {
+    container.innerHTML = `<div class="auth-inline-prompt">
+      <div class="auth-icon">${lucideIcon('clock', 28)}</div>
+      <h4>${t('sharing.coming_soon')}</h4>
+      <p class="auth-inline-hint">${t('sharing.coming_soon_hint')}</p>
+    </div>`;
+    return;
+  }
+
   if (!state.sharing) {
     // Supabase without auth: show inline sign-in prompt (only if DB has auth tables)
     const dbReady = parseFloat(state.dbSchemaVersion || '0') >= 1.294;

@@ -177,6 +177,7 @@ const T = {
       drive_creating_tables: 'Creating tables…', drive_creating_table: 'Creating {0}…',
       drive_upgrading: 'Upgrading data format…', drive_backing_up: 'Backing up data…',
       drive_migrating: 'Migrating to v{0}…',
+      drive_migrating_sync: 'Migrating to v{0}… ({1}/{2})',
       settings_stats: 'Stats', settings_stats_db_age: 'days since install', settings_stats_total_days: 'days active', settings_stats_streak: 'day streak', settings_stats_unavailable: 'Stats unavailable.',
     },
     // ── Nav tabs ──
@@ -863,6 +864,7 @@ const T = {
       drive_creating_tables: 'Création des tables…', drive_creating_table: 'Création de {0}…',
       drive_upgrading: 'Mise à jour du format…', drive_backing_up: 'Sauvegarde en cours…',
       drive_migrating: 'Migration vers v{0}…',
+      drive_migrating_sync: 'Migration vers v{0}… ({1}/{2})',
       settings_stats: 'Statistiques', settings_stats_db_age: 'jours depuis l\'installation', settings_stats_total_days: 'jours actifs', settings_stats_streak: 'jours consécutifs', settings_stats_unavailable: 'Statistiques indisponibles.',
     },
     nav: {
@@ -1537,6 +1539,7 @@ const T = {
       drive_creating_tables: 'Creando tablas…', drive_creating_table: 'Creando {0}…',
       drive_upgrading: 'Actualizando formato…', drive_backing_up: 'Creando respaldo…',
       drive_migrating: 'Migrando a v{0}…',
+      drive_migrating_sync: 'Migrando a v{0}… ({1}/{2})',
       settings_stats: 'Estadísticas', settings_stats_db_age: 'días desde instalación', settings_stats_total_days: 'días activos', settings_stats_streak: 'días consecutivos', settings_stats_unavailable: 'Estadísticas no disponibles.',
     },
     nav: {

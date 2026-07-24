@@ -599,10 +599,10 @@ input,select,button{font-family:inherit;}
 .add-task .draft-slider input[type="checkbox"]{position:absolute;opacity:0;width:0;height:0;pointer-events:none;}
 .draft-slider-track{position:relative;width:32px;height:18px;background:var(--border);border-radius:9px;transition:background 0.25s ease;flex-shrink:0;}
 .draft-slider-thumb{position:absolute;top:2px;left:2px;width:14px;height:14px;background:#fff;border-radius:50%;transition:transform 0.25s ease,box-shadow 0.25s ease;box-shadow:0 1px 3px rgba(0,0,0,0.2);}
-.draft-slider.active .draft-slider-track{background:var(--accent);box-shadow:0 0 8px rgba(100,108,255,0.3);}
-.draft-slider.active .draft-slider-thumb{transform:translateX(14px);box-shadow:0 1px 4px rgba(100,108,255,0.4);}
+.draft-slider input:checked + .draft-slider-track{background:var(--accent);box-shadow:0 0 8px rgba(100,108,255,0.3);}
+.draft-slider input:checked + .draft-slider-track .draft-slider-thumb{transform:translateX(14px);box-shadow:0 1px 4px rgba(100,108,255,0.4);}
 .draft-slider-label{font-size:0.72rem;color:var(--muted);transition:color 0.2s;order:-1;}
-.draft-slider.active .draft-slider-label{color:var(--accent);font-weight:600;}
+.draft-slider:has(input:checked) .draft-slider-label{color:var(--accent);font-weight:600;}
 .draft-slider:hover .draft-slider-track{border-color:var(--accent);}
 .promote-btn{font-size:0.78rem;padding:4px 10px;background:var(--accent) !important;color:#fff !important;border:none;border-radius:4px;cursor:pointer;font-weight:600;opacity:1;transition:all 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.15);letter-spacing:0.02em;flex-shrink:0;white-space:nowrap;}
 .promote-btn:hover{opacity:0.9;transform:scale(1.05);box-shadow:0 2px 6px rgba(0,0,0,0.2);}

@@ -192,7 +192,6 @@
       case 'handle-line-click': { var idx = el.dataset.lineIdx || el.dataset.line || el.dataset.index; if (window.handleLineClick) window.handleLineClick({ target: el }, idx); else callWindow('handleLineClick', [parseInt(idx||'0',10)]); } break;
       case 'submit-text-review': callWindow('submitTextReview', []); break;
       case 'continue-text-same-text': callWindow('continueTextSameText', []); break;
-      case 'toggle-draft-slider': callWindow('toggleDraftSlider', []); break;
       case 'archive-project': callWindow('archiveProject', [getId(el)]); break;
       case 'unarchive-project': callWindow('unarchiveProject', [getId(el)]); break;
       case 'delete-project': callWindow('deleteProject', [getId(el)]); break;

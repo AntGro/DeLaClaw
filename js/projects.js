@@ -225,7 +225,7 @@ function buildProjectCards() {
       <div class="archived-tasks" id="archived-tasks-${p.id}"></div>
       <div class="add-task">
         <textarea placeholder="${t('projects.add_task_placeholder')}" maxlength="${MAX_TEXT_LEN}" id="input-${p.id}" data-action="task-input" data-id="${esc(p.id)}" rows="1" style="resize:none;overflow:hidden;"></textarea>
-        <label class="draft-slider" title="${t('projects.status_draft')}"><input type="checkbox" id="draft-${p.id}" data-action="toggle-draft-slider"><span class="draft-slider-track"><span class="draft-slider-thumb"></span></span><span class="draft-slider-label">${t('projects.status_draft')}</span></label>
+        <label class="draft-slider" title="${t('projects.status_draft')}"><input type="checkbox" id="draft-${p.id}"><span class="draft-slider-track"><span class="draft-slider-thumb"></span></span><span class="draft-slider-label">${t('projects.status_draft')}</span></label>
         <button data-action="add-task" data-id="${esc(p.id)}">${lucideIcon('plus', 16)}</button>
       </div>
       <div class="char-counter" id="counter-${p.id}"></div>

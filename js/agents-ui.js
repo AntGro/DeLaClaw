@@ -63,6 +63,14 @@ export async function renderAgentsPane() {
     container.innerHTML = `<div class="page-empty-state"><div class="page-empty-icon">${lucideIcon('bot',28)}</div><h3>${esc(t('agents.no_tokens'))}</h3><p class="setting-hint">Demo mode does not support agent tokens.</p></div>`;
     return;
   }
+  if (localStorage.getItem('claw_cc_active_mode')==='googledrive') {
+    container.innerHTML = `<div class="auth-inline-prompt">
+      <div class="auth-icon">${lucideIcon('clock', 28)}</div>
+      <h4>${t('agents.coming_soon')}</h4>
+      <p class="auth-inline-hint">${t('agents.coming_soon_hint')}</p>
+    </div>`;
+    return;
+  }
   let grants = await fetchGrants();
   const activeGrants = grants.filter(g=>!g.revoked_at);
   const revokedGrants = grants.filter(g=>g.revoked_at);

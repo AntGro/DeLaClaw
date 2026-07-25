@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS habits (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   name TEXT NOT NULL,
   frequency_rule TEXT,
-  category TEXT DEFAULT 'General',
+  category TEXT DEFAULT '',
   category_id TEXT REFERENCES habit_categories(id) ON DELETE SET NULL,
   is_draft INTEGER DEFAULT 0,
   next_due TEXT,

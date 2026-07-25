@@ -1247,12 +1247,10 @@ VALUES ('schema_version', '1.436', NULL, now())
 ON CONFLICT (key) DO NOTHING;
 
 NOTIFY pgrst, 'reload schema';
-`,};
+`,
 
-// ── 1.452: filter revoked members from get_group_members RPC ──
-SUPABASE_MIGRATIONS['1.452_filter_revoked_from_rpc'] = {
-  version: '1.452',
-  sql: `
+  // ── 1.452: filter revoked members from get_group_members RPC ──
+  '1.452': `
 DROP FUNCTION IF EXISTS get_group_members(text, text);
 
 CREATE OR REPLACE FUNCTION get_group_members(p_token text, p_group_id text)
@@ -1276,12 +1274,10 @@ VALUES ('schema_version', '1.452', now())
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 
 NOTIFY pgrst, 'reload schema';
-`,};
+`,
 
-// ── 1.453: auth email guard — prevent multi-email data splits ──
-SUPABASE_MIGRATIONS['1.453_auth_email_guard'] = {
-  version: '1.453',
-  sql: `
+  // ── 1.453: auth email guard — prevent multi-email data splits ──
+  '1.453': `
 CREATE TABLE IF NOT EXISTS auth_email_guard (
   email_hash TEXT PRIMARY KEY,
   created_at TIMESTAMPTZ DEFAULT now()
@@ -1295,12 +1291,10 @@ VALUES ('schema_version', '1.453', now())
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 
 NOTIFY pgrst, 'reload schema';
-`,};
+`,
 
-// ── 1.474: category tables — promote categories to first-class entities ──
-SUPABASE_MIGRATIONS['1.474_category_tables'] = {
-  version: '1.474',
-  sql: `
+  // ── 1.474: category tables — promote categories to first-class entities ──
+  '1.474': `
 -- Migration 1.474: Category tables
 -- 4 new tables: todo_categories, habit_categories, vestiaire_categories, flashcard_decks
 -- Each item table gets a category_id / deck_id FK column
@@ -1543,12 +1537,10 @@ VALUES ('schema_version', '1.474', now())
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 
 NOTIFY pgrst, 'reload schema';
-`,};
+`,
 
-// ── 1.484: category integrity hardening ──
-SUPABASE_MIGRATIONS['1.484_category_integrity'] = {
-  version: '1.484',
-  sql: `
+  // ── 1.484: category integrity hardening ──
+  '1.484': `
 -- Migration 1.484: Category integrity hardening
 -- 1. texts: add missing deck_id column (was in FKs but not in CREATE TABLE)
 -- 2. text_line_progress: drop spurious deck_id column
@@ -1623,6 +1615,7 @@ ALTER TABLE texts ADD CONSTRAINT texts_deck_id_fkey FOREIGN KEY (deck_id) REFERE
 
 INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.484', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 NOTIFY pgrst, 'reload schema';
-`,};
+`,
+};
 
 export { SUPABASE_MIGRATIONS };

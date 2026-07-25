@@ -368,23 +368,23 @@ export const LOCAL_MIGRATIONS = {
     -- SQLite cannot DROP COLUMN before 3.35; column is harmless if it stays,
     -- but we clean it on fresh installs via schema.sql.
 
-    -- Seed protected rows (idempotent — INSERT OR IGNORE)
-    INSERT OR IGNORE INTO todo_categories (id, name, is_protected, sort_order)
-    VALUES ('_default_todo_cat', '', 1, 0);
-    INSERT OR IGNORE INTO todo_categories (id, name, is_protected, sort_order)
-    VALUES ('_shared_todo_cat', '__shared__', 1, 9999);
-    INSERT OR IGNORE INTO habit_categories (id, name, is_protected, sort_order)
-    VALUES ('_default_habit_cat', '', 1, 0);
-    INSERT OR IGNORE INTO habit_categories (id, name, is_protected, sort_order)
-    VALUES ('_shared_habit_cat', '__shared__', 1, 9999);
-    INSERT OR IGNORE INTO vestiaire_categories (id, name, is_protected, sort_order)
-    VALUES ('_default_vest_cat', '', 1, 0);
-    INSERT OR IGNORE INTO vestiaire_categories (id, name, is_protected, sort_order)
-    VALUES ('_shared_vest_cat', '__shared__', 1, 9999);
-    INSERT OR IGNORE INTO flashcard_decks (id, name, is_protected, sort_order)
-    VALUES ('_default_deck', '', 1, 0);
-    INSERT OR IGNORE INTO flashcard_decks (id, name, is_protected, sort_order)
-    VALUES ('_shared_deck', '__shared__', 1, 9999);
+    -- Seed protected rows (idempotent — WHERE NOT EXISTS on is_protected+name)
+    INSERT INTO todo_categories (id, name, is_protected, sort_order)
+    SELECT '_default_todo_cat', '', 1, 0 WHERE NOT EXISTS (SELECT 1 FROM todo_categories WHERE is_protected = 1 AND name = '');
+    INSERT INTO todo_categories (id, name, is_protected, sort_order)
+    SELECT '_shared_todo_cat', '__shared__', 1, 9999 WHERE NOT EXISTS (SELECT 1 FROM todo_categories WHERE is_protected = 1 AND name = '__shared__');
+    INSERT INTO habit_categories (id, name, is_protected, sort_order)
+    SELECT '_default_habit_cat', '', 1, 0 WHERE NOT EXISTS (SELECT 1 FROM habit_categories WHERE is_protected = 1 AND name = '');
+    INSERT INTO habit_categories (id, name, is_protected, sort_order)
+    SELECT '_shared_habit_cat', '__shared__', 1, 9999 WHERE NOT EXISTS (SELECT 1 FROM habit_categories WHERE is_protected = 1 AND name = '__shared__');
+    INSERT INTO vestiaire_categories (id, name, is_protected, sort_order)
+    SELECT '_default_vest_cat', '', 1, 0 WHERE NOT EXISTS (SELECT 1 FROM vestiaire_categories WHERE is_protected = 1 AND name = '');
+    INSERT INTO vestiaire_categories (id, name, is_protected, sort_order)
+    SELECT '_shared_vest_cat', '__shared__', 1, 9999 WHERE NOT EXISTS (SELECT 1 FROM vestiaire_categories WHERE is_protected = 1 AND name = '__shared__');
+    INSERT INTO flashcard_decks (id, name, is_protected, sort_order)
+    SELECT '_default_deck', '', 1, 0 WHERE NOT EXISTS (SELECT 1 FROM flashcard_decks WHERE is_protected = 1 AND name = '');
+    INSERT INTO flashcard_decks (id, name, is_protected, sort_order)
+    SELECT '_shared_deck', '__shared__', 1, 9999 WHERE NOT EXISTS (SELECT 1 FROM flashcard_decks WHERE is_protected = 1 AND name = '__shared__');
 
     -- Protection triggers (idempotent via IF NOT EXISTS)
     CREATE TRIGGER IF NOT EXISTS trg_protect_todo_categories

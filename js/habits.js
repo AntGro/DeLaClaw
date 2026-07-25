@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { HABIT_CATEGORIES_KEY } from './state.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, createSettingsAccessor } from './utils.js';
+import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, fetchAll, createSettingsAccessor } from './utils.js';
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { getCategoryColor, setCategoryColor } from './todos.js';
 import { t, getLang } from './i18n.js';
@@ -945,7 +945,7 @@ function renderHabitItem(habit) {
     ${sharedHtml}
     <div class="habit-row">
       <div class="habit-info">
-        <span class="habit-name">${esc(habit.name)}</span>
+        <span class="habit-name">${renderMd(habit.name)}</span>
         <span class="habit-frequency">${esc(formatFrequency(habit.frequency_rule))}</span>
       </div>
       <div class="habit-actions">

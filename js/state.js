@@ -46,3 +46,9 @@ export const TODO_MAX_LEN = 2000;
 export const HABIT_CATEGORIES_KEY = 'claw_cc_habit_categories';
 export const TAB_VISIBILITY_KEY = 'claw_cc_tab_visibility';
 export const TAB_ORDER_KEY = 'claw_cc_tab_order';
+
+// ── Default category palette ──
+// Shared across modules for auto-assigning colors to new categories.
+export const DEFAULT_CATEGORY_PALETTE = ['#3b82f6', '#ef4444', '#22c55e', '#eab308', '#8b5cf6', '#ec4899', '#f97316', '#14b8a6', '#6366f1', '#84cc16'];
+export const GENERAL_CATEGORY_COLOR = '#6c6f7e';
+export const SHARED_CATEGORY = '__shared__';

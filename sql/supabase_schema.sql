@@ -86,6 +86,23 @@ CREATE TABLE "public"."daily_visits" (
 
 
 --
+-- Name: flashcard_decks; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE "public"."flashcard_decks" (
+    "id" "text" DEFAULT encode(gen_random_bytes(16), 'hex') NOT NULL,
+    "name" "text" NOT NULL,
+    "shortname" "text",
+    "color" "text",
+    "sort_order" integer DEFAULT 0,
+    "is_protected" boolean DEFAULT false,
+    "owner_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+--
 -- Name: flashcard_notes; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -119,7 +136,8 @@ CREATE TABLE "public"."flashcards" (
     "review_count" integer DEFAULT 0,
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
-    "owner_id" "uuid"
+    "owner_id" "uuid",
+    "deck_id" "text"
 );
 
 
@@ -151,13 +169,26 @@ CREATE TABLE "public"."habits" (
     "is_draft" boolean DEFAULT false,
     "owner_id" "uuid",
     "shared_id" "text",
-    "shared_group_id" "text"
+    "shared_group_id" "text",
+    "category_id" "text"
 );
 
 
 --
--- Name: list_items; Type: TABLE; Schema: public; Owner: postgres
+-- Name: habit_categories; Type: TABLE; Schema: public; Owner: postgres
 --
+
+CREATE TABLE "public"."habit_categories" (
+    "id" "text" DEFAULT encode(gen_random_bytes(16), 'hex') NOT NULL,
+    "name" "text" NOT NULL,
+    "shortname" "text",
+    "color" "text",
+    "sort_order" integer DEFAULT 0,
+    "is_protected" boolean DEFAULT false,
+    "owner_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
 
 CREATE TABLE "public"."list_items" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
@@ -284,7 +315,8 @@ CREATE TABLE "public"."text_line_progress" (
     "next_review" timestamp with time zone,
     "review_count" integer DEFAULT 0 NOT NULL,
     "owner_id" "uuid",
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "deck_id" "text"
 );
 
 
@@ -323,7 +355,8 @@ CREATE TABLE "public"."todos" (
     CONSTRAINT "todos_priority_check" CHECK (("priority" = ANY (ARRAY['urgent'::"text", 'high'::"text", 'medium'::"text", 'low'::"text", 'normal'::"text"]))),
     "owner_id" "uuid",
     "shared_id" "text",
-    "shared_group_id" "text"
+    "shared_group_id" "text",
+    "category_id" "text"
 );
 
 
@@ -343,7 +376,52 @@ CREATE TABLE "public"."vestiaire" (
     "updated_at" timestamp with time zone DEFAULT "now"(),
     "purchase_status" "text",
     "sort_order" integer DEFAULT 0,
-    "owner_id" "uuid"
+    "owner_id" "uuid",
+    "category_id" "text"
+);
+
+
+--
+-- Name: vestiaire_categories; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE "public"."vestiaire_categories" (
+    "id" "text" DEFAULT encode(gen_random_bytes(16), 'hex') NOT NULL,
+    "name" "text" NOT NULL,
+    "shortname" "text",
+    "color" "text",
+    "sort_order" integer DEFAULT 0,
+    "is_protected" boolean DEFAULT false,
+    "owner_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+--
+-- Name: todo_categories; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE "public"."todo_categories" (
+    "id" "text" DEFAULT encode(gen_random_bytes(16), 'hex') NOT NULL,
+    "name" "text" NOT NULL,
+    "shortname" "text",
+    "color" "text",
+    "sort_order" integer DEFAULT 0,
+    "is_protected" boolean DEFAULT false,
+    "owner_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+--
+-- Name: auth_email_guard; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE "public"."auth_email_guard" (
+    "email_hash" "text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"()
 );
 
 
@@ -555,6 +633,7 @@ $$;
 -- Name: get_group_members; Type: FUNCTION; Schema: public; Owner: postgres
 -- 1.399: include auth_user_id for stable attribution
 -- 1.402: casts
+-- 1.452: filter revoked members from outer query
 --
 
 CREATE OR REPLACE FUNCTION "public"."get_group_members"("p_token" "text", "p_group_id" "text")
@@ -564,6 +643,7 @@ LANGUAGE "sql" SECURITY DEFINER SET search_path = public, extensions AS $$
   SELECT sm.member_id, sm.display_name, sm.invited_label, sm.role, sm.joined_at, sm.auth_user_id
   FROM sharing_members sm
   WHERE sm.group_id = p_group_id
+  AND sm.revoked_at IS NULL
   AND EXISTS (
     SELECT 1 FROM sharing_members sm2
     WHERE sm2.group_id = p_group_id
@@ -738,6 +818,46 @@ ALTER TABLE ONLY "public"."vestiaire"
 
 
 --
+-- Name: todo_categories todo_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."todo_categories"
+    ADD CONSTRAINT "todo_categories_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: habit_categories habit_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."habit_categories"
+    ADD CONSTRAINT "habit_categories_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: vestiaire_categories vestiaire_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."vestiaire_categories"
+    ADD CONSTRAINT "vestiaire_categories_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: flashcard_decks flashcard_decks_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."flashcard_decks"
+    ADD CONSTRAINT "flashcard_decks_pkey" PRIMARY KEY ("id");
+
+
+--
+-- Name: auth_email_guard auth_email_guard_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."auth_email_guard"
+    ADD CONSTRAINT "auth_email_guard_pkey" PRIMARY KEY ("email_hash");
+
+
+--
 -- Name: sharing_groups sharing_groups_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -854,6 +974,46 @@ ALTER TABLE ONLY "public"."sharing_items"
 
 
 --
+-- Name: todos todos_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."todos"
+    ADD CONSTRAINT "todos_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."todo_categories"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: habits habits_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."habits"
+    ADD CONSTRAINT "habits_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."habit_categories"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: vestiaire vestiaire_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."vestiaire"
+    ADD CONSTRAINT "vestiaire_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."vestiaire_categories"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: flashcards flashcards_deck_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."flashcards"
+    ADD CONSTRAINT "flashcards_deck_id_fkey" FOREIGN KEY ("deck_id") REFERENCES "public"."flashcard_decks"("id") ON DELETE CASCADE;
+
+
+--
+-- Name: texts texts_deck_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY "public"."texts"
+    ADD CONSTRAINT "texts_deck_id_fkey" FOREIGN KEY ("deck_id") REFERENCES "public"."flashcard_decks"("id") ON DELETE CASCADE;
+
+
+--
 -- ===== ROW LEVEL SECURITY: ENABLE =====
 --
 
@@ -878,6 +1038,10 @@ ALTER TABLE "public"."sharing_groups" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."sharing_members" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."sharing_items" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."joined_groups" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."todo_categories" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."habit_categories" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."vestiaire_categories" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."flashcard_decks" ENABLE ROW LEVEL SECURITY;
 
 
 --
@@ -931,6 +1095,11 @@ BEGIN
   UPDATE nvidia_usage SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE daily_visits SET owner_id = uid WHERE owner_id IS NULL;
   UPDATE joined_groups SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE agent_grants SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE todo_categories SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE habit_categories SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE vestiaire_categories SET owner_id = uid WHERE owner_id IS NULL;
+  UPDATE flashcard_decks SET owner_id = uid WHERE owner_id IS NULL;
 END;
 $$;
 
@@ -1000,6 +1169,23 @@ CREATE POLICY "owner" ON "public"."sharing_items" FOR ALL USING ("group_id" IN (
 CREATE POLICY "owner only" ON "public"."joined_groups" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."joined_groups" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
+-- ── Category tables (1.474) ──
+CREATE POLICY "owner only" ON "public"."todo_categories" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."todo_categories" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+
+CREATE POLICY "owner only" ON "public"."habit_categories" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."habit_categories" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+
+CREATE POLICY "owner only" ON "public"."vestiaire_categories" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."vestiaire_categories" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+
+CREATE POLICY "owner only" ON "public"."flashcard_decks" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."flashcard_decks" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+
+-- ── Auth email guard (1.453) — no RLS, anon must SELECT pre-auth ──
+GRANT SELECT ON "public"."auth_email_guard" TO anon;
+GRANT SELECT, INSERT ON "public"."auth_email_guard" TO authenticated;
+
 
 -- ===== SEED DATA =====
 
@@ -1034,9 +1220,18 @@ CREATE INDEX IF NOT EXISTS idx_sharing_members_token_hash ON "public"."sharing_m
 CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON "public"."sharing_members" ("auth_user_id");
 CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON "public"."sharing_members" ("group_id", "auth_user_id");
 CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON "public"."sharing_items" ("group_id");
+CREATE INDEX IF NOT EXISTS idx_todo_categories_owner_id ON "public"."todo_categories" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_habit_categories_owner_id ON "public"."habit_categories" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_vestiaire_categories_owner_id ON "public"."vestiaire_categories" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_flashcard_decks_owner_id ON "public"."flashcard_decks" ("owner_id");
+CREATE INDEX IF NOT EXISTS idx_todos_category_id ON "public"."todos" ("category_id");
+CREATE INDEX IF NOT EXISTS idx_habits_category_id ON "public"."habits" ("category_id");
+CREATE INDEX IF NOT EXISTS idx_vestiaire_category_id ON "public"."vestiaire" ("category_id");
+CREATE INDEX IF NOT EXISTS idx_flashcards_deck_id ON "public"."flashcards" ("deck_id");
+CREATE INDEX IF NOT EXISTS idx_texts_deck_id ON "public"."texts" ("deck_id");
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.436')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.436', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.474')
+ON CONFLICT ("key") DO UPDATE SET "value" = '1.474', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;
@@ -1047,7 +1242,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE
   tasks, projects, todos, habits, habit_completions,
   birthdays, vestiaire, flashcards, flashcard_notes,
   prompts, settings, lists, list_items, daily_visits,
-  sharing_groups, sharing_members, sharing_items;
+  sharing_groups, sharing_members, sharing_items,
+  todo_categories, habit_categories, vestiaire_categories, flashcard_decks;
 
 -- ===== 1.410 Agent grants — multi-token API =====
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -1124,5 +1320,9 @@ DROP POLICY IF EXISTS "owner only" ON "public"."joined_groups"; CREATE POLICY "o
 DROP POLICY IF EXISTS "owner" ON "public"."sharing_groups"; DROP POLICY IF EXISTS "owner or agent" ON "public"."sharing_groups"; CREATE POLICY "owner or agent" ON "public"."sharing_groups" FOR ALL USING (auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)) WITH CHECK (auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id));
 DROP POLICY IF EXISTS "owner" ON "public"."sharing_members"; DROP POLICY IF EXISTS "owner or agent" ON "public"."sharing_members"; CREATE POLICY "owner or agent" ON "public"."sharing_members" FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id))) WITH CHECK (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)));
 DROP POLICY IF EXISTS "owner" ON "public"."sharing_items"; DROP POLICY IF EXISTS "owner or agent" ON "public"."sharing_items"; CREATE POLICY "owner or agent" ON "public"."sharing_items" FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id))) WITH CHECK (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)));
+DROP POLICY IF EXISTS "owner only" ON "public"."todo_categories"; CREATE POLICY "owner or agent" ON "public"."todo_categories" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "owner only" ON "public"."habit_categories"; CREATE POLICY "owner or agent" ON "public"."habit_categories" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "owner only" ON "public"."vestiaire_categories"; CREATE POLICY "owner or agent" ON "public"."vestiaire_categories" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "owner only" ON "public"."flashcard_decks"; CREATE POLICY "owner or agent" ON "public"."flashcard_decks" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.410') ON CONFLICT ("key") DO UPDATE SET "value" = '1.410', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.474') ON CONFLICT ("key") DO UPDATE SET "value" = '1.474', "updated_at" = now();

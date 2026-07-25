@@ -12,7 +12,7 @@ User jobs:
 ## Entry & Ownership
 - **Entry:** `js/todos.js` (1395 LOC)
 - **State:** `currentView`, `db`, `js`, `sharing`
-- **Tables:** `todos`, `settings`
+- **Tables:** `todos`, `todo_categories`, `settings`
 - **CODEMAP:** `features[todos]` — loc 1395, esc 24, i18n 48, guards [pendingSet]
 
 ## Dependencies
@@ -54,6 +54,7 @@ User jobs:
 - `status=done` preserved on reorder
 - Snooze: `snoozed_until` → filtered out of Today until due
 - Delete → trash, not hard delete from UI (adapter handles)
+- **Category FK**: `category_id` FK → `todo_categories(id)`, CASCADE on delete. Deleting a category deletes all its TODOs. App-level sharing cleanup runs first — shared items are removed from `sharing_items` before CASCADE fires. Protected default row (`name=''`, `is_protected=1`) cannot be deleted.
 
 ## Adapter & Backend
 - Only via `db.from('todos')` — never `if (backend === 'supabase')`

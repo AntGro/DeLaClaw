@@ -62,7 +62,8 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 
 ## 4. Backend & Data
 
-- Tables (22 Supabase / 19 Local): 16 personal (`projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `nvidia_usage`) + `daily_visits`, `joined_groups`, `agent_grants` (all backends) + `sharing_groups`, `sharing_members`, `sharing_items` (Supabase only).
+- Tables (27 Supabase / 23 Local): 16 personal (`projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `nvidia_usage`) + 4 category/deck tables (`todo_categories`, `habit_categories`, `vestiaire_categories`, `flashcard_decks`) + `daily_visits`, `joined_groups`, `agent_grants` (all backends) + `sharing_groups`, `sharing_members`, `sharing_items`, `auth_email_guard` (Supabase only).
+- **Category integrity**: each category/deck table has one protected default row (`name=''`, `is_protected=1`). `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item FKs (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
 - Schema version in `settings` key `schema_version`, migrations in `migrations/`. Check `latest_compat` logic in `VERSION`.
 - Base schema + migrations must be runnable in Supabase SQL editor + local SQLite (`server/schema.sql`).
 - Vendor: `scripts/update-vendor.sh [supabase_ver] [three_ver]` updates `vendor/` + `index.html` comment + `docs-site/attributions.md`. Weekly GitHub Action `vendor-check.yml` opens PR to `dev` if new versions.

@@ -6,7 +6,7 @@ Wardrobe inventory tracker — items with brand, category, photos.
 ## Entry & Ownership
 - **Entry:** `js/vestiaire.js` (904 LOC)
 - **State:** `allVestiaire`, `currentView`, `db`, `demoMode`, `js`
-- **Tables:** `vestiaire`, `settings` (category shortnames)
+- **Tables:** `vestiaire`, `vestiaire_categories`, `settings` (category shortnames)
 - **CODEMAP:** `features[vestiaire]` — loc 904, esc 21, i18n 49, guards []
 
 ## Dependencies
@@ -33,6 +33,7 @@ Wardrobe inventory tracker — items with brand, category, photos.
 ## Business Invariants
 - `vestiaire` items: brand, category, size, color, etc.
 - Category shortnames DB-synced, not hardcoded
+- **Category FK**: `category_id` FK → `vestiaire_categories(id)`, CASCADE on delete. Deleting a category deletes all its items. Protected default row (`name=''`, `is_protected=1`) cannot be deleted.
 - Demo mode: sandbox prevents real localStorage leaking (category duplication bug fixed May 31)
 
 ## Adapter & Backend

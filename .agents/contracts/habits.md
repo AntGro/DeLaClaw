@@ -12,7 +12,7 @@ User jobs:
 ## Entry & Ownership
 - **Entry:** `js/habits.js` (2122 LOC)
 - **State:** `allHabits`, `allHabitCompletions`, `_historyHabitId`, `currentView`, `db`, `js`, `sharing`
-- **Tables:** `habits`, `habit_completions`, `settings`
+- **Tables:** `habits`, `habit_completions`, `habit_categories`, `settings`
 - **CODEMAP:** `features[habits]` — loc 2122, esc 47, i18n 68, guards [pendingSet]
 
 ## Dependencies
@@ -56,6 +56,7 @@ User jobs:
 - `syncSharedHabits()` merges completions by habit_id + date
 - Shared habit IDs are canonical: the shared record id is the value stored in every local pointer's `shared_id`
 - `creator_category` is origin metadata only. Local deck/category placement remains personal and must not rewrite `creator_category`
+- **Category FK**: `category_id` FK → `habit_categories(id)`, CASCADE on delete. Deleting a category deletes all its habits + completions. App-level sharing cleanup runs first — shared items are removed from `sharing_items` before CASCADE fires. Protected default row (`name=''`, `is_protected=1`) cannot be deleted.
 - Leaving group → local completions stay
 
 ## Cross-Feature Edges

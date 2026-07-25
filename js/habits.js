@@ -1693,11 +1693,20 @@ async function deleteHabitCategory(catId) {
   if (!cat) return;
   const habitsInCat = state.allHabits.filter(c => catIdForHabit(c) === catId);
   const msg = habitsInCat.length > 0
-    ? `Delete "${cat.name}"? Its ${habitsInCat.length} habit(s) will move to ${getHabitCatDisplayName(_defaultHabitCatId)}.`
+    ? `Delete "${cat.name}" and its ${habitsInCat.length} habit(s)? This cannot be undone.`
     : `Delete empty category "${cat.name}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
-    // SET NULL on FK — habits survive with category_id = NULL, shown in default bucket
+    // Propagate deletion of shared habits to sharing layer before CASCADE removes local rows
+    if (state.sharing) {
+      for (const habit of habitsInCat) {
+        if (habit.shared_id && habit.shared_group_id) {
+          try { await state.sharing.deleteItem(habit.shared_group_id, habit.shared_id); }
+          catch (e) { console.warn('Failed to delete shared habit:', e); }
+        }
+      }
+    }
+    // CASCADE on FK — deleting the category removes all its habits + completions
     const { error } = await state.db.from('habit_categories').delete().eq('id', catId);
     if (error) { showToast(t('toast.delete_failed') + ': ' + error.message, 'error'); return; }
     showToast(t('habits.category_deleted', cat.name), 'info');

@@ -891,11 +891,20 @@ async function deleteCategory(catId) {
   if (!cat || cat.is_protected) return;
   const todosInCat = allTodos.filter(t => catIdForTodo(t) === catId);
   const msg = todosInCat.length > 0
-    ? `Delete "${cat.name}"? Its ${todosInCat.length} TODO(s) will move to ${todoCatDisplayName(_defaultCatId)}.`
+    ? `Delete "${cat.name}" and its ${todosInCat.length} TODO(s)? This cannot be undone.`
     : `Delete empty category "${cat.name}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
-    // SET NULL on FK — items survive with category_id = NULL, shown in default bucket
+    // Propagate deletion of shared items to sharing layer before CASCADE removes local rows
+    if (state.sharing) {
+      for (const todo of todosInCat) {
+        if (todo.shared_id && todo.shared_group_id) {
+          try { await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id); }
+          catch (e) { console.warn('Failed to delete shared todo:', e); }
+        }
+      }
+    }
+    // CASCADE on FK — deleting the category removes all its items
     await state.db.from('todo_categories').delete().eq('id', catId);
     showToast(t('toast.deleted'), 'info');
     await refreshTodos();

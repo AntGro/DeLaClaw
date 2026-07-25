@@ -6,7 +6,7 @@ Cross-cutting app configuration — theme, language, category shortnames/colors,
 ## Entry & Ownership
 - **Entry:** `js/main.js` (settings pane switching) + `js/state.js` (STAY_CONNECTED_KEY) + `js/agents-ui.js` (agents pane) + `js/version.js`
 - **State:** `STAY_CONNECTED_KEY`, theme, language, `flash_shortnames`, `habit_category_shortnames`, `todo_category_shortnames`, `todo_category_colors`, `vest_category_shortnames`, `project_category_shortnames`, `list_category_*`
-- **Tables:** `settings` (key-value: `schema_version`, category shortnames, colors, theme, etc.), `prompts`
+- **Tables:** `settings` (key-value: `schema_version`, category shortnames, colors, theme, etc.), `prompts`, `todo_categories`, `habit_categories`, `vestiaire_categories`, `flashcard_decks`
 - **CODEMAP:** core — `state`, `main`, `agents-ui` (settings pane), not a feature
 
 ## Dependencies
@@ -35,6 +35,7 @@ Cross-cutting app configuration — theme, language, category shortnames/colors,
 
 ## Business Invariants
 - Category shortnames are DB-synced: keys `flash_shortnames`, `habit_category_shortnames`, `todo_category_shortnames`, `vest_category_shortnames`, `project_category_shortnames` in `settings` table — not hardcoded
+- **Category tables**: `todo_categories`, `habit_categories`, `vestiaire_categories`, `flashcard_decks` — each has a protected default row (`name=''`, `is_protected=1`) guarded by `protect_category_row()` trigger. Item FKs use CASCADE on delete — deleting a user category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
 - Colors: `todo_category_colors` etc. — solid header `var(--cat-color)` + 6% tinted body via `color-mix(in srgb,var(--cat-color) 6%, var(--bg))`
 - Language picker persists `settings.lang` and updates `js/i18n.js` `t()` cache
 - Backend picker: Supabase | Local | Demo — segmented pill, mode-aware labels/hints/placeholders; `#login` hash timing fixed to avoid race

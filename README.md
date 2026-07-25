@@ -121,14 +121,14 @@ js/
   demo-data.js          Sample data for demo mode
 server/
   server.js             Bun HTTP server (SQLite backend)
-  schema.sql            SQLite schema (16 tables)
+  schema.sql            SQLite schema (23 tables)
 migrations/             Incremental SQL migrations
 sw.js                   Service worker (network-first + precache)
 ```
 
 The adapter pattern (`db.js`) means the app logic never touches the backend directly. Each adapter exposes the same `.from(table).select()/.insert()/.update()/.delete()` interface. The offline cache wraps any adapter transparently, caching reads in IndexedDB and serving them when the network fails.
 
-16 database tables: `projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `nvidia_usage`.
+27 database tables (Supabase) / 23 (Local SQLite): 16 personal (`projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `nvidia_usage`), 4 category/deck (`todo_categories`, `habit_categories`, `vestiaire_categories`, `flashcard_decks`), 3 infra (`daily_visits`, `joined_groups`, `agent_grants`), and 4 Supabase-only (`sharing_groups`, `sharing_members`, `sharing_items`, `auth_email_guard`). Category/deck FKs use CASCADE on delete — deleting a category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
 
 See [docs-site/architecture.md](docs-site/architecture.md) for details.
 

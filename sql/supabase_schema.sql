@@ -978,7 +978,7 @@ ALTER TABLE ONLY "public"."sharing_items"
 --
 
 ALTER TABLE ONLY "public"."todos"
-    ADD CONSTRAINT "todos_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."todo_categories"("id") ON DELETE SET NULL;
+    ADD CONSTRAINT "todos_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."todo_categories"("id") ON DELETE CASCADE;
 
 
 --
@@ -986,7 +986,7 @@ ALTER TABLE ONLY "public"."todos"
 --
 
 ALTER TABLE ONLY "public"."habits"
-    ADD CONSTRAINT "habits_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."habit_categories"("id") ON DELETE SET NULL;
+    ADD CONSTRAINT "habits_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."habit_categories"("id") ON DELETE CASCADE;
 
 
 --
@@ -994,7 +994,7 @@ ALTER TABLE ONLY "public"."habits"
 --
 
 ALTER TABLE ONLY "public"."vestiaire"
-    ADD CONSTRAINT "vestiaire_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."vestiaire_categories"("id") ON DELETE SET NULL;
+    ADD CONSTRAINT "vestiaire_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."vestiaire_categories"("id") ON DELETE CASCADE;
 
 
 --
@@ -1002,7 +1002,7 @@ ALTER TABLE ONLY "public"."vestiaire"
 --
 
 ALTER TABLE ONLY "public"."flashcards"
-    ADD CONSTRAINT "flashcards_deck_id_fkey" FOREIGN KEY ("deck_id") REFERENCES "public"."flashcard_decks"("id") ON DELETE SET NULL;
+    ADD CONSTRAINT "flashcards_deck_id_fkey" FOREIGN KEY ("deck_id") REFERENCES "public"."flashcard_decks"("id") ON DELETE CASCADE;
 
 
 --
@@ -1010,7 +1010,7 @@ ALTER TABLE ONLY "public"."flashcards"
 --
 
 ALTER TABLE ONLY "public"."texts"
-    ADD CONSTRAINT "texts_deck_id_fkey" FOREIGN KEY ("deck_id") REFERENCES "public"."flashcard_decks"("id") ON DELETE SET NULL;
+    ADD CONSTRAINT "texts_deck_id_fkey" FOREIGN KEY ("deck_id") REFERENCES "public"."flashcard_decks"("id") ON DELETE CASCADE;
 
 
 --

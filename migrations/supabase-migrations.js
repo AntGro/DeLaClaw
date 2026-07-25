@@ -1601,17 +1601,17 @@ CREATE TRIGGER trg_protect_vestiaire_categories BEFORE DELETE OR UPDATE ON vesti
 DROP TRIGGER IF EXISTS trg_protect_flashcard_decks ON flashcard_decks;
 CREATE TRIGGER trg_protect_flashcard_decks BEFORE DELETE OR UPDATE ON flashcard_decks FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION protect_category_row();
 
--- ── FK policy: CASCADE → SET NULL ──
+-- ── FK policy: CASCADE (deleting a category deletes its items) ──
 ALTER TABLE todos DROP CONSTRAINT IF EXISTS todos_category_id_fkey;
-ALTER TABLE todos ADD CONSTRAINT todos_category_id_fkey FOREIGN KEY (category_id) REFERENCES todo_categories(id) ON DELETE SET NULL;
+ALTER TABLE todos ADD CONSTRAINT todos_category_id_fkey FOREIGN KEY (category_id) REFERENCES todo_categories(id) ON DELETE CASCADE;
 ALTER TABLE habits DROP CONSTRAINT IF EXISTS habits_category_id_fkey;
-ALTER TABLE habits ADD CONSTRAINT habits_category_id_fkey FOREIGN KEY (category_id) REFERENCES habit_categories(id) ON DELETE SET NULL;
+ALTER TABLE habits ADD CONSTRAINT habits_category_id_fkey FOREIGN KEY (category_id) REFERENCES habit_categories(id) ON DELETE CASCADE;
 ALTER TABLE vestiaire DROP CONSTRAINT IF EXISTS vestiaire_category_id_fkey;
-ALTER TABLE vestiaire ADD CONSTRAINT vestiaire_category_id_fkey FOREIGN KEY (category_id) REFERENCES vestiaire_categories(id) ON DELETE SET NULL;
+ALTER TABLE vestiaire ADD CONSTRAINT vestiaire_category_id_fkey FOREIGN KEY (category_id) REFERENCES vestiaire_categories(id) ON DELETE CASCADE;
 ALTER TABLE flashcards DROP CONSTRAINT IF EXISTS flashcards_deck_id_fkey;
-ALTER TABLE flashcards ADD CONSTRAINT flashcards_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES flashcard_decks(id) ON DELETE SET NULL;
+ALTER TABLE flashcards ADD CONSTRAINT flashcards_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES flashcard_decks(id) ON DELETE CASCADE;
 ALTER TABLE texts DROP CONSTRAINT IF EXISTS texts_deck_id_fkey;
-ALTER TABLE texts ADD CONSTRAINT texts_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES flashcard_decks(id) ON DELETE SET NULL;
+ALTER TABLE texts ADD CONSTRAINT texts_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES flashcard_decks(id) ON DELETE CASCADE;
 
 INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.484', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 NOTIFY pgrst, 'reload schema';

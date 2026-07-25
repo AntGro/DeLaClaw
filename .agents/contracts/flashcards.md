@@ -12,7 +12,7 @@ User jobs:
 ## Entry & Ownership
 - **Entry:** `js/flashcards.js` (2331 LOC)
 - **State:** `currentView`, `db`, `js`
-- **Tables:** `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `settings`
+- **Tables:** `flashcards`, `flashcard_notes`, `flashcard_decks`, `texts`, `text_line_progress`, `settings`
 - **CODEMAP:** `features[flashcards]` — loc 2331, esc 74, i18n 128, guards []
 
 ## Dependencies
@@ -40,6 +40,8 @@ User jobs:
 
 ## Business Invariants
 - Decks: `Général`, `Histoire de France`, `Vocabulaire` + user decks; shortnames DB-synced via `flash_shortnames`
+- **Deck FK**: `flashcards.deck_id` and `texts.deck_id` FK → `flashcard_decks(id)`, CASCADE on delete. Deleting a deck deletes all its flashcards and texts. Protected default row (`name=''`, `is_protected=1`) cannot be deleted.
+- `flashcard_notes.proposed_deck` stays TEXT (not FK) — stores deck names as proposals, intentional design decision
 - Draft proposal: raw `content` → research → `proposed_front/back/deck` + `proposal_status=ready`; Accept/Feedback/Reject in UI; only propose, never direct create via background worker
 - `text_line_progress` tracks per-line revision for long texts
 - Status: mastered/ok/due/new/draft mapped to CSS vars

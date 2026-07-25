@@ -785,13 +785,13 @@ async function deleteVestiaireCategory(catId) {
   if (!cat) return;
   const items = (state.allVestiaire || []).filter(v => catIdForVest(v) === catId);
   const msg = items.length > 0
-    ? t('vestiaire.delete_category_confirm', cat.name) + ` — ${items.length} item${items.length > 1 ? 's' : ''} will move to ${getVestCatDisplayName(_defaultVestCatId)}`
+    ? t('vestiaire.delete_category_confirm', cat.name) + ` — ${items.length} item${items.length > 1 ? 's' : ''} will be deleted. This cannot be undone.`
     : t('vestiaire.delete_category_confirm', cat.name);
   showDeleteConfirm(
     t('vestiaire.delete_category'),
     msg,
     async () => {
-      // SET NULL on FK — items survive with category_id = NULL, shown in default bucket
+      // CASCADE on FK — deleting the category removes all its items
       const { error } = await state.db.from('vestiaire_categories').delete().eq('id', catId);
       if (error) { showToast(t('toast.delete_failed') + ': ' + error.message, 'error'); return; }
       showToast(t('toast.removed'), 'info');

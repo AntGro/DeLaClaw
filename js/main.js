@@ -618,6 +618,10 @@ function showAuthPrompt(rawAdapter, url, key) {
       <div class="auth-icon">${lucideIcon('mail', 28)}</div>
       <h3>${t('auth.check_inbox')}</h3>
       <p class="auth-hint">${t('auth.check_inbox_hint', esc(email))}</p>
+      <div style="margin:14px 0; padding:10px 14px; border:1px solid var(--warning-border, #e6a817); border-radius:10px; background:color-mix(in srgb, var(--warning-border, #e6a817) 10%, var(--bg)); display:flex; gap:10px; align-items:flex-start;">
+        <span style="flex-shrink:0; margin-top:1px; color:var(--warning-border, #e6a817);">${lucideIcon('alert-triangle', 18)}</span>
+        <p style="margin:0; font-size:0.9em; line-height:1.45; color:var(--text);">${t('auth.do_not_click')}</p>
+      </div>
       <div id="authPwaHint" style="${needsPwaAck ? '' : 'display:none;'} margin:16px 0; padding:12px 14px; border:1px solid var(--accent); border-radius:10px; background:color-mix(in srgb, var(--accent) 8%, var(--bg));">
         <div style="display:flex; gap:10px; align-items:flex-start;">
           <div style="margin-top:2px;">${lucideIcon('smartphone', 20)}</div>

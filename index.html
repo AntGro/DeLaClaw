@@ -111,7 +111,7 @@
       </div>
       <label class="stay-connected-label">
         <input type="checkbox" id="stayConnected" checked>
-        <span>Stay connected on this device</span>
+        <span data-i18n="login.stay_connected">Stay connected on this device</span>
       </label>
       <button type="submit" class="btn-primary">Connect</button>
       <p class="error" id="loginError"></p>
@@ -128,7 +128,7 @@
       <a class="gate-welcome-login" id="gateWelcomeLogin" href="#" data-i18n="login.welcome_login">I already have an account</a>
     </div>
 
-    <a class="gate-guide-link" id="gateGuideLink" href="#setup">New here? Get started</a>
+    <a class="gate-guide-link" id="gateGuideLink" href="#setup" data-i18n="login.guide_link">New here? Get started</a>
   </div>
 
   <!-- ===== SETUP GUIDE (replaces gate-box) ===== -->
@@ -224,7 +224,7 @@
             <p class="error" id="setupLoginError"></p>
             <label class="stay-connected-label">
               <input type="checkbox" id="setupStayConnected" checked>
-              <span id="setupStayConnectedLabel">Stay connected on this device</span>
+              <span id="setupStayConnectedLabel" data-i18n="login.stay_connected">Stay connected on this device</span>
             </label>
             <button type="submit" class="setup-done-btn" id="setupLoginBtn">Connect</button>
           </form>

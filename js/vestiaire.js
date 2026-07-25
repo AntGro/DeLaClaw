@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
-import state from './state.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, createSettingsAccessor } from './utils.js';
+import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR } from './state.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 
@@ -8,70 +8,32 @@ import { t } from './i18n.js';
 // VESTIAIRE — WARDROBE TRACKER (bucket-card layout)
 // ===================================================================
 
-const DEFAULT_CATEGORIES = [];
 let vestSearchQuery = '';
 let vestFilter = 'all';
-const VESTIAIRE_CATEGORIES_KEY = 'claw_cc_vestiaire_categories';
-// DB-synced settings accessor
-const _vestShortnamesAccessor = createSettingsAccessor('vest_category_shortnames', 'claw_cc_vest_shortnames');
 
-// ── Category shortnames (synced via settings table) ──
-function getVestShortnames() { return _vestShortnamesAccessor.get(); }
-function getVestShortname(catName) {
-  return _vestShortnamesAccessor.get()[catName] || '';
+// ── Category table state ──
+// Categories live in the vestiaire_categories DB table. Loaded into maps for fast lookup.
+let _vestCatMap = new Map();    // id → row
+let _vestCatByName = new Map(); // name → row (backward compat)
+
+async function loadVestiaireCategories() {
+  const { data, error } = await state.db.from('vestiaire_categories').select('*').order('sort_order', { ascending: true });
+  if (error) { console.warn('loadVestiaireCategories error:', error); return; }
+  _vestCatMap.clear();
+  _vestCatByName.clear();
+  for (const row of (data || [])) {
+    _vestCatMap.set(row.id, row);
+    _vestCatByName.set(row.name, row);
+  }
 }
 
-async function loadVestShortnames() {
-  await _vestShortnamesAccessor.load();
-}
+function getVestiaireCategories() { return _vestCatMap; }
 
-function setVestShortname(catName, shortname) {
-  const map = _vestShortnamesAccessor.get();
-  if (shortname) map[catName] = shortname; else delete map[catName];
-  _vestShortnamesAccessor.save(map);
-}
-function promptVestShortname(catName) {
-  const current = getVestShortname(catName) || '';
-  const result = prompt(`Short name for "${catName}" (leave empty to clear):`, current);
-  if (result === null) return;
-  setVestShortname(catName, result.trim());
-  renderVestiaire();
-}
-
-// Distinct colors per category (cycles if more categories are added)
-const CATEGORY_COLORS = [
-  '#8b5cf6', // purple — Haut
-  '#3b82f6', // blue — Bas
-  '#f59e0b', // amber — Shoes
-  '#10b981', // emerald — Outerwear
-  '#ef4444', // red
-  '#ec4899', // pink
-  '#06b6d4', // cyan
-  '#f97316', // orange
-  '#6366f1', // indigo
-  '#14b8a6', // teal
-];
-
-function getCategoryColor(cat) {
-  const cats = getVestiaireCategories();
-  const idx = cats.indexOf(cat);
-  return CATEGORY_COLORS[(idx >= 0 ? idx : cats.length) % CATEGORY_COLORS.length];
-}
-
-function getVestiaireCategories() {
-  try {
-    const raw = localStorage.getItem(VESTIAIRE_CATEGORIES_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch {}
-  return [...DEFAULT_CATEGORIES];
-}
-
-function saveVestiaireCategories(cats) {
-  localStorage.setItem(VESTIAIRE_CATEGORIES_KEY, JSON.stringify(cats));
-}
+// ── Category helpers ──
+function getVestCatColor(catId) { return _vestCatMap.get(catId)?.color || GENERAL_CATEGORY_COLOR; }
+function getVestCatShortname(catId) { return _vestCatMap.get(catId)?.shortname || ''; }
+function getVestCatName(catId) { return _vestCatMap.get(catId)?.name ?? ''; }
+function catIdForVest(item) { return item.category_id || _vestCatByName.get(item.category ?? '')?.id || null; }
 
 
 // ===================================================================
@@ -80,7 +42,7 @@ function saveVestiaireCategories(cats) {
 
 async function refreshVestiaire() {
   if (!state.db.connected) return;
-  await loadVestShortnames();
+  await loadVestiaireCategories();
   let data;
   try {
     data = await fetchAll(() => state.db
@@ -94,28 +56,10 @@ async function refreshVestiaire() {
     return;
   }
   state.allVestiaire = data || [];
-  syncCategoriesFromData();
+  // Categories already loaded via loadVestiaireCategories() above
   if (state.currentView === 'vestiaire') {
     renderVestiaire();
   }
-}
-
-function syncCategoriesFromData() {
-  const cats = getVestiaireCategories();
-  const dataCats = [...new Set((state.allVestiaire || []).map(v => v.category).filter(Boolean))];
-  let changed = false;
-  dataCats.forEach(c => {
-    if (!cats.includes(c)) { cats.push(c); changed = true; }
-  });
-  // In demo mode, remove categories that have no items in data
-  if (state.demoMode) {
-    const pruned = cats.filter(c => dataCats.includes(c));
-    if (pruned.length !== cats.length) {
-      saveVestiaireCategories(pruned);
-      return;
-    }
-  }
-  if (changed) saveVestiaireCategories(cats);
 }
 
 
@@ -137,16 +81,10 @@ function renderVestiaire() {
   cleanupDragArtifacts();
 
   let items = state.allVestiaire || [];
-  let cats = getVestiaireCategories();
-
-  // In demo mode, only show categories that have items in data
-  if (state.demoMode) {
-    const dataCats = new Set(items.map(v => v.category).filter(Boolean));
-    cats = cats.filter(c => dataCats.has(c));
-  }
+  const catRows = Array.from(_vestCatMap.values()).sort((a, b) => a.sort_order - b.sort_order);
 
   // Show page-level empty state when no items and no categories
-  if (items.length === 0 && cats.length === 0) {
+  if (items.length === 0 && catRows.length === 0) {
     grid.innerHTML = `<div class="page-empty-state">
       <div class="empty-icon">${lucideIcon('shirt', 48, 'var(--muted)')}</div>
       <h3>${t('vestiaire.empty_title')}</h3>
@@ -176,7 +114,7 @@ function renderVestiaire() {
     );
   }
 
-  renderVestiaireNavButtons(cats, items);
+  renderVestiaireNavButtons(catRows, items);
 
   // Apply sort
   const sortBy = document.getElementById('vestiaireSortBy')?.value || 'manual';
@@ -186,28 +124,33 @@ function renderVestiaire() {
     ? (a, b) => (a.brand || '').localeCompare(b.brand || '')
     : (a, b) => (a.sort_order || 0) - (b.sort_order || 0);
 
-  // Group items by category
+  // Group items by category ID
   const grouped = {};
-  cats.forEach(c => { grouped[c] = []; });
+  catRows.forEach(c => { grouped[c.id] = []; });
   items.forEach(v => {
-    const cat = v.category || 'Autre';
-    if (!grouped[cat]) grouped[cat] = [];
-    grouped[cat].push(v);
+    const cId = catIdForVest(v);
+    if (cId && !grouped[cId]) grouped[cId] = [];
+    if (cId) grouped[cId].push(v);
+    else {
+      // Uncategorized
+      if (!grouped['_autre']) grouped['_autre'] = [];
+      grouped['_autre'].push(v);
+    }
   });
   // Sort within each group
   Object.values(grouped).forEach(arr => arr.sort(sortFn));
 
   // Render a card per category (skip empty when searching)
   let html = '';
-  cats.forEach(cat => {
-    const catItems = grouped[cat] || [];
-    if (vestSearchQuery && catItems.length === 0 && !cat.toLowerCase().includes(vestSearchQuery.toLowerCase())) return;
-    html += renderCategoryCard(cat, catItems);
+  catRows.forEach(cat => {
+    const catItems = grouped[cat.id] || [];
+    if (vestSearchQuery && catItems.length === 0 && !cat.name.toLowerCase().includes(vestSearchQuery.toLowerCase())) return;
+    html += renderCategoryCard(cat.id, catItems);
   });
 
   // "Autre" for uncategorized
-  if (grouped['Autre'] && grouped['Autre'].length > 0 && !cats.includes('Autre')) {
-    html += renderCategoryCard('Autre', grouped['Autre']);
+  if (grouped['_autre'] && grouped['_autre'].length > 0) {
+    html += renderCategoryCard(null, grouped['_autre']);
   }
 
   const scrollY = window.scrollY;
@@ -216,32 +159,34 @@ function renderVestiaire() {
   window.scrollTo(0, scrollY);
 
   // Init hover-delay action buttons & drag-drop for each category card
-  cats.forEach(cat => {
-    const card = grid.querySelector(`.vestiaire-bucket[data-category="${esc(cat)}"]`);
+  catRows.forEach(cat => {
+    const card = grid.querySelector(`.vestiaire-bucket[data-category="${CSS.escape(cat.id)}"]`);
     if (!card) return;
     const list = card.querySelector('.vestiaire-item-list');
     if (list) {
       initVestiaireHoverDelay(list);
-      initVestiaireDragDrop(cat, list);
+      initVestiaireDragDrop(cat.id, list);
     }
   });
-  // Also handle 'Autre' if present
-  const autreCard = grid.querySelector('.vestiaire-bucket[data-category="Autre"]');
+  // Also handle uncategorized if present
+  const autreCard = grid.querySelector('.vestiaire-bucket[data-category="_autre"]');
   if (autreCard) {
     const list = autreCard.querySelector('.vestiaire-item-list');
     if (list) {
       initVestiaireHoverDelay(list);
-      initVestiaireDragDrop('Autre', list);
+      initVestiaireDragDrop('_autre', list);
     }
   }
   balanceGrid(grid);
 }
 
-function renderCategoryCard(cat, items) {
-  const icon = getCategoryIcon(cat);
-  const escapedCat = esc(cat);
+function renderCategoryCard(catId, items) {
+  const cat = catId ? _vestCatMap.get(catId) : null;
+  const catName = cat?.name || 'Autre';
+  const icon = getCategoryIcon(catName);
+  const escapedCatId = esc(catId || '_autre');
   const count = items.length;
-  const color = getCategoryColor(cat);
+  const color = cat?.color || GENERAL_CATEGORY_COLOR;
 
   let itemsHtml = '';
   if (count === 0) {
@@ -250,24 +195,24 @@ function renderCategoryCard(cat, items) {
     itemsHtml = items.map(v => renderVestiaireItem(v)).join('');
   }
 
-  return `<div class="project-card vestiaire-bucket" data-category="${escapedCat}" style="--cat-color:${color}">
+  return `<div class="project-card vestiaire-bucket" data-category="${escapedCatId}" style="--cat-color:${color}">
     <div class="project-card-header">
       <div style="display:flex;align-items:center;gap:8px;">
         <span>${icon}</span>
-        <strong style="font-size:1rem;">${escapedCat}</strong>
+        <strong style="font-size:1rem;">${esc(catName)}</strong>
         <span style="font-size:0.78rem;opacity:0.75;">(${count})</span>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="todo-cat-shortname-btn" data-action="open-edit-vestiaire-category" data-category="${esc(cat)}" title="${t('vestiaire.edit_category')}">${lucideIcon("pencil",14)}</button>
-        <button class="archive-project-btn" data-action="open-add-vestiaire" data-category="${escapedCat}" title="${t('vestiaire.add_to_category', escapedCat)}">
+        ${catId ? `<button class="todo-cat-shortname-btn" data-action="open-edit-vestiaire-category" data-category="${escapedCatId}" title="${t('vestiaire.edit_category')}">${lucideIcon("pencil",14)}</button>` : ''}
+        <button class="archive-project-btn" data-action="open-add-vestiaire" data-category="${escapedCatId}" title="${t('vestiaire.add_to_category', esc(catName))}">
           ${lucideIcon('plus', 16)}
         </button>
-        <button class="todo-cat-delete-btn" data-action="delete-vestiaire-category" data-category="${escapedCat}" title="${t('vestiaire.delete_category')}">
+        ${catId ? `<button class="todo-cat-delete-btn" data-action="delete-vestiaire-category" data-category="${escapedCatId}" title="${t('vestiaire.delete_category')}">
           ${lucideIcon('trash-2', 16)}
-        </button>
+        </button>` : ''}
       </div>
     </div>
-    <div class="task-list vestiaire-item-list" data-category="${escapedCat}">
+    <div class="task-list vestiaire-item-list" data-category="${escapedCatId}">
       ${itemsHtml}
     </div>
   </div>`;
@@ -316,20 +261,20 @@ function renderVestiaireItem(v) {
   </div>`;
 }
 
-function renderVestiaireNavButtons(cats, items) {
+function renderVestiaireNavButtons(catRows, items) {
   const container = document.getElementById('vestiaireNavButtons');
   if (!container) return;
-  container.innerHTML = cats.map(cat => {
-    const count = items.filter(v => v.category === cat).length;
-    const color = getCategoryColor(cat);
-    const sn = getVestShortname(cat);
-    const display = sn || cat;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-vestiaire-cat" data-category="${esc(cat)}" title="${esc(cat)} (${count})">${esc(display)} (${count})</button>`;
+  container.innerHTML = catRows.map(cat => {
+    const count = items.filter(v => catIdForVest(v) === cat.id).length;
+    const color = cat.color || GENERAL_CATEGORY_COLOR;
+    const sn = cat.shortname || '';
+    const display = sn || cat.name;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-vestiaire-cat" data-category="${esc(cat.id)}" title="${esc(cat.name)} (${count})">${esc(display)} (${count})</button>`;
   }).join('');
 }
 
-function navigateToVestiaireCat(cat) {
-  const card = document.querySelector(`.vestiaire-bucket[data-category="${cat}"]`);
+function navigateToVestiaireCat(catId) {
+  const card = document.querySelector(`.vestiaire-bucket[data-category="${CSS.escape(catId)}"]`);
   if (!card) return;
   scrollToAndHighlight(card, 'var(--accent)');
 }
@@ -372,12 +317,12 @@ function initVestiaireHoverDelay(listEl) {
 }
 
 /** Drag-and-drop reorder within a category card */
-function initVestiaireDragDrop(category, listEl) {
+function initVestiaireDragDrop(catId, listEl) {
   initItemDragDrop(listEl, {
     itemSelector: '.vestiaire-item',
     idAttr: 'vestId',
     onReorder: async (draggedId, targetId) => {
-      const items = (state.allVestiaire || []).filter(v => v.category === category).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      const items = (state.allVestiaire || []).filter(v => catIdForVest(v) === catId).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       await reorderItems({
         items,
         allItems: state.allVestiaire || [],
@@ -387,7 +332,7 @@ function initVestiaireDragDrop(category, listEl) {
         itemSelector: '.vestiaire-item',
         idAttr: 'vestId',
         tableName: 'vestiaire',
-        reinitFn: () => initVestiaireDragDrop(category, listEl),
+        reinitFn: () => initVestiaireDragDrop(catId, listEl),
       });
     },
   });
@@ -630,11 +575,11 @@ function initVestiaireModals() {
   app.appendChild(m4);
 }
 
-function populateCategorySelect(selectId, preselect) {
+function populateCategorySelect(selectId, preselectId) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
-  const cats = getVestiaireCategories();
-  sel.innerHTML = cats.map(c => `<option value="${esc(c)}" ${c === preselect ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  const catRows = Array.from(_vestCatMap.values()).sort((a, b) => a.sort_order - b.sort_order);
+  sel.innerHTML = catRows.map(c => `<option value="${esc(c.id)}" ${c.id === preselectId ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
 }
 
 
@@ -642,14 +587,16 @@ function populateCategorySelect(selectId, preselect) {
 // CRUD
 // ===================================================================
 
-function openAddVestiaireModal(preselectedCategory) {
+function openAddVestiaireModal(preselectedCatId) {
   document.getElementById('newVestiaireName').value = '';
   document.getElementById('newVestiaireBrand').value = '';
   document.getElementById('newVestiaireSize').value = '';
   document.getElementById('newVestiaireColor').value = '';
   document.getElementById('newVestiaireNotes').value = '';
   document.getElementById('newVestiairePurchaseStatus').value = '';
-  document.getElementById('newVestiaireCategory').value = preselectedCategory || getVestiaireCategories()[0] || '';
+  const catRows = Array.from(_vestCatMap.values()).sort((a, b) => a.sort_order - b.sort_order);
+  const firstCatId = preselectedCatId || (catRows[0]?.id || '');
+  populateCategorySelect('newVestiaireCategory', firstCatId);
   document.getElementById('addVestiaireModal').classList.add('visible');
   setTimeout(() => document.getElementById('newVestiaireName').focus(), 100);
 }
@@ -662,7 +609,9 @@ async function saveNewVestiaire() {
   const name = document.getElementById('newVestiaireName').value.trim();
   const brand = document.getElementById('newVestiaireBrand').value.trim();
   const size = document.getElementById('newVestiaireSize').value.trim();
-  const category = document.getElementById('newVestiaireCategory').value;
+  const catId = document.getElementById('newVestiaireCategory').value;
+  const catRow = _vestCatMap.get(catId);
+  const catName = catRow?.name || '';
   const color = document.getElementById('newVestiaireColor').value.trim();
   const notes = document.getElementById('newVestiaireNotes').value.trim();
   const purchaseStatus = document.getElementById('newVestiairePurchaseStatus').value;
@@ -670,9 +619,9 @@ async function saveNewVestiaire() {
   if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
 
   // Compute sort_order: place new item at end of its category
-  const catItems = (state.allVestiaire || []).filter(v => v.category === category);
+  const catItems = (state.allVestiaire || []).filter(v => catIdForVest(v) === catId);
   const maxOrder = catItems.reduce((m, v) => Math.max(m, v.sort_order || 0), 0);
-  const row = { name, category, sort_order: maxOrder + 1 };
+  const row = { name, category: catName, category_id: catId, sort_order: maxOrder + 1 };
   if (brand) row.brand = brand;
   if (size) row.size = size;
   if (color) row.color = color;
@@ -697,7 +646,7 @@ function openEditVestiaireModal(id) {
   document.getElementById('editVestiaireColor').value = v.color || '';
   document.getElementById('editVestiaireNotes').value = v.note || '';
   document.getElementById('editVestiairePurchaseStatus').value = v.purchase_status || '';
-  populateCategorySelect('editVestiaireCategory', v.category);
+  populateCategorySelect('editVestiaireCategory', catIdForVest(v));
   document.getElementById('editVestiaireModal').classList.add('visible');
   setTimeout(() => document.getElementById('editVestiaireName').focus(), 100);
 }
@@ -711,7 +660,9 @@ async function saveEditVestiaire() {
   const name = document.getElementById('editVestiaireName').value.trim();
   const brand = document.getElementById('editVestiaireBrand').value.trim();
   const size = document.getElementById('editVestiaireSize').value.trim();
-  const category = document.getElementById('editVestiaireCategory').value;
+  const catId = document.getElementById('editVestiaireCategory').value;
+  const catRow = _vestCatMap.get(catId);
+  const catName = catRow?.name || '';
   const color = document.getElementById('editVestiaireColor').value.trim();
   const notes = document.getElementById('editVestiaireNotes').value.trim();
   const purchaseStatus = document.getElementById('editVestiairePurchaseStatus').value;
@@ -719,7 +670,7 @@ async function saveEditVestiaire() {
   if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
 
   const { error } = await state.db.from('vestiaire').update({
-    name, brand: brand || null, size: size || null, category,
+    name, brand: brand || null, size: size || null, category: catName, category_id: catId,
     color: color || null, note: notes || null,
     purchase_status: purchaseStatus || null,
     updated_at: new Date().toISOString()
@@ -761,22 +712,31 @@ function closeAddVestiaireCategoryModal() {
   document.getElementById('addVestiaireCategoryModal').classList.remove('visible');
 }
 
-function saveNewVestiaireCategory() {
+async function saveNewVestiaireCategory() {
   const name = document.getElementById('newVestiaireCategoryName').value.trim();
   if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
-  const cats = getVestiaireCategories();
-  if (cats.includes(name)) { showToast(t('toast.failed_to_add'), 'error'); return; }
-  cats.push(name);
-  saveVestiaireCategories(cats);
+  for (const cat of _vestCatMap.values()) {
+    if (cat.name.toLowerCase() === name.toLowerCase()) {
+      showToast(t('toast.failed_to_add'), 'error'); return;
+    }
+  }
+  const usedColors = new Set(Array.from(_vestCatMap.values()).map(c => c.color).filter(Boolean));
+  const color = DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c)) || DEFAULT_CATEGORY_PALETTE[_vestCatMap.size % DEFAULT_CATEGORY_PALETTE.length];
+  const sortOrder = Math.max(0, ...Array.from(_vestCatMap.values()).map(c => c.sort_order || 0)) + 1;
+  const { error } = await state.db.from('vestiaire_categories').insert({ name, color, sort_order: sortOrder });
+  if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
+  await loadVestiaireCategories();
   closeAddVestiaireCategoryModal();
   showToast(t('toast.added'), 'success');
   renderVestiaire();
 }
 
-function openEditVestiaireCategoryModal(cat) {
-  document.getElementById('editVestiaireCategoryOldName').value = cat;
-  document.getElementById('editVestiaireCategoryName').value = cat;
-  document.getElementById('editVestiaireCategoryShortname').value = getVestShortname(cat) || '';
+function openEditVestiaireCategoryModal(catId) {
+  const cat = _vestCatMap.get(catId);
+  if (!cat) return;
+  document.getElementById('editVestiaireCategoryOldName').value = catId; // store ID
+  document.getElementById('editVestiaireCategoryName').value = cat.name;
+  document.getElementById('editVestiaireCategoryShortname').value = cat.shortname || '';
   document.getElementById('editVestiaireCategoryModal').classList.add('visible');
   setTimeout(() => document.getElementById('editVestiaireCategoryName').focus(), 100);
 }
@@ -786,58 +746,40 @@ function closeEditVestiaireCategoryModal() {
 }
 
 async function saveEditVestiaireCategory() {
-  const oldName = document.getElementById('editVestiaireCategoryOldName').value;
+  const catId = document.getElementById('editVestiaireCategoryOldName').value;
+  const cat = _vestCatMap.get(catId);
+  if (!cat) return;
   const newName = document.getElementById('editVestiaireCategoryName').value.trim();
   const shortname = document.getElementById('editVestiaireCategoryShortname').value.trim();
 
   if (!newName) { showToast(t('toast.enter_name'), 'error'); return; }
 
-  // Prevent duplicate category names
-  if (oldName !== newName) {
-    const cats = getVestiaireCategories();
-    if (cats.includes(newName)) { showToast(t('toast.name_taken') || 'Name already taken', 'error'); return; }
-  }
-
-  // Update shortname (move to new key if renamed)
-  if (oldName !== newName) {
-    // Rename category in localStorage list
-    const cats = getVestiaireCategories();
-    const idx = cats.indexOf(oldName);
-    if (idx >= 0) cats[idx] = newName;
-    saveVestiaireCategories(cats);
-
-    // Rename category on all vestiaire items in DB
-    const items = (state.allVestiaire || []).filter(v => v.category === oldName);
-    for (const item of items) {
-      await state.db.from('vestiaire').update({ category: newName, updated_at: new Date().toISOString() }).eq('id', item.id);
-    }
-
-    // Move shortname from old key to new key
-    const oldShortname = getVestShortname(oldName);
-    if (oldShortname) setVestShortname(oldName, '');
-    setVestShortname(newName, shortname);
-  } else {
-    setVestShortname(oldName, shortname);
-  }
+  // Update the DB row directly — items reference by category_id FK
+  const updates = { name: newName, shortname: shortname || null };
+  await state.db.from('vestiaire_categories').update(updates).eq('id', catId);
+  Object.assign(cat, updates);
+  _vestCatByName.clear();
+  for (const row of _vestCatMap.values()) _vestCatByName.set(row.name, row);
 
   closeEditVestiaireCategoryModal();
   showToast(t('toast.updated'), 'success');
   await refreshVestiaire();
 }
 
-function deleteVestiaireCategory(cat) {
-  const items = (state.allVestiaire || []).filter(v => v.category === cat);
+async function deleteVestiaireCategory(catId) {
+  const cat = _vestCatMap.get(catId);
+  if (!cat) return;
+  const items = (state.allVestiaire || []).filter(v => catIdForVest(v) === catId);
   const msg = items.length > 0
-    ? t('vestiaire.delete_category_confirm', cat) + ` (${items.length} item${items.length > 1 ? 's' : ''})`
-    : t('vestiaire.delete_category_confirm', cat);
+    ? t('vestiaire.delete_category_confirm', cat.name) + ` (${items.length} item${items.length > 1 ? 's' : ''})`
+    : t('vestiaire.delete_category_confirm', cat.name);
   showDeleteConfirm(
     t('vestiaire.delete_category'),
     msg,
     async () => {
-      // Delete all items in this category in bulk
-      if (items.length) await state.db.from('vestiaire').delete().eq('category', cat);
-      const cats = getVestiaireCategories().filter(c => c !== cat);
-      saveVestiaireCategories(cats);
+      // CASCADE on the FK will handle item deletion when the category row is deleted
+      const { error } = await state.db.from('vestiaire_categories').delete().eq('id', catId);
+      if (error) { showToast(t('toast.delete_failed') + ': ' + error.message, 'error'); return; }
       showToast(t('toast.removed'), 'info');
       await refreshVestiaire();
     }
@@ -849,7 +791,7 @@ function deleteVestiaireCategory(cat) {
 // EXPORTS
 // ===================================================================
 
-export { refreshVestiaire, renderVestiaire, initVestiaireModals };
+export { refreshVestiaire, renderVestiaire, initVestiaireModals, loadVestiaireCategories, getVestiaireCategories };
 
 // Window bindings
 window.openAddVestiaireModal = openAddVestiaireModal;
@@ -870,7 +812,6 @@ window.editVestiaireInline = editVestiaireInline;
 window.editVestiaireBrandInline = editVestiaireBrandInline;
 window.cycleVestiaireStatus = cycleVestiaireStatus;
 
-window.promptVestShortname = promptVestShortname;
 window.openEditVestiaireCategoryModal = openEditVestiaireCategoryModal;
 window.closeEditVestiaireCategoryModal = closeEditVestiaireCategoryModal;
 window.saveEditVestiaireCategory = saveEditVestiaireCategory;

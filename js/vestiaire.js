@@ -1,5 +1,5 @@
 import { lucideIcon } from './icons.js';
-import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR } from './state.js';
+import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
@@ -13,17 +13,24 @@ let vestFilter = 'all';
 
 // ── Category table state ──
 // Categories live in the vestiaire_categories DB table. Loaded into maps for fast lookup.
+const SHARED_CATEGORY = SHARED_CAT_CONST;
 let _vestCatMap = new Map();    // id → row
 let _vestCatByName = new Map(); // name → row (backward compat)
+let _defaultVestCatId = null;   // protected default row
+let _sharedVestCatId = null;    // protected __shared__ row
 
 async function loadVestiaireCategories() {
   const { data, error } = await state.db.from('vestiaire_categories').select('*').order('sort_order', { ascending: true });
   if (error) { console.warn('loadVestiaireCategories error:', error); return; }
   _vestCatMap.clear();
   _vestCatByName.clear();
+  _defaultVestCatId = null;
+  _sharedVestCatId = null;
   for (const row of (data || [])) {
     _vestCatMap.set(row.id, row);
     _vestCatByName.set(row.name, row);
+    if (row.is_protected && row.name === SHARED_CATEGORY) _sharedVestCatId = row.id;
+    else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultVestCatId = row.id;
   }
 }
 
@@ -33,7 +40,14 @@ function getVestiaireCategories() { return _vestCatMap; }
 function getVestCatColor(catId) { return _vestCatMap.get(catId)?.color || GENERAL_CATEGORY_COLOR; }
 function getVestCatShortname(catId) { return _vestCatMap.get(catId)?.shortname || ''; }
 function getVestCatName(catId) { return _vestCatMap.get(catId)?.name ?? ''; }
-function catIdForVest(item) { return item.category_id || _vestCatByName.get(item.category ?? '')?.id || null; }
+function getVestCatDisplayName(catId) {
+  const cat = _vestCatMap.get(catId);
+  if (!cat) return t('common.category_default');
+  if (cat.name === '') return t('common.category_default');
+  if (cat.name === SHARED_CATEGORY) return t('sharing.shared');
+  return cat.name;
+}
+function catIdForVest(item) { return item.category_id || _vestCatByName.get(item.category ?? '')?.id || _defaultVestCatId; }
 
 
 // ===================================================================
@@ -182,7 +196,7 @@ function renderVestiaire() {
 
 function renderCategoryCard(catId, items) {
   const cat = catId ? _vestCatMap.get(catId) : null;
-  const catName = cat?.name || 'Autre';
+  const catName = catId ? getVestCatDisplayName(catId) : 'Autre';
   const icon = getCategoryIcon(catName);
   const escapedCatId = esc(catId || '_autre');
   const count = items.length;
@@ -268,8 +282,8 @@ function renderVestiaireNavButtons(catRows, items) {
     const count = items.filter(v => catIdForVest(v) === cat.id).length;
     const color = cat.color || GENERAL_CATEGORY_COLOR;
     const sn = cat.shortname || '';
-    const display = sn || cat.name;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-vestiaire-cat" data-category="${esc(cat.id)}" title="${esc(cat.name)} (${count})">${esc(display)} (${count})</button>`;
+    const display = sn || cat.name || t('common.category_default');
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-vestiaire-cat" data-category="${esc(cat.id)}" title="${esc(getVestCatDisplayName(cat.id))} (${count})">${esc(display)} (${count})</button>`;
   }).join('');
 }
 
@@ -579,7 +593,7 @@ function populateCategorySelect(selectId, preselectId) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
   const catRows = Array.from(_vestCatMap.values()).sort((a, b) => a.sort_order - b.sort_order);
-  sel.innerHTML = catRows.map(c => `<option value="${esc(c.id)}" ${c.id === preselectId ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+  sel.innerHTML = catRows.map(c => `<option value="${esc(c.id)}" ${c.id === preselectId ? 'selected' : ''}>${esc(getVestCatDisplayName(c.id))}</option>`).join('');
 }
 
 

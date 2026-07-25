@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
-import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR } from './state.js';
+import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, isMobileUA } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
@@ -101,17 +101,24 @@ let trSessionTextId = null;
 
 // ── Deck table state ──
 // Decks live in the flashcard_decks DB table. Loaded into maps for fast lookup.
+const SHARED_CATEGORY = SHARED_CAT_CONST;
 let _deckMap = new Map();     // id → row
 let _deckByName = new Map();  // name → row (backward compat)
+let _defaultDeckId = null;    // protected default row
+let _sharedDeckId = null;     // protected __shared__ row
 
 async function loadFlashcardDecks() {
   const { data, error } = await state.db.from('flashcard_decks').select('*').order('sort_order', { ascending: true });
   if (error) { console.warn('loadFlashcardDecks error:', error); return; }
   _deckMap.clear();
   _deckByName.clear();
+  _defaultDeckId = null;
+  _sharedDeckId = null;
   for (const row of (data || [])) {
     _deckMap.set(row.id, row);
     _deckByName.set(row.name, row);
+    if (row.is_protected && row.name === SHARED_CATEGORY) _sharedDeckId = row.id;
+    else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultDeckId = row.id;
   }
 }
 
@@ -121,8 +128,15 @@ function getFlashcardDecks() { return _deckMap; }
 function getDeckColorById(deckId) { return _deckMap.get(deckId)?.color || GENERAL_CATEGORY_COLOR; }
 function getDeckShortname(deckId) { return _deckMap.get(deckId)?.shortname || ''; }
 function getDeckName(deckId) { return _deckMap.get(deckId)?.name ?? ''; }
-function deckIdForCard(card) { return card.deck_id || _deckByName.get(card.deck ?? '')?.id || null; }
-function deckIdForText(text) { return text.deck_id || _deckByName.get(text.deck ?? '')?.id || null; }
+function getDeckDisplayName(deckId) {
+  const deck = _deckMap.get(deckId);
+  if (!deck) return t('common.category_default');
+  if (deck.name === '') return t('common.category_default');
+  if (deck.name === SHARED_CATEGORY) return t('sharing.shared');
+  return deck.name;
+}
+function deckIdForCard(card) { return card.deck_id || _deckByName.get(card.deck ?? '')?.id || _defaultDeckId; }
+function deckIdForText(text) { return text.deck_id || _deckByName.get(text.deck ?? '')?.id || _defaultDeckId; }
 
 // Backward-compat: accepts name or ID
 function getDeckColor(nameOrId) {
@@ -195,13 +209,13 @@ function renderDeckNavButtons() {
   html += decks.map(deck => {
     const color = getDeckColor(deck);
     const sn = getFlashShortname(deck);
-    const display = sn || deck;
+    const display = sn || deck || t('common.category_default');
     const type = getDeckType(deck);
     const icon = type === 'text' ? lucideIcon('book-open', 12, color) : lucideIcon('layers', 12, color);
     const count = type === 'text'
       ? allTexts.filter(tx => tx.deck === deck).length
       : allCards.filter(c => c.deck === deck).length;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-flash-deck" data-deck="${esc(deck)}" title="${esc(deck)}">${icon} ${esc(display)} (${count})</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-flash-deck" data-deck="${esc(deck)}" title="${esc(deck || t('common.category_default'))}">${icon} ${esc(display)} (${count})</button>`;
   }).join('');
 
   container.innerHTML = html;
@@ -329,9 +343,9 @@ function renderDraftItem(d) {
 
   let proposalHtml = '';
   if (hasProposal) {
-    const suggestedDeck = d.proposed_deck || 'General';
+    const suggestedDeck = d.proposed_deck || '';
     const deckOptions = [...new Set([...allCards.map(c => c.deck), suggestedDeck])].sort().map(dk =>
-      `<option value="${esc(dk)}"${dk === suggestedDeck ? ' selected' : ''}>${esc(dk)}</option>`
+      `<option value="${esc(dk)}"${dk === suggestedDeck ? ' selected' : ''}>${esc(dk || t('common.category_default'))}</option>`
     ).join('');
     proposalHtml = `<div class="fc-proposal">
       <div class="fc-proposal-label">${lucideIcon('sparkles', 14, '#22c55e')} Proposed card:</div>
@@ -435,7 +449,7 @@ function renderFlashcardDeck(deck, q) {
     <div class="project-card-header">
       <div style="display:flex;align-items:flex-start;gap:6px;">
         <div class="project-info">
-          <strong>${lucideIcon('layers', 14)} ${esc(deck)}</strong>
+          <strong>${lucideIcon('layers', 14)} ${esc(deck || t('common.category_default'))}</strong>
           <span class="tech">${allDeckCards.length} ${t('flashcards.cards')} ${chips.join(' ')}</span>
         </div>
       </div>
@@ -504,7 +518,7 @@ function renderTextDeck(deck, q) {
     <div class="project-card-header">
       <div style="display:flex;align-items:flex-start;gap:6px;">
         <div class="project-info">
-          <strong>${lucideIcon('book-open', 14)} ${esc(deck)}</strong>
+          <strong>${lucideIcon('book-open', 14)} ${esc(deck || t('common.category_default'))}</strong>
           <span class="tech">${allDeckTexts.length} ${t('text_revision.texts')} ${chips.join(' ')}</span>
         </div>
       </div>
@@ -703,8 +717,8 @@ window.requestProposal = async function(id) {
 window.acceptProposal = async function(id) {
   const draft = allDrafts.find(d => d.id === id);
   if (!draft || !draft.proposed_front || !draft.proposed_back) return;
-  const deck = draft.proposed_deck || 'General';
-  const deckId = _deckByName.get(deck)?.id || null;
+  const deck = draft.proposed_deck || '';
+  const deckId = _deckByName.get(deck)?.id || _defaultDeckId;
   if (state.db.connected) {
     await state.db.from('flashcards').insert({ deck, front: draft.proposed_front, back: draft.proposed_back, deck_id: deckId });
     await state.db.from('flashcard_notes').delete().eq('id', id);
@@ -763,9 +777,9 @@ window.editProposal = function(id) {
   const draft = allDrafts.find(d => d.id === id);
   if (!draft) return;
   closeAllFlashModals();
-  const currentDeck = draft.proposed_deck || 'General';
+  const currentDeck = draft.proposed_deck || '';
   const deckOptions = [...new Set([...allCards.map(c => c.deck), currentDeck])].sort().map(dk =>
-    `<option value="${esc(dk)}"${dk === currentDeck ? ' selected' : ''}>${esc(dk)}</option>`
+    `<option value="${esc(dk)}"${dk === currentDeck ? ' selected' : ''}>${esc(dk || t('common.category_default'))}</option>`
   ).join('');
   const html = `<div class="modal-overlay" id="editProposalModal" style="display:flex;" data-action="close-edit-proposal" data-overlay-close="true">
     <div class="modal">
@@ -818,7 +832,7 @@ window.openAddFlashcardModal = function(deck) {
   const html = `<div class="modal-overlay" id="addFlashcardModal" style="display:flex;" data-action="close-add-flashcard" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('plus', 18, '#8b5cf6')} ${t('flashcards.add_card')}</h2>
-      <input type="hidden" id="newFlashDeck" value="${esc(deck || 'General')}">
+      <input type="hidden" id="newFlashDeck" value="${esc(deck ?? '')}">
       <label>${t('flashcards.question')}</label>
       <textarea id="newFlashFront" rows="3" placeholder="${t('flashcards.question_placeholder')}"></textarea>
       <label>${t('flashcards.answer')}</label>
@@ -855,7 +869,7 @@ window.openEditFlashcardModal = function(id) {
   closeAllFlashModals();
   const currentDeckId = deckIdForCard(card);
   const sortedDecks = [..._deckMap.values()].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  const deckOptions = sortedDecks.map(d => `<option value="${esc(d.id)}" ${d.id === currentDeckId ? 'selected' : ''}>${esc(d.name)}</option>`).join('');
+  const deckOptions = sortedDecks.map(d => `<option value="${esc(d.id)}" ${d.id === currentDeckId ? 'selected' : ''}>${esc(d.name || t('common.category_default'))}</option>`).join('');
   const html = `<div class="modal-overlay" id="editFlashcardModal" style="display:flex;" data-action="close-edit-flashcard" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('pencil', 18, '#f59e0b')} ${t('flashcards.edit_card')}</h2>
@@ -1062,7 +1076,7 @@ function showNextCard() {
     <div class="practice-header">
       ${practiceHeaderLogo()}
       <div class="practice-progress-bar"><div class="practice-progress-fill" style="width:${pct}%;"></div></div>
-      <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${card.deck}</span></div>
+      <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${card.deck || t('common.category_default')}</span></div>
       <button class="practice-close" data-action="end-practice">✕</button>
     </div>
     <div class="practice-card-area" data-action="reveal-card">
@@ -1267,7 +1281,7 @@ window.openAddTextModal = function(deck) {
   const html = `<div class="modal-overlay" id="addTextModal" style="display:flex;" data-action="close-add-text" data-overlay-close="true">
     <div class="modal modal-wide">
       <h2>${lucideIcon('file-text', 18, '#6366f1')} ${t('text_revision.add_text')}</h2>
-      <input type="hidden" id="newTextDeck" value="${esc(deck || 'General')}">
+      <input type="hidden" id="newTextDeck" value="${esc(deck ?? '')}">
       <label>${t('text_revision.title_label')}</label>
       <input type="text" id="newTextTitle" placeholder="${t('text_revision.title_placeholder')}">
       <label>${t('text_revision.author_label')}</label>
@@ -1350,7 +1364,7 @@ window.openEditTextModal = function(id) {
   closeAllFlashModals();
   const currentDeckId = deckIdForText(tx);
   const sortedDecks = [..._deckMap.values()].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  const deckOptions = sortedDecks.map(d => `<option value="${esc(d.id)}" ${d.id === currentDeckId ? 'selected' : ''}>${esc(d.name)}</option>`).join('');
+  const deckOptions = sortedDecks.map(d => `<option value="${esc(d.id)}" ${d.id === currentDeckId ? 'selected' : ''}>${esc(d.name || t('common.category_default'))}</option>`).join('');
   const html = `<div class="modal-overlay" id="editTextModal" style="display:flex;" data-action="close-edit-text" data-overlay-close="true">
     <div class="modal modal-wide">
       <h2>${lucideIcon('pencil', 18, '#f59e0b')} ${t('text_revision.edit_text')}</h2>
@@ -1848,7 +1862,7 @@ window.openImportModal = async function(presetDeck) {
   }).join('');
 
   const deckOptions = allDecks.map(d =>
-    `<option value="${esc(d)}" ${d === presetDeck ? 'selected' : ''}>${esc(d)}</option>`
+    `<option value="${esc(d)}" ${d === presetDeck ? 'selected' : ''}>${esc(d || t('common.category_default'))}</option>`
   ).join('');
 
   const overlay = document.createElement('div');
@@ -1986,7 +2000,7 @@ window.openImportModal = async function(presetDeck) {
   function selectedType() { return typeSelect.value; }
 
   function updatePrompt() {
-    const deck = selectedDeck() || 'General';
+    const deck = selectedDeck() || t('common.category_default');
     const type = selectedType();
     promptPre.value = buildImportPrompt(importMode, deck, type);
   }

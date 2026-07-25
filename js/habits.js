@@ -50,8 +50,8 @@ function getHabitCatShortname(catId) { return _habitCatMap.get(catId)?.shortname
 function getHabitCatName(catId) { return _habitCatMap.get(catId)?.name ?? ''; }
 function getHabitCatDisplayName(catId) {
   const cat = _habitCatMap.get(catId);
-  if (!cat) return 'General';
-  if (cat.name === '') return 'General';
+  if (!cat) return t('common.category_default');
+  if (cat.name === '') return t('common.category_default');
   if (cat.name === SHARED_CATEGORY) return t('sharing.shared');
   return cat.name;
 }
@@ -848,9 +848,9 @@ function renderHabitNavButtons(categoryIdList) {
     const color = cat?.color || GENERAL_CATEGORY_COLOR;
     const shortname = cat?.shortname || '';
     const isShared = cat?.name === SHARED_CATEGORY;
-    const displayName = isShared ? t('sharing.shared') : (shortname || cat?.name || 'General');
+    const displayName = isShared ? t('sharing.shared') : (shortname || cat?.name || t('common.category_default'));
     const count = state.allHabits.filter(c => catIdForHabit(c) === catId).length;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-habit-category" data-category="${esc(catId)}" title="${esc(isShared ? t('sharing.shared') : (cat?.name || 'General'))}">${esc(displayName)} (${count})</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-habit-category" data-category="${esc(catId)}" title="${esc(isShared ? t('sharing.shared') : (cat?.name || t('common.category_default')))}">${esc(displayName)} (${count})</button>`;
   }).join('');
 }
 
@@ -864,7 +864,7 @@ function navigateToHabitCategory(catId) {
 function renderHabitCategoryCard(catId) {
   const cat = _habitCatMap.get(catId);
   const isSharedDeck = cat?.name === SHARED_CATEGORY;
-  const catName = isSharedDeck ? t('sharing.shared') : (cat?.name || 'General');
+  const catName = isSharedDeck ? t('sharing.shared') : (cat?.name || t('common.category_default'));
   const isGeneral = !isSharedDeck && cat?.is_protected;
   const habitsInCat = getFilteredHabitsForCategory(catId);
   const totalInCat = state.allHabits.filter(c => catIdForHabit(c) === catId).length;
@@ -1040,7 +1040,7 @@ function populateHabitCategorySelect(selectId) {
   // Include Shared in dropdown if any habit uses it (so user can move habits in/out)
   const hasShared = state.allHabits.some(h => h.category === SHARED_CATEGORY || h.category_id === _sharedHabitCatId);
   sel.innerHTML = catRows.map(c => {
-    const label = c.is_protected ? 'General' : c.name;
+    const label = c.is_protected ? t('common.category_default') : c.name;
     return `<option value="${esc(c.id)}">${esc(label)}</option>`;
   }).join('') + (hasShared && _sharedHabitCatId ? `<option value="${esc(_sharedHabitCatId)}">${esc(t('sharing.shared'))}</option>` : '');
 }
@@ -1086,7 +1086,7 @@ async function saveNewHabit() {
   const freq = getFrequencyFromPicker(document.getElementById('newHabitFreqPicker'));
   const catId = document.getElementById('newHabitCategory').value || _defaultHabitCatId;
   const catRow = _habitCatMap.get(catId);
-  const catName = catRow?.name || 'General';
+  const catName = catRow?.name ?? '';
   const lastDoneVal = document.getElementById('newHabitLastDone').value;
   const isDraft = document.getElementById('newHabitDraft').checked;
   const groupId = document.getElementById('newHabitGroup')?.value || '';
@@ -1200,7 +1200,7 @@ function editHabitInline(habitId, itemEl) {
   catRows.forEach(c => {
     const opt = document.createElement('option');
     opt.value = c.id;
-    opt.textContent = c.is_protected ? 'General' : c.name;
+    opt.textContent = c.is_protected ? t('common.category_default') : c.name;
     if (c.id === catIdForHabit(habit)) opt.selected = true;
     catSelect.appendChild(opt);
   });
@@ -1226,7 +1226,7 @@ function editHabitInline(habitId, itemEl) {
         if (extra.category_id !== currentCatId) {
           const newCatRow = _habitCatMap.get(extra.category_id);
           updates.category_id = extra.category_id;
-          updates.category = newCatRow?.name || 'General';
+          updates.category = newCatRow?.name ?? '';
         }
       }
       if (Object.keys(updates).length > 0) {
@@ -1310,7 +1310,7 @@ async function saveEditHabit() {
   const freq = getFrequencyFromPicker(document.getElementById('editHabitFreqPicker'));
   const catId = document.getElementById('editHabitCategory').value || _defaultHabitCatId;
   const catRow = _habitCatMap.get(catId);
-  const catName = catRow?.name || 'General';
+  const catName = catRow?.name ?? '';
   const lastDoneVal = document.getElementById('editHabitLastDone').value;
   const habit = state.allHabits.find(c => c.id === id);
 

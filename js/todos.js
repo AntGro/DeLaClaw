@@ -42,8 +42,8 @@ function getCatShortname(catId) { return _todoCatMap.get(catId)?.shortname || nu
 function getCatName(catId) { return _todoCatMap.get(catId)?.name ?? ''; }
 function getCatDisplayName(catId) {
   const cat = _todoCatMap.get(catId);
-  if (!cat) return 'General';
-  if (cat.name === '') return 'General';
+  if (!cat) return t('common.category_default');
+  if (cat.name === '') return t('common.category_default');
   if (cat.name === SHARED_CATEGORY) return t('sharing.shared');
   return cat.name;
 }
@@ -767,7 +767,7 @@ async function editTodoInline(id, itemEl) {
   catRows.forEach(c => {
     const opt = document.createElement('option');
     opt.value = c.id;
-    opt.textContent = c.name === SHARED_CATEGORY ? t('sharing.shared') : (c.name === '' ? 'General' : c.name);
+    opt.textContent = c.name === SHARED_CATEGORY ? t('sharing.shared') : (c.name === '' ? t('common.category_default') : c.name);
     if (c.id === todoCatId) opt.selected = true;
     catSelect.appendChild(opt);
   });

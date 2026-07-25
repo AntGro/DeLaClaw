@@ -1398,13 +1398,13 @@ DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE todo_categories, habit
 INSERT INTO todo_categories (name, is_protected, sort_order) VALUES ('', TRUE, 0);
 INSERT INTO todo_categories (name, is_protected, sort_order) VALUES ('__shared__', TRUE, 9999);
 -- Habits
-INSERT INTO habit_categories (name, is_protected, sort_order) VALUES ('General', TRUE, 0);
+INSERT INTO habit_categories (name, is_protected, sort_order) VALUES ('', TRUE, 0);
 INSERT INTO habit_categories (name, is_protected, sort_order) VALUES ('__shared__', TRUE, 9999);
 -- Vestiaire
 INSERT INTO vestiaire_categories (name, is_protected, sort_order) VALUES ('', TRUE, 0);
 INSERT INTO vestiaire_categories (name, is_protected, sort_order) VALUES ('__shared__', TRUE, 9999);
 -- Flashcard decks
-INSERT INTO flashcard_decks (name, is_protected, sort_order) VALUES ('Général', TRUE, 0);
+INSERT INTO flashcard_decks (name, is_protected, sort_order) VALUES ('', TRUE, 0);
 INSERT INTO flashcard_decks (name, is_protected, sort_order) VALUES ('__shared__', TRUE, 9999);
 
 -- ── Discover categories from existing items ──
@@ -1417,7 +1417,7 @@ AND NOT EXISTS (SELECT 1 FROM todo_categories tc WHERE tc.name = t.category AND 
 INSERT INTO habit_categories (name, sort_order, owner_id)
 SELECT DISTINCT h.category, ROW_NUMBER() OVER (ORDER BY h.category), h.owner_id
 FROM habits h
-WHERE h.category != 'General' AND h.category != '__shared__'
+WHERE h.category != '' AND h.category != '__shared__'
 AND NOT EXISTS (SELECT 1 FROM habit_categories hc WHERE hc.name = h.category AND hc.owner_id = h.owner_id);
 
 INSERT INTO vestiaire_categories (name, sort_order, owner_id)
@@ -1429,7 +1429,7 @@ AND NOT EXISTS (SELECT 1 FROM vestiaire_categories vc WHERE vc.name = v.category
 INSERT INTO flashcard_decks (name, sort_order, owner_id)
 SELECT DISTINCT f.deck, ROW_NUMBER() OVER (ORDER BY f.deck), f.owner_id
 FROM flashcards f
-WHERE f.deck != 'Général' AND f.deck != '__shared__'
+WHERE f.deck != '' AND f.deck != '__shared__'
 AND NOT EXISTS (SELECT 1 FROM flashcard_decks fd WHERE fd.name = f.deck AND fd.owner_id = f.owner_id);
 
 INSERT INTO flashcard_decks (name, sort_order, owner_id)
@@ -1437,7 +1437,7 @@ SELECT DISTINCT t.deck,
        (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM flashcard_decks) + ROW_NUMBER() OVER (ORDER BY t.deck),
        t.owner_id
 FROM texts t
-WHERE t.deck != 'Général' AND t.deck != '__shared__'
+WHERE t.deck != '' AND t.deck != '__shared__'
 AND NOT EXISTS (SELECT 1 FROM flashcard_decks fd WHERE fd.name = t.deck AND fd.owner_id = t.owner_id);
 
 -- ── Backfill metadata from settings JSON ──

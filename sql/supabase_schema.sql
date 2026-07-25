@@ -125,7 +125,7 @@ CREATE TABLE "public"."flashcard_notes" (
 
 CREATE TABLE "public"."flashcards" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "deck" "text" DEFAULT 'Général'::"text" NOT NULL,
+    "deck" "text" DEFAULT ''::text NOT NULL,
     "front" "text" NOT NULL,
     "back" "text" NOT NULL,
     "is_draft" boolean DEFAULT false,
@@ -162,7 +162,7 @@ CREATE TABLE "public"."habits" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "name" "text" NOT NULL,
     "frequency_rule" "text" NOT NULL,
-    "category" "text" DEFAULT 'General'::"text",
+    "category" "text" DEFAULT ''::text,
     "next_due" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),

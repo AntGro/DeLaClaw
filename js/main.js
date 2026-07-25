@@ -94,18 +94,23 @@ function setDemoCategoriesFromData(data) {
 
   function buildCatRows(items, nameField, tableName) {
     const names = [...new Set((items || []).map(i => i[nameField]).filter(Boolean))];
-    // Always ensure 'General' (or equivalent default) exists
-    if (!names.includes('General')) names.unshift('General');
-    const rows = names.map((name, idx) => ({
-      id: `demo-cat-${tableName}-${idx}`,
-      name,
-      shortname: null,
-      color: name === 'General' ? GENERAL_CATEGORY_COLOR : (DEFAULT_CATEGORY_PALETTE[idx % DEFAULT_CATEGORY_PALETTE.length]),
-      sort_order: idx,
-      is_protected: name === 'General',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }));
+    const rows = [
+      // Protected default row (empty name, like real DB)
+      { id: `demo-cat-${tableName}-default`, name: '', shortname: null, color: GENERAL_CATEGORY_COLOR, sort_order: 0, is_protected: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      // Protected __shared__ row
+      { id: `demo-cat-${tableName}-shared`, name: '__shared__', shortname: null, color: GENERAL_CATEGORY_COLOR, sort_order: 9999, is_protected: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      // User-defined categories from data
+      ...names.map((name, idx) => ({
+        id: `demo-cat-${tableName}-${idx}`,
+        name,
+        shortname: null,
+        color: DEFAULT_CATEGORY_PALETTE[idx % DEFAULT_CATEGORY_PALETTE.length],
+        sort_order: idx + 1,
+        is_protected: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })),
+    ];
     store[tableName] = rows;
     // Build name→id lookup for enriching items
     const lookup = new Map(rows.map(r => [r.name, r.id]));
@@ -117,12 +122,12 @@ function setDemoCategoriesFromData(data) {
   const vestLookup = buildCatRows(data.vestiaire, 'category', 'vestiaire_categories');
   const deckLookup = buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks');
 
-  // Enrich items with category_id / deck_id
-  for (const t of (store.todos || [])) t.category_id = todoLookup.get(t.category) || todoLookup.get('General') || null;
-  for (const h of (store.habits || [])) h.category_id = habitLookup.get(h.category) || habitLookup.get('General') || null;
-  for (const v of (store.vestiaire || [])) v.category_id = vestLookup.get(v.category) || null;
-  for (const f of (store.flashcards || [])) f.deck_id = deckLookup.get(f.deck) || null;
-  for (const tx of (store.texts || [])) tx.deck_id = deckLookup.get(tx.deck) || null;
+  // Enrich items with category_id / deck_id (fall back to default row)
+  for (const t of (store.todos || [])) t.category_id = todoLookup.get(t.category) || todoLookup.get('') || null;
+  for (const h of (store.habits || [])) h.category_id = habitLookup.get(h.category) || habitLookup.get('') || null;
+  for (const v of (store.vestiaire || [])) v.category_id = vestLookup.get(v.category) || vestLookup.get('') || null;
+  for (const f of (store.flashcards || [])) f.deck_id = deckLookup.get(f.deck) || deckLookup.get('') || null;
+  for (const tx of (store.texts || [])) tx.deck_id = deckLookup.get(tx.deck) || deckLookup.get('') || null;
 }
 
 // ===================================================================

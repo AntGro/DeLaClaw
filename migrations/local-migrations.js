@@ -219,9 +219,9 @@ export const LOCAL_MIGRATIONS = {
     INSERT INTO todo_categories (id, name, is_protected, sort_order)
     VALUES (lower(hex(randomblob(16))), '__shared__', 1, 9999);
 
-    -- Habits: General
+    -- Habits: default (empty string, displayed as 'General' via i18n)
     INSERT INTO habit_categories (id, name, is_protected, sort_order)
-    VALUES (lower(hex(randomblob(16))), 'General', 1, 0);
+    VALUES (lower(hex(randomblob(16))), '', 1, 0);
     INSERT INTO habit_categories (id, name, is_protected, sort_order)
     VALUES (lower(hex(randomblob(16))), '__shared__', 1, 9999);
 
@@ -231,9 +231,9 @@ export const LOCAL_MIGRATIONS = {
     INSERT INTO vestiaire_categories (id, name, is_protected, sort_order)
     VALUES (lower(hex(randomblob(16))), '__shared__', 1, 9999);
 
-    -- Flashcard decks: Général (most common existing deck)
+    -- Flashcard decks: default (empty string, displayed as 'General' via i18n)
     INSERT INTO flashcard_decks (id, name, is_protected, sort_order)
-    VALUES (lower(hex(randomblob(16))), 'Général', 1, 0);
+    VALUES (lower(hex(randomblob(16))), '', 1, 0);
     INSERT INTO flashcard_decks (id, name, is_protected, sort_order)
     VALUES (lower(hex(randomblob(16))), '__shared__', 1, 9999);
 
@@ -245,7 +245,7 @@ export const LOCAL_MIGRATIONS = {
 
     INSERT INTO habit_categories (id, name, sort_order)
     SELECT lower(hex(randomblob(16))), category, ROW_NUMBER() OVER (ORDER BY category)
-    FROM (SELECT DISTINCT category FROM habits WHERE category != 'General' AND category != '__shared__')
+    FROM (SELECT DISTINCT category FROM habits WHERE category != '' AND category != '__shared__')
     WHERE category NOT IN (SELECT name FROM habit_categories);
 
     INSERT INTO vestiaire_categories (id, name, sort_order)
@@ -255,14 +255,14 @@ export const LOCAL_MIGRATIONS = {
 
     INSERT INTO flashcard_decks (id, name, sort_order)
     SELECT lower(hex(randomblob(16))), deck, ROW_NUMBER() OVER (ORDER BY deck)
-    FROM (SELECT DISTINCT deck FROM flashcards WHERE deck != 'Général' AND deck != '__shared__')
+    FROM (SELECT DISTINCT deck FROM flashcards WHERE deck != '' AND deck != '__shared__')
     WHERE deck NOT IN (SELECT name FROM flashcard_decks);
 
     -- Also discover decks from texts table
     INSERT INTO flashcard_decks (id, name, sort_order)
     SELECT lower(hex(randomblob(16))), deck,
            (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM flashcard_decks) + ROW_NUMBER() OVER (ORDER BY deck)
-    FROM (SELECT DISTINCT deck FROM texts WHERE deck != 'Général' AND deck != '__shared__')
+    FROM (SELECT DISTINCT deck FROM texts WHERE deck != '' AND deck != '__shared__')
     WHERE deck NOT IN (SELECT name FROM flashcard_decks);
 
     -- ── Backfill metadata from settings JSON ──
@@ -349,5 +349,15 @@ export const LOCAL_MIGRATIONS = {
       'habit_category_shortnames', 'vest_category_shortnames',
       'flash_shortnames'
     );
+  `,
+
+  '1.482': `
+    -- Uniform default category names: all protected default rows use '' (empty string)
+    UPDATE habit_categories SET name = '' WHERE is_protected = 1 AND name = 'General';
+    UPDATE flashcard_decks SET name = '' WHERE is_protected = 1 AND name = 'Général';
+    -- Backfill items that still have the old default names
+    UPDATE habits SET category = '' WHERE category = 'General';
+    UPDATE flashcards SET deck = '' WHERE deck = 'Général';
+    UPDATE texts SET deck = '' WHERE deck = 'Général';
   `,
 };

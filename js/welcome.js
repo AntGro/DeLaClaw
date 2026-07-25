@@ -331,7 +331,7 @@ function renderFocusHabitItem(habit) {
     ${sharedHtml}
     <div class="habit-row">
       <div class="habit-info">
-        <span class="habit-name">${esc(habit.name)}</span>
+        <span class="habit-name">${renderMd(habit.name)}</span>
         <span class="habit-frequency">${esc(formatFrequency(habit.frequency_rule))}</span>
       </div>
       <div class="habit-actions">

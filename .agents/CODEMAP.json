@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "1.473",
-    "generated_at": "2026-07-25T11:17:56.478Z",
+    "version": "1.474",
+    "generated_at": "2026-07-25T15:14:41.778Z",
     "loc_total": 26470,
     "files_scanned": 38,
     "tier": "T2-enriched",
@@ -143,7 +143,7 @@
       "guards": [
         "pendingSet"
       ],
-      "esc_count": 47,
+      "esc_count": 46,
       "i18n_count": 69,
       "window_exposed": [
         "syncSharedHabits",
@@ -394,7 +394,7 @@
       "guards": [
         "pendingSet"
       ],
-      "esc_count": 78,
+      "esc_count": 77,
       "i18n_count": 44,
       "window_exposed": [
         "toggleTodo",

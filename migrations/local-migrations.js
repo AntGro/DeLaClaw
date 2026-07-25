@@ -157,4 +157,197 @@ export const LOCAL_MIGRATIONS = {
     -- Supabase sharing-only member identity migration; local backend has no sharing_members table.
     SELECT 1;
   `,
+  '1.474': `
+    -- Migration 1.474: Category tables — promote categories from free-text strings to first-class entities
+    -- 4 new tables: todo_categories, habit_categories, vestiaire_categories, flashcard_decks
+    -- Each item table gets a category_id / deck_id FK column
+    -- Old category/deck string columns are kept for transitional compatibility
+
+    -- ── Create category tables ──
+    CREATE TABLE IF NOT EXISTS todo_categories (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      name TEXT NOT NULL,
+      shortname TEXT,
+      color TEXT,
+      sort_order INTEGER DEFAULT 0,
+      is_protected INTEGER DEFAULT 0,
+      owner_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS habit_categories (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      name TEXT NOT NULL,
+      shortname TEXT,
+      color TEXT,
+      sort_order INTEGER DEFAULT 0,
+      is_protected INTEGER DEFAULT 0,
+      owner_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS vestiaire_categories (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      name TEXT NOT NULL,
+      shortname TEXT,
+      color TEXT,
+      sort_order INTEGER DEFAULT 0,
+      is_protected INTEGER DEFAULT 0,
+      owner_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS flashcard_decks (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      name TEXT NOT NULL,
+      shortname TEXT,
+      color TEXT,
+      sort_order INTEGER DEFAULT 0,
+      is_protected INTEGER DEFAULT 0,
+      owner_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- ── Seed protected rows ──
+    -- TODOs: General (empty string is the current default)
+    INSERT INTO todo_categories (id, name, is_protected, sort_order)
+    VALUES (lower(hex(randomblob(16))), '', 1, 0);
+    INSERT INTO todo_categories (id, name, is_protected, sort_order)
+    VALUES (lower(hex(randomblob(16))), '__shared__', 1, 9999);
+
+    -- Habits: General
+    INSERT INTO habit_categories (id, name, is_protected, sort_order)
+    VALUES (lower(hex(randomblob(16))), 'General', 1, 0);
+    INSERT INTO habit_categories (id, name, is_protected, sort_order)
+    VALUES (lower(hex(randomblob(16))), '__shared__', 1, 9999);
+
+    -- Vestiaire: General (empty string)
+    INSERT INTO vestiaire_categories (id, name, is_protected, sort_order)
+    VALUES (lower(hex(randomblob(16))), '', 1, 0);
+    INSERT INTO vestiaire_categories (id, name, is_protected, sort_order)
+    VALUES (lower(hex(randomblob(16))), '__shared__', 1, 9999);
+
+    -- Flashcard decks: Général (most common existing deck)
+    INSERT INTO flashcard_decks (id, name, is_protected, sort_order)
+    VALUES (lower(hex(randomblob(16))), 'Général', 1, 0);
+    INSERT INTO flashcard_decks (id, name, is_protected, sort_order)
+    VALUES (lower(hex(randomblob(16))), '__shared__', 1, 9999);
+
+    -- ── Discover categories from existing items ──
+    INSERT INTO todo_categories (id, name, sort_order)
+    SELECT lower(hex(randomblob(16))), category, ROW_NUMBER() OVER (ORDER BY category)
+    FROM (SELECT DISTINCT category FROM todos WHERE category != '' AND category != '__shared__')
+    WHERE category NOT IN (SELECT name FROM todo_categories);
+
+    INSERT INTO habit_categories (id, name, sort_order)
+    SELECT lower(hex(randomblob(16))), category, ROW_NUMBER() OVER (ORDER BY category)
+    FROM (SELECT DISTINCT category FROM habits WHERE category != 'General' AND category != '__shared__')
+    WHERE category NOT IN (SELECT name FROM habit_categories);
+
+    INSERT INTO vestiaire_categories (id, name, sort_order)
+    SELECT lower(hex(randomblob(16))), category, ROW_NUMBER() OVER (ORDER BY category)
+    FROM (SELECT DISTINCT category FROM vestiaire WHERE category != '' AND category != '__shared__')
+    WHERE category NOT IN (SELECT name FROM vestiaire_categories);
+
+    INSERT INTO flashcard_decks (id, name, sort_order)
+    SELECT lower(hex(randomblob(16))), deck, ROW_NUMBER() OVER (ORDER BY deck)
+    FROM (SELECT DISTINCT deck FROM flashcards WHERE deck != 'Général' AND deck != '__shared__')
+    WHERE deck NOT IN (SELECT name FROM flashcard_decks);
+
+    -- Also discover decks from texts table
+    INSERT INTO flashcard_decks (id, name, sort_order)
+    SELECT lower(hex(randomblob(16))), deck,
+           (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM flashcard_decks) + ROW_NUMBER() OVER (ORDER BY deck)
+    FROM (SELECT DISTINCT deck FROM texts WHERE deck != 'Général' AND deck != '__shared__')
+    WHERE deck NOT IN (SELECT name FROM flashcard_decks);
+
+    -- ── Backfill metadata from settings JSON ──
+    -- Colors
+    UPDATE todo_categories SET color = (
+      SELECT je.value FROM settings s, json_each(s.value) je
+      WHERE s.key = 'todo_category_colors' AND je.key = todo_categories.name LIMIT 1
+    ) WHERE EXISTS (
+      SELECT 1 FROM settings s, json_each(s.value) je
+      WHERE s.key = 'todo_category_colors' AND je.key = todo_categories.name
+    );
+
+    -- Shortnames
+    UPDATE todo_categories SET shortname = (
+      SELECT je.value FROM settings s, json_each(s.value) je
+      WHERE s.key = 'todo_category_shortnames' AND je.key = todo_categories.name LIMIT 1
+    ) WHERE EXISTS (
+      SELECT 1 FROM settings s, json_each(s.value) je
+      WHERE s.key = 'todo_category_shortnames' AND je.key = todo_categories.name
+    );
+
+    UPDATE habit_categories SET shortname = (
+      SELECT je.value FROM settings s, json_each(s.value) je
+      WHERE s.key = 'habit_category_shortnames' AND je.key = habit_categories.name LIMIT 1
+    ) WHERE EXISTS (
+      SELECT 1 FROM settings s, json_each(s.value) je
+      WHERE s.key = 'habit_category_shortnames' AND je.key = habit_categories.name
+    );
+
+    UPDATE vestiaire_categories SET shortname = (
+      SELECT je.value FROM settings s, json_each(s.value) je
+      WHERE s.key = 'vest_category_shortnames' AND je.key = vestiaire_categories.name LIMIT 1
+    ) WHERE EXISTS (
+      SELECT 1 FROM settings s, json_each(s.value) je
+      WHERE s.key = 'vest_category_shortnames' AND je.key = vestiaire_categories.name
+    );
+
+    UPDATE flashcard_decks SET shortname = (
+      SELECT je.value FROM settings s, json_each(s.value) je
+      WHERE s.key = 'flash_shortnames' AND je.key = flashcard_decks.name LIMIT 1
+    ) WHERE EXISTS (
+      SELECT 1 FROM settings s, json_each(s.value) je
+      WHERE s.key = 'flash_shortnames' AND je.key = flashcard_decks.name
+    );
+
+    -- ── Add FK columns to item tables ──
+    ALTER TABLE todos ADD COLUMN category_id TEXT;
+    ALTER TABLE habits ADD COLUMN category_id TEXT;
+    ALTER TABLE vestiaire ADD COLUMN category_id TEXT;
+    ALTER TABLE flashcards ADD COLUMN deck_id TEXT;
+    ALTER TABLE texts ADD COLUMN deck_id TEXT;
+
+    -- ── Populate FK values from string columns ──
+    UPDATE todos SET category_id = (
+      SELECT id FROM todo_categories WHERE name = todos.category LIMIT 1
+    );
+    UPDATE habits SET category_id = (
+      SELECT id FROM habit_categories WHERE name = habits.category LIMIT 1
+    );
+    UPDATE vestiaire SET category_id = (
+      SELECT id FROM vestiaire_categories WHERE name = vestiaire.category LIMIT 1
+    );
+    UPDATE flashcards SET deck_id = (
+      SELECT id FROM flashcard_decks WHERE name = flashcards.deck LIMIT 1
+    );
+    UPDATE texts SET deck_id = (
+      SELECT id FROM flashcard_decks WHERE name = texts.deck LIMIT 1
+    );
+
+    -- ── Indexes ──
+    CREATE INDEX IF NOT EXISTS idx_todo_categories_owner_id ON todo_categories(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_habit_categories_owner_id ON habit_categories(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_vestiaire_categories_owner_id ON vestiaire_categories(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_flashcard_decks_owner_id ON flashcard_decks(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_todos_category_id ON todos(category_id);
+    CREATE INDEX IF NOT EXISTS idx_habits_category_id ON habits(category_id);
+    CREATE INDEX IF NOT EXISTS idx_vestiaire_category_id ON vestiaire(category_id);
+    CREATE INDEX IF NOT EXISTS idx_flashcards_deck_id ON flashcards(deck_id);
+    CREATE INDEX IF NOT EXISTS idx_texts_deck_id ON texts(deck_id);
+
+    -- ── Clean up dead settings keys ──
+    DELETE FROM settings WHERE key IN (
+      'todo_category_colors', 'todo_category_shortnames',
+      'habit_category_shortnames', 'vest_category_shortnames',
+      'flash_shortnames'
+    );
+  `,
 };

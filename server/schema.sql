@@ -27,6 +27,55 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- ── Category tables ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS todo_categories (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  name TEXT NOT NULL,
+  shortname TEXT,
+  color TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_protected INTEGER DEFAULT 0,
+  owner_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS habit_categories (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  name TEXT NOT NULL,
+  shortname TEXT,
+  color TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_protected INTEGER DEFAULT 0,
+  owner_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS vestiaire_categories (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  name TEXT NOT NULL,
+  shortname TEXT,
+  color TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_protected INTEGER DEFAULT 0,
+  owner_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS flashcard_decks (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  name TEXT NOT NULL,
+  shortname TEXT,
+  color TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_protected INTEGER DEFAULT 0,
+  owner_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS todos (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   text TEXT,
@@ -35,6 +84,7 @@ CREATE TABLE IF NOT EXISTS todos (
   due_date TEXT,
   snooze_until TEXT,
   category TEXT DEFAULT '',
+  category_id TEXT REFERENCES todo_categories(id) ON DELETE CASCADE,
   sort_order INTEGER DEFAULT 0,
   shared_id TEXT,
   shared_group_id TEXT,
@@ -48,6 +98,7 @@ CREATE TABLE IF NOT EXISTS habits (
   name TEXT NOT NULL,
   frequency_rule TEXT,
   category TEXT DEFAULT 'General',
+  category_id TEXT REFERENCES habit_categories(id) ON DELETE CASCADE,
   is_draft INTEGER DEFAULT 0,
   next_due TEXT,
   shared_id TEXT,
@@ -70,6 +121,7 @@ CREATE TABLE IF NOT EXISTS habit_completions (
 CREATE TABLE IF NOT EXISTS flashcards (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   deck TEXT NOT NULL,
+  deck_id TEXT REFERENCES flashcard_decks(id) ON DELETE CASCADE,
   front TEXT,
   back TEXT,
   stability REAL DEFAULT 0,
@@ -95,6 +147,7 @@ CREATE TABLE IF NOT EXISTS flashcard_notes (
 CREATE TABLE IF NOT EXISTS texts (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   deck TEXT NOT NULL,
+  deck_id TEXT REFERENCES flashcard_decks(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   author TEXT,
   content TEXT NOT NULL,
@@ -134,6 +187,7 @@ CREATE TABLE IF NOT EXISTS vestiaire (
   brand TEXT,
   size TEXT,
   category TEXT DEFAULT '',
+  category_id TEXT REFERENCES vestiaire_categories(id) ON DELETE CASCADE,
   color TEXT,
   note TEXT,
   purchase_status TEXT,
@@ -236,6 +290,17 @@ CREATE INDEX IF NOT EXISTS idx_habits_shared_id ON habits(shared_id);
 CREATE INDEX IF NOT EXISTS idx_habits_shared_group_id ON habits(shared_group_id);
 CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON list_items(shared_id);
 CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_group_id);
+
+-- ── Category table indexes ──
+CREATE INDEX IF NOT EXISTS idx_todo_categories_owner_id ON todo_categories(owner_id);
+CREATE INDEX IF NOT EXISTS idx_habit_categories_owner_id ON habit_categories(owner_id);
+CREATE INDEX IF NOT EXISTS idx_vestiaire_categories_owner_id ON vestiaire_categories(owner_id);
+CREATE INDEX IF NOT EXISTS idx_flashcard_decks_owner_id ON flashcard_decks(owner_id);
+CREATE INDEX IF NOT EXISTS idx_todos_category_id ON todos(category_id);
+CREATE INDEX IF NOT EXISTS idx_habits_category_id ON habits(category_id);
+CREATE INDEX IF NOT EXISTS idx_vestiaire_category_id ON vestiaire(category_id);
+CREATE INDEX IF NOT EXISTS idx_flashcards_deck_id ON flashcards(deck_id);
+CREATE INDEX IF NOT EXISTS idx_texts_deck_id ON texts(deck_id);
 
 -- 1.410 agent grants (parity with Supabase)
 CREATE TABLE IF NOT EXISTS agent_grants (

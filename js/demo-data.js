@@ -453,5 +453,6 @@ export function getEmptyData() {
     flashcards: [], flashcard_notes: [], birthdays: [], vestiaire: [],
     lists: [], list_items: [],
     settings: [], prompts: [], texts: [], text_line_progress: [], nvidia_usage: [], daily_visits: [],
+    todo_categories: [], habit_categories: [], vestiaire_categories: [], flashcard_decks: [],
   };
 }

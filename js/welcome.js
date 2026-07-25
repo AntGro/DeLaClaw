@@ -6,8 +6,8 @@ import { t, getLang } from './i18n.js';
 import state, { ARCHIVED_PROJECTS_KEY } from './state.js';
 import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText } from './item-utils.js';
-import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor } from './habits.js';
-import { getCategoryColor, getTodos } from './todos.js';
+import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName } from './habits.js';
+import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName } from './todos.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
 
@@ -425,7 +425,7 @@ function renderWelcomeCalendar(allBirthdays, allHabits, todayStart) {
       html += `<span class="welcome-cal-dot birthday" title="${esc(b.name)}"></span>`;
     }
     for (let idx = 0; idx < Math.min(allHabitsOnDay.length, 4); idx++) {
-      const hColor = getHabitCategoryColor(allHabitsOnDay[idx].category || 'General');
+      const hColor = getHabitCategoryColor(catIdForHabit(allHabitsOnDay[idx]));
       html += `<span class="welcome-cal-dot habit" style="background:${hColor}" title="${esc(allHabitsOnDay[idx].name)}"></span>`;
     }
     html += `</div>`;
@@ -566,40 +566,37 @@ function renderWelcome() {
   if (focusTodos.length === 0) {
     html += `<div class="welcome-empty">${esc(t('welcome.all_clear'))}</div>`;
   } else {
-    // Group todos by category
+    // Group todos by category_id
     const todosByCategory = {};
     for (const td of focusTodos) {
-      const cat = td.category || '';
-      if (!todosByCategory[cat]) todosByCategory[cat] = [];
-      todosByCategory[cat].push(td);
+      const catId = catIdForTodo(td);
+      if (!todosByCategory[catId]) todosByCategory[catId] = [];
+      todosByCategory[catId].push(td);
     }
     html += `<div class="welcome-items welcome-focus-todos">`;
     const catKeys = Object.keys(todosByCategory);
-    for (const cat of catKeys) {
-      const catColor = getCategoryColor(cat);
-      const isShared = cat.toLowerCase() === '__shared__';
-      const catName = isShared ? t('sharing.shared') : (cat || 'General');
-      if (catKeys.length > 1 || cat) {
+    for (const catId of catKeys) {
+      const catColor = getCategoryColor(catId);
+      const catName = getCatDisplayName(catId);
+      if (catKeys.length > 1 || catName) {
         html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(catName)}</div>`;
       }
-      for (const td of todosByCategory[cat]) {
+      for (const td of todosByCategory[catId]) {
         html += renderFocusTodoItem(td);
       }
     }
     html += `</div>`;
   }
   // Quick-add TODO with category selector
-  const todoCats = [...new Set(wTodos.map(td => td.category || ''))].sort();
-  if (!todoCats.includes('')) todoCats.unshift('');
+  const todoCatIds = [...new Set(wTodos.map(td => catIdForTodo(td)))];
   html += `<div class="welcome-quick-add">`;
   html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
-  for (const cat of todoCats) {
-    const isShared = cat.toLowerCase() === '__shared__';
-    const label = isShared ? t('sharing.shared') : (cat || 'General');
-    html += `<option value="${esc(cat)}">${esc(label)}</option>`;
+  for (const catId of todoCatIds) {
+    const label = getCatDisplayName(catId);
+    html += `<option value="${esc(catId)}">${esc(label)}</option>`;
   }
   html += `</select>`;
-  html += `<input type="text" placeholder="${esc(t('todos.add_todo_placeholder'))}" maxlength="2000" class="todo-cat-input" data-category="${esc(todoCats[0])}" data-priority="medium" data-action="welcome-quick-add-todo-on-enter">`;
+  html += `<input type="text" placeholder="${esc(t('todos.add_todo_placeholder'))}" maxlength="2000" class="todo-cat-input" data-category="${esc(todoCatIds[0] || '')}" data-priority="medium" data-action="welcome-quick-add-todo-on-enter">`;
   html += `<button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>`;
   html += `<button data-action="welcome-add-todo-from-quick">+</button>`;
   html += `</div>`;
@@ -612,35 +609,35 @@ function renderWelcome() {
     html += `<div class="welcome-empty">${esc(t('welcome.no_habits_due'))}</div>`;
   } else {
     // Group habits by category
+    // Group habits by category_id
     const habitsByCategory = {};
     for (const ch of habitsDue) {
-      const cat = ch.category || 'General';
-      if (!habitsByCategory[cat]) habitsByCategory[cat] = [];
-      habitsByCategory[cat].push(ch);
+      const catId = catIdForHabit(ch);
+      if (!habitsByCategory[catId]) habitsByCategory[catId] = [];
+      habitsByCategory[catId].push(ch);
     }
     html += `<div class="welcome-items welcome-focus-habits">`;
-    const habitCatKeys = Object.keys(habitsByCategory).sort();
-    for (const cat of habitCatKeys) {
-      const catColor = getHabitCategoryColor(cat);
-      const isShared = cat.toLowerCase() === '__shared__';
-      const catLabel = isShared ? t('sharing.shared') : cat;
+    const habitCatKeys = Object.keys(habitsByCategory);
+    for (const catId of habitCatKeys) {
+      const catColor = getHabitCategoryColor(catId);
+      const catLabel = getHabitCatDisplayName(catId);
       html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(catLabel)}</div>`;
-      for (const ch of habitsByCategory[cat]) {
+      for (const ch of habitsByCategory[catId]) {
         html += renderFocusHabitItem(ch);
       }
     }
     html += `</div>`;
   }
   // Quick-add Habit (opens modal pre-filled with name + category)
-  const habitCats = [...new Set(wHabits.map(c => c.category || 'General'))].sort();
-  if (!habitCats.includes('General')) habitCats.unshift('General');
+  const habitCatIds = [...new Set(wHabits.map(c => catIdForHabit(c)))];
   html += `<div class="welcome-quick-add">`;
   html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
-  for (const cat of habitCats) {
-    html += `<option value="${esc(cat)}">${esc(cat)}</option>`;
+  for (const catId of habitCatIds) {
+    const label = getHabitCatDisplayName(catId);
+    html += `<option value="${esc(catId)}">${esc(label)}</option>`;
   }
   html += `</select>`;
-  html += `<input type="text" placeholder="${esc(t('habits.quick_add_placeholder'))}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(habitCats[0])}" data-action="welcome-quick-add-habit-on-enter">`;
+  html += `<input type="text" placeholder="${esc(t('habits.quick_add_placeholder'))}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(habitCatIds[0] || '')}" data-action="welcome-quick-add-habit-on-enter">`;
   html += `<button data-action="welcome-add-habit-from-quick">+</button>`;
   html += `</div>`;
   html += `</div>`;

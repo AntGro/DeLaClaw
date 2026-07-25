@@ -160,7 +160,7 @@
       case 'request-proposal': callWindow('requestProposal', [getId(el)]); break;
       case 'start-inline-edit-draft': callWindow('startInlineEditDraft', [getId(el), el]); break;
       case 'delete-draft': callWindow('deleteDraft', [getId(el)]); break;
-      case 'prompt-flash-shortname': callWindow('promptFlashShortname', [el.dataset.deck||getId(el)]); break;
+      case 'prompt-flash-shortname': callWindow('openEditDeckModal', [el.dataset.deck||getId(el)]); break;
       case 'open-add-flashcard': callWindow('openAddFlashcardModal', [el.dataset.deck||getId(el)]); break;
       case 'delete-deck': callWindow('deleteDeck', [el.dataset.deck||getId(el)]); break;
       case 'start-text-practice': callWindow('startTextPractice', [el.dataset.scope||el.dataset.deck||'__all']); break;
@@ -178,6 +178,8 @@
       case 'close-add-flash-deck': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddFlashDeckModal', []); break;
       case 'select-deck-type': callWindow('selectDeckType', [el.dataset.type]); break;
       case 'save-new-flash-deck': callWindow('saveNewFlashDeck', []); break;
+      case 'close-edit-deck': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditDeckModal', []); break;
+      case 'save-edit-deck': callWindow('saveEditDeck', []); break;
       case 'end-practice': callWindow('endPractice', []); break;
       case 'reveal-card': callWindow('revealCard', []); break;
       case 'rate-card': callWindow('rateCard', [el.dataset.rating]); break;

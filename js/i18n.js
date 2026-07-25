@@ -375,7 +375,7 @@ const T = {
     // ── Flashcards ──
     flashcards: {
       search_placeholder: 'Search cards…',
-      practice: 'Practice', new_deck: 'New Deck',
+      practice: 'Practice', new_deck: 'New Deck', edit_deck: 'Edit Deck',
       add_card: 'Add Flashcard', edit_card: 'Edit Flashcard',
       add_draft: 'Add Draft', edit_proposal: 'Edit Proposal',
       new_card: 'New', due: 'Due', generating: 'Generating…',
@@ -385,6 +385,7 @@ const T = {
       feedback_placeholder: 'e.g. Reverse the card, be less verbose…',
       feedback_sent: 'Feedback sent, reworking proposal…',
       question: 'Front (Question)', answer: 'Back (Answer)', deck: 'Deck', deck_name: 'Deck Name',
+      shortname: 'Short Name', shortname_placeholder: 'e.g. GEN',
       draft_added: 'Draft added', draft_updated: 'Draft updated', draft_deleted: 'Draft deleted',
       card_added: 'Card added', card_updated: 'Card updated', card_deleted: 'Card deleted',
       card_added_to: 'Card added to {0}',
@@ -1055,7 +1056,7 @@ const T = {
     },
     flashcards: {
       search_placeholder: 'Rechercher…',
-      practice: 'Réviser', new_deck: 'Nouveau paquet',
+      practice: 'Réviser', new_deck: 'Nouveau paquet', edit_deck: 'Modifier le paquet',
       add_card: 'Ajouter une carte', edit_card: 'Modifier la carte',
       add_draft: 'Ajouter un brouillon', edit_proposal: 'Modifier la proposition',
       new_card: 'Nouvelle', due: 'À réviser', generating: 'Génération…',
@@ -1065,6 +1066,7 @@ const T = {
       feedback_placeholder: 'ex. Inverser la carte, être plus concis…',
       feedback_sent: 'Feedback envoyé, proposition en cours de révision…',
       question: 'Recto (Question)', answer: 'Verso (Réponse)', deck: 'Paquet', deck_name: 'Nom du paquet',
+      shortname: 'Nom court', shortname_placeholder: 'ex. GÉN',
       draft_added: 'Brouillon ajouté', draft_updated: 'Brouillon mis à jour', draft_deleted: 'Brouillon supprimé',
       card_added: 'Carte ajoutée', card_updated: 'Carte mise à jour', card_deleted: 'Carte supprimée',
       card_added_to: 'Carte ajoutée à {0}',
@@ -1731,7 +1733,7 @@ const T = {
     },
     flashcards: {
       search_placeholder: 'Buscar…',
-      practice: 'Practicar', new_deck: 'Nuevo mazo',
+      practice: 'Practicar', new_deck: 'Nuevo mazo', edit_deck: 'Editar mazo',
       add_card: 'Añadir tarjeta', edit_card: 'Editar tarjeta',
       add_draft: 'Añadir borrador', edit_proposal: 'Editar propuesta',
       new_card: 'Nueva', due: 'Pendiente', generating: 'Generando…',
@@ -1741,6 +1743,7 @@ const T = {
       feedback_placeholder: 'ej. Invertir la tarjeta, ser más conciso…',
       feedback_sent: 'Feedback enviado, reelaborando propuesta…',
       question: 'Anverso (Pregunta)', answer: 'Reverso (Respuesta)', deck: 'Mazo', deck_name: 'Nombre del mazo',
+      shortname: 'Nombre corto', shortname_placeholder: 'ej. GEN',
       draft_added: 'Borrador añadido', draft_updated: 'Borrador actualizado', draft_deleted: 'Borrador eliminado',
       card_added: 'Tarjeta añadida', card_updated: 'Tarjeta actualizada', card_deleted: 'Tarjeta eliminada',
       card_added_to: 'Tarjeta añadida a {0}',

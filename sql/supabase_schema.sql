@@ -315,8 +315,7 @@ CREATE TABLE "public"."text_line_progress" (
     "next_review" timestamp with time zone,
     "review_count" integer DEFAULT 0 NOT NULL,
     "owner_id" "uuid",
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "deck_id" "text"
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
 );
 
 
@@ -326,14 +325,15 @@ CREATE TABLE "public"."text_line_progress" (
 
 CREATE TABLE "public"."texts" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "deck" "text" NOT NULL,
+    "deck" "text" DEFAULT ''::text NOT NULL,
     "title" "text" NOT NULL,
     "author" "text",
     "content" "text" NOT NULL,
     "lines_per_chunk" integer DEFAULT 4 NOT NULL,
     "context_lines" integer DEFAULT 3 NOT NULL,
     "owner_id" "uuid",
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "deck_id" "text"
 );
 
 
@@ -367,7 +367,7 @@ CREATE TABLE "public"."todos" (
 CREATE TABLE "public"."vestiaire" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "name" "text" NOT NULL,
-    "category" "text" DEFAULT 'Hauts'::"text" NOT NULL,
+    "category" "text" DEFAULT ''::text NOT NULL,
     "brand" "text",
     "size" "text",
     "color" "text",
@@ -978,7 +978,7 @@ ALTER TABLE ONLY "public"."sharing_items"
 --
 
 ALTER TABLE ONLY "public"."todos"
-    ADD CONSTRAINT "todos_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."todo_categories"("id") ON DELETE CASCADE;
+    ADD CONSTRAINT "todos_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."todo_categories"("id") ON DELETE SET NULL;
 
 
 --
@@ -986,7 +986,7 @@ ALTER TABLE ONLY "public"."todos"
 --
 
 ALTER TABLE ONLY "public"."habits"
-    ADD CONSTRAINT "habits_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."habit_categories"("id") ON DELETE CASCADE;
+    ADD CONSTRAINT "habits_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."habit_categories"("id") ON DELETE SET NULL;
 
 
 --
@@ -994,7 +994,7 @@ ALTER TABLE ONLY "public"."habits"
 --
 
 ALTER TABLE ONLY "public"."vestiaire"
-    ADD CONSTRAINT "vestiaire_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."vestiaire_categories"("id") ON DELETE CASCADE;
+    ADD CONSTRAINT "vestiaire_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."vestiaire_categories"("id") ON DELETE SET NULL;
 
 
 --
@@ -1002,7 +1002,7 @@ ALTER TABLE ONLY "public"."vestiaire"
 --
 
 ALTER TABLE ONLY "public"."flashcards"
-    ADD CONSTRAINT "flashcards_deck_id_fkey" FOREIGN KEY ("deck_id") REFERENCES "public"."flashcard_decks"("id") ON DELETE CASCADE;
+    ADD CONSTRAINT "flashcards_deck_id_fkey" FOREIGN KEY ("deck_id") REFERENCES "public"."flashcard_decks"("id") ON DELETE SET NULL;
 
 
 --
@@ -1010,7 +1010,7 @@ ALTER TABLE ONLY "public"."flashcards"
 --
 
 ALTER TABLE ONLY "public"."texts"
-    ADD CONSTRAINT "texts_deck_id_fkey" FOREIGN KEY ("deck_id") REFERENCES "public"."flashcard_decks"("id") ON DELETE CASCADE;
+    ADD CONSTRAINT "texts_deck_id_fkey" FOREIGN KEY ("deck_id") REFERENCES "public"."flashcard_decks"("id") ON DELETE SET NULL;
 
 
 --
@@ -1325,4 +1325,33 @@ DROP POLICY IF EXISTS "owner only" ON "public"."habit_categories"; CREATE POLICY
 DROP POLICY IF EXISTS "owner only" ON "public"."vestiaire_categories"; CREATE POLICY "owner or agent" ON "public"."vestiaire_categories" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 DROP POLICY IF EXISTS "owner only" ON "public"."flashcard_decks"; CREATE POLICY "owner or agent" ON "public"."flashcard_decks" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.474') ON CONFLICT ("key") DO UPDATE SET "value" = '1.474', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.484') ON CONFLICT ("key") DO UPDATE SET "value" = '1.484', "updated_at" = now();
+
+-- ── Seed protected category rows (ON CONFLICT safe for idempotent re-runs) ──
+-- owner_id is NULL here; trg_set_owner_id fills it on first auth'd INSERT.
+-- Fresh installs run claim_ownership() which backfills owner_id.
+INSERT INTO "public"."todo_categories" ("name", "is_protected", "sort_order") VALUES ('', TRUE, 0);
+INSERT INTO "public"."todo_categories" ("name", "is_protected", "sort_order") VALUES ('__shared__', TRUE, 9999);
+INSERT INTO "public"."habit_categories" ("name", "is_protected", "sort_order") VALUES ('', TRUE, 0);
+INSERT INTO "public"."habit_categories" ("name", "is_protected", "sort_order") VALUES ('__shared__', TRUE, 9999);
+INSERT INTO "public"."vestiaire_categories" ("name", "is_protected", "sort_order") VALUES ('', TRUE, 0);
+INSERT INTO "public"."vestiaire_categories" ("name", "is_protected", "sort_order") VALUES ('__shared__', TRUE, 9999);
+INSERT INTO "public"."flashcard_decks" ("name", "is_protected", "sort_order") VALUES ('', TRUE, 0);
+INSERT INTO "public"."flashcard_decks" ("name", "is_protected", "sort_order") VALUES ('__shared__', TRUE, 9999);
+
+-- ── Protection trigger: prevent DELETE or UPDATE of is_protected rows ──
+CREATE OR REPLACE FUNCTION "public"."protect_category_row"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  IF OLD.is_protected THEN
+    RAISE EXCEPTION 'Cannot modify or delete a protected category row (id=%)', OLD.id;
+  END IF;
+  RETURN OLD;
+END;
+$$;
+
+CREATE TRIGGER trg_protect_todo_categories BEFORE DELETE OR UPDATE ON "public"."todo_categories" FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION "public"."protect_category_row"();
+CREATE TRIGGER trg_protect_habit_categories BEFORE DELETE OR UPDATE ON "public"."habit_categories" FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION "public"."protect_category_row"();
+CREATE TRIGGER trg_protect_vestiaire_categories BEFORE DELETE OR UPDATE ON "public"."vestiaire_categories" FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION "public"."protect_category_row"();
+CREATE TRIGGER trg_protect_flashcard_decks BEFORE DELETE OR UPDATE ON "public"."flashcard_decks" FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION "public"."protect_category_row"();

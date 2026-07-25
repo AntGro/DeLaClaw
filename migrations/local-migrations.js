@@ -360,4 +360,67 @@ export const LOCAL_MIGRATIONS = {
     UPDATE flashcards SET deck = '' WHERE deck = 'Général';
     UPDATE texts SET deck = '' WHERE deck = 'Général';
   `,
+
+  '1.484': `
+    -- Migration 1.484: Category integrity hardening
+
+    -- Drop spurious deck_id from text_line_progress (inherits deck via text_id)
+    -- SQLite cannot DROP COLUMN before 3.35; column is harmless if it stays,
+    -- but we clean it on fresh installs via schema.sql.
+
+    -- Seed protected rows (idempotent — INSERT OR IGNORE)
+    INSERT OR IGNORE INTO todo_categories (id, name, is_protected, sort_order)
+    VALUES ('_default_todo_cat', '', 1, 0);
+    INSERT OR IGNORE INTO todo_categories (id, name, is_protected, sort_order)
+    VALUES ('_shared_todo_cat', '__shared__', 1, 9999);
+    INSERT OR IGNORE INTO habit_categories (id, name, is_protected, sort_order)
+    VALUES ('_default_habit_cat', '', 1, 0);
+    INSERT OR IGNORE INTO habit_categories (id, name, is_protected, sort_order)
+    VALUES ('_shared_habit_cat', '__shared__', 1, 9999);
+    INSERT OR IGNORE INTO vestiaire_categories (id, name, is_protected, sort_order)
+    VALUES ('_default_vest_cat', '', 1, 0);
+    INSERT OR IGNORE INTO vestiaire_categories (id, name, is_protected, sort_order)
+    VALUES ('_shared_vest_cat', '__shared__', 1, 9999);
+    INSERT OR IGNORE INTO flashcard_decks (id, name, is_protected, sort_order)
+    VALUES ('_default_deck', '', 1, 0);
+    INSERT OR IGNORE INTO flashcard_decks (id, name, is_protected, sort_order)
+    VALUES ('_shared_deck', '__shared__', 1, 9999);
+
+    -- Protection triggers (idempotent via IF NOT EXISTS)
+    CREATE TRIGGER IF NOT EXISTS trg_protect_todo_categories
+      BEFORE DELETE ON todo_categories FOR EACH ROW
+      WHEN OLD.is_protected = 1
+      BEGIN SELECT RAISE(ABORT, 'Cannot delete protected category row'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_protect_todo_categories_upd
+      BEFORE UPDATE ON todo_categories FOR EACH ROW
+      WHEN OLD.is_protected = 1
+      BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_protect_habit_categories
+      BEFORE DELETE ON habit_categories FOR EACH ROW
+      WHEN OLD.is_protected = 1
+      BEGIN SELECT RAISE(ABORT, 'Cannot delete protected category row'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_protect_habit_categories_upd
+      BEFORE UPDATE ON habit_categories FOR EACH ROW
+      WHEN OLD.is_protected = 1
+      BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_protect_vestiaire_categories
+      BEFORE DELETE ON vestiaire_categories FOR EACH ROW
+      WHEN OLD.is_protected = 1
+      BEGIN SELECT RAISE(ABORT, 'Cannot delete protected category row'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_protect_vestiaire_categories_upd
+      BEFORE UPDATE ON vestiaire_categories FOR EACH ROW
+      WHEN OLD.is_protected = 1
+      BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_protect_flashcard_decks
+      BEFORE DELETE ON flashcard_decks FOR EACH ROW
+      WHEN OLD.is_protected = 1
+      BEGIN SELECT RAISE(ABORT, 'Cannot delete protected category row'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_protect_flashcard_decks_upd
+      BEFORE UPDATE ON flashcard_decks FOR EACH ROW
+      WHEN OLD.is_protected = 1
+      BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
+  `,
 };

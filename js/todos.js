@@ -891,11 +891,11 @@ async function deleteCategory(catId) {
   if (!cat || cat.is_protected) return;
   const todosInCat = allTodos.filter(t => catIdForTodo(t) === catId);
   const msg = todosInCat.length > 0
-    ? `Delete "${cat.name}" and its ${todosInCat.length} TODO(s)?`
+    ? `Delete "${cat.name}"? Its ${todosInCat.length} TODO(s) will move to ${todoCatDisplayName(_defaultCatId)}.`
     : `Delete empty category "${cat.name}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
-    // CASCADE handles item deletion
+    // SET NULL on FK — items survive with category_id = NULL, shown in default bucket
     await state.db.from('todo_categories').delete().eq('id', catId);
     showToast(t('toast.deleted'), 'info');
     await refreshTodos();

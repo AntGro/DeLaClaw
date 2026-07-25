@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS todos (
   due_date TEXT,
   snooze_until TEXT,
   category TEXT DEFAULT '',
-  category_id TEXT REFERENCES todo_categories(id) ON DELETE CASCADE,
+  category_id TEXT REFERENCES todo_categories(id) ON DELETE SET NULL,
   sort_order INTEGER DEFAULT 0,
   shared_id TEXT,
   shared_group_id TEXT,
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS habits (
   name TEXT NOT NULL,
   frequency_rule TEXT,
   category TEXT DEFAULT 'General',
-  category_id TEXT REFERENCES habit_categories(id) ON DELETE CASCADE,
+  category_id TEXT REFERENCES habit_categories(id) ON DELETE SET NULL,
   is_draft INTEGER DEFAULT 0,
   next_due TEXT,
   shared_id TEXT,
@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS habit_completions (
 CREATE TABLE IF NOT EXISTS flashcards (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   deck TEXT NOT NULL,
-  deck_id TEXT REFERENCES flashcard_decks(id) ON DELETE CASCADE,
+  deck_id TEXT REFERENCES flashcard_decks(id) ON DELETE SET NULL,
   front TEXT,
   back TEXT,
   stability REAL DEFAULT 0,
@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS flashcard_notes (
 CREATE TABLE IF NOT EXISTS texts (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   deck TEXT NOT NULL,
-  deck_id TEXT REFERENCES flashcard_decks(id) ON DELETE CASCADE,
+  deck_id TEXT REFERENCES flashcard_decks(id) ON DELETE SET NULL,
   title TEXT NOT NULL,
   author TEXT,
   content TEXT NOT NULL,
@@ -187,7 +187,7 @@ CREATE TABLE IF NOT EXISTS vestiaire (
   brand TEXT,
   size TEXT,
   category TEXT DEFAULT '',
-  category_id TEXT REFERENCES vestiaire_categories(id) ON DELETE CASCADE,
+  category_id TEXT REFERENCES vestiaire_categories(id) ON DELETE SET NULL,
   color TEXT,
   note TEXT,
   purchase_status TEXT,
@@ -316,3 +316,54 @@ CREATE TABLE IF NOT EXISTS agent_grants (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_grants_owner_id ON agent_grants(owner_id);
 CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON agent_grants(token_hash);
+
+-- ── Seed protected category rows ──
+INSERT OR IGNORE INTO todo_categories (id, name, is_protected, sort_order) VALUES ('_default_todo_cat', '', 1, 0);
+INSERT OR IGNORE INTO todo_categories (id, name, is_protected, sort_order) VALUES ('_shared_todo_cat', '__shared__', 1, 9999);
+INSERT OR IGNORE INTO habit_categories (id, name, is_protected, sort_order) VALUES ('_default_habit_cat', '', 1, 0);
+INSERT OR IGNORE INTO habit_categories (id, name, is_protected, sort_order) VALUES ('_shared_habit_cat', '__shared__', 1, 9999);
+INSERT OR IGNORE INTO vestiaire_categories (id, name, is_protected, sort_order) VALUES ('_default_vest_cat', '', 1, 0);
+INSERT OR IGNORE INTO vestiaire_categories (id, name, is_protected, sort_order) VALUES ('_shared_vest_cat', '__shared__', 1, 9999);
+INSERT OR IGNORE INTO flashcard_decks (id, name, is_protected, sort_order) VALUES ('_default_deck', '', 1, 0);
+INSERT OR IGNORE INTO flashcard_decks (id, name, is_protected, sort_order) VALUES ('_shared_deck', '__shared__', 1, 9999);
+
+-- ── Protection triggers: prevent DELETE or UPDATE of is_protected rows ──
+CREATE TRIGGER IF NOT EXISTS trg_protect_todo_categories
+  BEFORE DELETE ON todo_categories FOR EACH ROW
+  WHEN OLD.is_protected = 1
+  BEGIN SELECT RAISE(ABORT, 'Cannot delete protected category row'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_protect_todo_categories_upd
+  BEFORE UPDATE ON todo_categories FOR EACH ROW
+  WHEN OLD.is_protected = 1
+  BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_protect_habit_categories
+  BEFORE DELETE ON habit_categories FOR EACH ROW
+  WHEN OLD.is_protected = 1
+  BEGIN SELECT RAISE(ABORT, 'Cannot delete protected category row'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_protect_habit_categories_upd
+  BEFORE UPDATE ON habit_categories FOR EACH ROW
+  WHEN OLD.is_protected = 1
+  BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_protect_vestiaire_categories
+  BEFORE DELETE ON vestiaire_categories FOR EACH ROW
+  WHEN OLD.is_protected = 1
+  BEGIN SELECT RAISE(ABORT, 'Cannot delete protected category row'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_protect_vestiaire_categories_upd
+  BEFORE UPDATE ON vestiaire_categories FOR EACH ROW
+  WHEN OLD.is_protected = 1
+  BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_protect_flashcard_decks
+  BEFORE DELETE ON flashcard_decks FOR EACH ROW
+  WHEN OLD.is_protected = 1
+  BEGIN SELECT RAISE(ABORT, 'Cannot delete protected category row'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_protect_flashcard_decks_upd
+  BEFORE UPDATE ON flashcard_decks FOR EACH ROW
+  WHEN OLD.is_protected = 1
+  BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;

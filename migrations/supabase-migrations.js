@@ -1545,4 +1545,84 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 NOTIFY pgrst, 'reload schema';
 `,};
 
+// ── 1.484: category integrity hardening ──
+SUPABASE_MIGRATIONS['1.484_category_integrity'] = {
+  version: '1.484',
+  sql: `
+-- Migration 1.484: Category integrity hardening
+-- 1. texts: add missing deck_id column (was in FKs but not in CREATE TABLE)
+-- 2. text_line_progress: drop spurious deck_id column
+-- 3. Fix vestiaire.category DEFAULT, texts.deck DEFAULT
+-- 4. Seed protected rows (idempotent)
+-- 5. Protection trigger on *_categories / flashcard_decks
+-- 6. FK policy: CASCADE → SET NULL (items survive category deletion)
+
+-- ── Fix texts.deck_id (already exists via 1.474 ALTER for existing installs) ──
+ALTER TABLE texts ADD COLUMN IF NOT EXISTS deck_id TEXT;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'texts_deck_id_fkey') THEN
+    ALTER TABLE texts ADD CONSTRAINT texts_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES flashcard_decks(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- ── Drop spurious text_line_progress.deck_id ──
+ALTER TABLE text_line_progress DROP COLUMN IF EXISTS deck_id;
+
+-- ── Fix column defaults ──
+ALTER TABLE vestiaire ALTER COLUMN category SET DEFAULT '';
+ALTER TABLE texts ALTER COLUMN deck SET DEFAULT '';
+
+-- ── Seed protected rows (idempotent via unique name+is_protected check) ──
+INSERT INTO todo_categories (name, is_protected, sort_order)
+  SELECT '', TRUE, 0 WHERE NOT EXISTS (SELECT 1 FROM todo_categories WHERE is_protected = TRUE AND name = '');
+INSERT INTO todo_categories (name, is_protected, sort_order)
+  SELECT '__shared__', TRUE, 9999 WHERE NOT EXISTS (SELECT 1 FROM todo_categories WHERE is_protected = TRUE AND name = '__shared__');
+INSERT INTO habit_categories (name, is_protected, sort_order)
+  SELECT '', TRUE, 0 WHERE NOT EXISTS (SELECT 1 FROM habit_categories WHERE is_protected = TRUE AND name = '');
+INSERT INTO habit_categories (name, is_protected, sort_order)
+  SELECT '__shared__', TRUE, 9999 WHERE NOT EXISTS (SELECT 1 FROM habit_categories WHERE is_protected = TRUE AND name = '__shared__');
+INSERT INTO vestiaire_categories (name, is_protected, sort_order)
+  SELECT '', TRUE, 0 WHERE NOT EXISTS (SELECT 1 FROM vestiaire_categories WHERE is_protected = TRUE AND name = '');
+INSERT INTO vestiaire_categories (name, is_protected, sort_order)
+  SELECT '__shared__', TRUE, 9999 WHERE NOT EXISTS (SELECT 1 FROM vestiaire_categories WHERE is_protected = TRUE AND name = '__shared__');
+INSERT INTO flashcard_decks (name, is_protected, sort_order)
+  SELECT '', TRUE, 0 WHERE NOT EXISTS (SELECT 1 FROM flashcard_decks WHERE is_protected = TRUE AND name = '');
+INSERT INTO flashcard_decks (name, is_protected, sort_order)
+  SELECT '__shared__', TRUE, 9999 WHERE NOT EXISTS (SELECT 1 FROM flashcard_decks WHERE is_protected = TRUE AND name = '__shared__');
+
+-- ── Protection trigger ──
+CREATE OR REPLACE FUNCTION protect_category_row() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.is_protected THEN
+    RAISE EXCEPTION 'Cannot modify or delete a protected category row (id=%)', OLD.id;
+  END IF;
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_todo_categories ON todo_categories;
+CREATE TRIGGER trg_protect_todo_categories BEFORE DELETE OR UPDATE ON todo_categories FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION protect_category_row();
+DROP TRIGGER IF EXISTS trg_protect_habit_categories ON habit_categories;
+CREATE TRIGGER trg_protect_habit_categories BEFORE DELETE OR UPDATE ON habit_categories FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION protect_category_row();
+DROP TRIGGER IF EXISTS trg_protect_vestiaire_categories ON vestiaire_categories;
+CREATE TRIGGER trg_protect_vestiaire_categories BEFORE DELETE OR UPDATE ON vestiaire_categories FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION protect_category_row();
+DROP TRIGGER IF EXISTS trg_protect_flashcard_decks ON flashcard_decks;
+CREATE TRIGGER trg_protect_flashcard_decks BEFORE DELETE OR UPDATE ON flashcard_decks FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION protect_category_row();
+
+-- ── FK policy: CASCADE → SET NULL ──
+ALTER TABLE todos DROP CONSTRAINT IF EXISTS todos_category_id_fkey;
+ALTER TABLE todos ADD CONSTRAINT todos_category_id_fkey FOREIGN KEY (category_id) REFERENCES todo_categories(id) ON DELETE SET NULL;
+ALTER TABLE habits DROP CONSTRAINT IF EXISTS habits_category_id_fkey;
+ALTER TABLE habits ADD CONSTRAINT habits_category_id_fkey FOREIGN KEY (category_id) REFERENCES habit_categories(id) ON DELETE SET NULL;
+ALTER TABLE vestiaire DROP CONSTRAINT IF EXISTS vestiaire_category_id_fkey;
+ALTER TABLE vestiaire ADD CONSTRAINT vestiaire_category_id_fkey FOREIGN KEY (category_id) REFERENCES vestiaire_categories(id) ON DELETE SET NULL;
+ALTER TABLE flashcards DROP CONSTRAINT IF EXISTS flashcards_deck_id_fkey;
+ALTER TABLE flashcards ADD CONSTRAINT flashcards_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES flashcard_decks(id) ON DELETE SET NULL;
+ALTER TABLE texts DROP CONSTRAINT IF EXISTS texts_deck_id_fkey;
+ALTER TABLE texts ADD CONSTRAINT texts_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES flashcard_decks(id) ON DELETE SET NULL;
+
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.484', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+NOTIFY pgrst, 'reload schema';
+`,};
+
 export { SUPABASE_MIGRATIONS };

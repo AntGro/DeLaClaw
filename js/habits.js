@@ -1693,13 +1693,11 @@ async function deleteHabitCategory(catId) {
   if (!cat) return;
   const habitsInCat = state.allHabits.filter(c => catIdForHabit(c) === catId);
   const msg = habitsInCat.length > 0
-    ? `Delete "${cat.name}" and its ${habitsInCat.length} habit(s)?`
+    ? `Delete "${cat.name}"? Its ${habitsInCat.length} habit(s) will move to ${getHabitCatDisplayName(_defaultHabitCatId)}.`
     : `Delete empty category "${cat.name}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
-    // CASCADE on the habit FK will handle deletion when the category row is deleted
-    // But habits have category_id FK — delete the category row, CASCADE deletes habits, 
-    // and habit_completions are cascaded from habits.
+    // SET NULL on FK — habits survive with category_id = NULL, shown in default bucket
     const { error } = await state.db.from('habit_categories').delete().eq('id', catId);
     if (error) { showToast(t('toast.delete_failed') + ': ' + error.message, 'error'); return; }
     showToast(t('habits.category_deleted', cat.name), 'info');

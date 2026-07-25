@@ -2315,13 +2315,13 @@ async function deleteDeck(deck) {
   const drafts = allDrafts.filter(d => d.proposed_deck === deck);
   const total = cards.length + texts.length;
   const msg = total > 0
-    ? `Delete "${deck}" and its ${total} item(s)?`
+    ? `Delete "${deck}"? Its ${total} item(s) will move to ${getDeckDisplayName(_defaultDeckId)}.`
     : `Delete empty deck "${deck}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
     // Delete drafts targeting this deck (proposed_deck is TEXT, not FK)
     if (drafts.length) await state.db.from('flashcard_notes').delete().eq('proposed_deck', deck);
-    // Delete the deck row — CASCADE handles flashcards + texts (and their text_line_progress via text FK)
+    // SET NULL on FK — flashcards + texts survive with deck_id = NULL, shown in default deck
     if (deckRow) {
       await state.db.from('flashcard_decks').delete().eq('id', deckRow.id);
     } else {

@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
-import state from './state.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, isMobileUA, createSettingsAccessor } from './utils.js';
+import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR } from './state.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, isMobileUA } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
@@ -99,53 +99,52 @@ let trSessionActive = false;
 let trSessionDeck = null;
 let trSessionTextId = null;
 
-const DECK_COLORS = [
-  '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b',
-  '#ef4444', '#ec4899', '#06b6d4', '#f97316',
-  '#6366f1', '#14b8a6',
-];
+// ── Deck table state ──
+// Decks live in the flashcard_decks DB table. Loaded into maps for fast lookup.
+let _deckMap = new Map();     // id → row
+let _deckByName = new Map();  // name → row (backward compat)
 
-// ── Shortnames (synced via settings table, localStorage fallback) ──
-const _flashShortnamesAccessor = createSettingsAccessor('flash_shortnames', 'claw_flash_shortnames');
-
-function getFlashShortnames() { return _flashShortnamesAccessor.get(); }
-
-function getFlashShortname(deckName) {
-  if (!deckName) return '';
-  return _flashShortnamesAccessor.get()[deckName] || '';
+async function loadFlashcardDecks() {
+  const { data, error } = await state.db.from('flashcard_decks').select('*').order('sort_order', { ascending: true });
+  if (error) { console.warn('loadFlashcardDecks error:', error); return; }
+  _deckMap.clear();
+  _deckByName.clear();
+  for (const row of (data || [])) {
+    _deckMap.set(row.id, row);
+    _deckByName.set(row.name, row);
+  }
 }
 
-async function loadFlashShortnames() {
-  await _flashShortnamesAccessor.load();
+function getFlashcardDecks() { return _deckMap; }
+
+// ── Deck helpers ──
+function getDeckColorById(deckId) { return _deckMap.get(deckId)?.color || GENERAL_CATEGORY_COLOR; }
+function getDeckShortname(deckId) { return _deckMap.get(deckId)?.shortname || ''; }
+function getDeckName(deckId) { return _deckMap.get(deckId)?.name ?? ''; }
+function deckIdForCard(card) { return card.deck_id || _deckByName.get(card.deck ?? '')?.id || null; }
+function deckIdForText(text) { return text.deck_id || _deckByName.get(text.deck ?? '')?.id || null; }
+
+// Backward-compat: accepts name or ID
+function getDeckColor(nameOrId) {
+  if (_deckMap.has(nameOrId)) return _deckMap.get(nameOrId).color || GENERAL_CATEGORY_COLOR;
+  const byName = _deckByName.get(nameOrId);
+  if (byName) return byName.color || GENERAL_CATEGORY_COLOR;
+  return GENERAL_CATEGORY_COLOR;
 }
 
-async function setFlashShortname(deckName, shortname) {
-  const map = { ..._flashShortnamesAccessor.get() };
-  if (shortname) { map[deckName] = shortname; } else { delete map[deckName]; }
-  await _flashShortnamesAccessor.save(map);
+function getFlashShortname(nameOrId) {
+  if (_deckMap.has(nameOrId)) return _deckMap.get(nameOrId).shortname || '';
+  const byName = _deckByName.get(nameOrId);
+  if (byName) return byName.shortname || '';
+  return '';
 }
 
-async function promptFlashShortname(deckName) {
-  const current = getFlashShortname(deckName) || '';
-  const result = prompt('Short name for "' + deckName + '" (leave empty to remove):', current);
-  if (result === null) return;
-  await setFlashShortname(deckName, result.trim());
-  refreshFlashcards();
-}
 const DRAFT_COLOR = '#6b7280';
-
-function getDeckColor(deck) {
-  const cardDecks = allCards.map(c => c.deck);
-  const textDecks = allTexts.map(tx => tx.deck);
-  const decks = [...new Set([...cardDecks, ...textDecks])].sort();
-  const idx = decks.indexOf(deck);
-  return DECK_COLORS[(idx >= 0 ? idx : 0) % DECK_COLORS.length];
-}
 
 // ── Data Loading ──
 async function refreshFlashcards() {
   if (!state.db.connected) return;
-  await loadFlashShortnames();
+  await loadFlashcardDecks();
   allCards = await fetchAll(() => state.db.from('flashcards').select('*').order('created_at'));
   allDrafts = await fetchAll(() => state.db.from('flashcard_notes').select('*').order('created_at', { ascending: false }));
   try {
@@ -167,14 +166,7 @@ async function refreshFlashcards() {
       }
     }
   }
-  // Prune orphan shortnames (deck was renamed or deleted)
-  const shortnames = _flashShortnamesAccessor.get();
-  const liveDecks = new Set([...allCards.map(c => c.deck), ...allTexts.map(t => t.deck)]);
-  const orphans = Object.keys(shortnames).filter(k => !liveDecks.has(k));
-  if (orphans.length) {
-    for (const k of orphans) delete shortnames[k];
-    await _flashShortnamesAccessor.save(shortnames);
-  }
+  // Decks already loaded via loadFlashcardDecks() above
   if (state.currentView === 'flashcards') renderFlashcards();
 }
 
@@ -2266,12 +2258,11 @@ function getFlashcards() { return allCards; }
 function getTexts() { return allTexts; }
 function getTextProgress() { return allChunkProgress; }
 
-export { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts, getFlashcards, getTexts, getTextProgress };
+export { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts, getFlashcards, getTexts, getTextProgress, loadFlashcardDecks, getFlashcardDecks, getDeckColor };
 window.renderFlashcards = renderFlashcards;
 window.setFlashcardFilter = setFlashcardFilter;
 window.refreshFlashcards = refreshFlashcards;
 
-window.promptFlashShortname = promptFlashShortname;
 
 async function deleteDeck(deck) {
   const cards = allCards.filter(c => c.deck === deck);

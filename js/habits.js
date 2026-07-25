@@ -1,8 +1,7 @@
 import { lucideIcon } from './icons.js';
-import state, { HABIT_CATEGORIES_KEY } from './state.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, fetchAll, createSettingsAccessor } from './utils.js';
+import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
+import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
-import { getCategoryColor, setCategoryColor } from './todos.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge } from './sharing-ui.js';
 
@@ -19,31 +18,59 @@ let habitCalSelectedDay = null; // ISO string of selected day (mobile tap-to-exp
 let habitCalScale = 'month'; // 'month' or 'week'
 let habitCalWeekStart = null; // Date object for the start of the current week view (today-based)
 // ── Shortnames (synced via settings table) ──
-const SHARED_CATEGORY = '__shared__';
+const SHARED_CATEGORY = SHARED_CAT_CONST;
 
-// DB-synced settings accessor
-const _habitShortnamesAccessor = createSettingsAccessor('habit_category_shortnames', 'claw_habit_shortnames');
+// ── Category table state ──
+// Categories live in the habit_categories DB table. Loaded into maps for fast lookup.
+let _habitCatMap = new Map();    // id → row
+let _habitCatByName = new Map(); // name → row (backward compat)
+let _defaultHabitCatId = null;   // protected General row
+let _sharedHabitCatId = null;    // protected __shared__ row
 
-function getHabitShortnames() { return _habitShortnamesAccessor.get(); }
-function getHabitShortname(catName) {
-  if (!catName) return '';
-  return _habitShortnamesAccessor.get()[catName] || '';
+async function loadHabitCategories() {
+  const { data, error } = await state.db.from('habit_categories').select('*').order('sort_order', { ascending: true });
+  if (error) { console.warn('loadHabitCategories error:', error); return; }
+  _habitCatMap.clear();
+  _habitCatByName.clear();
+  _defaultHabitCatId = null;
+  _sharedHabitCatId = null;
+  for (const row of (data || [])) {
+    _habitCatMap.set(row.id, row);
+    _habitCatByName.set(row.name, row);
+    if (row.is_protected && row.name === SHARED_CATEGORY) _sharedHabitCatId = row.id;
+    else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultHabitCatId = row.id;
+  }
 }
 
-async function loadHabitShortnames() {
-  await _habitShortnamesAccessor.load();
-}
+function getHabitCategories() { return _habitCatMap; }
 
-function setHabitShortname(catName, shortname) {
-  const map = _habitShortnamesAccessor.get();
-  if (shortname) { map[catName] = shortname; } else { delete map[catName]; }
-  _habitShortnamesAccessor.save(map);
+// ── Category helpers ──
+function getHabitCatColor(catId) { return _habitCatMap.get(catId)?.color || GENERAL_CATEGORY_COLOR; }
+function getHabitCatShortname(catId) { return _habitCatMap.get(catId)?.shortname || ''; }
+function getHabitCatName(catId) { return _habitCatMap.get(catId)?.name ?? ''; }
+function getHabitCatDisplayName(catId) {
+  const cat = _habitCatMap.get(catId);
+  if (!cat) return 'General';
+  if (cat.name === '') return 'General';
+  if (cat.name === SHARED_CATEGORY) return t('sharing.shared');
+  return cat.name;
 }
-function openEditHabitCategoryModal(catName) {
-  document.getElementById('editHabitCatOldName').value = catName;
-  document.getElementById('editHabitCatName').value = catName;
-  document.getElementById('editHabitCatShortname').value = getHabitShortname(catName) || '';
-  document.getElementById('editHabitCatColor').value = getCategoryColor(catName);
+function catIdForHabit(habit) { return habit.category_id || _habitCatByName.get(habit.category ?? '')?.id || _defaultHabitCatId; }
+
+// Backward-compat: accepts name or ID. Used by welcome.js for habit category colors.
+function getHabitCategoryColor(nameOrId) {
+  if (_habitCatMap.has(nameOrId)) return _habitCatMap.get(nameOrId).color || GENERAL_CATEGORY_COLOR;
+  const byName = _habitCatByName.get(nameOrId);
+  if (byName) return byName.color || GENERAL_CATEGORY_COLOR;
+  return GENERAL_CATEGORY_COLOR;
+}
+function openEditHabitCategoryModal(catId) {
+  const cat = _habitCatMap.get(catId);
+  if (!cat) return;
+  document.getElementById('editHabitCatOldName').value = catId; // store ID, not name
+  document.getElementById('editHabitCatName').value = cat.name;
+  document.getElementById('editHabitCatShortname').value = cat.shortname || '';
+  document.getElementById('editHabitCatColor').value = cat.color || GENERAL_CATEGORY_COLOR;
   document.getElementById('editHabitCategoryModal').classList.add('visible');
   setTimeout(() => document.getElementById('editHabitCatName').focus(), 50);
 }
@@ -53,44 +80,21 @@ function closeEditHabitCategoryModal() {
 }
 
 async function saveEditHabitCategory() {
-  const oldName = document.getElementById('editHabitCatOldName').value;
+  const catId = document.getElementById('editHabitCatOldName').value;
+  const cat = _habitCatMap.get(catId);
+  if (!cat) return;
   const newName = document.getElementById('editHabitCatName').value.trim();
   const shortname = document.getElementById('editHabitCatShortname').value.trim();
   const color = document.getElementById('editHabitCatColor').value;
-  if (!newName) { showToast(t('toast.name_required'), 'error'); return; }
+  if (!newName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
 
-  // Update shortname
-  setHabitShortname(newName, shortname);
-
-  // Update color
-  setCategoryColor(newName, color);
-
-  // Rename category if changed
-  if (newName !== oldName) {
-    // Update localStorage categories list
-    const cats = getHabitCategories();
-    const idx = cats.indexOf(oldName);
-    if (idx !== -1) { cats[idx] = newName; saveHabitCategories(cats); }
-
-    // Move old shortname to new name if different
-    const oldSn = getHabitShortname(oldName);
-    if (oldSn && !shortname) setHabitShortname(newName, oldSn);
-    setHabitShortname(oldName, ''); // clear old
-
-    // Move old color to new name
-    setCategoryColor(newName, color);
-
-    // Update all habits in Supabase
-    const habitsToUpdate = state.allHabits.filter(c => (c.category || 'General') === oldName);
-    if (habitsToUpdate.length > 0) {
-      await Promise.all(habitsToUpdate.map(c =>
-        state.db.from('habits').update({ category: newName }).eq('id', c.id)
-      ));
-      habitsToUpdate.forEach(c => { c.category = newName; });
-    }
-
-    // Shared habit deck placement is local. Keep creator_category as origin metadata.
-  }
+  // Update the DB row directly
+  const updates = { shortname: shortname || null, color };
+  if (!cat.is_protected) updates.name = newName;
+  await state.db.from('habit_categories').update(updates).eq('id', catId);
+  Object.assign(cat, updates);
+  _habitCatByName.clear();
+  for (const row of _habitCatMap.values()) _habitCatByName.set(row.name, row);
 
   closeEditHabitCategoryModal();
   renderHabits();
@@ -525,26 +529,11 @@ function getFrequencyFromPicker(container) {
   return '';
 }
 
-function getHabitCategories() {
-  try { return JSON.parse(localStorage.getItem(HABIT_CATEGORIES_KEY) || '[]'); } catch { return []; }
-}
-function saveHabitCategories(cats) { localStorage.setItem(HABIT_CATEGORIES_KEY, JSON.stringify(cats)); }
-
-function syncHabitCategoriesFromData() {
-  const known = getHabitCategories();
-  const knownSet = new Set(known.map(c => c.toLowerCase()));
-  const discovered = new Set();
-  state.allHabits.forEach(c => {
-    if (c.category && c.category !== 'General' && c.category !== SHARED_CATEGORY && !knownSet.has(c.category.toLowerCase())) {
-      discovered.add(c.category);
-    }
-  });
-  if (discovered.size > 0) saveHabitCategories([...known, ...Array.from(discovered)]);
-}
+// getHabitCategories / saveHabitCategories / syncHabitCategoriesFromData — removed (now DB table-based via loadHabitCategories)
 
 async function refreshHabits() {
   if (!state.db.connected) return;
-  await loadHabitShortnames();
+  await loadHabitCategories();
   let habits;
   try {
     habits = await fetchAll(() => state.db.from('habits').select('*').order('created_at', { ascending: true }));
@@ -604,7 +593,7 @@ async function refreshHabits() {
     }
   }
 
-  syncHabitCategoriesFromData();
+  // Categories already loaded via loadHabitCategories() above
   if (state.currentView === 'habits') {
     renderHabits();
   }
@@ -742,15 +731,15 @@ function formatHabitDue(habit) {
   return `<span class="habit-due on-track">${lucideIcon("circle-check",16)} ${dateStr} (${t('habits.in_days', diffDays)})</span>`;
 }
 
-function getFilteredHabitsForCategory(category) {
-  let filtered = state.allHabits.filter(c => (c.category || 'General') === (category || 'General'));
+function getFilteredHabitsForCategory(catId) {
+  let filtered = state.allHabits.filter(c => catIdForHabit(c) === catId);
 
   // Apply search filter
   if (habitSearchQuery) {
     const q = habitSearchQuery.toLowerCase();
     filtered = filtered.filter(c =>
       (c.name && c.name.toLowerCase().includes(q)) ||
-      ((c.category || '').toLowerCase().includes(q))
+      (getHabitCatDisplayName(catIdForHabit(c)).toLowerCase().includes(q))
     );
   }
 
@@ -800,7 +789,8 @@ function renderHabits() {
   }
 
   // Show page-level empty state when user has zero habits AND no custom categories
-  if (state.allHabits.length === 0 && getHabitCategories().length === 0) {
+  const customCatCount = Array.from(_habitCatMap.values()).filter(c => !c.is_protected).length;
+  if (state.allHabits.length === 0 && customCatCount === 0) {
     grid.innerHTML = `<div class="page-empty-state">
       <div class="empty-icon">${lucideIcon('calendar-check', 48, 'var(--muted)')}</div>
       <h3>${t('habits.empty_title')}</h3>
@@ -811,27 +801,29 @@ function renderHabits() {
     return;
   }
 
-  const categories = getHabitCategories();
-  const categoryList = ['General', ...categories];
+  // Build category ID list from DB table rows (sorted by sort_order)
+  const catRows = Array.from(_habitCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
+  const categoryIdList = catRows.map(c => c.id);
 
   // Dynamically include the Shared deck if any received habits exist
-  const hasSharedItems = state.allHabits.some(c => c.category === SHARED_CATEGORY);
-  if (hasSharedItems) categoryList.unshift(SHARED_CATEGORY);
+  const hasSharedItems = state.allHabits.some(c => c.category_id === _sharedHabitCatId || c.category === SHARED_CATEGORY);
+  if (hasSharedItems && _sharedHabitCatId) categoryIdList.unshift(_sharedHabitCatId);
 
   let html = '';
-  for (const cat of categoryList) {
+  for (const catId of categoryIdList) {
     // Skip empty categories when searching
     if (habitSearchQuery) {
-      const matchingItems = getFilteredHabitsForCategory(cat);
-      if (matchingItems.length === 0 && !cat.toLowerCase().includes(habitSearchQuery.toLowerCase())) continue;
+      const matchingItems = getFilteredHabitsForCategory(catId);
+      const catName = getHabitCatDisplayName(catId);
+      if (matchingItems.length === 0 && !catName.toLowerCase().includes(habitSearchQuery.toLowerCase())) continue;
     }
-    html += renderHabitCategoryCard(cat);
+    html += renderHabitCategoryCard(catId);
   }
   const scrollY = window.scrollY;
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
   initHabitHoverDelay(grid);
-  renderHabitNavButtons(categoryList);
+  renderHabitNavButtons(categoryIdList);
   balanceGrid(grid);
 }
 
@@ -848,42 +840,42 @@ function initHabitHoverDelay(container) {
   });
 }
 
-function renderHabitNavButtons(categoryList) {
+function renderHabitNavButtons(categoryIdList) {
   const container = document.getElementById('habitNavButtons');
   if (!container) return;
-  container.innerHTML = categoryList.map(cat => {
-    const color = getCategoryColor(cat);
-    const shortname = getHabitShortname(cat);
-    const isShared = cat === SHARED_CATEGORY;
-    const displayName = isShared ? t('sharing.shared') : (shortname || cat);
-    const count = state.allHabits.filter(c => (c.category || 'General') === cat).length;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-habit-category" data-category="${esc(cat)}" title="${esc(isShared ? t('sharing.shared') : cat)}">${esc(displayName)} (${count})</button>`;
+  container.innerHTML = categoryIdList.map(catId => {
+    const cat = _habitCatMap.get(catId);
+    const color = cat?.color || GENERAL_CATEGORY_COLOR;
+    const shortname = cat?.shortname || '';
+    const isShared = cat?.name === SHARED_CATEGORY;
+    const displayName = isShared ? t('sharing.shared') : (shortname || cat?.name || 'General');
+    const count = state.allHabits.filter(c => catIdForHabit(c) === catId).length;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-habit-category" data-category="${esc(catId)}" title="${esc(isShared ? t('sharing.shared') : (cat?.name || 'General'))}">${esc(displayName)} (${count})</button>`;
   }).join('');
 }
 
-function navigateToHabitCategory(cat) {
-  const card = document.querySelector(`.project-card[data-category="${CSS.escape(cat)}"]`);
+function navigateToHabitCategory(catId) {
+  const card = document.querySelector(`.project-card[data-category="${CSS.escape(catId)}"]`);
   if (!card) return;
-  const color = getCategoryColor(cat);
+  const color = getHabitCatColor(catId);
   scrollToAndHighlight(card, color);
 }
 
-function renderHabitCategoryCard(category) {
-  const isSharedDeck = category === SHARED_CATEGORY;
-  const catName = isSharedDeck ? t('sharing.shared') : (category || 'General');
-  const isGeneral = !isSharedDeck && (catName === 'General');
-  const habitsInCat = getFilteredHabitsForCategory(category);
-  const totalInCat = state.allHabits.filter(c => (c.category || 'General') === (isSharedDeck ? SHARED_CATEGORY : catName)).length;
-  const overdueCount = state.allHabits.filter(c => (c.category || 'General') === (isSharedDeck ? SHARED_CATEGORY : catName) && habitDueStatus(c) === 'overdue').length;
+function renderHabitCategoryCard(catId) {
+  const cat = _habitCatMap.get(catId);
+  const isSharedDeck = cat?.name === SHARED_CATEGORY;
+  const catName = isSharedDeck ? t('sharing.shared') : (cat?.name || 'General');
+  const isGeneral = !isSharedDeck && cat?.is_protected;
+  const habitsInCat = getFilteredHabitsForCategory(catId);
+  const totalInCat = state.allHabits.filter(c => catIdForHabit(c) === catId).length;
+  const overdueCount = state.allHabits.filter(c => catIdForHabit(c) === catId && habitDueStatus(c) === 'overdue').length;
 
-  const catColor = isSharedDeck ? '#a78bfa' : getCategoryColor(catName);
+  const catColor = cat?.color || GENERAL_CATEGORY_COLOR;
   const statsText = `${totalInCat} habit${totalInCat !== 1 ? 's' : ''}` + (overdueCount > 0 ? ` · <span style="color:var(--red)">${overdueCount} ${t('habits.overdue').toLowerCase()}</span>` : '');
 
   const deleteBtn = (!isGeneral && !isSharedDeck)
-    ? `<button class="todo-cat-delete-btn" data-action="delete-habit-category" data-category="${esc(catName)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
+    ? `<button class="todo-cat-delete-btn" data-action="delete-habit-category" data-category="${esc(catId)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
     : '';
-
-  const escapedCat = escQ(isSharedDeck ? SHARED_CATEGORY : catName);
 
   const items = habitsInCat.length === 0
     ? '<p class="empty-msg">No habits here</p>'
@@ -892,15 +884,15 @@ function renderHabitCategoryCard(category) {
   const headerIcon = isSharedDeck ? `${lucideIcon('users', 16)} ` : '';
 
   const editBtn = !isSharedDeck
-    ? `<button class="todo-cat-shortname-btn" data-action="open-edit-habit-category-modal" data-category="${esc(isSharedDeck ? SHARED_CATEGORY : catName)}" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
+    ? `<button class="todo-cat-shortname-btn" data-action="open-edit-habit-category-modal" data-category="${esc(catId)}" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
     : '';
 
   const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
-      <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catName)}" data-action="add-habit-from-input">
+      <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catId)}" data-action="add-habit-from-input">
       <button data-action="add-habit-from-input">${lucideIcon('plus', 16)}</button>
     </div>`;
 
-  return `<div class="project-card" data-category="${esc(isSharedDeck ? SHARED_CATEGORY : catName)}" style="--cat-color:${catColor}">
+  return `<div class="project-card" data-category="${esc(catId)}" style="--cat-color:${catColor}">
     <div class="todo-cat-header">
       <div class="todo-cat-header-left">
         <div class="todo-cat-info">
@@ -1033,7 +1025,7 @@ function openAddHabitModal() {
     groupRow.style.display = 'none';
   }
   const modal = document.getElementById('addHabitModal');
-  modal.style.setProperty('--cat-color', getCategoryColor('General'));
+  modal.style.setProperty('--cat-color', getHabitCatColor(_defaultHabitCatId));
   modal.classList.add('visible');
   setTimeout(() => document.getElementById('newHabitName').focus(), 100);
 }
@@ -1044,22 +1036,20 @@ function closeAddHabitModal() {
 
 function populateHabitCategorySelect(selectId) {
   const sel = document.getElementById(selectId);
-  const cats = ['General', ...getHabitCategories()];
+  const catRows = Array.from(_habitCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
   // Include Shared in dropdown if any habit uses it (so user can move habits in/out)
-  if (state.allHabits.some(h => h.category === SHARED_CATEGORY) && !cats.includes(SHARED_CATEGORY)) {
-    cats.push(SHARED_CATEGORY);
-  }
-  sel.innerHTML = cats.map(c => {
-    const label = c === SHARED_CATEGORY ? t('sharing.shared') : c;
-    return `<option value="${esc(c)}">${esc(label)}</option>`;
-  }).join('');
+  const hasShared = state.allHabits.some(h => h.category === SHARED_CATEGORY || h.category_id === _sharedHabitCatId);
+  sel.innerHTML = catRows.map(c => {
+    const label = c.is_protected ? 'General' : c.name;
+    return `<option value="${esc(c.id)}">${esc(label)}</option>`;
+  }).join('') + (hasShared && _sharedHabitCatId ? `<option value="${esc(_sharedHabitCatId)}">${esc(t('sharing.shared'))}</option>` : '');
 }
 
 async function addHabitFromInput(inputEl) {
   if (!inputEl || typeof inputEl.value !== 'string') return;
   const name = inputEl.value.trim();
   if (!name) return;
-  const category = inputEl.dataset.category || 'General';
+  const catId = inputEl.dataset.category || _defaultHabitCatId;
 
   // Quick-add: opens the full modal pre-filled with name + category
   document.getElementById('newHabitName').value = name;
@@ -1067,7 +1057,7 @@ async function addHabitFromInput(inputEl) {
   document.getElementById('newHabitDraft').checked = false;
   buildFrequencyPicker(document.getElementById('newHabitFreqPicker'), '');
   populateHabitCategorySelect('newHabitCategory');
-  document.getElementById('newHabitCategory').value = category;
+  document.getElementById('newHabitCategory').value = catId;
   // Show group selector if user belongs to any sharing groups
   const groupRow = document.getElementById('newHabitGroupRow');
   const groupSel = document.getElementById('newHabitGroup');
@@ -1084,7 +1074,7 @@ async function addHabitFromInput(inputEl) {
     groupRow.style.display = 'none';
   }
   const addModal = document.getElementById('addHabitModal');
-  const addCatColor = getCategoryColor(category);
+  const addCatColor = getHabitCatColor(catId);
   addModal.style.setProperty('--cat-color', addCatColor);
   addModal.classList.add('visible');
   inputEl.value = '';
@@ -1094,7 +1084,9 @@ async function addHabitFromInput(inputEl) {
 async function saveNewHabit() {
   const name = document.getElementById('newHabitName').value.trim();
   const freq = getFrequencyFromPicker(document.getElementById('newHabitFreqPicker'));
-  const cat = document.getElementById('newHabitCategory').value || 'General';
+  const catId = document.getElementById('newHabitCategory').value || _defaultHabitCatId;
+  const catRow = _habitCatMap.get(catId);
+  const catName = catRow?.name || 'General';
   const lastDoneVal = document.getElementById('newHabitLastDone').value;
   const isDraft = document.getElementById('newHabitDraft').checked;
   const groupId = document.getElementById('newHabitGroup')?.value || '';
@@ -1108,7 +1100,7 @@ async function saveNewHabit() {
     // Insert local pointer FIRST to prevent syncSharedHabits race
     // (addSharedHabit emits sharing-changed before we return here)
     const { data: pointerData, error: pointerErr } = await state.db.from('habits').insert({
-      name: '', frequency_rule: '', category: cat, is_draft: 0,
+      name: '', frequency_rule: '', category: catName, category_id: catId, is_draft: 0,
       shared_id: sharedId, shared_group_id: groupId,
     }).select().single();
     if (pointerErr) {
@@ -1123,7 +1115,7 @@ async function saveNewHabit() {
         item_type: 'habit',
         name,
         frequency_rule: freq,
-        creator_category: cat,
+        creator_category: catName,
         created_by: actor,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -1151,7 +1143,7 @@ async function saveNewHabit() {
   } else {
     // ─── Normal (non-shared) habit ───
     const { data, error } = await state.db.from('habits').insert({
-      name, frequency_rule: freq, category: cat, is_draft: isDraft,
+      name, frequency_rule: freq, category: catName, category_id: catId, is_draft: isDraft,
     }).select().single();
     if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
@@ -1204,12 +1196,12 @@ function editHabitInline(habitId, itemEl) {
   catLabel.textContent = t('common.category');
   const catSelect = document.createElement('select');
   catSelect.className = 'inline-edit-input';
-  const cats = ['General', ...getHabitCategories()];
-  cats.forEach(c => {
+  const catRows = Array.from(_habitCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
+  catRows.forEach(c => {
     const opt = document.createElement('option');
-    opt.value = c;
-    opt.textContent = c;
-    if (c === (habit.category || 'General')) opt.selected = true;
+    opt.value = c.id;
+    opt.textContent = c.is_protected ? 'General' : c.name;
+    if (c.id === catIdForHabit(habit)) opt.selected = true;
     catSelect.appendChild(opt);
   });
   catRow.appendChild(catLabel);
@@ -1223,19 +1215,24 @@ function editHabitInline(habitId, itemEl) {
     extraEl: extras,
     collectExtra: () => ({
       frequency_rule: getFrequencyFromPicker(freqContainer),
-      category: catSelect.value || 'General',
+      category_id: catSelect.value || _defaultHabitCatId,
     }),
     saveFn: async (newName, extra) => {
       const updates = {};
       if (newName !== habit.name) updates.name = newName;
       if (extra) {
         if (extra.frequency_rule && extra.frequency_rule !== habit.frequency_rule) updates.frequency_rule = extra.frequency_rule;
-        if (extra.category !== (habit.category || 'General')) updates.category = extra.category;
+        const currentCatId = catIdForHabit(habit);
+        if (extra.category_id !== currentCatId) {
+          const newCatRow = _habitCatMap.get(extra.category_id);
+          updates.category_id = extra.category_id;
+          updates.category = newCatRow?.name || 'General';
+        }
       }
       if (Object.keys(updates).length > 0) {
         if (habit.shared_id && habit.shared_group_id && state.sharing) {
-          if (updates.category !== undefined) {
-            const { error } = await state.db.from('habits').update({ category: updates.category }).eq('id', habitId);
+          if (updates.category_id !== undefined) {
+            const { error } = await state.db.from('habits').update({ category: updates.category, category_id: updates.category_id }).eq('id', habitId);
             if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
           }
           const sharedUpdates = {};
@@ -1288,7 +1285,7 @@ function openEditHabitModal(habitId) {
   document.getElementById('editHabitName').value = habit.name;
   buildFrequencyPicker(document.getElementById('editHabitFreqPicker'), habit.frequency_rule);
   populateHabitCategorySelect('editHabitCategory');
-  document.getElementById('editHabitCategory').value = habit.category || 'General';
+  document.getElementById('editHabitCategory').value = catIdForHabit(habit);
   // Populate last done date
   const lastDone = getHabitLastDone(habitId);
   const lastDoneInput = document.getElementById('editHabitLastDone');
@@ -1297,7 +1294,7 @@ function openEditHabitModal(habitId) {
     lastDoneInput.max = localDateStr(new Date());
   }
   const modal = document.getElementById('editHabitModal');
-  const catColor = getCategoryColor(habit.category || 'General');
+  const catColor = getHabitCatColor(catIdForHabit(habit));
   modal.style.setProperty('--cat-color', catColor);
   modal.classList.add('visible');
   setTimeout(() => document.getElementById('editHabitName').focus(), 100);
@@ -1311,7 +1308,9 @@ async function saveEditHabit() {
   const id = document.getElementById('editHabitId').value;
   const name = document.getElementById('editHabitName').value.trim();
   const freq = getFrequencyFromPicker(document.getElementById('editHabitFreqPicker'));
-  const cat = document.getElementById('editHabitCategory').value || 'General';
+  const catId = document.getElementById('editHabitCategory').value || _defaultHabitCatId;
+  const catRow = _habitCatMap.get(catId);
+  const catName = catRow?.name || 'General';
   const lastDoneVal = document.getElementById('editHabitLastDone').value;
   const habit = state.allHabits.find(c => c.id === id);
 
@@ -1323,7 +1322,7 @@ async function saveEditHabit() {
   let latestForNextDue = lastDoneVal ? habitDateInputToIso(lastDoneVal) : (prevLastDone?.toISOString() || null);
 
   if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-    await state.db.from('habits').update({ category: cat }).eq('id', id);
+    await state.db.from('habits').update({ category: catName, category_id: catId }).eq('id', id);
     try {
       await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, {
         name,
@@ -1338,7 +1337,7 @@ async function saveEditHabit() {
       return;
     }
   } else {
-    const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: cat }).eq('id', id);
+    const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: catName, category_id: catId }).eq('id', id);
     if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
 
     if (lastDoneVal !== prevDateStr) {
@@ -1513,7 +1512,7 @@ function openHabitHistory(habitId) {
   state._historyHabitId = habitId;
   renderHabitHistoryList(habitId, habit);
   const histModal = document.getElementById('habitHistoryModal');
-  histModal.style.setProperty('--cat-color', getCategoryColor(habit.category || 'General'));
+  histModal.style.setProperty('--cat-color', getHabitCatColor(catIdForHabit(habit)));
   histModal.classList.add('visible');
 }
 
@@ -1669,37 +1668,41 @@ function closeAddHabitCategoryModal() {
   document.getElementById('addHabitCategoryModal').classList.remove('visible');
 }
 
-function saveNewHabitCategory() {
+async function saveNewHabitCategory() {
   const name = document.getElementById('newHabitCategoryName').value.trim();
   if (!name) { showToast(t('habits.enter_habit_name'), 'error'); return; }
-  const cats = getHabitCategories();
-  if (cats.some(c => c.toLowerCase() === name.toLowerCase()) || name.toLowerCase() === 'general') {
-    showToast(t('habits.category_exists'), 'error'); return;
+  // Check for duplicates in DB table
+  for (const cat of _habitCatMap.values()) {
+    if (cat.name.toLowerCase() === name.toLowerCase()) {
+      showToast(t('habits.category_exists'), 'error'); return;
+    }
   }
-  cats.push(name);
-  saveHabitCategories(cats);
+  const usedColors = new Set(Array.from(_habitCatMap.values()).map(c => c.color).filter(Boolean));
+  const color = DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c)) || DEFAULT_CATEGORY_PALETTE[_habitCatMap.size % DEFAULT_CATEGORY_PALETTE.length];
+  const sortOrder = Math.max(0, ...Array.from(_habitCatMap.values()).map(c => c.sort_order || 0)) + 1;
+  const { error } = await state.db.from('habit_categories').insert({ name, color, sort_order: sortOrder });
+  if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
+  await loadHabitCategories();
   closeAddHabitCategoryModal();
   showToast(t('habits.category_created', name), 'success');
   renderHabits();
 }
 
-async function deleteHabitCategory(name) {
-  const habitsInCat = state.allHabits.filter(c => (c.category || 'General') === name);
+async function deleteHabitCategory(catId) {
+  const cat = _habitCatMap.get(catId);
+  if (!cat) return;
+  const habitsInCat = state.allHabits.filter(c => catIdForHabit(c) === catId);
   const msg = habitsInCat.length > 0
-    ? `Delete "${name}" and its ${habitsInCat.length} habit(s)?`
-    : `Delete empty category "${name}"?`;
+    ? `Delete "${cat.name}" and its ${habitsInCat.length} habit(s)?`
+    : `Delete empty category "${cat.name}"?`;
 
   showDeleteConfirm(t('common.delete'), msg, async () => {
-    for (const h of habitsInCat) {
-      // Delete completions for each habit
-      await state.db.from('habit_completions').delete().eq('habit_id', h.id);
-    }
-    // Delete all habits in this category in bulk
-    if (habitsInCat.length) await state.db.from('habits').delete().eq('category', name);
-    const cats = getHabitCategories();
-    const idx = cats.findIndex(c => c === name);
-    if (idx !== -1) { cats.splice(idx, 1); saveHabitCategories(cats); }
-    showToast(t('habits.category_deleted', name), 'info');
+    // CASCADE on the habit FK will handle deletion when the category row is deleted
+    // But habits have category_id FK — delete the category row, CASCADE deletes habits, 
+    // and habit_completions are cascaded from habits.
+    const { error } = await state.db.from('habit_categories').delete().eq('id', catId);
+    if (error) { showToast(t('toast.delete_failed') + ': ' + error.message, 'error'); return; }
+    showToast(t('habits.category_deleted', cat.name), 'info');
     await refreshHabits();
   });
 }
@@ -1780,7 +1783,7 @@ function _buildHabitsByDay() {
     const key = `${dueDate.getFullYear()}-${dueDate.getMonth()}-${dueDate.getDate()}`;
     if (!habitsByDay[key]) habitsByDay[key] = [];
     const status = habitDueStatus(h);
-    habitsByDay[key].push({ name: h.name, id: h.id, status, category: h.category || 'General', color: getCategoryColor(h.category || 'General') });
+    habitsByDay[key].push({ name: h.name, id: h.id, status, category: getHabitCatDisplayName(catIdForHabit(h)), color: getHabitCatColor(catIdForHabit(h)) });
   }
   return habitsByDay;
 }
@@ -1797,7 +1800,7 @@ function _getItemsForDay(d, habitsByDay, today) {
       const dueDate = new Date(h.next_due);
       const dueStart = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
       if (dueStart < today && !items.find(i => i.id === h.id)) {
-        overdueItems.push({ name: h.name, id: h.id, status: 'overdue', category: h.category || 'General', color: getCategoryColor(h.category || 'General') });
+        overdueItems.push({ name: h.name, id: h.id, status: 'overdue', category: getHabitCatDisplayName(catIdForHabit(h)), color: getHabitCatColor(catIdForHabit(h)) });
       }
     }
   }
@@ -2052,7 +2055,7 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
       const dueDate = new Date(h.next_due);
       const dueStart = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
       if (dueStart < today && !items.find(i => i.id === h.id)) {
-        overdueItems.push({ name: h.name, id: h.id, status: 'overdue', category: h.category || 'General', color: getCategoryColor(h.category || 'General') });
+        overdueItems.push({ name: h.name, id: h.id, status: 'overdue', category: getHabitCatDisplayName(catIdForHabit(h)), color: getHabitCatColor(catIdForHabit(h)) });
       }
     }
   }
@@ -2159,7 +2162,7 @@ async function _doSyncSharedHabits() {
     const { data: existing } = await state.db.from('habits').select('id').eq('shared_id', sh.id).limit(1);
     if (existing?.length) continue;
     const { error } = await state.db.from('habits').insert({
-      name: '', frequency_rule: '', category: SHARED_CATEGORY, is_draft: 0,
+      name: '', frequency_rule: '', category: SHARED_CATEGORY, category_id: _sharedHabitCatId, is_draft: 0,
       shared_id: sh.id, shared_group_id: sh.group_id,
     });
     if (error) { console.warn('syncSharedHabits: failed to create pointer', sh.id, error); continue; }
@@ -2184,7 +2187,7 @@ async function _doSyncSharedHabits() {
 
 window.syncSharedHabits = syncSharedHabits;
 
-export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, initHabitHoverDelay, isStructuredRule, STRUCTURED_PREFIXES, syncSharedHabits };
+export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, initHabitHoverDelay, isStructuredRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit };
 
 window.setHabitFilter = setHabitFilter;
 window.openAddHabitModal = openAddHabitModal;

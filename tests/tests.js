@@ -816,7 +816,7 @@ test('editHabitInline updates shared habits through sharing API', () => {
     'habits.js: editHabitInline must update shared habits through updateSharedHabit');
   assert(!fn.includes('creator_category'),
     'habits.js: editHabitInline must not rewrite creator_category when local deck changes');
-  assert(fn.includes("state.db.from('habits').update({ category: updates.category })"),
+  assert(fn.includes("state.db.from('habits').update({ category: updates.category, category_id: updates.category_id })"),
     'habits.js: editHabitInline must update only the local category pointer for shared habits');
 
   const sharedBranch = fn.slice(fn.indexOf('if (habit.shared_id'), fn.indexOf('} else {', fn.indexOf('if (habit.shared_id')));

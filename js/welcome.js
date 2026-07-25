@@ -6,7 +6,7 @@ import { t, getLang } from './i18n.js';
 import state, { ARCHIVED_PROJECTS_KEY } from './state.js';
 import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText } from './item-utils.js';
-import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount } from './habits.js';
+import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor } from './habits.js';
 import { getCategoryColor, getTodos } from './todos.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
@@ -425,7 +425,7 @@ function renderWelcomeCalendar(allBirthdays, allHabits, todayStart) {
       html += `<span class="welcome-cal-dot birthday" title="${esc(b.name)}"></span>`;
     }
     for (let idx = 0; idx < Math.min(allHabitsOnDay.length, 4); idx++) {
-      const hColor = getCategoryColor(allHabitsOnDay[idx].category || 'General');
+      const hColor = getHabitCategoryColor(allHabitsOnDay[idx].category || 'General');
       html += `<span class="welcome-cal-dot habit" style="background:${hColor}" title="${esc(allHabitsOnDay[idx].name)}"></span>`;
     }
     html += `</div>`;
@@ -621,7 +621,7 @@ function renderWelcome() {
     html += `<div class="welcome-items welcome-focus-habits">`;
     const habitCatKeys = Object.keys(habitsByCategory).sort();
     for (const cat of habitCatKeys) {
-      const catColor = getCategoryColor(cat);
+      const catColor = getHabitCategoryColor(cat);
       const isShared = cat.toLowerCase() === '__shared__';
       const catLabel = isShared ? t('sharing.shared') : cat;
       html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(catLabel)}</div>`;

@@ -1613,7 +1613,7 @@ ALTER TABLE flashcards ADD CONSTRAINT flashcards_deck_id_fkey FOREIGN KEY (deck_
 ALTER TABLE texts DROP CONSTRAINT IF EXISTS texts_deck_id_fkey;
 ALTER TABLE texts ADD CONSTRAINT texts_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES flashcard_decks(id) ON DELETE CASCADE;
 
-INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.484', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.485', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 NOTIFY pgrst, 'reload schema';
 `,
 };

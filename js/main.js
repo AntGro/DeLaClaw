@@ -22,7 +22,7 @@ import { refreshLists, renderLists, initListModals, syncSharedListItems } from '
 import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
 import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
-import { HABIT_CATEGORIES_KEY } from './state.js';
+import { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR } from './state.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
 import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
 
@@ -42,16 +42,8 @@ const SCOPED_LS_KEYS = [
   'claw_cc_archived_projects',
   'claw_cc_show_archived',
   'claw_cc_ideas',
-  'claw_cc_habit_categories',
   'claw_cc_tab_visibility',
   'claw_cc_tab_order',
-  'claw_cc_vestiaire_categories',
-  'claw_cc_vest_shortnames',
-  'claw_flash_shortnames',
-  'claw_habit_shortnames',
-  'todo_categories',
-  'todo_category_colors',
-  'todo_category_shortnames',
 ];
 const ACTIVE_MODE_KEY = 'claw_cc_active_mode';
 
@@ -95,19 +87,42 @@ function swapLsScope(newMode) {
   localStorage.setItem(ACTIVE_MODE_KEY, newMode);
 }
 
-/** Replace demo category keys to match the current demo dataset. */
+/** Build category table rows in the demo adapter store from item data. */
 function setDemoCategoriesFromData(data) {
-  const todoCats = [...new Set((data.todos || []).map(t => t.category).filter(c => c && c !== 'General'))];
-  const habitCats = [...new Set((data.habits || []).map(h => h.category).filter(c => c && c !== 'General'))];
-  const vestCats = [...new Set((data.vestiaire || []).map(v => v.category).filter(Boolean))];
-  localStorage.setItem('todo_categories', JSON.stringify(todoCats));
-  localStorage.setItem(HABIT_CATEGORIES_KEY, JSON.stringify(habitCats));
-  localStorage.setItem('claw_cc_vestiaire_categories', JSON.stringify(vestCats));
-  localStorage.setItem('todo_category_colors', '{}');
-  localStorage.setItem('todo_category_shortnames', '{}');
-  localStorage.setItem('claw_habit_shortnames', '{}');
-  localStorage.setItem('claw_cc_vest_shortnames', '{}');
-  localStorage.setItem('claw_flash_shortnames', '{}');
+  if (!state.demoAdapter) return;
+  const store = state.demoAdapter._store;
+
+  function buildCatRows(items, nameField, tableName) {
+    const names = [...new Set((items || []).map(i => i[nameField]).filter(Boolean))];
+    // Always ensure 'General' (or equivalent default) exists
+    if (!names.includes('General')) names.unshift('General');
+    const rows = names.map((name, idx) => ({
+      id: `demo-cat-${tableName}-${idx}`,
+      name,
+      shortname: null,
+      color: name === 'General' ? GENERAL_CATEGORY_COLOR : (DEFAULT_CATEGORY_PALETTE[idx % DEFAULT_CATEGORY_PALETTE.length]),
+      sort_order: idx,
+      is_protected: name === 'General',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }));
+    store[tableName] = rows;
+    // Build name→id lookup for enriching items
+    const lookup = new Map(rows.map(r => [r.name, r.id]));
+    return lookup;
+  }
+
+  const todoLookup = buildCatRows(data.todos, 'category', 'todo_categories');
+  const habitLookup = buildCatRows(data.habits, 'category', 'habit_categories');
+  const vestLookup = buildCatRows(data.vestiaire, 'category', 'vestiaire_categories');
+  const deckLookup = buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks');
+
+  // Enrich items with category_id / deck_id
+  for (const t of (store.todos || [])) t.category_id = todoLookup.get(t.category) || todoLookup.get('General') || null;
+  for (const h of (store.habits || [])) h.category_id = habitLookup.get(h.category) || habitLookup.get('General') || null;
+  for (const v of (store.vestiaire || [])) v.category_id = vestLookup.get(v.category) || null;
+  for (const f of (store.flashcards || [])) f.deck_id = deckLookup.get(f.deck) || null;
+  for (const tx of (store.texts || [])) tx.deck_id = deckLookup.get(tx.deck) || null;
 }
 
 // ===================================================================

@@ -43,7 +43,6 @@ export const STAY_CONNECTED_KEY = 'claw_cc_stay_connected';
 export const MAX_TEXT_LEN = 5000;
 export const MAX_META_DISPLAY = 500;
 export const TODO_MAX_LEN = 2000;
-export const HABIT_CATEGORIES_KEY = 'claw_cc_habit_categories';
 export const TAB_VISIBILITY_KEY = 'claw_cc_tab_visibility';
 export const TAB_ORDER_KEY = 'claw_cc_tab_order';
 

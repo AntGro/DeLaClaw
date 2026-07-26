@@ -1536,6 +1536,9 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
             } catch (e) { console.warn('late sharing init:', e); }
           }
           updateSharingNavVisibility();
+          // Now that auth is resolved, reload settings and re-check schema version
+          await loadSettings();
+          checkSchemaVersion();
         }
       });
     } catch {}
@@ -2951,6 +2954,11 @@ function getPendingMigrationSQL(dbVer) {
 
 function checkSchemaVersion() {
   if (state.demoMode || state.driveMode || !state.db?.connected) {
+    document.getElementById('schema-banner')?.remove();
+    return;
+  }
+  // Supabase with RLS: settings table is auth-gated, so skip until signed in
+  if (!state.demoMode && !state.driveMode && state.supabaseUrl && !state.authUser) {
     document.getElementById('schema-banner')?.remove();
     return;
   }

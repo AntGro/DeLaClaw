@@ -1019,11 +1019,11 @@ test('sharing member identity is memberId-based and agent-safe', () => {
   assert(supabase.includes('invited_label') && supabase.includes('getAgentSafeGroup'),
     'sharing-supabase.js must preserve invited_label separately and expose agent-safe serialization');
 
-  const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.436_member_identity.sql'), 'utf-8');
+  const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
   assert(migration.includes('DROP FUNCTION IF EXISTS verify_join_token(text)'),
-    '1.436 migration must drop verify_join_token before changing RETURNS TABLE shape');
-  assert(migration.includes('DROP FUNCTION IF EXISTS get_group_members(text, text)'),
-    '1.436 migration must drop get_group_members before changing RETURNS TABLE shape');
+    '1.484 migration must drop verify_join_token before redefining');
+  assert(migration.includes('FUNCTION get_group_members('),
+    '1.484 migration must define get_group_members');
 });
 
 // ===================================================================
@@ -1500,24 +1500,14 @@ async function archiveDeleteIntegrationTest() {
 // ===================================================================
 console.log('\n-- Auth & Sharing (D+E Hybrid)\n');
 
-test('Migration SQL files 1.294-1.297 exist', () => {
+test('Unified migration SQL file 1.484 exists', () => {
   const migDir = path.join(__dirname, '..', 'migrations');
-  const expected = [
-    '1.294_auth_owner.sql',
-    '1.295_sharing_tables.sql',
-    '1.296_sharing_rpc.sql',
-    '1.297_joined_groups.sql',
-  ];
-  for (const f of expected) {
-    assert(fs.existsSync(path.join(migDir, f)), `Missing migration file: ${f}`);
-  }
+  assert(fs.existsSync(path.join(migDir, '1.484_sharing_ownership_categories.sql')), 'Missing unified migration file');
 });
 
-test('supabase-migrations.js has entries for 1.294-1.297', () => {
+test('supabase-migrations.js has entry for 1.484', () => {
   const content = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'supabase-migrations.js'), 'utf-8');
-  for (const ver of ['1.294', '1.295', '1.296', '1.297']) {
-    assert(content.includes(`'${ver}':`), `Missing supabase migration entry for ${ver}`);
-  }
+  assert(content.includes("'1.484':"), 'Missing supabase migration entry for 1.484');
 });
 
 test('local-migrations.js has entries for 1.294 and 1.297', () => {
@@ -1637,36 +1627,36 @@ test('No HTML entities in new JS files (auth.js, sharing-supabase.js)', () => {
   }
 });
 
-test('1.296 migration defines all 8 RPC functions', () => {
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.296_sharing_rpc.sql'), 'utf-8');
+test('1.484 migration defines all 8 RPC functions', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
   const expected = [
     'verify_join_token', 'confirm_join', 'get_shared_items',
     'add_shared_item', 'update_shared_item', 'delete_shared_item',
     'get_group_members', 'leave_group',
   ];
   for (const fn of expected) {
-    assert(sql.includes(`FUNCTION ${fn}(`), `1.296 migration missing function: ${fn}`);
+    assert(sql.includes(`FUNCTION ${fn}(`), `1.484 migration missing function: ${fn}`);
   }
 });
 
-test('1.294 migration adds owner_id to all 12 personal tables', () => {
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.294_auth_owner.sql'), 'utf-8');
+test('1.484 migration adds owner_id to all personal tables', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
   const tables = [
     'projects', 'tasks', 'todos', 'habits', 'habit_completions',
     'flashcard_notes', 'birthdays', 'vestiaire', 'lists', 'list_items',
     'settings', 'prompts',
   ];
   for (const t of tables) {
-    assert(sql.includes(`ALTER TABLE ${t} ADD COLUMN`), `1.294 missing ALTER TABLE ${t}`);
+    assert(sql.includes(`ALTER TABLE ${t} ADD COLUMN`), `1.484 missing ALTER TABLE ${t}`);
   }
 });
 
-test('1.300 migration enforces owner-only RLS and claim_ownership RPC', () => {
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.300_owner_only.sql'), 'utf-8');
-  assert(!sql.includes('CREATE POLICY "owner or unclaimed"'), '1.300 must not CREATE owner or unclaimed');
-  assert(sql.includes('CREATE POLICY "owner only"'), '1.300 must create owner only policies');
-  assert(sql.includes('set_owner_id()'), '1.300 must include set_owner_id trigger');
-  assert(sql.includes('claim_ownership()'), '1.300 must include claim_ownership function');
+test('1.484 migration enforces owner-or-agent RLS and claim_ownership RPC', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
+  assert(!sql.includes('CREATE POLICY "owner or unclaimed"'), '1.484 must not CREATE owner or unclaimed');
+  assert(sql.includes('CREATE POLICY "owner or agent"'), '1.484 must create owner or agent policies');
+  assert(sql.includes('set_owner_id()'), '1.484 must include set_owner_id trigger');
+  assert(sql.includes('claim_ownership()'), '1.484 must include claim_ownership function');
 });
 
 test('sql/supabase_schema.sql has owner-only for all personal tables + joined_groups', () => {

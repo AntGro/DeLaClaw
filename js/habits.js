@@ -3,7 +3,7 @@ import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGOR
 import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { t, getLang } from './i18n.js';
-import { sharedBadge } from './sharing-ui.js';
+import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
 // ===================================================================
 // HABITS — DATA, CRUD & RENDERING
@@ -1037,10 +1037,13 @@ function closeAddHabitModal() {
   document.getElementById('addHabitModal').classList.remove('visible');
 }
 
-function shareHabitFromAdd() {
-  const groups = state.sharing?.getAllGroups() || [];
+function shareHabitFromAdd(btn) {
+  if (!state.sharing) return;
+  const groups = state.sharing.getAllGroups();
   if (!groups.length) return;
-  openAddHabitModal(groups[0].id);
+  openSharePopover(btn, (groupId) => {
+    openAddHabitModal(groupId);
+  }, { showAssignees: false });
 }
 
 function populateHabitCategorySelect(selectId) {

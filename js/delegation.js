@@ -62,7 +62,7 @@
       case 'open-add-project': callWindow('openAddProjectModal', []); break;
       case 'open-add-category': callWindow('openAddCategoryModal', []); break;
       case 'open-add-habit': callWindow('openAddHabitModal', []); break;
-      case 'share-habit-from-add': callWindow('shareHabitFromAdd', []); break;
+      case 'share-habit-from-add': callWindow('shareHabitFromAdd', [el]); break;
       case 'open-add-habit-category': callWindow('openAddHabitCategoryModal', []); break;
       case 'open-add-birthday': callWindow('openAddBirthdayModal', []); break;
       case 'open-add-vestiaire': callWindow('openAddVestiaireModal', []); break;

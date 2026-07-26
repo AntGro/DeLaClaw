@@ -1109,6 +1109,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('setupPathCloud')?.addEventListener('click', () => showSteps('cloud'));
   document.getElementById('setupPathLocal')?.addEventListener('click', () => showSteps('local'));
   document.getElementById('setupPathDrive')?.addEventListener('click', () => showSteps('drive'));
+  document.getElementById('setupCompareLink')?.addEventListener('click', (e) => { e.preventDefault(); showCompareModal(); });
 
   // ── Schema copy + toggle ──
   let SUPABASE_SCHEMA = '';
@@ -1849,7 +1850,11 @@ function initDemoBanner() {
   const startOwnBtn = document.createElement('button');
   startOwnBtn.className = 'demo-banner-start';
   startOwnBtn.textContent = t('demo.start_own');
-  startOwnBtn.addEventListener('click', () => showSignupOverlay());
+  startOwnBtn.addEventListener('click', () => {
+    clearStayConnectedCreds();
+    location.hash = '#setup';
+    location.reload();
+  });
 
   // Exit demo
   const exitBtn = document.createElement('button');

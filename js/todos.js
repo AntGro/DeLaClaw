@@ -378,7 +378,7 @@ function renderCategoryCard(catId) {
       </div>
     </div>
     ${addRow}
-    <div class="task-list todo-cat-list" data-category="${esc(category)}">
+    <div class="task-list todo-cat-list" data-category="${esc(catId)}">
       ${mainListContent}
     </div>
     ${doneToggle}

@@ -2585,6 +2585,36 @@ async function importFlashcardsIntegrationTest() {
     assert(before === after, 'supabase-migrations.js is stale — run: node scripts/generate-supabase-migrations.js');
   });
 
+  test('supabase_schema.sql covers all structures from latest migration', () => {
+    const schema = fs.readFileSync(path.join(__dirname, '..', 'sql', 'supabase_schema.sql'), 'utf-8');
+    const migDir = path.join(__dirname, '..', 'migrations');
+    const sqlFiles = fs.readdirSync(migDir).filter(f => f.endsWith('.sql')).sort();
+    const latestMig = sqlFiles[sqlFiles.length - 1];
+    const latestVer = latestMig.split('_')[0];
+
+    // Schema version must match latest migration
+    assert(schema.includes("'" + latestVer + "'"), 'supabase_schema.sql schema_version (' + latestVer + ') not found');
+
+    // All tables created by the migration must exist in the base schema
+    const migration = fs.readFileSync(path.join(migDir, latestMig), 'utf-8');
+    const tableMatches = migration.matchAll(/CREATE TABLE IF NOT EXISTS\s+(\w+)/g);
+    for (const m of tableMatches) {
+      assert(schema.includes(m[1]), 'supabase_schema.sql missing table: ' + m[1]);
+    }
+
+    // All functions defined by the migration must exist in the base schema
+    const fnMatches = migration.matchAll(/CREATE OR REPLACE FUNCTION\s+(\w+)/g);
+    for (const m of fnMatches) {
+      assert(schema.includes(m[1]), 'supabase_schema.sql missing function: ' + m[1]);
+    }
+
+    // No stale schema_version inserts (only the latest should remain)
+    const verInserts = [...schema.matchAll(/schema_version.*?(\d+\.\d+)/g)];
+    const versions = verInserts.map(m => m[1]);
+    const stale = versions.filter(v => v !== latestVer);
+    assert(stale.length === 0, 'supabase_schema.sql has stale schema_version inserts: ' + stale.join(', '));
+  });
+
 
   // ===================================================================
   // SUMMARY

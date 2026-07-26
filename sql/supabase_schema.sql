@@ -1232,8 +1232,6 @@ CREATE INDEX IF NOT EXISTS idx_vestiaire_category_id ON "public"."vestiaire" ("c
 CREATE INDEX IF NOT EXISTS idx_flashcards_deck_id ON "public"."flashcards" ("deck_id");
 CREATE INDEX IF NOT EXISTS idx_texts_deck_id ON "public"."texts" ("deck_id");
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.474')
-ON CONFLICT ("key") DO UPDATE SET "value" = '1.474', "updated_at" = now();
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('db_created_at', to_jsonb(now()::text))
 ON CONFLICT ("key") DO NOTHING;
@@ -1299,6 +1297,16 @@ END; $$;
 
 CREATE OR REPLACE FUNCTION revoke_agent_grant(p_id UUID) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
 DECLARE uid UUID := auth.uid(); BEGIN IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF; UPDATE agent_grants SET revoked_at = now() WHERE id = p_id AND owner_id = uid AND revoked_at IS NULL; END; $$;
+
+CREATE OR REPLACE FUNCTION touch_agent_grant() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+DECLARE hdr TEXT; tok TEXT; h TEXT; BEGIN
+  BEGIN hdr := current_setting('request.headers', true); EXCEPTION WHEN OTHERS THEN RETURN; END;
+  IF hdr IS NULL THEN RETURN; END IF;
+  BEGIN tok := (hdr::jsonb ->> 'x-agent-token'); IF tok IS NULL OR tok = '' THEN tok := (hdr::jsonb ->> 'X-Agent-Token'); END IF; EXCEPTION WHEN OTHERS THEN RETURN; END;
+  IF tok IS NULL OR tok = '' THEN RETURN; END IF;
+  h := encode(digest(tok::text, 'sha256'::text), 'hex'::text);
+  UPDATE agent_grants SET last_used_at = now() WHERE token_hash = h;
+END; $$;
 
 -- Replace owner-only with owner-or-agent for personal tables
 DROP POLICY IF EXISTS "owner only" ON "public"."birthdays"; CREATE POLICY "owner or agent" ON "public"."birthdays" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));

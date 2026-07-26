@@ -1788,6 +1788,15 @@ Output a JSON array. Each element must have:
 - "author": string or null
 - "content": string (the full text, line breaks as \\n)
 
+Example:
+[
+  {
+    "title": "Le Lac",
+    "author": "Alphonse de Lamartine",
+    "content": "Ainsi, toujours poussés vers de nouveaux rivages,\\nDans la nuit éternelle emportés sans retour,\\nNe pourrons-nous jamais sur l'océan des âges\\nJeter l'ancre un seul jour ?"
+  }
+]
+
 Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}`;
   }
 
@@ -1823,6 +1832,12 @@ Paste your flashcards below and I will convert them:`;
 Output a JSON array of objects, each with:
 - "front": string (the question)
 - "back": string (the answer)
+
+Example:
+[
+  { "front": "What is the capital of France?", "back": "Paris" },
+  { "front": "H₂O is the formula for?", "back": "Water" }
+]
 
 Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}`;
 }

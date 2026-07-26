@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import { t } from './i18n.js';
-import state from './state.js';
+import state, { DEFAULT_CATEGORY_PALETTE } from './state.js';
 import { APP_VERSION } from './version.js';
 
 // ===================================================================
@@ -766,6 +766,32 @@ function buildAuthSteps(prefix, authConfigUrl, opts = {}) {
   return { html, wireUp };
 }
 
+/**
+ * Auto-assign palette colors to category/deck rows that have no color.
+ * Called after loading each category table. Persists to DB so it's one-time.
+ * @param {string} table - DB table name (e.g. 'todo_categories')
+ * @param {Map} catMap - the in-memory map of rows (id → row)
+ */
+async function backfillCategoryColors(table, catMap) {
+  const missing = [];
+  for (const row of catMap.values()) {
+    if (!row.color && !row.is_protected) missing.push(row);
+  }
+  if (!missing.length) return;
+  const palette = DEFAULT_CATEGORY_PALETTE;
+  // Assign colors cycling through palette by sort_order position
+  missing.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  const updates = missing.map((row, i) => {
+    const color = palette[i % palette.length];
+    row.color = color;
+    return { id: row.id, color };
+  });
+  // Persist each color to DB (fire-and-forget, already set in memory)
+  for (const u of updates) {
+    state.db.from(table).update({ color: u.color }).eq('id', u.id).then(() => {});
+  }
+}
+
 export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
   showDeleteConfirm, closeDeleteConfirm, executeDeleteConfirm,
@@ -774,6 +800,7 @@ export {
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA,
   getSupabaseKeyRole, isServiceRoleKey,
   getSupabaseProjectRef, buildAuthSteps, createSettingsAccessor,
+  backfillCategoryColors,
 };
 
 window.closeDeleteConfirm = closeDeleteConfirm;

@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
+import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
 import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -32,6 +32,7 @@ async function loadTodoCategories() {
     if (row.is_protected && row.name === SHARED_CATEGORY) _sharedCatId = row.id;
     else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultCatId = row.id;
   }
+  await backfillCategoryColors('todo_categories', _todoCatMap);
 }
 
 function getTodoCategories() { return _todoCatMap; }

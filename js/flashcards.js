@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, isMobileUA } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
@@ -120,6 +120,7 @@ async function loadFlashcardDecks() {
     if (row.is_protected && row.name === SHARED_CATEGORY) _sharedDeckId = row.id;
     else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultDeckId = row.id;
   }
+  await backfillCategoryColors('flashcard_decks', _deckMap);
 }
 
 function getFlashcardDecks() { return _deckMap; }

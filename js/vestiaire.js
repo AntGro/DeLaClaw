@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
+import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 
@@ -32,6 +32,7 @@ async function loadVestiaireCategories() {
     if (row.is_protected && row.name === SHARED_CATEGORY) _sharedVestCatId = row.id;
     else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultVestCatId = row.id;
   }
+  await backfillCategoryColors('vestiaire_categories', _vestCatMap);
 }
 
 function getVestiaireCategories() { return _vestCatMap; }

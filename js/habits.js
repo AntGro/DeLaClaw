@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
+import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge } from './sharing-ui.js';
@@ -40,6 +40,7 @@ async function loadHabitCategories() {
     if (row.is_protected && row.name === SHARED_CATEGORY) _sharedHabitCatId = row.id;
     else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultHabitCatId = row.id;
   }
+  await backfillCategoryColors('habit_categories', _habitCatMap);
 }
 
 function getHabitCategories() { return _habitCatMap; }

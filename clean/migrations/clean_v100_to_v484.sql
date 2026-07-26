@@ -1,0 +1,776 @@
+-- clean_v100_to_v484.sql
+-- Single migration from main (v1.100) to v1.484
+-- Aggregates all 24 dev migrations with intermediate steps collapsed.
+--
+-- Requires: RLS already enabled on all original tables (done by v1.100)
+--
+-- Sections:
+--   1. Extensions
+--   2. Columns on existing tables
+--   3. New tables (sharing, joined_groups, agent_grants, auth_email_guard, categories)
+--   4. daily_visits composite PK
+--   5. Functions (set_owner_id, has_agent_access, protect_category_row)
+--   6. RLS policies
+--   7. Insert triggers
+--   8. Realtime
+--   9. Category seeds, data discovery, metadata backfill
+--  10. Category FK columns + populate
+--  11. Column fixes
+--  12. Sharing RPCs
+--  13. Agent RPCs
+--  14. claim_ownership
+--  15. Indexes
+--  16. Cleanup
+
+-- ══════════════════════════════════════════════════
+-- 1. Extensions
+-- ══════════════════════════════════════════════════
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
+
+-- ══════════════════════════════════════════════════
+-- 2. Columns on existing tables
+-- ══════════════════════════════════════════════════
+-- Sharing pointers
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS shared_id TEXT;
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS shared_group_id TEXT;
+ALTER TABLE habit_completions ADD COLUMN IF NOT EXISTS completed_by TEXT;
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS shared_id TEXT;
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS shared_group_id TEXT;
+ALTER TABLE list_items ADD COLUMN IF NOT EXISTS shared_id TEXT;
+ALTER TABLE list_items ADD COLUMN IF NOT EXISTS shared_group_id TEXT;
+
+-- owner_id on all personal tables
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE habit_completions ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE flashcards ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE flashcard_notes ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE texts ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE text_line_progress ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE birthdays ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE vestiaire ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE lists ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE list_items ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE prompts ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE nvidia_usage ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE daily_visits ADD COLUMN IF NOT EXISTS owner_id UUID;
+
+-- ══════════════════════════════════════════════════
+-- 3. New tables
+-- ══════════════════════════════════════════════════
+-- Sharing
+CREATE TABLE IF NOT EXISTS sharing_groups (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  backend_type TEXT NOT NULL DEFAULT 'supabase',
+  auth_owner_id UUID,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sharing_members (
+  member_id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL REFERENCES sharing_groups(id) ON DELETE CASCADE,
+  token TEXT UNIQUE NOT NULL,
+  token_hash TEXT,
+  display_name TEXT,
+  invited_label TEXT,
+  role TEXT NOT NULL DEFAULT 'member',
+  auth_user_id UUID,
+  joined_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sharing_items (
+  item_id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL REFERENCES sharing_groups(id) ON DELETE CASCADE,
+  item_type TEXT NOT NULL,
+  parent_item_id TEXT,
+  payload JSONB NOT NULL,
+  created_by TEXT REFERENCES sharing_members(member_id),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE sharing_groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sharing_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sharing_items ENABLE ROW LEVEL SECURITY;
+
+-- Joined groups (with encryption columns)
+CREATE TABLE IF NOT EXISTS joined_groups (
+  group_id TEXT PRIMARY KEY,
+  member_id TEXT NOT NULL,
+  token TEXT NOT NULL,
+  token_ciphertext TEXT,
+  token_iv TEXT,
+  display_name TEXT,
+  group_name TEXT,
+  remote_backend_type TEXT NOT NULL,
+  remote_url TEXT,
+  remote_anon_key TEXT,
+  remote_anon_key_ciphertext TEXT,
+  remote_anon_key_iv TEXT,
+  owner_id UUID,
+  joined_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE joined_groups ENABLE ROW LEVEL SECURITY;
+
+-- Agent grants
+CREATE TABLE IF NOT EXISTS agent_grants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id UUID NOT NULL,
+  display_name TEXT NOT NULL,
+  token_hash TEXT UNIQUE NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'full',
+  last_used_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE agent_grants ENABLE ROW LEVEL SECURITY;
+
+-- Auth email guard
+CREATE TABLE IF NOT EXISTS auth_email_guard (
+  email_hash TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+GRANT SELECT ON auth_email_guard TO anon;
+GRANT SELECT, INSERT ON auth_email_guard TO authenticated;
+
+-- Category tables
+CREATE TABLE IF NOT EXISTS todo_categories (
+  id TEXT PRIMARY KEY DEFAULT encode(gen_random_bytes(16), 'hex'),
+  name TEXT NOT NULL,
+  shortname TEXT,
+  color TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_protected BOOLEAN DEFAULT FALSE,
+  owner_id UUID,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS habit_categories (
+  id TEXT PRIMARY KEY DEFAULT encode(gen_random_bytes(16), 'hex'),
+  name TEXT NOT NULL,
+  shortname TEXT,
+  color TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_protected BOOLEAN DEFAULT FALSE,
+  owner_id UUID,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS vestiaire_categories (
+  id TEXT PRIMARY KEY DEFAULT encode(gen_random_bytes(16), 'hex'),
+  name TEXT NOT NULL,
+  shortname TEXT,
+  color TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_protected BOOLEAN DEFAULT FALSE,
+  owner_id UUID,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS flashcard_decks (
+  id TEXT PRIMARY KEY DEFAULT encode(gen_random_bytes(16), 'hex'),
+  name TEXT NOT NULL,
+  shortname TEXT,
+  color TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_protected BOOLEAN DEFAULT FALSE,
+  owner_id UUID,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE todo_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE habit_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vestiaire_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE flashcard_decks ENABLE ROW LEVEL SECURITY;
+
+-- ══════════════════════════════════════════════════
+-- 4. daily_visits composite PK
+-- ══════════════════════════════════════════════════
+ALTER TABLE daily_visits REPLICA IDENTITY FULL;
+DELETE FROM daily_visits WHERE visit_date IS NULL;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='daily_visits_pkey' AND conrelid='daily_visits'::regclass) THEN
+    ALTER TABLE daily_visits DROP CONSTRAINT daily_visits_pkey;
+  END IF;
+END $$;
+DELETE FROM daily_visits WHERE owner_id IS NULL;
+DELETE FROM daily_visits a USING daily_visits b
+  WHERE a.ctid < b.ctid AND a.visit_date = b.visit_date
+    AND COALESCE(a.owner_id::text,'') = COALESCE(b.owner_id::text,'');
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='daily_visits_pkey' AND conrelid='daily_visits'::regclass) THEN
+    ALTER TABLE daily_visits ADD CONSTRAINT daily_visits_pkey PRIMARY KEY (visit_date, owner_id);
+  END IF;
+END $$;
+ALTER TABLE daily_visits REPLICA IDENTITY DEFAULT;
+
+-- ══════════════════════════════════════════════════
+-- 5. Functions
+-- ══════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION set_owner_id() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+BEGIN
+  IF NEW.owner_id IS NULL THEN NEW.owner_id := auth.uid(); END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION has_agent_access(target_owner UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+DECLARE
+  hdr TEXT; tok TEXT; h TEXT; matched_id UUID;
+BEGIN
+  IF target_owner IS NULL THEN RETURN FALSE; END IF;
+  BEGIN hdr := current_setting('request.headers', true); EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
+  IF hdr IS NULL OR hdr = '' THEN RETURN FALSE; END IF;
+  BEGIN
+    tok := (hdr::jsonb ->> 'x-agent-token');
+    IF tok IS NULL OR tok = '' THEN tok := (hdr::jsonb ->> 'X-Agent-Token'); END IF;
+    IF tok IS NULL OR tok = '' THEN tok := (hdr::jsonb ->> 'x-api-token'); END IF;
+  EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
+  IF tok IS NULL OR tok = '' THEN RETURN FALSE; END IF;
+  h := encode(digest(tok::text, 'sha256'::text), 'hex'::text);
+  SELECT id INTO matched_id FROM agent_grants
+    WHERE owner_id = target_owner AND token_hash = h
+      AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
+    LIMIT 1;
+  IF matched_id IS NULL THEN RETURN FALSE; END IF;
+  BEGIN
+    UPDATE agent_grants SET last_used_at = now()
+      WHERE id = matched_id AND (last_used_at IS NULL OR last_used_at < now() - INTERVAL '5 minutes');
+  EXCEPTION WHEN OTHERS THEN NULL; END;
+  RETURN TRUE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION protect_category_row() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.is_protected THEN
+      RAISE EXCEPTION 'Cannot delete protected row %', OLD.id;
+    END IF;
+    RETURN OLD;
+  ELSIF TG_OP = 'UPDATE' THEN
+    IF OLD.is_protected AND OLD.owner_id IS NULL AND NEW.owner_id IS NOT NULL THEN
+      IF OLD.name IS DISTINCT FROM NEW.name OR OLD.is_protected IS DISTINCT FROM NEW.is_protected THEN
+        RAISE EXCEPTION 'Cannot change name/flag of protected %', OLD.id;
+      END IF;
+      RETURN NEW;
+    END IF;
+    IF OLD.is_protected AND (OLD.name IS DISTINCT FROM NEW.name OR OLD.id IS DISTINCT FROM NEW.id OR OLD.is_protected IS DISTINCT FROM NEW.is_protected) THEN
+      RAISE EXCEPTION 'Cannot modify protected row % (only color/shortname/sort_order)', OLD.id;
+    END IF;
+    RETURN NEW;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+-- ══════════════════════════════════════════════════
+-- 6. RLS policies — all at once
+-- ══════════════════════════════════════════════════
+-- Personal tables → "owner or agent"
+DROP POLICY IF EXISTS "allow all" ON projects; DROP POLICY IF EXISTS "owner or agent" ON projects;
+CREATE POLICY "owner or agent" ON projects FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON tasks; DROP POLICY IF EXISTS "owner or agent" ON tasks;
+CREATE POLICY "owner or agent" ON tasks FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON todos; DROP POLICY IF EXISTS "owner or agent" ON todos;
+CREATE POLICY "owner or agent" ON todos FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON habits; DROP POLICY IF EXISTS "owner or agent" ON habits;
+CREATE POLICY "owner or agent" ON habits FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON habit_completions; DROP POLICY IF EXISTS "owner or agent" ON habit_completions;
+CREATE POLICY "owner or agent" ON habit_completions FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON flashcards; DROP POLICY IF EXISTS "Allow all access to flashcards" ON flashcards; DROP POLICY IF EXISTS "allow_all_flashcards" ON flashcards; DROP POLICY IF EXISTS "owner or agent" ON flashcards;
+CREATE POLICY "owner or agent" ON flashcards FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON flashcard_notes; DROP POLICY IF EXISTS "owner or agent" ON flashcard_notes;
+CREATE POLICY "owner or agent" ON flashcard_notes FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON texts; DROP POLICY IF EXISTS "Allow all access to texts" ON texts; DROP POLICY IF EXISTS "allow_all_texts" ON texts; DROP POLICY IF EXISTS "owner or agent" ON texts;
+CREATE POLICY "owner or agent" ON texts FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON text_line_progress; DROP POLICY IF EXISTS "Allow all access to text_line_progress" ON text_line_progress; DROP POLICY IF EXISTS "allow_all_text_line_progress" ON text_line_progress; DROP POLICY IF EXISTS "owner or agent" ON text_line_progress;
+CREATE POLICY "owner or agent" ON text_line_progress FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON birthdays; DROP POLICY IF EXISTS "owner or agent" ON birthdays;
+CREATE POLICY "owner or agent" ON birthdays FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON vestiaire; DROP POLICY IF EXISTS "owner or agent" ON vestiaire;
+CREATE POLICY "owner or agent" ON vestiaire FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON lists; DROP POLICY IF EXISTS "owner or agent" ON lists;
+CREATE POLICY "owner or agent" ON lists FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON list_items; DROP POLICY IF EXISTS "owner or agent" ON list_items;
+CREATE POLICY "owner or agent" ON list_items FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON settings; DROP POLICY IF EXISTS "owner or agent" ON settings;
+CREATE POLICY "owner or agent" ON settings FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON prompts; DROP POLICY IF EXISTS "owner or agent" ON prompts;
+CREATE POLICY "owner or agent" ON prompts FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON nvidia_usage; DROP POLICY IF EXISTS "Allow all access to nvidia_usage" ON nvidia_usage; DROP POLICY IF EXISTS "allow_all_nvidia_usage" ON nvidia_usage; DROP POLICY IF EXISTS "owner or agent" ON nvidia_usage;
+CREATE POLICY "owner or agent" ON nvidia_usage FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "allow all" ON daily_visits; DROP POLICY IF EXISTS "Allow all access to daily_visits" ON daily_visits; DROP POLICY IF EXISTS "owner or agent" ON daily_visits;
+CREATE POLICY "owner or agent" ON daily_visits FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "owner or agent" ON joined_groups;
+CREATE POLICY "owner or agent" ON joined_groups FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+
+-- Sharing tables → "owner or agent"
+DROP POLICY IF EXISTS "owner or agent" ON sharing_groups;
+CREATE POLICY "owner or agent" ON sharing_groups FOR ALL USING (auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)) WITH CHECK (auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id));
+DROP POLICY IF EXISTS "owner or agent" ON sharing_members;
+CREATE POLICY "owner or agent" ON sharing_members FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id))) WITH CHECK (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)));
+DROP POLICY IF EXISTS "owner or agent" ON sharing_items;
+CREATE POLICY "owner or agent" ON sharing_items FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id))) WITH CHECK (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)));
+
+-- Category tables → "owner or agent"
+DROP POLICY IF EXISTS "owner or agent" ON todo_categories;
+CREATE POLICY "owner or agent" ON todo_categories FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "owner or agent" ON habit_categories;
+CREATE POLICY "owner or agent" ON habit_categories FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "owner or agent" ON vestiaire_categories;
+CREATE POLICY "owner or agent" ON vestiaire_categories FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "owner or agent" ON flashcard_decks;
+CREATE POLICY "owner or agent" ON flashcard_decks FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+
+-- Agent grants → "owner only" (agents must not manage their own grants)
+DROP POLICY IF EXISTS "owner only" ON agent_grants;
+CREATE POLICY "owner only" ON agent_grants FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+
+-- ══════════════════════════════════════════════════
+-- 7. Insert triggers — all tables, once
+-- ══════════════════════════════════════════════════
+DROP TRIGGER IF EXISTS trg_set_owner_id ON projects; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON projects FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON tasks; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON tasks FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON todos; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON todos FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON habits; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON habits FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON habit_completions; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON habit_completions FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON flashcards; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON flashcards FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON flashcard_notes; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON flashcard_notes FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON texts; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON texts FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON text_line_progress; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON text_line_progress FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON birthdays; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON birthdays FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON vestiaire; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON vestiaire FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON lists; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON lists FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON list_items; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON list_items FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON settings; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON settings FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON prompts; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON prompts FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON nvidia_usage; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON nvidia_usage FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON daily_visits; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON daily_visits FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON joined_groups; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON joined_groups FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON agent_grants; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON agent_grants FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON todo_categories; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON todo_categories FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON habit_categories; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON habit_categories FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON vestiaire_categories; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON vestiaire_categories FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+DROP TRIGGER IF EXISTS trg_set_owner_id ON flashcard_decks; CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON flashcard_decks FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+
+-- Protection triggers on category tables
+DROP TRIGGER IF EXISTS trg_protect_todo_categories ON todo_categories;
+CREATE TRIGGER trg_protect_todo_categories BEFORE DELETE OR UPDATE ON todo_categories FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION protect_category_row();
+DROP TRIGGER IF EXISTS trg_protect_habit_categories ON habit_categories;
+CREATE TRIGGER trg_protect_habit_categories BEFORE DELETE OR UPDATE ON habit_categories FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION protect_category_row();
+DROP TRIGGER IF EXISTS trg_protect_vestiaire_categories ON vestiaire_categories;
+CREATE TRIGGER trg_protect_vestiaire_categories BEFORE DELETE OR UPDATE ON vestiaire_categories FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION protect_category_row();
+DROP TRIGGER IF EXISTS trg_protect_flashcard_decks ON flashcard_decks;
+CREATE TRIGGER trg_protect_flashcard_decks BEFORE DELETE OR UPDATE ON flashcard_decks FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION protect_category_row();
+
+-- ══════════════════════════════════════════════════
+-- 8. Realtime
+-- ══════════════════════════════════════════════════
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE sharing_groups, sharing_members, sharing_items; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE agent_grants; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE todo_categories, habit_categories, vestiaire_categories, flashcard_decks; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ══════════════════════════════════════════════════
+-- 9. Category seeds, data discovery, metadata backfill
+-- ══════════════════════════════════════════════════
+-- Protected rows (idempotent)
+INSERT INTO todo_categories (name, is_protected, sort_order)
+  SELECT '', TRUE, 0 WHERE NOT EXISTS (SELECT 1 FROM todo_categories WHERE is_protected = TRUE AND name = '');
+INSERT INTO todo_categories (name, is_protected, sort_order)
+  SELECT '__shared__', TRUE, 9999 WHERE NOT EXISTS (SELECT 1 FROM todo_categories WHERE is_protected = TRUE AND name = '__shared__');
+INSERT INTO habit_categories (name, is_protected, sort_order)
+  SELECT '', TRUE, 0 WHERE NOT EXISTS (SELECT 1 FROM habit_categories WHERE is_protected = TRUE AND name = '');
+INSERT INTO habit_categories (name, is_protected, sort_order)
+  SELECT '__shared__', TRUE, 9999 WHERE NOT EXISTS (SELECT 1 FROM habit_categories WHERE is_protected = TRUE AND name = '__shared__');
+INSERT INTO vestiaire_categories (name, is_protected, sort_order)
+  SELECT '', TRUE, 0 WHERE NOT EXISTS (SELECT 1 FROM vestiaire_categories WHERE is_protected = TRUE AND name = '');
+INSERT INTO vestiaire_categories (name, is_protected, sort_order)
+  SELECT '__shared__', TRUE, 9999 WHERE NOT EXISTS (SELECT 1 FROM vestiaire_categories WHERE is_protected = TRUE AND name = '__shared__');
+INSERT INTO flashcard_decks (name, is_protected, sort_order)
+  SELECT '', TRUE, 0 WHERE NOT EXISTS (SELECT 1 FROM flashcard_decks WHERE is_protected = TRUE AND name = '');
+INSERT INTO flashcard_decks (name, is_protected, sort_order)
+  SELECT '__shared__', TRUE, 9999 WHERE NOT EXISTS (SELECT 1 FROM flashcard_decks WHERE is_protected = TRUE AND name = '__shared__');
+
+-- Discover categories from existing items
+INSERT INTO todo_categories (name, sort_order, owner_id)
+SELECT DISTINCT t.category, ROW_NUMBER() OVER (ORDER BY t.category), t.owner_id
+FROM todos t
+WHERE t.category != '' AND t.category != '__shared__'
+AND NOT EXISTS (SELECT 1 FROM todo_categories tc WHERE tc.name = t.category AND tc.owner_id = t.owner_id);
+
+INSERT INTO habit_categories (name, sort_order, owner_id)
+SELECT DISTINCT h.category, ROW_NUMBER() OVER (ORDER BY h.category), h.owner_id
+FROM habits h
+WHERE h.category != '' AND h.category != '__shared__'
+AND NOT EXISTS (SELECT 1 FROM habit_categories hc WHERE hc.name = h.category AND hc.owner_id = h.owner_id);
+
+INSERT INTO vestiaire_categories (name, sort_order, owner_id)
+SELECT DISTINCT v.category, ROW_NUMBER() OVER (ORDER BY v.category), v.owner_id
+FROM vestiaire v
+WHERE v.category != '' AND v.category != '__shared__'
+AND NOT EXISTS (SELECT 1 FROM vestiaire_categories vc WHERE vc.name = v.category AND vc.owner_id = v.owner_id);
+
+INSERT INTO flashcard_decks (name, sort_order, owner_id)
+SELECT DISTINCT f.deck, ROW_NUMBER() OVER (ORDER BY f.deck), f.owner_id
+FROM flashcards f
+WHERE f.deck != '' AND f.deck != '__shared__'
+AND NOT EXISTS (SELECT 1 FROM flashcard_decks fd WHERE fd.name = f.deck AND fd.owner_id = f.owner_id);
+
+INSERT INTO flashcard_decks (name, sort_order, owner_id)
+SELECT DISTINCT t.deck,
+       (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM flashcard_decks) + ROW_NUMBER() OVER (ORDER BY t.deck),
+       t.owner_id
+FROM texts t
+WHERE t.deck != '' AND t.deck != '__shared__'
+AND NOT EXISTS (SELECT 1 FROM flashcard_decks fd WHERE fd.name = t.deck AND fd.owner_id = t.owner_id);
+
+-- Backfill metadata from settings JSON
+UPDATE todo_categories SET color = sub.val FROM (
+  SELECT je.key AS cat_name, je.value #>> '{}' AS val, s.owner_id
+  FROM settings s, jsonb_each(s.value::jsonb) je WHERE s.key = 'todo_category_colors'
+) sub WHERE todo_categories.name = sub.cat_name AND todo_categories.owner_id = sub.owner_id;
+
+UPDATE todo_categories SET shortname = sub.val FROM (
+  SELECT je.key AS cat_name, je.value #>> '{}' AS val, s.owner_id
+  FROM settings s, jsonb_each(s.value::jsonb) je WHERE s.key = 'todo_category_shortnames'
+) sub WHERE todo_categories.name = sub.cat_name AND todo_categories.owner_id = sub.owner_id;
+
+UPDATE habit_categories SET shortname = sub.val FROM (
+  SELECT je.key AS cat_name, je.value #>> '{}' AS val, s.owner_id
+  FROM settings s, jsonb_each(s.value::jsonb) je WHERE s.key = 'habit_category_shortnames'
+) sub WHERE habit_categories.name = sub.cat_name AND habit_categories.owner_id = sub.owner_id;
+
+UPDATE vestiaire_categories SET shortname = sub.val FROM (
+  SELECT je.key AS cat_name, je.value #>> '{}' AS val, s.owner_id
+  FROM settings s, jsonb_each(s.value::jsonb) je WHERE s.key = 'vest_category_shortnames'
+) sub WHERE vestiaire_categories.name = sub.cat_name AND vestiaire_categories.owner_id = sub.owner_id;
+
+UPDATE flashcard_decks SET shortname = sub.val FROM (
+  SELECT je.key AS cat_name, je.value #>> '{}' AS val, s.owner_id
+  FROM settings s, jsonb_each(s.value::jsonb) je WHERE s.key = 'flash_shortnames'
+) sub WHERE flashcard_decks.name = sub.cat_name AND flashcard_decks.owner_id = sub.owner_id;
+
+-- ══════════════════════════════════════════════════
+-- 10. Category FK columns + populate
+-- ══════════════════════════════════════════════════
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS category_id TEXT;
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS category_id TEXT;
+ALTER TABLE vestiaire ADD COLUMN IF NOT EXISTS category_id TEXT;
+ALTER TABLE flashcards ADD COLUMN IF NOT EXISTS deck_id TEXT;
+ALTER TABLE texts ADD COLUMN IF NOT EXISTS deck_id TEXT;
+
+ALTER TABLE todos DROP CONSTRAINT IF EXISTS todos_category_id_fkey;
+ALTER TABLE todos ADD CONSTRAINT todos_category_id_fkey FOREIGN KEY (category_id) REFERENCES todo_categories(id) ON DELETE CASCADE;
+ALTER TABLE habits DROP CONSTRAINT IF EXISTS habits_category_id_fkey;
+ALTER TABLE habits ADD CONSTRAINT habits_category_id_fkey FOREIGN KEY (category_id) REFERENCES habit_categories(id) ON DELETE CASCADE;
+ALTER TABLE vestiaire DROP CONSTRAINT IF EXISTS vestiaire_category_id_fkey;
+ALTER TABLE vestiaire ADD CONSTRAINT vestiaire_category_id_fkey FOREIGN KEY (category_id) REFERENCES vestiaire_categories(id) ON DELETE CASCADE;
+ALTER TABLE flashcards DROP CONSTRAINT IF EXISTS flashcards_deck_id_fkey;
+ALTER TABLE flashcards ADD CONSTRAINT flashcards_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES flashcard_decks(id) ON DELETE CASCADE;
+ALTER TABLE texts DROP CONSTRAINT IF EXISTS texts_deck_id_fkey;
+ALTER TABLE texts ADD CONSTRAINT texts_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES flashcard_decks(id) ON DELETE CASCADE;
+
+UPDATE todos SET category_id = tc.id FROM todo_categories tc
+WHERE tc.name = todos.category AND tc.owner_id = todos.owner_id AND todos.category_id IS NULL;
+UPDATE habits SET category_id = hc.id FROM habit_categories hc
+WHERE hc.name = habits.category AND hc.owner_id = habits.owner_id AND habits.category_id IS NULL;
+UPDATE vestiaire SET category_id = vc.id FROM vestiaire_categories vc
+WHERE vc.name = vestiaire.category AND vc.owner_id = vestiaire.owner_id AND vestiaire.category_id IS NULL;
+UPDATE flashcards SET deck_id = fd.id FROM flashcard_decks fd
+WHERE fd.name = flashcards.deck AND fd.owner_id = flashcards.owner_id AND flashcards.deck_id IS NULL;
+UPDATE texts SET deck_id = fd.id FROM flashcard_decks fd
+WHERE fd.name = texts.deck AND fd.owner_id = texts.owner_id AND texts.deck_id IS NULL;
+
+-- ══════════════════════════════════════════════════
+-- 11. Column fixes
+-- ══════════════════════════════════════════════════
+ALTER TABLE text_line_progress DROP COLUMN IF EXISTS deck_id;
+ALTER TABLE vestiaire ALTER COLUMN category SET DEFAULT '';
+ALTER TABLE texts ALTER COLUMN deck SET DEFAULT '';
+
+-- ══════════════════════════════════════════════════
+-- 12. Sharing RPCs — final versions (token_hash, search_path, invited_label)
+-- ══════════════════════════════════════════════════
+DROP FUNCTION IF EXISTS verify_join_token(text);
+
+CREATE OR REPLACE FUNCTION verify_join_token(p_token text)
+RETURNS TABLE(group_id text, group_name text, member_id text, display_name text, invited_label text, backend_type text, creator_name text)
+LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  SELECT sg.id, sg.name, sm.member_id, sm.display_name, sm.invited_label, sg.backend_type,
+         (SELECT cm.display_name FROM sharing_members cm WHERE cm.group_id = sg.id AND cm.role = 'creator' LIMIT 1)
+  FROM sharing_members sm
+  JOIN sharing_groups sg ON sg.id = sm.group_id
+  WHERE sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND sm.revoked_at IS NULL
+    AND (sm.expires_at IS NULL OR sm.expires_at > now())
+    AND sm.joined_at IS NULL;
+$$;
+
+CREATE OR REPLACE FUNCTION confirm_join(p_token text, p_display_name text)
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  UPDATE sharing_members
+  SET joined_at = now(),
+      display_name = COALESCE(NULLIF(p_display_name, ''::text), display_name, invited_label),
+      auth_user_id = COALESCE(auth_user_id, auth.uid())
+  WHERE token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND joined_at IS NULL
+    AND revoked_at IS NULL
+    AND (expires_at IS NULL OR expires_at > now());
+$$;
+
+CREATE OR REPLACE FUNCTION get_shared_items(p_token text, p_group_id text, p_item_type text DEFAULT NULL::text)
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  SELECT si.* FROM sharing_items si
+  WHERE si.group_id = p_group_id
+    AND (p_item_type IS NULL OR si.item_type = p_item_type)
+    AND EXISTS (
+      SELECT 1 FROM sharing_members sm
+      WHERE sm.group_id = p_group_id
+        AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+        AND sm.joined_at IS NOT NULL AND sm.revoked_at IS NULL
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION add_shared_item(p_token text, p_item_id text, p_group_id text, p_item_type text, p_payload jsonb, p_member_id text, p_parent_item_id text DEFAULT NULL::text)
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  INSERT INTO sharing_items (item_id, group_id, item_type, parent_item_id, payload, created_by)
+  SELECT p_item_id, p_group_id, p_item_type, p_parent_item_id, p_payload, p_member_id
+  WHERE EXISTS (
+    SELECT 1 FROM sharing_members sm
+    WHERE sm.group_id = p_group_id
+      AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+      AND sm.member_id = p_member_id
+      AND sm.joined_at IS NOT NULL AND sm.revoked_at IS NULL
+  )
+  RETURNING *;
+$$;
+
+CREATE OR REPLACE FUNCTION update_shared_item(p_token text, p_item_id text, p_payload jsonb)
+RETURNS SETOF sharing_items LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  UPDATE sharing_items si
+  SET payload = p_payload, updated_at = now()
+  WHERE si.item_id = p_item_id
+    AND EXISTS (
+      SELECT 1 FROM sharing_members sm
+      WHERE sm.group_id = si.group_id
+        AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+        AND sm.joined_at IS NOT NULL AND sm.revoked_at IS NULL
+    )
+  RETURNING *;
+$$;
+
+CREATE OR REPLACE FUNCTION delete_shared_item(p_token text, p_item_id text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+BEGIN
+  DELETE FROM sharing_items si
+  WHERE si.item_id = p_item_id
+    AND EXISTS (
+      SELECT 1 FROM sharing_members sm
+      WHERE sm.group_id = si.group_id
+        AND sm.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+        AND sm.joined_at IS NOT NULL AND sm.revoked_at IS NULL
+    );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION get_group_members(p_token text, p_group_id text)
+RETURNS TABLE(member_id text, display_name text, invited_label text, role text, joined_at timestamp with time zone, auth_user_id uuid)
+LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  SELECT sm.member_id, sm.display_name, sm.invited_label, sm.role, sm.joined_at, sm.auth_user_id
+  FROM sharing_members sm
+  WHERE sm.group_id = p_group_id
+  AND sm.revoked_at IS NULL
+  AND EXISTS (
+    SELECT 1 FROM sharing_members sm2
+    WHERE sm2.group_id = p_group_id
+      AND sm2.token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+      AND sm2.joined_at IS NOT NULL
+      AND sm2.revoked_at IS NULL
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION leave_group(p_token text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+BEGIN
+  DELETE FROM sharing_members
+  WHERE token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
+    AND role != 'creator'
+    AND joined_at IS NOT NULL AND revoked_at IS NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION revoke_member(p_group_id text, p_member_id text)
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+  UPDATE sharing_members SET revoked_at = now()
+  WHERE group_id = p_group_id AND member_id = p_member_id AND role != 'creator';
+$$;
+
+-- ══════════════════════════════════════════════════
+-- 13. Agent RPCs
+-- ══════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION create_agent_grant(p_display_name TEXT, p_scope TEXT DEFAULT 'full')
+RETURNS TABLE(id UUID, token TEXT, display_name TEXT, scope TEXT, created_at TIMESTAMPTZ)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+DECLARE
+  uid UUID := auth.uid(); raw TEXT; hash TEXT; new_id UUID; new_created TIMESTAMPTZ;
+BEGIN
+  IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  IF p_display_name IS NULL OR btrim(p_display_name) = '' THEN RAISE EXCEPTION 'display_name required'; END IF;
+  raw := encode(gen_random_bytes(32), 'hex');
+  hash := encode(digest(raw::text, 'sha256'::text), 'hex'::text);
+  INSERT INTO agent_grants (owner_id, display_name, token_hash, scope)
+    VALUES (uid, btrim(p_display_name), hash, COALESCE(p_scope, 'full'))
+    RETURNING agent_grants.id, agent_grants.created_at INTO new_id, new_created;
+  RETURN QUERY SELECT new_id, raw, btrim(p_display_name), COALESCE(p_scope, 'full'), new_created;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION revoke_agent_grant(p_id UUID)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+DECLARE uid UUID := auth.uid();
+BEGIN
+  IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  UPDATE agent_grants SET revoked_at = now() WHERE id = p_id AND owner_id = uid AND revoked_at IS NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION touch_agent_grant()
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+DECLARE hdr TEXT; tok TEXT; h TEXT;
+BEGIN
+  BEGIN hdr := current_setting('request.headers', true); EXCEPTION WHEN OTHERS THEN RETURN; END;
+  IF hdr IS NULL THEN RETURN; END IF;
+  BEGIN
+    tok := (hdr::jsonb ->> 'x-agent-token');
+    IF tok IS NULL OR tok = '' THEN tok := (hdr::jsonb ->> 'X-Agent-Token'); END IF;
+  EXCEPTION WHEN OTHERS THEN RETURN; END;
+  IF tok IS NULL OR tok = '' THEN RETURN; END IF;
+  h := encode(digest(tok::text, 'sha256'::text), 'hex'::text);
+  UPDATE agent_grants SET last_used_at = now() WHERE token_hash = h;
+END;
+$$;
+
+-- ══════════════════════════════════════════════════
+-- 14. claim_ownership — final hardened version
+-- ══════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION claim_ownership()
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE uid UUID := auth.uid();
+BEGIN
+  IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  BEGIN DELETE FROM daily_visits WHERE owner_id IS NULL AND visit_date IN (SELECT visit_date FROM daily_visits WHERE owner_id = uid); EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE projects SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE tasks SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE todos SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE habits SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE habit_completions SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE flashcards SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE flashcard_notes SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE texts SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE text_line_progress SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE birthdays SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE vestiaire SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE lists SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE list_items SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE settings SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE prompts SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE nvidia_usage SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE daily_visits SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table OR unique_violation THEN NULL; END;
+  BEGIN UPDATE joined_groups SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE agent_grants SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE todo_categories SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE habit_categories SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE vestiaire_categories SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE flashcard_decks SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+END;
+$$;
+
+-- ══════════════════════════════════════════════════
+-- 15. Indexes
+-- ══════════════════════════════════════════════════
+-- owner_id
+CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_owner_id ON tasks(owner_id);
+CREATE INDEX IF NOT EXISTS idx_todos_owner_id ON todos(owner_id);
+CREATE INDEX IF NOT EXISTS idx_habits_owner_id ON habits(owner_id);
+CREATE INDEX IF NOT EXISTS idx_habit_completions_owner_id ON habit_completions(owner_id);
+CREATE INDEX IF NOT EXISTS idx_flashcards_owner_id ON flashcards(owner_id);
+CREATE INDEX IF NOT EXISTS idx_flashcard_notes_owner_id ON flashcard_notes(owner_id);
+CREATE INDEX IF NOT EXISTS idx_texts_owner_id ON texts(owner_id);
+CREATE INDEX IF NOT EXISTS idx_text_line_progress_owner_id ON text_line_progress(owner_id);
+CREATE INDEX IF NOT EXISTS idx_birthdays_owner_id ON birthdays(owner_id);
+CREATE INDEX IF NOT EXISTS idx_vestiaire_owner_id ON vestiaire(owner_id);
+CREATE INDEX IF NOT EXISTS idx_lists_owner_id ON lists(owner_id);
+CREATE INDEX IF NOT EXISTS idx_list_items_owner_id ON list_items(owner_id);
+CREATE INDEX IF NOT EXISTS idx_settings_owner_id ON settings(owner_id);
+CREATE INDEX IF NOT EXISTS idx_prompts_owner_id ON prompts(owner_id);
+CREATE INDEX IF NOT EXISTS idx_nvidia_usage_owner_id ON nvidia_usage(owner_id);
+CREATE INDEX IF NOT EXISTS idx_daily_visits_owner_id ON daily_visits(owner_id);
+CREATE INDEX IF NOT EXISTS idx_joined_groups_owner_id ON joined_groups(owner_id);
+-- shared_id
+CREATE INDEX IF NOT EXISTS idx_todos_shared_id ON todos(shared_id);
+CREATE INDEX IF NOT EXISTS idx_todos_shared_group_id ON todos(shared_group_id);
+CREATE INDEX IF NOT EXISTS idx_habits_shared_id ON habits(shared_id);
+CREATE INDEX IF NOT EXISTS idx_habits_shared_group_id ON habits(shared_group_id);
+CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON list_items(shared_id);
+CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_group_id);
+-- sharing tables
+CREATE INDEX IF NOT EXISTS idx_sharing_groups_auth_owner_id ON sharing_groups(auth_owner_id);
+CREATE INDEX IF NOT EXISTS idx_sharing_members_group_id ON sharing_members(group_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sharing_members_token_hash ON sharing_members(token_hash);
+CREATE INDEX IF NOT EXISTS idx_sharing_members_expires_at ON sharing_members(expires_at);
+CREATE INDEX IF NOT EXISTS idx_sharing_members_revoked_at ON sharing_members(revoked_at) WHERE revoked_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sharing_members_auth_user_id ON sharing_members(auth_user_id);
+CREATE INDEX IF NOT EXISTS idx_sharing_members_group_auth ON sharing_members(group_id, auth_user_id);
+CREATE INDEX IF NOT EXISTS idx_sharing_items_group_id ON sharing_items(group_id);
+-- agent grants
+CREATE INDEX IF NOT EXISTS idx_agent_grants_owner_id ON agent_grants(owner_id);
+CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON agent_grants(token_hash);
+-- categories
+CREATE INDEX IF NOT EXISTS idx_todo_categories_owner_id ON todo_categories(owner_id);
+CREATE INDEX IF NOT EXISTS idx_habit_categories_owner_id ON habit_categories(owner_id);
+CREATE INDEX IF NOT EXISTS idx_vestiaire_categories_owner_id ON vestiaire_categories(owner_id);
+CREATE INDEX IF NOT EXISTS idx_flashcard_decks_owner_id ON flashcard_decks(owner_id);
+CREATE INDEX IF NOT EXISTS idx_todos_category_id ON todos(category_id);
+CREATE INDEX IF NOT EXISTS idx_habits_category_id ON habits(category_id);
+CREATE INDEX IF NOT EXISTS idx_vestiaire_category_id ON vestiaire(category_id);
+CREATE INDEX IF NOT EXISTS idx_flashcards_deck_id ON flashcards(deck_id);
+CREATE INDEX IF NOT EXISTS idx_texts_deck_id ON texts(deck_id);
+
+-- ══════════════════════════════════════════════════
+-- 16. Cleanup
+-- ══════════════════════════════════════════════════
+DELETE FROM settings WHERE key IN (
+  'todo_category_colors', 'todo_category_shortnames',
+  'habit_category_shortnames', 'vest_category_shortnames',
+  'flash_shortnames'
+);
+
+-- Schema version
+INSERT INTO settings (key, value, updated_at)
+VALUES ('schema_version', '1.484', now())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+
+NOTIFY pgrst, 'reload schema';

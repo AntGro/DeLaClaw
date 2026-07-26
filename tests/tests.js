@@ -2576,6 +2576,16 @@ async function importFlashcardsIntegrationTest() {
     }
   });
 
+  test('supabase-migrations.js freshness: matches generated output from SQL files', () => {
+    const { execSync } = require('child_process');
+    const migFile = path.join(__dirname, '..', 'migrations', 'supabase-migrations.js');
+    const before = fs.readFileSync(migFile, 'utf-8');
+    execSync('node scripts/generate-supabase-migrations.js', { cwd: path.join(__dirname,'..'), stdio: 'pipe' });
+    const after = fs.readFileSync(migFile, 'utf-8');
+    assert(before === after, 'supabase-migrations.js is stale — run: node scripts/generate-supabase-migrations.js');
+  });
+
+
   // ===================================================================
   // SUMMARY
   // ===================================================================

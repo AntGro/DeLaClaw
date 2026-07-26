@@ -1585,10 +1585,24 @@ INSERT INTO flashcard_decks (name, is_protected, sort_order)
 -- ── Protection trigger ──
 CREATE OR REPLACE FUNCTION protect_category_row() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
-  IF OLD.is_protected THEN
-    RAISE EXCEPTION 'Cannot modify or delete a protected category row (id=%)', OLD.id;
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.is_protected THEN
+      RAISE EXCEPTION 'Cannot delete protected row %', OLD.id;
+    END IF;
+    RETURN OLD;
+  ELSIF TG_OP = 'UPDATE' THEN
+    IF OLD.is_protected AND OLD.owner_id IS NULL AND NEW.owner_id IS NOT NULL THEN
+      IF OLD.name IS DISTINCT FROM NEW.name OR OLD.is_protected IS DISTINCT FROM NEW.is_protected THEN
+        RAISE EXCEPTION 'Cannot change name/flag of protected %', OLD.id;
+      END IF;
+      RETURN NEW;
+    END IF;
+    IF OLD.is_protected AND (OLD.name IS DISTINCT FROM NEW.name OR OLD.id IS DISTINCT FROM NEW.id OR OLD.is_protected IS DISTINCT FROM NEW.is_protected) THEN
+      RAISE EXCEPTION 'Cannot modify protected row % (only color/shortname/sort_order)', OLD.id;
+    END IF;
+    RETURN NEW;
   END IF;
-  RETURN OLD;
+  RETURN NEW;
 END;
 $$;
 
@@ -1613,7 +1627,41 @@ ALTER TABLE flashcards ADD CONSTRAINT flashcards_deck_id_fkey FOREIGN KEY (deck_
 ALTER TABLE texts DROP CONSTRAINT IF EXISTS texts_deck_id_fkey;
 ALTER TABLE texts ADD CONSTRAINT texts_deck_id_fkey FOREIGN KEY (deck_id) REFERENCES flashcard_decks(id) ON DELETE CASCADE;
 
-INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.485', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+-- Harden claim_ownership: tolerant of missing tables + daily_visits PK conflict
+CREATE OR REPLACE FUNCTION claim_ownership()
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE uid UUID := auth.uid();
+BEGIN
+  IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  BEGIN DELETE FROM daily_visits WHERE owner_id IS NULL AND visit_date IN (SELECT visit_date FROM daily_visits WHERE owner_id = uid); EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE projects SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE tasks SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE todos SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE habits SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE habit_completions SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE flashcards SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE flashcard_notes SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE texts SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE text_line_progress SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE birthdays SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE vestiaire SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE lists SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE list_items SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE settings SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE prompts SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE nvidia_usage SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE daily_visits SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table OR unique_violation THEN NULL; END;
+  BEGIN UPDATE joined_groups SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE agent_grants SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE todo_categories SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE habit_categories SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE vestiaire_categories SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+  BEGIN UPDATE flashcard_decks SET owner_id = uid WHERE owner_id IS NULL; EXCEPTION WHEN undefined_table THEN NULL; END;
+END;
+$$;
+
+INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.484', now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 NOTIFY pgrst, 'reload schema';
 `,
 };

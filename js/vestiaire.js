@@ -97,8 +97,9 @@ function renderVestiaire() {
   let items = state.allVestiaire || [];
   const catRows = Array.from(_vestCatMap.values()).sort((a, b) => a.sort_order - b.sort_order);
 
-  // Show page-level empty state when no items and no categories
-  if (items.length === 0 && catRows.length === 0) {
+  // Show page-level empty state when no items and only protected (default) categories
+  const userCats = catRows.filter(c => !c.is_protected);
+  if (items.length === 0 && userCats.length === 0) {
     grid.innerHTML = `<div class="page-empty-state">
       <div class="empty-icon">${lucideIcon('shirt', 48, 'var(--muted)')}</div>
       <h3>${t('vestiaire.empty_title')}</h3>

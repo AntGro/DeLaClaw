@@ -191,7 +191,7 @@
       case 'close-edit-text': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditTextModal', []); break;
       case 'save-edit-text': callWindow('saveEditText', []); break;
       case 'end-text-practice': callWindow('endTextPractice', []); break;
-      case 'handle-line-click': { var idx = el.dataset.lineIdx || el.dataset.line || el.dataset.index; if (window.handleLineClick) window.handleLineClick({ target: el }, idx); else callWindow('handleLineClick', [parseInt(idx||'0',10)]); } break;
+      case 'handle-line-click': if (window.handleLineClick) window.handleLineClick(el); else { var idx = el.dataset.lineIdx || el.dataset.line || el.dataset.index; callWindow('handleLineClick', [parseInt(idx||'0',10)]); } break;
       case 'submit-text-review': callWindow('submitTextReview', []); break;
       case 'continue-text-same-text': callWindow('continueTextSameText', []); break;
       case 'archive-project': callWindow('archiveProject', [getId(el)]); break;

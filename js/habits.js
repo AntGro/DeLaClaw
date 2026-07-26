@@ -891,6 +891,7 @@ function renderHabitCategoryCard(catId) {
   const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
       <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catId)}" data-action="add-habit-from-input">
       <button data-action="add-habit-from-input">${lucideIcon('plus', 16)}</button>
+      ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-habit-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
     </div>`;
 
   return `<div class="project-card" data-category="${esc(catId)}" style="--cat-color:${catColor}">
@@ -1004,7 +1005,7 @@ function initHabitModals() {
   app.appendChild(m6);
 }
 
-function openAddHabitModal() {
+function openAddHabitModal(preselectedGroupId) {
   document.getElementById('newHabitName').value = '';
   document.getElementById('newHabitLastDone').value = '';
   document.getElementById('newHabitDraft').checked = false;
@@ -1019,6 +1020,7 @@ function openAddHabitModal() {
       groupSel.innerHTML = `<option value="">${t('sharing.no_group')}</option>` +
         groups.map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
       groupRow.style.display = '';
+      if (preselectedGroupId) groupSel.value = preselectedGroupId;
     } else {
       groupRow.style.display = 'none';
     }
@@ -1033,6 +1035,12 @@ function openAddHabitModal() {
 
 function closeAddHabitModal() {
   document.getElementById('addHabitModal').classList.remove('visible');
+}
+
+function shareHabitFromAdd() {
+  const groups = state.sharing?.getAllGroups() || [];
+  if (!groups.length) return;
+  openAddHabitModal(groups[0].id);
 }
 
 function populateHabitCategorySelect(selectId) {
@@ -2199,6 +2207,7 @@ export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHa
 
 window.setHabitFilter = setHabitFilter;
 window.openAddHabitModal = openAddHabitModal;
+window.shareHabitFromAdd = shareHabitFromAdd;
 window.closeAddHabitModal = closeAddHabitModal;
 window.saveNewHabit = saveNewHabit;
 window.openEditHabitModal = openEditHabitModal;

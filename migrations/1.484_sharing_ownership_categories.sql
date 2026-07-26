@@ -471,6 +471,48 @@ UPDATE flashcard_decks SET shortname = sub.val FROM (
   FROM settings s, jsonb_each(s.value::jsonb) je WHERE s.key = 'flash_shortnames'
 ) sub WHERE flashcard_decks.name = sub.cat_name AND flashcard_decks.owner_id = sub.owner_id;
 
+-- Auto-assign palette colors to categories/decks that still have no color
+-- Uses the app's DEFAULT_CATEGORY_PALETTE (10 colors), cycling by row position
+WITH palette(idx, hex) AS (VALUES
+  (0,'#3b82f6'),(1,'#ef4444'),(2,'#22c55e'),(3,'#eab308'),(4,'#8b5cf6'),
+  (5,'#ec4899'),(6,'#f97316'),(7,'#14b8a6'),(8,'#6366f1'),(9,'#84cc16')
+),
+numbered AS (
+  SELECT id, (ROW_NUMBER() OVER (PARTITION BY owner_id ORDER BY sort_order, id) - 1) % 10 AS idx
+  FROM todo_categories WHERE color IS NULL AND is_protected = FALSE
+)
+UPDATE todo_categories SET color = p.hex FROM numbered n JOIN palette p ON p.idx = n.idx WHERE todo_categories.id = n.id;
+
+WITH palette(idx, hex) AS (VALUES
+  (0,'#3b82f6'),(1,'#ef4444'),(2,'#22c55e'),(3,'#eab308'),(4,'#8b5cf6'),
+  (5,'#ec4899'),(6,'#f97316'),(7,'#14b8a6'),(8,'#6366f1'),(9,'#84cc16')
+),
+numbered AS (
+  SELECT id, (ROW_NUMBER() OVER (PARTITION BY owner_id ORDER BY sort_order, id) - 1) % 10 AS idx
+  FROM habit_categories WHERE color IS NULL AND is_protected = FALSE
+)
+UPDATE habit_categories SET color = p.hex FROM numbered n JOIN palette p ON p.idx = n.idx WHERE habit_categories.id = n.id;
+
+WITH palette(idx, hex) AS (VALUES
+  (0,'#3b82f6'),(1,'#ef4444'),(2,'#22c55e'),(3,'#eab308'),(4,'#8b5cf6'),
+  (5,'#ec4899'),(6,'#f97316'),(7,'#14b8a6'),(8,'#6366f1'),(9,'#84cc16')
+),
+numbered AS (
+  SELECT id, (ROW_NUMBER() OVER (PARTITION BY owner_id ORDER BY sort_order, id) - 1) % 10 AS idx
+  FROM vestiaire_categories WHERE color IS NULL AND is_protected = FALSE
+)
+UPDATE vestiaire_categories SET color = p.hex FROM numbered n JOIN palette p ON p.idx = n.idx WHERE vestiaire_categories.id = n.id;
+
+WITH palette(idx, hex) AS (VALUES
+  (0,'#3b82f6'),(1,'#ef4444'),(2,'#22c55e'),(3,'#eab308'),(4,'#8b5cf6'),
+  (5,'#ec4899'),(6,'#f97316'),(7,'#14b8a6'),(8,'#6366f1'),(9,'#84cc16')
+),
+numbered AS (
+  SELECT id, (ROW_NUMBER() OVER (PARTITION BY owner_id ORDER BY sort_order, id) - 1) % 10 AS idx
+  FROM flashcard_decks WHERE color IS NULL AND is_protected = FALSE
+)
+UPDATE flashcard_decks SET color = p.hex FROM numbered n JOIN palette p ON p.idx = n.idx WHERE flashcard_decks.id = n.id;
+
 -- ══════════════════════════════════════════════════
 -- 10. Category FK columns + populate
 -- ══════════════════════════════════════════════════

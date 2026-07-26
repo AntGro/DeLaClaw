@@ -428,6 +428,31 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     // Set schema_version to latest — no migrations needed
     if (!inner._store.settings) inner._store.settings = [];
     inner._store.settings.push({ key: 'schema_version', value: latestVersion });
+
+    // Seed protected rows for category tables (fresh install has empty arrays)
+    const now = new Date().toISOString();
+    const catSeed = [
+      ['todo_categories',      '_default_todo_cat',  '_shared_todo_cat'],
+      ['habit_categories',     '_default_habit_cat', '_shared_habit_cat'],
+      ['vestiaire_categories', '_default_vest_cat',  '_shared_vest_cat'],
+      ['flashcard_decks',      '_default_deck',      '_shared_deck'],
+    ];
+    for (const [table, defId, sharedId] of catSeed) {
+      if (!inner._store[table]) inner._store[table] = [];
+      inner._store[table].push(
+        { id: defId,    name: '',           shortname: null, color: null, sort_order: 0,    is_protected: 1, owner_id: null, created_at: now, updated_at: now },
+        { id: sharedId, name: '__shared__', shortname: null, color: null, sort_order: 9999, is_protected: 1, owner_id: null, created_at: now, updated_at: now },
+      );
+    }
+    // Flush seeded category tables to Drive
+    const catTok = await getToken();
+    if (catTok) {
+      for (const [table] of catSeed) {
+        const meta = fileMeta[table] || {};
+        const result = await uploadFile(catTok, folderId, meta.fileId, `${table}.json`, inner._store[table]);
+        fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+      }
+    }
     // Flush settings with the version stamp
     const settingsTok = await getToken();
     if (settingsTok) {

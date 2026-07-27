@@ -4201,6 +4201,30 @@ function renderLastUpdated() {
 }
 
 // ===================================================================
+// STALE-TAB REFRESH — re-fetch data when returning to a hidden tab
+// ===================================================================
+const STALE_TAB_MS = 2 * 60 * 1000; // 2 minutes
+
+const _viewRefreshMap = {
+  welcome:    () => refreshWelcome().then(() => { renderWelcome(); markLastUpdated(); }),
+  projects:   () => refreshAll().then(() => markLastUpdated()),
+  todos:      () => refreshTodos().then(() => { renderTodos(); markLastUpdated(); }),
+  habits:     () => refreshHabits().then(() => { renderHabits(); markLastUpdated(); }),
+  birthdays:  () => refreshBirthdays().then(() => { renderBirthdays(); markLastUpdated(); }),
+  vestiaire:  () => refreshVestiaire().then(() => { renderVestiaire(); markLastUpdated(); }),
+  flashcards: () => refreshFlashcards().then(() => markLastUpdated()),
+  lists:      () => refreshLists().then(() => { renderLists(); markLastUpdated(); }),
+};
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !state.db?.connected) return;
+  const staleSince = _lastUpdatedAt ? Date.now() - _lastUpdatedAt : Infinity;
+  if (staleSince < STALE_TAB_MS) return;
+  const fn = _viewRefreshMap[state.currentView];
+  if (fn) fn();
+});
+
+// ===================================================================
 // SEARCH TOGGLE — collapsible search input
 // ===================================================================
 function toggleSearch(btn) {

@@ -245,7 +245,7 @@ function renderFocusTodoItem(td) {
   let sharedHtml = '';
   if (isShared && state.sharing) {
     const group = state.sharing.getAllGroups().find(g => g.id === td.shared_group_id);
-    sharedHtml = sharedBadge(group?.name || '');
+    sharedHtml = sharedBadge(group?.name || '', td.shared_group_id);
   }
 
   return `<div class="${classes}" data-todo-id="${td.id}">
@@ -324,7 +324,7 @@ function renderFocusHabitItem(habit) {
   let sharedHtml = '';
   if (isShared && state.sharing) {
     const group = state.sharing.getAllGroups().find(g => g.id === habit.shared_group_id);
-    sharedHtml = sharedBadge(group?.name || '');
+    sharedHtml = sharedBadge(group?.name || '', habit.shared_group_id);
   }
 
   return `<div class="bucket-item habit-item habit-status-${status}" data-habit-id="${habit.id}">

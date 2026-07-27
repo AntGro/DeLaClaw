@@ -1975,7 +1975,11 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-empty-actions{display:flex;gap:8px;justify-content:center;margin-top:8px;}
 .sharing-join-btn{border-color:var(--muted);}
 .sharing-avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff;font-weight:600;flex-shrink:0;line-height:1;}
-.shared-badge{font-size:0.68rem;color:var(--accent);background:color-mix(in srgb, var(--accent) 12%, transparent);border:1px solid color-mix(in srgb, var(--accent) 25%, transparent);padding:2px 8px;border-radius:4px;display:flex;align-items:center;gap:4px;white-space:nowrap;width:fit-content;margin-bottom:4px;letter-spacing:0.02em;}
+.shared-badge{font-size:0.68rem;color:var(--accent);background:color-mix(in srgb, var(--accent) 12%, transparent);border:1px solid color-mix(in srgb, var(--accent) 25%, transparent);padding:2px 8px;border-radius:4px;display:flex;align-items:center;gap:4px;white-space:nowrap;width:fit-content;margin-bottom:4px;letter-spacing:0.02em;cursor:default;}
+.shared-badge[data-group-id]{cursor:pointer;}
+.shared-badge-tooltip{position:fixed;z-index:9999;background:var(--bg);border:1px solid var(--border, #ccc);border-radius:8px;padding:6px 8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);min-width:120px;max-width:260px;animation:badge-tip-in 0.15s ease-out;}
+.shared-badge-tooltip-row{display:flex;align-items:center;gap:8px;padding:4px 4px;font-size:0.8rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+@keyframes badge-tip-in{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
 .assignee-dots{display:inline-flex;align-items:center;gap:-2px;margin-left:4px;}
 .assignee-dots .sharing-avatar{margin-left:-4px;border:2px solid var(--bg);}
 .assignee-dots .sharing-avatar:first-child{margin-left:0;}

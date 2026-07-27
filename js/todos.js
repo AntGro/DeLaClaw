@@ -455,7 +455,7 @@ function renderTodoItem(td) {
   let sharedHtml = '';
   if (isShared && state.sharing) {
     const group = state.sharing.getAllGroups().find(g => g.id === td.shared_group_id);
-    sharedHtml = sharedBadge(group?.name || '');
+    sharedHtml = sharedBadge(group?.name || '', td.shared_group_id);
   }
 
   return `<div class="${classes}" data-todo-id="${td.id}">

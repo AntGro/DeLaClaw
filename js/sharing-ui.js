@@ -660,9 +660,99 @@ async function sharingOpenJoinPicker(folderId) {
 // ── Shared badge (used by todos/habits/lists) ───────────────────
 
 /** Return inline HTML for a shared badge showing the group name. */
-export function sharedBadge(groupName) {
-  return `<span class="shared-badge">${lucideIcon('users', 12)} ${esc(groupName)}</span>`;
+export function sharedBadge(groupName, groupId) {
+  return `<span class="shared-badge" ${groupId ? `data-group-id="${esc(groupId)}"` : ''}>${lucideIcon('users', 12)} ${esc(groupName)}</span>`;
 }
+
+// ── Shared-badge hover tooltip (1s delay, shows group members) ──
+
+let _badgeHoverTimer = null;
+let _badgeTooltip = null;
+
+function removeBadgeTooltip() {
+  if (_badgeHoverTimer) { clearTimeout(_badgeHoverTimer); _badgeHoverTimer = null; }
+  if (_badgeTooltip) { _badgeTooltip.remove(); _badgeTooltip = null; }
+}
+
+function showBadgeTooltip(badge) {
+  const groupId = badge.dataset.groupId;
+  if (!groupId || !state.sharing) return;
+  const group = state.sharing.getGroup(groupId);
+  if (!group?.members?.length) return;
+
+  removeBadgeTooltip();
+
+  const tip = document.createElement('div');
+  tip.className = 'shared-badge-tooltip';
+
+  const activeMembers = group.members.filter(m => m.status !== 'revoked');
+  tip.innerHTML = activeMembers.map(m => {
+    const label = memberLabel(m);
+    return `<div class="shared-badge-tooltip-row">${avatarDot(m, 20)}<span>${esc(label)}</span></div>`;
+  }).join('');
+
+  document.body.appendChild(tip);
+  _badgeTooltip = tip;
+
+  // Position relative to badge, flip if overflowing
+  const br = badge.getBoundingClientRect();
+  const tw = tip.offsetWidth;
+  const th = tip.offsetHeight;
+
+  let top = br.bottom + 6;
+  let left = br.left + (br.width / 2) - (tw / 2);
+
+  // Flip above if overflows bottom
+  if (top + th > window.innerHeight - 8) top = br.top - th - 6;
+  // Clamp horizontal
+  if (left < 8) left = 8;
+  if (left + tw > window.innerWidth - 8) left = window.innerWidth - 8 - tw;
+
+  tip.style.top = `${top}px`;
+  tip.style.left = `${left}px`;
+
+  // Dismiss on scroll or outside interaction
+  const dismissOnScroll = () => removeBadgeTooltip();
+  window.addEventListener('scroll', dismissOnScroll, { once: true, capture: true });
+
+  tip.addEventListener('mouseleave', removeBadgeTooltip);
+}
+
+function initBadgeHover() {
+  document.body.addEventListener('mouseenter', (e) => {
+    const badge = e.target.closest?.('.shared-badge[data-group-id]');
+    if (!badge) return;
+    removeBadgeTooltip();
+    _badgeHoverTimer = setTimeout(() => showBadgeTooltip(badge), 1000);
+  }, true);
+
+  document.body.addEventListener('mouseleave', (e) => {
+    const badge = e.target.closest?.('.shared-badge[data-group-id]');
+    if (!badge) return;
+    // Allow moving from badge into tooltip
+    setTimeout(() => {
+      if (_badgeTooltip && !_badgeTooltip.matches(':hover') && !badge.matches(':hover')) {
+        removeBadgeTooltip();
+      }
+    }, 100);
+  }, true);
+
+  // Touch: tap shows, tap elsewhere dismisses
+  document.body.addEventListener('touchstart', (e) => {
+    if (_badgeTooltip && !e.target.closest('.shared-badge-tooltip') && !e.target.closest('.shared-badge[data-group-id]')) {
+      removeBadgeTooltip();
+      return;
+    }
+    const badge = e.target.closest?.('.shared-badge[data-group-id]');
+    if (badge) {
+      e.preventDefault();
+      showBadgeTooltip(badge);
+    }
+  }, { passive: false });
+}
+
+// Init once on load
+if (typeof document !== 'undefined') initBadgeHover();
 
 /** Return inline HTML for assignee avatar dots. */
 export function assigneeDots(assignees, maxShow = 3) {

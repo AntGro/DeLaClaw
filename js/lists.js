@@ -265,7 +265,7 @@ function renderListItem(item) {
   let sharedHtml = '';
   if (isShared && state.sharing) {
     const group = state.sharing.getAllGroups().find(g => g.id === item.shared_group_id);
-    sharedHtml = sharedBadge(group?.name || '');
+    sharedHtml = sharedBadge(group?.name || '', item.shared_group_id);
   }
 
   return `<div class="bucket-item list-item${checkedCls}" data-item-id="${item.id}">

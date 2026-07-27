@@ -2271,7 +2271,16 @@ window.openImportModal = async function(presetDeck) {
     confirmBtn.disabled = true;
     confirmBtn.textContent = t('flashcards.import_importing');
 
-    const deckId = _deckByName.get(deck)?.id || null;
+    // If deck doesn't exist yet, create the deck row (same as manual creation)
+    let deckId = _deckByName.get(deck)?.id || null;
+    if (!deckId && deck && state.db.connected) {
+      const usedColors = new Set(Array.from(_deckMap.values()).map(d => d.color).filter(Boolean));
+      const color = DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c)) || DEFAULT_CATEGORY_PALETTE[_deckMap.size % DEFAULT_CATEGORY_PALETTE.length];
+      const sortOrder = Math.max(0, ...Array.from(_deckMap.values()).map(d => d.sort_order || 0)) + 1;
+      await state.db.from('flashcard_decks').insert({ name: deck, color, sort_order: sortOrder });
+      await loadFlashcardDecks();
+      deckId = _deckByName.get(deck)?.id || null;
+    }
 
     try {
       if (type === 'text') {

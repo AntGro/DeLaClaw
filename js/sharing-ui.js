@@ -729,6 +729,8 @@ function initBadgeHover() {
   document.body.addEventListener('mouseleave', (e) => {
     const badge = e.target.closest?.('.shared-badge[data-group-id]');
     if (!badge) return;
+    // Cancel pending hover timer
+    if (_badgeHoverTimer) { clearTimeout(_badgeHoverTimer); _badgeHoverTimer = null; }
     // Allow moving from badge into tooltip
     setTimeout(() => {
       if (_badgeTooltip && !_badgeTooltip.matches(':hover') && !badge.matches(':hover')) {

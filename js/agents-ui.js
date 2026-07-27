@@ -105,9 +105,9 @@ export async function renderAgentsPane() {
         <button class="sharing-invite-btn" data-action="agents-create" id="agentsCreateBtn" style="white-space:nowrap">${lucideIcon('plus',14)} ${esc(t('agents.create_btn'))}</button>
       </div>
       <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-        <span class="setting-hint" style="background:var(--surface2);padding:5px 10px;border-radius:999px;font-size:0.74rem;display:inline-flex;gap:4px;align-items:center">${lucideIcon('terminal',12)} Claude Code</span>
-        <span class="setting-hint" style="background:var(--surface2);padding:5px 10px;border-radius:999px;font-size:0.74rem;display:inline-flex;gap:4px;align-items:center">${lucideIcon('code-2',12)} Codex CLI</span>
-        <span class="setting-hint" style="background:var(--surface2);padding:5px 10px;border-radius:999px;font-size:0.74rem">OpenClaw</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Claude Code">${lucideIcon('terminal',12)} Claude Code</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Codex CLI">${lucideIcon('code-2',12)} Codex CLI</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="OpenClaw">OpenClaw</span>
       </div>
     </div>`;
 
@@ -208,6 +208,13 @@ function agentsCopyPrompt() {
 export function applyAgentsI18n() {
   const titleEl=document.getElementById('settingsPaneAgentsTitle'); if(titleEl) titleEl.textContent=t('agents.title');
   const navEl=document.getElementById('settingsNavAgents'); if(navEl) navEl.textContent=t('agents.nav');
+}
+function agentsPrefillName(el) {
+  const name = el?.dataset?.name;
+  const input = document.getElementById('agentsNewName');
+  if (!name || !input) return;
+  input.value = name;
+  input.focus();
 }
 window.agentsCreate=agentsCreate;
 window.agentsRevoke=agentsRevoke;

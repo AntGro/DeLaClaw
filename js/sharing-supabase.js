@@ -544,6 +544,27 @@ export async function createSupabaseSharing(adapter, config) {
     _notifyUpdate();
   }
 
+
+  async function updateMyDisplayName(groupId, newName) {
+    const remote = _getRemote(groupId);
+    if (remote) {
+      // Joined member: update via RPC on the owner's Supabase
+      await remote.client.rpc('update_member_display_name', { p_token: remote.token, p_display_name: newName });
+      // Update local cache
+      const members = _memberCache[groupId] || [];
+      const me = members.find(m => m.memberId === remote.memberId);
+      if (me) me.displayName = newName;
+    } else if (_ownedGroups.some(g => g.id === groupId)) {
+      // Owner: direct update
+      const w = await _getItemWriter(groupId);
+      await adapter.from('sharing_members').update({ display_name: newName }).eq('member_id', w.memberId);
+      const members = _memberCache[groupId] || [];
+      const me = members.find(m => m.memberId === w.memberId);
+      if (me) me.displayName = newName;
+    }
+    _notifyUpdate();
+  }
+
   async function _cleanupJoinedGroup(groupId) {
     // Delete local pointers
     await adapter.from('habits').delete().eq('shared_group_id', groupId);
@@ -1264,6 +1285,7 @@ export async function createSupabaseSharing(adapter, config) {
     stopPolling,
     onUpdate,
     getRevokedMembers,
+    updateMyDisplayName,
     openJoinPicker: null,
   };
 }

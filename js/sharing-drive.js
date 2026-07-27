@@ -901,6 +901,17 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       emit('group-left', { groupId });
     },
 
+    async updateMyDisplayName(groupId, newName) {
+      const e = _groups.get(groupId);
+      if (!e) return;
+      const currentMember = await getCurrentMemberInternal(groupId);
+      if (!currentMember) return;
+      const m = e.group.members.find(m => m.memberId === currentMember.memberId);
+      if (m) m.displayName = newName;
+      await saveGroup(groupId);
+      emit('group-changed', { groupId, group: e.group });
+    },
+
     // ─── Items ───
 
     async addItem(groupId, { id: presetId, item_type, payload, assignees = [] }) {

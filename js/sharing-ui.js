@@ -185,6 +185,7 @@ export async function renderSharingPane() {
       html += `<div class="sharing-member">
           ${avatarDot(member, 22)}
           <span class="sharing-member-email">${esc(label)}${statusHtml}</span>
+          ${isYou ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-edit-my-name" data-group-id="${esc(group.id)}" data-member-id="${esc(member.memberId)}" data-current-name="${esc(label)}" title="${t('sharing.edit_name')}" aria-label="${t('sharing.edit_name')}">${lucideIcon('pencil', 12)}</button>` : ''}
           ${canCopyCode ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-copy-member-code" data-group-id="${esc(group.id)}" data-token="${esc(member.token)}" title="${t('sharing.copy_code')}" aria-label="${t('sharing.copy_code')}">${lucideIcon('key', 12)}</button>` : ''}
           ${canRemove ? `<button class="sharing-remove-btn" data-action="sharing-remove-member" data-group-id="${esc(group.id)}" data-member-id="${esc(member.memberId)}" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
         </div>`;
@@ -395,6 +396,43 @@ async function sharingUnjoinGroup(groupId) {
       } catch (e) { showToast(e.message, 'error'); }
     }
   );
+}
+
+async function sharingEditMyName(groupId, memberId, currentName) {
+  // Replace the member row with an inline input
+  const row = document.querySelector(`.sharing-member [data-action="sharing-edit-my-name"][data-group-id="${CSS.escape(groupId)}"][data-member-id="${CSS.escape(memberId)}"]`)?.closest('.sharing-member');
+  if (!row) return;
+  const nameSpan = row.querySelector('.sharing-member-email');
+  if (!nameSpan || nameSpan.querySelector('.sharing-edit-name-input')) return;
+
+  const prevHtml = nameSpan.innerHTML;
+  nameSpan.innerHTML = `<input class="sharing-edit-name-input" type="text" value="${esc(currentName)}" maxlength="50" autocomplete="off">`;
+  const input = nameSpan.querySelector('input');
+  input.focus();
+  input.select();
+
+  const save = async () => {
+    const newName = input.value.trim();
+    if (!newName || newName === currentName) {
+      nameSpan.innerHTML = prevHtml;
+      return;
+    }
+    input.disabled = true;
+    try {
+      await state.sharing.updateMyDisplayName(groupId, newName);
+      showToast(t('sharing.name_updated'), 'info');
+      renderSharingPane();
+    } catch (e) {
+      showToast(e.message, 'error');
+      nameSpan.innerHTML = prevHtml;
+    }
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); save(); }
+    if (e.key === 'Escape') { nameSpan.innerHTML = prevHtml; }
+  });
+  input.addEventListener('blur', save);
 }
 
 async function sharingDeleteGroup(groupId) {
@@ -968,6 +1006,7 @@ window.sharingInvite = sharingInvite;
 window.sharingRemoveMember = sharingRemoveMember;
 window.sharingLeaveGroup = sharingLeaveGroup;
 window.sharingUnjoinGroup = sharingUnjoinGroup;
+window.sharingEditMyName = sharingEditMyName;
 window.sharingDeleteGroup = sharingDeleteGroup;
 window.sharingCopyCode = sharingCopyCode;
 window.sharingCopyMemberCode = sharingCopyMemberCode;

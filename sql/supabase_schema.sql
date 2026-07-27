@@ -680,6 +680,18 @@ LANGUAGE "sql" SECURITY DEFINER SET search_path = public, extensions AS $$
     AND role != 'creator';
 $$;
 
+CREATE OR REPLACE FUNCTION "public"."update_member_display_name"("p_token" "text", "p_display_name" "text")
+RETURNS "void"
+LANGUAGE "plpgsql" SECURITY DEFINER SET search_path = public, extensions AS $$
+BEGIN
+  UPDATE sharing_members
+  SET display_name = p_display_name
+  WHERE token_hash = encode(digest(p_token, 'sha256'), 'hex')
+    AND joined_at IS NOT NULL
+    AND revoked_at IS NULL;
+END;
+$$;
+
 
 --
 -- Name: birthdays birthdays_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
@@ -1335,7 +1347,7 @@ DROP POLICY IF EXISTS "owner only" ON "public"."habit_categories"; CREATE POLICY
 DROP POLICY IF EXISTS "owner only" ON "public"."vestiaire_categories"; CREATE POLICY "owner or agent" ON "public"."vestiaire_categories" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 DROP POLICY IF EXISTS "owner only" ON "public"."flashcard_decks"; CREATE POLICY "owner or agent" ON "public"."flashcard_decks" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.484') ON CONFLICT ("key") DO UPDATE SET "value" = '1.484', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.523') ON CONFLICT ("key") DO UPDATE SET "value" = '1.523', "updated_at" = now();
 
 -- ── Seed protected category rows (ON CONFLICT safe for idempotent re-runs) ──
 -- owner_id is NULL here; trg_set_owner_id fills it on first auth'd INSERT.

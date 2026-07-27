@@ -71,6 +71,7 @@ function openEditCategoryModal(catId) {
   document.getElementById('editCategoryOldName').value = catId; // store ID, not name
   document.getElementById('editCategoryName').value = cat.name;
   document.getElementById('editCategoryShortname').value = cat.shortname || '';
+  document.getElementById('editCategoryColor').value = cat.color || GENERAL_CATEGORY_COLOR;
   document.getElementById('editCategoryModal').classList.add('visible');
   setTimeout(() => document.getElementById('editCategoryName').focus(), 50);
 }
@@ -85,10 +86,11 @@ async function saveEditCategory() {
   if (!cat) return;
   const newName = document.getElementById('editCategoryName').value.trim();
   const shortname = document.getElementById('editCategoryShortname').value.trim();
+  const color = document.getElementById('editCategoryColor').value;
   if (!newName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
 
   // Update the DB row directly — no need to rename strings on items since they reference by ID
-  const updates = { shortname: shortname || null };
+  const updates = { shortname: shortname || null, color };
   if (!cat.is_protected) updates.name = newName;
   await state.db.from('todo_categories').update(updates).eq('id', catId);
   Object.assign(cat, updates);

@@ -639,6 +639,8 @@ function initListModals() {
   const m2 = document.createElement('div');
   m2.className = 'modal-overlay';
   m2.id = 'editListModal';
+  m2.dataset.action = 'close-edit-list';
+  m2.dataset.overlayClose = 'true';
   m2.innerHTML = `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('lists.edit_list')}</h2>
     <input type="hidden" id="editListId">

@@ -620,7 +620,7 @@ bun run server.js</pre>
   </div>
 
   <!-- Edit Project Modal -->
-  <div class="modal-overlay" id="editProjectModal">
+  <div class="modal-overlay" id="editProjectModal" data-action="close-edit-project" data-overlay-close="true">
     <div class="modal">
       <h2><span data-icon="pencil" data-size="20"></span> Edit Project</h2>
       <input type="hidden" id="editProjectId">
@@ -651,7 +651,7 @@ bun run server.js</pre>
   <!-- Add Category Modal is created dynamically by js/todos.js -->
 
   <!-- Delete Confirmation Modal -->
-  <div class="modal-overlay" id="editCategoryModal">
+  <div class="modal-overlay" id="editCategoryModal" data-action="close-edit-category" data-overlay-close="true">
     <div class="modal">
       <h2><span data-icon="pencil" data-size="20"></span> Edit Category</h2>
       <input type="hidden" id="editCategoryOldName">
@@ -659,6 +659,8 @@ bun run server.js</pre>
       <input type="text" id="editCategoryName" maxlength="40" data-action="save-edit-category-on-enter">
       <label>Short Name (for nav buttons)</label>
       <input type="text" id="editCategoryShortname" maxlength="20" data-action="save-edit-category-on-enter">
+      <label>Color</label>
+      <input type="color" id="editCategoryColor">
       <div class="modal-actions">
         <button class="modal-cancel" data-action="close-edit-category">Cancel</button>
         <button class="modal-save" data-action="save-edit-category">Save</button>

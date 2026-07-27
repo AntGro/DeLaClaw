@@ -574,6 +574,8 @@ function initVestiaireModals() {
   const m4 = document.createElement('div');
   m4.className = 'modal-overlay';
   m4.id = 'editVestiaireCategoryModal';
+  m4.dataset.action = 'close-edit-vestiaire-category';
+  m4.dataset.overlayClose = 'true';
   m4.innerHTML = `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('vestiaire.edit_category')}</h2>
     <input type="hidden" id="editVestiaireCategoryOldName">
@@ -583,6 +585,8 @@ function initVestiaireModals() {
     <label>${t('vestiaire.shortname')}</label>
     <input type="text" id="editVestiaireCategoryShortname" maxlength="20" placeholder="${t('vestiaire.shortname_placeholder')}"
       data-action="save-edit-vestiaire-category-on-enter">
+    <label>${t('lists.color')}</label>
+    <input type="color" id="editVestiaireCategoryColor">
     <div class="modal-actions">
       <button class="modal-cancel" data-action="close-edit-vestiaire-category">${t('common.cancel')}</button>
       <button class="modal-save" data-action="save-edit-vestiaire-category">${t('common.save')}</button>
@@ -753,6 +757,7 @@ function openEditVestiaireCategoryModal(catId) {
   document.getElementById('editVestiaireCategoryOldName').value = catId; // store ID
   document.getElementById('editVestiaireCategoryName').value = cat.name;
   document.getElementById('editVestiaireCategoryShortname').value = cat.shortname || '';
+  document.getElementById('editVestiaireCategoryColor').value = cat.color || GENERAL_CATEGORY_COLOR;
   document.getElementById('editVestiaireCategoryModal').classList.add('visible');
   setTimeout(() => document.getElementById('editVestiaireCategoryName').focus(), 100);
 }
@@ -767,11 +772,12 @@ async function saveEditVestiaireCategory() {
   if (!cat) return;
   const newName = document.getElementById('editVestiaireCategoryName').value.trim();
   const shortname = document.getElementById('editVestiaireCategoryShortname').value.trim();
+  const color = document.getElementById('editVestiaireCategoryColor').value;
 
   if (!newName) { showToast(t('toast.enter_name'), 'error'); return; }
 
   // Update the DB row directly — items reference by category_id FK
-  const updates = { name: newName, shortname: shortname || null };
+  const updates = { name: newName, shortname: shortname || null, color };
   await state.db.from('vestiaire_categories').update(updates).eq('id', catId);
   Object.assign(cat, updates);
   _vestCatByName.clear();

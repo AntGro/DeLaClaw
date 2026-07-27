@@ -310,6 +310,8 @@ function initBirthdayModals() {
   const m2 = document.createElement('div');
   m2.className = 'modal-overlay';
   m2.id = 'editBirthdayModal';
+  m2.dataset.action = 'close-edit-birthday';
+  m2.dataset.overlayClose = 'true';
   m2.innerHTML = `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('birthdays.edit_birthday')}</h2>
     <input type="hidden" id="editBirthdayId">

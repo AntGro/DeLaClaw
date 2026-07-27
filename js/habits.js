@@ -1001,6 +1001,8 @@ function initHabitModals() {
   // Edit Habit Category Modal
   const m6 = document.createElement('div');
   m6.className = 'modal-overlay'; m6.id = 'editHabitCategoryModal';
+  m6.dataset.action = 'close-edit-habit-category-modal';
+  m6.dataset.overlayClose = 'true';
   m6.innerHTML = `<div class="modal"><h2>` + lucideIcon("pencil",20) + ` ${t('habits.edit_category')}</h2><input type="hidden" id="editHabitCatOldName"><label>${t('habits.category_name')}</label><input type="text" id="editHabitCatName" maxlength="40" data-action="save-edit-habit-category-on-enter"><label>Shortname</label><input type="text" id="editHabitCatShortname" maxlength="20" placeholder="e.g. STR" data-action="save-edit-habit-category-on-enter"><label>${t('lists.color')}</label><input type="color" id="editHabitCatColor"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit-category">${t('common.save')}</button></div></div>`;
   app.appendChild(m6);
 }

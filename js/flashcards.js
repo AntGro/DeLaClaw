@@ -2376,6 +2376,8 @@ function openEditDeckModal(deck) {
       <input type="text" id="editDeckName" value="${esc(deckRow.name)}"${deckRow.is_protected ? ' disabled' : ''}>
       <label>${t('flashcards.shortname')}</label>
       <input type="text" id="editDeckShortname" value="${esc(deckRow.shortname || '')}" placeholder="${t('flashcards.shortname_placeholder')}">
+      <label>${t('lists.color')}</label>
+      <input type="color" id="editDeckColor" value="${esc(deckRow.color || GENERAL_CATEGORY_COLOR)}">
       <div class="modal-actions">
         <button class="modal-cancel" data-action="close-edit-deck">${t('common.cancel')}</button>
         <button class="modal-save" data-action="save-edit-deck">${t('common.save')}</button>
@@ -2398,9 +2400,10 @@ window.saveEditDeck = async function() {
   if (!deckRow) return;
   const newName = document.getElementById('editDeckName').value.trim();
   const shortname = document.getElementById('editDeckShortname').value.trim();
+  const color = document.getElementById('editDeckColor').value;
   if (!newName && !deckRow.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
 
-  const updates = { shortname: shortname || null };
+  const updates = { shortname: shortname || null, color };
   if (!deckRow.is_protected) updates.name = newName;
   await state.db.from('flashcard_decks').update(updates).eq('id', deckId);
 

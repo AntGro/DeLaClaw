@@ -82,9 +82,9 @@
       case 'save-global-prompt': callWindow('saveGlobalPrompt', []); break;
       case 'close-project-prompt': callWindow('closeProjectPrompt', []); break;
       case 'save-project-prompt': callWindow('saveProjectPrompt', []); break;
-      case 'close-edit-project': callWindow('closeEditProjectModal', []); break;
+      case 'close-edit-project': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditProjectModal', []); break;
       case 'save-edit-project': callWindow('saveEditProject', []); break;
-      case 'close-edit-category': callWindow('closeEditCategoryModal', []); break;
+      case 'close-edit-category': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditCategoryModal', []); break;
       case 'save-edit-category': callWindow('saveEditCategory', []); break;
       case 'close-delete-confirm': callWindow('closeDeleteConfirm', []); break;
       case 'execute-delete-confirm': callWindow('executeDeleteConfirm', []); break;

@@ -737,17 +737,15 @@ function initBadgeHover() {
     }, 100);
   }, true);
 
-  // Touch: tap shows, tap elsewhere dismisses
-  document.body.addEventListener('touchstart', (e) => {
-    if (_badgeTooltip && !e.target.closest('.shared-badge-tooltip') && !e.target.closest('.shared-badge[data-group-id]')) {
-      removeBadgeTooltip();
+  // Click: toggle tooltip immediately
+  document.body.addEventListener('click', (e) => {
+    const badge = e.target.closest?.('.shared-badge[data-group-id]');
+    if (!badge) {
+      if (_badgeTooltip && !e.target.closest('.shared-badge-tooltip')) removeBadgeTooltip();
       return;
     }
-    const badge = e.target.closest?.('.shared-badge[data-group-id]');
-    if (badge) {
-      e.preventDefault();
-      showBadgeTooltip(badge);
-    }
+    if (_badgeHoverTimer) { clearTimeout(_badgeHoverTimer); _badgeHoverTimer = null; }
+    if (_badgeTooltip) { removeBadgeTooltip(); } else { showBadgeTooltip(badge); }
   }, { passive: false });
 }
 

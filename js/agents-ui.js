@@ -216,6 +216,7 @@ function agentsPrefillName(el) {
   input.value = name;
   input.focus();
 }
+window.agentsPrefillName=agentsPrefillName;
 window.agentsCreate=agentsCreate;
 window.agentsRevoke=agentsRevoke;
 window.agentsCopyLastToken=agentsCopyLastToken;

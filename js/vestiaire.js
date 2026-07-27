@@ -156,10 +156,11 @@ function renderVestiaire() {
   // Sort within each group
   Object.values(grouped).forEach(arr => arr.sort(sortFn));
 
-  // Render a card per category (skip empty when searching)
+  // Render a card per category (skip empty protected + empty when searching)
   let html = '';
   catRows.forEach(cat => {
     const catItems = grouped[cat.id] || [];
+    if (cat.is_protected && catItems.length === 0) return;
     if (vestSearchQuery && catItems.length === 0 && !cat.name.toLowerCase().includes(vestSearchQuery.toLowerCase())) return;
     html += renderCategoryCard(cat.id, catItems);
   });

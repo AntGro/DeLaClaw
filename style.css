@@ -1643,11 +1643,11 @@ body:has(.schema-banner) .app-header{top:var(--schema-banner-h,40px);}
 .migration-sql-code{margin:0;padding:14px;font-size:0.78rem;line-height:1.5;overflow-x:auto;max-height:280px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;font-family:'DM Mono',ui-monospace,monospace;color:var(--text);background:var(--bg);}
 .migration-actions{display:flex;gap:10px;align-items:center;}
 .ver-diff{color:var(--accent);font-weight:700;}
-.migration-check-btn{display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--accent);border-radius:8px;padding:9px 18px;font-size:0.88rem;color:var(--accent);cursor:pointer;font-family:inherit;transition:all 0.2s;}
-.migration-check-btn:hover{background:color-mix(in srgb, var(--accent) 10%, transparent);}
-.migration-check-btn:disabled{opacity:0.6;cursor:not-allowed;}
-.migration-check-btn.migration-check-ok{border-color:#22c55e;color:#22c55e;}
-.migration-check-btn.migration-check-fail{border-color:#ef4444;color:#ef4444;}
+.migration-check-btn{display:inline-flex;align-items:center;gap:6px;background:color-mix(in srgb, var(--accent) 8%, transparent);border:1px solid color-mix(in srgb, var(--accent) 40%, transparent);border-radius:8px;padding:9px 18px;font-size:0.88rem;font-weight:500;color:var(--accent);cursor:pointer;font-family:inherit;transition:all 0.25s ease;}
+.migration-check-btn:hover{background:color-mix(in srgb, var(--accent) 16%, transparent);border-color:var(--accent);}
+.migration-check-btn:disabled{opacity:0.55;cursor:not-allowed;pointer-events:none;}
+.migration-check-btn.migration-check-ok{background:color-mix(in srgb, #22c55e 12%, transparent);border-color:color-mix(in srgb, #22c55e 50%, transparent);color:#22c55e;}
+.migration-check-btn.migration-check-fail{background:color-mix(in srgb, #ef4444 10%, transparent);border-color:color-mix(in srgb, #ef4444 40%, transparent);color:#ef4444;}
 .migration-open-btn{display:inline-flex;align-items:center;gap:4px;padding:9px 18px;font-size:0.88rem;text-decoration:none;text-align:center;flex:1;justify-content:center;}
 .migration-close-btn{background:transparent;border:1px solid var(--border);border-radius:8px;padding:9px 18px;font-size:0.88rem;color:var(--muted);cursor:pointer;font-family:inherit;transition:all 0.2s;}
 .migration-close-btn:hover{border-color:var(--text);color:var(--text);}

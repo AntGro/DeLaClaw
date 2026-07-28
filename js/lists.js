@@ -1054,8 +1054,9 @@ async function copyListItemToPersonal(id, el) {
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="copy-list-item-to-personal"][data-id="${CSS.escape(id)}"]`);
   if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
   try {
-    // Find the first user-owned list (non-shared) to place the copy
-    let personalList = (state.allLists || []).find(l => l.name !== '__shared__');
+    // Place copy in the same list as the shared item, unless it's the __shared__ list
+    const itemList = (state.allLists || []).find(l => l.id === item.list_id);
+    let personalList = (itemList && itemList.name !== '__shared__') ? itemList : (state.allLists || []).find(l => l.name !== '__shared__');
     if (!personalList) {
       // Auto-create a personal list
       const maxOrder = (state.allLists || []).reduce((m, l) => Math.max(m, l.sort_order || 0), 0);

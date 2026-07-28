@@ -294,7 +294,7 @@ function renderListItem(item) {
       </div>
       <div class="list-item-actions">
         ${!isShared && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-list-item" data-id="${esc(item.id)}" title="${t('sharing.share')}">${lucideIcon('share', 14)}</button>` : ''}
-        ${isShared && _myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="unshare-list-item" data-id="${esc(item.id)}" title="${t('sharing.unshare')}">${lucideIcon('undo-2', 14)}</button>` : ''}
+        ${isShared && _myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="unshare-list-item" data-id="${esc(item.id)}" title="${t('sharing.unshare')}">${lucideIcon('share-off', 14)}</button>` : ''}
         ${isShared && !_myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="copy-list-item-to-personal" data-id="${esc(item.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon('copy', 14)}</button>` : ''}
         <button data-action="edit-list-item-inline" data-id="${esc(item.id)}" title="Edit">${lucideIcon('pencil', 14)}</button>
         <button data-action="delete-list-item" data-id="${esc(item.id)}" title="Delete">${lucideIcon('trash-2', 14)}</button>
@@ -1014,34 +1014,35 @@ async function unshareListItem(id, el) {
   const item = (state.allListItems || []).find(i => i.id === id);
   if (!item || !item.shared_id || !item.shared_group_id) return;
 
-  const ok = await new Promise(resolve => {
-    showDeleteConfirm(t('sharing.unshare_confirm'), () => resolve(true), () => resolve(false));
-  });
-  if (!ok) return;
-
-  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-list-item"][data-id="${CSS.escape(id)}"]`);
-  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
-  try {
-    // 1. Create personal list item (same list)
-    const { error: insErr } = await state.db.from('list_items').insert({
-      list_id: item.list_id,
-      text: item.text || '',
-      note: item.note || '',
-      checked: item.checked ? true : false,
-      sort_order: item.sort_order || 0,
-    });
-    if (insErr) { showToast(insErr.message, 'error'); return; }
-    // 2. Delete shared item from sharing layer
-    await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
-    // 3. Delete the local pointer
-    await state.db.from('list_items').delete().eq('id', item.id);
-    showToast(t('sharing.unshared'), 'success');
-    await refreshLists();
-  } catch (e) {
-    showToast(e.message, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
-  }
+  showDeleteConfirm(
+    t('sharing.unshare'),
+    t('sharing.unshare_confirm'),
+    async () => {
+      const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-list-item"][data-id="${CSS.escape(id)}"]`);
+      if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+      try {
+        // 1. Create personal list item (same list)
+        const { error: insErr } = await state.db.from('list_items').insert({
+          list_id: item.list_id,
+          text: item.text || '',
+          note: item.note || '',
+          checked: item.checked ? true : false,
+          sort_order: item.sort_order || 0,
+        });
+        if (insErr) { showToast(insErr.message, 'error'); return; }
+        // 2. Delete shared item from sharing layer
+        await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
+        // 3. Delete the local pointer
+        await state.db.from('list_items').delete().eq('id', item.id);
+        showToast(t('sharing.unshared'), 'success');
+        await refreshLists();
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+      }
+    }
+  );
 }
 window.unshareListItem = unshareListItem;
 

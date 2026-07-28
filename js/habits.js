@@ -964,7 +964,7 @@ function renderHabitItem(habit) {
         ${!isDraft ? `<button data-habit-id="${esc(habit.id)}" data-action="mark-habit-done" data-id="${esc(habit.id)}" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
         <button data-action="open-habit-history" data-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list",16)} ${completionCount}</button>
         ${!isShared && !isDraft && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
-        ${isShared && !isDraft && _myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="unshare-habit" data-id="${esc(habit.id)}" title="${t('sharing.unshare')}">${lucideIcon("undo-2",16)}</button>` : ''}
+        ${isShared && !isDraft && _myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="unshare-habit" data-id="${esc(habit.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
         ${isShared && !isDraft && !_myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="copy-habit-to-personal" data-id="${esc(habit.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
         <button data-action="open-edit-habit-modal" data-id="${esc(habit.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button data-action="delete-habit" data-id="${esc(habit.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
@@ -2298,46 +2298,47 @@ async function unshareHabit(id, el) {
   const habit = state.allHabits.find(h => h.id === id);
   if (!habit || !habit.shared_id || !habit.shared_group_id) return;
 
-  const ok = await new Promise(resolve => {
-    showDeleteConfirm(t('sharing.unshare_confirm'), () => resolve(true), () => resolve(false));
-  });
-  if (!ok) return;
-
-  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-habit"][data-id="${CSS.escape(id)}"]`);
-  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
-  try {
-    const catRow = _habitCatMap.get(habit.category_id || _defaultHabitCatId);
-    // 1. Create personal habit
-    const { data: newHabit, error: insErr } = await state.db.from('habits').insert({
-      name: habit.name || '',
-      frequency_rule: habit.frequency_rule || '',
-      category: catRow?.name ?? habit.category ?? '',
-      category_id: habit.category_id || _defaultHabitCatId,
-      is_draft: 0,
-      next_due: habit.next_due || null,
-    }).select().single();
-    if (insErr) { showToast(insErr.message, 'error'); return; }
-    // 2. Recreate completions locally
-    const sharedCompletions = habit._shared?.completions || [];
-    for (const c of sharedCompletions) {
-      await state.db.from('habit_completions').insert({
-        habit_id: newHabit.id,
-        completed_at: c.completed_at,
-        note: null,
-      });
+  showDeleteConfirm(
+    t('sharing.unshare'),
+    t('sharing.unshare_confirm'),
+    async () => {
+      const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-habit"][data-id="${CSS.escape(id)}"]`);
+      if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+      try {
+        const catRow = _habitCatMap.get(habit.category_id || _defaultHabitCatId);
+        // 1. Create personal habit
+        const { data: newHabit, error: insErr } = await state.db.from('habits').insert({
+          name: habit.name || '',
+          frequency_rule: habit.frequency_rule || '',
+          category: catRow?.name ?? habit.category ?? '',
+          category_id: habit.category_id || _defaultHabitCatId,
+          is_draft: 0,
+          next_due: habit.next_due || null,
+        }).select().single();
+        if (insErr) { showToast(insErr.message, 'error'); return; }
+        // 2. Recreate completions locally
+        const sharedCompletions = habit._shared?.completions || [];
+        for (const c of sharedCompletions) {
+          await state.db.from('habit_completions').insert({
+            habit_id: newHabit.id,
+            completed_at: c.completed_at,
+            note: null,
+          });
+        }
+        // 3. Delete shared habit from sharing layer
+        await state.sharing.deleteSharedHabit(habit.shared_group_id, habit.shared_id);
+        // 4. Delete local pointer + its completions
+        await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
+        await state.db.from('habits').delete().eq('id', habit.id);
+        showToast(t('sharing.unshared'), 'success');
+        await refreshHabits();
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+      }
     }
-    // 3. Delete shared habit from sharing layer
-    await state.sharing.deleteSharedHabit(habit.shared_group_id, habit.shared_id);
-    // 4. Delete local pointer + its completions
-    await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
-    await state.db.from('habits').delete().eq('id', habit.id);
-    showToast(t('sharing.unshared'), 'success');
-    await refreshHabits();
-  } catch (e) {
-    showToast(e.message, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
-  }
+  );
 }
 window.unshareHabit = unshareHabit;
 

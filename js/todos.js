@@ -486,7 +486,7 @@ function renderTodoItem(td) {
         ${!td.done ? `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="true" title="${t('common.done')}" class="todo-done-btn">${lucideIcon("circle-check",16)}</button>` : `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="false" title="${t('common.undo')}" class="todo-undo-btn">${lucideIcon("refresh-cw",16)}</button>`}
         ${!td.done ? `<button data-action="open-snooze-modal" data-id="${esc(td.id)}" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>` : ''}
         ${!isShared && !td.done && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-todo" data-id="${esc(td.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
-        ${isShared && !td.done && _myCreatedSharedIds.has(td.shared_id) ? `<button data-action="unshare-todo" data-id="${esc(td.id)}" title="${t('sharing.unshare')}">${lucideIcon("undo-2",16)}</button>` : ''}
+        ${isShared && !td.done && _myCreatedSharedIds.has(td.shared_id) ? `<button data-action="unshare-todo" data-id="${esc(td.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
         ${isShared && !td.done && !_myCreatedSharedIds.has(td.shared_id) ? `<button data-action="copy-todo-to-personal" data-id="${esc(td.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
         <button data-action="edit-todo-inline" data-id="${esc(td.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button data-action="delete-todo" data-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
@@ -1355,37 +1355,38 @@ async function unshareTodo(id, el) {
   const todo = allTodos.find(t => t.id === id);
   if (!todo || !todo.shared_id || !todo.shared_group_id) return;
 
-  const ok = await new Promise(resolve => {
-    showDeleteConfirm(t('sharing.unshare_confirm'), () => resolve(true), () => resolve(false));
-  });
-  if (!ok) return;
-
-  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-todo"][data-id="${CSS.escape(id)}"]`);
-  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
-  try {
-    const cat = _todoCatMap.get(catIdForTodo(todo));
-    // 1. Create personal todo (same category, keep text/priority/note)
-    const { error: insErr } = await state.db.from('todos').insert({
-      text: todo.text || '',
-      priority: todo.priority || 'medium',
-      done: todo.done ? true : false,
-      note: todo._shared?.payload?.note || todo.note || '',
-      category: cat?.name ?? '',
-      category_id: catIdForTodo(todo),
-      sort_order: todo.sort_order || 0,
-    });
-    if (insErr) { showToast(insErr.message, 'error'); return; }
-    // 2. Delete shared item from sharing layer
-    await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
-    // 3. Delete the local pointer
-    await state.db.from('todos').delete().eq('id', todo.id);
-    showToast(t('sharing.unshared'), 'success');
-    await refreshTodos();
-  } catch (e) {
-    showToast(e.message, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
-  }
+  showDeleteConfirm(
+    t('sharing.unshare'),
+    t('sharing.unshare_confirm'),
+    async () => {
+      const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-todo"][data-id="${CSS.escape(id)}"]`);
+      if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+      try {
+        const cat = _todoCatMap.get(catIdForTodo(todo));
+        // 1. Create personal todo (same category, keep text/priority/note)
+        const { error: insErr } = await state.db.from('todos').insert({
+          text: todo.text || '',
+          priority: todo.priority || 'medium',
+          done: todo.done ? true : false,
+          note: todo._shared?.payload?.note || todo.note || '',
+          category: cat?.name ?? '',
+          category_id: catIdForTodo(todo),
+          sort_order: todo.sort_order || 0,
+        });
+        if (insErr) { showToast(insErr.message, 'error'); return; }
+        // 2. Delete shared item from sharing layer
+        await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
+        // 3. Delete the local pointer
+        await state.db.from('todos').delete().eq('id', todo.id);
+        showToast(t('sharing.unshared'), 'success');
+        await refreshTodos();
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+      }
+    }
+  );
 }
 window.unshareTodo = unshareTodo;
 

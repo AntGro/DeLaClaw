@@ -1283,7 +1283,7 @@ async function shareTodoFromAdd(btn) {
     } catch (e) {
       showToast(e.message, 'error');
     }
-  });
+  }, { showAssignees: false });
 }
 
 window.shareTodoFromAdd = shareTodoFromAdd;

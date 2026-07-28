@@ -63,6 +63,7 @@
       case 'open-add-category': callWindow('openAddCategoryModal', []); break;
       case 'open-add-habit': callWindow('openAddHabitModal', []); break;
       case 'share-habit-from-add': callWindow('shareHabitFromAdd', [el]); break;
+      case 'share-existing-habit': callWindow('shareExistingHabit', [getId(el), el]); break;
       case 'open-add-habit-category': callWindow('openAddHabitCategoryModal', []); break;
       case 'open-add-birthday': callWindow('openAddBirthdayModal', []); break;
       case 'open-add-vestiaire': callWindow('openAddVestiaireModal', []); break;
@@ -110,6 +111,7 @@
       case 'open-quick-add-priority-picker': callWindow('openQuickAddPriorityPicker', [el, e]); break;
       case 'add-todo-from-add-row': { var inp = el.closest('.todo-cat-add')?.querySelector('.todo-cat-input'); if (inp) callWindow('addTodoToCategory', [inp]); } break;
       case 'share-todo-from-add': callWindow('shareTodoFromAdd', [el]); break;
+      case 'share-existing-todo': callWindow('shareExistingTodo', [getId(el), el]); break;
       case 'open-priority-picker': callWindow('openPriorityPicker', [getId(el), e, el]); break;
       case 'toggle-todo': { var done = el.dataset.done === 'true'; callWindow('toggleTodo', [getId(el) || el.dataset.todoId, done, el]); } break;
       case 'open-snooze-modal': callWindow('openSnoozeModal', [getId(el)]); break;
@@ -240,6 +242,7 @@
       case 'close-edit-list': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditListModal', []); break;
       case 'save-edit-list': callWindow('saveEditList', []); break;
       case 'share-list-item-from-add': callWindow('shareListItemFromAdd', [el, el.dataset.listId||getId(el)]); break;
+      case 'share-existing-list-item': callWindow('shareExistingListItem', [getId(el), el]); break;
       case 'open-add-vestiaire': callWindow('openAddVestiaireModal', []); break;
       case 'navigate-to-vestiaire-cat': callWindow('navigateToVestiaireCat', [getCat(el)]); break;
       case 'open-add-vestiaire-category': callWindow('openAddVestiaireCategoryModal', []); break;

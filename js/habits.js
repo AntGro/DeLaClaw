@@ -946,6 +946,7 @@ function renderHabitItem(habit) {
         ${promoteBtn}
         ${!isDraft ? `<button data-habit-id="${esc(habit.id)}" data-action="mark-habit-done" data-id="${esc(habit.id)}" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
         <button data-action="open-habit-history" data-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list",16)} ${completionCount}</button>
+        ${!isShared && !isDraft && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         <button data-action="open-edit-habit-modal" data-id="${esc(habit.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button data-action="delete-habit" data-id="${esc(habit.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
@@ -2213,6 +2214,64 @@ export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHa
 window.setHabitFilter = setHabitFilter;
 window.openAddHabitModal = openAddHabitModal;
 window.shareHabitFromAdd = shareHabitFromAdd;
+
+async function shareExistingHabit(id, el) {
+  if (!state.sharing) return;
+  const habit = state.allHabits.find(h => h.id === id);
+  if (!habit || habit.shared_id) return;
+  const groups = state.sharing.getAllGroups();
+  if (!groups.length) return;
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-habit"][data-id="${CSS.escape(id)}"]`);
+  if (!btn) return;
+  openSharePopover(btn, async (groupId) => {
+    try {
+      const sharedId = crypto.randomUUID();
+      const actor = await getSharedHabitCompletionActor(groupId);
+      const catRow = _habitCatMap.get(habit.category_id || _defaultHabitCatId);
+      // Build completions list from local records
+      const localCompletions = (state.allHabitCompletions || [])
+        .filter(c => c.habit_id === habit.id)
+        .map(c => ({
+          id: crypto.randomUUID(),
+          completed_at: c.completed_at,
+          completed_by: actor,
+        }));
+      const sharedItem = {
+        id: sharedId,
+        item_type: 'habit',
+        name: habit.name,
+        frequency_rule: habit.frequency_rule,
+        creator_category: catRow?.name ?? habit.category ?? '',
+        created_by: actor,
+        created_at: habit.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        completions: localCompletions,
+      };
+      // 1. Create shared habit on the sharing layer
+      await state.sharing.addSharedHabit(groupId, sharedItem);
+      // 2. Create local pointer
+      const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
+        name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
+        category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
+        shared_id: sharedId, shared_group_id: groupId,
+      }).select().single();
+      if (ptrErr) { showToast(ptrErr.message, 'error'); return; }
+      // 3. Delete local completions then the personal habit
+      await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
+      await state.db.from('habits').delete().eq('id', habit.id);
+      // Compute next_due on the pointer
+      if (pointer?.id) {
+        await updateHabitNextDue(pointer.id, habit.frequency_rule,
+          localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
+      }
+      showToast(t('sharing.shared') + '!', 'success');
+      await refreshHabits();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  }, { showAssignees: false });
+}
+window.shareExistingHabit = shareExistingHabit;
 window.closeAddHabitModal = closeAddHabitModal;
 window.saveNewHabit = saveNewHabit;
 window.openEditHabitModal = openEditHabitModal;

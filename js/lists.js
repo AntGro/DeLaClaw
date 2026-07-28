@@ -277,6 +277,7 @@ function renderListItem(item) {
         ${noteHtml}
       </div>
       <div class="list-item-actions">
+        ${!isShared && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-list-item" data-id="${esc(item.id)}" title="${t('sharing.share')}">${lucideIcon('share', 14)}</button>` : ''}
         <button data-action="edit-list-item-inline" data-id="${esc(item.id)}" title="Edit">${lucideIcon('pencil', 14)}</button>
         <button data-action="delete-list-item" data-id="${esc(item.id)}" title="Delete">${lucideIcon('trash-2', 14)}</button>
       </div>
@@ -947,6 +948,46 @@ async function shareListItemFromAdd(btn, listId) {
   }, { showAssignees: false });
 }
 window.shareListItemFromAdd = shareListItemFromAdd;
+
+async function shareExistingListItem(id, el) {
+  if (!state.sharing) return;
+  const item = (state.allListItems || []).find(i => i.id === id);
+  if (!item || item.shared_id) return;
+  const groups = state.sharing.getAllGroups();
+  if (!groups.length) return;
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-list-item"][data-id="${CSS.escape(id)}"]`);
+  if (!btn) return;
+  const listObj = (state.allLists || []).find(l => l.id === item.list_id);
+  openSharePopover(btn, async (groupId) => {
+    try {
+      const sharedId = crypto.randomUUID();
+      // 1. Create shared item on the sharing layer
+      await state.sharing.addItem(groupId, {
+        id: sharedId,
+        item_type: 'list_item',
+        payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
+      });
+      // 2. Create local pointer
+      const items = (state.allListItems || []).filter(i => i.list_id === item.list_id);
+      const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
+      const { error: ptrErr } = await state.db.from('list_items').insert({
+        list_id: item.list_id,
+        text: '',
+        sort_order: maxOrder + 1,
+        shared_id: sharedId,
+        shared_group_id: groupId,
+      });
+      if (ptrErr) { showToast(t('toast.failed_to_add') + ': ' + ptrErr.message, 'error'); return; }
+      // 3. Delete the personal item
+      await state.db.from('list_items').delete().eq('id', item.id);
+      showToast(t('sharing.shared') + '!', 'success');
+      await refreshLists();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  }, { showAssignees: false });
+}
+window.shareExistingListItem = shareExistingListItem;
 
 export { refreshLists, renderLists, initListModals, syncSharedListItems };
 

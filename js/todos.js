@@ -467,6 +467,7 @@ function renderTodoItem(td) {
       <div class="todo-actions">
         ${!td.done ? `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="true" title="${t('common.done')}" class="todo-done-btn">${lucideIcon("circle-check",16)}</button>` : `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="false" title="${t('common.undo')}" class="todo-undo-btn">${lucideIcon("refresh-cw",16)}</button>`}
         ${!td.done ? `<button data-action="open-snooze-modal" data-id="${esc(td.id)}" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>` : ''}
+        ${!isShared && !td.done && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-todo" data-id="${esc(td.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         <button data-action="edit-todo-inline" data-id="${esc(td.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button data-action="delete-todo" data-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
@@ -1287,6 +1288,46 @@ async function shareTodoFromAdd(btn) {
 }
 
 window.shareTodoFromAdd = shareTodoFromAdd;
+
+async function shareExistingTodo(id, el) {
+  if (!state.sharing) return;
+  const todo = allTodos.find(t => t.id === id);
+  if (!todo || todo.shared_id) return;
+  const groups = state.sharing.getAllGroups();
+  if (!groups.length) return;
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-todo"][data-id="${CSS.escape(id)}"]`);
+  if (!btn) return;
+  openSharePopover(btn, async (groupId) => {
+    try {
+      const sharedId = crypto.randomUUID();
+      const cat = _todoCatMap.get(catIdForTodo(todo));
+      const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catIdForTodo(todo));
+      const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
+      // 1. Create shared item on the sharing layer
+      await state.sharing.addItem(groupId, {
+        id: sharedId,
+        item_type: 'todo',
+        payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'medium', note: todo.note || '' },
+      });
+      // 2. Create local pointer
+      const { error: ptrErr } = await state.db.from('todos').insert({
+        text: '', priority: 'medium', done: false,
+        category: cat?.name ?? '', category_id: catIdForTodo(todo),
+        sort_order: minOrder,
+        shared_id: sharedId,
+        shared_group_id: groupId,
+      });
+      if (ptrErr) { showToast(ptrErr.message, 'error'); return; }
+      // 3. Delete the personal item
+      await state.db.from('todos').delete().eq('id', todo.id);
+      showToast(t('sharing.shared') + '!', 'success');
+      await refreshTodos();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  }, { showAssignees: false });
+}
+window.shareExistingTodo = shareExistingTodo;
 
 export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName };
 

@@ -142,10 +142,9 @@ async function refreshTodos() {
     _myCreatedSharedIds.clear();
     if (typeof state.sharing.getCurrentMember === 'function') {
       const memberIdPerGroup = new Map();
-      for (const gid of groupIds) {
-        const member = await Promise.resolve(state.sharing.getCurrentMember(gid));
-        if (member?.memberId) memberIdPerGroup.set(gid, member.memberId);
-      }
+      const gidArr = [...groupIds];
+      const members = await Promise.all(gidArr.map(gid => Promise.resolve(state.sharing.getCurrentMember(gid))));
+      gidArr.forEach((gid, i) => { if (members[i]?.memberId) memberIdPerGroup.set(gid, members[i].memberId); });
       for (const todo of allTodos) {
         if (!todo._shared || !todo.shared_group_id) continue;
         const myId = memberIdPerGroup.get(todo.shared_group_id);
@@ -1399,9 +1398,12 @@ async function copyTodoToPersonal(id, el) {
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="copy-todo-to-personal"][data-id="${CSS.escape(id)}"]`);
   if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
   try {
-    // Place in General category (not __shared__)
-    const targetCatId = _defaultCatId;
+    // Keep current category unless it's __shared__, then fall back to General
+    const itemCatId = catIdForTodo(todo);
+    const targetCatId = (itemCatId === _sharedCatId) ? _defaultCatId : itemCatId;
     const targetCatName = _todoCatMap.get(targetCatId)?.name ?? '';
+    const pendingInCat = allTodos.filter(t => !t.done && catIdForTodo(t) === targetCatId);
+    const minOrder = pendingInCat.length > 0 ? Math.min(...pendingInCat.map(t => t.sort_order || 0)) - 1 : 0;
     const { error: insErr } = await state.db.from('todos').insert({
       text: todo.text || '',
       priority: todo.priority || 'medium',
@@ -1409,7 +1411,7 @@ async function copyTodoToPersonal(id, el) {
       note: todo._shared?.payload?.note || todo.note || '',
       category: targetCatName,
       category_id: targetCatId,
-      sort_order: 0,
+      sort_order: minOrder,
     });
     if (insErr) { showToast(insErr.message, 'error'); return; }
     // Do NOT delete shared item — it stays for other members

@@ -2617,6 +2617,48 @@ async function importFlashcardsIntegrationTest() {
 
 
   // ===================================================================
+  // SHARING: unshare/copy-to-personal guards
+  // ===================================================================
+
+  test('showDeleteConfirm in unshare functions uses (title, message, fn) — not function as 2nd arg', () => {
+    const files = ['js/todos.js', 'js/habits.js', 'js/lists.js'];
+    for (const file of files) {
+      const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+      // Find all showDeleteConfirm calls inside unshare functions
+      const calls = [...src.matchAll(/showDeleteConfirm\(([^)]+)\)/g)];
+      for (const m of calls) {
+        const args = m[1];
+        // 2nd arg must not be an arrow function or function ref — it should be a string (i18n key call or literal)
+        const parts = args.split(/,\s*(?=(?:[^()]*\([^()]*\))*[^()]*$)/);
+        if (parts.length >= 2) {
+          const secondArg = parts[1].trim();
+          assert(!secondArg.startsWith('()') && !secondArg.startsWith('function'),
+            `${file}: showDeleteConfirm 2nd arg must be a message string, got: ${secondArg.slice(0, 40)}`);
+        }
+      }
+    }
+  });
+
+  test('unshare/copy inserts use integer 0/1 for done/checked, not boolean true/false', () => {
+    const files = ['js/todos.js', 'js/habits.js', 'js/lists.js'];
+    for (const file of files) {
+      const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+      // Find insert blocks inside unshare/copy functions
+      const fnPattern = /(?:unshare|copyTodoToPersonal|copyHabitToPersonal|copyListItemToPersonal)\b[\s\S]*?\.insert\(\{([\s\S]*?)\}\)/g;
+      let match;
+      while ((match = fnPattern.exec(src)) !== null) {
+        const block = match[1];
+        // done/checked fields must not use literal true/false
+        const boolDone = block.match(/\bdone:\s.*?\btrue\b|\bdone:\s.*?\bfalse\b/);
+        const boolChecked = block.match(/\bchecked:\s.*?\btrue\b|\bchecked:\s.*?\bfalse\b/);
+        assert(!boolDone, `${file}: insert uses boolean for 'done' — must use integer 0/1`);
+        assert(!boolChecked, `${file}: insert uses boolean for 'checked' — must use integer 0/1`);
+      }
+    }
+  });
+
+
+  // ===================================================================
   // SUMMARY
   // ===================================================================
   console.log(`\n${'═'.repeat(50)}`);

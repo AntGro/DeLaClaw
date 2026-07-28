@@ -107,10 +107,9 @@ async function refreshLists() {
     if (typeof state.sharing.getCurrentMember === 'function') {
       const groupIds = new Set(state.allListItems.filter(i => i.shared_group_id).map(i => i.shared_group_id));
       const memberIdPerGroup = new Map();
-      for (const gid of groupIds) {
-        const member = await Promise.resolve(state.sharing.getCurrentMember(gid));
-        if (member?.memberId) memberIdPerGroup.set(gid, member.memberId);
-      }
+      const gidArr = [...groupIds];
+      const members = await Promise.all(gidArr.map(gid => Promise.resolve(state.sharing.getCurrentMember(gid))));
+      gidArr.forEach((gid, i) => { if (members[i]?.memberId) memberIdPerGroup.set(gid, members[i].memberId); });
       for (const item of state.allListItems) {
         if (!item._shared || !item.shared_group_id) continue;
         const myId = memberIdPerGroup.get(item.shared_group_id);
@@ -1056,14 +1055,25 @@ async function copyListItemToPersonal(id, el) {
   if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
   try {
     // Find the first user-owned list (non-shared) to place the copy
-    const personalList = (state.allLists || []).find(l => l.name !== '__shared__');
-    if (!personalList) { showToast('No personal list to copy to', 'error'); return; }
+    let personalList = (state.allLists || []).find(l => l.name !== '__shared__');
+    if (!personalList) {
+      // Auto-create a personal list
+      const maxOrder = (state.allLists || []).reduce((m, l) => Math.max(m, l.sort_order || 0), 0);
+      const { data: newList, error: listErr } = await state.db.from('lists').insert({
+        name: t('lists.default_list_name') || 'My List',
+        sort_order: maxOrder + 1,
+      }).select().single();
+      if (listErr || !newList) { showToast(listErr?.message || 'Failed to create list', 'error'); return; }
+      personalList = newList;
+    }
+    const items = (state.allListItems || []).filter(i => i.list_id === personalList.id);
+    const maxItemOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
     const { error: insErr } = await state.db.from('list_items').insert({
       list_id: personalList.id,
       text: item.text || '',
       note: item.note || '',
       checked: item.checked ? 1 : 0,
-      sort_order: 0,
+      sort_order: maxItemOrder + 1,
     });
     if (insErr) { showToast(insErr.message, 'error'); return; }
     showToast(t('sharing.copied_to_personal'), 'success');

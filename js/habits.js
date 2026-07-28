@@ -599,10 +599,9 @@ async function refreshHabits() {
     if (typeof state.sharing.getCurrentMember === 'function') {
       const groupIds = new Set(state.allHabits.filter(h => h.shared_group_id).map(h => h.shared_group_id));
       const memberIdPerGroup = new Map();
-      for (const gid of groupIds) {
-        const member = await Promise.resolve(state.sharing.getCurrentMember(gid));
-        if (member?.memberId) memberIdPerGroup.set(gid, member.memberId);
-      }
+      const gidArr = [...groupIds];
+      const members = await Promise.all(gidArr.map(gid => Promise.resolve(state.sharing.getCurrentMember(gid))));
+      gidArr.forEach((gid, i) => { if (members[i]?.memberId) memberIdPerGroup.set(gid, members[i].memberId); });
       for (const habit of state.allHabits) {
         if (!habit._shared || !habit.shared_group_id) continue;
         const myId = memberIdPerGroup.get(habit.shared_group_id);
@@ -2351,8 +2350,9 @@ async function copyHabitToPersonal(id, el) {
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="copy-habit-to-personal"][data-id="${CSS.escape(id)}"]`);
   if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
   try {
-    // Place in General category
-    const targetCatId = _defaultHabitCatId;
+    // Keep current category unless it's __shared__, then fall back to General
+    const itemCatId = habit.category_id || _defaultHabitCatId;
+    const targetCatId = (itemCatId === _sharedHabitCatId) ? _defaultHabitCatId : itemCatId;
     const targetCatName = _habitCatMap.get(targetCatId)?.name ?? '';
     const { data: newHabit, error: insErr } = await state.db.from('habits').insert({
       name: habit.name || '',

@@ -822,6 +822,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .habit-frequency{font-size:0.75rem;color:var(--muted);font-style:italic;}
 
 .habit-actions{display:grid;grid-template-columns:auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
+.habit-actions:has(:nth-child(5)){grid-template-columns:auto auto auto;}
 .habit-actions.visible{max-width:80px;opacity:1;pointer-events:auto;}
 .habit-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;white-space:nowrap;}
 .habit-actions button:hover{background:var(--surface2);}
@@ -1126,6 +1127,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .todo-text{flex:1;min-width:0;overflow-wrap:break-word;word-break:break-word;font-size:0.86rem;line-height:1.35;cursor:default;}
 .todo-text[ondblclick]{cursor:text;}
 .todo-actions{display:grid;grid-template-columns:auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
+.todo-actions:has(:nth-child(5)){grid-template-columns:auto auto auto;}
 .todo-actions.visible{max-width:80px;opacity:1;pointer-events:auto;}
 .todo-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;}
 .todo-actions button:hover{background:var(--surface2);}

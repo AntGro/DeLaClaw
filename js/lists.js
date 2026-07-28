@@ -1026,7 +1026,7 @@ async function unshareListItem(id, el) {
           list_id: item.list_id,
           text: item.text || '',
           note: item.note || '',
-          checked: item.checked ? true : false,
+          checked: item.checked ? 1 : 0,
           sort_order: item.sort_order || 0,
         });
         if (insErr) { showToast(insErr.message, 'error'); return; }
@@ -1062,7 +1062,7 @@ async function copyListItemToPersonal(id, el) {
       list_id: personalList.id,
       text: item.text || '',
       note: item.note || '',
-      checked: item.checked ? true : false,
+      checked: item.checked ? 1 : 0,
       sort_order: 0,
     });
     if (insErr) { showToast(insErr.message, 'error'); return; }

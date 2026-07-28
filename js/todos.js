@@ -1367,7 +1367,7 @@ async function unshareTodo(id, el) {
         const { error: insErr } = await state.db.from('todos').insert({
           text: todo.text || '',
           priority: todo.priority || 'medium',
-          done: todo.done ? true : false,
+          done: todo.done ? 1 : 0,
           note: todo._shared?.payload?.note || todo.note || '',
           category: cat?.name ?? '',
           category_id: catIdForTodo(todo),
@@ -1405,7 +1405,7 @@ async function copyTodoToPersonal(id, el) {
     const { error: insErr } = await state.db.from('todos').insert({
       text: todo.text || '',
       priority: todo.priority || 'medium',
-      done: todo.done ? true : false,
+      done: todo.done ? 1 : 0,
       note: todo._shared?.payload?.note || todo.note || '',
       category: targetCatName,
       category_id: targetCatId,

@@ -64,6 +64,8 @@
       case 'open-add-habit': callWindow('openAddHabitModal', []); break;
       case 'share-habit-from-add': callWindow('shareHabitFromAdd', [el]); break;
       case 'share-existing-habit': callWindow('shareExistingHabit', [getId(el), el]); break;
+      case 'unshare-habit': callWindow('unshareHabit', [getId(el), el]); break;
+      case 'copy-habit-to-personal': callWindow('copyHabitToPersonal', [getId(el), el]); break;
       case 'open-add-habit-category': callWindow('openAddHabitCategoryModal', []); break;
       case 'open-add-birthday': callWindow('openAddBirthdayModal', []); break;
       case 'open-add-vestiaire': callWindow('openAddVestiaireModal', []); break;
@@ -112,6 +114,8 @@
       case 'add-todo-from-add-row': { var inp = el.closest('.todo-cat-add')?.querySelector('.todo-cat-input'); if (inp) callWindow('addTodoToCategory', [inp]); } break;
       case 'share-todo-from-add': callWindow('shareTodoFromAdd', [el]); break;
       case 'share-existing-todo': callWindow('shareExistingTodo', [getId(el), el]); break;
+      case 'unshare-todo': callWindow('unshareTodo', [getId(el), el]); break;
+      case 'copy-todo-to-personal': callWindow('copyTodoToPersonal', [getId(el), el]); break;
       case 'open-priority-picker': callWindow('openPriorityPicker', [getId(el), e, el]); break;
       case 'toggle-todo': { var done = el.dataset.done === 'true'; callWindow('toggleTodo', [getId(el) || el.dataset.todoId, done, el]); } break;
       case 'open-snooze-modal': callWindow('openSnoozeModal', [getId(el)]); break;
@@ -243,6 +247,8 @@
       case 'save-edit-list': callWindow('saveEditList', []); break;
       case 'share-list-item-from-add': callWindow('shareListItemFromAdd', [el, el.dataset.listId||getId(el)]); break;
       case 'share-existing-list-item': callWindow('shareExistingListItem', [getId(el), el]); break;
+      case 'unshare-list-item': callWindow('unshareListItem', [getId(el), el]); break;
+      case 'copy-list-item-to-personal': callWindow('copyListItemToPersonal', [getId(el), el]); break;
       case 'open-add-vestiaire': callWindow('openAddVestiaireModal', []); break;
       case 'navigate-to-vestiaire-cat': callWindow('navigateToVestiaireCat', [getCat(el)]); break;
       case 'open-add-vestiaire-category': callWindow('openAddVestiaireCategoryModal', []); break;

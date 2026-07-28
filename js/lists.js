@@ -101,6 +101,22 @@ async function refreshLists() {
         item._shared = sh;
       }
     }
+
+    // Precompute which shared list items the current user created
+    _myCreatedSharedListItemIds.clear();
+    if (typeof state.sharing.getCurrentMember === 'function') {
+      const groupIds = new Set(state.allListItems.filter(i => i.shared_group_id).map(i => i.shared_group_id));
+      const memberIdPerGroup = new Map();
+      for (const gid of groupIds) {
+        const member = await Promise.resolve(state.sharing.getCurrentMember(gid));
+        if (member?.memberId) memberIdPerGroup.set(gid, member.memberId);
+      }
+      for (const item of state.allListItems) {
+        if (!item._shared || !item.shared_group_id) continue;
+        const myId = memberIdPerGroup.get(item.shared_group_id);
+        if (myId && item._shared.created_by === myId) _myCreatedSharedListItemIds.add(item.shared_id);
+      }
+    }
   }
 
   if (state.currentView === 'lists') {
@@ -278,6 +294,8 @@ function renderListItem(item) {
       </div>
       <div class="list-item-actions">
         ${!isShared && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-list-item" data-id="${esc(item.id)}" title="${t('sharing.share')}">${lucideIcon('share', 14)}</button>` : ''}
+        ${isShared && _myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="unshare-list-item" data-id="${esc(item.id)}" title="${t('sharing.unshare')}">${lucideIcon('undo-2', 14)}</button>` : ''}
+        ${isShared && !_myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="copy-list-item-to-personal" data-id="${esc(item.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon('copy', 14)}</button>` : ''}
         <button data-action="edit-list-item-inline" data-id="${esc(item.id)}" title="Edit">${lucideIcon('pencil', 14)}</button>
         <button data-action="delete-list-item" data-id="${esc(item.id)}" title="Delete">${lucideIcon('trash-2', 14)}</button>
       </div>
@@ -769,6 +787,7 @@ async function deleteList(listId) {
 let _syncingListItems = false;
 // ── Shared list: auto-created landing list for received shared items ──
 const SHARED_LIST_NAME = '__shared__';
+const _myCreatedSharedListItemIds = new Set(); // shared_ids where current user is creator
 
 async function getOrCreateSharedList(localLists) {
   // Look for existing shared list (by internal name)
@@ -988,6 +1007,73 @@ async function shareExistingListItem(id, el) {
   }, { showAssignees: false });
 }
 window.shareExistingListItem = shareExistingListItem;
+
+// ── Unshare list item (creator only): move shared item back to personal ──
+async function unshareListItem(id, el) {
+  if (!state.sharing) return;
+  const item = (state.allListItems || []).find(i => i.id === id);
+  if (!item || !item.shared_id || !item.shared_group_id) return;
+
+  const ok = await new Promise(resolve => {
+    showDeleteConfirm(t('sharing.unshare_confirm'), () => resolve(true), () => resolve(false));
+  });
+  if (!ok) return;
+
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-list-item"][data-id="${CSS.escape(id)}"]`);
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  try {
+    // 1. Create personal list item (same list)
+    const { error: insErr } = await state.db.from('list_items').insert({
+      list_id: item.list_id,
+      text: item.text || '',
+      note: item.note || '',
+      checked: item.checked ? true : false,
+      sort_order: item.sort_order || 0,
+    });
+    if (insErr) { showToast(insErr.message, 'error'); return; }
+    // 2. Delete shared item from sharing layer
+    await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
+    // 3. Delete the local pointer
+    await state.db.from('list_items').delete().eq('id', item.id);
+    showToast(t('sharing.unshared'), 'success');
+    await refreshLists();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+  }
+}
+window.unshareListItem = unshareListItem;
+
+// ── Copy list item to personal (non-creator) ──
+async function copyListItemToPersonal(id, el) {
+  if (!state.sharing) return;
+  const item = (state.allListItems || []).find(i => i.id === id);
+  if (!item || !item.shared_id || !item.shared_group_id) return;
+
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="copy-list-item-to-personal"][data-id="${CSS.escape(id)}"]`);
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  try {
+    // Find the first user-owned list (non-shared) to place the copy
+    const personalList = (state.allLists || []).find(l => l.name !== '__shared__');
+    if (!personalList) { showToast('No personal list to copy to', 'error'); return; }
+    const { error: insErr } = await state.db.from('list_items').insert({
+      list_id: personalList.id,
+      text: item.text || '',
+      note: item.note || '',
+      checked: item.checked ? true : false,
+      sort_order: 0,
+    });
+    if (insErr) { showToast(insErr.message, 'error'); return; }
+    showToast(t('sharing.copied_to_personal'), 'success');
+    await refreshLists();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+  }
+}
+window.copyListItemToPersonal = copyListItemToPersonal;
 
 export { refreshLists, renderLists, initListModals, syncSharedListItems };
 

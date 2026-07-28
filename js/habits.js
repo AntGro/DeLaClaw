@@ -26,6 +26,7 @@ let _habitCatMap = new Map();    // id → row
 let _habitCatByName = new Map(); // name → row (backward compat)
 let _defaultHabitCatId = null;   // protected General row
 let _sharedHabitCatId = null;    // protected __shared__ row
+const _myCreatedSharedHabitIds = new Set(); // shared_ids where current user is creator
 
 async function loadHabitCategories() {
   const { data, error } = await state.db.from('habit_categories').select('*').order('sort_order', { ascending: true });
@@ -592,6 +593,22 @@ async function refreshHabits() {
         }
       }
     }
+
+    // Precompute which shared habits the current user created
+    _myCreatedSharedHabitIds.clear();
+    if (typeof state.sharing.getCurrentMember === 'function') {
+      const groupIds = new Set(state.allHabits.filter(h => h.shared_group_id).map(h => h.shared_group_id));
+      const memberIdPerGroup = new Map();
+      for (const gid of groupIds) {
+        const member = await Promise.resolve(state.sharing.getCurrentMember(gid));
+        if (member?.memberId) memberIdPerGroup.set(gid, member.memberId);
+      }
+      for (const habit of state.allHabits) {
+        if (!habit._shared || !habit.shared_group_id) continue;
+        const myId = memberIdPerGroup.get(habit.shared_group_id);
+        if (myId && habit._shared.created_by === myId) _myCreatedSharedHabitIds.add(habit.shared_id);
+      }
+    }
   }
 
   // Categories already loaded via loadHabitCategories() above
@@ -947,6 +964,8 @@ function renderHabitItem(habit) {
         ${!isDraft ? `<button data-habit-id="${esc(habit.id)}" data-action="mark-habit-done" data-id="${esc(habit.id)}" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
         <button data-action="open-habit-history" data-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list",16)} ${completionCount}</button>
         ${!isShared && !isDraft && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
+        ${isShared && !isDraft && _myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="unshare-habit" data-id="${esc(habit.id)}" title="${t('sharing.unshare')}">${lucideIcon("undo-2",16)}</button>` : ''}
+        ${isShared && !isDraft && !_myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="copy-habit-to-personal" data-id="${esc(habit.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
         <button data-action="open-edit-habit-modal" data-id="${esc(habit.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button data-action="delete-habit" data-id="${esc(habit.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
@@ -2272,6 +2291,95 @@ async function shareExistingHabit(id, el) {
   }, { showAssignees: false });
 }
 window.shareExistingHabit = shareExistingHabit;
+
+// ── Unshare habit (creator only): move shared habit back to personal ──
+async function unshareHabit(id, el) {
+  if (!state.sharing) return;
+  const habit = state.allHabits.find(h => h.id === id);
+  if (!habit || !habit.shared_id || !habit.shared_group_id) return;
+
+  const ok = await new Promise(resolve => {
+    showDeleteConfirm(t('sharing.unshare_confirm'), () => resolve(true), () => resolve(false));
+  });
+  if (!ok) return;
+
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-habit"][data-id="${CSS.escape(id)}"]`);
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  try {
+    const catRow = _habitCatMap.get(habit.category_id || _defaultHabitCatId);
+    // 1. Create personal habit
+    const { data: newHabit, error: insErr } = await state.db.from('habits').insert({
+      name: habit.name || '',
+      frequency_rule: habit.frequency_rule || '',
+      category: catRow?.name ?? habit.category ?? '',
+      category_id: habit.category_id || _defaultHabitCatId,
+      is_draft: 0,
+      next_due: habit.next_due || null,
+    }).select().single();
+    if (insErr) { showToast(insErr.message, 'error'); return; }
+    // 2. Recreate completions locally
+    const sharedCompletions = habit._shared?.completions || [];
+    for (const c of sharedCompletions) {
+      await state.db.from('habit_completions').insert({
+        habit_id: newHabit.id,
+        completed_at: c.completed_at,
+        note: null,
+      });
+    }
+    // 3. Delete shared habit from sharing layer
+    await state.sharing.deleteSharedHabit(habit.shared_group_id, habit.shared_id);
+    // 4. Delete local pointer + its completions
+    await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
+    await state.db.from('habits').delete().eq('id', habit.id);
+    showToast(t('sharing.unshared'), 'success');
+    await refreshHabits();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+  }
+}
+window.unshareHabit = unshareHabit;
+
+// ── Copy habit to personal (non-creator) ──
+async function copyHabitToPersonal(id, el) {
+  if (!state.sharing) return;
+  const habit = state.allHabits.find(h => h.id === id);
+  if (!habit || !habit.shared_id || !habit.shared_group_id) return;
+
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="copy-habit-to-personal"][data-id="${CSS.escape(id)}"]`);
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  try {
+    // Place in General category
+    const targetCatId = _defaultHabitCatId;
+    const targetCatName = _habitCatMap.get(targetCatId)?.name ?? '';
+    const { data: newHabit, error: insErr } = await state.db.from('habits').insert({
+      name: habit.name || '',
+      frequency_rule: habit.frequency_rule || '',
+      category: targetCatName,
+      category_id: targetCatId,
+      is_draft: 0,
+      next_due: habit.next_due || null,
+    }).select().single();
+    if (insErr) { showToast(insErr.message, 'error'); return; }
+    // Copy completions
+    const sharedCompletions = habit._shared?.completions || [];
+    for (const c of sharedCompletions) {
+      await state.db.from('habit_completions').insert({
+        habit_id: newHabit.id,
+        completed_at: c.completed_at,
+        note: null,
+      });
+    }
+    showToast(t('sharing.copied_to_personal'), 'success');
+    await refreshHabits();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+  }
+}
+window.copyHabitToPersonal = copyHabitToPersonal;
 window.closeAddHabitModal = closeAddHabitModal;
 window.saveNewHabit = saveNewHabit;
 window.openEditHabitModal = openEditHabitModal;

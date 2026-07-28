@@ -18,6 +18,7 @@ let _todoCatMap = new Map();    // id → row
 let _todoCatByName = new Map(); // name → row (backward compat)
 let _defaultCatId = null;       // protected General row
 let _sharedCatId = null;        // protected __shared__ row
+const _myCreatedSharedIds = new Set(); // shared_ids where current user is creator
 
 async function loadTodoCategories() {
   const { data, error } = await state.db.from('todo_categories').select('*').order('sort_order', { ascending: true });
@@ -121,17 +122,34 @@ async function refreshTodos() {
     const sharedItems = state.sharing.getAllSharedItems().filter(i => i.item_type === 'todo');
     const sharedById = new Map(sharedItems.map(i => [i.id, i]));
 
+    // Collect group IDs and enrich pointers
+    const groupIds = new Set();
     for (const todo of allTodos) {
       if (!todo.shared_id) continue;
       const sh = sharedById.get(todo.shared_id);
       if (sh) {
-        // Enrich pointer with Drive data (keep local category_id + sort_order)
         todo.text = sh.payload?.text || sh.payload?.title || '';
         todo.priority = sh.payload?.priority || 'medium';
         todo.done = sh.done ? 1 : 0;
         todo.due_date = sh.payload?.due_date || null;
         todo.snooze_until = sh.payload?.snooze_until || null;
-        todo._shared = sh; // keep reference for metadata
+        todo._shared = sh;
+        if (todo.shared_group_id) groupIds.add(todo.shared_group_id);
+      }
+    }
+
+    // Precompute which shared items the current user created (for unshare vs copy-to-personal)
+    _myCreatedSharedIds.clear();
+    if (typeof state.sharing.getCurrentMember === 'function') {
+      const memberIdPerGroup = new Map();
+      for (const gid of groupIds) {
+        const member = await Promise.resolve(state.sharing.getCurrentMember(gid));
+        if (member?.memberId) memberIdPerGroup.set(gid, member.memberId);
+      }
+      for (const todo of allTodos) {
+        if (!todo._shared || !todo.shared_group_id) continue;
+        const myId = memberIdPerGroup.get(todo.shared_group_id);
+        if (myId && todo._shared.created_by === myId) _myCreatedSharedIds.add(todo.shared_id);
       }
     }
   }
@@ -468,6 +486,8 @@ function renderTodoItem(td) {
         ${!td.done ? `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="true" title="${t('common.done')}" class="todo-done-btn">${lucideIcon("circle-check",16)}</button>` : `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="false" title="${t('common.undo')}" class="todo-undo-btn">${lucideIcon("refresh-cw",16)}</button>`}
         ${!td.done ? `<button data-action="open-snooze-modal" data-id="${esc(td.id)}" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>` : ''}
         ${!isShared && !td.done && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-todo" data-id="${esc(td.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
+        ${isShared && !td.done && _myCreatedSharedIds.has(td.shared_id) ? `<button data-action="unshare-todo" data-id="${esc(td.id)}" title="${t('sharing.unshare')}">${lucideIcon("undo-2",16)}</button>` : ''}
+        ${isShared && !td.done && !_myCreatedSharedIds.has(td.shared_id) ? `<button data-action="copy-todo-to-personal" data-id="${esc(td.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
         <button data-action="edit-todo-inline" data-id="${esc(td.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button data-action="delete-todo" data-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
@@ -1328,6 +1348,79 @@ async function shareExistingTodo(id, el) {
   }, { showAssignees: false });
 }
 window.shareExistingTodo = shareExistingTodo;
+
+// ── Unshare (creator only): move shared item back to personal ──
+async function unshareTodo(id, el) {
+  if (!state.sharing) return;
+  const todo = allTodos.find(t => t.id === id);
+  if (!todo || !todo.shared_id || !todo.shared_group_id) return;
+
+  const ok = await new Promise(resolve => {
+    showDeleteConfirm(t('sharing.unshare_confirm'), () => resolve(true), () => resolve(false));
+  });
+  if (!ok) return;
+
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-todo"][data-id="${CSS.escape(id)}"]`);
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  try {
+    const cat = _todoCatMap.get(catIdForTodo(todo));
+    // 1. Create personal todo (same category, keep text/priority/note)
+    const { error: insErr } = await state.db.from('todos').insert({
+      text: todo.text || '',
+      priority: todo.priority || 'medium',
+      done: todo.done ? true : false,
+      note: todo._shared?.payload?.note || todo.note || '',
+      category: cat?.name ?? '',
+      category_id: catIdForTodo(todo),
+      sort_order: todo.sort_order || 0,
+    });
+    if (insErr) { showToast(insErr.message, 'error'); return; }
+    // 2. Delete shared item from sharing layer
+    await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
+    // 3. Delete the local pointer
+    await state.db.from('todos').delete().eq('id', todo.id);
+    showToast(t('sharing.unshared'), 'success');
+    await refreshTodos();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+  }
+}
+window.unshareTodo = unshareTodo;
+
+// ── Copy to personal (non-creator): duplicate shared item as personal ──
+async function copyTodoToPersonal(id, el) {
+  if (!state.sharing) return;
+  const todo = allTodos.find(t => t.id === id);
+  if (!todo || !todo.shared_id || !todo.shared_group_id) return;
+
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="copy-todo-to-personal"][data-id="${CSS.escape(id)}"]`);
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  try {
+    // Place in General category (not __shared__)
+    const targetCatId = _defaultCatId;
+    const targetCatName = _todoCatMap.get(targetCatId)?.name ?? '';
+    const { error: insErr } = await state.db.from('todos').insert({
+      text: todo.text || '',
+      priority: todo.priority || 'medium',
+      done: todo.done ? true : false,
+      note: todo._shared?.payload?.note || todo.note || '',
+      category: targetCatName,
+      category_id: targetCatId,
+      sort_order: 0,
+    });
+    if (insErr) { showToast(insErr.message, 'error'); return; }
+    // Do NOT delete shared item — it stays for other members
+    showToast(t('sharing.copied_to_personal'), 'success');
+    await refreshTodos();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+  }
+}
+window.copyTodoToPersonal = copyTodoToPersonal;
 
 export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName };
 

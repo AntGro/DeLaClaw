@@ -1053,7 +1053,7 @@ async function unshareListItem(id, el) {
       }
     },
     null,
-    { variant: 'neutral', btnText: t('sharing.unshare'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15) }
+    { variant: 'neutral', btnText: t('sharing.unshare'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }
   );
 }
 window.unshareListItem = unshareListItem;

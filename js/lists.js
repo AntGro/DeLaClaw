@@ -187,6 +187,17 @@ function renderLists() {
 
   renderListNavButtons(sortedLists, grouped);
 
+  // Empty state — also check after filtering out hidden __shared__ list
+  if (visibleLists.length === 0) {
+    grid.innerHTML = `<div class="page-empty-state">
+      <div class="empty-icon">${lucideIcon('list', 48, 'var(--muted)')}</div>
+      <h3>${t('lists.empty_title')}</h3>
+      <p>${t('lists.empty_hint')}</p>
+      <button class="empty-cta" data-action="open-add-list">${lucideIcon('plus', 16)} ${t('lists.empty_cta')}</button>
+    </div>`;
+    return;
+  }
+
   // Sort items within each list: unchecked first by sort_order, checked at bottom
   for (const listId of Object.keys(grouped)) {
     grouped[listId].sort((a, b) => {

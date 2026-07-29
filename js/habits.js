@@ -2209,12 +2209,17 @@ async function _doSyncSharedHabits() {
     needsRefresh = true;
   }
 
-  // Delete pointers for removed shared habits
+  // Clean up pointers for removed shared habits
   for (const local of localShared) {
     if (!driveSharedIds.has(local.shared_id)) {
       const group = state.sharing.getAllGroups().find(g => g.id === local.shared_group_id);
       if (group) {
+        // Group exists but item gone from remote → delete local pointer
         await state.db.from('habits').delete().eq('id', local.id);
+        needsRefresh = true;
+      } else {
+        // Group deleted → revert to personal by clearing shared fields
+        await state.db.from('habits').update({ shared_id: null, shared_group_id: null }).eq('id', local.id);
         needsRefresh = true;
       }
     }

@@ -908,7 +908,14 @@ async function _doSyncSharedListItems() {
   // Remove pointers for deleted shared items
   for (const ptr of localPointers) {
     if (!sharedById.has(ptr.shared_id)) {
-      await state.db.from('list_items').delete().eq('id', ptr.id);
+      const group = state.sharing?.getAllGroups().find(g => g.id === ptr.shared_group_id);
+      if (group) {
+        // Group exists but item gone from remote → delete local pointer
+        await state.db.from('list_items').delete().eq('id', ptr.id);
+      } else {
+        // Group deleted → revert to personal by clearing shared fields
+        await state.db.from('list_items').update({ shared_id: null, shared_group_id: null }).eq('id', ptr.id);
+      }
       needsRefresh = true;
     }
   }

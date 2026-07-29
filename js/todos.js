@@ -1238,13 +1238,17 @@ async function _doSyncSharedTodos() {
     }
   }
 
-  // ─── Deletion: local shared todos whose shared_id no longer exists on Drive ───
+  // ─── Cleanup: local shared todos whose shared_id no longer exists on remote ───
   for (const local of localShared) {
     if (!driveSharedIds.has(local.shared_id)) {
-      // Check the group still exists (don't delete if group just hasn't loaded yet)
       const group = state.sharing.getAllGroups().find(g => g.id === local.shared_group_id);
       if (group) {
+        // Group exists but item gone from remote → delete local pointer
         await state.db.from('todos').delete().eq('id', local.id);
+        needsRefresh = true;
+      } else {
+        // Group deleted → revert to personal by clearing shared fields
+        await state.db.from('todos').update({ shared_id: null, shared_group_id: null }).eq('id', local.id);
         needsRefresh = true;
       }
     }

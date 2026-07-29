@@ -422,7 +422,13 @@ export async function createSupabaseSharing(adapter, config) {
     _allItems = _allItems.filter(i => i.group_id !== groupId);
     delete _memberCache[groupId];
     delete _revokedCache[groupId];
-    // 1.399: no localStorage cleanup — attribution now in DB via auth_user_id
+
+    // Clear shared pointers on local items so they revert to personal
+    const nullShared = { shared_id: null, shared_group_id: null };
+    await adapter.from('habits').update(nullShared).eq('shared_group_id', groupId);
+    await adapter.from('todos').update(nullShared).eq('shared_group_id', groupId);
+    await adapter.from('list_items').update(nullShared).eq('shared_group_id', groupId);
+
     _notifyUpdate();
   }
 

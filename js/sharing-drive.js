@@ -294,6 +294,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   let _user   = null;            // { email, name, photo }
   let _rootId  = null;           // DeLaClaw-Shared folder id (own)
   const _groups = new Map();     // groupId → GroupEntry
+  let _loaded = false;           // true after loadAll() completes
   let _pollTimer = null;
   let _listeners = [];
 
@@ -779,6 +780,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       }
 
       await Promise.all(promises);
+      _loaded = true;
       return this.getAllGroups();
     },
 
@@ -1364,6 +1366,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      *  Returns array of selected docs or null if cancelled.
      *  Null/undefined when the backend has no picker concept. */
     openJoinPicker: capabilities.openJoinPicker ?? null,
+
+    isReady() { return _loaded; },
 
     // ─── Lifecycle ───
 

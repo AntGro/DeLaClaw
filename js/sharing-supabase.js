@@ -1292,6 +1292,7 @@ export async function createSupabaseSharing(adapter, config) {
     onUpdate,
     getRevokedMembers,
     updateMyDisplayName,
+    isReady() { return _loaded; },
     openJoinPicker: null,
   };
 }

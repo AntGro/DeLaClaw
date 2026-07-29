@@ -1246,11 +1246,12 @@ async function _doSyncSharedTodos() {
         // Group exists but item gone from remote → delete local pointer
         await state.db.from('todos').delete().eq('id', local.id);
         needsRefresh = true;
-      } else {
-        // Group deleted → revert to personal by clearing shared fields
+      } else if (state.sharing.isReady?.()) {
+        // Groups loaded but this one is gone → revert to personal
         await state.db.from('todos').update({ shared_id: null, shared_group_id: null }).eq('id', local.id);
         needsRefresh = true;
       }
+      // else: sharing not loaded yet — skip, will retry on next sync
     }
   }
 

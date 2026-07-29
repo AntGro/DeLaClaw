@@ -784,6 +784,17 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 [data-theme="light"] .delete-confirm-modal{box-shadow:0 20px 60px rgba(0,0,0,0.12),0 0 40px rgba(239,68,68,0.06);}
 [data-theme="light"] .delete-confirm-icon-wrap{background:rgba(239,68,68,0.08);}
 [data-theme="light"] .delete-confirm-detail{background:rgba(239,68,68,0.04);border-color:rgba(239,68,68,0.12);}
+/* Neutral (accent/blue) variant for non-destructive confirmations (e.g. unshare) */
+.confirm-neutral{border-top-color:var(--accent) !important;box-shadow:0 20px 60px rgba(0,0,0,0.5),0 0 40px rgba(59,130,246,0.1) !important;}
+.confirm-neutral .delete-confirm-icon-wrap{background:rgba(59,130,246,0.12);}
+.confirm-neutral .delete-confirm-icon-svg{color:var(--accent);}
+.confirm-neutral h2{color:var(--accent) !important;}
+.confirm-neutral .delete-confirm-detail{background:rgba(59,130,246,0.06);border-color:rgba(59,130,246,0.15);}
+.confirm-neutral .delete-confirm-btn{background:var(--accent) !important;box-shadow:0 2px 12px rgba(59,130,246,0.25) !important;}
+.confirm-neutral .delete-confirm-btn:hover{background:#2563eb !important;box-shadow:0 4px 20px rgba(59,130,246,0.35) !important;}
+[data-theme="light"] .confirm-neutral{box-shadow:0 20px 60px rgba(0,0,0,0.12),0 0 40px rgba(59,130,246,0.06) !important;}
+[data-theme="light"] .confirm-neutral .delete-confirm-icon-wrap{background:rgba(59,130,246,0.08);}
+[data-theme="light"] .confirm-neutral .delete-confirm-detail{background:rgba(59,130,246,0.04);border-color:rgba(59,130,246,0.12);}
 @keyframes modalSlideIn{from{opacity:0;transform:translateY(-8px) scale(0.97);}to{opacity:1;transform:translateY(0) scale(1);}}
 @keyframes overlayFadeIn{from{opacity:0;}to{opacity:1;}}
 @keyframes warningPulse{0%,100%{transform:scale(1);}50%{transform:scale(1.1);}}

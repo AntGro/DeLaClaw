@@ -203,6 +203,11 @@ function showDeleteConfirm(title, message, onConfirm, detail, opts) {
       btnSvg.outerHTML = opts.btnIconSvg;
     }
   }
+  // Variant: 'neutral' uses accent color instead of red
+  const modal = document.querySelector('.delete-confirm-modal');
+  if (modal) {
+    modal.classList.toggle('confirm-neutral', opts?.variant === 'neutral');
+  }
   _deleteConfirmCallback = onConfirm;
   document.getElementById('deleteConfirmModal').classList.add('visible');
 }
@@ -210,6 +215,9 @@ function showDeleteConfirm(title, message, onConfirm, detail, opts) {
 function closeDeleteConfirm() {
   document.getElementById('deleteConfirmModal').classList.remove('visible');
   _deleteConfirmCallback = null;
+  // Reset variant
+  const modal = document.querySelector('.delete-confirm-modal');
+  if (modal) modal.classList.remove('confirm-neutral');
   // Reset custom button text
   const btnTextEl = document.getElementById('deleteConfirmBtnText');
   if (btnTextEl) btnTextEl.textContent = 'Delete';

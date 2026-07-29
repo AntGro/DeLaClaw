@@ -1383,7 +1383,9 @@ async function unshareTodo(id, el) {
       } finally {
         if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
       }
-    }
+    },
+    null,
+    { variant: 'neutral', btnText: t('sharing.unshare'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15) }
   );
 }
 window.unshareTodo = unshareTodo;

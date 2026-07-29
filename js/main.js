@@ -1797,6 +1797,29 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   // Offer PWA install on phones/tablets when not already installed.
   // In demo mode this stacks below the demo banner (see install-banner CSS).
   maybeShowInstallBanner();
+
+  // Ask user before clearing orphan shared pointers (group unreachable)
+  const _orphanPrompted = new Set();
+  document.addEventListener('sharing-orphan-detected', (e) => {
+    const groupId = e.detail?.groupId;
+    if (!groupId || _orphanPrompted.has(groupId)) return;
+    _orphanPrompted.add(groupId);
+    const label = groupId.slice(0, 8);
+    showDeleteConfirm(
+      t('sharing.orphan_detected_title'),
+      t('sharing.orphan_detected_message', label),
+      async () => {
+        const nullShared = { shared_id: null, shared_group_id: null };
+        await state.db.from('habits').update(nullShared).eq('shared_group_id', groupId);
+        await state.db.from('todos').update(nullShared).eq('shared_group_id', groupId);
+        await state.db.from('list_items').update(nullShared).eq('shared_group_id', groupId);
+        await refreshHabits(); await refreshTodos(); await refreshLists();
+        showToast(t('sharing.group_deleted'), 'info');
+      },
+      null,
+      { variant: 'neutral', btnText: t('sharing.orphan_unlink'), iconSvg: lucideIcon('unlink', 24), btnIconSvg: lucideIcon('unlink', 15, 'currentColor') }
+    );
+  });
 }
 
 

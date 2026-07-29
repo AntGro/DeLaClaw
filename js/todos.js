@@ -1247,9 +1247,8 @@ async function _doSyncSharedTodos() {
         await state.db.from('todos').delete().eq('id', local.id);
         needsRefresh = true;
       } else if (state.sharing.isReady?.()) {
-        // Groups loaded but this one is gone → revert to personal
-        await state.db.from('todos').update({ shared_id: null, shared_group_id: null }).eq('id', local.id);
-        needsRefresh = true;
+        // Groups loaded but this one is gone → ask user before clearing
+        try { document.dispatchEvent(new CustomEvent('sharing-orphan-detected', { detail: { groupId: local.shared_group_id } })); } catch {}
       }
       // else: sharing not loaded yet — skip, will retry on next sync
     }

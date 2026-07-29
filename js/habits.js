@@ -900,7 +900,7 @@ function renderHabitCategoryCard(catId) {
 
   const headerIcon = isSharedDeck ? `${lucideIcon('users', 16)} ` : '';
 
-  const editBtn = !isSharedDeck
+  const editBtn = (!isSharedDeck && !isGeneral)
     ? `<button class="todo-cat-shortname-btn" data-action="open-edit-habit-category-modal" data-category="${esc(catId)}" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
     : '';
 

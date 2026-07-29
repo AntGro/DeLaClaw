@@ -455,10 +455,10 @@ function renderFlashcardDeck(deck, q) {
         </div>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deck)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>
+        ${deck ? `<button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deck)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>` : ''}
         ${practiceButton}
         <button class="archive-project-btn" data-action="open-add-flashcard" data-deck="${esc(deck)}" title="${t('flashcards.add_card')}">${lucideIcon('plus', 16)}</button>
-        <button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deck)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        ${deck ? `<button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deck)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>` : ''}
       </div>
     </div>
     <div class="task-list">
@@ -524,10 +524,10 @@ function renderTextDeck(deck, q) {
         </div>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deck)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>
+        ${deck ? `<button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deck)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>` : ''}
         ${practiceButton}
         <button class="archive-project-btn" data-action="open-add-text" data-deck="${esc(deck)}" title="${t('text_revision.add_text')}">${lucideIcon('plus', 16)}</button>
-        <button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deck)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        ${deck ? `<button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deck)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>` : ''}
       </div>
     </div>
     <div class="task-list">

@@ -4417,15 +4417,33 @@ function handleStartupDeepLink() {
 
 // Delegated click handler for deep links in rendered markdown
 document.addEventListener('click', (e) => {
-  const link = e.target.closest('a.deep-link[data-deep-link]');
-  if (!link) return;
-  e.preventDefault();
-  const val = link.dataset.deepLink;
-  const parts = val.split('/');
-  if (parts.length === 2) {
-    const [type, id] = parts;
-    history.pushState(null, '', '#' + val);
-    navigateToItem(type, id);
+  // Explicit deep links rendered by renderMd [text](#type/id)
+  const deepLink = e.target.closest('a.deep-link[data-deep-link]');
+  if (deepLink) {
+    e.preventDefault();
+    const val = deepLink.dataset.deepLink;
+    const parts = val.split('/');
+    if (parts.length === 2) {
+      const [type, id] = parts;
+      history.pushState(null, '', '#' + val);
+      navigateToItem(type, id);
+    }
+    return;
+  }
+  // Full-URL links that point back to this app with a deep-link hash
+  const anyLink = e.target.closest('a[href]');
+  if (anyLink) {
+    try {
+      const url = new URL(anyLink.href, location.href);
+      if (url.origin === location.origin && url.pathname === location.pathname && url.hash) {
+        const parsed = parseDeepLink(url.hash);
+        if (parsed) {
+          e.preventDefault();
+          history.pushState(null, '', url.hash);
+          navigateToItem(parsed.type, parsed.id);
+        }
+      }
+    } catch (_) { /* invalid URL, let browser handle */ }
   }
 });
 

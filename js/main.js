@@ -1640,9 +1640,6 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   checkSchemaVersion();
   recordDailyVisit();
 
-  // Deep-link navigation on startup
-  handleStartupDeepLink();
-
   // Clean up any legacy localStorage ideas (one-time)
   localStorage.removeItem(IDEAS_KEY);
 
@@ -1769,6 +1766,9 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   }
 
   markLastUpdated();
+
+  // Deep-link navigation on startup — all page data is loaded, no retry loop needed
+  handleStartupDeepLink();
 
   // Listen for sharing updates (Drive sharing module polls and fires sharing-changed)
   document.addEventListener('sharing-changed', async () => {
@@ -4362,14 +4362,15 @@ function navigateToItem(type, id) {
     switchView(view);
   }
   let attempts = 0;
+  const maxAttempts = 3;
   const tryFind = () => {
     attempts++;
     const el = findItemElement(type, id);
     if (el) {
       expandParentIfNeeded(type, id, el);
       highlightItem(el);
-    } else if (attempts < 8) {
-      setTimeout(tryFind, 300);
+    } else if (attempts < maxAttempts) {
+      setTimeout(tryFind, 150);
     } else {
       showToast(t('common.item_not_found'), 'error');
     }

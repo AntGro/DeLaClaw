@@ -291,6 +291,7 @@ function renderListItem(item) {
 
   // Shared list item badge
   const isShared = item.shared_id && item.shared_group_id;
+  const hasShareBtn = isShared || (!isShared && state.sharing?.getAllGroups().length);
   let sharedHtml = '';
   if (isShared && state.sharing) {
     const group = state.sharing.getAllGroups().find(g => g.id === item.shared_group_id);
@@ -305,7 +306,7 @@ function renderListItem(item) {
         <span class="list-item-text">${truncateWithShowMore(item.text, 120, item.id, 'listtext')}</span>
         ${noteHtml}
       </div>
-      <div class="list-item-actions">
+      <div class="list-item-actions${hasShareBtn ? ' cols-2' : ''}">
         ${!isShared && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-list-item" data-id="${esc(item.id)}" title="${t('sharing.share')}">${lucideIcon('share', 14)}</button>` : ''}
         ${isShared && _myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="unshare-list-item" data-id="${esc(item.id)}" title="${t('sharing.unshare')}">${lucideIcon('share-off', 14)}</button>` : ''}
         ${isShared && !_myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="copy-list-item-to-personal" data-id="${esc(item.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon('copy', 14)}</button>` : ''}

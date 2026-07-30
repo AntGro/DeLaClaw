@@ -1010,6 +1010,7 @@ async function doLogin() {
     } else if (e.message === 'popup_failed_to_open') {
       err.textContent = t('login.drive_popup_blocked') || 'Pop-up blocked by your browser — please try again.';
     } else {
+      console.error('[DeLaClaw] connect error:', e);
       err.textContent = t('toast.connection_failed');
     }
   }

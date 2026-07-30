@@ -547,7 +547,13 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             for (const table of dirtyTables) {
               const fileName = `${table}.json`;
               const meta = fileMeta[table] || {};
-              const result = await uploadFile(flushTok, folderId, meta.fileId, fileName, inner._store[table] || []);
+              let result;
+              try {
+                result = await uploadFile(flushTok, folderId, meta.fileId, fileName, inner._store[table] || []);
+              } catch (uploadErr) {
+                console.error(`[DeLaClaw] migration ${version} flush failed for ${table}:`, uploadErr);
+                throw uploadErr;
+              }
               fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
               flushed++;
               completedUnits++;

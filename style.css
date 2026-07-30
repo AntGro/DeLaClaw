@@ -2107,4 +2107,5 @@ a.sharing-drive-link{text-decoration:none;}
   100% { transform: rotate(180deg); color: var(--accent); }
 }
 .copy-link-done { animation: copy-link-done 0.35s ease-out forwards; }
+[data-action="copy-item-link"]{ color: var(--muted); background:none; border:none; cursor:pointer; }
 a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor: pointer; }

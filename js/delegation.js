@@ -205,6 +205,7 @@
       case 'unarchive-project': callWindow('unarchiveProject', [getId(el)]); break;
       case 'delete-project': callWindow('deleteProject', [getId(el)]); break;
       case 'copy-project-title': callWindow('copyProjectTitle', [getId(el)]); break;
+      case 'copy-item-link': callWindow('copyItemLink', [el.dataset.linkType, getId(el)]); break;
       case 'navigate-to-project': callWindow('navigateToProject', [getId(el)]); break;
       case 'toggle-expand-project': callWindow('toggleExpandProject', [getId(el)]); break;
       case 'open-edit-project': callWindow('openEditProjectModal', [getId(el)]); break;

@@ -965,6 +965,7 @@ function renderHabitItem(habit) {
         ${!isShared && !isDraft && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         ${isShared && !isDraft && _myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="unshare-habit" data-id="${esc(habit.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
         ${isShared && !isDraft && !_myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="copy-habit-to-personal" data-id="${esc(habit.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
+        <button data-action="copy-item-link" data-link-type="habit" data-id="${esc(habit.id)}" title="${t('common.copy_link')}">${lucideIcon("link",16)}</button>
         <button data-action="open-edit-habit-modal" data-id="${esc(habit.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button data-action="delete-habit" data-id="${esc(habit.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>

@@ -10,7 +10,7 @@ import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
 
-import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps } from './utils.js';
+import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
@@ -1609,7 +1609,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   // Restore view early (before async refreshes) to avoid flash
   applyTabVisibility();
-  const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'vestiaire', 'flashcards'];
+  const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'vestiaire', 'flashcards', 'lists'];
   const rawHash = location.hash.replace('#', '');
   const hashView = validViews.includes(rawHash) ? rawHash : null;
   let savedView = hashView || localStorage.getItem(CURRENT_VIEW_KEY) || 'welcome';
@@ -1621,7 +1621,13 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   // Listen for back/forward navigation
   window.addEventListener('hashchange', () => {
-    const raw = location.hash.replace('#', '');
+    const hash = location.hash;
+    const deepLink = parseDeepLink(hash);
+    if (deepLink) {
+      navigateToItem(deepLink.type, deepLink.id);
+      return;
+    }
+    const raw = hash.replace('#', '');
     const h = validViews.includes(raw) ? raw : 'welcome';
     if (h !== state.currentView) switchView(h);
   });
@@ -1632,6 +1638,9 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   await loadSettings();
   checkSchemaVersion();
   recordDailyVisit();
+
+  // Deep-link navigation on startup
+  handleStartupDeepLink();
 
   // Clean up any legacy localStorage ideas (one-time)
   localStorage.removeItem(IDEAS_KEY);
@@ -4340,6 +4349,88 @@ document.addEventListener('keydown', e => {
 });
 
 window.switchView = switchView;
+
+// ===================================================================
+// DEEP-LINK NAVIGATION
+// ===================================================================
+function navigateToItem(type, id) {
+  const view = DEEP_LINK_TYPE_MAP[type];
+  if (!view) { showToast(t('common.item_not_found'), 'error'); return; }
+
+  const doFind = () => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const el = findItemElement(type, id);
+        if (!el) {
+          showToast(t('common.item_not_found'), 'error');
+          return;
+        }
+        expandParentIfNeeded(type, id, el);
+        highlightItem(el);
+      }, 150);
+    });
+  };
+
+  if (state.currentView !== view) {
+    switchView(view);
+  }
+  doFind();
+}
+
+function findItemElement(type, id) {
+  const selectors = {
+    todo: `[data-todo-id="${id}"]`,
+    habit: `[data-habit-id="${id}"]`,
+    project: `[data-project="${id}"]`,
+    task: `[data-task-id="${id}"]`,
+    birthday: `.birthday-card[data-id="${id}"]`,
+    vest: `[data-vest-id="${id}"]`,
+    flashcard: `[data-card-id="${id}"]`,
+    list: `[data-list-id="${id}"]`,
+    listitem: `[data-item-id="${id}"]`,
+  };
+  const sel = selectors[type];
+  return sel ? document.querySelector(sel) : null;
+}
+
+function expandParentIfNeeded(type, id, el) {
+  if (type === 'task') {
+    const archivedSection = el.closest('.archived-tasks');
+    if (archivedSection && archivedSection.style.display === 'none') {
+      const toggle = el.closest('.project-card')?.querySelector('.archive-toggle');
+      if (toggle) toggle.click();
+    }
+  }
+  const bucket = el.closest('.bucket-collapsed, [class*="collapsed"]');
+  if (bucket) {
+    const header = bucket.querySelector('.bucket-header, .project-card-header');
+    if (header) header.click();
+  }
+}
+
+function handleStartupDeepLink() {
+  const deepLink = parseDeepLink(location.hash);
+  if (deepLink) {
+    navigateToItem(deepLink.type, deepLink.id);
+  }
+}
+
+// Delegated click handler for deep links in rendered markdown
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('a.deep-link[data-deep-link]');
+  if (!link) return;
+  e.preventDefault();
+  const val = link.dataset.deepLink;
+  const parts = val.split('/');
+  if (parts.length === 2) {
+    const [type, id] = parts;
+    history.pushState(null, '', '#' + val);
+    navigateToItem(type, id);
+  }
+});
+
+window.navigateToItem = navigateToItem;
+
 function clearPageSearch(btn) {
   const input = btn.closest('.search-input-wrap').querySelector('.page-search');
   if (input) {

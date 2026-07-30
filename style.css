@@ -2091,3 +2091,14 @@ a.sharing-drive-link{text-decoration:none;}
 .auth-inline-prompt .auth-inline-status{font-size:0.82rem;color:var(--success,#22c55e);margin-top:0.5rem;}
 .auth-signed-in-badge{display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--muted);margin-bottom:8px;}
 .auth-signed-in-badge svg{color:var(--success,#22c55e);}
+
+/* Deep-link highlight */
+@keyframes deep-link-highlight {
+  0%   { background-color: rgba(59,130,246,0.25); }
+  100% { background-color: transparent; }
+}
+.deep-link-highlight {
+  animation: deep-link-highlight 1.5s ease-out;
+  border-radius: 6px;
+}
+a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor: pointer; }

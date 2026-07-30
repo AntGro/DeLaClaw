@@ -67,6 +67,8 @@ function renderMd(text) {
   // Links [text](url) — supports https://, http://, and www. prefixes
   html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   html = html.replace(/\[([^\]]+)\]\((www\.[^\s)]+)\)/g, '<a href="https://$2" target="_blank" rel="noopener">$1</a>');
+  // Internal deep links [text](#type/id)
+  html = html.replace(/\[([^\]]+)\]\(#((?:todo|habit|project|task|birthday|vest|flashcard|list|listitem)\/[a-f0-9-]+)\)/g, '<a href="#$2" class="deep-link" data-deep-link="$2">$1</a>');
   // Bare URLs (not already in an <a> tag)
   html = html.replace(/(?<!href="|">)(https?:\/\/[^\s<&]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
   html = html.replace(/(?<!href="|"|\/)(www\.[^\s<&]+)/g, '<a href="https://$1" target="_blank" rel="noopener">$1</a>');
@@ -806,6 +808,56 @@ async function backfillCategoryColors(table, catMap) {
   }
 }
 
+// ===================================================================
+// DEEP-LINK UTILITIES
+// ===================================================================
+
+/** Map item type prefix to its view name */
+const DEEP_LINK_TYPE_MAP = {
+  todo: 'todos', habit: 'habits', project: 'projects', task: 'projects',
+  birthday: 'birthdays', vest: 'vestiaire', flashcard: 'flashcards',
+  list: 'lists', listitem: 'lists',
+};
+
+/** Parse a deep-link hash like #todo/abc123 → { type, id } or null */
+function parseDeepLink(hash) {
+  if (!hash || !hash.startsWith('#')) return null;
+  const parts = hash.slice(1).split('/');
+  if (parts.length !== 2) return null;
+  const [type, id] = parts;
+  if (!DEEP_LINK_TYPE_MAP[type] || !id) return null;
+  return { type, id };
+}
+
+/** Copy an item's deep link to clipboard and show toast */
+function copyItemLink(type, id) {
+  const base = location.origin + location.pathname;
+  const url = base + '#' + type + '/' + id;
+  navigator.clipboard.writeText(url).then(() => {
+    showToast(t('common.link_copied'), 'success');
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast(t('common.link_copied'), 'success');
+  });
+}
+
+/** Scroll to an item element and apply the highlight animation */
+function highlightItem(el) {
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('deep-link-highlight');
+  void el.offsetWidth;
+  el.classList.add('deep-link-highlight');
+  el.addEventListener('animationend', () => el.classList.remove('deep-link-highlight'), { once: true });
+}
+
 export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
   showDeleteConfirm, closeDeleteConfirm, executeDeleteConfirm,
@@ -815,6 +867,7 @@ export {
   getSupabaseKeyRole, isServiceRoleKey,
   getSupabaseProjectRef, buildAuthSteps, createSettingsAccessor,
   backfillCategoryColors,
+  parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,
 };
 
 window.closeDeleteConfirm = closeDeleteConfirm;
@@ -824,3 +877,4 @@ window.closeDeleteConfirm = closeDeleteConfirm;
 window.executeDeleteConfirm = executeDeleteConfirm;
 window.expandMeta = expandMeta;
 window.collapseMeta = collapseMeta;
+window.copyItemLink = copyItemLink;

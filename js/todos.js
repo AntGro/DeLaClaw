@@ -487,6 +487,7 @@ function renderTodoItem(td) {
         ${!isShared && !td.done && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-todo" data-id="${esc(td.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         ${isShared && !td.done && _myCreatedSharedIds.has(td.shared_id) ? `<button data-action="unshare-todo" data-id="${esc(td.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
         ${isShared && !td.done && !_myCreatedSharedIds.has(td.shared_id) ? `<button data-action="copy-todo-to-personal" data-id="${esc(td.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
+        <button data-action="copy-item-link" data-link-type="todo" data-id="${esc(td.id)}" title="${t('common.copy_link')}">${lucideIcon("link",16)}</button>
         <button data-action="edit-todo-inline" data-id="${esc(td.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button data-action="delete-todo" data-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>

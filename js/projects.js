@@ -211,6 +211,7 @@ function buildProjectCards() {
         </div>
         <div class="project-header-actions">
           ${p.links.map(l => `<a class="project-link" href="${l.url}" target="_blank">${l.label} ↗</a>`).join(' ')}
+          <button class="archive-project-btn" data-action="copy-item-link" data-link-type="project" data-id="${esc(p.id)}" title="${t('common.copy_link')}">${lucideIcon("link",14)}</button>
           <button class="expand-project-btn" data-action="toggle-expand-project" data-id="${esc(p.id)}" title="Expand/collapse project" id="expand-btn-${p.id}">${lucideIcon('maximize-2', 14, 'currentColor')}</button>
           <button class="prompt-project-btn" data-action="open-project-prompt" data-id="${esc(p.id)}" title="${t('projects.edit_prompt')}">${lucideIcon("file-text",16)}</button>
           <button class="archive-project-btn" data-action="open-edit-project" data-id="${esc(p.id)}" title="${t('projects.edit_project')}">${lucideIcon("pencil",16)}</button>
@@ -368,6 +369,7 @@ function renderTask(task, isArchived = false) {
   if (task.status === 'approved' && isArchived) {
     actionBtns += `<button data-task-id="${esc(task.id)}" data-action="update-task-status" data-id="${esc(task.id)}" data-status="todo" title="${t('common.reopen')}">${lucideIcon('undo-2', 14)}</button>`;
   }
+  actionBtns += `<button data-action="copy-item-link" data-link-type="task" data-id="${esc(task.id)}" title="${t('common.copy_link')}">${lucideIcon("link",16)}</button>`;
   actionBtns += `<button data-action="prompt-edit-task" data-id="${esc(task.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>`;
   actionBtns += `<button data-action="delete-task" data-id="${esc(task.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`;
 

@@ -571,6 +571,7 @@ function renderFlashcardItem(c, color) {
         ${badge}
       </div>
       <div class="todo-actions">
+        <button data-action="copy-item-link" data-link-type="flashcard" data-id="${esc(c.id)}" title="${t('common.copy_link')}">${lucideIcon('link', 16)}</button>
         <button data-action="open-edit-flashcard" data-id="${esc(c.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
         <button data-action="delete-flashcard" data-id="${esc(c.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>

@@ -1,7 +1,7 @@
 import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
 import state, { ARCHIVED_PROJECTS_KEY, SHOW_ARCHIVED_KEY, MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm,
+import { esc, escQ, renderMd, showToast, showConfirmAction,
          updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
 import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 
@@ -89,7 +89,7 @@ async function unarchiveProject(id) {
 async function deleteProject(id, name) {
   const taskCount = state.allTasks.filter(t => t.project === id).length;
   const detail = taskCount > 0 ? `This will also delete ${taskCount} task${taskCount > 1 ? 's' : ''} in this project.` : null;
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     `Delete "${name}"? This cannot be undone.`,
     async () => {
@@ -338,7 +338,7 @@ async function deleteAllArchivedTasks(projectId) {
   if (!archivedTasks.length) return;
   const project = state.PROJECTS.find(p => p.id === projectId);
   const name = project ? project.name : projectId;
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     `Delete all ${archivedTasks.length} archived task${archivedTasks.length > 1 ? 's' : ''} in "${name}"? This cannot be undone.`,
     async () => {
@@ -504,7 +504,7 @@ async function promptEditTask(id) {
 }
 
 async function deleteTask(id) {
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     'Delete this task? This cannot be undone.',
     async () => {

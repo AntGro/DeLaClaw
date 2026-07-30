@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, truncateWithShowMore, fetchAll, createSettingsAccessor } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, createSettingsAccessor } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
@@ -633,7 +633,7 @@ async function toggleListItemCheck(id, btnEl) {
 async function deleteListItem(id) {
   const item = (state.allListItems || []).find(x => x.id === id);
   if (!item) return;
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     `Remove "${item.text}"?`,
     async () => {
@@ -778,7 +778,7 @@ async function deleteList(listId) {
   const msg = itemCount > 0
     ? `Delete "${list.name}" and its ${itemCount} item(s)?`
     : `Delete "${list.name}"?`;
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     msg,
     async () => {
@@ -1051,7 +1051,7 @@ async function bulkShareList(listId, el) {
   if (!btn) return;
   openSharePopover(btn, async (groupId) => {
     const msg = t('sharing.share_all_confirm', listItems.length);
-    showDeleteConfirm(
+    showConfirmAction(
       t('sharing.share_all'),
       msg,
       async () => {
@@ -1082,7 +1082,7 @@ async function bulkShareList(listId, el) {
         await refreshLists();
       },
       null,
-      { variant: 'neutral' }
+      { variant: 'neutral', btnText: t('sharing.share_all'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }
     );
   }, { showAssignees: false });
 }
@@ -1094,7 +1094,7 @@ async function unshareListItem(id, el) {
   const item = (state.allListItems || []).find(i => i.id === id);
   if (!item || !item.shared_id || !item.shared_group_id) return;
 
-  showDeleteConfirm(
+  showConfirmAction(
     t('sharing.unshare'),
     t('sharing.unshare_confirm'),
     async () => {

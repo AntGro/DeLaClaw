@@ -248,7 +248,7 @@ test('Orphan handler is module-level, not inside connect()', () => {
     'orphan listener must be outside connect() to avoid leak on reconnect');
 });
 
-test('Orphan handler uses queued processing, not direct showDeleteConfirm', () => {
+test('Orphan handler uses queued processing, not direct showConfirmAction', () => {
   const main = jsFiles['main.js'];
   // Must have a queue and threshold
   assert(main.includes('_orphanQueue'), 'must use _orphanQueue for sequential processing');
@@ -256,22 +256,22 @@ test('Orphan handler uses queued processing, not direct showDeleteConfirm', () =
   assert(main.includes('_processOrphanQueue'), 'must process queue sequentially');
 });
 
-test('Orphan handler passes onCancel to showDeleteConfirm', () => {
+test('Orphan handler passes onCancel to showConfirmAction', () => {
   const main = jsFiles['main.js'];
-  // Find the orphan showDeleteConfirm call and check it has onCancel
+  // Find the orphan showConfirmAction call and check it has onCancel
   const orphanSection = main.slice(main.indexOf('function _processOrphanQueue'));
   assert(orphanSection.includes('onCancel'), 'orphan dialog must pass onCancel to allow retry');
 });
 
-test('showDeleteConfirm supports onCancel callback', () => {
+test('showConfirmAction supports onCancel callback', () => {
   const utils = jsFiles['utils.js'];
-  assert(utils.includes('_deleteCancelCallback'), 'utils.js must track cancel callback');
-  // closeDeleteConfirm must fire cancel callback
-  const closeFn = utils.slice(utils.indexOf('function closeDeleteConfirm()'));
-  assert(closeFn.includes('cancelCb'), 'closeDeleteConfirm must invoke cancel callback');
-  // executeDeleteConfirm must clear cancel before calling close (prevent double-fire)
-  const execFn = utils.slice(utils.indexOf('async function executeDeleteConfirm()'));
-  assert(execFn.includes('_deleteCancelCallback = null'), 'executeDeleteConfirm must clear cancel callback before close');
+  assert(utils.includes('_confirmCancelCallback'), 'utils.js must track cancel callback');
+  // closeConfirmAction must fire cancel callback
+  const closeFn = utils.slice(utils.indexOf('function closeConfirmAction()'));
+  assert(closeFn.includes('cancelCb'), 'closeConfirmAction must invoke cancel callback');
+  // executeConfirmAction must clear cancel before calling close (prevent double-fire)
+  const execFn = utils.slice(utils.indexOf('async function executeConfirmAction()'));
+  assert(execFn.includes('_confirmCancelCallback = null'), 'executeConfirmAction must clear cancel callback before close');
 });
 
 test('Sync dispatches sharing-orphan-detected instead of clearing directly', () => {
@@ -1516,8 +1516,8 @@ async function archiveDeleteIntegrationTest() {
     // Delete the archived project Beta — trigger via JS (the button is in the archived list)
     await page.evaluate(() => window.deleteProject('proj-beta', 'Beta'));
     // Confirm in the delete modal
-    await page.waitForSelector('#deleteConfirmModal.visible', { timeout: 5000 });
-    await page.click('#deleteConfirmBtn');
+    await page.waitForSelector('#confirmActionModal.visible', { timeout: 5000 });
+    await page.click('#confirmActionBtn');
     // Wait for the delete to complete and cards to rebuild
     await page.waitForTimeout(1000);
 
@@ -2680,12 +2680,12 @@ async function importFlashcardsIntegrationTest() {
   // SHARING: unshare/copy-to-personal guards
   // ===================================================================
 
-  test('showDeleteConfirm in unshare functions uses (title, message, fn) — not function as 2nd arg', () => {
+  test('showConfirmAction in unshare functions uses (title, message, fn) — not function as 2nd arg', () => {
     const files = ['js/todos.js', 'js/habits.js', 'js/lists.js'];
     for (const file of files) {
       const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
-      // Find all showDeleteConfirm calls inside unshare functions
-      const calls = [...src.matchAll(/showDeleteConfirm\(([^)]+)\)/g)];
+      // Find all showConfirmAction calls inside unshare functions
+      const calls = [...src.matchAll(/showConfirmAction\(([^)]+)\)/g)];
       for (const m of calls) {
         const args = m[1];
         // 2nd arg must not be an arrow function or function ref — it should be a string (i18n key call or literal)
@@ -2693,7 +2693,7 @@ async function importFlashcardsIntegrationTest() {
         if (parts.length >= 2) {
           const secondArg = parts[1].trim();
           assert(!secondArg.startsWith('()') && !secondArg.startsWith('function'),
-            `${file}: showDeleteConfirm 2nd arg must be a message string, got: ${secondArg.slice(0, 40)}`);
+            `${file}: showConfirmAction 2nd arg must be a message string, got: ${secondArg.slice(0, 40)}`);
         }
       }
     }

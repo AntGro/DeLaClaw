@@ -90,8 +90,8 @@
       case 'save-edit-project': callWindow('saveEditProject', []); break;
       case 'close-edit-category': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditCategoryModal', []); break;
       case 'save-edit-category': callWindow('saveEditCategory', []); break;
-      case 'close-delete-confirm': callWindow('closeDeleteConfirm', []); break;
-      case 'execute-delete-confirm': callWindow('executeDeleteConfirm', []); break;
+      case 'close-confirm-action': callWindow('closeConfirmAction', []); break;
+      case 'execute-confirm-action': callWindow('executeConfirmAction', []); break;
       case 'close-settings': callWindow('closeSettings', []); break;
       case 'overlay-close-settings': callWindow('closeSettings', []); break;
       case 'overlay-close-auth': { var ov = document.getElementById('authPromptOverlay'); if (ov) ov.classList.remove('visible'); } break;

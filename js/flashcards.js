@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors } from './utils.js';
+import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
@@ -699,7 +699,7 @@ window.editFlashcardInline = function(id) {
 window.deleteDraft = function(id) {
   const draft = allDrafts.find(d => d.id === id);
   if (!draft) return;
-  showDeleteConfirm('Delete Draft', 'Are you sure?', async () => {
+  showConfirmAction('Delete Draft', 'Are you sure?', async () => {
     if (state.db.connected) await state.db.from('flashcard_notes').delete().eq('id', id);
     await refreshFlashcards();
     showToast(t('flashcards.draft_deleted'));
@@ -912,7 +912,7 @@ window.saveEditFlashcard = async function() {
 window.deleteFlashcard = function(id) {
   const card = allCards.find(c => c.id === id);
   if (!card) return;
-  showDeleteConfirm('Delete Flashcard', 'Are you sure?', async () => {
+  showConfirmAction('Delete Flashcard', 'Are you sure?', async () => {
     if (state.db.connected) await state.db.from('flashcards').delete().eq('id', id);
     await refreshFlashcards();
     showToast(t('flashcards.card_deleted'));
@@ -1353,7 +1353,7 @@ window.saveNewText = async function() {
 window.deleteText = function(id) {
   const tx = allTexts.find(t => t.id === id);
   if (!tx) return;
-  showDeleteConfirm(t('text_revision.delete_text'), t('text_revision.delete_confirm'), async () => {
+  showConfirmAction(t('text_revision.delete_text'), t('text_revision.delete_confirm'), async () => {
     if (state.db.connected) await state.db.from('texts').delete().eq('id', id);
     await refreshFlashcards();
     showToast(t('text_revision.text_deleted'));
@@ -2344,7 +2344,7 @@ async function deleteDeck(deck) {
     ? `Delete "${deck}" and its ${total} item(s)? This cannot be undone.`
     : `Delete empty deck "${deck}"?`;
 
-  showDeleteConfirm(t('common.delete'), msg, async () => {
+  showConfirmAction(t('common.delete'), msg, async () => {
     // Delete drafts targeting this deck (proposed_deck is TEXT, not FK)
     if (drafts.length) await state.db.from('flashcard_notes').delete().eq('proposed_deck', deck);
     // CASCADE on FK — deleting the deck removes all its flashcards + texts

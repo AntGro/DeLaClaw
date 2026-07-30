@@ -705,7 +705,7 @@ body.paused-mode:has(.schema-banner) .schema-banner{top:var(--paused-banner-h,36
 /* ===== ADD PROJECT MODAL ===== */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:200;align-items:center;justify-content:center;}
 .modal-overlay.visible{display:flex;animation:overlayFadeIn 0.2s ease-out;}
-#deleteConfirmModal{z-index:9900;}
+#confirmActionModal{z-index:9900;}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 60px rgba(100,108,255,0.05);max-height:85vh;overflow-y:auto;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);animation:modalSlideIn 0.25s ease-out;}
 /* Category-colored modal: solid header, tinted body */
 .modal-overlay[style*="--cat-color"] .modal{background:color-mix(in srgb, var(--cat-color) 6%, var(--surface));border-color:color-mix(in srgb, var(--cat-color) 20%, var(--border));}
@@ -764,41 +764,41 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .deck-type-btn{flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:0.82rem;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:all 0.2s ease;}
 .deck-type-btn:hover{border-color:var(--text);color:var(--text);}
 .deck-type-btn.active{border-color:var(--accent);background:rgba(100,108,255,0.1);color:var(--accent);font-weight:600;}
-.delete-confirm-modal{max-width:400px;text-align:center;border-top:3px solid var(--red);animation:deleteModalIn 0.3s cubic-bezier(0.34,1.56,0.64,1);box-shadow:0 20px 60px rgba(0,0,0,0.5),0 0 40px rgba(239,68,68,0.1);}
-.delete-confirm-icon-wrap{width:56px;height:56px;border-radius:50%;background:rgba(239,68,68,0.12);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;animation:iconBounceIn 0.4s 0.1s cubic-bezier(0.34,1.56,0.64,1) both;}
-.delete-confirm-icon-svg{color:var(--red);flex-shrink:0;}
-.delete-confirm-modal h2{color:var(--red);font-size:1.05rem;margin-bottom:6px;font-weight:700;}
-.delete-confirm-msg{font-size:0.88rem;color:var(--muted);margin:8px 0 4px;line-height:1.5;}
-.delete-confirm-detail{font-size:0.8rem;color:var(--text);background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);border-radius:8px;padding:10px 14px;margin:12px 0 4px;line-height:1.4;word-break:break-word;}
-.delete-confirm-modal .modal-actions{justify-content:center;gap:12px;margin-top:20px;}
-.delete-confirm-modal .modal-actions button{min-width:110px;padding:10px 20px;font-size:0.88rem;}
-.delete-confirm-btn{background:var(--red) !important;color:#fff !important;transition:all 0.2s;display:inline-flex !important;align-items:center;justify-content:center;gap:6px;box-shadow:0 2px 12px rgba(239,68,68,0.25) !important;}
-.delete-confirm-btn:hover{background:#dc2626 !important;transform:translateY(-1px) !important;box-shadow:0 4px 20px rgba(239,68,68,0.35) !important;}
-.delete-confirm-btn:active{transform:translateY(0) scale(0.98) !important;}
-.delete-confirm-btn.loading{pointer-events:none;opacity:0.7;}
-.delete-confirm-btn.loading .lucide-icon{display:none;}
-.delete-confirm-btn.loading #deleteConfirmBtnText::before{content:'';display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:btnSpin 0.6s linear infinite;margin-right:6px;vertical-align:middle;}
-.delete-confirm-modal .modal-cancel{transition:all 0.2s;font-weight:600;}
-.delete-confirm-modal .modal-cancel:hover{border-color:var(--text);color:var(--text);transform:translateY(-1px);}
-.delete-confirm-modal .modal-cancel:active{transform:translateY(0) scale(0.98);}
-[data-theme="light"] .delete-confirm-modal{box-shadow:0 20px 60px rgba(0,0,0,0.12),0 0 40px rgba(239,68,68,0.06);}
-[data-theme="light"] .delete-confirm-icon-wrap{background:rgba(239,68,68,0.08);}
-[data-theme="light"] .delete-confirm-detail{background:rgba(239,68,68,0.04);border-color:rgba(239,68,68,0.12);}
+.confirm-action-modal{max-width:400px;text-align:center;border-top:3px solid var(--red);animation:confirmModalIn 0.3s cubic-bezier(0.34,1.56,0.64,1);box-shadow:0 20px 60px rgba(0,0,0,0.5),0 0 40px rgba(239,68,68,0.1);}
+.confirm-action-icon-wrap{width:56px;height:56px;border-radius:50%;background:rgba(239,68,68,0.12);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;animation:iconBounceIn 0.4s 0.1s cubic-bezier(0.34,1.56,0.64,1) both;}
+.confirm-action-icon-svg{color:var(--red);flex-shrink:0;}
+.confirm-action-modal h2{color:var(--red);font-size:1.05rem;margin-bottom:6px;font-weight:700;}
+.confirm-action-msg{font-size:0.88rem;color:var(--muted);margin:8px 0 4px;line-height:1.5;}
+.confirm-action-detail{font-size:0.8rem;color:var(--text);background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);border-radius:8px;padding:10px 14px;margin:12px 0 4px;line-height:1.4;word-break:break-word;}
+.confirm-action-modal .modal-actions{justify-content:center;gap:12px;margin-top:20px;}
+.confirm-action-modal .modal-actions button{min-width:110px;padding:10px 20px;font-size:0.88rem;}
+.confirm-action-btn{background:var(--red) !important;color:#fff !important;transition:all 0.2s;display:inline-flex !important;align-items:center;justify-content:center;gap:6px;box-shadow:0 2px 12px rgba(239,68,68,0.25) !important;}
+.confirm-action-btn:hover{background:#dc2626 !important;transform:translateY(-1px) !important;box-shadow:0 4px 20px rgba(239,68,68,0.35) !important;}
+.confirm-action-btn:active{transform:translateY(0) scale(0.98) !important;}
+.confirm-action-btn.loading{pointer-events:none;opacity:0.7;}
+.confirm-action-btn.loading .lucide-icon{display:none;}
+.confirm-action-btn.loading #confirmActionBtnText::before{content:'';display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:btnSpin 0.6s linear infinite;margin-right:6px;vertical-align:middle;}
+.confirm-action-modal .modal-cancel{transition:all 0.2s;font-weight:600;}
+.confirm-action-modal .modal-cancel:hover{border-color:var(--text);color:var(--text);transform:translateY(-1px);}
+.confirm-action-modal .modal-cancel:active{transform:translateY(0) scale(0.98);}
+[data-theme="light"] .confirm-action-modal{box-shadow:0 20px 60px rgba(0,0,0,0.12),0 0 40px rgba(239,68,68,0.06);}
+[data-theme="light"] .confirm-action-icon-wrap{background:rgba(239,68,68,0.08);}
+[data-theme="light"] .confirm-action-detail{background:rgba(239,68,68,0.04);border-color:rgba(239,68,68,0.12);}
 /* Neutral (accent/blue) variant for non-destructive confirmations (e.g. unshare) */
 .confirm-neutral{border-top-color:var(--accent) !important;box-shadow:0 20px 60px rgba(0,0,0,0.5),0 0 40px rgba(59,130,246,0.1) !important;}
-.confirm-neutral .delete-confirm-icon-wrap{background:rgba(59,130,246,0.12);}
-.confirm-neutral .delete-confirm-icon-svg{color:var(--accent);}
+.confirm-neutral .confirm-action-icon-wrap{background:rgba(59,130,246,0.12);}
+.confirm-neutral .confirm-action-icon-svg{color:var(--accent);}
 .confirm-neutral h2{color:var(--accent) !important;}
-.confirm-neutral .delete-confirm-detail{background:rgba(59,130,246,0.06);border-color:rgba(59,130,246,0.15);}
-.confirm-neutral .delete-confirm-btn{background:var(--accent) !important;box-shadow:0 2px 12px rgba(59,130,246,0.25) !important;}
-.confirm-neutral .delete-confirm-btn:hover{background:#2563eb !important;box-shadow:0 4px 20px rgba(59,130,246,0.35) !important;}
+.confirm-neutral .confirm-action-detail{background:rgba(59,130,246,0.06);border-color:rgba(59,130,246,0.15);}
+.confirm-neutral .confirm-action-btn{background:var(--accent) !important;box-shadow:0 2px 12px rgba(59,130,246,0.25) !important;}
+.confirm-neutral .confirm-action-btn:hover{background:#2563eb !important;box-shadow:0 4px 20px rgba(59,130,246,0.35) !important;}
 [data-theme="light"] .confirm-neutral{box-shadow:0 20px 60px rgba(0,0,0,0.12),0 0 40px rgba(59,130,246,0.06) !important;}
-[data-theme="light"] .confirm-neutral .delete-confirm-icon-wrap{background:rgba(59,130,246,0.08);}
-[data-theme="light"] .confirm-neutral .delete-confirm-detail{background:rgba(59,130,246,0.04);border-color:rgba(59,130,246,0.12);}
+[data-theme="light"] .confirm-neutral .confirm-action-icon-wrap{background:rgba(59,130,246,0.08);}
+[data-theme="light"] .confirm-neutral .confirm-action-detail{background:rgba(59,130,246,0.04);border-color:rgba(59,130,246,0.12);}
 @keyframes modalSlideIn{from{opacity:0;transform:translateY(-8px) scale(0.97);}to{opacity:1;transform:translateY(0) scale(1);}}
 @keyframes overlayFadeIn{from{opacity:0;}to{opacity:1;}}
 @keyframes warningPulse{0%,100%{transform:scale(1);}50%{transform:scale(1.1);}}
-@keyframes deleteModalIn{from{opacity:0;transform:translateY(-12px) scale(0.93);}to{opacity:1;transform:translateY(0) scale(1);}}
+@keyframes confirmModalIn{from{opacity:0;transform:translateY(-12px) scale(0.93);}to{opacity:1;transform:translateY(0) scale(1);}}
 @keyframes iconBounceIn{from{opacity:0;transform:scale(0.5);}to{opacity:1;transform:scale(1);}}
 @keyframes btnSpin{to{transform:rotate(360deg);}}
 

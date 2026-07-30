@@ -4,7 +4,7 @@
 // ===================================================================
 import db from './db.js';
 import { t } from './i18n.js';
-import { esc, showToast, showDeleteConfirm } from './utils.js';
+import { esc, showToast, showConfirmAction } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { STAY_CONNECTED_KEY } from './state.js';
 
@@ -183,7 +183,7 @@ async function agentsCreate() {
 }
 
 async function agentsRevoke(id) {
-  showDeleteConfirm(t('agents.revoke'), t('agents.revoke_confirm'), async ()=>{
+  showConfirmAction(t('agents.revoke'), t('agents.revoke_confirm'), async ()=>{
     try {
       try { const { error } = await db.rpc('revoke_agent_grant',{ p_id:id }); if (error) throw error; }
       catch { await db.from('agent_grants').update({ revoked_at:new Date().toISOString() }).eq('id',id); }

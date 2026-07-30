@@ -669,19 +669,19 @@ bun run server.js</pre>
   </div>
 
   <!-- Delete Confirmation Modal -->
-  <div class="modal-overlay" id="deleteConfirmModal">
-    <div class="modal delete-confirm-modal">
-      <div class="delete-confirm-icon-wrap">
-        <svg class="delete-confirm-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+  <div class="modal-overlay" id="confirmActionModal">
+    <div class="modal confirm-action-modal">
+      <div class="confirm-action-icon-wrap">
+        <svg class="confirm-action-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
       </div>
-      <h2 id="deleteConfirmTitle">Confirm Delete</h2>
-      <p id="deleteConfirmMessage" class="delete-confirm-msg"></p>
-      <div id="deleteConfirmDetail" class="delete-confirm-detail" style="display:none;"></div>
+      <h2 id="confirmActionTitle">Confirm</h2>
+      <p id="confirmActionMessage" class="confirm-action-msg"></p>
+      <div id="confirmActionDetail" class="confirm-action-detail" style="display:none;"></div>
       <div class="modal-actions">
-        <button class="modal-cancel" id="deleteConfirmCancelBtn" data-action="close-delete-confirm">Cancel</button>
-        <button class="modal-save delete-confirm-btn" id="deleteConfirmBtn" data-action="execute-delete-confirm">
+        <button class="modal-cancel" id="confirmActionCancelBtn" data-action="close-confirm-action">Cancel</button>
+        <button class="modal-save confirm-action-btn" id="confirmActionBtn" data-action="execute-confirm-action">
           <svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-          <span id="deleteConfirmBtnText">Delete</span>
+          <span id="confirmActionBtnText">Delete</span>
         </button>
       </div>
     </div>

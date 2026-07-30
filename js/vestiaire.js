@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
+import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 
@@ -707,7 +707,7 @@ async function saveEditVestiaire() {
 async function deleteVestiaire(id) {
   const v = (state.allVestiaire || []).find(x => x.id === id);
   if (!v) return;
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     `Remove "${v.name}" from your wardrobe?`,
     async () => {
@@ -797,7 +797,7 @@ async function deleteVestiaireCategory(catId) {
   const msg = items.length > 0
     ? t('vestiaire.delete_category_confirm', cat.name) + ` — ${items.length} item${items.length > 1 ? 's' : ''} will be deleted. This cannot be undone.`
     : t('vestiaire.delete_category_confirm', cat.name);
-  showDeleteConfirm(
+  showConfirmAction(
     t('vestiaire.delete_category'),
     msg,
     async () => {

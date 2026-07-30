@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
-import { esc, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
+import { esc, showToast, showConfirmAction, balanceGrid, fetchAll } from './utils.js';
 import { scrollToAndHighlight, initItemHoverDelay, inlineEditText } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 
@@ -591,7 +591,7 @@ async function saveEditBirthday() {
 async function deleteBirthday(id) {
   const b = state.allBirthdays.find(x => x.id === id);
   if (!b) return;
-  showDeleteConfirm(
+  showConfirmAction(
     'Delete Birthday',
     `Remove ${b.name}'s birthday?`,
     async () => {

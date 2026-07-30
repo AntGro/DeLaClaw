@@ -176,13 +176,13 @@ function showToast(msg, type = 'info') {
 // DELETE CONFIRMATION MODAL
 // ===================================================================
 // ===================================================================
-let _deleteConfirmCallback = null;
-let _deleteCancelCallback = null;
+let _confirmActionCallback = null;
+let _confirmCancelCallback = null;
 
-function showDeleteConfirm(title, message, onConfirm, detail, opts) {
-  document.getElementById('deleteConfirmTitle').textContent = title;
-  document.getElementById('deleteConfirmMessage').textContent = message;
-  const detailEl = document.getElementById('deleteConfirmDetail');
+function showConfirmAction(title, message, onConfirm, detail, opts) {
+  document.getElementById('confirmActionTitle').textContent = title;
+  document.getElementById('confirmActionMessage').textContent = message;
+  const detailEl = document.getElementById('confirmActionDetail');
   if (detail) {
     detailEl.textContent = detail;
     detailEl.style.display = 'block';
@@ -190,10 +190,10 @@ function showDeleteConfirm(title, message, onConfirm, detail, opts) {
     detailEl.style.display = 'none';
   }
   // Custom confirm button text (default: Delete)
-  const btnTextEl = document.getElementById('deleteConfirmBtnText');
+  const btnTextEl = document.getElementById('confirmActionBtnText');
   if (btnTextEl) btnTextEl.textContent = opts?.btnText || 'Delete';
   // Custom icon (swap trash SVG for another Lucide icon)
-  const iconWrap = document.querySelector('.delete-confirm-icon-wrap');
+  const iconWrap = document.querySelector('.confirm-action-icon-wrap');
   if (iconWrap) {
     if (opts?.iconSvg) {
       iconWrap.dataset.originalHtml = iconWrap.innerHTML;
@@ -201,7 +201,7 @@ function showDeleteConfirm(title, message, onConfirm, detail, opts) {
     }
   }
   // Custom button icon (swap trash SVG on the action button)
-  const btnEl = document.getElementById('deleteConfirmBtn');
+  const btnEl = document.getElementById('confirmActionBtn');
   if (btnEl) {
     const btnSvg = btnEl.querySelector('svg');
     if (opts?.btnIconSvg && btnSvg) {
@@ -210,35 +210,35 @@ function showDeleteConfirm(title, message, onConfirm, detail, opts) {
     }
   }
   // Variant: 'neutral' uses accent color instead of red
-  const modal = document.querySelector('.delete-confirm-modal');
+  const modal = document.querySelector('.confirm-action-modal');
   if (modal) {
     modal.classList.toggle('confirm-neutral', opts?.variant === 'neutral');
   }
-  _deleteConfirmCallback = onConfirm;
-  _deleteCancelCallback = opts?.onCancel || null;
-  document.getElementById('deleteConfirmModal').classList.add('visible');
+  _confirmActionCallback = onConfirm;
+  _confirmCancelCallback = opts?.onCancel || null;
+  document.getElementById('confirmActionModal').classList.add('visible');
 }
 
-function closeDeleteConfirm() {
-  document.getElementById('deleteConfirmModal').classList.remove('visible');
-  const cancelCb = _deleteCancelCallback;
-  _deleteConfirmCallback = null;
-  _deleteCancelCallback = null;
+function closeConfirmAction() {
+  document.getElementById('confirmActionModal').classList.remove('visible');
+  const cancelCb = _confirmCancelCallback;
+  _confirmActionCallback = null;
+  _confirmCancelCallback = null;
   if (cancelCb) try { cancelCb(); } catch {}
   // Reset variant
-  const modal = document.querySelector('.delete-confirm-modal');
+  const modal = document.querySelector('.confirm-action-modal');
   if (modal) modal.classList.remove('confirm-neutral');
   // Reset custom button text
-  const btnTextEl = document.getElementById('deleteConfirmBtnText');
+  const btnTextEl = document.getElementById('confirmActionBtnText');
   if (btnTextEl) btnTextEl.textContent = 'Delete';
   // Reset custom icon if it was changed
-  const iconWrap = document.querySelector('.delete-confirm-icon-wrap');
+  const iconWrap = document.querySelector('.confirm-action-icon-wrap');
   if (iconWrap && iconWrap.dataset.originalHtml) {
     iconWrap.innerHTML = iconWrap.dataset.originalHtml;
     delete iconWrap.dataset.originalHtml;
   }
   // Reset custom button icon if it was changed
-  const btnEl = document.getElementById('deleteConfirmBtn');
+  const btnEl = document.getElementById('confirmActionBtn');
   if (btnEl && btnEl.dataset.originalBtnSvg) {
     const curSvg = btnEl.querySelector('svg');
     if (curSvg) curSvg.outerHTML = btnEl.dataset.originalBtnSvg;
@@ -246,11 +246,11 @@ function closeDeleteConfirm() {
   }
 }
 
-async function executeDeleteConfirm() {
-  if (_deleteConfirmCallback) {
-    const cb = _deleteConfirmCallback;
-    _deleteCancelCallback = null; // confirm path — do not fire cancel
-    closeDeleteConfirm();
+async function executeConfirmAction() {
+  if (_confirmActionCallback) {
+    const cb = _confirmActionCallback;
+    _confirmCancelCallback = null; // confirm path — do not fire cancel
+    closeConfirmAction();
     await cb();
   }
 }
@@ -263,7 +263,7 @@ document.addEventListener('click', e => {
   if (e.target.id === 'promptEditorModal') closePromptEditor();
   if (e.target.id === 'projectPromptModal') closeProjectPrompt();
   if (e.target.id === 'snoozeModal') closeSnoozeModal();
-  if (e.target.id === 'deleteConfirmModal') closeDeleteConfirm();
+  if (e.target.id === 'confirmActionModal') closeConfirmAction();
   if (e.target.id === 'addCategoryModal') closeAddCategoryModal();
   if (e.target.id === 'addVestiaireModal') closeAddVestiaireModal();
   if (e.target.id === 'editVestiaireModal') closeEditVestiaireModal();
@@ -278,7 +278,7 @@ document.addEventListener('click', e => {
   if (e.target.id === 'editListModal') closeEditListModal();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeAddProjectModal(); closeEditProjectModal(); closeTaskExpandModal(); closeRevisionModal(); closePromptEditor(); closeProjectPrompt(); closeSnoozeModal(); closeDeleteConfirm(); closeAddCategoryModal(); if (window.closeAddVestiaireModal) closeAddVestiaireModal(); if (window.closeEditVestiaireModal) closeEditVestiaireModal(); if (window.closeAddVestiaireCategoryModal) closeAddVestiaireCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); if (window.closeMigrationModal) closeMigrationModal(); if (window.closeCompareModal) closeCompareModal(); }
+  if (e.key === 'Escape') { closeAddProjectModal(); closeEditProjectModal(); closeTaskExpandModal(); closeRevisionModal(); closePromptEditor(); closeProjectPrompt(); closeSnoozeModal(); closeConfirmAction(); closeAddCategoryModal(); if (window.closeAddVestiaireModal) closeAddVestiaireModal(); if (window.closeEditVestiaireModal) closeEditVestiaireModal(); if (window.closeAddVestiaireCategoryModal) closeAddVestiaireCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); if (window.closeMigrationModal) closeMigrationModal(); if (window.closeCompareModal) closeCompareModal(); }
 });
 
 
@@ -874,7 +874,7 @@ function highlightItem(el) {
 
 export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
-  showDeleteConfirm, closeDeleteConfirm, executeDeleteConfirm,
+  showConfirmAction, closeConfirmAction, executeConfirmAction,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, fetchAll,
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA,
@@ -884,11 +884,11 @@ export {
   parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,
 };
 
-window.closeDeleteConfirm = closeDeleteConfirm;
+window.closeConfirmAction = closeConfirmAction;
 
 // CSP delegation for utils handled in js/delegation.js — no per-module listeners
 
-window.executeDeleteConfirm = executeDeleteConfirm;
+window.executeConfirmAction = executeConfirmAction;
 window.expandMeta = expandMeta;
 window.collapseMeta = collapseMeta;
 window.copyItemLink = copyItemLink;

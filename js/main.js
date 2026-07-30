@@ -10,7 +10,7 @@ import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
 
-import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
+import { esc, showToast, showConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
@@ -1029,7 +1029,7 @@ document.addEventListener('DOMContentLoaded', () => {
     'saveNewCategory', 'saveEditCategory', 'submitSnooze', 'addTodoToCategory',
     'saveNewVestiaire', 'saveEditVestiaire',
     'saveNewVestiaireCategory', 'saveEditVestiaireCategory',
-    'executeDeleteConfirm',
+    'executeConfirmAction',
     'quickAddDraft', 'quickAddListItem',
     'saveGlobalPrompt', 'saveProjectPrompt',
   ];
@@ -1923,7 +1923,7 @@ function _processOrphanQueue() {
   const groupId = _orphanQueue[0];
   _orphanDialogOpen = true;
   const label = state.sharing?.getGroupName?.(groupId) || groupId.slice(0, 8);
-  showDeleteConfirm(
+  showConfirmAction(
     t('sharing.orphan_detected_title'),
     t('sharing.orphan_detected_message', label),
     async () => {
@@ -3932,14 +3932,14 @@ function importBackup() {
   input.addEventListener('change', async () => {
     const file = input.files[0];
     if (!file) return;
-    showDeleteConfirm(
+    showConfirmAction(
       t('menu.settings_restore'),
       t('menu.settings_restore_confirm'),
       () => performImport(file),
       null,
       {
         btnText: t('menu.settings_restore') || 'Restore',
-        iconSvg: '<svg class="delete-confirm-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+        iconSvg: '<svg class="confirm-action-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
         btnIconSvg: '<svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
       }
     );

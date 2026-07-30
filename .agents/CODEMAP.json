@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "1.554",
-    "generated_at": "2026-07-30T21:33:20.647Z",
+    "version": "1.555",
+    "generated_at": "2026-07-30T21:49:19.470Z",
     "loc_total": 27852,
     "files_scanned": 38,
     "tier": "T2-enriched",
@@ -1042,8 +1042,8 @@
       "esc_count": 9,
       "i18n_count": 11,
       "window_exposed": [
-        "closeDeleteConfirm",
-        "executeDeleteConfirm",
+        "closeConfirmAction",
+        "executeConfirmAction",
         "expandMeta",
         "collapseMeta",
         "copyItemLink"

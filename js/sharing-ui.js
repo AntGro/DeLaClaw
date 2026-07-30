@@ -19,7 +19,7 @@
 
 import state, { STAY_CONNECTED_KEY } from './state.js';
 import { t } from './i18n.js';
-import { esc, showToast, showDeleteConfirm, getSupabaseProjectRef, buildAuthSteps } from './utils.js';
+import { esc, showToast, showConfirmAction, getSupabaseProjectRef, buildAuthSteps } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { LOGOS } from './backend-logos.js';
 import { decodeInviteEnvelope } from './sharing-envelope.js';
@@ -357,7 +357,7 @@ async function sharingRemoveMember(groupId, memberId) {
   const group = state.sharing?.getGroup?.(groupId);
   const member = (group?.members || []).find(m => m.memberId === memberId);
   const label = memberLabel(member);
-  showDeleteConfirm(
+  showConfirmAction(
     t('sharing.remove_member'),
     t('sharing.remove_member_confirm', label),
     async () => {
@@ -371,7 +371,7 @@ async function sharingRemoveMember(groupId, memberId) {
 }
 
 async function sharingLeaveGroup(groupId) {
-  showDeleteConfirm(
+  showConfirmAction(
     t('sharing.leave'),
     t('sharing.leave_confirm'),
     async () => {
@@ -385,7 +385,7 @@ async function sharingLeaveGroup(groupId) {
 }
 
 async function sharingUnjoinGroup(groupId) {
-  showDeleteConfirm(
+  showConfirmAction(
     t('sharing.leave'),
     t('sharing.leave_confirm'),
     async () => {
@@ -436,7 +436,7 @@ async function sharingEditMyName(groupId, memberId, currentName) {
 }
 
 async function sharingDeleteGroup(groupId) {
-  showDeleteConfirm(
+  showConfirmAction(
     t('sharing.delete_group'),
     t('sharing.delete_group_confirm'),
     async () => {

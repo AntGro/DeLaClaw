@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -1400,7 +1400,7 @@ async function saveEditHabit() {
 async function deleteHabit(habitId) {
   const habit = state.allHabits.find(c => c.id === habitId);
   if (!habit) return;
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     `Delete "${habit.name}"? All completion history will be lost.`,
     async () => {
@@ -1587,7 +1587,7 @@ async function deleteHabitCompletion(compId) {
   if (!comp) return;
   const habit = state.allHabits.find(h => h.id === comp.habit_id);
   const dateStr = new Date(comp.completed_at).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     'Are you sure you want to delete this completion record?',
     async () => {
@@ -1736,7 +1736,7 @@ async function deleteHabitCategory(catId) {
     ? `Delete "${cat.name}" and its ${habitsInCat.length} habit(s)? This cannot be undone.`
     : `Delete empty category "${cat.name}"?`;
 
-  showDeleteConfirm(t('common.delete'), msg, async () => {
+  showConfirmAction(t('common.delete'), msg, async () => {
     // Propagate deletion of shared habits to sharing layer before CASCADE removes local rows
     if (state.sharing) {
       for (const habit of habitsInCat) {
@@ -2314,7 +2314,7 @@ async function bulkShareHabitCategory(catId, el) {
   if (!btn) return;
   openSharePopover(btn, async (groupId) => {
     const msg = t('sharing.share_all_confirm', items.length);
-    showDeleteConfirm(
+    showConfirmAction(
       t('sharing.share_all'),
       msg,
       async () => {
@@ -2355,7 +2355,7 @@ async function bulkShareHabitCategory(catId, el) {
         await refreshHabits();
       },
       null,
-      { variant: 'neutral' }
+      { variant: 'neutral', btnText: t('sharing.share_all'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }
     );
   }, { showAssignees: false });
 }
@@ -2367,7 +2367,7 @@ async function unshareHabit(id, el) {
   const habit = state.allHabits.find(h => h.id === id);
   if (!habit || !habit.shared_id || !habit.shared_group_id) return;
 
-  showDeleteConfirm(
+  showConfirmAction(
     t('sharing.unshare'),
     t('sharing.unshare_confirm'),
     async () => {

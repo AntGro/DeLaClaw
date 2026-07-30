@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
 import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -693,7 +693,7 @@ async function toggleTodo(id, done, btnEl) {
 }
 
 async function deleteTodo(id) {
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     'Delete this TODO? This cannot be undone.',
     async () => {
@@ -725,7 +725,7 @@ async function deleteAllDoneTodos(catId) {
   const doneTodos = allTodos.filter(t => catIdForTodo(t) === catId && t.done);
   if (!doneTodos.length) return;
   const catName = getCatDisplayName(catId);
-  showDeleteConfirm(
+  showConfirmAction(
     t('todos.delete_all_done'),
     `Delete all ${doneTodos.length} completed TODO${doneTodos.length > 1 ? 's' : ''} in "${catName}"? This cannot be undone.`,
     async () => {
@@ -923,7 +923,7 @@ async function deleteCategory(catId) {
     ? `Delete "${cat.name}" and its ${todosInCat.length} TODO(s)? This cannot be undone.`
     : `Delete empty category "${cat.name}"?`;
 
-  showDeleteConfirm(t('common.delete'), msg, async () => {
+  showConfirmAction(t('common.delete'), msg, async () => {
     // Propagate deletion of shared items to sharing layer before CASCADE removes local rows
     if (state.sharing) {
       for (const todo of todosInCat) {
@@ -1370,7 +1370,7 @@ async function bulkShareTodoCategory(catId, el) {
   openSharePopover(btn, async (groupId) => {
     const cat = _todoCatMap.get(catId);
     const msg = t('sharing.share_all_confirm', items.length);
-    showDeleteConfirm(
+    showConfirmAction(
       t('sharing.share_all'),
       msg,
       async () => {
@@ -1401,7 +1401,7 @@ async function bulkShareTodoCategory(catId, el) {
         await refreshTodos();
       },
       null,
-      { variant: 'neutral' }
+      { variant: 'neutral', btnText: t('sharing.share_all'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }
     );
   }, { showAssignees: false });
 }
@@ -1413,7 +1413,7 @@ async function unshareTodo(id, el) {
   const todo = allTodos.find(t => t.id === id);
   if (!todo || !todo.shared_id || !todo.shared_group_id) return;
 
-  showDeleteConfirm(
+  showConfirmAction(
     t('sharing.unshare'),
     t('sharing.unshare_confirm'),
     async () => {

@@ -4357,24 +4357,23 @@ function navigateToItem(type, id) {
   const view = DEEP_LINK_TYPE_MAP[type];
   if (!view) { showToast(t('common.item_not_found'), 'error'); return; }
 
-  const doFind = () => {
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        const el = findItemElement(type, id);
-        if (!el) {
-          showToast(t('common.item_not_found'), 'error');
-          return;
-        }
-        expandParentIfNeeded(type, id, el);
-        highlightItem(el);
-      }, 150);
-    });
-  };
-
   if (state.currentView !== view) {
     switchView(view);
   }
-  doFind();
+  let attempts = 0;
+  const tryFind = () => {
+    attempts++;
+    const el = findItemElement(type, id);
+    if (el) {
+      expandParentIfNeeded(type, id, el);
+      highlightItem(el);
+    } else if (attempts < 8) {
+      setTimeout(tryFind, 300);
+    } else {
+      showToast(t('common.item_not_found'), 'error');
+    }
+  };
+  requestAnimationFrame(() => setTimeout(tryFind, 150));
 }
 
 function findItemElement(type, id) {
@@ -4401,7 +4400,7 @@ function expandParentIfNeeded(type, id, el) {
       if (toggle) toggle.click();
     }
   }
-  const bucket = el.closest('.bucket-collapsed, [class*="collapsed"]');
+  const bucket = el.closest('.bucket-collapsed');
   if (bucket) {
     const header = bucket.querySelector('.bucket-header, .project-card-header');
     if (header) header.click();

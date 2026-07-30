@@ -253,7 +253,7 @@ function renderListCard(list, items, idx) {
   </div>`;
 
   const headerActions = isSharedList ? '' : `<div class="project-header-actions" style="opacity:1;">
-        <button class="archive-project-btn" data-action="copy-item-link" data-link-type="list" data-id="${esc(list.id)}" title="${t('common.copy_link')}">
+        <button class="archive-project-btn" data-action="copy-item-link" data-link-type="list" data-id="${esc(list.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">
           ${lucideIcon('link', 14)}
         </button>
         <button class="archive-project-btn" data-action="open-edit-list" data-id="${esc(list.id)}" title="${t('lists.edit_list')}">
@@ -309,7 +309,7 @@ function renderListItem(item) {
         ${!isShared && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-list-item" data-id="${esc(item.id)}" title="${t('sharing.share')}">${lucideIcon('share', 14)}</button>` : ''}
         ${isShared && _myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="unshare-list-item" data-id="${esc(item.id)}" title="${t('sharing.unshare')}">${lucideIcon('share-off', 14)}</button>` : ''}
         ${isShared && !_myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="copy-list-item-to-personal" data-id="${esc(item.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon('copy', 14)}</button>` : ''}
-        <button data-action="copy-item-link" data-link-type="listitem" data-id="${esc(item.id)}" title="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
+        <button data-action="copy-item-link" data-link-type="listitem" data-id="${esc(item.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
         <button data-action="edit-list-item-inline" data-id="${esc(item.id)}" title="Edit">${lucideIcon('pencil', 14)}</button>
         <button data-action="delete-list-item" data-id="${esc(item.id)}" title="Delete">${lucideIcon('trash-2', 14)}</button>
       </div>

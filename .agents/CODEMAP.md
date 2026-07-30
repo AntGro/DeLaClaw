@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-07-30T09:51:21.645Z from 38 modules (v1.547). Total LOC 27641. Do not hand-edit.
+> Generated 2026-07-30T10:42:46.530Z from 38 modules (v1.548). Total LOC 27654. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,12 +27,12 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 4489 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:36,guard+pendingSet,window:8 |
+| main | 4488 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:36,guard+pendingSet,window:8 |
 | i18n | 2136 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
 | sharing-drive | 1399 | - | sharing-envelope,utils | main.js,sharing.js | - |
 | sharing-supabase | 1304 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
 | sharing-ui | 1023 | - | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:41,pendingSet,window:8 |
-| utils | 881 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:5 |
+| utils | 895 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:5 |
 | drive | 816 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
 | item-utils | 539 | - | db,i18n,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |

@@ -68,7 +68,10 @@ function renderMd(text) {
   html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   html = html.replace(/\[([^\]]+)\]\((www\.[^\s)]+)\)/g, '<a href="https://$2" target="_blank" rel="noopener">$1</a>');
   // Internal deep links [text](#type/id)
-  html = html.replace(/\[([^\]]+)\]\(#((?:todo|habit|project|task|birthday|vest|flashcard|list|listitem)\/[a-f0-9-]+)\)/g, '<a href="#$2" class="deep-link" data-deep-link="$2">$1</a>');
+  html = html.replace(/\[([^\]]+)\]\(#((?:todo|habit|project|task|birthday|vest|flashcard|list|listitem)\/[\w-]+)\)/g, (_, text, ref) => {
+    if (!parseDeepLink('#' + ref)) return `[${text}](#${ref})`;
+    return `<a href="#${ref}" class="deep-link" data-deep-link="${ref}">${text}</a>`;
+  });
   // Bare URLs (not already in an <a> tag)
   html = html.replace(/(?<!href="|">)(https?:\/\/[^\s<&]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
   html = html.replace(/(?<!href="|"|\/)(www\.[^\s<&]+)/g, '<a href="https://$1" target="_blank" rel="noopener">$1</a>');
@@ -830,11 +833,19 @@ function parseDeepLink(hash) {
 }
 
 /** Copy an item's deep link to clipboard and show toast */
-function copyItemLink(type, id) {
+function copyItemLink(type, id, btnEl) {
   const base = location.origin + location.pathname;
   const url = base + '#' + type + '/' + id;
+  const animateBtn = () => {
+    if (!btnEl) return;
+    btnEl.classList.remove('copy-link-done');
+    void btnEl.offsetWidth;
+    btnEl.classList.add('copy-link-done');
+    btnEl.addEventListener('animationend', () => btnEl.classList.remove('copy-link-done'), { once: true });
+  };
   navigator.clipboard.writeText(url).then(() => {
     showToast(t('common.link_copied'), 'success');
+    animateBtn();
   }).catch(() => {
     const ta = document.createElement('textarea');
     ta.value = url;
@@ -845,6 +856,7 @@ function copyItemLink(type, id) {
     document.execCommand('copy');
     document.body.removeChild(ta);
     showToast(t('common.link_copied'), 'success');
+    animateBtn();
   });
 }
 
@@ -852,6 +864,8 @@ function copyItemLink(type, id) {
 function highlightItem(el) {
   if (!el) return;
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (!el.getAttribute('tabindex')) el.setAttribute('tabindex', '-1');
+  el.focus({ preventScroll: true });
   el.classList.remove('deep-link-highlight');
   void el.offsetWidth;
   el.classList.add('deep-link-highlight');

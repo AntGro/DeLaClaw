@@ -267,7 +267,7 @@ function renderBirthdayCard(b, isUpcoming) {
       </div>
     </div>
     <div class="birthday-actions">
-      <button data-action="copy-item-link" data-link-type="birthday" data-id="${esc(b.id)}" title="${t('common.copy_link')}">${lucideIcon('link', 16)}</button>
+      <button data-action="copy-item-link" data-link-type="birthday" data-id="${esc(b.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 16)}</button>
       <button data-action="open-edit-birthday" data-id="${esc(b.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
       <button data-action="delete-birthday" data-id="${esc(b.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
     </div>

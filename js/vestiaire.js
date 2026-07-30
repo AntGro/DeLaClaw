@@ -270,7 +270,7 @@ function renderVestiaireItem(v) {
         ${metaHtml}
       </div>
       <div class="vest-actions">
-        <button data-action="copy-item-link" data-link-type="vest" data-id="${esc(v.id)}" title="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
+        <button data-action="copy-item-link" data-link-type="vest" data-id="${esc(v.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
         <button data-action="edit-vestiaire-inline" data-id="${esc(v.id)}" title="${t('vestiaire.edit_name')}">${lucideIcon('pencil', 14)}</button>
         <button data-action="open-edit-vestiaire" data-id="${esc(v.id)}" title="${t('vestiaire.edit_all_fields')}">${lucideIcon('settings', 14)}</button>
         <button data-action="delete-vestiaire" data-id="${esc(v.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>

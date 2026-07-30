@@ -2101,4 +2101,11 @@ a.sharing-drive-link{text-decoration:none;}
   animation: deep-link-highlight 1.5s ease-out;
   border-radius: 6px;
 }
+@keyframes copy-link-done {
+  0%   { transform: scale(1); opacity: 1; }
+  30%  { transform: scale(1.35); opacity: 0.7; }
+  60%  { transform: scale(0.9); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.copy-link-done { animation: copy-link-done 0.4s ease-out; }
 a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor: pointer; }

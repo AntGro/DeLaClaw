@@ -1067,12 +1067,10 @@ async function bulkShareList(listId, el) {
               item_type: 'list_item',
               payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
             });
-            const allItems = (state.allListItems || []).filter(i => i.list_id === listId);
-            const maxOrder = allItems.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
             const { error: ptrErr } = await state.db.from('list_items').insert({
               list_id: listId,
               text: '',
-              sort_order: maxOrder + 1 + shared,
+              sort_order: item.sort_order ?? 0,
               shared_id: sharedId,
               shared_group_id: groupId,
             });

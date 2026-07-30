@@ -2342,6 +2342,7 @@ async function bulkShareHabitCategory(catId, el) {
             const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
               name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
               category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
+              created_at: habit.created_at || new Date().toISOString(),
               shared_id: sharedId, shared_group_id: groupId,
             }).select().single();
             if (ptrErr) continue;

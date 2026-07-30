@@ -1381,8 +1381,6 @@ async function bulkShareTodoCategory(catId, el) {
         for (const todo of items) {
           try {
             const sharedId = crypto.randomUUID();
-            const pendingTodos = allTodos.filter(t2 => !t2.done && catIdForTodo(t2) === catId);
-            const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t2 => t2.sort_order || 0)) - 1 : 0;
             await state.sharing.addItem(groupId, {
               id: sharedId,
               item_type: 'todo',
@@ -1391,7 +1389,7 @@ async function bulkShareTodoCategory(catId, el) {
             const { error: ptrErr } = await state.db.from('todos').insert({
               text: '', priority: 'medium', done: false,
               category: cat?.name ?? '', category_id: catId,
-              sort_order: minOrder - shared,
+              sort_order: todo.sort_order ?? 0,
               shared_id: sharedId,
               shared_group_id: groupId,
             });

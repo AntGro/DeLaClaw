@@ -172,6 +172,7 @@ function showToast(msg, type = 'info') {
 // ===================================================================
 // ===================================================================
 let _deleteConfirmCallback = null;
+let _deleteCancelCallback = null;
 
 function showDeleteConfirm(title, message, onConfirm, detail, opts) {
   document.getElementById('deleteConfirmTitle').textContent = title;
@@ -209,12 +210,16 @@ function showDeleteConfirm(title, message, onConfirm, detail, opts) {
     modal.classList.toggle('confirm-neutral', opts?.variant === 'neutral');
   }
   _deleteConfirmCallback = onConfirm;
+  _deleteCancelCallback = opts?.onCancel || null;
   document.getElementById('deleteConfirmModal').classList.add('visible');
 }
 
 function closeDeleteConfirm() {
   document.getElementById('deleteConfirmModal').classList.remove('visible');
+  const cancelCb = _deleteCancelCallback;
   _deleteConfirmCallback = null;
+  _deleteCancelCallback = null;
+  if (cancelCb) try { cancelCb(); } catch {}
   // Reset variant
   const modal = document.querySelector('.delete-confirm-modal');
   if (modal) modal.classList.remove('confirm-neutral');
@@ -239,6 +244,7 @@ function closeDeleteConfirm() {
 async function executeDeleteConfirm() {
   if (_deleteConfirmCallback) {
     const cb = _deleteConfirmCallback;
+    _deleteCancelCallback = null; // confirm path — do not fire cancel
     closeDeleteConfirm();
     await cb();
   }

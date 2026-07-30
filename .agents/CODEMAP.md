@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-07-30T00:02:58.099Z from 38 modules (v1.544). Total LOC 27407. Do not hand-edit.
+> Generated 2026-07-30T00:49:59.022Z from 38 modules (v1.545). Total LOC 27463. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,12 +27,12 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 4330 | daily_visits,habits,list_items,nvidia_usage,projects,settings,todos | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:36,guard+pendingSet,window:8 |
+| main | 4380 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:36,guard+pendingSet,window:8 |
 | i18n | 2133 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
 | sharing-drive | 1399 | - | sharing-envelope,utils | main.js,sharing.js | - |
 | sharing-supabase | 1304 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
 | sharing-ui | 1023 | - | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:41,pendingSet,window:8 |
-| utils | 821 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:4 |
+| utils | 827 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:4 |
 | drive | 816 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
 | item-utils | 539 | - | db,i18n,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |
@@ -67,9 +67,9 @@
 | flashcard_notes | flashcards |
 | flashcards | flashcards, utils |
 | habit_completions | habits |
-| habits | habits, main, sharing-supabase |
+| habits | habits, sharing-supabase |
 | joined_groups | sharing-supabase |
-| list_items | lists, main, sharing-supabase |
+| list_items | lists, sharing-supabase |
 | lists | lists |
 | nvidia_usage | main |
 | projects | db, main, projects |
@@ -81,7 +81,7 @@
 | tasks | projects |
 | text_line_progress | flashcards |
 | texts | flashcards |
-| todos | main, sharing-supabase, todos |
+| todos | sharing-supabase, todos |
 | vestiaire | vestiaire |
 
 ## Adapters

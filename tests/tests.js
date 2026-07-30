@@ -235,6 +235,66 @@ test('Sharing refresh handler centralizes sync before render', () => {
     'lists.js must not register its own sharing-changed listener');
 });
 
+test('Orphan handler is module-level, not inside connect()', () => {
+  const main = jsFiles['main.js'];
+  // Listener must exist at module level
+  assert(main.includes("document.addEventListener('sharing-orphan-detected'"),
+    'main.js must register sharing-orphan-detected listener');
+  // Must NOT be inside connect() — extract connect body and check
+  const connectIdx = main.indexOf('async function connect(');
+  assert(connectIdx !== -1, 'connect() must exist');
+  const connectBody = main.slice(connectIdx, main.indexOf('\n}\n', connectIdx) + 3);
+  assert(!connectBody.includes('sharing-orphan-detected'),
+    'orphan listener must be outside connect() to avoid leak on reconnect');
+});
+
+test('Orphan handler uses queued processing, not direct showDeleteConfirm', () => {
+  const main = jsFiles['main.js'];
+  // Must have a queue and threshold
+  assert(main.includes('_orphanQueue'), 'must use _orphanQueue for sequential processing');
+  assert(main.includes('ORPHAN_THRESHOLD'), 'must require multiple detections before prompting');
+  assert(main.includes('_processOrphanQueue'), 'must process queue sequentially');
+});
+
+test('Orphan handler passes onCancel to showDeleteConfirm', () => {
+  const main = jsFiles['main.js'];
+  // Find the orphan showDeleteConfirm call and check it has onCancel
+  const orphanSection = main.slice(main.indexOf('function _processOrphanQueue'));
+  assert(orphanSection.includes('onCancel'), 'orphan dialog must pass onCancel to allow retry');
+});
+
+test('showDeleteConfirm supports onCancel callback', () => {
+  const utils = jsFiles['utils.js'];
+  assert(utils.includes('_deleteCancelCallback'), 'utils.js must track cancel callback');
+  // closeDeleteConfirm must fire cancel callback
+  const closeFn = utils.slice(utils.indexOf('function closeDeleteConfirm()'));
+  assert(closeFn.includes('cancelCb'), 'closeDeleteConfirm must invoke cancel callback');
+  // executeDeleteConfirm must clear cancel before calling close (prevent double-fire)
+  const execFn = utils.slice(utils.indexOf('async function executeDeleteConfirm()'));
+  assert(execFn.includes('_deleteCancelCallback = null'), 'executeDeleteConfirm must clear cancel callback before close');
+});
+
+test('Sync dispatches sharing-orphan-detected instead of clearing directly', () => {
+  for (const [file, label] of [['habits.js', 'habits'], ['todos.js', 'todos'], ['lists.js', 'lists']]) {
+    const src = jsFiles[file];
+    // Must dispatch event, not update/nullify directly
+    assert(src.includes("sharing-orphan-detected"), `${label} sync must dispatch sharing-orphan-detected`);
+    // Must NOT directly nullify shared fields in the orphan branch
+    const orphanIdx = src.indexOf('sharing-orphan-detected');
+    // Check the surrounding context doesn't do update({shared_id: null}) in the same branch
+    const nearContext = src.slice(Math.max(0, orphanIdx - 200), orphanIdx);
+    assert(!nearContext.includes("shared_id: null"), `${label} sync must not directly nullify shared fields near orphan detection`);
+  }
+});
+
+test('Orphan handler deletes empty pointers instead of nullifying', () => {
+  const main = jsFiles['main.js'];
+  const handler = main.slice(main.indexOf('function _processOrphanQueue'));
+  assert(handler.includes('hasContent'), 'orphan confirm must check if item has local content');
+  assert(handler.includes('.delete()'), 'orphan confirm must delete empty pointer items');
+  assert(handler.includes('.update('), 'orphan confirm must nullify items with local content');
+});
+
 test('Shared habit next_due updates are idempotent during refresh', () => {
   const habits = jsFiles['habits.js'];
   assert(habits.includes('function normalizeHabitNextDue'),

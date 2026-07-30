@@ -1797,29 +1797,6 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   // Offer PWA install on phones/tablets when not already installed.
   // In demo mode this stacks below the demo banner (see install-banner CSS).
   maybeShowInstallBanner();
-
-  // Ask user before clearing orphan shared pointers (group unreachable)
-  const _orphanPrompted = new Set();
-  document.addEventListener('sharing-orphan-detected', (e) => {
-    const groupId = e.detail?.groupId;
-    if (!groupId || _orphanPrompted.has(groupId)) return;
-    _orphanPrompted.add(groupId);
-    const label = state.sharing?.getGroupName?.(groupId) || groupId.slice(0, 8);
-    showDeleteConfirm(
-      t('sharing.orphan_detected_title'),
-      t('sharing.orphan_detected_message', label),
-      async () => {
-        const nullShared = { shared_id: null, shared_group_id: null };
-        await state.db.from('habits').update(nullShared).eq('shared_group_id', groupId);
-        await state.db.from('todos').update(nullShared).eq('shared_group_id', groupId);
-        await state.db.from('list_items').update(nullShared).eq('shared_group_id', groupId);
-        await refreshHabits(); await refreshTodos(); await refreshLists();
-        showToast(t('sharing.group_deleted'), 'info');
-      },
-      null,
-      { variant: 'neutral', btnText: t('sharing.orphan_unlink'), iconSvg: lucideIcon('unlink', 24), btnIconSvg: lucideIcon('unlink', 15, 'currentColor') }
-    );
-  });
 }
 
 
@@ -1905,6 +1882,79 @@ function removeDemoBanner() {
   document.body.classList.remove('demo-mode');
   document.body.style.removeProperty('--demo-banner-h');
 }
+
+
+// ===================================================================
+// ORPHAN SHARED-ITEM HANDLER (module-level, survives reconnect)
+// ===================================================================
+const _orphanCounts = {};    // groupId -> consecutive detection count
+const _orphanConfirmed = new Set();  // groups already unlinked
+const _orphanQueue = [];     // queued groupIds awaiting dialog
+let _orphanDialogOpen = false;
+
+const ORPHAN_THRESHOLD = 2; // require N consecutive sync detections before prompting
+
+document.addEventListener('sharing-orphan-detected', (e) => {
+  const groupId = e.detail?.groupId;
+  if (!groupId || _orphanConfirmed.has(groupId)) return;
+
+  // Increment counter — only prompt after threshold consecutive detections
+  _orphanCounts[groupId] = (_orphanCounts[groupId] || 0) + 1;
+  if (_orphanCounts[groupId] < ORPHAN_THRESHOLD) return;
+
+  // Avoid duplicate queue entries
+  if (_orphanQueue.includes(groupId)) return;
+  _orphanQueue.push(groupId);
+  _processOrphanQueue();
+});
+
+function _processOrphanQueue() {
+  if (_orphanDialogOpen || _orphanQueue.length === 0) return;
+  const groupId = _orphanQueue[0];
+  _orphanDialogOpen = true;
+  const label = state.sharing?.getGroupName?.(groupId) || groupId.slice(0, 8);
+  showDeleteConfirm(
+    t('sharing.orphan_detected_title'),
+    t('sharing.orphan_detected_message', label),
+    async () => {
+      _orphanConfirmed.add(groupId);
+      _orphanQueue.shift();
+      _orphanDialogOpen = false;
+      // Delete pointer items with no local content; nullify ones that have text
+      for (const table of ['habits', 'todos', 'list_items']) {
+        const nameCol = table === 'habits' ? 'name' : 'text';
+        const { data: rows } = await state.db.from(table).select('id,' + nameCol).eq('shared_group_id', groupId);
+        if (!rows) continue;
+        for (const row of rows) {
+          const hasContent = (row[nameCol] || '').trim() !== '';
+          if (hasContent) {
+            await state.db.from(table).update({ shared_id: null, shared_group_id: null }).eq('id', row.id);
+          } else {
+            await state.db.from(table).delete().eq('id', row.id);
+          }
+        }
+      }
+      await refreshHabits(); await refreshTodos(); await refreshLists();
+      showToast(t('sharing.group_deleted'), 'info');
+      _processOrphanQueue(); // next in queue
+    },
+    null,
+    {
+      variant: 'neutral',
+      btnText: t('sharing.orphan_unlink'),
+      iconSvg: lucideIcon('unlink', 24),
+      btnIconSvg: lucideIcon('unlink', 15, 'currentColor'),
+      onCancel: () => {
+        // Cancel — allow retry on next sync cycle
+        delete _orphanCounts[groupId];
+        _orphanQueue.shift();
+        _orphanDialogOpen = false;
+        _processOrphanQueue(); // next in queue
+      },
+    }
+  );
+}
+
 
 // ===================================================================
 // INSTALL BANNER (PWA)

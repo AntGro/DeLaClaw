@@ -160,7 +160,7 @@ export const LUCIDE_COLORS = {
   'search': '#71717a',
   'shirt': '#8b5cf6',
   'log-out': '#71717a',
-  'log-in': '#71717a',
+
   'users': '#6366f1',
   'user-plus': '#6366f1',
   'share': '#6366f1',

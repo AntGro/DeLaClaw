@@ -2102,7 +2102,7 @@ a.sharing-drive-link{text-decoration:none;}
   border-radius: 6px;
 }
 @keyframes copy-link-done {
-  0%   { transform: rotate(0deg); color: inherit; }
+  0%   { transform: rotate(0deg); color: var(--muted); }
   50%  { transform: rotate(180deg); color: var(--accent); }
   100% { transform: rotate(180deg); color: var(--accent); }
 }

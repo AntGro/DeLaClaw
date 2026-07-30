@@ -116,6 +116,9 @@ async function refreshLists() {
         if (myId && item._shared.created_by === myId) _myCreatedSharedListItemIds.add(item.shared_id);
       }
     }
+
+    // Drop shared pointers whose remote data couldn't be resolved
+    state.allListItems = state.allListItems.filter(i => !i.shared_id || i._shared);
   }
 
   if (state.currentView === 'lists') {

@@ -608,6 +608,9 @@ async function refreshHabits() {
         if (myId && habit._shared.created_by === myId) _myCreatedSharedHabitIds.add(habit.shared_id);
       }
     }
+
+    // Drop shared pointers whose remote data couldn't be resolved
+    state.allHabits = state.allHabits.filter(h => !h.shared_id || h._shared);
   }
 
   // Categories already loaded via loadHabitCategories() above

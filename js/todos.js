@@ -151,6 +151,9 @@ async function refreshTodos() {
         if (myId && todo._shared.created_by === myId) _myCreatedSharedIds.add(todo.shared_id);
       }
     }
+
+    // Drop shared pointers whose remote data couldn't be resolved
+    allTodos = allTodos.filter(t => !t.shared_id || t._shared);
   }
 
   if (state.currentView === 'todos') {

@@ -649,7 +649,7 @@ export async function createSupabaseSharing(adapter, config) {
       throw new Error('Auth required to join Supabase groups — sign in first. Anon joins must use localStorage.');
     }
     const encrypted = await _encryptForJoined(pj.token, pj.anonKey);
-    await adapter.from('joined_groups').upsert({
+    const { error: joinedErr } = await adapter.from('joined_groups').upsert({
       group_id: pj.groupId,
       member_id: pj.info.member_id,
       token: null,
@@ -664,6 +664,7 @@ export async function createSupabaseSharing(adapter, config) {
       remote_anon_key_iv: encrypted.remote_anon_key_iv || null,
       owner_id: authUser.id,
     });
+    if (joinedErr) console.error('[DeLaClaw] joined_groups upsert failed:', joinedErr);
 
     // Set up remote client
     _remoteClients[pj.groupId] = {

@@ -370,6 +370,11 @@ function renderCategoryCard(catId) {
     ? (displayDone.length === 0 ? `<p class="empty-msg">${t('todos.no_items')}</p>` : displayDone.map(t2 => renderTodoItem(t2)).join(''))
     : (activeEmptyMsg || displayActive.map(t => renderTodoItem(t)).join(''));
 
+  const shareableCount = allInCat.filter(td => !td.shared_id && !td.done).length;
+  const shareAllBtn = (!isSharedDeck && state.sharing?.getAllGroups().length && shareableCount > 0)
+    ? `<button class="todo-cat-shortname-btn" data-action="bulk-share-todo-category" data-category="${esc(catId)}" title="${esc(t('sharing.share_all'))}">${lucideIcon("share",14)}</button>`
+    : '';
+
   const shortnameBtn = (!isGeneral && !isSharedDeck && !cat.is_protected)
     ? `<button class="todo-cat-shortname-btn" data-action="open-edit-category-modal" data-category="${esc(catId)}" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
     : '';
@@ -394,7 +399,7 @@ function renderCategoryCard(catId) {
         </div>
       </div>
       <div class="todo-cat-header-actions">
-        ${shortnameBtn}${deleteBtn}
+        ${shareAllBtn}${shortnameBtn}${deleteBtn}
       </div>
     </div>
     ${addRow}
@@ -1352,6 +1357,55 @@ async function shareExistingTodo(id, el) {
   }, { showAssignees: false });
 }
 window.shareExistingTodo = shareExistingTodo;
+
+// ── Bulk share all personal items in a category ──
+async function bulkShareTodoCategory(catId, el) {
+  if (!state.sharing) return;
+  const groups = state.sharing.getAllGroups();
+  if (!groups.length) return;
+  const items = allTodos.filter(td => catIdForTodo(td) === catId && !td.shared_id && !td.done);
+  if (!items.length) { showToast(t('sharing.share_all_nothing'), 'info'); return; }
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="bulk-share-todo-category"][data-category="${CSS.escape(catId)}"]`);
+  if (!btn) return;
+  openSharePopover(btn, async (groupId) => {
+    const cat = _todoCatMap.get(catId);
+    const msg = t('sharing.share_all_confirm', items.length);
+    showDeleteConfirm(
+      t('sharing.share_all'),
+      msg,
+      async () => {
+        let shared = 0;
+        for (const todo of items) {
+          try {
+            const sharedId = crypto.randomUUID();
+            const pendingTodos = allTodos.filter(t2 => !t2.done && catIdForTodo(t2) === catId);
+            const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t2 => t2.sort_order || 0)) - 1 : 0;
+            await state.sharing.addItem(groupId, {
+              id: sharedId,
+              item_type: 'todo',
+              payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'medium', note: todo.note || '' },
+            });
+            const { error: ptrErr } = await state.db.from('todos').insert({
+              text: '', priority: 'medium', done: false,
+              category: cat?.name ?? '', category_id: catId,
+              sort_order: minOrder - shared,
+              shared_id: sharedId,
+              shared_group_id: groupId,
+            });
+            if (ptrErr) continue;
+            await state.db.from('todos').delete().eq('id', todo.id);
+            shared++;
+          } catch (e) { console.error('[DeLaClaw] bulk share todo failed:', e); }
+        }
+        if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+        await refreshTodos();
+      },
+      null,
+      { variant: 'neutral' }
+    );
+  }, { showAssignees: false });
+}
+window.bulkShareTodoCategory = bulkShareTodoCategory;
 
 // ── Unshare (creator only): move shared item back to personal ──
 async function unshareTodo(id, el) {

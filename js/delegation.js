@@ -64,6 +64,7 @@
       case 'open-add-habit': callWindow('openAddHabitModal', []); break;
       case 'share-habit-from-add': callWindow('shareHabitFromAdd', [el]); break;
       case 'share-existing-habit': callWindow('shareExistingHabit', [getId(el), el]); break;
+      case 'bulk-share-habit-category': callWindow('bulkShareHabitCategory', [el.dataset.category, el]); break;
       case 'unshare-habit': callWindow('unshareHabit', [getId(el), el]); break;
       case 'copy-habit-to-personal': callWindow('copyHabitToPersonal', [getId(el), el]); break;
       case 'open-add-habit-category': callWindow('openAddHabitCategoryModal', []); break;
@@ -114,6 +115,7 @@
       case 'add-todo-from-add-row': { var inp = el.closest('.todo-cat-add')?.querySelector('.todo-cat-input'); if (inp) callWindow('addTodoToCategory', [inp]); } break;
       case 'share-todo-from-add': callWindow('shareTodoFromAdd', [el]); break;
       case 'share-existing-todo': callWindow('shareExistingTodo', [getId(el), el]); break;
+      case 'bulk-share-todo-category': callWindow('bulkShareTodoCategory', [el.dataset.category, el]); break;
       case 'unshare-todo': callWindow('unshareTodo', [getId(el), el]); break;
       case 'copy-todo-to-personal': callWindow('copyTodoToPersonal', [getId(el), el]); break;
       case 'open-priority-picker': callWindow('openPriorityPicker', [getId(el), e, el]); break;
@@ -248,6 +250,7 @@
       case 'save-edit-list': callWindow('saveEditList', []); break;
       case 'share-list-item-from-add': callWindow('shareListItemFromAdd', [el, el.dataset.listId||getId(el)]); break;
       case 'share-existing-list-item': callWindow('shareExistingListItem', [getId(el), el]); break;
+      case 'bulk-share-list': callWindow('bulkShareList', [getId(el), el]); break;
       case 'unshare-list-item': callWindow('unshareListItem', [getId(el), el]); break;
       case 'copy-list-item-to-personal': callWindow('copyListItemToPersonal', [getId(el), el]); break;
       case 'open-add-vestiaire': callWindow('openAddVestiaireModal', []); break;

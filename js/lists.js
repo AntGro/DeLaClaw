@@ -252,7 +252,15 @@ function renderListCard(list, items, idx) {
     ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-list-item-from-add" data-list-id="${esc(list.id)}" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
   </div>`;
 
+  const shareableItems = items.filter(i => !i.shared_id);
+  const shareListBtn = (state.sharing?.getAllGroups().length && shareableItems.length > 0)
+    ? `<button class="archive-project-btn" data-action="bulk-share-list" data-id="${esc(list.id)}" title="${esc(t('sharing.share_all'))}">
+          ${lucideIcon('share', 14)}
+        </button>`
+    : '';
+
   const headerActions = isSharedList ? '' : `<div class="project-header-actions" style="opacity:1;">
+        ${shareListBtn}
         <button class="archive-project-btn" data-action="copy-item-link" data-link-type="list" data-id="${esc(list.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">
           ${lucideIcon('link', 14)}
         </button>
@@ -1030,6 +1038,55 @@ async function shareExistingListItem(id, el) {
   }, { showAssignees: false });
 }
 window.shareExistingListItem = shareExistingListItem;
+
+// ── Bulk share all personal items in a list ──
+async function bulkShareList(listId, el) {
+  if (!state.sharing) return;
+  const groups = state.sharing.getAllGroups();
+  if (!groups.length) return;
+  const listItems = (state.allListItems || []).filter(i => i.list_id === listId && !i.shared_id);
+  if (!listItems.length) { showToast(t('sharing.share_all_nothing'), 'info'); return; }
+  const listObj = (state.allLists || []).find(l => l.id === listId);
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="bulk-share-list"][data-id="${CSS.escape(listId)}"]`);
+  if (!btn) return;
+  openSharePopover(btn, async (groupId) => {
+    const msg = t('sharing.share_all_confirm', listItems.length);
+    showDeleteConfirm(
+      t('sharing.share_all'),
+      msg,
+      async () => {
+        let shared = 0;
+        for (const item of listItems) {
+          try {
+            const sharedId = crypto.randomUUID();
+            await state.sharing.addItem(groupId, {
+              id: sharedId,
+              item_type: 'list_item',
+              payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
+            });
+            const allItems = (state.allListItems || []).filter(i => i.list_id === listId);
+            const maxOrder = allItems.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
+            const { error: ptrErr } = await state.db.from('list_items').insert({
+              list_id: listId,
+              text: '',
+              sort_order: maxOrder + 1 + shared,
+              shared_id: sharedId,
+              shared_group_id: groupId,
+            });
+            if (ptrErr) continue;
+            await state.db.from('list_items').delete().eq('id', item.id);
+            shared++;
+          } catch (e) { console.error('[DeLaClaw] bulk share list item failed:', e); }
+        }
+        if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+        await refreshLists();
+      },
+      null,
+      { variant: 'neutral' }
+    );
+  }, { showAssignees: false });
+}
+window.bulkShareList = bulkShareList;
 
 // ── Unshare list item (creator only): move shared item back to personal ──
 async function unshareListItem(id, el) {

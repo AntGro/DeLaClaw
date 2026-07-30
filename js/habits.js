@@ -890,6 +890,11 @@ function renderHabitCategoryCard(catId) {
   const catColor = cat?.color || GENERAL_CATEGORY_COLOR;
   const statsText = `${totalInCat} habit${totalInCat !== 1 ? 's' : ''}` + (overdueCount > 0 ? ` · <span style="color:var(--red)">${overdueCount} ${t('habits.overdue').toLowerCase()}</span>` : '');
 
+  const shareableHabits = state.allHabits.filter(h => catIdForHabit(h) === catId && !h.shared_id);
+  const shareAllBtn = (!isSharedDeck && state.sharing?.getAllGroups().length && shareableHabits.length > 0)
+    ? `<button class="todo-cat-shortname-btn" data-action="bulk-share-habit-category" data-category="${esc(catId)}" title="${esc(t('sharing.share_all'))}">${lucideIcon("share",14)}</button>`
+    : '';
+
   const deleteBtn = (!isGeneral && !isSharedDeck)
     ? `<button class="todo-cat-delete-btn" data-action="delete-habit-category" data-category="${esc(catId)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
     : '';
@@ -919,6 +924,7 @@ function renderHabitCategoryCard(catId) {
         </div>
       </div>
       <div class="todo-cat-header-actions">
+        ${shareAllBtn}
         ${editBtn}
         ${deleteBtn}
       </div>
@@ -2296,6 +2302,64 @@ async function shareExistingHabit(id, el) {
   }, { showAssignees: false });
 }
 window.shareExistingHabit = shareExistingHabit;
+
+// ── Bulk share all personal habits in a category ──
+async function bulkShareHabitCategory(catId, el) {
+  if (!state.sharing) return;
+  const groups = state.sharing.getAllGroups();
+  if (!groups.length) return;
+  const items = state.allHabits.filter(h => catIdForHabit(h) === catId && !h.shared_id);
+  if (!items.length) { showToast(t('sharing.share_all_nothing'), 'info'); return; }
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="bulk-share-habit-category"][data-category="${CSS.escape(catId)}"]`);
+  if (!btn) return;
+  openSharePopover(btn, async (groupId) => {
+    const msg = t('sharing.share_all_confirm', items.length);
+    showDeleteConfirm(
+      t('sharing.share_all'),
+      msg,
+      async () => {
+        const actor = await getSharedHabitCompletionActor(groupId);
+        let shared = 0;
+        for (const habit of items) {
+          try {
+            const sharedId = crypto.randomUUID();
+            const catRow = _habitCatMap.get(habit.category_id || _defaultHabitCatId);
+            const localCompletions = (state.allHabitCompletions || [])
+              .filter(c => c.habit_id === habit.id)
+              .map(c => ({ id: crypto.randomUUID(), completed_at: c.completed_at, completed_by: actor }));
+            await state.sharing.addSharedHabit(groupId, {
+              id: sharedId, item_type: 'habit',
+              name: habit.name, frequency_rule: habit.frequency_rule,
+              creator_category: catRow?.name ?? habit.category ?? '',
+              created_by: actor,
+              created_at: habit.created_at || new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              completions: localCompletions,
+            });
+            const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
+              name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
+              category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
+              shared_id: sharedId, shared_group_id: groupId,
+            }).select().single();
+            if (ptrErr) continue;
+            await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
+            await state.db.from('habits').delete().eq('id', habit.id);
+            if (pointer?.id) {
+              await updateHabitNextDue(pointer.id, habit.frequency_rule,
+                localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
+            }
+            shared++;
+          } catch (e) { console.error('[DeLaClaw] bulk share habit failed:', e); }
+        }
+        if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+        await refreshHabits();
+      },
+      null,
+      { variant: 'neutral' }
+    );
+  }, { showAssignees: false });
+}
+window.bulkShareHabitCategory = bulkShareHabitCategory;
 
 // ── Unshare habit (creator only): move shared habit back to personal ──
 async function unshareHabit(id, el) {

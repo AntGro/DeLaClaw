@@ -1804,7 +1804,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     const groupId = e.detail?.groupId;
     if (!groupId || _orphanPrompted.has(groupId)) return;
     _orphanPrompted.add(groupId);
-    const label = groupId.slice(0, 8);
+    const label = state.sharing?.getGroupName?.(groupId) || groupId.slice(0, 8);
     showDeleteConfirm(
       t('sharing.orphan_detected_title'),
       t('sharing.orphan_detected_message', label),

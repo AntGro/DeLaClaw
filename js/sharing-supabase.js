@@ -42,6 +42,7 @@ export async function createSupabaseSharing(adapter, config) {
   let _memberCache = {};   // groupId -> active+pending members array
   let _revokedCache = {};  // groupId -> revoked members array
   let _remoteClients = {}; // groupId -> { client, token, memberId }
+  let _groupNameCache = {}; // groupId -> name (survives group deletion)
   let _pollTimer = null;
   let _realtimeChannel = null;
   let _updateCallbacks = [];
@@ -282,6 +283,7 @@ export async function createSupabaseSharing(adapter, config) {
       members: [creatorMember],
     };
     _ownedGroups.push(group);
+    _groupNameCache[groupId] = name;
     _memberCache[groupId] = group.members;
     _notifyUpdate();
     return group;
@@ -319,6 +321,7 @@ export async function createSupabaseSharing(adapter, config) {
             created_by: creatorMemberId,
             members: activeMembers,
           });
+          _groupNameCache[g.id] = g.name;
 
           // Merge items
           if (items) {
@@ -373,6 +376,7 @@ export async function createSupabaseSharing(adapter, config) {
             members: activeMembers,
             _isJoined: true,
           });
+          _groupNameCache[jg.group_id] = jg.group_name;
 
           // Load items
           const { data: items } = await remote.rpc('get_shared_items', {
@@ -740,7 +744,7 @@ export async function createSupabaseSharing(adapter, config) {
   }
 
   function _groupName(groupId) {
-    return getAllGroups().find(g => g.id === groupId)?.name || '';
+    return getAllGroups().find(g => g.id === groupId)?.name || _groupNameCache[groupId] || '';
   }
 
   function _normalizeSharedHabit(item) {
@@ -1264,6 +1268,7 @@ export async function createSupabaseSharing(adapter, config) {
     unjoinGroup,
     getAllGroups,
     getGroup,
+    getGroupName: _groupName,
     getCurrentMember,
     getAgentSafeGroup,
     getAllSharedItems,

@@ -294,6 +294,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   let _user   = null;            // { email, name, photo }
   let _rootId  = null;           // DeLaClaw-Shared folder id (own)
   const _groups = new Map();     // groupId → GroupEntry
+  const _groupNameCache = {};    // groupId → name (survives group deletion)
   let _loaded = false;           // true after loadAll() completes
   let _pollTimer = null;
   let _listeners = [];
@@ -530,6 +531,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta, joinedViaLink: true });
     _groups.set(groupId, entry);
+    _groupNameCache[groupId] = group.name;
     return entry;
   }
 
@@ -585,6 +587,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta });
     _groups.set(groupId, entry);
+    _groupNameCache[groupId] = group.name;
 
     // Migrate legacy items.json if present
     await migrateItemsJson(tok, folderId, entry);
@@ -743,6 +746,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         typeMeta,
         gMeta: { fileId: gRes.id, etag: gRes.etag, modifiedTime: gRes.modifiedTime },
       });
+      _groupNameCache[groupId] = name;
 
       emit('group-created', { group });
       return group;
@@ -791,6 +795,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     getGroup(groupId) {
       const e = _groups.get(groupId);
       return e ? publicGroup(e) : null;
+    },
+
+    getGroupName(groupId) {
+      const e = _groups.get(groupId);
+      return e?.group?.name || _groupNameCache[groupId] || '';
     },
 
     async getCurrentMember(groupId) {

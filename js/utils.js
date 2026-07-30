@@ -841,7 +841,7 @@ function copyItemLink(type, id, btnEl) {
     btnEl.classList.remove('copy-link-done');
     void btnEl.offsetWidth;
     btnEl.classList.add('copy-link-done');
-    btnEl.addEventListener('animationend', () => btnEl.classList.remove('copy-link-done'), { once: true });
+    setTimeout(() => btnEl.classList.remove('copy-link-done'), 2000);
   };
   navigator.clipboard.writeText(url).then(() => {
     showToast(t('common.link_copied'), 'success');

@@ -2154,6 +2154,7 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
  * - Data (name, frequency, completions) is read live from shared storage in refreshHabits()
  */
 let _syncingHabits = false;
+let _bulkShareInProgress = false;
 async function syncSharedHabits() {
   if (_syncingHabits) return;
   _syncingHabits = true;
@@ -2321,42 +2322,46 @@ async function bulkShareHabitCategory(catId, el) {
       t('sharing.share_all'),
       msg,
       async () => {
-        const actor = await getSharedHabitCompletionActor(groupId);
-        let shared = 0;
-        for (const habit of items) {
-          try {
-            const sharedId = crypto.randomUUID();
-            const catRow = _habitCatMap.get(habit.category_id || _defaultHabitCatId);
-            const localCompletions = (state.allHabitCompletions || [])
-              .filter(c => c.habit_id === habit.id)
-              .map(c => ({ id: crypto.randomUUID(), completed_at: c.completed_at, completed_by: actor }));
-            await state.sharing.addSharedHabit(groupId, {
-              id: sharedId, item_type: 'habit',
-              name: habit.name, frequency_rule: habit.frequency_rule,
-              creator_category: catRow?.name ?? habit.category ?? '',
-              created_by: actor,
-              created_at: habit.created_at || new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              completions: localCompletions,
-            });
-            const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
-              name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
-              category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
-              created_at: habit.created_at || new Date().toISOString(),
-              shared_id: sharedId, shared_group_id: groupId,
-            }).select().single();
-            if (ptrErr) continue;
-            await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
-            await state.db.from('habits').delete().eq('id', habit.id);
-            if (pointer?.id) {
-              await updateHabitNextDue(pointer.id, habit.frequency_rule,
-                localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
-            }
-            shared++;
-          } catch (e) { console.error('[DeLaClaw] bulk share habit failed:', e); }
-        }
-        if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
-        await refreshHabits();
+        if (_bulkShareInProgress) return;
+        _bulkShareInProgress = true;
+        try {
+          const actor = await getSharedHabitCompletionActor(groupId);
+          let shared = 0;
+          for (const habit of items) {
+            try {
+              const sharedId = crypto.randomUUID();
+              const catRow = _habitCatMap.get(habit.category_id || _defaultHabitCatId);
+              const localCompletions = (state.allHabitCompletions || [])
+                .filter(c => c.habit_id === habit.id)
+                .map(c => ({ id: crypto.randomUUID(), completed_at: c.completed_at, completed_by: actor }));
+              await state.sharing.addSharedHabit(groupId, {
+                id: sharedId, item_type: 'habit',
+                name: habit.name, frequency_rule: habit.frequency_rule,
+                creator_category: catRow?.name ?? habit.category ?? '',
+                created_by: actor,
+                created_at: habit.created_at || new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                completions: localCompletions,
+              });
+              const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
+                name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
+                category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
+                created_at: habit.created_at || new Date().toISOString(),
+                shared_id: sharedId, shared_group_id: groupId,
+              }).select().single();
+              if (ptrErr) continue;
+              await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
+              await state.db.from('habits').delete().eq('id', habit.id);
+              if (pointer?.id) {
+                await updateHabitNextDue(pointer.id, habit.frequency_rule,
+                  localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
+              }
+              shared++;
+            } catch (e) { console.error('[DeLaClaw] bulk share habit failed:', e); }
+          }
+          if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+          await refreshHabits();
+        } finally { _bulkShareInProgress = false; }
       },
       null,
       { variant: 'neutral', btnText: t('sharing.share_all'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }

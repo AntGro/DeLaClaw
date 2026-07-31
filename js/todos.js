@@ -1201,6 +1201,7 @@ function getTodos() { return allTodos; }
  * - Shared TODO deleted from Drive → delete local todo
  */
 let _syncingTodos = false;
+let _bulkShareInProgress = false;
 async function syncSharedTodos() {
   if (_syncingTodos) return;
   _syncingTodos = true;
@@ -1377,29 +1378,35 @@ async function bulkShareTodoCategory(catId, el) {
       t('sharing.share_all'),
       msg,
       async () => {
-        let shared = 0;
-        for (const todo of items) {
-          try {
-            const sharedId = crypto.randomUUID();
-            await state.sharing.addItem(groupId, {
-              id: sharedId,
-              item_type: 'todo',
-              payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'medium', note: todo.note || '' },
-            });
-            const { error: ptrErr } = await state.db.from('todos').insert({
-              text: '', priority: 'medium', done: false,
-              category: cat?.name ?? '', category_id: catId,
-              sort_order: todo.sort_order ?? 0,
-              shared_id: sharedId,
-              shared_group_id: groupId,
-            });
-            if (ptrErr) continue;
-            await state.db.from('todos').delete().eq('id', todo.id);
-            shared++;
-          } catch (e) { console.error('[DeLaClaw] bulk share todo failed:', e); }
-        }
-        if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
-        await refreshTodos();
+        if (_bulkShareInProgress) return;
+        _bulkShareInProgress = true;
+        try {
+          let shared = 0;
+          const pendingTodos = allTodos.filter(td => !td.done && catIdForTodo(td) === catId);
+          let nextOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(td => td.sort_order || 0)) - 1 : 0;
+          for (const todo of items) {
+            try {
+              const sharedId = crypto.randomUUID();
+              await state.sharing.addItem(groupId, {
+                id: sharedId,
+                item_type: 'todo',
+                payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'medium', note: todo.note || '' },
+              });
+              const { error: ptrErr } = await state.db.from('todos').insert({
+                text: '', priority: 'medium', done: false,
+                category: cat?.name ?? '', category_id: catId,
+                sort_order: nextOrder--,
+                shared_id: sharedId,
+                shared_group_id: groupId,
+              });
+              if (ptrErr) continue;
+              await state.db.from('todos').delete().eq('id', todo.id);
+              shared++;
+            } catch (e) { console.error('[DeLaClaw] bulk share todo failed:', e); }
+          }
+          if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+          await refreshTodos();
+        } finally { _bulkShareInProgress = false; }
       },
       null,
       { variant: 'neutral', btnText: t('sharing.share_all'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }

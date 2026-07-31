@@ -811,6 +811,7 @@ async function deleteList(listId) {
 // ── Shared List Items — sync pointers ─────────────────────────────
 
 let _syncingListItems = false;
+let _bulkShareInProgress = false;
 // ── Shared list: auto-created landing list for received shared items ──
 const SHARED_LIST_NAME = '__shared__';
 const _myCreatedSharedListItemIds = new Set(); // shared_ids where current user is creator
@@ -1058,29 +1059,33 @@ async function bulkShareList(listId, el) {
       t('sharing.share_all'),
       msg,
       async () => {
-        let shared = 0;
-        for (const item of listItems) {
-          try {
-            const sharedId = crypto.randomUUID();
-            await state.sharing.addItem(groupId, {
-              id: sharedId,
-              item_type: 'list_item',
-              payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
-            });
-            const { error: ptrErr } = await state.db.from('list_items').insert({
-              list_id: listId,
-              text: '',
-              sort_order: item.sort_order ?? 0,
-              shared_id: sharedId,
-              shared_group_id: groupId,
-            });
-            if (ptrErr) continue;
-            await state.db.from('list_items').delete().eq('id', item.id);
-            shared++;
-          } catch (e) { console.error('[DeLaClaw] bulk share list item failed:', e); }
-        }
-        if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
-        await refreshLists();
+        if (_bulkShareInProgress) return;
+        _bulkShareInProgress = true;
+        try {
+          let shared = 0;
+          for (const item of listItems) {
+            try {
+              const sharedId = crypto.randomUUID();
+              await state.sharing.addItem(groupId, {
+                id: sharedId,
+                item_type: 'list_item',
+                payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
+              });
+              const { error: ptrErr } = await state.db.from('list_items').insert({
+                list_id: listId,
+                text: '',
+                sort_order: item.sort_order ?? 0,
+                shared_id: sharedId,
+                shared_group_id: groupId,
+              });
+              if (ptrErr) continue;
+              await state.db.from('list_items').delete().eq('id', item.id);
+              shared++;
+            } catch (e) { console.error('[DeLaClaw] bulk share list item failed:', e); }
+          }
+          if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+          await refreshLists();
+        } finally { _bulkShareInProgress = false; }
       },
       null,
       { variant: 'neutral', btnText: t('sharing.share_all'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }

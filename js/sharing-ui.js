@@ -374,13 +374,19 @@ async function sharingLeaveGroup(groupId) {
   showConfirmAction(
     t('sharing.leave'),
     t('sharing.leave_confirm'),
-    async () => {
+    async (keepCopies) => {
       try {
+        if (keepCopies) {
+          await _convertGroupItemsToPersonal(groupId);
+        }
         await state.sharing.leaveGroup(groupId);
         showToast(t('sharing.left_group'), 'info');
         renderSharingPane();
+        document.dispatchEvent(new CustomEvent('sharing-changed'));
       } catch (e) { showToast(e.message, 'error'); }
-    }
+    },
+    null,
+    { toggleLabel: t('sharing.leave_keep_copies') }
   );
 }
 
@@ -388,13 +394,19 @@ async function sharingUnjoinGroup(groupId) {
   showConfirmAction(
     t('sharing.leave'),
     t('sharing.leave_confirm'),
-    async () => {
+    async (keepCopies) => {
       try {
+        if (keepCopies) {
+          await _convertGroupItemsToPersonal(groupId);
+        }
         await state.sharing.unjoinGroup(groupId);
         showToast(t('sharing.left_group'), 'info');
         renderSharingPane();
+        document.dispatchEvent(new CustomEvent('sharing-changed'));
       } catch (e) { showToast(e.message, 'error'); }
-    }
+    },
+    null,
+    { toggleLabel: t('sharing.leave_keep_copies') }
   );
 }
 
@@ -435,17 +447,77 @@ async function sharingEditMyName(groupId, memberId, currentName) {
   input.addEventListener('blur', save);
 }
 
+// ── Group cleanup helpers ──────────────────────────────────────
+
+/**
+ * Convert all items belonging to a group into personal items.
+ * Nulls shared_id and shared_group_id; moves items in __shared__ category to General.
+ */
+async function _convertGroupItemsToPersonal(groupId) {
+  const nullShared = { shared_id: null, shared_group_id: null };
+
+  // Find default category IDs for __shared__ → General fallback
+  for (const catTable of ['todo_categories', 'habit_categories']) {
+    const { data: cats } = await state.db.from(catTable).select('id, name, is_protected');
+    if (!cats) continue;
+    const sharedCat = cats.find(c => c.is_protected && c.name === '__shared__');
+    const defaultCat = cats.find(c => c.is_protected && c.name !== '__shared__');
+    if (sharedCat && defaultCat) {
+      const itemTable = catTable === 'todo_categories' ? 'todos' : 'habits';
+      // Move items from __shared__ to General for this group
+      await state.db.from(itemTable).update({ ...nullShared, category: '', category_id: defaultCat.id })
+        .eq('shared_group_id', groupId).eq('category_id', sharedCat.id);
+      // Null pointers for items in other categories
+      await state.db.from(itemTable).update(nullShared)
+        .eq('shared_group_id', groupId).neq('category_id', sharedCat.id);
+    } else {
+      // No __shared__ category or no default — just null pointers
+      const itemTable = catTable === 'todo_categories' ? 'todos' : 'habits';
+      await state.db.from(itemTable).update(nullShared).eq('shared_group_id', groupId);
+    }
+  }
+
+  // List items don't have a category table, just null pointers
+  await state.db.from('list_items').update(nullShared).eq('shared_group_id', groupId);
+
+  // Also null any habit_completions linked to habits that were shared in this group
+  // (completions don't have shared_group_id directly, they follow their habit)
+}
+
+/**
+ * Delete all local items belonging to a group.
+ */
+async function _deleteGroupItems(groupId) {
+  await state.db.from('todos').delete().eq('shared_group_id', groupId);
+  await state.db.from('habits').delete().eq('shared_group_id', groupId);
+  await state.db.from('list_items').delete().eq('shared_group_id', groupId);
+}
+
 async function sharingDeleteGroup(groupId) {
+  const group = state.sharing.getGroup(groupId);
+  // Count active members (excluding creator)
+  const otherMembers = (group?.members || []).filter(m => m.status === 'joined' && m.role !== 'creator' && m.role !== 'owner');
+  const detail = otherMembers.length > 0 ? t('sharing.delete_group_has_members').replace('{0}', otherMembers.length) : null;
+
   showConfirmAction(
     t('sharing.delete_group'),
     t('sharing.delete_group_confirm'),
-    async () => {
+    async (keepItems) => {
       try {
+        if (keepItems) {
+          await _convertGroupItemsToPersonal(groupId);
+        } else {
+          await _deleteGroupItems(groupId);
+        }
         await state.sharing.deleteGroup(groupId);
         showToast(t('sharing.group_deleted'), 'info');
         renderSharingPane();
+        // Refresh all pages to reflect changes
+        document.dispatchEvent(new CustomEvent('sharing-changed'));
       } catch (e) { showToast(e.message, 'error'); }
-    }
+    },
+    detail,
+    { toggleLabel: t('sharing.delete_group_keep_items') }
   );
 }
 

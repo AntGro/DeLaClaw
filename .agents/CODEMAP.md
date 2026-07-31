@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-07-30T23:43:58.716Z from 38 modules (v1.562). Total LOC 27858. Do not hand-edit.
+> Generated 2026-07-31T00:02:14.069Z from 38 modules (v1.563). Total LOC 27967. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -28,11 +28,11 @@
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
 | main | 4490 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:36,guard+pendingSet,window:8 |
-| i18n | 2148 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
+| i18n | 2157 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
 | sharing-drive | 1399 | - | sharing-envelope,utils | main.js,sharing.js | - |
-| sharing-supabase | 1303 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
-| sharing-ui | 1023 | - | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:41,pendingSet,window:8 |
-| utils | 895 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:5 |
+| sharing-supabase | 1315 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
+| sharing-ui | 1095 | habits,list_items,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:41,pendingSet,window:8 |
+| utils | 911 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:5 |
 | drive | 822 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
 | item-utils | 539 | - | db,i18n,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |
@@ -67,9 +67,9 @@
 | flashcard_notes | flashcards |
 | flashcards | flashcards, utils |
 | habit_completions | habits |
-| habits | habits, sharing-supabase |
+| habits | habits, sharing-supabase, sharing-ui |
 | joined_groups | sharing-supabase |
-| list_items | lists, sharing-supabase |
+| list_items | lists, sharing-supabase, sharing-ui |
 | lists | lists |
 | nvidia_usage | main |
 | projects | db, main, projects |
@@ -81,7 +81,7 @@
 | tasks | projects |
 | text_line_progress | flashcards |
 | texts | flashcards |
-| todos | sharing-supabase, todos |
+| todos | sharing-supabase, sharing-ui, todos |
 | vestiaire | vestiaire |
 
 ## Adapters

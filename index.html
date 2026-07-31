@@ -677,6 +677,10 @@ bun run server.js</pre>
       <h2 id="confirmActionTitle">Confirm</h2>
       <p id="confirmActionMessage" class="confirm-action-msg"></p>
       <div id="confirmActionDetail" class="confirm-action-detail" style="display:none;"></div>
+      <label id="confirmActionToggle" class="confirm-action-toggle" style="display:none;">
+        <input type="checkbox" id="confirmActionToggleInput" checked>
+        <span id="confirmActionToggleLabel"></span>
+      </label>
       <div class="modal-actions">
         <button class="modal-cancel" id="confirmActionCancelBtn" data-action="close-confirm-action">Cancel</button>
         <button class="modal-save confirm-action-btn" id="confirmActionBtn" data-action="execute-confirm-action">

@@ -189,6 +189,17 @@ function showConfirmAction(title, message, onConfirm, detail, opts) {
   } else {
     detailEl.style.display = 'none';
   }
+  // Toggle checkbox (optional)
+  const toggleWrap = document.getElementById('confirmActionToggle');
+  const toggleInput = document.getElementById('confirmActionToggleInput');
+  const toggleLabel = document.getElementById('confirmActionToggleLabel');
+  if (opts?.toggleLabel) {
+    toggleLabel.textContent = opts.toggleLabel;
+    toggleInput.checked = opts.toggleChecked !== false; // default true
+    toggleWrap.style.display = '';
+  } else {
+    toggleWrap.style.display = 'none';
+  }
   // Custom confirm button text (default: Delete)
   const btnTextEl = document.getElementById('confirmActionBtnText');
   if (btnTextEl) btnTextEl.textContent = opts?.btnText || 'Delete';
@@ -228,6 +239,9 @@ function closeConfirmAction() {
   // Reset variant
   const modal = document.querySelector('.confirm-action-modal');
   if (modal) modal.classList.remove('confirm-neutral');
+  // Reset toggle
+  const toggleWrap = document.getElementById('confirmActionToggle');
+  if (toggleWrap) toggleWrap.style.display = 'none';
   // Reset custom button text
   const btnTextEl = document.getElementById('confirmActionBtnText');
   if (btnTextEl) btnTextEl.textContent = 'Delete';
@@ -249,9 +263,11 @@ function closeConfirmAction() {
 async function executeConfirmAction() {
   if (_confirmActionCallback) {
     const cb = _confirmActionCallback;
+    const toggleInput = document.getElementById('confirmActionToggleInput');
+    const toggleChecked = toggleInput ? toggleInput.checked : false;
     _confirmCancelCallback = null; // confirm path — do not fire cancel
     closeConfirmAction();
-    await cb();
+    await cb(toggleChecked);
   }
 }
 

@@ -546,6 +546,18 @@ export async function createSupabaseSharing(adapter, config) {
     const remote = _getRemote(groupId);
     if (!remote) throw new Error('Not a joined group');
 
+    // Reassign items created by this member to the group owner
+    const group = getGroup(groupId);
+    const creatorMemberId = group?.created_by;
+    if (creatorMemberId && creatorMemberId !== remote.memberId) {
+      try {
+        await remote.client.from('sharing_items')
+          .update({ created_by: creatorMemberId })
+          .eq('group_id', groupId)
+          .eq('created_by', remote.memberId);
+      } catch (e) { console.error('leaveGroup: failed to reassign items', e); }
+    }
+
     // Remove self from A's member list via RPC
     await remote.client.rpc('leave_group', { p_token: remote.token });
 

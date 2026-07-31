@@ -1036,13 +1036,11 @@ async function shareExistingListItem(id, el) {
         item_type: 'list_item',
         payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
       });
-      // 2. Create local pointer
-      const items = (state.allListItems || []).filter(i => i.list_id === item.list_id);
-      const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
+      // 2. Create local pointer — keep original sort_order so position stays
       const { error: ptrErr } = await state.db.from('list_items').insert({
         list_id: item.list_id,
         text: '',
-        sort_order: maxOrder + 1,
+        sort_order: item.sort_order || 0,
         shared_id: sharedId,
         shared_group_id: groupId,
       });

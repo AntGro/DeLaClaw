@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-07-31T23:08:34.358Z from 38 modules (v1.567). Total LOC 28040. Do not hand-edit.
+> Generated 2026-07-31T23:26:06.757Z from 38 modules (v1.568). Total LOC 28036. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -17,9 +17,9 @@
 | birthdays | 817 | birthdays | allBirthdays,currentView,db,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,btn,project-card,empty-state,toast | - | 14 | 37 |
 | flashcards | 2426 | flashcard_decks,flashcard_notes,flashcards,text_line_progress,texts | currentView,db,js | i18n,icons,item-utils,logo,state,utils | main.js,welcome.js | modal,btn,project-card,card-header,empty-state,toast | - | 79 | 136 |
 | habits | 2510 | habit_categories,habit_completions,habits | _historyHabitId,allHabitCompletions,allHabits,currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 55 | 79 |
-| lists | 1220 | list_items,lists | allListItems,allLists,currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | pendingSet | 25 | 36 |
+| lists | 1218 | list_items,lists | allListItems,allLists,currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | pendingSet | 25 | 36 |
 | projects | 1006 | projects,prompts,tasks | PROJECTS,allTasks,db,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,btn,project-card,card-header,empty-state,toast | pendingSet | 37 | 36 |
-| todos | 1567 | todo_categories,todos | currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 30 | 57 |
+| todos | 1565 | todo_categories,todos | currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 30 | 57 |
 | vestiaire | 843 | vestiaire,vestiaire_categories | allVestiaire,currentView,db,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | - | 22 | 52 |
 | welcome | 840 | - | PROJECTS,allBirthdays,allHabitCompletions,allHabits,allVestiaire,currentView,db,js | flashcards,habits,i18n,icons,item-utils,sharing-ui,state,todos,utils | main.js | modal,app-header,btn | pendingSet | 77 | 43 |
 

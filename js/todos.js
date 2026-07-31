@@ -1347,19 +1347,17 @@ async function shareExistingTodo(id, el) {
     try {
       const sharedId = crypto.randomUUID();
       const cat = _todoCatMap.get(catIdForTodo(todo));
-      const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catIdForTodo(todo));
-      const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
       // 1. Create shared item on the sharing layer
       await state.sharing.addItem(groupId, {
         id: sharedId,
         item_type: 'todo',
         payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'medium', note: todo.note || '' },
       });
-      // 2. Create local pointer
+      // 2. Create local pointer — keep original sort_order so position stays
       const { error: ptrErr } = await state.db.from('todos').insert({
         text: '', priority: 'medium', done: false,
         category: cat?.name ?? '', category_id: catIdForTodo(todo),
-        sort_order: minOrder,
+        sort_order: todo.sort_order || 0,
         shared_id: sharedId,
         shared_group_id: groupId,
       });

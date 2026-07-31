@@ -811,7 +811,7 @@ async function deleteList(listId) {
 // ── Shared List Items — sync pointers ─────────────────────────────
 
 let _syncingListItems = false;
-let _bulkShareInProgress = false;
+let _bulkShareInProgress = new Set();
 // ── Shared list: auto-created landing list for received shared items ──
 const SHARED_LIST_NAME = '__shared__';
 const _myCreatedSharedListItemIds = new Set(); // shared_ids where current user is creator
@@ -1046,6 +1046,7 @@ window.shareExistingListItem = shareExistingListItem;
 // ── Bulk share all personal items in a list ──
 async function bulkShareList(listId, el) {
   if (!state.sharing) return;
+  if (_bulkShareInProgress.has(listId)) return;
   const groups = state.sharing.getAllGroups();
   if (!groups.length) return;
   const listItems = (state.allListItems || []).filter(i => i.list_id === listId && !i.shared_id);
@@ -1059,8 +1060,9 @@ async function bulkShareList(listId, el) {
       t('sharing.share_all'),
       msg,
       async () => {
-        if (_bulkShareInProgress) return;
-        _bulkShareInProgress = true;
+        if (_bulkShareInProgress.has(listId)) return;
+        _bulkShareInProgress.add(listId);
+        if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
         try {
           let shared = 0;
           for (const item of listItems) {
@@ -1085,7 +1087,10 @@ async function bulkShareList(listId, el) {
           }
           if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
           await refreshLists();
-        } finally { _bulkShareInProgress = false; }
+        } finally {
+          _bulkShareInProgress.delete(listId);
+          if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+        }
       },
       null,
       { variant: 'neutral', btnText: t('sharing.share_all'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }

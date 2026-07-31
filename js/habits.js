@@ -2154,7 +2154,7 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
  * - Data (name, frequency, completions) is read live from shared storage in refreshHabits()
  */
 let _syncingHabits = false;
-let _bulkShareInProgress = false;
+let _bulkShareInProgress = new Set();
 async function syncSharedHabits() {
   if (_syncingHabits) return;
   _syncingHabits = true;
@@ -2310,6 +2310,7 @@ window.shareExistingHabit = shareExistingHabit;
 // ── Bulk share all personal habits in a category ──
 async function bulkShareHabitCategory(catId, el) {
   if (!state.sharing) return;
+  if (_bulkShareInProgress.has(catId)) return;
   const groups = state.sharing.getAllGroups();
   if (!groups.length) return;
   const items = state.allHabits.filter(h => catIdForHabit(h) === catId && !h.shared_id);
@@ -2322,8 +2323,9 @@ async function bulkShareHabitCategory(catId, el) {
       t('sharing.share_all'),
       msg,
       async () => {
-        if (_bulkShareInProgress) return;
-        _bulkShareInProgress = true;
+        if (_bulkShareInProgress.has(catId)) return;
+        _bulkShareInProgress.add(catId);
+        if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
         try {
           const actor = await getSharedHabitCompletionActor(groupId);
           let shared = 0;
@@ -2361,7 +2363,10 @@ async function bulkShareHabitCategory(catId, el) {
           }
           if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
           await refreshHabits();
-        } finally { _bulkShareInProgress = false; }
+        } finally {
+          _bulkShareInProgress.delete(catId);
+          if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+        }
       },
       null,
       { variant: 'neutral', btnText: t('sharing.share_all'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }

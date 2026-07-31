@@ -1201,7 +1201,7 @@ function getTodos() { return allTodos; }
  * - Shared TODO deleted from Drive → delete local todo
  */
 let _syncingTodos = false;
-let _bulkShareInProgress = false;
+let _bulkShareInProgress = new Set();
 async function syncSharedTodos() {
   if (_syncingTodos) return;
   _syncingTodos = true;
@@ -1365,6 +1365,7 @@ window.shareExistingTodo = shareExistingTodo;
 // ── Bulk share all personal items in a category ──
 async function bulkShareTodoCategory(catId, el) {
   if (!state.sharing) return;
+  if (_bulkShareInProgress.has(catId)) return;
   const groups = state.sharing.getAllGroups();
   if (!groups.length) return;
   const items = allTodos.filter(td => catIdForTodo(td) === catId && !td.shared_id && !td.done);
@@ -1378,12 +1379,11 @@ async function bulkShareTodoCategory(catId, el) {
       t('sharing.share_all'),
       msg,
       async () => {
-        if (_bulkShareInProgress) return;
-        _bulkShareInProgress = true;
+        if (_bulkShareInProgress.has(catId)) return;
+        _bulkShareInProgress.add(catId);
+        if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
         try {
           let shared = 0;
-          const pendingTodos = allTodos.filter(td => !td.done && catIdForTodo(td) === catId);
-          let nextOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(td => td.sort_order || 0)) - 1 : 0;
           for (const todo of items) {
             try {
               const sharedId = crypto.randomUUID();
@@ -1395,7 +1395,7 @@ async function bulkShareTodoCategory(catId, el) {
               const { error: ptrErr } = await state.db.from('todos').insert({
                 text: '', priority: 'medium', done: false,
                 category: cat?.name ?? '', category_id: catId,
-                sort_order: nextOrder--,
+                sort_order: todo.sort_order ?? 0,
                 shared_id: sharedId,
                 shared_group_id: groupId,
               });
@@ -1406,7 +1406,10 @@ async function bulkShareTodoCategory(catId, el) {
           }
           if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
           await refreshTodos();
-        } finally { _bulkShareInProgress = false; }
+        } finally {
+          _bulkShareInProgress.delete(catId);
+          if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+        }
       },
       null,
       { variant: 'neutral', btnText: t('sharing.share_all'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }

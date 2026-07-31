@@ -4379,16 +4379,17 @@ function navigateToItem(type, id) {
 }
 
 function findItemElement(type, id) {
+  const eid = CSS.escape(id);
   const selectors = {
-    todo: `[data-todo-id="${id}"]`,
-    habit: `[data-habit-id="${id}"]`,
-    project: `[data-project="${id}"]`,
-    task: `[data-task-id="${id}"]`,
-    birthday: `.birthday-card[data-id="${id}"]`,
-    vest: `[data-vest-id="${id}"]`,
-    flashcard: `[data-card-id="${id}"]`,
-    list: `[data-list-id="${id}"]`,
-    listitem: `[data-item-id="${id}"]`,
+    todo: `[data-todo-id="${eid}"]`,
+    habit: `[data-habit-id="${eid}"]`,
+    project: `[data-project="${eid}"]`,
+    task: `[data-task-id="${eid}"]`,
+    birthday: `.birthday-card[data-id="${eid}"]`,
+    vest: `[data-vest-id="${eid}"]`,
+    flashcard: `[data-card-id="${eid}"]`,
+    list: `[data-list-id="${eid}"]`,
+    listitem: `[data-item-id="${eid}"]`,
   };
   const sel = selectors[type];
   return sel ? document.querySelector(sel) : null;

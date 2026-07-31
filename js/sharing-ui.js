@@ -456,32 +456,77 @@ async function sharingEditMyName(groupId, memberId, currentName) {
 async function _convertGroupItemsToPersonal(groupId) {
   const nullShared = { shared_id: null, shared_group_id: null };
 
-  // Find default category IDs for __shared__ → General fallback
-  for (const catTable of ['todo_categories', 'habit_categories']) {
-    const { data: cats } = await state.db.from(catTable).select('id, name, is_protected');
-    if (!cats) continue;
-    const sharedCat = cats.find(c => c.is_protected && c.name === '__shared__');
-    const defaultCat = cats.find(c => c.is_protected && c.name !== '__shared__');
-    if (sharedCat && defaultCat) {
-      const itemTable = catTable === 'todo_categories' ? 'todos' : 'habits';
-      // Move items from __shared__ to General for this group
-      await state.db.from(itemTable).update({ ...nullShared, category: '', category_id: defaultCat.id })
-        .eq('shared_group_id', groupId).eq('category_id', sharedCat.id);
-      // Null pointers for items in other categories
-      await state.db.from(itemTable).update(nullShared)
-        .eq('shared_group_id', groupId).neq('category_id', sharedCat.id);
-    } else {
-      // No __shared__ category or no default — just null pointers
-      const itemTable = catTable === 'todo_categories' ? 'todos' : 'habits';
-      await state.db.from(itemTable).update(nullShared).eq('shared_group_id', groupId);
+  // Build a lookup of shared-layer data so we can enrich pointers (which store
+  // text/name as '' locally) before severing the shared link.
+  const sharedLookup = new Map();
+  if (state.sharing) {
+    for (const si of state.sharing.getAllSharedItems()) {
+      if (si.group_id === groupId) sharedLookup.set(si.id, si);
     }
   }
 
-  // List items don't have a category table, just null pointers
-  await state.db.from('list_items').update(nullShared).eq('shared_group_id', groupId);
+  // ── Todos ──
+  {
+    const { data: cats } = await state.db.from('todo_categories').select('id, name, is_protected');
+    const sharedCat = cats?.find(c => c.is_protected && c.name === '__shared__');
+    const defaultCat = cats?.find(c => c.is_protected && c.name !== '__shared__');
 
-  // Also null any habit_completions linked to habits that were shared in this group
-  // (completions don't have shared_group_id directly, they follow their habit)
+    const { data: rows } = await state.db.from('todos').select('id, text, shared_id, category_id')
+      .eq('shared_group_id', groupId);
+    for (const row of (rows || [])) {
+      const sh = row.shared_id ? sharedLookup.get(row.shared_id) : null;
+      const enriched = {};
+      if (sh) {
+        enriched.text = sh.payload?.text || sh.payload?.title || row.text || '';
+        if (sh.payload?.priority) enriched.priority = sh.payload.priority;
+        if (sh.payload?.due_date) enriched.due_date = sh.payload.due_date;
+      }
+      // Move __shared__ category items to General
+      if (sharedCat && defaultCat && row.category_id === sharedCat.id) {
+        enriched.category = '';
+        enriched.category_id = defaultCat.id;
+      }
+      await state.db.from('todos').update({ ...nullShared, ...enriched }).eq('id', row.id);
+    }
+  }
+
+  // ── Habits ──
+  {
+    const { data: cats } = await state.db.from('habit_categories').select('id, name, is_protected');
+    const sharedCat = cats?.find(c => c.is_protected && c.name === '__shared__');
+    const defaultCat = cats?.find(c => c.is_protected && c.name !== '__shared__');
+
+    const { data: rows } = await state.db.from('habits').select('id, name, shared_id, category_id, frequency_rule')
+      .eq('shared_group_id', groupId);
+    for (const row of (rows || [])) {
+      const sh = row.shared_id ? sharedLookup.get(row.shared_id) : null;
+      const enriched = {};
+      if (sh) {
+        enriched.name = sh.name || row.name || '';
+        if (sh.frequency_rule) enriched.frequency_rule = sh.frequency_rule;
+      }
+      if (sharedCat && defaultCat && row.category_id === sharedCat.id) {
+        enriched.category = '';
+        enriched.category_id = defaultCat.id;
+      }
+      await state.db.from('habits').update({ ...nullShared, ...enriched }).eq('id', row.id);
+    }
+  }
+
+  // ── List items ──
+  {
+    const { data: rows } = await state.db.from('list_items').select('id, text, note, shared_id')
+      .eq('shared_group_id', groupId);
+    for (const row of (rows || [])) {
+      const sh = row.shared_id ? sharedLookup.get(row.shared_id) : null;
+      const enriched = {};
+      if (sh) {
+        enriched.text = sh.payload?.text || sh.payload?.title || row.text || '';
+        if (sh.payload?.note != null) enriched.note = sh.payload.note;
+      }
+      await state.db.from('list_items').update({ ...nullShared, ...enriched }).eq('id', row.id);
+    }
+  }
 }
 
 /**

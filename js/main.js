@@ -1773,14 +1773,15 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   // Listen for sharing updates (Drive sharing module polls and fires sharing-changed)
   document.addEventListener('sharing-changed', async () => {
     try {
-      // syncShared* functions refresh their own data when pointers change,
-      // so we only render afterwards (cheap DOM-only pass).
+      // syncShared* functions refresh their own data when pointers change;
+      // always do a full refresh afterwards so deletions / conversions are
+      // picked up even when sync itself found nothing new.
       await syncSharedTodos();
       await syncSharedHabits();
       await syncSharedListItems();
-      renderTodos();
-      renderHabits();
-      renderLists();
+      await refreshTodos();
+      await refreshHabits();
+      await refreshLists();
     } catch (e) {
       console.warn('sharing refresh:', e);
     }

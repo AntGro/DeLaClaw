@@ -812,6 +812,7 @@ async function deleteList(listId) {
 
 let _syncingListItems = false;
 let _bulkShareInProgress = new Set();
+const _pendingShare = new Set();
 // ── Shared list: auto-created landing list for received shared items ──
 const SHARED_LIST_NAME = '__shared__';
 const _myCreatedSharedListItemIds = new Set(); // shared_ids where current user is creator
@@ -949,7 +950,7 @@ async function shareListItemFromAdd(btn, listId) {
   let actualListId = listId;
   if (typeof btn === 'string') {
     actualListId = btn;
-    const safeListId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(btn) : btn.replace(/"/g, '\"');
+    const safeListId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(btn) : btn.replace(/"/g, '\\"');
     actualBtn = document.querySelector(`[data-action="share-list-item-from-add"][data-list-id="${safeListId}"]`);
   } else if (btn && btn.target) {
     // event case
@@ -964,40 +965,50 @@ async function shareListItemFromAdd(btn, listId) {
   const input = addRow.querySelector('.list-quick-input');
   const text = input?.value.trim();
   if (!text) return;
+  const guardKey = `add-${actualListId}`;
+  if (_pendingShare.has(guardKey)) return;
 
   // Find list name for payload context
   const listObj = (state.allLists || []).find(l => l.id === actualListId);
 
   openSharePopover(actualBtn, async (groupId) => {
-    // Pre-generate UUID for pointer → Drive linkage
-    const presetId = crypto.randomUUID();
-
-    // 1. Insert local pointer FIRST (prevents race with syncSharedListItems)
-    const items = (state.allListItems || []).filter(i => i.list_id === actualListId);
-    const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
-    const { error: ptrErr } = await state.db.from('list_items').insert({
-      list_id: actualListId,
-      text: '',
-      sort_order: maxOrder + 1,
-      shared_id: presetId,
-      shared_group_id: groupId,
-    });
-    if (ptrErr) { showToast(t('toast.failed_to_add') + ': ' + ptrErr.message, 'error'); return; }
-
-    // 2. Write to Drive with the same ID
+    if (_pendingShare.has(guardKey)) return;
+    _pendingShare.add(guardKey);
+    if (actualBtn) { actualBtn.disabled = true; actualBtn.classList.add('is-pending'); actualBtn.setAttribute('aria-busy', 'true'); }
     try {
-      await state.sharing.addItem(groupId, {
-        id: presetId,
-        item_type: 'list_item',
-        payload: { text, list_name: listObj?.name || '' },
+      // Pre-generate UUID for pointer → Drive linkage
+      const presetId = crypto.randomUUID();
+
+      // 1. Insert local pointer FIRST (prevents race with syncSharedListItems)
+      const items = (state.allListItems || []).filter(i => i.list_id === actualListId);
+      const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
+      const { error: ptrErr } = await state.db.from('list_items').insert({
+        list_id: actualListId,
+        text: '',
+        sort_order: maxOrder + 1,
+        shared_id: presetId,
+        shared_group_id: groupId,
       });
-      input.value = '';
-      showToast(t('sharing.shared') + '!', 'success');
-      await refreshLists();
-    } catch (e) {
-      // Drive failed — clean up local pointer
-      await state.db.from('list_items').delete().eq('shared_id', presetId);
-      showToast(e.message, 'error');
+      if (ptrErr) { showToast(t('toast.failed_to_add') + ': ' + ptrErr.message, 'error'); return; }
+
+      // 2. Write to Drive with the same ID
+      try {
+        await state.sharing.addItem(groupId, {
+          id: presetId,
+          item_type: 'list_item',
+          payload: { text, list_name: listObj?.name || '' },
+        });
+        input.value = '';
+        showToast(t('sharing.shared') + '!', 'success');
+        await refreshLists();
+      } catch (e) {
+        // Drive failed — clean up local pointer
+        await state.db.from('list_items').delete().eq('shared_id', presetId);
+        showToast(e.message, 'error');
+      }
+    } finally {
+      _pendingShare.delete(guardKey);
+      if (actualBtn) { actualBtn.disabled = false; actualBtn.classList.remove('is-pending'); actualBtn.removeAttribute('aria-busy'); }
     }
   }, { showAssignees: false });
 }
@@ -1005,6 +1016,7 @@ window.shareListItemFromAdd = shareListItemFromAdd;
 
 async function shareExistingListItem(id, el) {
   if (!state.sharing) return;
+  if (_pendingShare.has(id)) return;
   const item = (state.allListItems || []).find(i => i.id === id);
   if (!item || item.shared_id) return;
   const groups = state.sharing.getAllGroups();
@@ -1013,6 +1025,9 @@ async function shareExistingListItem(id, el) {
   if (!btn) return;
   const listObj = (state.allLists || []).find(l => l.id === item.list_id);
   openSharePopover(btn, async (groupId) => {
+    if (_pendingShare.has(id)) return;
+    _pendingShare.add(id);
+    if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
     try {
       const sharedId = crypto.randomUUID();
       // 1. Create shared item on the sharing layer
@@ -1038,6 +1053,9 @@ async function shareExistingListItem(id, el) {
       await refreshLists();
     } catch (e) {
       showToast(e.message, 'error');
+    } finally {
+      _pendingShare.delete(id);
+      if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
     }
   }, { showAssignees: false });
 }

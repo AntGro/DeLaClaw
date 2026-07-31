@@ -2155,6 +2155,7 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
  */
 let _syncingHabits = false;
 let _bulkShareInProgress = new Set();
+const _pendingShare = new Set();
 async function syncSharedHabits() {
   if (_syncingHabits) return;
   _syncingHabits = true;
@@ -2251,6 +2252,7 @@ window.shareHabitFromAdd = shareHabitFromAdd;
 
 async function shareExistingHabit(id, el) {
   if (!state.sharing) return;
+  if (_pendingShare.has(id)) return;
   const habit = state.allHabits.find(h => h.id === id);
   if (!habit || habit.shared_id) return;
   const groups = state.sharing.getAllGroups();
@@ -2258,6 +2260,9 @@ async function shareExistingHabit(id, el) {
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-habit"][data-id="${CSS.escape(id)}"]`);
   if (!btn) return;
   openSharePopover(btn, async (groupId) => {
+    if (_pendingShare.has(id)) return;
+    _pendingShare.add(id);
+    if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
     try {
       const sharedId = crypto.randomUUID();
       const actor = await getSharedHabitCompletionActor(groupId);
@@ -2302,6 +2307,9 @@ async function shareExistingHabit(id, el) {
       await refreshHabits();
     } catch (e) {
       showToast(e.message, 'error');
+    } finally {
+      _pendingShare.delete(id);
+      if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
     }
   }, { showAssignees: false });
 }

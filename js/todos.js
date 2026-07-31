@@ -1202,6 +1202,7 @@ function getTodos() { return allTodos; }
  */
 let _syncingTodos = false;
 let _bulkShareInProgress = new Set();
+const _pendingShare = new Set();
 async function syncSharedTodos() {
   if (_syncingTodos) return;
   _syncingTodos = true;
@@ -1280,8 +1281,13 @@ async function shareTodoFromAdd(btn) {
   const catId = input.dataset.category || _defaultCatId;
   const cat = _todoCatMap.get(catId);
   const priority = input.dataset.priority || 'medium';
+  const guardKey = `add-${catId}`;
+  if (_pendingShare.has(guardKey)) return;
 
   openSharePopover(btn, async (groupId, assignees) => {
+    if (_pendingShare.has(guardKey)) return;
+    _pendingShare.add(guardKey);
+    if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
     try {
       const sharedId = crypto.randomUUID();
       const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catId);
@@ -1316,6 +1322,9 @@ async function shareTodoFromAdd(btn) {
       await refreshTodos();
     } catch (e) {
       showToast(e.message, 'error');
+    } finally {
+      _pendingShare.delete(guardKey);
+      if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
     }
   }, { showAssignees: false });
 }
@@ -1324,6 +1333,7 @@ window.shareTodoFromAdd = shareTodoFromAdd;
 
 async function shareExistingTodo(id, el) {
   if (!state.sharing) return;
+  if (_pendingShare.has(id)) return;
   const todo = allTodos.find(t => t.id === id);
   if (!todo || todo.shared_id) return;
   const groups = state.sharing.getAllGroups();
@@ -1331,6 +1341,9 @@ async function shareExistingTodo(id, el) {
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-todo"][data-id="${CSS.escape(id)}"]`);
   if (!btn) return;
   openSharePopover(btn, async (groupId) => {
+    if (_pendingShare.has(id)) return;
+    _pendingShare.add(id);
+    if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
     try {
       const sharedId = crypto.randomUUID();
       const cat = _todoCatMap.get(catIdForTodo(todo));
@@ -1357,6 +1370,9 @@ async function shareExistingTodo(id, el) {
       await refreshTodos();
     } catch (e) {
       showToast(e.message, 'error');
+    } finally {
+      _pendingShare.delete(id);
+      if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
     }
   }, { showAssignees: false });
 }

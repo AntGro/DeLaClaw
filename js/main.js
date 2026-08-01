@@ -2630,7 +2630,7 @@ function initGateToolbar() {
 
     // Step 2: if any tab is narrower than 2.5× the icon size, switch to icon-only
     const ICON_SIZE = 18;
-    const iconOnlyThreshold = 105;
+    const iconOnlyThreshold = 85;
     const visibleTabs = Array.from(tabs).filter(tab => tab.style.display !== 'none');
     if (visibleTabs.some(tab => tab.clientWidth < iconOnlyThreshold)) {
       switcher.classList.add('icon-only');

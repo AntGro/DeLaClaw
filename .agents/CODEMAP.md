@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-08-01T22:34:37.951Z from 38 modules (v1.577). Total LOC 28175. Do not hand-edit.
+> Generated 2026-08-01T22:38:23.735Z from 38 modules (v1.578). Total LOC 28175. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)

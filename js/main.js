@@ -1628,8 +1628,8 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     if (hash === '#settings' || hash.startsWith('#settings/')) {
       const pane = hash.split('/')[1] || 'general';
       const modal = document.getElementById('settingsModal');
-      if (!modal?.classList.contains('visible')) openSettings();
-      if (SETTINGS_PANES.includes(pane)) switchSettingsPane(pane);
+      if (!modal?.classList.contains('visible')) openSettings(pane);
+      else if (SETTINGS_PANES.includes(pane)) switchSettingsPane(pane);
       return;
     }
     // Close settings if navigating away
@@ -2773,7 +2773,7 @@ function getVisibleTabs() {
 let _tabConfigState = {};
 let _tabConfigOrder = []; // current order of tab keys in the settings list
 
-function openSettings() {
+function openSettings(pane) {
   const vis = getTabVisibility() || {};
   _tabConfigState = {};
   const ordered = getOrderedTabs();
@@ -2791,8 +2791,8 @@ function openSettings() {
   // Reset visibility toggle icon
   const toggleBtn = document.getElementById('settingsToggleVis');
   if (toggleBtn) toggleBtn.innerHTML = `<span data-icon="eye" data-size="16"></span>`;
-  // Reset to first pane
-  switchSettingsPane('general');
+  // Reset to first pane (or target pane if specified)
+  switchSettingsPane(pane && SETTINGS_PANES.includes(pane) ? pane : 'general');
   // Init theme toggle state
   updateMenuThemeItem();
   hydrateIcons();
@@ -4457,8 +4457,7 @@ function handleStartupDeepLink() {
   // Settings deep link on startup
   if (location.hash === '#settings' || location.hash.startsWith('#settings/')) {
     const pane = location.hash.split('/')[1] || 'general';
-    openSettings();
-    if (SETTINGS_PANES.includes(pane)) switchSettingsPane(pane);
+    openSettings(pane);
     return;
   }
   const deepLink = parseDeepLink(location.hash);

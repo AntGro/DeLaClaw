@@ -1037,7 +1037,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
   .modal label{font-size:0.74rem;}
   .modal-actions button{padding:8px 14px;font-size:0.84rem;}
   .task-modal{max-width:95%;}
-  .modal-wide{max-width:95%;width:auto;min-width:0;}
+  .modal-wide{max-width:95%;width:95%;min-width:0;}
   .textarea-resize-grip{display:none;}
   .prompt-modal{max-width:95%;}
 

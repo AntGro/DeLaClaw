@@ -842,12 +842,12 @@ INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.560',
 ALTER TABLE lists ADD COLUMN IF NOT EXISTS shortname TEXT;
 
 -- Backfill from settings JSON (key = 'list_shortnames', value is {"<list_id>": "<shortname>", ...})
--- Use #>> '{}' to extract raw text from JSON string values (je.value::text would yield "\\"Travel\\"")
+-- jsonb_each_text returns values as plain text directly
 UPDATE lists SET shortname = (
-  SELECT je.value #>> '{}' FROM settings s, json_each(s.value::text) je
+  SELECT je.value FROM settings s, jsonb_each_text(s.value::jsonb) je
   WHERE s.key = 'list_shortnames' AND je.key = lists.id::text LIMIT 1
 ) WHERE EXISTS (
-  SELECT 1 FROM settings s, json_each(s.value::text) je
+  SELECT 1 FROM settings s, jsonb_each_text(s.value::jsonb) je
   WHERE s.key = 'list_shortnames' AND je.key = lists.id::text
 );
 

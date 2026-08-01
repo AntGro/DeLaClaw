@@ -1623,6 +1623,17 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   // Listen for back/forward navigation
   window.addEventListener('hashchange', () => {
     const hash = location.hash;
+    // Settings deep links
+    if (hash === '#settings' || hash.startsWith('#settings/')) {
+      const pane = hash.split('/')[1] || 'general';
+      const modal = document.getElementById('settingsModal');
+      if (!modal?.classList.contains('visible')) openSettings();
+      if (SETTINGS_PANES.includes(pane)) switchSettingsPane(pane);
+      return;
+    }
+    // Close settings if navigating away
+    const settingsModal = document.getElementById('settingsModal');
+    if (settingsModal?.classList.contains('visible')) closeSettings();
     const deepLink = parseDeepLink(hash);
     if (deepLink) {
       navigateToItem(deepLink.type, deepLink.id);
@@ -2797,6 +2808,9 @@ function closeSettings() {
   const scrollY = parseInt(document.body.dataset.scrollY || '0', 10);
   document.body.style.top = '';
   window.scrollTo(0, scrollY);
+  // Restore view hash
+  const viewHash = '#' + (state.currentView || 'welcome');
+  if (location.hash.startsWith('#settings')) history.replaceState(null, '', viewHash);
 }
 
 function switchSettingsPane(paneKey) {
@@ -2810,6 +2824,9 @@ function switchSettingsPane(paneKey) {
   if (paneKey === 'stats') { loadUsageStats(); }
   if (paneKey === 'sharing') { renderSharingPane(); }
   if (paneKey === 'agents') { renderAgentsPane(); }
+  // Sync URL hash
+  const settingsHash = paneKey === 'general' ? '#settings' : '#settings/' + paneKey;
+  if (location.hash !== settingsHash) history.replaceState(null, '', settingsHash);
 }
 
 function renderTabConfigList() {

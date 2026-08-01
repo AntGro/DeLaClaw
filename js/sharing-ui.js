@@ -465,6 +465,16 @@ async function _convertGroupItemsToPersonal(groupId) {
     }
   }
 
+  // Build a separate lookup for habits via getAllSharedHabits() which normalizes
+  // name/frequency_rule to top-level (Supabase keeps them inside payload) and
+  // merges completions from child items + legacy payload.
+  const sharedHabitLookup = new Map();
+  if (state.sharing?.getAllSharedHabits) {
+    for (const sh of state.sharing.getAllSharedHabits()) {
+      if (sh.group_id === groupId) sharedHabitLookup.set(sh.id, sh);
+    }
+  }
+
   // ── Todos ──
   {
     const { data: cats } = await state.db.from('todo_categories').select('id, name, is_protected');
@@ -499,17 +509,29 @@ async function _convertGroupItemsToPersonal(groupId) {
     const { data: rows } = await state.db.from('habits').select('id, name, shared_id, category_id, frequency_rule')
       .eq('shared_group_id', groupId);
     for (const row of (rows || [])) {
-      const sh = row.shared_id ? sharedLookup.get(row.shared_id) : null;
+      const sh = row.shared_id ? sharedHabitLookup.get(row.shared_id) : null;
       const enriched = {};
       if (sh) {
-        enriched.name = sh.name || row.name || '';
-        if (sh.frequency_rule) enriched.frequency_rule = sh.frequency_rule;
+        enriched.name = sh.name || sh.payload?.name || row.name || '';
+        enriched.frequency_rule = sh.frequency_rule || sh.payload?.frequency_rule || row.frequency_rule || '';
       }
       if (sharedCat && defaultCat && row.category_id === sharedCat.id) {
         enriched.category = '';
         enriched.category_id = defaultCat.id;
       }
       await state.db.from('habits').update({ ...nullShared, ...enriched }).eq('id', row.id);
+
+      // Restore completions from the shared layer — they were deleted locally
+      // when the habit was originally shared.
+      if (sh?.completions?.length && row.id) {
+        for (const c of sh.completions) {
+          await state.db.from('habit_completions').insert({
+            habit_id: row.id,
+            completed_at: c.completed_at,
+            note: c.note || null,
+          });
+        }
+      }
     }
   }
 

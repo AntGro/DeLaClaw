@@ -4434,6 +4434,13 @@ function expandParentIfNeeded(type, id, el) {
 }
 
 function handleStartupDeepLink() {
+  // Settings deep link on startup
+  if (location.hash === '#settings' || location.hash.startsWith('#settings/')) {
+    const pane = location.hash.split('/')[1] || 'general';
+    openSettings();
+    if (SETTINGS_PANES.includes(pane)) switchSettingsPane(pane);
+    return;
+  }
   const deepLink = parseDeepLink(location.hash);
   if (deepLink) {
     navigateToItem(deepLink.type, deepLink.id);

@@ -223,6 +223,7 @@ CREATE TABLE IF NOT EXISTS nvidia_usage (
 CREATE TABLE IF NOT EXISTS lists (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   name TEXT NOT NULL,
+  shortname TEXT,
   color TEXT,
   icon TEXT,
   sort_order INTEGER DEFAULT 0,

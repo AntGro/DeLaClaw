@@ -423,4 +423,21 @@ export const LOCAL_MIGRATIONS = {
       WHEN OLD.is_protected = 1
       BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
   `,
+
+  '1.573': `
+    -- Move list shortnames from settings accessor to a proper column
+    ALTER TABLE lists ADD COLUMN shortname TEXT;
+
+    -- Backfill from settings JSON
+    UPDATE lists SET shortname = (
+      SELECT je.value FROM settings s, json_each(s.value) je
+      WHERE s.key = 'list_shortnames' AND je.key = lists.id LIMIT 1
+    ) WHERE EXISTS (
+      SELECT 1 FROM settings s, json_each(s.value) je
+      WHERE s.key = 'list_shortnames' AND je.key = lists.id
+    );
+
+    -- Remove dead settings key
+    DELETE FROM settings WHERE key = 'list_shortnames';
+  `,
 };

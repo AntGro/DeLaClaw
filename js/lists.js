@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, createSettingsAccessor, nextPaletteColor } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, nextPaletteColor } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
@@ -10,10 +10,6 @@ import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 // ===================================================================
 
 let listSearchQuery = '';
-
-// Shortnames
-// DB-synced settings accessor
-const _listShortnamesAccessor = createSettingsAccessor('list_shortnames', 'list_shortnames');
 
 // Distinct colors for list cards (cycles)
 const LIST_COLORS = [
@@ -35,30 +31,11 @@ function getListColor(list, idx) {
 }
 
 // ===================================================================
-// SHORTNAMES
-// ===================================================================
-
-async function loadListShortnames() {
-  await _listShortnamesAccessor.load();
-}
-
-function getListShortname(listId) { return _listShortnamesAccessor.get()[listId] || null; }
-
-function setListShortname(listId, shortname) {
-  const map = _listShortnamesAccessor.get();
-  if (shortname) { map[listId] = shortname; }
-  else { delete map[listId]; }
-  _listShortnamesAccessor.save(map);
-}
-
-
-// ===================================================================
 // DATA
 // ===================================================================
 
 async function refreshLists() {
   if (!state.db.connected) return;
-  await loadListShortnames();
   let lists;
   try {
     lists = await fetchAll(() => state.db
@@ -343,7 +320,7 @@ function renderListNavButtons(lists, grouped) {
   container.innerHTML = navLists.map((list, idx) => {
     const count = (grouped[list.id] || []).length;
     const color = getListColor(list, idx);
-    const shortname = getListShortname(list.id);
+    const shortname = list.shortname;
     const isSharedList = list.name === SHARED_LIST_NAME;
     const displayName = isSharedList ? t('sharing.shared') : (shortname || list.name);
     return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-list" data-id="${esc(list.id)}" title="${esc(isSharedList ? t('sharing.shared') : list.name)} (${count})">${esc(displayName)} (${count})</button>`;
@@ -741,8 +718,9 @@ async function saveNewList() {
 
   const maxOrder = (state.allLists || []).reduce((m, l) => Math.max(m, l.sort_order || 0), 0);
 
-  const { data, error } = await state.db.from('lists').insert({
+  const { error } = await state.db.from('lists').insert({
     name,
+    shortname: shortname || null,
     color: color || '#14b8a6',
     sort_order: maxOrder + 1,
   });
@@ -751,12 +729,6 @@ async function saveNewList() {
   closeAddListModal();
   showToast(t('toast.added'), 'success');
   await refreshLists();
-
-  // Persist shortname — find the newly created list by matching name+order
-  if (shortname) {
-    const newList = data || (state.allLists || []).find(l => l.name === name);
-    if (newList?.id) setListShortname(newList.id, shortname);
-  }
 }
 
 function openEditListModal(listId) {
@@ -764,7 +736,7 @@ function openEditListModal(listId) {
   if (!list) return;
   document.getElementById('editListId').value = listId;
   document.getElementById('editListName').value = list.name || '';
-  document.getElementById('editListShortname').value = getListShortname(listId) || '';
+  document.getElementById('editListShortname').value = list.shortname || '';
   document.getElementById('editListColor').value = list.color || '#14b8a6';
   document.getElementById('editListModal').classList.add('visible');
   setTimeout(() => document.getElementById('editListName').focus(), 100);
@@ -782,10 +754,9 @@ async function saveEditList() {
 
   if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
 
-  setListShortname(id, shortname);
-
   const { error } = await state.db.from('lists').update({
     name,
+    shortname: shortname || null,
     color: color || '#14b8a6',
     updated_at: new Date().toISOString(),
   }).eq('id', id);

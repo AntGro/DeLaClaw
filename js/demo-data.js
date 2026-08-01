@@ -153,9 +153,9 @@ function en() {
   ];
 
   const lists = [
-    { id: 'demo-list-001', name: 'Travel Destinations', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
-    { id: 'demo-list-002', name: 'Monthly Expenses to Reimburse', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
-    { id: 'demo-list-003', name: 'Movies to Watch', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-001', name: 'Travel Destinations', shortname: 'Travel', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
+    { id: 'demo-list-002', name: 'Monthly Expenses to Reimburse', shortname: 'Expenses', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
+    { id: 'demo-list-003', name: 'Movies to Watch', shortname: 'Movies', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
   ];
 
   const list_items = [
@@ -258,9 +258,9 @@ function fr() {
   ];
 
   const lists = [
-    { id: 'demo-list-001', name: 'Destinations de voyage', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
-    { id: 'demo-list-002', name: 'Notes de frais du mois', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
-    { id: 'demo-list-003', name: 'Films à voir', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-001', name: 'Destinations de voyage', shortname: 'Voyage', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
+    { id: 'demo-list-002', name: 'Notes de frais du mois', shortname: 'Frais', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
+    { id: 'demo-list-003', name: 'Films à voir', shortname: 'Films', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
   ];
 
   const list_items = [
@@ -364,9 +364,9 @@ function es() {
   ];
 
   const lists = [
-    { id: 'demo-list-001', name: 'Destinos de viaje', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
-    { id: 'demo-list-002', name: 'Gastos a reembolsar', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
-    { id: 'demo-list-003', name: 'Películas por ver', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-001', name: 'Destinos de viaje', shortname: 'Viajes', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
+    { id: 'demo-list-002', name: 'Gastos a reembolsar', shortname: 'Gastos', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
+    { id: 'demo-list-003', name: 'Películas por ver', shortname: 'Pelis', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
   ];
 
   const list_items = [

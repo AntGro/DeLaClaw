@@ -212,4 +212,20 @@ export const DRIVE_MIGRATIONS = {
     // Drive protection is enforced at the adapter/app level.
     // Version bump only.
   },
+
+  '1.573': async (store) => {
+    // Move list shortnames from settings accessor to a proper column on lists
+    const settingsRow = (store.settings || []).find(s => s.key === 'list_shortnames');
+    if (settingsRow) {
+      let map = {};
+      try { map = typeof settingsRow.value === 'string' ? JSON.parse(settingsRow.value) : settingsRow.value; } catch (_) {}
+      for (const list of (store.lists || [])) {
+        if (map[list.id] && !list.shortname) {
+          list.shortname = map[list.id];
+        }
+      }
+      // Remove dead settings key
+      store.settings = store.settings.filter(s => s.key !== 'list_shortnames');
+    }
+  },
 };

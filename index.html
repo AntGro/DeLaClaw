@@ -8,7 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- Content-Security-Policy: self-hosted vendor + Google Identity exception (Google forbids SRI, see https://developers.google.com/identity/gsi/web/guides/content-security-policy) -->
 <!-- CSP hardened: all inline handlers removed via delegation (Phase 1 index.html 109, Phase 2 js/*.js 254 → 0). Secure hash for importmap restored, unsafe-* removed. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com; frame-src 'self' https://accounts.google.com https://content.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com https://cloudflareinsights.com; frame-src 'self' https://accounts.google.com https://content.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <!-- Vendor: self-hosted (was CDN jsdelivr) — supabase @2.110.6 (203KB raw) + three @0.170.0 -->
 <script src="vendor/supabase.js"></script>
 <!-- Google Identity: must stay on CDN per ToS, no SRI per Google docs -->
@@ -878,5 +878,6 @@ bun run server.js</pre>
 
 <script type="module" src="js/main.js"></script>
 <script src="js/sw-register.js"></script>
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "1f5bb02456c14318b23069eccbe1104c"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 </html>

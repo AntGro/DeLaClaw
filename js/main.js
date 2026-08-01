@@ -3996,8 +3996,30 @@ async function performImport(file) {
         totalRows += rows.length;
       } catch (e) { console.warn(`Failed to restore ${table}:`, e.message); }
     }
+    // Validate shared items: clear stale group refs if sharing is connected
+    let sharedCleaned = 0;
+    if (state.sharing?.isReady()) {
+      showProgress(t('menu.settings_restore_sharing'), step, totalSteps);
+      const validGroupIds = new Set(state.sharing.getAllGroups().map(g => g.id));
+      const sharedTables = ['todos', 'habits', 'list_items'];
+      for (const table of sharedTables) {
+        try {
+          const { data: rows } = await state.db.from(table).select('id,shared_group_id');
+          if (!rows) continue;
+          for (const row of rows) {
+            if (row.shared_group_id && !validGroupIds.has(row.shared_group_id)) {
+              await state.db.from(table).update({ shared_id: null, shared_group_id: null }).eq('id', row.id);
+              sharedCleaned++;
+            }
+          }
+        } catch (e) { console.warn(`Shared cleanup for ${table}:`, e.message); }
+      }
+    }
     hideProgress();
     showToast(t('menu.settings_restore_done', totalRows));
+    if (sharedCleaned > 0) {
+      showToast(t('menu.settings_restore_shared_cleaned', sharedCleaned), 'info');
+    }
     // In demo/drive mode, reseed the in-memory adapter instead of reloading
     // (reload would re-create the adapter with default/empty data)
     const inMemAdapter = (state.demoMode && state.demoAdapter) ? state.demoAdapter

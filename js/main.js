@@ -1612,13 +1612,14 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   applyTabVisibility();
   const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'vestiaire', 'flashcards', 'lists'];
   const rawHash = location.hash.replace('#', '');
+  const isSettingsHash = location.hash === '#settings' || location.hash.startsWith('#settings/');
   const hashView = validViews.includes(rawHash) ? rawHash : null;
   let savedView = hashView || localStorage.getItem(CURRENT_VIEW_KEY) || 'welcome';
   if (!isTabVisible(savedView)) {
     const firstVisible = getVisibleTabs()[0];
     savedView = firstVisible ? firstVisible.key : 'welcome';
   }
-  switchView(savedView);
+  switchView(savedView, isSettingsHash);
 
   // Listen for back/forward navigation
   window.addEventListener('hashchange', () => {
@@ -4156,7 +4157,7 @@ function toggleNvidiaUsageDetail() {
 // ===================================================================
 // currentView is in state
 
-function switchView(view) {
+function switchView(view, skipHash) {
   // Animate header logo on page transition
   const headerLogo = document.querySelector('.header-logo');
   if (headerLogo && view !== state.currentView) {
@@ -4170,8 +4171,10 @@ function switchView(view) {
   state.currentView = view;
   localStorage.setItem(CURRENT_VIEW_KEY, view);
   // Sync URL hash (no reload)
-  const newHash = '#' + view;
-  if (location.hash !== newHash) history.replaceState(null, '', newHash);
+  if (!skipHash) {
+    const newHash = '#' + view;
+    if (location.hash !== newHash) history.replaceState(null, '', newHash);
+  }
   const welcomeView = document.getElementById('welcomeView');
   const projectsView = document.getElementById('projectsView');
   const todosView = document.getElementById('todosView');

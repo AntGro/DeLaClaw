@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
-import state, { TODO_MAX_LEN, DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
+import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
 import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -878,12 +878,14 @@ function initTodoModals() {
   // Add Category Modal
   const m2 = document.createElement('div');
   m2.className = 'modal-overlay'; m2.id = 'addCategoryModal';
-  m2.innerHTML = `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="40" data-action="save-new-category-on-enter"><div class="modal-actions"><button class="modal-cancel" data-action="close-add-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-category">${t('common.add')}</button></div></div>`;
+  m2.innerHTML = `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="40" data-action="save-new-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-category">${t('common.add')}</button></div></div>`;
   app.appendChild(m2);
 }
 
 function openAddCategoryModal() {
   document.getElementById('newCategoryName').value = '';
+  document.getElementById('newCategoryShortname').value = '';
+  document.getElementById('newCategoryColor').value = nextPaletteColor(_todoCatMap);
   document.getElementById('addCategoryModal').classList.add('visible');
   setTimeout(() => document.getElementById('newCategoryName').focus(), 100);
 }
@@ -905,12 +907,11 @@ async function saveNewCategory() {
     }
   }
 
-  // Auto-assign color from palette
-  const usedColors = new Set(Array.from(_todoCatMap.values()).map(c => c.color).filter(Boolean));
-  const color = DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c)) || DEFAULT_CATEGORY_PALETTE[_todoCatMap.size % DEFAULT_CATEGORY_PALETTE.length];
+  const shortname = document.getElementById('newCategoryShortname').value.trim() || null;
+  const color = document.getElementById('newCategoryColor').value;
   const sortOrder = Math.max(0, ...Array.from(_todoCatMap.values()).map(c => c.sort_order || 0)) + 1;
 
-  const { error } = await state.db.from('todo_categories').insert({ name, color, sort_order: sortOrder });
+  const { error } = await state.db.from('todo_categories').insert({ name, shortname, color, sort_order: sortOrder });
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
   closeAddCategoryModal();

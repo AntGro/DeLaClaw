@@ -749,6 +749,10 @@ body.paused-mode:has(.schema-banner) .schema-banner{top:var(--paused-banner-h,36
 .modal input[type="color"]{width:100%;height:40px;padding:4px;border-radius:8px;cursor:pointer;}
 .modal input[type="date"],.modal input[type="datetime-local"]{font-family:inherit;}
 .modal-hint{font-size:0.82rem;color:var(--muted);margin-bottom:12px;line-height:1.4;}
+.modal-row{display:flex;gap:12px;margin-top:2px;}
+.modal-field{flex:1;min-width:0;}
+.modal-field label{display:block;margin-bottom:4px;}
+.modal-field input[type="color"]{width:100%;height:38px;padding:2px;border-radius:6px;border:1px solid var(--border);background:var(--bg);cursor:pointer;}
 .modal-actions{display:flex;gap:8px;margin-top:18px;justify-content:flex-end;}
 .modal-actions button{padding:8px 18px;border-radius:7px;font-size:0.86rem;font-weight:600;cursor:pointer;border:none;transition:all 0.2s ease;}
 .modal-actions .modal-cancel{background:var(--surface2);color:var(--text);border:1px solid var(--border);}

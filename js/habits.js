@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
-import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
+import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
 import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -1024,7 +1024,7 @@ function initHabitModals() {
   // Add Habit Category Modal
   const m5 = document.createElement('div');
   m5.className = 'modal-overlay'; m5.id = 'addHabitCategoryModal';
-  m5.innerHTML = `<div class="modal"><h2>` + lucideIcon("folder-plus",20) + ` ${t('habits.add_category')}</h2><label>${t('habits.category_name')}</label><input type="text" id="newHabitCategoryName" placeholder="${t('habits.category_placeholder')}" maxlength="40" data-action="save-new-habit-category-on-enter"><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit-category">${t("common.create")}</button></div></div>`;
+  m5.innerHTML = `<div class="modal"><h2>` + lucideIcon("folder-plus",20) + ` ${t('habits.add_category')}</h2><label>${t('habits.category_name')}</label><input type="text" id="newHabitCategoryName" placeholder="${t('habits.category_placeholder')}" maxlength="40" data-action="save-new-habit-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newHabitCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-habit-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newHabitCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit-category">${t("common.create")}</button></div></div>`;
   app.appendChild(m5);
 
   // Edit Habit Category Modal
@@ -1032,7 +1032,7 @@ function initHabitModals() {
   m6.className = 'modal-overlay'; m6.id = 'editHabitCategoryModal';
   m6.dataset.action = 'close-edit-habit-category-modal';
   m6.dataset.overlayClose = 'true';
-  m6.innerHTML = `<div class="modal"><h2>` + lucideIcon("pencil",20) + ` ${t('habits.edit_category')}</h2><input type="hidden" id="editHabitCatOldName"><label>${t('habits.category_name')}</label><input type="text" id="editHabitCatName" maxlength="40" data-action="save-edit-habit-category-on-enter"><label>Shortname</label><input type="text" id="editHabitCatShortname" maxlength="20" placeholder="e.g. STR" data-action="save-edit-habit-category-on-enter"><label>${t('lists.color')}</label><input type="color" id="editHabitCatColor"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit-category">${t('common.save')}</button></div></div>`;
+  m6.innerHTML = `<div class="modal"><h2>` + lucideIcon("pencil",20) + ` ${t('habits.edit_category')}</h2><input type="hidden" id="editHabitCatOldName"><label>${t('habits.category_name')}</label><input type="text" id="editHabitCatName" maxlength="40" data-action="save-edit-habit-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="editHabitCatShortname" maxlength="20" placeholder="${t('common.shortname_placeholder')}" data-action="save-edit-habit-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="editHabitCatColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit-category">${t('common.save')}</button></div></div>`;
   app.appendChild(m6);
 }
 
@@ -1703,6 +1703,8 @@ function closeHabitHistoryModal() {
 // ===================================================================
 function openAddHabitCategoryModal() {
   document.getElementById('newHabitCategoryName').value = '';
+  document.getElementById('newHabitCategoryShortname').value = '';
+  document.getElementById('newHabitCategoryColor').value = nextPaletteColor(_habitCatMap);
   document.getElementById('addHabitCategoryModal').classList.add('visible');
   setTimeout(() => document.getElementById('newHabitCategoryName').focus(), 100);
 }
@@ -1720,10 +1722,10 @@ async function saveNewHabitCategory() {
       showToast(t('habits.category_exists'), 'error'); return;
     }
   }
-  const usedColors = new Set(Array.from(_habitCatMap.values()).map(c => c.color).filter(Boolean));
-  const color = DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c)) || DEFAULT_CATEGORY_PALETTE[_habitCatMap.size % DEFAULT_CATEGORY_PALETTE.length];
+  const shortname = document.getElementById('newHabitCategoryShortname').value.trim() || null;
+  const color = document.getElementById('newHabitCategoryColor').value;
   const sortOrder = Math.max(0, ...Array.from(_habitCatMap.values()).map(c => c.sort_order || 0)) + 1;
-  const { error } = await state.db.from('habit_categories').insert({ name, color, sort_order: sortOrder });
+  const { error } = await state.db.from('habit_categories').insert({ name, shortname, color, sort_order: sortOrder });
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
   await loadHabitCategories();
   closeAddHabitCategoryModal();

@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
-import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors } from './utils.js';
+import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
+import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
@@ -922,11 +922,22 @@ window.deleteFlashcard = function(id) {
 // ── New Deck ──
 window.openAddFlashDeckModal = function() {
   closeAllFlashModals();
+  const defaultColor = nextPaletteColor(_deckMap);
   const html = `<div class="modal-overlay" id="addFlashDeckModal" style="display:flex;" data-action="close-add-flash-deck" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('brain', 18, '#06b6d4')} ${t('flashcards.new_deck')}</h2>
       <label>${t('flashcards.deck_name')}</label>
       <input type="text" id="newDeckName" placeholder="${t('flashcards.deck_placeholder')}">
+      <div class="modal-row">
+        <div class="modal-field">
+          <label>${t('common.shortname')}</label>
+          <input type="text" id="newDeckShortname" placeholder="${t('flashcards.shortname_placeholder')}" maxlength="20">
+        </div>
+        <div class="modal-field">
+          <label>${t('common.color')}</label>
+          <input type="color" id="newDeckColor" value="${defaultColor}">
+        </div>
+      </div>
       <label>${t('flashcards.deck_type')}</label>
       <div class="deck-type-selector">
         <button class="deck-type-btn active" id="deckTypeFlashcard" data-action="select-deck-type" data-type="flashcard">${lucideIcon('layers', 14)} ${t('flashcards.type_flashcard')}</button>
@@ -967,10 +978,10 @@ window.saveNewFlashDeck = async function() {
 
   // Create the deck row in DB first
   if (state.db.connected) {
-    const usedColors = new Set(Array.from(_deckMap.values()).map(d => d.color).filter(Boolean));
-    const color = DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c)) || DEFAULT_CATEGORY_PALETTE[_deckMap.size % DEFAULT_CATEGORY_PALETTE.length];
+    const shortname = document.getElementById('newDeckShortname').value.trim() || null;
+    const color = document.getElementById('newDeckColor').value;
     const sortOrder = Math.max(0, ...Array.from(_deckMap.values()).map(d => d.sort_order || 0)) + 1;
-    await state.db.from('flashcard_decks').insert({ name, color, sort_order: sortOrder });
+    await state.db.from('flashcard_decks').insert({ name, shortname, color, sort_order: sortOrder });
     await loadFlashcardDecks();
   }
 
@@ -2275,8 +2286,7 @@ window.openImportModal = async function(presetDeck) {
     // If deck doesn't exist yet, create the deck row (same as manual creation)
     let deckId = _deckByName.get(deck)?.id || null;
     if (!deckId && deck && state.db.connected) {
-      const usedColors = new Set(Array.from(_deckMap.values()).map(d => d.color).filter(Boolean));
-      const color = DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c)) || DEFAULT_CATEGORY_PALETTE[_deckMap.size % DEFAULT_CATEGORY_PALETTE.length];
+      const color = nextPaletteColor(_deckMap);
       const sortOrder = Math.max(0, ...Array.from(_deckMap.values()).map(d => d.sort_order || 0)) + 1;
       await state.db.from('flashcard_decks').insert({ name: deck, color, sort_order: sortOrder });
       await loadFlashcardDecks();
@@ -2375,10 +2385,16 @@ function openEditDeckModal(deck) {
       <input type="hidden" id="editDeckId" value="${esc(deckRow.id)}">
       <label>${t('flashcards.deck_name')}</label>
       <input type="text" id="editDeckName" value="${esc(deckRow.name)}"${deckRow.is_protected ? ' disabled' : ''}>
-      <label>${t('flashcards.shortname')}</label>
-      <input type="text" id="editDeckShortname" value="${esc(deckRow.shortname || '')}" placeholder="${t('flashcards.shortname_placeholder')}">
-      <label>${t('lists.color')}</label>
-      <input type="color" id="editDeckColor" value="${esc(deckRow.color || GENERAL_CATEGORY_COLOR)}">
+      <div class="modal-row">
+        <div class="modal-field">
+          <label>${t('common.shortname')}</label>
+          <input type="text" id="editDeckShortname" value="${esc(deckRow.shortname || '')}" placeholder="${t('flashcards.shortname_placeholder')}">
+        </div>
+        <div class="modal-field">
+          <label>${t('common.color')}</label>
+          <input type="color" id="editDeckColor" value="${esc(deckRow.color || GENERAL_CATEGORY_COLOR)}">
+        </div>
+      </div>
       <div class="modal-actions">
         <button class="modal-cancel" data-action="close-edit-deck">${t('common.cancel')}</button>
         <button class="modal-save" data-action="save-edit-deck">${t('common.save')}</button>

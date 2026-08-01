@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, createSettingsAccessor } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, createSettingsAccessor, nextPaletteColor } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
@@ -671,8 +671,17 @@ function initListModals() {
     <label>${t('common.name')}</label>
     <input type="text" id="newListName" placeholder="${t('lists.name_placeholder')}" maxlength="100"
       data-action="save-new-list-on-enter">
-    <label>${t('lists.color')}</label>
-    <input type="color" id="newListColor" value="#14b8a6">
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>${t('common.shortname')}</label>
+        <input type="text" id="newListShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20"
+          data-action="save-new-list-on-enter">
+      </div>
+      <div class="modal-field">
+        <label>${t('common.color')}</label>
+        <input type="color" id="newListColor">
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="modal-cancel" data-action="close-add-list">${t('common.cancel')}</button>
       <button class="modal-save" data-action="save-new-list">${t('common.add')}</button>
@@ -692,11 +701,17 @@ function initListModals() {
     <label>${t('common.name')}</label>
     <input type="text" id="editListName" maxlength="100"
       data-action="save-edit-list-on-enter">
-    <label>Shortname</label>
-    <input type="text" id="editListShortname" maxlength="20" placeholder="e.g. GRC"
-      data-action="save-edit-list-on-enter">
-    <label>${t('lists.color')}</label>
-    <input type="color" id="editListColor">
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>${t('common.shortname')}</label>
+        <input type="text" id="editListShortname" maxlength="20" placeholder="${t('common.shortname_placeholder')}"
+          data-action="save-edit-list-on-enter">
+      </div>
+      <div class="modal-field">
+        <label>${t('common.color')}</label>
+        <input type="color" id="editListColor">
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="modal-cancel" data-action="close-edit-list">${t('common.cancel')}</button>
       <button class="modal-save" data-action="save-edit-list">${t('common.save')}</button>
@@ -707,7 +722,8 @@ function initListModals() {
 
 function openAddListModal() {
   document.getElementById('newListName').value = '';
-  document.getElementById('newListColor').value = '#14b8a6';
+  document.getElementById('newListShortname').value = '';
+  document.getElementById('newListColor').value = nextPaletteColor(state.allLists);
   document.getElementById('addListModal').classList.add('visible');
   setTimeout(() => document.getElementById('newListName').focus(), 100);
 }
@@ -718,13 +734,14 @@ function closeAddListModal() {
 
 async function saveNewList() {
   const name = document.getElementById('newListName').value.trim();
+  const shortname = document.getElementById('newListShortname').value.trim();
   const color = document.getElementById('newListColor').value;
 
   if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
 
   const maxOrder = (state.allLists || []).reduce((m, l) => Math.max(m, l.sort_order || 0), 0);
 
-  const { error } = await state.db.from('lists').insert({
+  const { data, error } = await state.db.from('lists').insert({
     name,
     color: color || '#14b8a6',
     sort_order: maxOrder + 1,
@@ -734,6 +751,12 @@ async function saveNewList() {
   closeAddListModal();
   showToast(t('toast.added'), 'success');
   await refreshLists();
+
+  // Persist shortname — find the newly created list by matching name+order
+  if (shortname) {
+    const newList = data || (state.allLists || []).find(l => l.name === name);
+    if (newList?.id) setListShortname(newList.id, shortname);
+  }
 }
 
 function openEditListModal(listId) {

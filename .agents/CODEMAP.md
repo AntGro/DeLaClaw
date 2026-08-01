@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-08-01T00:10:32.207Z from 38 modules (v1.570). Total LOC 28104. Do not hand-edit.
+> Generated 2026-08-01T10:45:45.366Z from 38 modules (v1.571). Total LOC 28179. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -15,12 +15,12 @@
 | Feature | LOC | Tables | State | Depends | Dependents | UI | Guards | esc | i18n |
 |---------|-----|--------|-------|---------|------------|----|--------|-----|------|
 | birthdays | 817 | birthdays | allBirthdays,currentView,db,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,btn,project-card,empty-state,toast | - | 14 | 37 |
-| flashcards | 2426 | flashcard_decks,flashcard_notes,flashcards,text_line_progress,texts | currentView,db,js | i18n,icons,item-utils,logo,state,utils | main.js,welcome.js | modal,btn,project-card,card-header,empty-state,toast | - | 79 | 136 |
-| habits | 2510 | habit_categories,habit_completions,habits | _historyHabitId,allHabitCompletions,allHabits,currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 55 | 79 |
-| lists | 1218 | list_items,lists | allListItems,allLists,currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | pendingSet | 25 | 36 |
+| flashcards | 2442 | flashcard_decks,flashcard_notes,flashcards,text_line_progress,texts | currentView,db,js | i18n,icons,item-utils,logo,state,utils | main.js,welcome.js | modal,btn,project-card,card-header,empty-state,toast | - | 79 | 136 |
+| habits | 2512 | habit_categories,habit_completions,habits | _historyHabitId,allHabitCompletions,allHabits,currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 55 | 81 |
+| lists | 1241 | list_items,lists | allListItems,allLists,currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | pendingSet | 25 | 38 |
 | projects | 1006 | projects,prompts,tasks | PROJECTS,allTasks,db,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,btn,project-card,card-header,empty-state,toast | pendingSet | 37 | 36 |
-| todos | 1565 | todo_categories,todos | currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 30 | 57 |
-| vestiaire | 843 | vestiaire,vestiaire_categories | allVestiaire,currentView,db,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | - | 22 | 52 |
+| todos | 1566 | todo_categories,todos | currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 30 | 60 |
+| vestiaire | 862 | vestiaire,vestiaire_categories | allVestiaire,currentView,db,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | - | 22 | 52 |
 | welcome | 840 | - | PROJECTS,allBirthdays,allHabitCompletions,allHabits,allVestiaire,currentView,db,js | flashcards,habits,i18n,icons,item-utils,sharing-ui,state,todos,utils | main.js | modal,app-header,btn | pendingSet | 77 | 43 |
 
 ## Core modules (30)
@@ -28,11 +28,11 @@
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
 | main | 4492 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:36,guard+pendingSet,window:8 |
-| i18n | 2157 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
+| i18n | 2160 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
 | sharing-drive | 1399 | - | sharing-envelope,utils | main.js,sharing.js | - |
 | sharing-supabase | 1315 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
 | sharing-ui | 1162 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:41,pendingSet,window:8 |
-| utils | 911 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:5 |
+| utils | 922 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:5 |
 | drive | 822 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
 | item-utils | 539 | - | db,i18n,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |

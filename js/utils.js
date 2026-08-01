@@ -888,6 +888,17 @@ function highlightItem(el) {
   el.addEventListener('animationend', () => el.classList.remove('deep-link-highlight'), { once: true });
 }
 
+/** Pick the next palette color not yet used by any entry in `catMapOrArray`.
+ *  Accepts a Map (values iterated) or an Array of objects with optional `.color`. */
+function nextPaletteColor(catMapOrArray) {
+  const entries = catMapOrArray instanceof Map ? catMapOrArray.values() : (catMapOrArray || []);
+  const usedColors = new Set();
+  let count = 0;
+  for (const c of entries) { if (c.color) usedColors.add(c.color); count++; }
+  return DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c))
+    || DEFAULT_CATEGORY_PALETTE[count % DEFAULT_CATEGORY_PALETTE.length];
+}
+
 export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
   showConfirmAction, closeConfirmAction, executeConfirmAction,
@@ -896,7 +907,7 @@ export {
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA,
   getSupabaseKeyRole, isServiceRoleKey,
   getSupabaseProjectRef, buildAuthSteps, createSettingsAccessor,
-  backfillCategoryColors,
+  backfillCategoryColors, nextPaletteColor,
   parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,
 };
 

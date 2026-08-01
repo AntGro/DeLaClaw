@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
-import state, { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors } from './utils.js';
+import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
+import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
 import { t } from './i18n.js';
 
@@ -565,6 +565,17 @@ function initVestiaireModals() {
     <label>${t('common.name')}</label>
     <input type="text" id="newVestiaireCategoryName" placeholder="${t('vestiaire.category_placeholder')}" maxlength="40"
       data-action="save-new-vestiaire-category-on-enter">
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>${t('common.shortname')}</label>
+        <input type="text" id="newVestiaireCategoryShortname" placeholder="${t('vestiaire.shortname_placeholder')}" maxlength="20"
+          data-action="save-new-vestiaire-category-on-enter">
+      </div>
+      <div class="modal-field">
+        <label>${t('common.color')}</label>
+        <input type="color" id="newVestiaireCategoryColor">
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="modal-cancel" data-action="close-add-vestiaire-category">${t('common.cancel')}</button>
       <button class="modal-save" data-action="save-new-vestiaire-category">${t('common.add')}</button>
@@ -584,11 +595,17 @@ function initVestiaireModals() {
     <label>${t('common.name')}</label>
     <input type="text" id="editVestiaireCategoryName" maxlength="40"
       data-action="save-edit-vestiaire-category-on-enter">
-    <label>${t('vestiaire.shortname')}</label>
-    <input type="text" id="editVestiaireCategoryShortname" maxlength="20" placeholder="${t('vestiaire.shortname_placeholder')}"
-      data-action="save-edit-vestiaire-category-on-enter">
-    <label>${t('lists.color')}</label>
-    <input type="color" id="editVestiaireCategoryColor">
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>${t('common.shortname')}</label>
+        <input type="text" id="editVestiaireCategoryShortname" maxlength="20" placeholder="${t('vestiaire.shortname_placeholder')}"
+          data-action="save-edit-vestiaire-category-on-enter">
+      </div>
+      <div class="modal-field">
+        <label>${t('common.color')}</label>
+        <input type="color" id="editVestiaireCategoryColor">
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="modal-cancel" data-action="close-edit-vestiaire-category">${t('common.cancel')}</button>
       <button class="modal-save" data-action="save-edit-vestiaire-category">${t('common.save')}</button>
@@ -726,6 +743,8 @@ async function deleteVestiaire(id) {
 
 function openAddVestiaireCategoryModal() {
   document.getElementById('newVestiaireCategoryName').value = '';
+  document.getElementById('newVestiaireCategoryShortname').value = '';
+  document.getElementById('newVestiaireCategoryColor').value = nextPaletteColor(_vestCatMap);
   document.getElementById('addVestiaireCategoryModal').classList.add('visible');
   setTimeout(() => document.getElementById('newVestiaireCategoryName').focus(), 100);
 }
@@ -742,10 +761,10 @@ async function saveNewVestiaireCategory() {
       showToast(t('toast.failed_to_add'), 'error'); return;
     }
   }
-  const usedColors = new Set(Array.from(_vestCatMap.values()).map(c => c.color).filter(Boolean));
-  const color = DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c)) || DEFAULT_CATEGORY_PALETTE[_vestCatMap.size % DEFAULT_CATEGORY_PALETTE.length];
+  const shortname = document.getElementById('newVestiaireCategoryShortname').value.trim() || null;
+  const color = document.getElementById('newVestiaireCategoryColor').value;
   const sortOrder = Math.max(0, ...Array.from(_vestCatMap.values()).map(c => c.sort_order || 0)) + 1;
-  const { error } = await state.db.from('vestiaire_categories').insert({ name, color, sort_order: sortOrder });
+  const { error } = await state.db.from('vestiaire_categories').insert({ name, shortname, color, sort_order: sortOrder });
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
   await loadVestiaireCategories();
   closeAddVestiaireCategoryModal();

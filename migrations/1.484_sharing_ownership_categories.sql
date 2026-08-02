@@ -283,61 +283,185 @@ END;
 $$;
 
 -- ══════════════════════════════════════════════════
--- 6. RLS policies — all at once
+-- 6. RLS policies — comprehensive drop of all legacy + current names, then create
+-- Legacy names from initial schema (pre-1.099): "Allow all", "allow all",
+-- "Allow all for anon", "Allow all access to X", "Allow all delete/insert/read/update",
+-- "allow_all_X", "todos_open_*", "lists_policy", "list_items_policy".
+-- Intermediate name (v1.398): "owner only".
+-- Current name: "owner or agent".
 -- ══════════════════════════════════════════════════
--- Personal tables → "owner or agent"
-DROP POLICY IF EXISTS "allow all" ON projects; DROP POLICY IF EXISTS "owner or agent" ON projects;
+
+-- projects
+DROP POLICY IF EXISTS "Allow all delete" ON projects;
+DROP POLICY IF EXISTS "Allow all insert" ON projects;
+DROP POLICY IF EXISTS "Allow all read" ON projects;
+DROP POLICY IF EXISTS "Allow all update" ON projects;
+DROP POLICY IF EXISTS "allow_all_projects" ON projects;
+DROP POLICY IF EXISTS "allow all" ON projects;
+DROP POLICY IF EXISTS "owner only" ON projects;
+DROP POLICY IF EXISTS "owner or agent" ON projects;
 CREATE POLICY "owner or agent" ON projects FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON tasks; DROP POLICY IF EXISTS "owner or agent" ON tasks;
+
+-- tasks
+DROP POLICY IF EXISTS "Allow all delete" ON tasks;
+DROP POLICY IF EXISTS "Allow all insert" ON tasks;
+DROP POLICY IF EXISTS "Allow all read" ON tasks;
+DROP POLICY IF EXISTS "Allow all update" ON tasks;
+DROP POLICY IF EXISTS "allow_all_tasks" ON tasks;
+DROP POLICY IF EXISTS "allow all" ON tasks;
+DROP POLICY IF EXISTS "owner only" ON tasks;
+DROP POLICY IF EXISTS "owner or agent" ON tasks;
 CREATE POLICY "owner or agent" ON tasks FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON todos; DROP POLICY IF EXISTS "owner or agent" ON todos;
+
+-- todos
+DROP POLICY IF EXISTS "todos_open_delete" ON todos;
+DROP POLICY IF EXISTS "todos_open_insert" ON todos;
+DROP POLICY IF EXISTS "todos_open_read" ON todos;
+DROP POLICY IF EXISTS "todos_open_update" ON todos;
+DROP POLICY IF EXISTS "allow_all_todos" ON todos;
+DROP POLICY IF EXISTS "allow all" ON todos;
+DROP POLICY IF EXISTS "owner only" ON todos;
+DROP POLICY IF EXISTS "owner or agent" ON todos;
 CREATE POLICY "owner or agent" ON todos FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON habits; DROP POLICY IF EXISTS "owner or agent" ON habits;
+
+-- habits
+DROP POLICY IF EXISTS "Allow all" ON habits;
+DROP POLICY IF EXISTS "allow_all_chores" ON habits;
+DROP POLICY IF EXISTS "allow all" ON habits;
+DROP POLICY IF EXISTS "owner only" ON habits;
+DROP POLICY IF EXISTS "owner or agent" ON habits;
 CREATE POLICY "owner or agent" ON habits FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON habit_completions; DROP POLICY IF EXISTS "owner or agent" ON habit_completions;
+
+-- habit_completions
+DROP POLICY IF EXISTS "Allow all" ON habit_completions;
+DROP POLICY IF EXISTS "allow_all_chore_completions" ON habit_completions;
+DROP POLICY IF EXISTS "allow all" ON habit_completions;
+DROP POLICY IF EXISTS "owner only" ON habit_completions;
+DROP POLICY IF EXISTS "owner or agent" ON habit_completions;
 CREATE POLICY "owner or agent" ON habit_completions FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON flashcards; DROP POLICY IF EXISTS "Allow all access to flashcards" ON flashcards; DROP POLICY IF EXISTS "allow_all_flashcards" ON flashcards; DROP POLICY IF EXISTS "owner or agent" ON flashcards;
+
+-- flashcards
+DROP POLICY IF EXISTS "Allow all for anon" ON flashcards;
+DROP POLICY IF EXISTS "Allow all access to flashcards" ON flashcards;
+DROP POLICY IF EXISTS "allow_all_flashcards" ON flashcards;
+DROP POLICY IF EXISTS "allow all" ON flashcards;
+DROP POLICY IF EXISTS "owner only" ON flashcards;
+DROP POLICY IF EXISTS "owner or agent" ON flashcards;
 CREATE POLICY "owner or agent" ON flashcards FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON flashcard_notes; DROP POLICY IF EXISTS "owner or agent" ON flashcard_notes;
+
+-- flashcard_notes
+DROP POLICY IF EXISTS "Allow all for anon" ON flashcard_notes;
+DROP POLICY IF EXISTS "allow_all_flashcard_notes" ON flashcard_notes;
+DROP POLICY IF EXISTS "allow all" ON flashcard_notes;
+DROP POLICY IF EXISTS "owner only" ON flashcard_notes;
+DROP POLICY IF EXISTS "owner or agent" ON flashcard_notes;
 CREATE POLICY "owner or agent" ON flashcard_notes FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON texts; DROP POLICY IF EXISTS "Allow all access to texts" ON texts; DROP POLICY IF EXISTS "allow_all_texts" ON texts; DROP POLICY IF EXISTS "owner or agent" ON texts;
+
+-- texts
+DROP POLICY IF EXISTS "Allow all access to texts" ON texts;
+DROP POLICY IF EXISTS "allow_all_texts" ON texts;
+DROP POLICY IF EXISTS "allow all" ON texts;
+DROP POLICY IF EXISTS "owner only" ON texts;
+DROP POLICY IF EXISTS "owner or agent" ON texts;
 CREATE POLICY "owner or agent" ON texts FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON text_line_progress; DROP POLICY IF EXISTS "Allow all access to text_line_progress" ON text_line_progress; DROP POLICY IF EXISTS "allow_all_text_line_progress" ON text_line_progress; DROP POLICY IF EXISTS "owner or agent" ON text_line_progress;
+
+-- text_line_progress
+DROP POLICY IF EXISTS "Allow all access to text_line_progress" ON text_line_progress;
+DROP POLICY IF EXISTS "allow_all_text_line_progress" ON text_line_progress;
+DROP POLICY IF EXISTS "allow all" ON text_line_progress;
+DROP POLICY IF EXISTS "owner only" ON text_line_progress;
+DROP POLICY IF EXISTS "owner or agent" ON text_line_progress;
 CREATE POLICY "owner or agent" ON text_line_progress FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON birthdays; DROP POLICY IF EXISTS "owner or agent" ON birthdays;
+
+-- birthdays
+DROP POLICY IF EXISTS "Allow all for anon" ON birthdays;
+DROP POLICY IF EXISTS "allow_all_birthdays" ON birthdays;
+DROP POLICY IF EXISTS "allow all" ON birthdays;
+DROP POLICY IF EXISTS "owner only" ON birthdays;
+DROP POLICY IF EXISTS "owner or agent" ON birthdays;
 CREATE POLICY "owner or agent" ON birthdays FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON vestiaire; DROP POLICY IF EXISTS "owner or agent" ON vestiaire;
+
+-- vestiaire
+DROP POLICY IF EXISTS "Allow all for anon" ON vestiaire;
+DROP POLICY IF EXISTS "allow_all_vestiaire" ON vestiaire;
+DROP POLICY IF EXISTS "allow all" ON vestiaire;
+DROP POLICY IF EXISTS "owner only" ON vestiaire;
+DROP POLICY IF EXISTS "owner or agent" ON vestiaire;
 CREATE POLICY "owner or agent" ON vestiaire FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON lists; DROP POLICY IF EXISTS "owner or agent" ON lists;
+
+-- lists
+DROP POLICY IF EXISTS "lists_policy" ON lists;
+DROP POLICY IF EXISTS "allow all" ON lists;
+DROP POLICY IF EXISTS "owner only" ON lists;
+DROP POLICY IF EXISTS "owner or agent" ON lists;
 CREATE POLICY "owner or agent" ON lists FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON list_items; DROP POLICY IF EXISTS "owner or agent" ON list_items;
+
+-- list_items
+DROP POLICY IF EXISTS "list_items_policy" ON list_items;
+DROP POLICY IF EXISTS "allow all" ON list_items;
+DROP POLICY IF EXISTS "owner only" ON list_items;
+DROP POLICY IF EXISTS "owner or agent" ON list_items;
 CREATE POLICY "owner or agent" ON list_items FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON settings; DROP POLICY IF EXISTS "owner or agent" ON settings;
+
+-- settings
+DROP POLICY IF EXISTS "allow_all_settings" ON settings;
+DROP POLICY IF EXISTS "allow all" ON settings;
+DROP POLICY IF EXISTS "owner only" ON settings;
+DROP POLICY IF EXISTS "owner or agent" ON settings;
 CREATE POLICY "owner or agent" ON settings FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON prompts; DROP POLICY IF EXISTS "owner or agent" ON prompts;
+
+-- prompts
+DROP POLICY IF EXISTS "Allow all delete" ON prompts;
+DROP POLICY IF EXISTS "Allow all insert" ON prompts;
+DROP POLICY IF EXISTS "Allow all read" ON prompts;
+DROP POLICY IF EXISTS "allow_all_prompts" ON prompts;
+DROP POLICY IF EXISTS "allow all" ON prompts;
+DROP POLICY IF EXISTS "owner only" ON prompts;
+DROP POLICY IF EXISTS "owner or agent" ON prompts;
 CREATE POLICY "owner or agent" ON prompts FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON nvidia_usage; DROP POLICY IF EXISTS "Allow all access to nvidia_usage" ON nvidia_usage; DROP POLICY IF EXISTS "allow_all_nvidia_usage" ON nvidia_usage; DROP POLICY IF EXISTS "owner or agent" ON nvidia_usage;
+
+-- nvidia_usage
+DROP POLICY IF EXISTS "Allow all access to nvidia_usage" ON nvidia_usage;
+DROP POLICY IF EXISTS "allow_all_nvidia_usage" ON nvidia_usage;
+DROP POLICY IF EXISTS "allow all" ON nvidia_usage;
+DROP POLICY IF EXISTS "owner only" ON nvidia_usage;
+DROP POLICY IF EXISTS "owner or agent" ON nvidia_usage;
 CREATE POLICY "owner or agent" ON nvidia_usage FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "allow all" ON daily_visits; DROP POLICY IF EXISTS "Allow all access to daily_visits" ON daily_visits; DROP POLICY IF EXISTS "owner or agent" ON daily_visits;
+
+-- daily_visits
+DROP POLICY IF EXISTS "Allow all access to daily_visits" ON daily_visits;
+DROP POLICY IF EXISTS "allow all" ON daily_visits;
+DROP POLICY IF EXISTS "owner only" ON daily_visits;
+DROP POLICY IF EXISTS "owner or agent" ON daily_visits;
 CREATE POLICY "owner or agent" ON daily_visits FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+
+-- joined_groups
+DROP POLICY IF EXISTS "owner only" ON joined_groups;
 DROP POLICY IF EXISTS "owner or agent" ON joined_groups;
 CREATE POLICY "owner or agent" ON joined_groups FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 
 -- Sharing tables → "owner or agent"
+DROP POLICY IF EXISTS "owner" ON sharing_groups;
 DROP POLICY IF EXISTS "owner or agent" ON sharing_groups;
 CREATE POLICY "owner or agent" ON sharing_groups FOR ALL USING (auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)) WITH CHECK (auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id));
+DROP POLICY IF EXISTS "owner" ON sharing_members;
 DROP POLICY IF EXISTS "owner or agent" ON sharing_members;
 CREATE POLICY "owner or agent" ON sharing_members FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id))) WITH CHECK (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)));
+DROP POLICY IF EXISTS "owner" ON sharing_items;
 DROP POLICY IF EXISTS "owner or agent" ON sharing_items;
 CREATE POLICY "owner or agent" ON sharing_items FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id))) WITH CHECK (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)));
 
 -- Category tables → "owner or agent"
+DROP POLICY IF EXISTS "owner only" ON todo_categories;
 DROP POLICY IF EXISTS "owner or agent" ON todo_categories;
 CREATE POLICY "owner or agent" ON todo_categories FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "owner only" ON habit_categories;
 DROP POLICY IF EXISTS "owner or agent" ON habit_categories;
 CREATE POLICY "owner or agent" ON habit_categories FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "owner only" ON vestiaire_categories;
 DROP POLICY IF EXISTS "owner or agent" ON vestiaire_categories;
 CREATE POLICY "owner or agent" ON vestiaire_categories FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
+DROP POLICY IF EXISTS "owner only" ON flashcard_decks;
 DROP POLICY IF EXISTS "owner or agent" ON flashcard_decks;
 CREATE POLICY "owner or agent" ON flashcard_decks FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 

@@ -1116,83 +1116,81 @@ BEGIN
 END;
 $$;
 
--- ── Personal tables (owner only) ──────────────────────
+-- ── Personal tables (owner or agent) ──────────────────────
 
-CREATE POLICY "owner only" ON "public"."birthdays" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."birthdays" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."birthdays" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."flashcard_notes" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."flashcard_notes" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."flashcard_notes" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."habit_completions" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."habit_completions" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."habit_completions" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."habits" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."habits" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."habits" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."list_items" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."list_items" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."list_items" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."lists" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."lists" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."lists" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."projects" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."projects" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."projects" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."prompts" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."prompts" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."prompts" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."settings" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."settings" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."settings" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."tasks" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."tasks" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."tasks" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."todos" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."todos" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."todos" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."vestiaire" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."vestiaire" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."vestiaire" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
--- ── Previously open tables — now owner-only (1.398 fix) ─────────
-
-CREATE POLICY "owner only" ON "public"."daily_visits" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."daily_visits" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."daily_visits" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."flashcards" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."flashcards" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."flashcards" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."nvidia_usage" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."nvidia_usage" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."nvidia_usage" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."text_line_progress" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."text_line_progress" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."text_line_progress" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."texts" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."texts" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."texts" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
 -- ── Sharing tables ────────────────────────────────────────────
 
-CREATE POLICY "owner" ON "public"."sharing_groups" FOR ALL USING ("auth_owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."sharing_groups" FOR ALL USING (auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)) WITH CHECK (auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id));
 
-CREATE POLICY "owner" ON "public"."sharing_members" FOR ALL USING ("group_id" IN (SELECT "id" FROM "public"."sharing_groups" WHERE "auth_owner_id" = "auth"."uid"()));
+CREATE POLICY "owner or agent" ON "public"."sharing_members" FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id))) WITH CHECK (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)));
 
-CREATE POLICY "owner" ON "public"."sharing_items" FOR ALL USING ("group_id" IN (SELECT "id" FROM "public"."sharing_groups" WHERE "auth_owner_id" = "auth"."uid"()));
+CREATE POLICY "owner or agent" ON "public"."sharing_items" FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id))) WITH CHECK (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)));
 
-CREATE POLICY "owner only" ON "public"."joined_groups" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."joined_groups" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."joined_groups" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
--- ── Category tables (1.474) ──
-CREATE POLICY "owner only" ON "public"."todo_categories" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+-- ── Category tables ──
+CREATE POLICY "owner or agent" ON "public"."todo_categories" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."todo_categories" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."habit_categories" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."habit_categories" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."habit_categories" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."vestiaire_categories" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."vestiaire_categories" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."vestiaire_categories" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
-CREATE POLICY "owner only" ON "public"."flashcard_decks" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE POLICY "owner or agent" ON "public"."flashcard_decks" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."flashcard_decks" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
 
 -- ── Auth email guard (1.453) — no RLS, anon must SELECT pre-auth ──
@@ -1318,33 +1316,6 @@ DECLARE hdr TEXT; tok TEXT; h TEXT; BEGIN
   h := encode(digest(tok::text, 'sha256'::text), 'hex'::text);
   UPDATE agent_grants SET last_used_at = now() WHERE token_hash = h;
 END; $$;
-
--- Replace owner-only with owner-or-agent for personal tables
-DROP POLICY IF EXISTS "owner only" ON "public"."birthdays"; CREATE POLICY "owner or agent" ON "public"."birthdays" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."flashcard_notes"; CREATE POLICY "owner or agent" ON "public"."flashcard_notes" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."habit_completions"; CREATE POLICY "owner or agent" ON "public"."habit_completions" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."habits"; CREATE POLICY "owner or agent" ON "public"."habits" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."list_items"; CREATE POLICY "owner or agent" ON "public"."list_items" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."lists"; CREATE POLICY "owner or agent" ON "public"."lists" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."projects"; CREATE POLICY "owner or agent" ON "public"."projects" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."prompts"; CREATE POLICY "owner or agent" ON "public"."prompts" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."settings"; CREATE POLICY "owner or agent" ON "public"."settings" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."tasks"; CREATE POLICY "owner or agent" ON "public"."tasks" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."todos"; CREATE POLICY "owner or agent" ON "public"."todos" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."vestiaire"; CREATE POLICY "owner or agent" ON "public"."vestiaire" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."daily_visits"; CREATE POLICY "owner or agent" ON "public"."daily_visits" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."flashcards"; CREATE POLICY "owner or agent" ON "public"."flashcards" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."nvidia_usage"; CREATE POLICY "owner or agent" ON "public"."nvidia_usage" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."text_line_progress"; CREATE POLICY "owner or agent" ON "public"."text_line_progress" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."texts"; CREATE POLICY "owner or agent" ON "public"."texts" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."joined_groups"; CREATE POLICY "owner or agent" ON "public"."joined_groups" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner" ON "public"."sharing_groups"; DROP POLICY IF EXISTS "owner or agent" ON "public"."sharing_groups"; CREATE POLICY "owner or agent" ON "public"."sharing_groups" FOR ALL USING (auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)) WITH CHECK (auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id));
-DROP POLICY IF EXISTS "owner" ON "public"."sharing_members"; DROP POLICY IF EXISTS "owner or agent" ON "public"."sharing_members"; CREATE POLICY "owner or agent" ON "public"."sharing_members" FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id))) WITH CHECK (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)));
-DROP POLICY IF EXISTS "owner" ON "public"."sharing_items"; DROP POLICY IF EXISTS "owner or agent" ON "public"."sharing_items"; CREATE POLICY "owner or agent" ON "public"."sharing_items" FOR ALL USING (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id))) WITH CHECK (group_id IN (SELECT id FROM sharing_groups WHERE auth_owner_id = auth.uid() OR has_agent_access(auth_owner_id)));
-DROP POLICY IF EXISTS "owner only" ON "public"."todo_categories"; CREATE POLICY "owner or agent" ON "public"."todo_categories" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."habit_categories"; CREATE POLICY "owner or agent" ON "public"."habit_categories" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."vestiaire_categories"; CREATE POLICY "owner or agent" ON "public"."vestiaire_categories" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
-DROP POLICY IF EXISTS "owner only" ON "public"."flashcard_decks"; CREATE POLICY "owner or agent" ON "public"."flashcard_decks" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.573') ON CONFLICT ("key") DO UPDATE SET "value" = '1.573', "updated_at" = now();
 

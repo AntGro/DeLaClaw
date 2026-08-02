@@ -1716,17 +1716,17 @@ test('1.484 migration enforces owner-or-agent RLS and claim_ownership RPC', () =
   assert(sql.includes('claim_ownership()'), '1.484 must include claim_ownership function');
 });
 
-test('sql/supabase_schema.sql has owner-only for all personal tables + joined_groups', () => {
-  const schema = fs.readFileSync(path.join(__dirname, '..', 'sql', 'supabase_schema.sql'), 'utf-8');
+test('sql/supabase_schema.sql has owner-or-agent for all personal tables + joined_groups', () => {
+  const schema = fs.readFileSync(path.join(__dirname, '../', 'sql', 'supabase_schema.sql'), 'utf-8');
   assert(!schema.includes('owner or unclaimed'), 'supabase_schema.sql must not contain owner or unclaimed after 1.300');
   const personal = ['birthdays','flashcard_notes','habit_completions','habits','list_items','lists','projects','prompts','settings','tasks','todos','vestiaire','joined_groups'];
   let count = 0;
   for (const t of personal) {
-    const re = new RegExp(`CREATE POLICY "owner only"[^;]*ON[^;]*${t}`, 'i');
-    assert(re.test(schema), `supabase_schema.sql missing owner only policy for ${t}`);
+    const re = new RegExp(`CREATE POLICY "owner or agent"[^;]*ON[^;]*"?${t}"?`, 'i');
+    assert(re.test(schema), `supabase_schema.sql missing "owner or agent" policy for ${t}`);
     count++;
   }
-  assert(count === 13, `expected 13 owner-only policies, counted ${count}`);
+  assert(count === 13, `expected 13 owner-or-agent policies for personal tables, counted ${count}`);
   assert(schema.includes('trg_set_owner_id'), 'supabase_schema.sql must include trg_set_owner_id triggers');
   assert(schema.includes('claim_ownership'), 'supabase_schema.sql must include claim_ownership function');
 });

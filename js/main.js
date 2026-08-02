@@ -13,6 +13,8 @@ import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
 import { esc, showToast, showConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
+
+const SETTINGS_PANES = ['general', 'ai', 'sharing', 'data', 'stats', 'agents'];
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
 import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
 import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthdays.js';

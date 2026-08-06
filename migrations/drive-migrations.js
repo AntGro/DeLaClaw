@@ -229,12 +229,10 @@ export const DRIVE_MIGRATIONS = {
     }
   },
 
-  '1.608': {
-    description: 'Add sort_order to flashcard_notes',
-    migrate(store) {
-      for (const note of (store.flashcard_notes || [])) {
-        if (note.sort_order === undefined) note.sort_order = 0;
-      }
+  '1.608': async (store) => {
+    // Add sort_order to flashcard_notes
+    for (const note of (store.flashcard_notes || [])) {
+      if (note.sort_order === undefined) note.sort_order = 0;
     }
   },
 };

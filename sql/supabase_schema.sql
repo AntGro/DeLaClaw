@@ -1117,6 +1117,67 @@ BEGIN
 END;
 $$;
 
+-- ===== 1.410 Agent grants — multi-token API =====
+CREATE TABLE IF NOT EXISTS "public"."agent_grants" (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id UUID NOT NULL,
+  display_name TEXT NOT NULL,
+  token_hash TEXT UNIQUE NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'full',
+  last_used_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE "public"."agent_grants" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "owner only" ON "public"."agent_grants";
+CREATE POLICY "owner only" ON "public"."agent_grants" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
+CREATE INDEX IF NOT EXISTS idx_agent_grants_owner_id ON "public"."agent_grants"(owner_id);
+CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON "public"."agent_grants"(token_hash);
+DROP TRIGGER IF EXISTS trg_set_owner_id ON "public"."agent_grants";
+CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."agent_grants" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
+
+CREATE OR REPLACE FUNCTION has_agent_access(target_owner UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+DECLARE hdr TEXT; tok TEXT; h TEXT; matched_id UUID;
+BEGIN
+  IF target_owner IS NULL THEN RETURN FALSE; END IF;
+  BEGIN hdr := current_setting('request.headers', true); EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
+  IF hdr IS NULL OR hdr = '' THEN RETURN FALSE; END IF;
+  BEGIN tok := (hdr::jsonb ->> 'x-agent-token'); IF tok IS NULL OR tok = '' THEN tok := (hdr::jsonb ->> 'X-Agent-Token'); END IF; IF tok IS NULL OR tok = '' THEN tok := (hdr::jsonb ->> 'x-api-token'); END IF; EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
+  IF tok IS NULL OR tok = '' THEN RETURN FALSE; END IF;
+  h := encode(digest(tok::text, 'sha256'::text), 'hex'::text);
+  SELECT id INTO matched_id FROM agent_grants WHERE owner_id = target_owner AND token_hash = h AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()) LIMIT 1;
+  IF matched_id IS NULL THEN RETURN FALSE; END IF;
+  BEGIN UPDATE agent_grants SET last_used_at = now() WHERE id = matched_id AND (last_used_at IS NULL OR last_used_at < now() - INTERVAL '5 minutes'); EXCEPTION WHEN OTHERS THEN NULL; END;
+  RETURN TRUE;
+END; $$;
+
+CREATE OR REPLACE FUNCTION create_agent_grant(p_display_name TEXT, p_scope TEXT DEFAULT 'full')
+RETURNS TABLE(id UUID, token TEXT, display_name TEXT, scope TEXT, created_at TIMESTAMPTZ)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+DECLARE uid UUID := auth.uid(); raw TEXT; hash TEXT; new_id UUID; new_created TIMESTAMPTZ;
+BEGIN
+  IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  IF p_display_name IS NULL OR btrim(p_display_name) = '' THEN RAISE EXCEPTION 'display_name required'; END IF;
+  raw := encode(gen_random_bytes(32), 'hex');
+  hash := encode(digest(raw::text, 'sha256'::text), 'hex'::text);
+  INSERT INTO agent_grants (owner_id, display_name, token_hash, scope) VALUES (uid, btrim(p_display_name), hash, COALESCE(p_scope,'full')) RETURNING agent_grants.id, agent_grants.created_at INTO new_id, new_created;
+  RETURN QUERY SELECT new_id, raw, btrim(p_display_name), COALESCE(p_scope,'full'), new_created;
+END; $$;
+
+CREATE OR REPLACE FUNCTION revoke_agent_grant(p_id UUID) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+DECLARE uid UUID := auth.uid(); BEGIN IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF; UPDATE agent_grants SET revoked_at = now() WHERE id = p_id AND owner_id = uid AND revoked_at IS NULL; END; $$;
+
+CREATE OR REPLACE FUNCTION touch_agent_grant() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+DECLARE hdr TEXT; tok TEXT; h TEXT; BEGIN
+  BEGIN hdr := current_setting('request.headers', true); EXCEPTION WHEN OTHERS THEN RETURN; END;
+  IF hdr IS NULL THEN RETURN; END IF;
+  BEGIN tok := (hdr::jsonb ->> 'x-agent-token'); IF tok IS NULL OR tok = '' THEN tok := (hdr::jsonb ->> 'X-Agent-Token'); END IF; EXCEPTION WHEN OTHERS THEN RETURN; END;
+  IF tok IS NULL OR tok = '' THEN RETURN; END IF;
+  h := encode(digest(tok::text, 'sha256'::text), 'hex'::text);
+  UPDATE agent_grants SET last_used_at = now() WHERE token_hash = h;
+END; $$;
 -- ── Personal tables (owner or agent) ──────────────────────
 
 CREATE POLICY "owner or agent" ON "public"."birthdays" FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (owner_id = auth.uid() OR has_agent_access(owner_id));
@@ -1255,68 +1316,6 @@ ALTER PUBLICATION supabase_realtime ADD TABLE
   sharing_groups, sharing_members, sharing_items,
   todo_categories, habit_categories, vestiaire_categories, flashcard_decks;
 
--- ===== 1.410 Agent grants — multi-token API =====
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE TABLE IF NOT EXISTS "public"."agent_grants" (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  owner_id UUID NOT NULL,
-  display_name TEXT NOT NULL,
-  token_hash TEXT UNIQUE NOT NULL,
-  scope TEXT NOT NULL DEFAULT 'full',
-  last_used_at TIMESTAMPTZ,
-  expires_at TIMESTAMPTZ,
-  revoked_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-ALTER TABLE "public"."agent_grants" ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "owner only" ON "public"."agent_grants";
-CREATE POLICY "owner only" ON "public"."agent_grants" FOR ALL USING ("owner_id" = "auth"."uid"()) WITH CHECK ("owner_id" = "auth"."uid"());
-CREATE INDEX IF NOT EXISTS idx_agent_grants_owner_id ON "public"."agent_grants"(owner_id);
-CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON "public"."agent_grants"(token_hash);
-DROP TRIGGER IF EXISTS trg_set_owner_id ON "public"."agent_grants";
-CREATE TRIGGER trg_set_owner_id BEFORE INSERT ON "public"."agent_grants" FOR EACH ROW EXECUTE FUNCTION set_owner_id();
-
-CREATE OR REPLACE FUNCTION has_agent_access(target_owner UUID)
-RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
-DECLARE hdr TEXT; tok TEXT; h TEXT; matched_id UUID;
-BEGIN
-  IF target_owner IS NULL THEN RETURN FALSE; END IF;
-  BEGIN hdr := current_setting('request.headers', true); EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
-  IF hdr IS NULL OR hdr = '' THEN RETURN FALSE; END IF;
-  BEGIN tok := (hdr::jsonb ->> 'x-agent-token'); IF tok IS NULL OR tok = '' THEN tok := (hdr::jsonb ->> 'X-Agent-Token'); END IF; IF tok IS NULL OR tok = '' THEN tok := (hdr::jsonb ->> 'x-api-token'); END IF; EXCEPTION WHEN OTHERS THEN RETURN FALSE; END;
-  IF tok IS NULL OR tok = '' THEN RETURN FALSE; END IF;
-  h := encode(digest(tok::text, 'sha256'::text), 'hex'::text);
-  SELECT id INTO matched_id FROM agent_grants WHERE owner_id = target_owner AND token_hash = h AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()) LIMIT 1;
-  IF matched_id IS NULL THEN RETURN FALSE; END IF;
-  BEGIN UPDATE agent_grants SET last_used_at = now() WHERE id = matched_id AND (last_used_at IS NULL OR last_used_at < now() - INTERVAL '5 minutes'); EXCEPTION WHEN OTHERS THEN NULL; END;
-  RETURN TRUE;
-END; $$;
-
-CREATE OR REPLACE FUNCTION create_agent_grant(p_display_name TEXT, p_scope TEXT DEFAULT 'full')
-RETURNS TABLE(id UUID, token TEXT, display_name TEXT, scope TEXT, created_at TIMESTAMPTZ)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
-DECLARE uid UUID := auth.uid(); raw TEXT; hash TEXT; new_id UUID; new_created TIMESTAMPTZ;
-BEGIN
-  IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
-  IF p_display_name IS NULL OR btrim(p_display_name) = '' THEN RAISE EXCEPTION 'display_name required'; END IF;
-  raw := encode(gen_random_bytes(32), 'hex');
-  hash := encode(digest(raw::text, 'sha256'::text), 'hex'::text);
-  INSERT INTO agent_grants (owner_id, display_name, token_hash, scope) VALUES (uid, btrim(p_display_name), hash, COALESCE(p_scope,'full')) RETURNING agent_grants.id, agent_grants.created_at INTO new_id, new_created;
-  RETURN QUERY SELECT new_id, raw, btrim(p_display_name), COALESCE(p_scope,'full'), new_created;
-END; $$;
-
-CREATE OR REPLACE FUNCTION revoke_agent_grant(p_id UUID) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
-DECLARE uid UUID := auth.uid(); BEGIN IF uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF; UPDATE agent_grants SET revoked_at = now() WHERE id = p_id AND owner_id = uid AND revoked_at IS NULL; END; $$;
-
-CREATE OR REPLACE FUNCTION touch_agent_grant() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
-DECLARE hdr TEXT; tok TEXT; h TEXT; BEGIN
-  BEGIN hdr := current_setting('request.headers', true); EXCEPTION WHEN OTHERS THEN RETURN; END;
-  IF hdr IS NULL THEN RETURN; END IF;
-  BEGIN tok := (hdr::jsonb ->> 'x-agent-token'); IF tok IS NULL OR tok = '' THEN tok := (hdr::jsonb ->> 'X-Agent-Token'); END IF; EXCEPTION WHEN OTHERS THEN RETURN; END;
-  IF tok IS NULL OR tok = '' THEN RETURN; END IF;
-  h := encode(digest(tok::text, 'sha256'::text), 'hex'::text);
-  UPDATE agent_grants SET last_used_at = now() WHERE token_hash = h;
-END; $$;
 
 INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.608') ON CONFLICT ("key") DO UPDATE SET "value" = '1.608', "updated_at" = now();
 

@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
-import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder } from './item-utils.js';
 import { t } from './i18n.js';
 
 // ===================================================================
@@ -131,6 +131,7 @@ function renderVestiaire() {
   }
 
   renderVestiaireNavButtons(catRows, items);
+  initVestiaireNavBtnReorder();
 
   // Apply sort
   const sortBy = document.getElementById('vestiaireSortBy')?.value || 'manual';
@@ -297,6 +298,22 @@ function navigateToVestiaireCat(catId) {
   scrollToAndHighlight(card, 'var(--accent)');
 }
 
+function initVestiaireNavBtnReorder() {
+  const skipIds = new Set();
+  if (_sharedVestCatId) skipIds.add(_sharedVestCatId);
+  initNavBtnReorder('vestiaireNavButtons', {
+    idAttr: 'category',
+    skipIds,
+    async onReorder(orderedIds) {
+      const reorderable = orderedIds.filter(id => id !== _sharedVestCatId);
+      await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('vestiaire_categories').update({ sort_order: i }).eq('id', id))));
+      await loadVestiaireCategories();
+      renderVestiaire();
+      showToast(t('toast.reordered'), 'success');
+    },
+  });
+}
+
 function getCategoryIcon(cat) {
   const lower = (cat || '').toLowerCase();
   if (lower.includes('haut') || lower.includes('top') || lower.includes('chemis') || lower.includes('pull') || lower.includes('t-shirt'))
@@ -334,24 +351,40 @@ function initVestiaireHoverDelay(listEl) {
   });
 }
 
-/** Drag-and-drop reorder within a category card */
+/** Drag-and-drop reorder within / across category cards */
 function initVestiaireDragDrop(catId, listEl) {
   initItemDragDrop(listEl, {
     itemSelector: '.vestiaire-item',
     idAttr: 'vestId',
-    onReorder: async (draggedId, targetId) => {
-      const items = (state.allVestiaire || []).filter(v => catIdForVest(v) === catId).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-      await reorderItems({
-        items,
-        allItems: state.allVestiaire || [],
-        draggedId,
-        targetId,
-        container: listEl,
-        itemSelector: '.vestiaire-item',
-        idAttr: 'vestId',
-        tableName: 'vestiaire',
-        reinitFn: () => initVestiaireDragDrop(catId, listEl),
-      });
+    crossContainerSelector: '.vestiaire-item-list',
+    getContainerId: (el) => el.dataset.category,
+    onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
+      const allItems = state.allVestiaire || [];
+      const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;
+      if (crossMove) {
+        const movedItem = allItems.find(x => x.id === draggedId);
+        if (!movedItem) return;
+        movedItem.category_id = targetContainerId;
+        orderedIds.forEach((id, i) => { const it = allItems.find(x => x.id === id); if (it) it.sort_order = i; });
+        const sourceItems = allItems
+          .filter(x => catIdForVest(x) === sourceContainerId && x.id !== draggedId)
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        sourceItems.forEach((it, i) => { it.sort_order = i; });
+        await state.db.batch(async () => {
+          await state.db.from('vestiaire').update({ category_id: targetContainerId }).eq('id', draggedId);
+          await Promise.all(orderedIds.map((id, i) => state.db.from('vestiaire').update({ sort_order: i }).eq('id', id)));
+          await Promise.all(sourceItems.map((it, i) => state.db.from('vestiaire').update({ sort_order: i }).eq('id', it.id)));
+        });
+        await refreshVestiaire();
+        showToast(t('toast.moved'), 'success');
+      } else {
+        await reorderItems({
+          orderedIds,
+          allItems,
+          tableName: 'vestiaire',
+          reinitFn: () => initVestiaireDragDrop(catId, listEl),
+        });
+      }
     },
   });
 }

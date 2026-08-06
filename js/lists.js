@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, nextPaletteColor } from './utils.js';
-import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 
@@ -27,6 +27,13 @@ const LIST_COLORS = [
 
 function getListColor(list, idx) {
   if (list.color) return list.color;
+  // Stable fallback for legacy lists without a stored color:
+  // hash the id so the color doesn't change when sort order changes.
+  if (list.id) {
+    let h = 0;
+    for (let i = 0; i < list.id.length; i++) h = (h * 31 + list.id.charCodeAt(i)) | 0;
+    return LIST_COLORS[Math.abs(h) % LIST_COLORS.length];
+  }
   return LIST_COLORS[(idx >= 0 ? idx : 0) % LIST_COLORS.length];
 }
 
@@ -166,6 +173,7 @@ function renderLists() {
   });
 
   renderListNavButtons(sortedLists, grouped);
+  initListNavBtnReorder();
 
   // Empty state — also check after filtering out hidden __shared__ list
   if (visibleLists.length === 0) {
@@ -333,6 +341,25 @@ function navigateToList(listId) {
   scrollToAndHighlight(card, 'var(--accent)');
 }
 
+function initListNavBtnReorder() {
+  const skipIds = new Set();
+  const sharedList = (state.allLists || []).find(l => l.name === SHARED_LIST_NAME);
+  if (sharedList) skipIds.add(sharedList.id);
+  initNavBtnReorder('listsNavButtons', {
+    idAttr: 'id',
+    skipIds,
+    async onReorder(orderedIds) {
+      const reorderable = orderedIds.filter(id => {
+        const l = (state.allLists || []).find(ls => ls.id === id);
+        return l && l.name !== SHARED_LIST_NAME;
+      });
+      await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('lists').update({ sort_order: i }).eq('id', id))));
+      await refreshLists();
+      showToast(t('toast.reordered'), 'success');
+    },
+  });
+}
+
 
 // ===================================================================
 // HOVER-DELAY, DRAG & DROP, INLINE EDIT
@@ -355,19 +382,62 @@ function initListItemDragDrop(listId, listEl) {
   initItemDragDrop(listEl, {
     itemSelector: '.list-item',
     idAttr: 'itemId',
-    onReorder: async (draggedId, targetId) => {
-      const items = (state.allListItems || []).filter(i => i.list_id === listId).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-      await reorderItems({
-        items,
-        allItems: state.allListItems || [],
-        draggedId,
-        targetId,
-        container: listEl,
-        itemSelector: '.list-item',
-        idAttr: 'itemId',
-        tableName: 'list_items',
-        reinitFn: () => initListItemDragDrop(listId, listEl),
-      });
+    crossContainerSelector: '.list-item-list',
+    getContainerId: (el) => el.dataset.listId,
+    onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
+      const allItems = state.allListItems || [];
+      const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;
+
+      if (crossMove) {
+        // --- Cross-list move ---
+        const movedItem = allItems.find(x => x.id === draggedId);
+        if (!movedItem) return;
+
+        // Update list_id in memory
+        movedItem.list_id = targetContainerId;
+
+        // Update sort_order for all items in target list (new order from DOM)
+        orderedIds.forEach((id, i) => {
+          const it = allItems.find(x => x.id === id);
+          if (it) it.sort_order = i;
+        });
+
+        // Re-number source list items
+        const sourceItems = allItems
+          .filter(x => x.list_id === sourceContainerId)
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        sourceItems.forEach((it, i) => { it.sort_order = i; });
+
+        // DB: batch all writes (list_id change + sort_order for both lists)
+        await state.db.batch(async () => {
+          // Move item to new list
+          await state.db.from('list_items').update({ list_id: targetContainerId }).eq('id', draggedId);
+          // Update sort_order in target list
+          await Promise.all(orderedIds.map((id, i) =>
+            state.db.from('list_items').update({ sort_order: i }).eq('id', id)
+          ));
+          // Update sort_order in source list
+          await Promise.all(sourceItems.map((it, i) =>
+            state.db.from('list_items').update({ sort_order: i }).eq('id', it.id)
+          ));
+        });
+
+        // Refresh: sharing cleanup if needed
+        if (movedItem.shared_id && movedItem.shared_group_id && state.sharing) {
+          // Shared items keep their sharing data, only list_id is local
+        }
+
+        await refreshLists();
+        showToast(t('toast.moved'), 'success');
+      } else {
+        // --- Same-list reorder ---
+        await reorderItems({
+          orderedIds,
+          allItems,
+          tableName: 'list_items',
+          reinitFn: () => initListItemDragDrop(listId, listEl),
+        });
+      }
     },
   });
 }

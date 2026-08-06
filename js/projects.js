@@ -3,7 +3,7 @@ import { lucideIcon } from './icons.js';
 import state, { ARCHIVED_PROJECTS_KEY, SHOW_ARCHIVED_KEY, MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction,
          updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
-import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
+import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 
 // ===================================================================
 // state.PROJECTS (loaded from Supabase)
@@ -44,6 +44,19 @@ function navigateToProject(projectId) {
   const project = state.PROJECTS.find(p => p.id === projectId);
   const color = project ? project.color : 'var(--accent)';
   scrollToAndHighlight(card, color);
+}
+
+function initProjectNavBtnReorder() {
+  initNavBtnReorder('projectNavButtons', {
+    idAttr: 'id',
+    async onReorder(orderedIds) {
+      await state.db.batch(() => Promise.all(orderedIds.map((id, i) => state.db.from('projects').update({ sort_order: i }).eq('id', id))));
+      await loadProjects();
+      buildProjectCards();
+      renderAllTasks();
+      showToast(t('toast.reordered'), 'success');
+    },
+  });
 }
 
 function updateArchiveToggleBtn() {
@@ -218,7 +231,7 @@ function buildProjectCards() {
           <button class="archive-project-btn" data-action="archive-project" data-id="${esc(p.id)}" title="${t('projects.toggle_archived')}">${lucideIcon("package")}</button>
         </div>
       </div>
-      <div class="task-list" id="tasks-${p.id}"><p class="empty-msg">${t('common.loading')}</p></div>
+      <div class="task-list" id="tasks-${p.id}" data-project="${p.id}"><p class="empty-msg">${t('common.loading')}</p></div>
       <div class="archive-toggle" data-action="toggle-archived-tasks" data-id="${esc(p.id)}" id="archive-toggle-${p.id}" style="display:none;">
         <span class="arrow" id="archive-arrow-${p.id}">▶</span> ${t('projects.archived_tasks')} (<span id="archive-count-${p.id}">0</span>)
         <button class="delete-all-archived-btn" data-action="delete-all-archived-tasks" data-id="${esc(p.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
@@ -235,6 +248,7 @@ function buildProjectCards() {
 
   renderArchivedProjects();
   renderProjectNavButtons(visibleProjects);
+  initProjectNavBtnReorder();
   balanceGrid(grid);
 }
 
@@ -415,19 +429,34 @@ function initDragDrop(container, projectId) {
     excludeSelector: 'button, a, input, textarea, select, .task-actions',
     skipInsideSelector: '.archived-tasks',
     idAttr: 'taskId',
-    onReorder: async (draggedId, targetId) => {
-      const projectTasks = state.allTasks.filter(t => t.project === projectId && t.status !== 'approved');
-      await reorderItems({
-        items: projectTasks,
-        allItems: state.allTasks,
-        draggedId,
-        targetId,
-        container,
-        itemSelector: '.task-item',
-        idAttr: 'taskId',
-        tableName: 'tasks',
-        reinitFn: () => initDragDrop(container, projectId),
-      });
+    crossContainerSelector: '.task-list[data-project]',
+    getContainerId: (el) => el.dataset.project,
+    onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
+      const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;
+      if (crossMove) {
+        const movedItem = state.allTasks.find(x => x.id === draggedId);
+        if (!movedItem) return;
+        movedItem.project = targetContainerId;
+        orderedIds.forEach((id, i) => { const it = state.allTasks.find(x => x.id === id); if (it) it.sort_order = i; });
+        const sourceItems = state.allTasks
+          .filter(x => x.project === sourceContainerId && x.id !== draggedId && x.status !== 'approved')
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        sourceItems.forEach((it, i) => { it.sort_order = i; });
+        await state.db.batch(async () => {
+          await state.db.from('tasks').update({ project: targetContainerId }).eq('id', draggedId);
+          await Promise.all(orderedIds.map((id, i) => state.db.from('tasks').update({ sort_order: i }).eq('id', id)));
+          await Promise.all(sourceItems.map((it, i) => state.db.from('tasks').update({ sort_order: i }).eq('id', it.id)));
+        });
+        await refreshAll();
+        showToast(t('toast.moved'), 'success');
+      } else {
+        await reorderItems({
+          orderedIds,
+          allItems: state.allTasks,
+          tableName: 'tasks',
+          reinitFn: () => initDragDrop(container, projectId),
+        });
+      }
     },
   });
 }

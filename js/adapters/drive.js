@@ -705,6 +705,11 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     setTimeout(() => { if (_syncBar) _syncBar.classList.remove('done', 'error'); }, error ? 2500 : 400);
   }
 
+  // ── Batch mode: defer flushing during batch, flush once at end ──
+
+  let _batching = false;
+  const _batchDirty = new Set();
+
   // ── Wrapped adapter ──
 
   const adapter = {
@@ -714,22 +719,51 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       builder.then = (resolve, reject) => {
         origThen(async (result) => {
           if (builder._method !== 'GET') {
-            // Cancel any pending debounced save — we flush immediately
-            if (saveTimers[table]) {
-              clearTimeout(saveTimers[table]);
-              delete saveTimers[table];
-              dirtyTables.delete(table);
+            if (_batching) {
+              // In batch mode: skip per-mutation flush, just track the table
+              _batchDirty.add(table);
+            } else {
+              // Cancel any pending debounced save — we flush immediately
+              if (saveTimers[table]) {
+                clearTimeout(saveTimers[table]);
+                delete saveTimers[table];
+                dirtyTables.delete(table);
+              }
+              syncStart();
+              let _err = false;
+              try { await flushTable(table); }
+              catch (e) { _err = true; console.error(`Drive: sync flush failed for ${table}`, e); }
+              finally { syncEnd(_err); }
             }
-            syncStart();
-            let _err = false;
-            try { await flushTable(table); }
-            catch (e) { _err = true; console.error(`Drive: sync flush failed for ${table}`, e); }
-            finally { syncEnd(_err); }
           }
           resolve(result);
         }, reject);
       };
       return builder;
+    },
+
+    async batch(fn) {
+      _batching = true;
+      _batchDirty.clear();
+      try {
+        await fn();
+      } finally {
+        _batching = false;
+        // Flush each affected table once
+        for (const table of _batchDirty) {
+          if (saveTimers[table]) {
+            clearTimeout(saveTimers[table]);
+            delete saveTimers[table];
+            dirtyTables.delete(table);
+          }
+          syncStart();
+          let _err = false;
+          try { await flushTable(table); }
+          catch (e) { _err = true; console.error(`Drive: batch flush failed for ${table}`, e); }
+          finally { syncEnd(_err); }
+        }
+        _batchDirty.clear();
+      }
     },
     channel() { return inner.channel(); },
     rpc(fn, params) { return inner.rpc(fn, params); },

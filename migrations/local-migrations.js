@@ -440,4 +440,9 @@ export const LOCAL_MIGRATIONS = {
     -- Remove dead settings key
     DELETE FROM settings WHERE key = 'list_shortnames';
   `,
+
+  '1.608': `
+    -- Add sort_order to flashcard_notes for draft reorder
+    ALTER TABLE flashcard_notes ADD COLUMN sort_order INTEGER DEFAULT 0;
+  `,
 };

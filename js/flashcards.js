@@ -2,7 +2,7 @@ import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor } from './utils.js';
-import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
+import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, initNavBtnReorder } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
 // ===================================================================
@@ -161,7 +161,7 @@ async function refreshFlashcards() {
   if (!state.db.connected) return;
   await loadFlashcardDecks();
   allCards = await fetchAll(() => state.db.from('flashcards').select('*').order('created_at'));
-  allDrafts = await fetchAll(() => state.db.from('flashcard_notes').select('*').order('created_at', { ascending: false }));
+  allDrafts = await fetchAll(() => state.db.from('flashcard_notes').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: false }));
   try {
     allTexts = await fetchAll(() => state.db.from('texts').select('*').order('created_at'));
     allChunkProgress = await fetchAll(() => state.db.from('text_line_progress').select('*').order('chunk_index'));
@@ -202,7 +202,12 @@ function renderDeckNavButtons() {
   if (!container) return;
   const cardDecks = allCards.map(c => c.deck);
   const textDecks = allTexts.map(t => t.deck);
-  const decks = [...new Set([...cardDecks, ...textDecks])].sort();
+  const deckNames = new Set([...cardDecks, ...textDecks]);
+  // Sort by DB sort_order (fall back to alphabetical for unknown decks)
+  const decks = [...deckNames].sort((a, b) => {
+    const ra = _deckByName.get(a), rb = _deckByName.get(b);
+    return (ra?.sort_order ?? Infinity) - (rb?.sort_order ?? Infinity) || a.localeCompare(b);
+  });
 
   // Draft nav button first
   let html = `<button class="category-nav-btn" style="--cat-color:${DRAFT_COLOR}" data-action="navigate-to-flash-deck" data-deck="__drafts">${lucideIcon('file-edit', 14, DRAFT_COLOR)} ${t('flashcards.draft')} (${allDrafts.length})</button>`;
@@ -227,6 +232,26 @@ window.navigateToFlashDeck = function(deck) {
   scrollToAndHighlight(el, null);
 };
 
+function initFlashDeckNavBtnReorder() {
+  const skipIds = new Set(['__drafts']);
+  if (_sharedDeckId) {
+    const sharedRow = _deckMap.get(_sharedDeckId);
+    if (sharedRow) skipIds.add(sharedRow.name);
+  }
+  initNavBtnReorder('flashcardNavButtons', {
+    idAttr: 'deck',
+    skipIds,
+    async onReorder(orderedNames) {
+      const reorderable = orderedNames.filter(n => n !== SHARED_CATEGORY && n !== '__drafts');
+      const deckRows = reorderable.map(n => _deckByName.get(n)).filter(Boolean);
+      await state.db.batch(() => Promise.all(deckRows.map((d, i) => state.db.from('flashcard_decks').update({ sort_order: i }).eq('id', d.id))));
+      await loadFlashcardDecks();
+      renderFlashcards();
+      showToast(t('toast.reordered'), 'success');
+    },
+  });
+}
+
 // ── Search State ──
 let searchQuery = '';
 let flashcardFilter = 'all';
@@ -242,6 +267,7 @@ function setFlashcardFilter(filter) {
 
 function renderFlashcards() {
   renderDeckNavButtons();
+  initFlashDeckNavBtnReorder();
   renderAllBuckets();
 }
 
@@ -252,7 +278,11 @@ function renderAllBuckets() {
 
   const cardDecks = allCards.map(c => c.deck);
   const textDecks = allTexts.map(tx => tx.deck);
-  const decks = [...new Set([...cardDecks, ...textDecks])].sort();
+  const deckNames = new Set([...cardDecks, ...textDecks]);
+  const decks = [...deckNames].sort((a, b) => {
+    const ra = _deckByName.get(a), rb = _deckByName.get(b);
+    return (ra?.sort_order ?? Infinity) - (rb?.sort_order ?? Infinity) || a.localeCompare(b);
+  });
   const q = searchQuery.toLowerCase().trim();
 
   // Draft bucket first
@@ -273,6 +303,12 @@ function renderAllBuckets() {
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
   initFlashcardHoverDelay(grid);
+  // Init draft reorder
+  const draftDeck = document.getElementById('flashDraftsDeck');
+  if (draftDeck) {
+    const draftList = draftDeck.querySelector('.task-list');
+    if (draftList) initDraftDragDrop(draftList);
+  }
   // Bind expand toggles for text items
   grid.querySelectorAll('.tr-expand-toggle').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -302,6 +338,22 @@ function initFlashcardHoverDelay(container) {
       } else if (cardId) {
         window.editFlashcardInline(cardId);
       }
+    },
+  });
+}
+
+function initDraftDragDrop(listEl) {
+  initItemDragDrop(listEl, {
+    itemSelector: '.todo-item[data-draft-id]',
+    excludeSelector: 'button, a, input, textarea, select, .todo-actions, .fc-proposal',
+    idAttr: 'draftId',
+    onReorder: async (orderedIds) => {
+      await reorderItems({
+        orderedIds,
+        allItems: allDrafts,
+        tableName: 'flashcard_notes',
+        reinitFn: () => initDraftDragDrop(listEl),
+      });
     },
   });
 }

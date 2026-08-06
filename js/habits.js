@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
-import { initItemHoverDelay, scrollToAndHighlight, inlineEditText } from './item-utils.js';
+import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
@@ -843,7 +843,16 @@ function renderHabits() {
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
   initHabitHoverDelay(grid);
+  // Init cross-category drag (no within-category reorder)
+  for (const catId of categoryIdList) {
+    const card = grid.querySelector(`.project-card[data-category="${CSS.escape(catId)}"]`);
+    if (card) {
+      const listEl = card.querySelector('.habit-list');
+      if (listEl) initHabitCrossDrag(catId, listEl);
+    }
+  }
   renderHabitNavButtons(categoryIdList);
+  initHabitNavBtnReorder();
   balanceGrid(grid);
 }
 
@@ -856,6 +865,28 @@ function initHabitHoverDelay(container) {
     onDblClick: (item) => {
       const id = item.dataset.habitId;
       if (id) editHabitInline(id, item);
+    },
+  });
+}
+
+/** Cross-category drag only (no within-category reorder) */
+function initHabitCrossDrag(catId, listEl) {
+  initItemDragDrop(listEl, {
+    itemSelector: '.habit-item',
+    excludeSelector: 'button, a, input, textarea, select, .habit-actions',
+    idAttr: 'habitId',
+    crossContainerSelector: '.habit-list',
+    getContainerId: (el) => el.dataset.category,
+    crossOnly: true,
+    onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
+      const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;
+      if (!crossMove) return;
+      const movedItem = state.allHabits.find(x => String(x.id) === String(draggedId));
+      if (!movedItem) return;
+      movedItem.category_id = targetContainerId;
+      await state.db.from('habits').update({ category_id: targetContainerId }).eq('id', draggedId);
+      await refreshHabits();
+      showToast(t('toast.moved'), 'success');
     },
   });
 }
@@ -879,6 +910,22 @@ function navigateToHabitCategory(catId) {
   if (!card) return;
   const color = getHabitCatColor(catId);
   scrollToAndHighlight(card, color);
+}
+
+function initHabitNavBtnReorder() {
+  const skipIds = new Set();
+  if (_sharedHabitCatId) skipIds.add(_sharedHabitCatId);
+  initNavBtnReorder('habitNavButtons', {
+    idAttr: 'category',
+    skipIds,
+    async onReorder(orderedIds) {
+      const reorderable = orderedIds.filter(id => id !== _sharedHabitCatId);
+      await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('habit_categories').update({ sort_order: i }).eq('id', id))));
+      await loadHabitCategories();
+      renderHabits();
+      showToast(t('toast.reordered'), 'success');
+    },
+  });
 }
 
 function renderHabitCategoryCard(catId) {
@@ -933,7 +980,7 @@ function renderHabitCategoryCard(catId) {
       </div>
     </div>
     ${addRow}
-    <div class="task-list habit-list todo-cat-list">
+    <div class="task-list habit-list todo-cat-list" data-category="${esc(catId)}">
       ${items}
     </div>
   </div>`;

@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS flashcard_notes (
   proposed_back TEXT,
   proposed_deck TEXT,
   proposal_status TEXT DEFAULT 'pending' CHECK (proposal_status IN ('pending', 'ready', 'accepted', 'rejected')),
+  sort_order INTEGER DEFAULT 0,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );

@@ -12,7 +12,7 @@ import db from './db.js';
 export let isDragging = false;
 export function setDragging(v) { isDragging = v; }
 
-export const LONG_PRESS_MS = 250;
+export const LONG_PRESS_MS = 100;
 export const DRAG_THRESHOLD = 5;
 export const DRAG_CLONE_SELECTOR = '[data-drag-clone="true"]';
 export const DRAG_SOURCE_SELECTOR = '[data-drag-source="true"]';
@@ -197,13 +197,25 @@ export function initItemDragDrop(container, {
   skipInsideSelector = null,
   idAttr,
   onReorder,
+  crossContainerSelector = null,
+  getContainerId = null,
+  crossOnly = false,
 }) {
   cleanupDragArtifacts();
   let dragState = null;
 
+  // Abort previous listeners on this container to prevent stacking
+  if (container._itemDragAC) container._itemDragAC.abort();
+  const ac = new AbortController();
+  container._itemDragAC = ac;
+  const sig = { signal: ac.signal };
+
+  const itemsIn = (c) => Array.from(c.querySelectorAll(itemSelector));
+
   container.querySelectorAll(itemSelector).forEach(item => {
     if (skipInsideSelector && item.closest(skipInsideSelector)) return;
     item.style.touchAction = 'pan-y';
+    item.setAttribute('draggable', 'false');
     let pressTimer = null;
     let startX = 0, startY = 0;
     let activated = false;
@@ -228,38 +240,85 @@ export function initItemDragDrop(container, {
 
     const finishDrag = async ({ complete = true } = {}) => {
       if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      const activeState = dragState && dragState.el === item ? dragState : null;
-      if (!activeState) { cleanup(false); return; }
+      const active = dragState && dragState.el === item ? dragState : null;
+      if (!active) { cleanup(false); return; }
 
-      if (activeState.clone) activeState.clone.remove();
-      item.classList.remove('dragging');
-      unmarkDragSource(item);
+      const ph = active.placeholder;
 
-      let targetId = null;
-      container.querySelectorAll(itemSelector).forEach(el => {
-        if (el.classList.contains('drag-over')) { targetId = el.dataset[idAttr]; }
-        el.classList.remove('drag-over');
-      });
-      const draggedId = activeState.id;
+      // Stop auto-scroll loop
+      if (active.scrollRAF) { cancelAnimationFrame(active.scrollRAF); active.scrollRAF = null; }
+
+      // The placeholder may have moved to a different container
+      const dropContainer = (ph?.parentNode?.matches?.(crossContainerSelector || '____'))
+        ? ph.parentNode : container;
+
+      // Build final order from the drop container
+      let finalOrder = null;
+      if (complete) {
+        finalOrder = [];
+        for (const child of dropContainer.children) {
+          if (child === ph) finalOrder.push(active.id);
+          else if (child === item) continue;
+          else if (child.matches?.(itemSelector)) {
+            finalOrder.push(child.dataset[idAttr]);
+          }
+        }
+      }
+
+      // Move item to placeholder position, then remove placeholder
+      if (ph?.parentNode) {
+        ph.parentNode.insertBefore(item, ph);
+        ph.remove();
+      }
+      item.style.cssText = active.originalCssText || '';
+      item.classList.remove('item-dragging');
+
+      // Clear FLIP transforms on all containers' items
+      if (crossContainerSelector) {
+        document.querySelectorAll(crossContainerSelector).forEach(c => {
+          itemsIn(c).forEach(el => { el.style.transition = ''; el.style.transform = ''; });
+        });
+      } else {
+        itemsIn(container).forEach(el => { el.style.transition = ''; el.style.transform = ''; });
+      }
+
       try {
-        if (activeState.pointerId && item.hasPointerCapture?.(activeState.pointerId)) item.releasePointerCapture(activeState.pointerId);
+        if (active.pointerId && item.hasPointerCapture?.(active.pointerId)) item.releasePointerCapture(active.pointerId);
       } catch (_) {}
+
+      // Detect change: either order changed within same container, or container changed
+      const sourceId = getContainerId ? getContainerId(container) : null;
+      const targetId = getContainerId ? getContainerId(dropContainer) : null;
+      const crossMove = sourceId != null && targetId != null && sourceId !== targetId;
+      const orderChanged = complete && finalOrder && finalOrder.join('\x00') !== active.initialOrder.join('\x00');
+      const changed = complete && (crossMove || orderChanged);
+
       dragState = null;
       setDragging(false);
       cleanup(true);
-      if (complete && targetId && targetId !== draggedId) {
-        try { await onReorder(draggedId, targetId); }
-        catch (e) { console.error('Item reorder failed:', e); }
+
+      if (changed) {
+        try {
+          await onReorder(finalOrder, {
+            draggedId: active.id,
+            sourceContainerId: sourceId,
+            targetContainerId: targetId,
+            sourceContainer: container,
+            targetContainer: dropContainer,
+          });
+        } catch (e) { console.error('Item reorder failed:', e); }
       }
     };
 
-    const cancelDrag = () => {
-      void finishDrag({ complete: false });
-    };
+    const cancelDrag = () => { void finishDrag({ complete: false }); };
+
+    // Prevent native drag ghost
+    item.addEventListener('dragstart', e => e.preventDefault(), sig);
 
     item.addEventListener('pointerdown', e => {
       if (e.target.closest(excludeSelector)) return;
       if (dragState) return;
+      if (e.button !== 0) return;
       startX = e.clientX;
       startY = e.clientY;
       activated = false;
@@ -269,29 +328,77 @@ export function initItemDragDrop(container, {
         void finishDrag({ complete });
       });
 
-      // Prevent scrolling once long-press activates
       preventScroll = (ev) => { if (activated) ev.preventDefault(); };
       item.addEventListener('touchmove', preventScroll, { passive: false });
 
       pressTimer = setTimeout(() => {
         activated = true;
         e.preventDefault();
-        item.style.touchAction = 'none';
-        const rect = item.getBoundingClientRect();
         setDragging(true);
         document.body.style.userSelect = 'none';
         document.body.style.webkitUserSelect = 'none';
-        dragState = { el: item, id: item.dataset[idAttr], offsetY: e.clientY - rect.top, clone: null, pointerId: e.pointerId };
 
-        const clone = markDragClone(item.cloneNode(true));
-        clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;opacity:0.85;z-index:1000;pointer-events:none;box-shadow:0 4px 20px rgba(0,0,0,0.3);background:var(--surface);border-radius:8px;border:2px solid var(--accent);transition:none;`;
-        document.body.appendChild(clone);
-        dragState.clone = clone;
-        markDragSource(item);
-        item.classList.add('dragging');
+        const rect = item.getBoundingClientRect();
+        const initialOrder = itemsIn(container).map(el => el.dataset[idAttr]).filter(Boolean);
+        const originalCssText = item.style.cssText;
+
+        // Placeholder holds the gap
+        const placeholder = document.createElement('div');
+        placeholder.className = 'item-drag-placeholder';
+        placeholder.style.cssText = `height:${rect.height}px;`;
+        container.insertBefore(placeholder, item);
+
+        // Real item goes position:fixed
+        item.style.position = 'fixed';
+        item.style.left = rect.left + 'px';
+        item.style.top = rect.top + 'px';
+        item.style.width = rect.width + 'px';
+        item.style.boxSizing = 'border-box';
+        item.style.zIndex = '1000';
+        item.style.transition = 'none';
+        item.style.margin = '0';
+        item.classList.add('item-dragging');
+
+        dragState = {
+          el: item,
+          id: item.dataset[idAttr],
+          offsetX: e.clientX - rect.left,
+          offsetY: e.clientY - rect.top,
+          pointerId: e.pointerId,
+          placeholder,
+          initialOrder,
+          originalCssText,
+          lastClientX: e.clientX,
+          lastClientY: e.clientY,
+          activeContainer: container,
+          scrollRAF: null,
+        };
+
+        // Continuous auto-scroll loop during drag
+        const scrollLoop = () => {
+          if (!dragState || dragState.el !== item) return;
+          const y = dragState.lastClientY;
+          const edgeSize = 40;
+          const ac = dragState.activeContainer || container;
+          const scrollable = ac.scrollHeight > ac.clientHeight;
+          if (scrollable) {
+            const cRect = ac.getBoundingClientRect();
+            if (y < cRect.top + edgeSize && ac.scrollTop > 0) {
+              ac.scrollTop -= 6;
+            } else if (y > cRect.bottom - edgeSize && ac.scrollTop < ac.scrollHeight - ac.clientHeight) {
+              ac.scrollTop += 6;
+            }
+          }
+          // Always allow page-level scroll too
+          if (y < edgeSize) window.scrollBy(0, -6);
+          else if (y > window.innerHeight - edgeSize) window.scrollBy(0, 6);
+          dragState.scrollRAF = requestAnimationFrame(scrollLoop);
+        };
+        dragState.scrollRAF = requestAnimationFrame(scrollLoop);
+
         try { item.setPointerCapture(e.pointerId); } catch (_) {}
       }, LONG_PRESS_MS);
-    });
+    }, sig);
 
     item.addEventListener('pointermove', e => {
       if (pressTimer && !activated) {
@@ -304,70 +411,161 @@ export function initItemDragDrop(container, {
       }
       if (!dragState || dragState.el !== item) return;
       e.preventDefault();
-      if (!dragState.clone) return;
-      dragState.clone.style.top = (e.clientY - dragState.offsetY) + 'px';
 
-      // Auto-scroll
-      const cRect = container.getBoundingClientRect();
-      const edge = 40;
-      if (e.clientY < cRect.top + edge && container.scrollTop > 0) container.scrollTop -= 5;
-      else if (e.clientY > cRect.bottom - edge && container.scrollTop < container.scrollHeight - container.clientHeight) container.scrollTop += 5;
+      // Move the fixed item with cursor
+      item.style.left = (e.clientX - dragState.offsetX) + 'px';
+      item.style.top = (e.clientY - dragState.offsetY) + 'px';
+      dragState.lastClientX = e.clientX;
+      dragState.lastClientY = e.clientY;
 
-      container.querySelectorAll(`${itemSelector}:not(.dragging)`).forEach(el => {
-        el.classList.remove('drag-over');
-        const r = el.getBoundingClientRect();
-        if (e.clientY >= r.top && e.clientY <= r.bottom) el.classList.add('drag-over');
+      const ph = dragState.placeholder;
+
+      // Determine active container (cross-container or original)
+      let activeContainer = dragState.activeContainer;
+      if (crossContainerSelector) {
+        const allContainers = Array.from(document.querySelectorAll(crossContainerSelector));
+        for (const c of allContainers) {
+          const r = c.getBoundingClientRect();
+          if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+            activeContainer = c;
+            break;
+          }
+        }
+        // If the cursor is between containers (e.g. over a header), also check
+        // if it's within the parent card's bounds — use that card's list container
+        if (activeContainer === dragState.activeContainer) {
+          for (const c of allContainers) {
+            const card = c.closest('.project-card, .list-bucket, .bucket-card');
+            if (card) {
+              const r = card.getBoundingClientRect();
+              if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+                activeContainer = c;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Container changed — move placeholder to new container
+      if (activeContainer !== dragState.activeContainer) {
+        // FLIP: capture old positions in previous container
+        const oldSiblings = itemsIn(dragState.activeContainer).filter(el => el !== item);
+        const oldRects = new Map();
+        oldSiblings.forEach(el => oldRects.set(el, el.getBoundingClientRect()));
+
+        // Move placeholder to new container
+        // crossOnly returning home: restore placeholder next to the fixed item
+        if (crossOnly && activeContainer === container) {
+          container.insertBefore(ph, item);
+        } else {
+          activeContainer.appendChild(ph);
+        }
+        dragState.activeContainer = activeContainer;
+
+        // FLIP: animate old container siblings
+        oldSiblings.forEach(el => {
+          const oldR = oldRects.get(el);
+          const newR = el.getBoundingClientRect();
+          const dy = oldR.top - newR.top;
+          if (Math.abs(dy) < 1) return;
+          el.style.transition = 'none';
+          el.style.transform = `translateY(${dy}px)`;
+          requestAnimationFrame(() => {
+            el.style.transition = 'transform 0.15s ease';
+            el.style.transform = '';
+          });
+        });
+      }
+
+      // crossOnly: skip within-container reorder when still in the original container
+      if (crossOnly && activeContainer === container) return;
+
+      // Find insertion point within active container — vertical only
+      // Clamp to the container's visible scroll area so the placeholder
+      // never lands among items scrolled out of view.
+      const cRect = activeContainer.getBoundingClientRect();
+      const siblings = itemsIn(activeContainer).filter(el => el !== item);
+      let insertBefore = null;
+      for (const sib of siblings) {
+        const r = sib.getBoundingClientRect();
+        if (r.top > cRect.bottom) { insertBefore = sib; break; }  // below visible area
+        if (r.bottom < cRect.top) continue;                        // above visible area
+        const midY = r.top + r.height / 2;
+        if (e.clientY < midY) { insertBefore = sib; break; }
+      }
+
+      // "Already at target" check
+      if (insertBefore) {
+        if (ph.nextElementSibling === insertBefore) return;
+      } else {
+        let afterPh = ph.nextElementSibling;
+        while (afterPh === item) afterPh = afterPh.nextElementSibling;
+        if (!afterPh || !afterPh.matches?.(itemSelector)) return;
+      }
+
+      // FLIP: capture old positions
+      const rects = new Map();
+      siblings.forEach(el => rects.set(el, el.getBoundingClientRect()));
+
+      // Move placeholder
+      if (insertBefore) {
+        activeContainer.insertBefore(ph, insertBefore);
+      } else {
+        activeContainer.appendChild(ph);
+      }
+
+      // Keep placeholder visible inside scrollable container
+      const phR = ph.getBoundingClientRect();
+      if (phR.top < cRect.top) {
+        activeContainer.scrollTop -= (cRect.top - phR.top);
+      } else if (phR.bottom > cRect.bottom) {
+        activeContainer.scrollTop += (phR.bottom - cRect.bottom);
+      }
+
+      // FLIP: animate from old to new
+      siblings.forEach(el => {
+        const oldR = rects.get(el);
+        const newR = el.getBoundingClientRect();
+        const dy = oldR.top - newR.top;
+        if (Math.abs(dy) < 1) return;
+        el.style.transition = 'none';
+        el.style.transform = `translateY(${dy}px)`;
+        requestAnimationFrame(() => {
+          el.style.transition = 'transform 0.15s ease';
+          el.style.transform = '';
+        });
       });
-    });
+    }, sig);
 
-    item.addEventListener('pointerup', () => { void finishDrag({ complete: true }); });
-    item.addEventListener('pointercancel', cancelDrag);
-    item.addEventListener('lostpointercapture', cancelDrag);
+    item.addEventListener('pointerup', () => { void finishDrag({ complete: true }); }, sig);
+    item.addEventListener('pointercancel', cancelDrag, sig);
+    item.addEventListener('lostpointercapture', cancelDrag, sig);
   });
 }
 
 // ===================================================================
-// REORDER ITEMS — splice array, move DOM, sync to Supabase
+// REORDER ITEMS — update sort_order from ordered ID array
 // ===================================================================
-// Replaces reorderTasks (projects) and reorderTodosInCategory (todos)
 export async function reorderItems({
-  items,
+  orderedIds,
   allItems,
-  draggedId,
-  targetId,
-  container,
-  itemSelector,
-  idAttr,
   tableName,
   reinitFn,
 }) {
-  const draggedIdx = items.findIndex(t => t.id === draggedId);
-  const targetIdx = items.findIndex(t => t.id === targetId);
-  if (draggedIdx === -1 || targetIdx === -1) return;
-
-  const [dragged] = items.splice(draggedIdx, 1);
-  items.splice(targetIdx, 0, dragged);
-
-  items.forEach((t, i) => { t.sort_order = i; });
-  items.forEach(t => {
-    const st = allItems.find(x => x.id === t.id);
-    if (st) st.sort_order = t.sort_order;
+  // Update sort_order in-memory
+  orderedIds.forEach((id, i) => {
+    const item = allItems.find(x => x.id === id);
+    if (item) item.sort_order = i;
   });
-
-  const domItems = Array.from(container.querySelectorAll(itemSelector));
-  const ordered = items.map(t => domItems.find(el => el.dataset[idAttr] === t.id)).filter(Boolean);
-  ordered.forEach(el => container.appendChild(el));
 
   if (reinitFn) reinitFn();
   showToast(t('toast.reordered'), 'success');
 
-  Promise.all(items.map((t, i) =>
-    db.from(tableName).update({ sort_order: i }).eq('id', t.id)
+  db.batch(() => Promise.all(
+    orderedIds.map((id, i) => db.from(tableName).update({ sort_order: i }).eq('id', id))
   )).catch(e => console.error(`${tableName} reorder sync failed:`, e));
 }
-
-
-// ===================================================================
 // SCROLL TO & HIGHLIGHT
 // ===================================================================
 export function scrollToAndHighlight(element, color, durationMs = 1500) {
@@ -534,5 +732,274 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
         }
       }
     });
+  });
+}
+
+
+// ===================================================================
+// NAV BUTTON REORDER — sortable drag-and-drop for category-nav-btn pills
+// ===================================================================
+// Shared across all pages. Long-press a nav pill to pick it up; other
+// pills slide apart with CSS transitions to show where it will land.
+// Drop to commit. `onReorder(orderedIds)` receives the full new order.
+export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = {}) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const allBtns = () => Array.from(container.querySelectorAll('.category-nav-btn'));
+  if (allBtns().length < 2) return;
+
+  let dragState = null;
+
+  const draggableBtns = allBtns().filter(b => {
+    const id = b.dataset[idAttr];
+    return id && !(skipIds && skipIds.has(id));
+  });
+
+  draggableBtns.forEach(btn => {
+    const entityId = btn.dataset[idAttr];
+    let pressTimer = null;
+    let startX = 0, startY = 0;
+    let activated = false;
+    let preventScroll = null;
+    let unregisterCleanup = null;
+
+    const unregisterGlobalCleanup = () => {
+      if (unregisterCleanup) { unregisterCleanup(); unregisterCleanup = null; }
+    };
+
+    const cleanup = (wasDrag) => {
+      unregisterGlobalCleanup();
+      if (preventScroll) { btn.removeEventListener('touchmove', preventScroll); preventScroll = null; }
+      document.body.style.userSelect = '';
+      document.body.style.webkitUserSelect = '';
+      if (wasDrag) window.getSelection()?.removeAllRanges();
+    };
+
+    const finishDrag = async ({ complete = true } = {}) => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      const active = dragState && dragState.el === btn ? dragState : null;
+      if (!active) { cleanup(false); return; }
+
+      const ph = active.placeholder;
+
+      // Build final order from placeholder position
+      let finalOrder;
+      if (complete && ph?.parentNode === container) {
+        finalOrder = [];
+        for (const child of container.children) {
+          if (child === ph) finalOrder.push(entityId);
+          else if (child === btn) continue;
+          else if (child.classList.contains('category-nav-btn')) {
+            finalOrder.push(child.dataset[idAttr]);
+          }
+        }
+      }
+
+      // Suppress the click event the browser fires after pointerup —
+      // without this, delegation.js would navigate to the category.
+      // Self-cleans after 400ms so it never eats a later deliberate click.
+      function suppress(ev) {
+        ev.stopPropagation();
+        ev.preventDefault();
+        document.removeEventListener('click', suppress, true);
+        clearTimeout(suppressTimer);
+      }
+      document.addEventListener('click', suppress, true);
+      const suppressTimer = setTimeout(() => {
+        document.removeEventListener('click', suppress, true);
+      }, 400);
+
+      // Move button to placeholder's DOM position, then remove placeholder.
+      // This way the button reappears at its new spot — no flash at the old one.
+      if (ph?.parentNode === container) container.insertBefore(btn, ph);
+      if (ph?.parentNode) ph.remove();
+      btn.style.cssText = active.originalCssText || '';
+      btn.classList.remove('nav-btn-dragging');
+      allBtns().forEach(b => { b.style.transition = ''; b.style.transform = ''; });
+
+      try {
+        if (active.pointerId && btn.hasPointerCapture?.(active.pointerId)) btn.releasePointerCapture(active.pointerId);
+      } catch (_) {}
+
+      const changed = complete && finalOrder && finalOrder.join('\x00') !== active.initialOrder.join('\x00');
+
+      dragState = null;
+      setDragging(false);
+      cleanup(true);
+
+      if (changed) {
+        try { await onReorder(finalOrder); }
+        catch (e) { console.error('Nav btn reorder failed:', e); }
+      }
+    };
+
+    const cancelDrag = () => { void finishDrag({ complete: false }); };
+
+    // Prevent native HTML drag ghost on touch/mouse
+    btn.addEventListener('dragstart', e => e.preventDefault());
+    // Prevent long-press context menu on mobile
+    btn.addEventListener('contextmenu', e => { if (activated) e.preventDefault(); });
+
+    btn.addEventListener('pointerdown', e => {
+      if (dragState) return;
+      if (e.button !== 0) return;
+      startX = e.clientX;
+      startY = e.clientY;
+      activated = false;
+
+      unregisterGlobalCleanup();
+      unregisterCleanup = registerDragCleanup(({ complete }) => {
+        void finishDrag({ complete });
+      });
+
+      preventScroll = (ev) => { if (activated) ev.preventDefault(); };
+      btn.addEventListener('touchmove', preventScroll, { passive: false });
+
+      pressTimer = setTimeout(() => {
+        activated = true;
+        e.preventDefault();
+        setDragging(true);
+        document.body.style.userSelect = 'none';
+        document.body.style.webkitUserSelect = 'none';
+
+        const rect = btn.getBoundingClientRect();
+        const initialOrder = allBtns().map(b => b.dataset[idAttr]).filter(Boolean);
+        const originalCssText = btn.style.cssText; // preserve --cat-color etc.
+
+        // Invisible placeholder takes the button's space in flex flow
+        const placeholder = document.createElement('span');
+        placeholder.className = 'nav-btn-placeholder';
+        placeholder.style.cssText = `display:inline-block;width:${rect.width}px;height:${rect.height}px;flex-shrink:0;visibility:hidden;`;
+        container.insertBefore(placeholder, btn);
+
+        // The actual button goes position:fixed — user drags the real thing
+        // (same colors, font, styling — no clone needed).
+        // It stays at its DOM position so pointer capture is never broken.
+        btn.style.position = 'fixed';
+        btn.style.left = rect.left + 'px';
+        btn.style.top = rect.top + 'px';
+        btn.style.width = rect.width + 'px';
+        btn.style.boxSizing = 'border-box';
+        btn.style.zIndex = '1000';
+        btn.style.transition = 'none';
+        btn.style.margin = '0';
+        btn.classList.add('nav-btn-dragging');
+
+        dragState = {
+          el: btn,
+          id: entityId,
+          offsetX: e.clientX - rect.left,
+          offsetY: e.clientY - rect.top,
+          pointerId: e.pointerId,
+          placeholder,
+          initialOrder,
+          originalCssText,
+        };
+
+        try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+      }, LONG_PRESS_MS);
+    });
+
+    btn.addEventListener('pointermove', e => {
+      if (pressTimer && !activated) {
+        if (Math.abs(e.clientX - startX) > DRAG_THRESHOLD || Math.abs(e.clientY - startY) > DRAG_THRESHOLD) {
+          clearTimeout(pressTimer); pressTimer = null; cleanup(false);
+        }
+        return;
+      }
+      if (!dragState || dragState.el !== btn) return;
+      e.preventDefault();
+
+      // Button follows cursor instantly (transition:none already set)
+      btn.style.left = (e.clientX - dragState.offsetX) + 'px';
+      btn.style.top = (e.clientY - dragState.offsetY) + 'px';
+
+      // Determine insertion point — supports multi-row flex wrapping
+      const ph = dragState.placeholder;
+      const siblings = allBtns().filter(b => b !== btn);
+
+      // Group siblings into rows by vertical midpoint
+      const rows = [];
+      for (const sib of siblings) {
+        const r = sib.getBoundingClientRect();
+        const midY = r.top + r.height / 2;
+        let row = rows.find(rw => Math.abs(midY - rw.midY) < r.height * 0.6);
+        if (row) { row.items.push({ el: sib, rect: r }); }
+        else { rows.push({ midY, items: [{ el: sib, rect: r }] }); }
+      }
+      rows.sort((a, b) => a.midY - b.midY);
+      rows.forEach(rw => rw.items.sort((a, b) => a.rect.left - b.rect.left));
+
+      // Find closest row to cursor Y
+      let targetRow = rows[0];
+      if (rows.length > 1) {
+        let minDist = Infinity;
+        for (const rw of rows) {
+          const d = Math.abs(e.clientY - rw.midY);
+          if (d < minDist) { minDist = d; targetRow = rw; }
+        }
+      }
+
+      // Within that row, find insertion by X midpoint
+      let insertBefore = null;
+      if (targetRow) {
+        for (const item of targetRow.items) {
+          if (e.clientX < item.rect.left + item.rect.width / 2) {
+            insertBefore = item.el; break;
+          }
+        }
+        // Past all items in row → insert before first item of next row, or end
+        if (!insertBefore) {
+          const ri = rows.indexOf(targetRow);
+          if (ri < rows.length - 1) insertBefore = rows[ri + 1].items[0].el;
+        }
+      }
+
+      // Check if placeholder is already at the target position
+      if (insertBefore) {
+        if (ph.nextElementSibling === insertBefore) return;
+      } else {
+        // "end" means no visible element after placeholder (btn is fixed, ignore it)
+        let afterPh = ph.nextElementSibling;
+        while (afterPh === btn) afterPh = afterPh.nextElementSibling;
+        if (!afterPh) return;
+      }
+
+      // FLIP: clear stale transforms, snapshot current positions
+      siblings.forEach(b => { b.style.transition = 'none'; b.style.transform = ''; });
+      const oldRects = new Map();
+      siblings.forEach(b => oldRects.set(b, b.getBoundingClientRect()));
+
+      // Move placeholder (only this moves — btn stays put in DOM)
+      if (insertBefore) {
+        container.insertBefore(ph, insertBefore);
+      } else {
+        // End of list — append so ph is the last flex item
+        // (btn is position:fixed, out of flex flow, so DOM order after it is fine)
+        container.appendChild(ph);
+      }
+
+      // FLIP: inverse-transform then transition to zero
+      siblings.forEach(b => {
+        const oldR = oldRects.get(b);
+        const newR = b.getBoundingClientRect();
+        const dx = oldR.left - newR.left;
+        const dy = oldR.top - newR.top;
+        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+          b.style.transform = `translate(${dx}px,${dy}px)`;
+        }
+      });
+      container.offsetHeight; // force reflow before enabling transitions
+      siblings.forEach(b => {
+        if (b.style.transform) {
+          b.style.transition = 'transform 0.15s ease';
+          b.style.transform = '';
+        }
+      });
+    });
+
+    btn.addEventListener('pointerup', () => { void finishDrag({ complete: true }); });
+    btn.addEventListener('pointercancel', cancelDrag);
+    btn.addEventListener('lostpointercapture', cancelDrag);
   });
 }

@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
-import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
+import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
@@ -237,6 +237,7 @@ function renderTodos() {
 
   // Render category navigation buttons in toolbar
   renderCategoryToolbarButtons(categoryIdList);
+  initTodoNavBtnReorder();
 
   let html = '';
   for (const catId of categoryIdList) {
@@ -263,9 +264,6 @@ function renderTodos() {
       if (list) initTodoHoverDelay(list);
     }
   });
-
-  // Init drag-and-drop for category cards themselves
-  initCategoryDragDrop();
 
   balanceGrid(grid);
 }
@@ -1018,160 +1016,57 @@ function initTodoDragDropForCard(catId) {
     itemSelector: '.todo-item:not(.todo-done)',
     excludeSelector: 'button, a, input, textarea, select, .todo-actions',
     idAttr: 'todoId',
-    onReorder: async (draggedId, targetId) => {
-      const catKey = container.dataset.category || '';
-      const filtered = getFilteredTodosForCategory(catKey);
-      await reorderItems({
-        items: filtered,
-        allItems: allTodos,
-        draggedId,
-        targetId,
-        container,
-        itemSelector: '.todo-item',
-        idAttr: 'todoId',
-        tableName: 'todos',
-        reinitFn: () => initTodoDragDropForCard(catId),
-      });
+    crossContainerSelector: '.todo-cat-list:not(.habit-list)',
+    getContainerId: (el) => el.dataset.category,
+    onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
+      const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;
+      if (crossMove) {
+        const movedItem = allTodos.find(x => x.id === draggedId);
+        if (!movedItem) return;
+        movedItem.category_id = targetContainerId;
+        orderedIds.forEach((id, i) => { const it = allTodos.find(x => x.id === id); if (it) it.sort_order = i; });
+        const sourceItems = allTodos
+          .filter(x => catIdForTodo(x) === sourceContainerId && x.id !== draggedId)
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        sourceItems.forEach((it, i) => { it.sort_order = i; });
+        await state.db.batch(async () => {
+          await state.db.from('todos').update({ category_id: targetContainerId }).eq('id', draggedId);
+          await Promise.all(orderedIds.map((id, i) => state.db.from('todos').update({ sort_order: i }).eq('id', id)));
+          await Promise.all(sourceItems.map((it, i) => state.db.from('todos').update({ sort_order: i }).eq('id', it.id)));
+        });
+        await refreshTodos();
+        showToast(t('toast.moved'), 'success');
+      } else {
+        await reorderItems({
+          orderedIds,
+          allItems: allTodos,
+          tableName: 'todos',
+          reinitFn: () => initTodoDragDropForCard(catId),
+        });
+      }
     },
   });
 }
 
 
 // ===================================================================
-// CATEGORY CARD DRAG & DROP REORDER
+// NAV BUTTON REORDER
 // ===================================================================
-function initCategoryDragDrop() {
-  const grid = document.getElementById('todoCategoryGrid');
-  if (!grid) return;
-  const cards = grid.querySelectorAll('.project-card');
-  let dragState = null;
-
-  cards.forEach(card => {
-    const category = card.dataset.category;
-    // General category (empty string) is not draggable
-    if (category === '' || category === undefined) return;
-    const header = card.querySelector('.todo-cat-header');
-    if (!header) return;
-
-    let pressTimer = null;
-    let startX = 0, startY = 0;
-    let activated = false;
-    let unregisterCleanup = null;
-
-    const unregisterGlobalCleanup = () => {
-      if (unregisterCleanup) {
-        unregisterCleanup();
-        unregisterCleanup = null;
-      }
-    };
-
-    const finishDrag = async ({ complete = true } = {}) => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      unregisterGlobalCleanup();
-      const activeState = dragState && dragState.el === card ? dragState : null;
-      if (!activeState) return;
-
-      if (activeState.clone) activeState.clone.remove();
-      card.classList.remove('dragging');
-      unmarkDragSource(card);
-      let targetCategory = null;
-      grid.querySelectorAll('.project-card').forEach(el => {
-        if (el.classList.contains('drag-over')) { targetCategory = el.dataset.category || ''; }
-        el.classList.remove('drag-over');
-      });
-      const draggedCategory = activeState.category;
-      try {
-        if (activeState.pointerId && header.hasPointerCapture?.(activeState.pointerId)) header.releasePointerCapture(activeState.pointerId);
-      } catch (_) {}
-      dragState = null;
-      setDragging(false);
-      window.getSelection()?.removeAllRanges();
-      if (complete && targetCategory !== null && targetCategory !== draggedCategory && draggedCategory !== '' && targetCategory !== '') {
-        await reorderCategories(draggedCategory, targetCategory);
-      }
-    };
-
-    const cancelDrag = () => {
-      void finishDrag({ complete: false });
-    };
-
-    header.addEventListener('pointerdown', e => {
-      if (e.target.closest('button, a, input, textarea, select, .todo-cat-header-actions')) return;
-      if (dragState) return;
-      startX = e.clientX;
-      startY = e.clientY;
-      activated = false;
-
-      unregisterGlobalCleanup();
-      unregisterCleanup = registerDragCleanup(({ complete }) => {
-        void finishDrag({ complete });
-      });
-
-      pressTimer = setTimeout(() => {
-        activated = true;
-        const rect = card.getBoundingClientRect();
-        setDragging(true);
-        dragState = { el: card, category, offsetY: e.clientY - rect.top, offsetX: e.clientX - rect.left, clone: null, pointerId: e.pointerId };
-        const clone = markDragClone(card.cloneNode(true));
-        clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;opacity:0.85;z-index:1000;pointer-events:none;box-shadow:0 4px 20px rgba(0,0,0,0.3);border-radius:12px;border:2px solid var(--accent);transition:none;`;
-        document.body.appendChild(clone);
-        dragState.clone = clone;
-        markDragSource(card);
-        card.classList.add('dragging');
-        try { header.setPointerCapture(e.pointerId); } catch (_) {}
-      }, LONG_PRESS_MS);
-    });
-
-    header.addEventListener('pointermove', e => {
-      if (pressTimer && !activated) {
-        if (Math.abs(e.clientX - startX) > DRAG_THRESHOLD || Math.abs(e.clientY - startY) > DRAG_THRESHOLD) {
-          clearTimeout(pressTimer); pressTimer = null; unregisterGlobalCleanup();
-        }
-        return;
-      }
-      if (!dragState || dragState.el !== card) return;
-      e.preventDefault();
-      if (!dragState.clone) return;
-      dragState.clone.style.top = (e.clientY - dragState.offsetY) + 'px';
-      dragState.clone.style.left = (e.clientX - dragState.offsetX) + 'px';
-      grid.querySelectorAll('.project-card:not(.dragging)').forEach(el => {
-        el.classList.remove('drag-over');
-        const r = el.getBoundingClientRect();
-        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) el.classList.add('drag-over');
-      });
-    });
-
-    header.addEventListener('pointerup', () => { void finishDrag({ complete: true }); });
-    header.addEventListener('pointercancel', cancelDrag);
-    header.addEventListener('lostpointercapture', cancelDrag);
+function initTodoNavBtnReorder() {
+  const skipIds = new Set();
+  if (_sharedCatId) skipIds.add(_sharedCatId);
+  initNavBtnReorder('todoNavButtons', {
+    idAttr: 'category',
+    skipIds,
+    async onReorder(orderedIds) {
+      const reorderable = orderedIds.filter(id => id !== _sharedCatId);
+      await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('todo_categories').update({ sort_order: i }).eq('id', id))));
+      await loadTodoCategories();
+      renderTodos();
+      showToast(t('toast.reordered'), 'success');
+    },
   });
 }
-
-async function reorderCategories(draggedCatId, targetCatId) {
-  const grid = document.getElementById('todoCategoryGrid');
-  const catRows = Array.from(_todoCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
-  const draggedIdx = catRows.findIndex(c => c.id === draggedCatId);
-  const targetIdx = catRows.findIndex(c => c.id === targetCatId);
-  if (draggedIdx === -1 || targetIdx === -1) return;
-  const [dragged] = catRows.splice(draggedIdx, 1);
-  catRows.splice(targetIdx, 0, dragged);
-
-  // Update sort_order in DB
-  const updates = catRows.map((cat, i) => state.db.from('todo_categories').update({ sort_order: i }).eq('id', cat.id));
-  await Promise.all(updates);
-
-  // Move DOM elements instead of full re-render
-  catRows.forEach(cat => {
-    const card = grid.querySelector(`.project-card[data-category="${CSS.escape(cat.id)}"]`);
-    if (card) grid.appendChild(card);
-  });
-
-  await loadTodoCategories();
-  initCategoryDragDrop();
-  showToast(t('toast.reordered'), 'success');
-}
-
-
 
 function initTodoHoverDelay(container) {
   initItemHoverDelay(container, {

@@ -115,6 +115,7 @@ CREATE TABLE "public"."flashcard_notes" (
     "proposed_back" "text",
     "proposal_status" "text",
     "proposed_deck" "text",
+    "sort_order" integer DEFAULT 0,
     "owner_id" "uuid"
 );
 
@@ -1317,7 +1318,7 @@ DECLARE hdr TEXT; tok TEXT; h TEXT; BEGIN
   UPDATE agent_grants SET last_used_at = now() WHERE token_hash = h;
 END; $$;
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.573') ON CONFLICT ("key") DO UPDATE SET "value" = '1.573', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.608') ON CONFLICT ("key") DO UPDATE SET "value" = '1.608', "updated_at" = now();
 
 -- ── Seed protected category rows (ON CONFLICT safe for idempotent re-runs) ──
 -- owner_id is NULL here; trg_set_owner_id fills it on first auth'd INSERT.

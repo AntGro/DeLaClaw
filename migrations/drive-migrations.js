@@ -228,4 +228,13 @@ export const DRIVE_MIGRATIONS = {
       store.settings = store.settings.filter(s => s.key !== 'list_shortnames');
     }
   },
+
+  '1.608': {
+    description: 'Add sort_order to flashcard_notes',
+    migrate(store) {
+      for (const note of (store.flashcard_notes || [])) {
+        if (note.sort_order === undefined) note.sort_order = 0;
+      }
+    }
+  },
 };

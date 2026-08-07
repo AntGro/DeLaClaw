@@ -188,6 +188,8 @@ function getFilteredTodosForCategory(catId) {
     filtered = filtered.filter(t => !t.done && (!t.snooze_until || new Date(t.snooze_until) <= now));
   } else if (todoFilter === 'done') {
     filtered = filtered.filter(t => t.done);
+  } else if (todoFilter === 'snoozed') {
+    filtered = filtered.filter(t => !t.done && t.snooze_until && new Date(t.snooze_until) > now);
   } else if (todoFilter === 'outdated') {
     filtered = filtered.filter(t => isTodoOutdated(t));
   }
@@ -328,7 +330,7 @@ function renderCategoryCard(catId) {
 
   // Show active todos based on filter; done section always available as collapsible
   let displayActive, displayDone;
-  if (todoFilter === 'outdated') {
+  if (todoFilter === 'outdated' || todoFilter === 'snoozed') {
     displayActive = activeTodos;
     displayDone = [];
   } else {

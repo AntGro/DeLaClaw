@@ -3,7 +3,7 @@ import { initHero, showHero, hideHero, injectGateLogo } from './hero.js';
 import { t, getLang, setLang, nextLang } from './i18n.js';
 import { renderStorm, generateStorm, LOGO_DEFAULTS, animLoading, animLock, animUnlock } from './logo.js';
 import { LOGOS, LABELS } from './backend-logos.js';
-import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY, TAB_VISIBILITY_KEY, TAB_ORDER_KEY } from './state.js';
+import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY } from './state.js';
 import db from './db.js';
 import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
@@ -41,11 +41,7 @@ let _lastUpdatedTimer = null;
 const SCOPED_LS_KEYS = [
   'claw_cc_theme',
   'claw_cc_current_view',
-  'claw_cc_archived_projects',
-  'claw_cc_show_archived',
   'claw_cc_ideas',
-  'claw_cc_tab_visibility',
-  'claw_cc_tab_order',
 ];
 const ACTIVE_MODE_KEY = 'claw_cc_active_mode';
 
@@ -1610,6 +1606,9 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   updateArchiveToggleBtn();
   renderArchivedProjects();
 
+  // Load user settings from DB (before tab visibility / view restore)
+  await loadSettings();
+
   // Restore view early (before async refreshes) to avoid flash
   applyTabVisibility();
   const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'vestiaire', 'flashcards', 'lists'];
@@ -1649,8 +1648,6 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   await refreshAll();
 
-  // Load user settings from DB
-  await loadSettings();
   checkSchemaVersion();
   recordDailyVisit();
 
@@ -2711,34 +2708,28 @@ const ALL_TABS = [
 ];
 
 function getTabVisibility() {
-  try {
-    const raw = localStorage.getItem(TAB_VISIBILITY_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch { return null; }
+  return state.tabVisibility;
 }
 
 function saveTabVisibility(vis) {
-  localStorage.setItem(TAB_VISIBILITY_KEY, JSON.stringify(vis));
+  state.tabVisibility = vis;
+  _persistSetting('tab_visibility', JSON.stringify(vis));
 }
 
 function isTabVisible(key) {
-  const vis = getTabVisibility();
+  const vis = state.tabVisibility;
   if (!vis) return true; // all visible by default
   return vis[key] !== false;
 }
 
 // ── Tab Order ──
 function getTabOrder() {
-  try {
-    const raw = localStorage.getItem(TAB_ORDER_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch { return null; }
+  return state.tabOrder;
 }
 
 function saveTabOrder(order) {
-  localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(order));
+  state.tabOrder = order;
+  _persistSetting('tab_order', JSON.stringify(order));
 }
 
 function getOrderedTabs() {
@@ -2940,6 +2931,14 @@ function toggleTabConfigItem(key) {
 
 // ── AI Settings ──
 
+// Fire-and-forget upsert to settings table (used by tab config + project archive)
+function _persistSetting(key, value) {
+  if (!state.db?.connected) return;
+  state.db.from('settings').upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' }).then(({ error }) => {
+    if (error) console.warn(`Could not save setting ${key}:`, error.message);
+  });
+}
+
 async function loadSettings() {
   try {
     const { data, error } = await state.db.from('settings').select('key,value');
@@ -2949,6 +2948,10 @@ async function loadSettings() {
         if (row.key === 'nvidia_api_key') state.nvidiaApiKey = row.value || null;
         if (row.key === 'nvidia_model') state.nvidiaModel = row.value || 'meta/llama-3.1-8b-instruct';
         if (row.key === 'schema_version') state.dbSchemaVersion = row.value || '0.00';
+        if (row.key === 'tab_visibility') { try { state.tabVisibility = JSON.parse(row.value); } catch { /* keep null */ } }
+        if (row.key === 'tab_order') { try { state.tabOrder = JSON.parse(row.value); } catch { /* keep null */ } }
+        if (row.key === 'archived_project_ids') { try { state.archivedProjectIds = JSON.parse(row.value) || []; } catch { /* keep [] */ } }
+        if (row.key === 'show_archived') state.showArchived = row.value === 'true';
       }
     }
   } catch (e) { console.warn('Could not load settings:', e.message); }

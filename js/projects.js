@@ -1,6 +1,6 @@
 import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
-import state, { ARCHIVED_PROJECTS_KEY, SHOW_ARCHIVED_KEY, MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
+import state, { MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction,
          updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
 import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
@@ -14,16 +14,27 @@ import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, 
 let projectSearchQuery = '';
 let projectFilter = 'active';
 
-function getArchivedProjectIds() {
-  try { return JSON.parse(localStorage.getItem(ARCHIVED_PROJECTS_KEY) || '[]'); } catch { return []; }
+// Fire-and-forget upsert to settings table
+function _persistProjectSetting(key, value) {
+  if (!state.db?.connected) return;
+  state.db.from('settings').upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' }).then(({ error }) => {
+    if (error) console.warn(`Could not save setting ${key}:`, error.message);
+  });
 }
-function saveArchivedProjectIds(ids) { localStorage.setItem(ARCHIVED_PROJECTS_KEY, JSON.stringify(ids)); }
 
-function isShowArchived() { return localStorage.getItem(SHOW_ARCHIVED_KEY) === 'true'; }
+function getArchivedProjectIds() {
+  return state.archivedProjectIds || [];
+}
+function saveArchivedProjectIds(ids) {
+  state.archivedProjectIds = ids;
+  _persistProjectSetting('archived_project_ids', JSON.stringify(ids));
+}
+
+function isShowArchived() { return state.showArchived === true; }
 
 function toggleShowArchived() {
-  const current = isShowArchived();
-  localStorage.setItem(SHOW_ARCHIVED_KEY, String(!current));
+  state.showArchived = !state.showArchived;
+  _persistProjectSetting('show_archived', String(state.showArchived));
   updateArchiveToggleBtn();
   renderArchivedProjects();
   updateArchiveToggleBtn();

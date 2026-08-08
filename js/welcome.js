@@ -3,7 +3,7 @@
 // ===================================================================
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
-import state, { ARCHIVED_PROJECTS_KEY } from './state.js';
+import state from './state.js';
 import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText } from './item-utils.js';
 import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName } from './habits.js';
@@ -94,7 +94,7 @@ async function refreshWelcome() {
   wTexts = getTexts();
   wTextProgress = getTextProgress();
   wBirthdays = state.allBirthdays;
-  const archivedIds = (() => { try { return JSON.parse(localStorage.getItem(ARCHIVED_PROJECTS_KEY) || '[]'); } catch { return []; } })();
+  const archivedIds = state.archivedProjectIds || [];
   wProjectCount = state.PROJECTS.filter(p => !archivedIds.includes(p.id)).length;
   wVestiaireCount = state.allVestiaire.length;
 }

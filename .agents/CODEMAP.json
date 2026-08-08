@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "1.611",
-    "generated_at": "2026-08-07T23:52:37.586Z",
+    "version": "1.617",
+    "generated_at": "2026-08-08T10:55:06.905Z",
     "loc_total": 28842,
     "files_scanned": 38,
     "tier": "T2-enriched",
@@ -926,7 +926,7 @@
       "guards": [
         "pendingSet"
       ],
-      "esc_count": 41,
+      "esc_count": 40,
       "i18n_count": 70,
       "window_exposed": [
         "sharingCreateGroup",

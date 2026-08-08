@@ -192,6 +192,15 @@ Default Supabase confirmation links work; custom token templates are optional. T
 - `main.js` `saveStayConnectedCreds()` strips anon key for local/demo/drive, rejects `service_role` keys.
 - `drive.js` tokens scoped by `clientId`, dedup pending promise.
 
+### Defense: email guard (sec-006, 1.484+)
+
+Prevents a second person from authenticating on a single-owner Supabase instance, which would split data or grant access to someone else's rows.
+
+- **Table:** `auth_email_guard` — single row, `email_hash TEXT PRIMARY KEY, created_at TIMESTAMPTZ`, no RLS (must be readable before authentication).
+- **Grants:** `SELECT` to anon, `SELECT + INSERT` to authenticated.
+- **Flow:** after first successful magic-link verification, `setEmailGuard()` stores `SHA-256(email.lower().trim())`. On every subsequent login attempt, `checkEmailGuard()` compares the entered email's hash against the stored one _before_ `sendMagicLink()` fires. Mismatch → magic link never sent, user sees an error.
+- **Recovery:** there is no UI to change the guarded email. If the owner loses access to their email, the `auth_email_guard` row must be deleted directly in the database.
+
 ## Service worker
 
 `sw.js` implements a **network-first** strategy for all requests:

@@ -19,7 +19,7 @@
 
 import state, { STAY_CONNECTED_KEY } from './state.js';
 import { t } from './i18n.js';
-import { esc, showToast, showConfirmAction, getSupabaseProjectRef, buildAuthSteps } from './utils.js';
+import { esc, escQ, showToast, showConfirmAction, getSupabaseProjectRef, buildAuthSteps } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { LOGOS } from './backend-logos.js';
 import { decodeInviteEnvelope } from './sharing-envelope.js';
@@ -282,7 +282,7 @@ function showInviteCodeModal(name, code, isNewGroup) {
     <h2>${lucideIcon('key', 20)} ${title}</h2>
     <p>${hint}</p>
     <div class="sharing-invite-link-box sharing-invite-code-box">
-      <textarea id="sharingInviteCodeInput" class="sharing-code-textarea" rows="4" readonly data-action="select-all-on-click">${esc(code)}</textarea>
+      <input id="sharingInviteCodeInput" class="sharing-code-input" type="text" readonly value="${escQ(code)}" data-action="select-all-on-click">
       <button class="sharing-invite-btn" data-action="sharing-copy-code-value">${lucideIcon('copy', 14)} ${t('sharing.copy')}</button>
     </div>
     ${warn}

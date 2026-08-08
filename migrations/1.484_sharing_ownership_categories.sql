@@ -141,8 +141,9 @@ CREATE TABLE IF NOT EXISTS auth_email_guard (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
-GRANT SELECT ON auth_email_guard TO anon;
-GRANT SELECT, INSERT ON auth_email_guard TO authenticated;
+ALTER TABLE auth_email_guard ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_read" ON auth_email_guard FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "authenticated_insert" ON auth_email_guard FOR INSERT TO authenticated WITH CHECK (true);
 
 -- Category tables
 CREATE TABLE IF NOT EXISTS todo_categories (
@@ -734,11 +735,35 @@ $$;
 
 CREATE OR REPLACE FUNCTION leave_group(p_token text)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+DECLARE
+  v_group_id text;
+  v_member_id text;
+  v_creator_id text;
 BEGIN
-  DELETE FROM sharing_members
+  -- Find the leaving member
+  SELECT group_id, member_id INTO v_group_id, v_member_id
+  FROM sharing_members
   WHERE token_hash = encode(digest(p_token::text, 'sha256'::text), 'hex'::text)
     AND role != 'creator'
     AND joined_at IS NOT NULL AND revoked_at IS NULL;
+
+  IF v_group_id IS NULL THEN RETURN; END IF;
+
+  -- Find the group creator
+  SELECT member_id INTO v_creator_id
+  FROM sharing_members
+  WHERE group_id = v_group_id AND role = 'creator';
+
+  -- Reassign items to creator before deleting member (FK constraint)
+  IF v_creator_id IS NOT NULL THEN
+    UPDATE sharing_items
+    SET created_by = v_creator_id
+    WHERE group_id = v_group_id AND created_by = v_member_id;
+  END IF;
+
+  -- Now safe to delete
+  DELETE FROM sharing_members
+  WHERE group_id = v_group_id AND member_id = v_member_id;
 END;
 $$;
 

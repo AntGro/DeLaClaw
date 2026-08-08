@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-08-08T10:55:06.905Z from 38 modules (v1.617). Total LOC 28842. Do not hand-edit.
+> Generated 2026-08-08T16:41:02.894Z from 38 modules (v1.619). Total LOC 28830. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -30,7 +30,7 @@
 | main | 4542 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:36,guard+pendingSet,window:8 |
 | i18n | 2163 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
 | sharing-drive | 1399 | - | sharing-envelope,utils | main.js,sharing.js | - |
-| sharing-supabase | 1315 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
+| sharing-supabase | 1303 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
 | sharing-ui | 1162 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:40,pendingSet,window:8 |
 | item-utils | 1006 | - | db,i18n,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | utils | 922 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:5 |

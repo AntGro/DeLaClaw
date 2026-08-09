@@ -234,8 +234,8 @@ function renderListCard(list, items, idx) {
 
   // Quick-add input — not shown for the auto-managed Shared list
   const quickAddHtml = isSharedList ? '' : `<div class="list-quick-add">
-    <input type="text" class="list-quick-input" placeholder="${esc(t('lists.add_item'))}" maxlength="2000"
-      data-action="quick-add-input" data-list-id="${esc(list.id)}">
+    <textarea class="list-quick-input" placeholder="${esc(t('lists.add_item'))}" maxlength="2000"
+      data-action="quick-add-input" data-list-id="${esc(list.id)}" rows="1" style="resize:none;overflow:hidden;"></textarea>
     <button class="list-quick-add-btn" data-action="quick-add-list-item" data-list-id="${esc(list.id)}" title="${esc(t('lists.add_item'))}">${lucideIcon('plus', 16)}</button>
     ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-list-item-from-add" data-list-id="${esc(list.id)}" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
   </div>`;
@@ -630,6 +630,7 @@ async function quickAddListItem(inputEl, listId) {
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
   inputToUse.value = '';
+  if (inputToUse.tagName === 'TEXTAREA') { inputToUse.style.height = ''; }
   showToast(t('toast.added'), 'success');
   await refreshLists();
 }
@@ -1260,6 +1261,21 @@ async function copyListItemToPersonal(id, el) {
   }
 }
 window.copyListItemToPersonal = copyListItemToPersonal;
+
+// Auto-resize list quick-add textareas
+function autoResizeListInput(ta) {
+  ta.style.height = '0';
+  const newHeight = Math.min(ta.scrollHeight, 120);
+  ta.style.height = newHeight + 'px';
+  ta.style.overflowY = ta.scrollHeight > 120 ? 'auto' : 'hidden';
+}
+window.autoResizeListInput = autoResizeListInput;
+
+document.addEventListener('input', e => {
+  if (e.target.tagName === 'TEXTAREA' && e.target.classList.contains('list-quick-input')) {
+    autoResizeListInput(e.target);
+  }
+});
 
 export { refreshLists, renderLists, initListModals, syncSharedListItems };
 

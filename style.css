@@ -1750,7 +1750,7 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .list-item-actions.visible{max-width:120px;opacity:1;pointer-events:auto;}
 .list-item-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;}
 .list-item-actions button:hover{background:var(--surface2);}
-.list-quick-add{padding:10px 16px 10px;display:flex;gap:6px;align-items:center;}
+.list-quick-add{padding:10px 16px 10px;display:flex;gap:6px;align-items:flex-end;}
 .list-quick-input{flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.84rem;font-family:inherit;line-height:1.4;}
 .list-quick-input:focus{outline:none;border-color:var(--accent);}
 .list-quick-add-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;width:34px;height:34px;padding:0;cursor:pointer;color:var(--muted);transition:all 0.15s;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0;}

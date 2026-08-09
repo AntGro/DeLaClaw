@@ -234,7 +234,7 @@ function renderTodos() {
   const categoryIdList = catRows.map(c => c.id);
 
   // Dynamically include the Shared deck if any received items exist
-  const hasSharedItems = allTodos.some(t => t.category_id === _sharedCatId || t.category === SHARED_CATEGORY);
+  const hasSharedItems = allTodos.some(t => catIdForTodo(t) === _sharedCatId);
   if (hasSharedItems && _sharedCatId) categoryIdList.unshift(_sharedCatId);
 
   // Render category navigation buttons in toolbar
@@ -1026,13 +1026,15 @@ function initTodoDragDropForCard(catId) {
         const movedItem = allTodos.find(x => x.id === draggedId);
         if (!movedItem) return;
         movedItem.category_id = targetContainerId;
+        const targetCatName = _todoCatMap.get(targetContainerId)?.name ?? '';
+        movedItem.category = targetCatName;
         orderedIds.forEach((id, i) => { const it = allTodos.find(x => x.id === id); if (it) it.sort_order = i; });
         const sourceItems = allTodos
           .filter(x => catIdForTodo(x) === sourceContainerId && x.id !== draggedId)
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
         sourceItems.forEach((it, i) => { it.sort_order = i; });
         await state.db.batch(async () => {
-          await state.db.from('todos').update({ category_id: targetContainerId }).eq('id', draggedId);
+          await state.db.from('todos').update({ category_id: targetContainerId, category: targetCatName }).eq('id', draggedId);
           await Promise.all(orderedIds.map((id, i) => state.db.from('todos').update({ sort_order: i }).eq('id', id)));
           await Promise.all(sourceItems.map((it, i) => state.db.from('todos').update({ sort_order: i }).eq('id', it.id)));
         });

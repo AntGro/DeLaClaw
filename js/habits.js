@@ -826,7 +826,7 @@ function renderHabits() {
   const categoryIdList = catRows.map(c => c.id);
 
   // Dynamically include the Shared deck if any received habits exist
-  const hasSharedItems = state.allHabits.some(c => c.category_id === _sharedHabitCatId || c.category === SHARED_CATEGORY);
+  const hasSharedItems = state.allHabits.some(c => catIdForHabit(c) === _sharedHabitCatId);
   if (hasSharedItems && _sharedHabitCatId) categoryIdList.unshift(_sharedHabitCatId);
 
   let html = '';
@@ -884,7 +884,9 @@ function initHabitCrossDrag(catId, listEl) {
       const movedItem = state.allHabits.find(x => String(x.id) === String(draggedId));
       if (!movedItem) return;
       movedItem.category_id = targetContainerId;
-      await state.db.from('habits').update({ category_id: targetContainerId }).eq('id', draggedId);
+      const targetCatName = _habitCatMap.get(targetContainerId)?.name ?? '';
+      movedItem.category = targetCatName;
+      await state.db.from('habits').update({ category_id: targetContainerId, category: targetCatName }).eq('id', draggedId);
       await refreshHabits();
       showToast(t('toast.moved'), 'success');
     },
@@ -1128,7 +1130,7 @@ function populateHabitCategorySelect(selectId) {
   const sel = document.getElementById(selectId);
   const catRows = Array.from(_habitCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
   // Include Shared in dropdown if any habit uses it (so user can move habits in/out)
-  const hasShared = state.allHabits.some(h => h.category === SHARED_CATEGORY || h.category_id === _sharedHabitCatId);
+  const hasShared = state.allHabits.some(h => catIdForHabit(h) === _sharedHabitCatId);
   sel.innerHTML = catRows.map(c => {
     const label = c.is_protected ? t('common.category_default') : c.name;
     return `<option value="${esc(c.id)}">${esc(label)}</option>`;

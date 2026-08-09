@@ -2,7 +2,7 @@ import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
 import state, { MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction,
-         updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
+         updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll, autoResizeTextarea } from './utils.js';
 import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 
 // ===================================================================
@@ -987,13 +987,6 @@ function handleTaskInput(event, projectId) {
   }
   // Auto-resize on any other input
   setTimeout(() => autoResizeTextarea(event.target), 0);
-}
-
-function autoResizeTextarea(ta) {
-  ta.style.height = '0';
-  const newHeight = Math.min(ta.scrollHeight, 120);
-  ta.style.height = newHeight + 'px';
-  ta.style.overflowY = ta.scrollHeight > 120 ? 'auto' : 'hidden';
 }
 
 // Also auto-resize on input (for paste, etc.)

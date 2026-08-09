@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -1410,18 +1410,9 @@ async function copyTodoToPersonal(id, el) {
 }
 window.copyTodoToPersonal = copyTodoToPersonal;
 
-// Auto-resize TODO quick-add textareas
-function autoResizeTodoInput(ta) {
-  ta.style.height = '0';
-  const newHeight = Math.min(ta.scrollHeight, 120);
-  ta.style.height = newHeight + 'px';
-  ta.style.overflowY = ta.scrollHeight > 120 ? 'auto' : 'hidden';
-}
-window.autoResizeTodoInput = autoResizeTodoInput;
-
 document.addEventListener('input', e => {
   if (e.target.tagName === 'TEXTAREA' && e.target.classList.contains('todo-cat-input')) {
-    autoResizeTodoInput(e.target);
+    autoResizeTextarea(e.target);
   }
 });
 

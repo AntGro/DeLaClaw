@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, nextPaletteColor } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, nextPaletteColor, autoResizeTextarea } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
@@ -1262,18 +1262,9 @@ async function copyListItemToPersonal(id, el) {
 }
 window.copyListItemToPersonal = copyListItemToPersonal;
 
-// Auto-resize list quick-add textareas
-function autoResizeListInput(ta) {
-  ta.style.height = '0';
-  const newHeight = Math.min(ta.scrollHeight, 120);
-  ta.style.height = newHeight + 'px';
-  ta.style.overflowY = ta.scrollHeight > 120 ? 'auto' : 'hidden';
-}
-window.autoResizeListInput = autoResizeListInput;
-
 document.addEventListener('input', e => {
   if (e.target.tagName === 'TEXTAREA' && e.target.classList.contains('list-quick-input')) {
-    autoResizeListInput(e.target);
+    autoResizeTextarea(e.target);
   }
 });
 

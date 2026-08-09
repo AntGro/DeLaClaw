@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor } from './utils.js';
+import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, initNavBtnReorder } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
@@ -669,18 +669,11 @@ window.saveNewDraft = async function() {
 
 window.handleDraftInput = function(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); quickAddDraft(); }
-  else { setTimeout(() => autoResizeDraftInput(e.target), 0); }
+  else { setTimeout(() => autoResizeTextarea(e.target), 0); }
 };
 
-function autoResizeDraftInput(ta) {
-  ta.style.height = '0';
-  const newHeight = Math.min(ta.scrollHeight, 120);
-  ta.style.height = newHeight + 'px';
-  ta.style.overflowY = ta.scrollHeight > 120 ? 'auto' : 'hidden';
-}
-
 document.addEventListener('input', e => {
-  if (e.target.id === 'draftQuickInput') autoResizeDraftInput(e.target);
+  if (e.target.id === 'draftQuickInput') autoResizeTextarea(e.target);
 });
 
 window.quickAddDraft = async function() {

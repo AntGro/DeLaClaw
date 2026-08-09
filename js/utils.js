@@ -899,6 +899,15 @@ function nextPaletteColor(catMapOrArray) {
     || DEFAULT_CATEGORY_PALETTE[count % DEFAULT_CATEGORY_PALETTE.length];
 }
 
+// ── Auto-resize textarea (shared across all quick-add inputs) ──
+function autoResizeTextarea(ta, maxHeight = 120) {
+  ta.style.height = '0';
+  const newHeight = Math.min(ta.scrollHeight, maxHeight);
+  ta.style.height = newHeight + 'px';
+  ta.style.overflowY = ta.scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
+window.autoResizeTextarea = autoResizeTextarea;
+
 export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
   showConfirmAction, closeConfirmAction, executeConfirmAction,
@@ -909,6 +918,7 @@ export {
   getSupabaseProjectRef, buildAuthSteps, createSettingsAccessor,
   backfillCategoryColors, nextPaletteColor,
   parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,
+  autoResizeTextarea,
 };
 
 window.closeConfirmAction = closeConfirmAction;

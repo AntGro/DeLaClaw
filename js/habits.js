@@ -898,7 +898,7 @@ function renderHabitNavButtons(categoryIdList) {
   if (!container) return;
   container.innerHTML = categoryIdList.map(catId => {
     const cat = _habitCatMap.get(catId);
-    const color = cat?.color || GENERAL_CATEGORY_COLOR;
+    const color = isShared ? '#a78bfa' : (cat?.color || GENERAL_CATEGORY_COLOR);
     const shortname = cat?.shortname || '';
     const isShared = cat?.name === SHARED_CATEGORY;
     const displayName = isShared ? t('sharing.shared') : (shortname || cat?.name || t('common.category_default'));
@@ -939,7 +939,7 @@ function renderHabitCategoryCard(catId) {
   const totalInCat = state.allHabits.filter(c => catIdForHabit(c) === catId).length;
   const overdueCount = state.allHabits.filter(c => catIdForHabit(c) === catId && habitDueStatus(c) === 'overdue').length;
 
-  const catColor = cat?.color || GENERAL_CATEGORY_COLOR;
+  const catColor = isSharedDeck ? '#a78bfa' : (cat?.color || GENERAL_CATEGORY_COLOR);
   const statsText = `${totalInCat} habit${totalInCat !== 1 ? 's' : ''}` + (overdueCount > 0 ? ` · <span style="color:var(--red)">${overdueCount} ${t('habits.overdue').toLowerCase()}</span>` : '');
 
   const shareableHabits = state.allHabits.filter(h => catIdForHabit(h) === catId && !h.shared_id);

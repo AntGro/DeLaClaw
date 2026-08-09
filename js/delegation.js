@@ -404,7 +404,7 @@
         case 'sharing-create-group-on-enter': e.preventDefault(); callWindow('sharingCreateGroupSubmit', []); break;
         case 'sharing-join-code-on-enter': if ((e.ctrlKey || e.metaKey) && window.sharingJoinCodeSubmit) { e.preventDefault(); window.sharingJoinCodeSubmit(); } break;
         case 'add-todo-to-category': if (e.shiftKey) { setTimeout(function(){ if (window.autoResizeTextarea) window.autoResizeTextarea(el); }, 0); } else { e.preventDefault(); if (window.addTodoToCategory) window.addTodoToCategory(el); } break;
-        case 'add-habit-from-input': e.preventDefault(); if (window.addHabitFromInput) window.addHabitFromInput(el); break;
+        case 'add-habit-from-input': if (e.shiftKey) { setTimeout(function(){ if (window.autoResizeTextarea) window.autoResizeTextarea(el); }, 0); } else { e.preventDefault(); if (window.addHabitFromInput) window.addHabitFromInput(el); } break;
         case 'handle-draft-input': e.preventDefault(); if (window.quickAddDraft) window.quickAddDraft(); break;
         case 'task-input': e.preventDefault(); { var pid = el.dataset.id; if (pid && window.addTask) window.addTask(pid); else if (window.handleTaskInput) window.handleTaskInput(e); } break;
         case 'quick-add-input': if (e.shiftKey) { setTimeout(function(){ if (window.autoResizeTextarea) window.autoResizeTextarea(el); }, 0); } else { e.preventDefault(); var lid = el.dataset.listId||el.dataset.id; if (lid && window.quickAddListItem) window.quickAddListItem(lid); } break;

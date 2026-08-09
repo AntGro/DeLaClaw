@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
 import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -962,7 +962,7 @@ function renderHabitCategoryCard(catId) {
     : '';
 
   const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
-      <input type="text" placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catId)}" data-action="add-habit-from-input">
+      <textarea placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catId)}" data-action="add-habit-from-input" rows="1" style="resize:none;overflow:hidden;"></textarea>
       <button data-action="add-habit-from-input">${lucideIcon('plus', 16)}</button>
       ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-habit-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
     </div>`;
@@ -1170,6 +1170,7 @@ async function addHabitFromInput(inputEl) {
   addModal.style.setProperty('--cat-color', addCatColor);
   addModal.classList.add('visible');
   inputEl.value = '';
+  if (inputEl.tagName === 'TEXTAREA') { inputEl.style.height = ''; }
   setTimeout(() => document.getElementById('newHabitFreqPicker').querySelector('select')?.focus(), 100);
 }
 
@@ -2294,6 +2295,12 @@ async function _doSyncSharedHabits() {
 }
 
 window.syncSharedHabits = syncSharedHabits;
+
+document.addEventListener('input', e => {
+  if (e.target.tagName === 'TEXTAREA' && e.target.classList.contains('habit-add-input')) {
+    autoResizeTextarea(e.target);
+  }
+});
 
 export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, initHabitHoverDelay, isStructuredRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName };
 

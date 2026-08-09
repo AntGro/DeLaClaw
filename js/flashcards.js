@@ -669,7 +669,19 @@ window.saveNewDraft = async function() {
 
 window.handleDraftInput = function(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); quickAddDraft(); }
+  else { setTimeout(() => autoResizeDraftInput(e.target), 0); }
 };
+
+function autoResizeDraftInput(ta) {
+  ta.style.height = '0';
+  const newHeight = Math.min(ta.scrollHeight, 120);
+  ta.style.height = newHeight + 'px';
+  ta.style.overflowY = ta.scrollHeight > 120 ? 'auto' : 'hidden';
+}
+
+document.addEventListener('input', e => {
+  if (e.target.id === 'draftQuickInput') autoResizeDraftInput(e.target);
+});
 
 window.quickAddDraft = async function() {
   const input = document.getElementById('draftQuickInput');
@@ -678,6 +690,7 @@ window.quickAddDraft = async function() {
   if (!content) return;
   if (state.db.connected) await state.db.from('flashcard_notes').insert({ content });
   input.value = '';
+  input.style.height = '';
   await refreshFlashcards();
   showToast(t('flashcards.draft_added'));
 };

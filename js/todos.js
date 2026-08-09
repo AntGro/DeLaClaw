@@ -385,7 +385,7 @@ function renderCategoryCard(catId) {
   const headerIcon = isSharedDeck ? `${lucideIcon('users', 16)} ` : '';
 
   const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
-      <input type="text" placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(catId)}" data-priority="medium" data-action="add-todo-to-category">
+      <textarea placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(catId)}" data-priority="medium" data-action="add-todo-to-category" rows="1" style="resize:none;overflow:hidden;"></textarea>
       <button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>
       <button data-action="add-todo-from-add-row">${lucideIcon('plus', 16)}</button>
       ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-todo-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
@@ -650,6 +650,7 @@ async function addTodoToCategory(inputEl) {
   const { error } = await state.db.from('todos').insert({ text, priority, category: cat?.name ?? '', category_id: catId, sort_order: minOrder });
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
   inputEl.value = '';
+  if (inputEl.tagName === 'TEXTAREA') { inputEl.style.height = ''; }
   // Reset priority to medium after adding
   inputEl.dataset.priority = 'medium';
   const prioBtn = inputEl.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.todo-add-priority-btn');
@@ -1408,6 +1409,21 @@ async function copyTodoToPersonal(id, el) {
   }
 }
 window.copyTodoToPersonal = copyTodoToPersonal;
+
+// Auto-resize TODO quick-add textareas
+function autoResizeTodoInput(ta) {
+  ta.style.height = '0';
+  const newHeight = Math.min(ta.scrollHeight, 120);
+  ta.style.height = newHeight + 'px';
+  ta.style.overflowY = ta.scrollHeight > 120 ? 'auto' : 'hidden';
+}
+window.autoResizeTodoInput = autoResizeTodoInput;
+
+document.addEventListener('input', e => {
+  if (e.target.tagName === 'TEXTAREA' && e.target.classList.contains('todo-cat-input')) {
+    autoResizeTodoInput(e.target);
+  }
+});
 
 export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName };
 

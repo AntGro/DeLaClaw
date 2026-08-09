@@ -403,7 +403,7 @@
         case 'sharing-invite-on-enter': e.preventDefault(); if (window.sharingInvite) { var gid = el.dataset.groupId||el.dataset.id; window.sharingInvite(gid); } break;
         case 'sharing-create-group-on-enter': e.preventDefault(); callWindow('sharingCreateGroupSubmit', []); break;
         case 'sharing-join-code-on-enter': if ((e.ctrlKey || e.metaKey) && window.sharingJoinCodeSubmit) { e.preventDefault(); window.sharingJoinCodeSubmit(); } break;
-        case 'add-todo-to-category': e.preventDefault(); if (window.addTodoToCategory) window.addTodoToCategory(el); break;
+        case 'add-todo-to-category': if (e.shiftKey) { setTimeout(function(){ if (window.autoResizeTodoInput) window.autoResizeTodoInput(el); }, 0); } else { e.preventDefault(); if (window.addTodoToCategory) window.addTodoToCategory(el); } break;
         case 'add-habit-from-input': e.preventDefault(); if (window.addHabitFromInput) window.addHabitFromInput(el); break;
         case 'handle-draft-input': e.preventDefault(); if (window.quickAddDraft) window.quickAddDraft(); break;
         case 'task-input': e.preventDefault(); { var pid = el.dataset.id; if (pid && window.addTask) window.addTask(pid); else if (window.handleTaskInput) window.handleTaskInput(e); } break;

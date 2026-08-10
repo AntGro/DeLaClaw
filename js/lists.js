@@ -468,6 +468,9 @@ function editListItemInlineFull(id) {
   input.className = 'inline-edit-input';
   input.value = item.note || '';
   input.placeholder = t('lists.note_placeholder');
+  input.rows = 1;
+  input.style.overflow = 'hidden';
+  input.style.resize = 'none';
   input.style.fontFamily = 'inherit';
   // Allow Enter to create newlines — stop propagation so extraEl handler doesn't finishEdit
   input.addEventListener('keydown', e => {

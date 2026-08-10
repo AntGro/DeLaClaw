@@ -515,6 +515,7 @@ input,select,button{font-family:inherit;}
 /* ===== BUCKET ITEM (shared base for all list rows inside cards) ===== */
 .bucket-item{padding:8px 12px;background:var(--surface);border:1px solid transparent;border-radius:8px;transition:all 0.2s ease;}
 .bucket-item:hover{border-color:var(--accent-dim);background:var(--surface2);}
+.bucket-item:has(.todo-edit-wrapper){background:var(--surface);border-color:transparent;}
 .bucket-item.dragging{opacity:0.4;border:1px dashed var(--accent);}
 .bucket-item.drag-over{border-top:2px solid var(--accent);}
 .bucket-item.item-dragging{box-shadow:0 4px 16px rgba(0,0,0,0.25);background:var(--surface);border-radius:8px;}

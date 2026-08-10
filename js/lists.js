@@ -465,13 +465,15 @@ function editListItemInlineFull(id) {
   label.className = 'inline-edit-label';
   label.textContent = t('common.notes');
   const input = document.createElement('textarea');
-  input.className = 'inline-edit-input';
+  input.className = 'task-edit-input';
   input.value = item.note || '';
   input.placeholder = t('lists.note_placeholder');
   input.rows = 1;
   input.style.overflow = 'hidden';
   input.style.resize = 'none';
-  input.style.fontFamily = 'inherit';
+  input.style.width = '100%';
+  input.style.boxSizing = 'border-box';
+  input.style.flex = 'none';
   // Allow Enter to create newlines — stop propagation so extraEl handler doesn't finishEdit
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter') e.stopPropagation();

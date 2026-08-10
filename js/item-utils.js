@@ -4,6 +4,7 @@
 
 import { showToast, isTouchDevice } from './utils.js';
 import { t } from './i18n.js';
+import { lucideIcon } from './icons.js';
 import db from './db.js';
 
 // ===================================================================
@@ -604,7 +605,7 @@ let _inlineEditRefreshTimer = null;
 export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refreshFn, extraEl, onStart, onFinish, collectExtra, multiline }) {
   if (spanEl.dataset.editing) return;
 
-  // Cancel any other active inline edit first (save + restore span)
+  // Cancel any other active inline edit first (discard + restore span)
   if (_activeInlineEdit) {
     _activeInlineEdit();
     _activeInlineEdit = null;
@@ -629,13 +630,28 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
   input.style.flex = 'none';
   if (maxLength) input.maxLength = maxLength;
 
-  let root = input;
+  // Confirm button (check icon)
+  const confirmBtn = document.createElement('button');
+  confirmBtn.type = 'button';
+  confirmBtn.className = 'inline-edit-confirm-btn';
+  confirmBtn.title = t('common.save');
+  confirmBtn.innerHTML = lucideIcon('check', 16);
+
+  // Build edit root: textarea row (input + confirm) + optional extras
+  const inputRow = document.createElement('div');
+  inputRow.className = 'inline-edit-input-row';
+  inputRow.appendChild(input);
+  inputRow.appendChild(confirmBtn);
+
+  let root;
   if (extraEl) {
     const wrapper = document.createElement('div');
     wrapper.className = 'todo-edit-wrapper';
-    wrapper.appendChild(input);
+    wrapper.appendChild(inputRow);
     wrapper.appendChild(extraEl);
     root = wrapper;
+  } else {
+    root = inputRow;
   }
 
   if (onStart) onStart();
@@ -676,8 +692,14 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     }
   };
 
-  // Register cancel function: save + restore span, defer refresh (caller clears the timer)
-  _activeInlineEdit = () => finishEdit(true, true);
+  // Register cancel function: discard + restore span, defer refresh (caller clears the timer)
+  _activeInlineEdit = () => finishEdit(false, true);
+
+  confirmBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    finishEdit(true);
+  });
 
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey && !multiline) { e.preventDefault(); finishEdit(true); }
@@ -688,7 +710,7 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
   if (extraEl) {
     root.addEventListener('focusout', () => {
       setTimeout(() => {
-        if (!root.contains(document.activeElement)) finishEdit(true, true);
+        if (!root.contains(document.activeElement)) finishEdit(false, true);
       }, 150);
     });
     extraEl.addEventListener('keydown', e => {
@@ -696,7 +718,14 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
       if (e.key === 'Escape') { e.preventDefault(); finishEdit(false); }
     });
   } else {
-    input.addEventListener('blur', () => finishEdit(true, true));
+    input.addEventListener('blur', () => {
+      // Delay to let confirm button click register before cancelling
+      setTimeout(() => {
+        if (finished) return;
+        if (root.contains(document.activeElement)) return;
+        finishEdit(false, true);
+      }, 150);
+    });
   }
 
   spanEl.replaceWith(root);

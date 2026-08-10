@@ -1222,6 +1222,11 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .inline-edit-input{flex:1;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:0.8rem;outline:none;font-family:inherit;box-sizing:border-box;}
 .inline-edit-input:focus{border-color:var(--accent);}
 select.inline-edit-input{appearance:auto;cursor:pointer;background-image:none;padding-right:8px;}
+.inline-edit-input-row{display:flex;align-items:flex-start;gap:4px;flex:1;min-width:0;}
+.inline-edit-input-row .task-edit-input{flex:1;min-width:0;}
+.inline-edit-confirm-btn{flex-shrink:0;display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;margin-top:1px;}
+.inline-edit-confirm-btn:hover{opacity:0.85;}
+.inline-edit-confirm-btn .lucide-icon{stroke:#fff;}
 /* Lucide inline SVG icons */
 .lucide-icon{display:inline-block;vertical-align:middle;flex-shrink:0;}
 button .lucide-icon,

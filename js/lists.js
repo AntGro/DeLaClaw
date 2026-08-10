@@ -282,7 +282,7 @@ function renderListItem(item) {
     ? lucideIcon('check-square', 16, 'var(--accent)')
     : lucideIcon('square', 16, 'var(--muted)');
   const noteHtml = item.note
-    ? `<div class="list-item-note">${esc(item.note)}</div>`
+    ? `<div class="list-item-note">${renderMd(item.note)}</div>`
     : '';
 
   // Shared list item badge

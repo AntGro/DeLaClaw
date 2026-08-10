@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "1.627",
-    "generated_at": "2026-08-10T21:30:44.128Z",
+    "version": "1.628",
+    "generated_at": "2026-08-10T21:40:43.551Z",
     "loc_total": 29035,
     "files_scanned": 38,
     "tier": "T2-enriched",
@@ -197,7 +197,7 @@
       "guards": [
         "pendingSet"
       ],
-      "esc_count": 25,
+      "esc_count": 24,
       "i18n_count": 40,
       "window_exposed": [
         "shareListItemFromAdd",

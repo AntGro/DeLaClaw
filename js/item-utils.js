@@ -630,29 +630,27 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
   input.style.flex = 'none';
   if (maxLength) input.maxLength = maxLength;
 
-  // Confirm button (check icon)
+  // Action buttons (Save + Cancel) at bottom-right of edit form
+  const actionRow = document.createElement('div');
+  actionRow.className = 'inline-edit-actions';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'inline-edit-cancel-btn';
+  cancelBtn.innerHTML = lucideIcon('x', 14) + ' ' + t('common.cancel');
   const confirmBtn = document.createElement('button');
   confirmBtn.type = 'button';
-  confirmBtn.className = 'inline-edit-confirm-btn';
-  confirmBtn.title = t('common.save');
-  confirmBtn.innerHTML = lucideIcon('check', 16);
+  confirmBtn.className = 'inline-edit-save-btn';
+  confirmBtn.innerHTML = lucideIcon('check', 14) + ' ' + t('common.save');
+  actionRow.appendChild(cancelBtn);
+  actionRow.appendChild(confirmBtn);
 
-  // Build edit root: textarea row (input + confirm) + optional extras
-  const inputRow = document.createElement('div');
-  inputRow.className = 'inline-edit-input-row';
-  inputRow.appendChild(input);
-  inputRow.appendChild(confirmBtn);
-
-  let root;
-  if (extraEl) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'todo-edit-wrapper';
-    wrapper.appendChild(inputRow);
-    wrapper.appendChild(extraEl);
-    root = wrapper;
-  } else {
-    root = inputRow;
-  }
+  // Build edit root: textarea + optional extras + action row
+  const wrapper = document.createElement('div');
+  wrapper.className = 'todo-edit-wrapper';
+  wrapper.appendChild(input);
+  if (extraEl) wrapper.appendChild(extraEl);
+  wrapper.appendChild(actionRow);
+  const root = wrapper;
 
   if (onStart) onStart();
 
@@ -700,6 +698,11 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     e.stopPropagation();
     finishEdit(true);
   });
+  cancelBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    finishEdit(false);
+  });
 
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey && !multiline) { e.preventDefault(); finishEdit(true); }
@@ -707,24 +710,18 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
   });
   input.addEventListener('input', autoSize);
 
+  // Blur anywhere inside the wrapper → cancel (delay lets button clicks register first)
+  root.addEventListener('focusout', () => {
+    setTimeout(() => {
+      if (finished) return;
+      if (root.contains(document.activeElement)) return;
+      finishEdit(false, true);
+    }, 150);
+  });
   if (extraEl) {
-    root.addEventListener('focusout', () => {
-      setTimeout(() => {
-        if (!root.contains(document.activeElement)) finishEdit(false, true);
-      }, 150);
-    });
     extraEl.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !multiline) { e.preventDefault(); finishEdit(true); }
       if (e.key === 'Escape') { e.preventDefault(); finishEdit(false); }
-    });
-  } else {
-    input.addEventListener('blur', () => {
-      // Delay to let confirm button click register before cancelling
-      setTimeout(() => {
-        if (finished) return;
-        if (root.contains(document.activeElement)) return;
-        finishEdit(false, true);
-      }, 150);
     });
   }
 

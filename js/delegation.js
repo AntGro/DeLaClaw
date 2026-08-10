@@ -391,7 +391,7 @@
       switch (action) {
         case 'save-edit-category-on-enter': e.preventDefault(); callWindow('saveEditCategory', []); break;
         case 'save-new-category-on-enter': e.preventDefault(); callWindow('saveNewCategory', []); break;
-        case 'save-new-habit-on-enter': e.preventDefault(); callWindow('saveNewHabit', []); break;
+        case 'save-new-habit-on-enter': if (e.shiftKey) { setTimeout(function(){ if (window.autoResizeTextarea) window.autoResizeTextarea(el); }, 0); } else { e.preventDefault(); callWindow('saveNewHabit', []); } break;
         case 'save-new-habit-category-on-enter': e.preventDefault(); callWindow('saveNewHabitCategory', []); break;
         case 'save-edit-habit-category-on-enter': e.preventDefault(); callWindow('saveEditHabitCategory', []); break;
         case 'save-new-list-on-enter': e.preventDefault(); callWindow('saveNewList', []); break;

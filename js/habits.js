@@ -1055,13 +1055,13 @@ function initHabitModals() {
   // Add Habit Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'addHabitModal';
-  m1.innerHTML = `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><input type="text" id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="200" data-action="save-new-habit-on-enter"><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><div id="newHabitGroupRow" style="display:none"><label>${t('sharing.group')}</label><select id="newHabitGroup"><option value="">${t('sharing.no_group')}</option></select></div><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit">${t("common.create")}</button></div></div>`;
+  m1.innerHTML = `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><textarea id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="200" data-action="save-new-habit-on-enter" rows="1" style="resize:none;overflow:hidden;"></textarea><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><div id="newHabitGroupRow" style="display:none"><label>${t('sharing.group')}</label><select id="newHabitGroup"><option value="">${t('sharing.no_group')}</option></select></div><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit">${t("common.create")}</button></div></div>`;
   app.appendChild(m1);
 
   // Edit Habit Modal
   const m2 = document.createElement('div');
   m2.className = 'modal-overlay'; m2.id = 'editHabitModal';
-  m2.innerHTML = `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><input type="text" id="editHabitName" maxlength="200"><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-modal" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
+  m2.innerHTML = `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><textarea id="editHabitName" maxlength="200" rows="1" style="resize:none;overflow:hidden;"></textarea><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-modal" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
   app.appendChild(m2);
 
   // Habit History Modal
@@ -1144,7 +1144,9 @@ async function addHabitFromInput(inputEl) {
   const catId = inputEl.dataset.category || _defaultHabitCatId;
 
   // Quick-add: opens the full modal pre-filled with name + category
-  document.getElementById('newHabitName').value = name;
+  const addNameEl = document.getElementById('newHabitName');
+  addNameEl.value = name;
+  setTimeout(() => autoResizeTextarea(addNameEl), 0);
   document.getElementById('newHabitLastDone').value = '';
   document.getElementById('newHabitDraft').checked = false;
   buildFrequencyPicker(document.getElementById('newHabitFreqPicker'), '');
@@ -1375,7 +1377,9 @@ function openEditHabitModal(habitId) {
   if (saveBtn) saveBtn.textContent = t('common.save');
 
   document.getElementById('editHabitId').value = habitId;
-  document.getElementById('editHabitName').value = habit.name;
+  const editNameEl = document.getElementById('editHabitName');
+  editNameEl.value = habit.name;
+  setTimeout(() => autoResizeTextarea(editNameEl), 0);
   buildFrequencyPicker(document.getElementById('editHabitFreqPicker'), habit.frequency_rule);
   populateHabitCategorySelect('editHabitCategory');
   document.getElementById('editHabitCategory').value = catIdForHabit(habit);
@@ -2297,7 +2301,7 @@ async function _doSyncSharedHabits() {
 window.syncSharedHabits = syncSharedHabits;
 
 document.addEventListener('input', e => {
-  if (e.target.tagName === 'TEXTAREA' && e.target.classList.contains('habit-add-input')) {
+  if (e.target.tagName === 'TEXTAREA' && (e.target.classList.contains('habit-add-input') || e.target.id === 'newHabitName' || e.target.id === 'editHabitName')) {
     autoResizeTextarea(e.target);
   }
 });

@@ -890,7 +890,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .inline-edit-row-freq .inline-edit-label{min-width:auto;}
 .inline-edit-row-note{flex-direction:column;align-items:stretch;gap:4px;}
 .inline-edit-row-note .inline-edit-label{min-width:auto;}
-.inline-edit-row-note textarea.inline-edit-input{min-height:48px;line-height:1.5;white-space:pre-wrap;width:100%;}
+.inline-edit-row-note textarea.inline-edit-input{min-height:48px;line-height:1.5;white-space:pre-wrap;width:100%;overflow:hidden;}
 
 /* Habit Done Modal */
 .habit-done-modal{max-width:400px;}

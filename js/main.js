@@ -1506,16 +1506,18 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       // Pre-auth schema check: if DB is readable without auth and < 1.484,
       // the schema predates owner-only RLS — force migration before auth.
       let needsPreAuthMigration = false;
+      let preAuthDbVer = '0.00';
       try {
         const { data, error } = await state._rawSupabaseAdapter
           .from('settings').select('value').eq('key', 'schema_version').maybeSingle();
         if (!error && data) {
           const ver = data.value || '0.00';
+          preAuthDbVer = ver;
           if (cmpVer(ver, '1.484') < 0) needsPreAuthMigration = true;
         }
       } catch { /* table may not exist — treat as needs migration */ }
       if (needsPreAuthMigration) {
-        showPreAuthMigrationModal(state._rawSupabaseAdapter, url, key);
+        showPreAuthMigrationModal(state._rawSupabaseAdapter, url, key, preAuthDbVer);
       } else {
         showAuthPrompt(state._rawSupabaseAdapter, url, key);
       }
@@ -3245,9 +3247,9 @@ function closeMigrationModal() {
  * and < 1.484 (pre-RLS). Forces migration before auth.
  * After migration, RLS blocks the read → we know it worked → show auth.
  */
-function showPreAuthMigrationModal(rawAdapter, url, key) {
-  // Compute SQL from version 0.00 (give them everything up to LATEST_COMPAT)
-  const sql = getPendingMigrationSQL('0.00');
+function showPreAuthMigrationModal(rawAdapter, url, key, dbVer) {
+  // Compute SQL from detected version up to LATEST_COMPAT
+  const sql = getPendingMigrationSQL(dbVer || '0.00');
   if (!sql) { showAuthPrompt(rawAdapter, url, key); return; }
 
   document.getElementById('preAuthMigrationModal')?.remove();

@@ -1503,7 +1503,22 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     } catch (e) { console.warn('auth init:', e); }
     // Mandatory auth since 1.300 owner-only: show prompt if not signed in
     if (!state.authUser) {
-      showAuthPrompt(state._rawSupabaseAdapter, url, key);
+      // Pre-auth schema check: if DB is readable without auth and < 1.484,
+      // the schema predates owner-only RLS — force migration before auth.
+      let needsPreAuthMigration = false;
+      try {
+        const { data, error } = await state._rawSupabaseAdapter
+          .from('settings').select('value').eq('key', 'schema_version').maybeSingle();
+        if (!error && data) {
+          const ver = data.value || '0.00';
+          if (cmpVer(ver, '1.484') < 0) needsPreAuthMigration = true;
+        }
+      } catch { /* table may not exist — treat as needs migration */ }
+      if (needsPreAuthMigration) {
+        showPreAuthMigrationModal(state._rawSupabaseAdapter, url, key);
+      } else {
+        showAuthPrompt(state._rawSupabaseAdapter, url, key);
+      }
     }
     // Listen for late auth events (magic link callback may resolve after getSession)
     try {
@@ -3225,6 +3240,108 @@ async function checkMigrationStatus() {
 function closeMigrationModal() {
   document.getElementById('migrationModal')?.remove();
 }
+/**
+ * Pre-auth migration modal: shown when schema is readable without auth
+ * and < 1.484 (pre-RLS). Forces migration before auth.
+ * After migration, RLS blocks the read → we know it worked → show auth.
+ */
+function showPreAuthMigrationModal(rawAdapter, url, key) {
+  // Compute SQL from version 0.00 (give them everything up to LATEST_COMPAT)
+  const sql = getPendingMigrationSQL('0.00');
+  if (!sql) { showAuthPrompt(rawAdapter, url, key); return; }
+
+  document.getElementById('preAuthMigrationModal')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'preAuthMigrationModal';
+  overlay.className = 'modal-overlay visible';
+
+  const projectRef = (url || '').replace('https://', '').replace('.supabase.co', '') || '_';
+  const sqlEditorUrl = `https://supabase.com/dashboard/project/${projectRef}/sql/new?skip=true`;
+
+  overlay.innerHTML = `<div class="modal migration-modal">
+    <h2>${LOGOS.supabase(18)} ${esc(t('schema.modal_title'))}</h2>
+    <p class="migration-hint">${esc(t('schema.pre_auth_hint'))}</p>
+    <ol class="migration-steps">
+      <li>${t('schema.step_1')}
+        <div class="migration-sql-wrap">
+          <div class="migration-sql-header">
+            <span>SQL</span>
+            <button class="migration-copy-btn" id="preAuthMigrationCopyBtn">${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}</button>
+          </div>
+          <pre class="migration-sql-code" id="preAuthMigrationSqlCode">${esc(sql)}</pre>
+        </div>
+      </li>
+      <li>${t('schema.step_2', { url: sqlEditorUrl })}</li>
+      <li>${t('schema.step_3')}</li>
+    </ol>
+    <div class="migration-actions">
+      <button class="migration-check-btn" id="preAuthMigrationCheckBtn">${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+
+  // Wire copy button
+  document.getElementById('preAuthMigrationCopyBtn').addEventListener('click', async () => {
+    const code = document.getElementById('preAuthMigrationSqlCode')?.textContent;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      const btn = document.getElementById('preAuthMigrationCopyBtn');
+      btn.innerHTML = `${lucideIcon('check', 14)} ${esc(t('schema.copied'))}`;
+      setTimeout(() => { btn.innerHTML = `${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}`; }, 2000);
+    } catch { showToast(t('schema.copy_fallback')); }
+  });
+
+  // Wire check button: after migration, RLS blocks the read → success
+  document.getElementById('preAuthMigrationCheckBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('preAuthMigrationCheckBtn');
+    btn.disabled = true;
+    btn.innerHTML = `${lucideIcon('loader', 14)} ${esc(t('common.loading'))}`;
+    try {
+      const { data, error } = await rawAdapter
+        .from('settings').select('value').eq('key', 'schema_version').maybeSingle();
+      if (error || !data) {
+        // RLS is now blocking the read → migration worked → show auth
+        btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.pre_auth_success'))}`;
+        btn.classList.add('migration-check-ok');
+        setTimeout(() => {
+          overlay.remove();
+          showAuthPrompt(rawAdapter, url, key);
+        }, 1200);
+      } else {
+        const ver = data.value || '0.00';
+        if (cmpVer(ver, '1.484') >= 0) {
+          // Version readable and >= 1.484 — unusual but proceed to auth
+          btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.check_success', { ver }))}`;
+          btn.classList.add('migration-check-ok');
+          setTimeout(() => {
+            overlay.remove();
+            showAuthPrompt(rawAdapter, url, key);
+          }, 1200);
+        } else {
+          // Still old
+          btn.innerHTML = `${lucideIcon('alert-triangle', 14)} ${esc(t('schema.check_still_old', { ver }))}`;
+          btn.classList.add('migration-check-fail');
+          setTimeout(() => {
+            btn.classList.remove('migration-check-fail');
+            btn.disabled = false;
+            btn.innerHTML = `${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}`;
+          }, 3000);
+        }
+      }
+    } catch {
+      // Error likely means RLS is active → migration worked
+      btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.pre_auth_success'))}`;
+      btn.classList.add('migration-check-ok');
+      setTimeout(() => {
+        overlay.remove();
+        showAuthPrompt(rawAdapter, url, key);
+      }, 1200);
+    }
+  });
+}
+
 
 function showCompareModal() {
   document.getElementById('compareModal')?.remove();

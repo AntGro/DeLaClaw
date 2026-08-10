@@ -490,6 +490,8 @@ const T = {
       check_success: 'Migration successful! Now at v{ver}.',
       check_still_old: 'Still at v{ver} — run the SQL first.',
       check_error: 'Could not check — try again.',
+      pre_auth_hint: 'Your database needs to be updated before you can sign in.',
+      pre_auth_success: 'Migration complete — sign in now.',
       close: 'Close',
     },
     // ── Backend comparison ──
@@ -1187,6 +1189,8 @@ const T = {
       check_success: 'Migration réussie ! Maintenant en v{ver}.',
       check_still_old: 'Toujours en v{ver} — exécutez le SQL d\'abord.',
       check_error: 'Impossible de vérifier — réessayez.',
+      pre_auth_hint: 'Votre base de données doit être mise à jour avant de vous connecter.',
+      pre_auth_success: 'Migration terminée — connectez-vous.',
       close: 'Fermer',
     },
     compare: {
@@ -1884,6 +1888,8 @@ const T = {
       check_success: '¡Migración exitosa! Ahora en v{ver}.',
       check_still_old: 'Aún en v{ver} — ejecuta el SQL primero.',
       check_error: 'No se pudo verificar — inténtalo de nuevo.',
+      pre_auth_hint: 'Tu base de datos necesita actualizarse antes de iniciar sesión.',
+      pre_auth_success: 'Migración completada — inicia sesión ahora.',
       close: 'Cerrar',
     },
     compare: {

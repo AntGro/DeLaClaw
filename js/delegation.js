@@ -112,6 +112,7 @@
       case 'toggle-done-todos': callWindow('toggleDoneTodos', [el.dataset.catId || getCat(el)]); break;
       case 'open-edit-category-modal': callWindow('openEditCategoryModal', [getCat(el)]); break;
       case 'open-quick-add-priority-picker': callWindow('openQuickAddPriorityPicker', [el, e]); break;
+      case 'add-todo-to-category': break; // textarea only — creation handled on Enter keydown, not click
       case 'add-todo-from-add-row': { var inp = el.closest('.todo-cat-add')?.querySelector('.todo-cat-input'); if (inp) callWindow('addTodoToCategory', [inp]); } break;
       case 'share-todo-from-add': callWindow('shareTodoFromAdd', [el]); break;
       case 'share-existing-todo': callWindow('shareExistingTodo', [getId(el), el]); break;
@@ -134,7 +135,7 @@
       case 'navigate-to-habit-category': callWindow('navigateToHabitCategory', [getCat(el)]); break;
       case 'delete-habit-category': callWindow('deleteHabitCategory', [getCat(el)]); break;
       case 'open-edit-habit-category-modal': callWindow('openEditHabitCategoryModal', [getCat(el)]); break;
-      case 'add-habit-from-input': { var hInp = el.matches && el.matches('input, textarea') ? el : el.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.habit-add-input, .todo-cat-input'); if (hInp) callWindow('addHabitFromInput', [hInp]); } break;
+      case 'add-habit-from-input': { if (!(el.matches && el.matches('input, textarea'))) { var hInp = el.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.habit-add-input, .todo-cat-input'); if (hInp) callWindow('addHabitFromInput', [hInp]); } } break;
       case 'promote-habit': callWindow('promoteHabit', [getId(el)||el.dataset.habitId]); break;
       case 'mark-habit-done': callWindow('markHabitDone', [el.dataset.habitId||getId(el), el]); break;
       case 'open-habit-history': callWindow('openHabitHistory', [el.dataset.habitId||getId(el)]); break;

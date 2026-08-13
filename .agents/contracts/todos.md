@@ -17,7 +17,7 @@ User jobs:
 
 ## Dependencies
 - **Depends on:** `i18n`, `icons` (via `data-icon`), `item-utils` (drag-drop + inline edit), `sharing-ui`, `state`, `utils`
-- **Dependents (blast radius):** `habits.js`, `main.js`, `welcome.js` → editing `todos.js` can affect habit rendering and Welcome aggregation
+- **Dependents (blast radius):** `main.js`, `welcome.js` → editing `todos.js` can affect Welcome aggregation
 
 ## UI / UX
 - **Reused components:**

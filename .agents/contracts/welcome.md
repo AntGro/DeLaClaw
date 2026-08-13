@@ -5,12 +5,12 @@ Today / Welcome aggregation — focus TODOs, due habits, flashcard reviews, birt
 
 ## Entry & Ownership
 - **Entry:** `js/welcome.js` (868 LOC)
-- **State:** `PROJECTS`, `allBirthdays`, `allHabitCompletions`, `allHabits`, `allVestiaire`, `currentView`, `db`, `js`
+- **State:** `PROJECTS`, `allBirthdays`, `allHabitCompletions`, `allHabits`, `allVestiaire`, `archivedProjectIds`, `currentView`, `db`
 - **Tables:** reads `habits`, `habit_completions`, `todos` (plus birthdays via state)
 - **CODEMAP:** `features[welcome]` — loc 868, esc 78, i18n 49, guards [pendingSet]
 
 ## Dependencies
-- **Depends on:** `flashcards`, `habits`, `i18n`, `icons`, `item-utils`, `state`, `todos`, `utils`
+- **Depends on:** `flashcards`, `habits`, `i18n`, `icons`, `item-utils`, `sharing-ui`, `state`, `todos`, `utils`
 - **Dependents:** `main.js`
 
 ## UI / UX

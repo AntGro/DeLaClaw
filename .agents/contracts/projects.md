@@ -11,8 +11,8 @@ User jobs:
 
 ## Entry & Ownership
 - **Entry:** `js/projects.js` (981 LOC)
-- **State:** `PROJECTS`, `allTasks`, `db`, `js`
-- **Tables:** `projects`, `tasks`, `prompts`
+- **State:** `PROJECTS`, `allTasks`, `archivedProjectIds`, `db`, `js`, `showArchived`
+- **Tables:** `projects`, `tasks`, `prompts`, `settings`
 - **CODEMAP:** `features[projects]` — loc 981, esc 35, i18n 35, guards [pendingSet]
 
 ## Dependencies

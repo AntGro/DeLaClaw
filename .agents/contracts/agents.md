@@ -10,10 +10,10 @@ User jobs:
 - see last_used + created
 
 ## Entry & Ownership
-- **Entry:** `js/agents-ui.js` (207 LOC)
+- **Entry:** `js/agents-ui.js`
 - **State:** transient `_lastCreatedToken`, `_lastCreatedPrompt` (in-memory only, never persisted raw)
 - **Tables:** `agent_grants` (id UUID PK, owner_id, display_name, token_hash UNIQUE, scope='full', last_used_at, expires_at, revoked_at, created_at)
-- **CODEMAP:** `core[agents-ui]` — loc 207, tables [agent_grants], deps [db,i18n,icons,state,utils], esc 32, i18n 29, ui [page-empty-state,settings-data-btn]
+- **CODEMAP:** `core[agents-ui]` — see CODEMAP.json for current stats
 
 ## Dependencies
 - **Depends on:** `db` (proxy), `i18n` (t()), `icons` (lucideIcon), `state` (STAY_CONNECTED_KEY), `utils` (esc, toast, delete confirm)
@@ -64,13 +64,13 @@ User jobs:
 
 ## Cross-Feature Edges
 - No Welcome aggregation, but agent edits to todos/habits/projects → verify Welcome re-renders via `state.all*`
-- Version: `VERSION` latest=1.411 latest_compat=1.410 — migration `1.410_agent_grants.sql`
+- Migration: `1.410_agent_grants.sql` (consolidated into `1.484_sharing_ownership_categories.sql`)
 
 ## Risks / Gotchas
 - Token shown once — no recovery
 - Double create without guard → duplicate display_name allowed (hash unique)
 - Global `guard()` on `executeDeleteConfirm` serializes revokes — add per-ID pendingSet for parity
-- PWA cache: `sw.js CACHE_VERSION dlc-1.411` must include `js/agents-ui.js`
+- PWA cache: `sw.js` PRECACHE_URLS must include `js/agents-ui.js`
 
 ## Test Hooks
 - `bun tests/tests.js`:

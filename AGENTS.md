@@ -4,7 +4,7 @@ For any coding agent (Human, Claude, Cursor, Codex) working in this repo. This i
 
 ## 0. Purpose
 
-DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, ~17k LOC vanilla JS (ES modules). Own your data: Supabase | Local Bun+SQLite | Google Drive | Demo. PWA, offline-first via IndexedDB cache, dark/light, i18n (EN/FR/ES).
+DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, vanilla JS (ES modules). Own your data: Supabase | Local Bun+SQLite | Google Drive | Demo. PWA, offline-first via IndexedDB cache, dark/light, i18n (EN/FR/ES).
 
 ## 1. Core Product Principles
 
@@ -15,7 +15,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - Styles: reuse CSS variables (`--cat-color`, `--bg`, `--text`, `--muted`). Solid header backgrounds with 6% tinted body (color-mix) since v1.348 overhaul.
 - Theme compatibility: all new CSS must work in both dark and light mode. Never hardcode colours — use CSS variables (`--bg`, `--text`, `--muted`, `--accent`, `--surface`, `--surface2`, etc.). Test visibility and contrast in both themes; `color-mix` tints that look fine in light mode can vanish on dark surfaces.
 
-**1.2 Interaction guards — assume double-click**
+**1.2 UI interaction guards**
 - When adding any interactive element (button, toggle, checkbox, link that mutates state), ask: what happens if it fires 2x before the first promise resolves? Does it duplicate a task, double-toggle, double-insert?
 - Rule: one-click → disable until fulfilled.
   - Modal saves: use `guard()` in `js/main.js` (adds `disabled` + `saving`/`is-pending` + `aria-busy`).
@@ -32,7 +32,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 **1.4 AI-native dependency index (CODEMAP) + Feature contracts — mandatory for agents**
 - Generated: `.agents/CODEMAP.json` (T2, ~25KB pretty / ~15KB compact) + `.agents/CODEMAP.md` (6KB matrix). Source: `scripts/generate-codemap.js`. Do not hand-edit.
 - Contains per `js/*.js`: `entry`, `loc`, `tables`, `state`, `depends_on`, `dependents` (blast radius), `ui_components` (reusable CSS), `i18n_prefix`, `guards` (`guard`/`pendingSet`), `esc_count`, `window_exposed`.
-- 8 features: `todos`, `habits`, `projects`, `birthdays`, `vestiaire`, `flashcards`, `lists`, `welcome`. 23 core modules + 5 adapters (`supabase`, `rest`, `demo`, `drive`, `offline-cache`). `welcome` aggregates all features.
+- 8 features: `todos`, `habits`, `projects`, `birthdays`, `vestiaire`, `flashcards`, `lists`, `welcome`. Core modules + 5 adapters (`supabase`, `rest`, `demo`, `drive`, `offline-cache`). `welcome` aggregates all features. Exact counts live in CODEMAP itself.
 - Feature contracts: `.agents/contracts/*.md` — agent-only, NOT in `docs-site`. Captures invariants CODEMAP can't: single source of truth (`isStructuredRule()`), guard patterns, XSS fields, RLS policies, welcome edges, business rules. BEFORE editing a feature, agents MUST read `CODEMAP.json:features[feature]` + `contracts/<feature>.md` if present.
 - Rule: BEFORE editing any `js/*.js`, agents MUST read `.agents/CODEMAP.json` → `features[feature]` and relevant `core` entries. Reuse `depends_on` + `ui_components`, check `dependents` for impact scope, follow `guards` per AGENTS 1.2, verify `esc_count`/`tables` for XSS/schema impact.
 - Freshness: pre-commit auto-regenerates JSON+MD and stages them. `tests/tests.js` will fail if JSON is out-of-date (CODEMAP freshness test). No manual sync.
@@ -74,11 +74,11 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - **Hooks**: ALWAYS `git config core.hooksPath .githooks` on fresh clone/subagent. Pre-commit bumps `VERSION` → updates `sw.js` CACHE_VERSION + ` .agents/CODEMAP.json/.md` (via `scripts/generate-codemap.js`) + prints `[impact] Checked: …` hint + blocks emoji. Commit-msg enforces `Checked:` trailer and on failure runs `scripts/impact.js --staged` to show blast radius from CODEMAP dependents and suggested trailer.
 - **VERSION file**: `latest` bumped every commit (X.YYY), `latest_compat` / `latest_compat_deprec` only on schema change. See `COMMIT_CHECKLIST.md`.
 - **Checked trailer**: Format `Checked: versioning [x], i18n [~], docs [~], readme [~], checklist [~], tests [~], welcome [~], prompts [~], xss [x]` — decide each individually, no batch-marking. `[x]` = diff touches area, `[~]` = does not. Bare item = rejected. Lesson v1.145: tests + xss left unmarked by inertia. Use CODEMAP `dependents` to assess `welcome` impact.
-- **Commit style**: `feat|fix|refactor|chore|ci|docs(scope): message`. Include test result (`142 passed`) when relevant.
+- **Commit style**: `feat|fix|refactor|chore|ci|docs(scope): message`. Include test result (e.g. `N passed`) when relevant.
 
 ## 6. Testing
 
-- `bun tests/tests.js` (or `node`). 142 passed + 3 Playwright missing (expected, no browser in CI dev) is green. Covers: unit logic, adapter compliance, import/export, window-assignment guard, XSS esc usage, CODEMAP freshness (`.agents/CODEMAP.json` matches regenerated output).
+- `bun tests/tests.js` (or `node`). All tests must pass before pushing. Covers: unit logic, adapter compliance, import/export, window-assignment guard, XSS esc usage, CODEMAP freshness (`.agents/CODEMAP.json` matches regenerated output).
 - PWA: `CACHE_VERSION` + `PRECACHE_URLS` in `sw.js` — `cache.addAll` fails entire install if any entry 404, so list must be exact. Include new `js/*.js` and `vendor/*` files.
 - CODEMAP: `scripts/generate-codemap.js` must be idempotent. CI fails if committed JSON differs from regenerated.
 

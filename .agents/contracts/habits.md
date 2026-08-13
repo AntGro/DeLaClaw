@@ -16,7 +16,7 @@ User jobs:
 - **CODEMAP:** `features[habits]` — loc 2122, esc 47, i18n 68, guards [pendingSet]
 
 ## Dependencies
-- **Depends on:** `i18n`, `icons`, `item-utils`, `sharing-ui`, `state`, `todos`, `utils`
+- **Depends on:** `i18n`, `icons`, `item-utils`, `sharing-ui`, `state`, `utils`
 - **Dependents (blast radius):** `main.js`, `welcome.js` → Welcome shows due-today; change to `frequency_rule` → check Welcome aggregation
 
 ## UI / UX

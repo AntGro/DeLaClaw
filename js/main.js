@@ -1024,7 +1024,7 @@ document.addEventListener('DOMContentLoaded', () => {
     'saveNewHabitCategory', 'saveEditHabitCategory',
     'saveNewList', 'saveEditList',
     'addTask', 'saveNewProject', 'saveEditProject', 'submitRevision',
-    'saveNewCategory', 'saveEditCategory', 'submitSnooze', 'addTodoToCategory',
+    'saveNewCategory', 'saveEditCategory', 'snoozeFor', 'submitSnooze', 'addTodoToCategory',
     'saveNewVestiaire', 'saveEditVestiaire',
     'saveNewVestiaireCategory', 'saveEditVestiaireCategory',
     'executeConfirmAction',

@@ -1202,6 +1202,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .snooze-options{display:flex;flex-wrap:wrap;gap:6px;}
 .snooze-options button{padding:7px 14px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-size:0.82rem;font-weight:500;transition:all 0.2s ease;font-family:inherit;}
 .snooze-options button:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px);}
+.snooze-options button:disabled,.snooze-modal .modal-save:disabled{opacity:0.5;pointer-events:none;cursor:wait;}
 .snooze-modal input[type="datetime-local"]{padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.86rem;outline:none;font-family:inherit;transition:border-color 0.2s,box-shadow 0.2s;}
 .snooze-modal input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(100,108,255,0.1);}
 

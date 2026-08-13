@@ -959,7 +959,7 @@ function closeSnoozeModal() {
   document.getElementById('snoozeModal').classList.remove('visible');
 }
 
-function snoozeFor(amount, unit) {
+async function snoozeFor(amount, unit) {
   const now = new Date();
   let target;
   if (unit === 'h') {
@@ -972,13 +972,13 @@ function snoozeFor(amount, unit) {
     target.setMonth(target.getMonth() + amount);
     target.setHours(9, 0, 0, 0);
   }
-  doSnooze(target);
+  await doSnooze(target);
 }
 
 async function submitSnooze() {
   const customDate = document.getElementById('snoozeCustomDate').value;
   if (!customDate) { showToast(t('toast.content_required'), 'error'); return; }
-  doSnooze(new Date(customDate));
+  await doSnooze(new Date(customDate));
 }
 
 async function doSnooze(snoozeUntil) {
@@ -986,22 +986,31 @@ async function doSnooze(snoozeUntil) {
   if (!taskId) return;
   const todo = allTodos.find(t => t.id === taskId);
 
-  if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-    // ─── Shared: write snooze to Drive payload ───
-    try {
+  // Disable all snooze buttons while in flight
+  const snoozeBtns = document.querySelectorAll('.snooze-modal button');
+  snoozeBtns.forEach(b => { b.disabled = true; b.classList.add('is-pending'); });
+
+  try {
+    if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+      // ─── Shared: write snooze to Drive payload ───
       const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
       await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
         payload: { ...currentPayload, snooze_until: snoozeUntil.toISOString() },
       });
-    } catch (e) { console.warn('Failed to snooze shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
-  } else {
-    // ─── Normal: write to local DB ───
-    const { error } = await state.db.from('todos').update({ snooze_until: snoozeUntil.toISOString() }).eq('id', taskId);
-    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    } else {
+      // ─── Normal: write to local DB ───
+      const { error } = await state.db.from('todos').update({ snooze_until: snoozeUntil.toISOString() }).eq('id', taskId);
+      if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    }
+    closeSnoozeModal();
+    showToast(`${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 'success');
+    await refreshTodos();
+  } catch (e) {
+    console.warn('Failed to snooze todo:', e);
+    showToast(t('toast.update_failed'), 'error');
+  } finally {
+    snoozeBtns.forEach(b => { b.disabled = false; b.classList.remove('is-pending'); });
   }
-  closeSnoozeModal();
-  showToast(`${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 'success');
-  await refreshTodos();
 }
 
 

@@ -727,7 +727,11 @@ function showCropModal(file, id) {
   container.addEventListener('touchend', e => { if (e.touches.length < 2) pinchDist0 = null; if (e.touches.length === 0) dragging = false; });
 
   document.getElementById('avatarCropCancel').addEventListener('click', () => overlay.remove());
-  document.getElementById('avatarCropSave').addEventListener('click', async () => {
+  document.getElementById('avatarCropSave').addEventListener('click', async function() {
+    const btn = this;
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.classList.add('is-pending');
     try {
       const cw = container.clientWidth;
       const canvas = document.createElement('canvas');
@@ -748,6 +752,9 @@ function showCropModal(file, id) {
       showToast(t('birthdays.photo_updated'), 'success');
     } catch (e) {
       showToast(t('toast.failed_to_save'), 'error');
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('is-pending');
     }
   });
 

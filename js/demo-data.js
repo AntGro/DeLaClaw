@@ -132,6 +132,7 @@ function en() {
   const flashcard_notes = [
     { id: 'demo-fn-001', content: 'Add more capitals from Africa and Asia.', proposal_status: null, proposed_front: null, proposed_back: null, proposed_deck: null, created_at: d(-10) },
     { id: 'demo-fn-002', content: 'Renaissance art flashcards — Michelangelo, Da Vinci, Raphael.', proposal_status: 'pending', proposed_front: 'Who painted the ceiling of the Sistine Chapel?', proposed_back: 'Michelangelo (1508–1512)', proposed_deck: 'History', created_at: d(-4) },
+    { id: 'demo-fn-003', content: 'The Silk Road — trade routes, key cities, cultural exchanges.', proposal_status: 'ready', proposed_front: 'What ancient network of trade routes connected China to the Mediterranean?', proposed_back: 'The Silk Road — active from the 2nd century BC to the 15th century AD, linking East Asia to Europe via Central Asia.', proposed_deck: 'History', created_at: d(-2) },
   ];
 
   const birthdays = [
@@ -237,6 +238,7 @@ function fr() {
   const flashcard_notes = [
     { id: 'demo-fn-001', content: 'Ajouter plus de capitales d\'Afrique et d\'Asie.', proposal_status: null, proposed_front: null, proposed_back: null, proposed_deck: null, created_at: d(-10) },
     { id: 'demo-fn-002', content: 'Flashcards art de la Renaissance — Michel-Ange, Léonard de Vinci, Raphaël.', proposal_status: 'pending', proposed_front: 'Qui a peint le plafond de la chapelle Sixtine ?', proposed_back: 'Michel-Ange (1508–1512)', proposed_deck: 'Histoire', created_at: d(-4) },
+    { id: 'demo-fn-003', content: 'La Route de la Soie — routes commerciales, villes clés, échanges culturels.', proposal_status: 'ready', proposed_front: 'Quel ancien réseau de routes commerciales reliait la Chine à la Méditerranée ?', proposed_back: 'La Route de la Soie — active du IIe siècle av. J.-C. au XVe siècle, reliant l\'Asie de l\'Est à l\'Europe via l\'Asie centrale.', proposed_deck: 'Histoire', created_at: d(-2) },
   ];
 
   const birthdays = [
@@ -343,6 +345,7 @@ function es() {
   const flashcard_notes = [
     { id: 'demo-fn-001', content: 'Añadir más capitales de África y Asia.', proposal_status: null, proposed_front: null, proposed_back: null, proposed_deck: null, created_at: d(-10) },
     { id: 'demo-fn-002', content: 'Flashcards de arte renacentista — Miguel Ángel, Da Vinci, Rafael.', proposal_status: 'pending', proposed_front: '¿Quién pintó el techo de la Capilla Sixtina?', proposed_back: 'Miguel Ángel (1508–1512)', proposed_deck: 'Historia', created_at: d(-4) },
+    { id: 'demo-fn-003', content: 'La Ruta de la Seda — rutas comerciales, ciudades clave, intercambios culturales.', proposal_status: 'ready', proposed_front: '¿Qué antigua red de rutas comerciales conectaba China con el Mediterráneo?', proposed_back: 'La Ruta de la Seda — activa desde el siglo II a.C. hasta el siglo XV, uniendo Asia Oriental con Europa a través de Asia Central.', proposed_deck: 'Historia', created_at: d(-2) },
   ];
 
   const birthdays = [

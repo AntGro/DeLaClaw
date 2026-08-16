@@ -1068,11 +1068,8 @@ window.saveNewFlashDeck = async function() {
 
   const type = document.getElementById('newDeckType').value;
   closeAddFlashDeckModal();
-  if (type === 'text') {
-    openAddTextModal(name);
-  } else {
-    openAddFlashcardModal(name);
-  }
+  showToast(t('toast.created'), 'success');
+  await refreshFlashcards();
 };
 
 function closeAllFlashModals() {

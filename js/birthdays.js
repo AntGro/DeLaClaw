@@ -818,6 +818,10 @@ window.navigateToBirthdaySection = navigateToBirthdaySection;
 window.filterBirthdays = function(e) { birthdaySearchQuery = e.target.value; renderBirthdays(); };
 window.handleAvatarClick = handleAvatarClick;
 window.pickAvatarFile = pickAvatarFile;
+window.closeAvatarPreviewModal = function() {
+  const overlay = document.getElementById('avatarPreviewOverlay');
+  if (overlay) overlay.remove();
+};
 window.removeAvatar = removeAvatar;
 window.pickNewBirthdayAvatar = pickNewBirthdayAvatar;
 window.clearNewBirthdayAvatar = clearNewBirthdayAvatar;

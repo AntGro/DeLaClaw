@@ -1017,11 +1017,13 @@ async function doLogin() {
 document.addEventListener('DOMContentLoaded', () => {
   // Wrap all save/add/submit actions with guard() to prevent double-fire
   const guardedNames = [
-    'saveNewBirthday', 'saveEditBirthday',
+    'saveNewBirthday', 'saveEditBirthday', 'removeAvatar',
     'saveNewDraft', 'saveEditedProposal', 'saveNewFlashcard', 'saveEditFlashcard',
     'saveNewText', 'saveEditText', 'submitFeedback', 'submitTextReview',
+    'saveEditDeck',
     'saveNewHabit', 'saveEditHabit', 'saveHabitCompletion', 'addHabitFromInput',
     'saveNewHabitCategory', 'saveEditHabitCategory',
+    'promoteHabit',
     'saveNewList', 'saveEditList',
     'addTask', 'saveNewProject', 'saveEditProject', 'submitRevision',
     'saveNewCategory', 'saveEditCategory', 'snoozeFor', 'submitSnooze', 'addTodoToCategory',

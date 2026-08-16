@@ -765,37 +765,60 @@ window.deleteDraft = function(id) {
 };
 
 // ── Proposal Workflow ──
+const _pendingProposal = new Set();
+
+function _setProposalBtns(id, pending) {
+  const card = document.querySelector(`.draft-card[data-draft-id="${CSS?.escape ? CSS.escape(id) : id}"]`)
+             || document.getElementById(`draft-${id}`);
+  if (!card) return;
+  card.querySelectorAll('button[data-action="accept-proposal"], button[data-action="reject-proposal"], button[data-action="request-proposal"]')
+    .forEach(b => { b.disabled = pending; b.classList.toggle('is-pending', pending); });
+}
+
 window.requestProposal = async function(id) {
-  if (!state.db.connected) return;
-  await state.db.from('flashcard_notes').update({ proposal_status: 'pending' }).eq('id', id);
-  const draft = allDrafts.find(d => d.id === id);
-  if (draft) draft.proposal_status = 'pending';
-  renderAllBuckets();
-  showToast(t('flashcards.generating_proposal'));
+  if (!state.db.connected || _pendingProposal.has(id)) return;
+  _pendingProposal.add(id);
+  _setProposalBtns(id, true);
+  try {
+    await state.db.from('flashcard_notes').update({ proposal_status: 'pending' }).eq('id', id);
+    const draft = allDrafts.find(d => d.id === id);
+    if (draft) draft.proposal_status = 'pending';
+    renderAllBuckets();
+    showToast(t('flashcards.generating_proposal'));
+  } finally { _pendingProposal.delete(id); }
 };
 
 window.acceptProposal = async function(id) {
+  if (_pendingProposal.has(id)) return;
   const draft = allDrafts.find(d => d.id === id);
   if (!draft || !draft.proposed_front || !draft.proposed_back) return;
-  const deck = draft.proposed_deck || '';
-  const deckId = _deckByName.get(deck)?.id || _defaultDeckId;
-  if (state.db.connected) {
-    await state.db.from('flashcards').insert({ deck, front: draft.proposed_front, back: draft.proposed_back, deck_id: deckId });
-    await state.db.from('flashcard_notes').delete().eq('id', id);
-  }
-  await refreshFlashcards();
-  showToast(t('flashcards.card_added_to', deck));
+  _pendingProposal.add(id);
+  _setProposalBtns(id, true);
+  try {
+    const deck = draft.proposed_deck || '';
+    const deckId = _deckByName.get(deck)?.id || _defaultDeckId;
+    if (state.db.connected) {
+      await state.db.from('flashcards').insert({ deck, front: draft.proposed_front, back: draft.proposed_back, deck_id: deckId });
+      await state.db.from('flashcard_notes').delete().eq('id', id);
+    }
+    await refreshFlashcards();
+    showToast(t('flashcards.card_added_to', deck));
+  } finally { _pendingProposal.delete(id); }
 };
 
 window.rejectProposal = async function(id) {
-  if (!state.db.connected) return;
-  await state.db.from('flashcard_notes').update({
-    proposal_status: null, proposed_front: null, proposed_back: null
-  }).eq('id', id);
-  const draft = allDrafts.find(d => d.id === id);
-  if (draft) { draft.proposal_status = null; draft.proposed_front = null; draft.proposed_back = null; }
-  renderAllBuckets();
-  showToast(t('flashcards.proposal_rejected'));
+  if (!state.db.connected || _pendingProposal.has(id)) return;
+  _pendingProposal.add(id);
+  _setProposalBtns(id, true);
+  try {
+    await state.db.from('flashcard_notes').update({
+      proposal_status: null, proposed_front: null, proposed_back: null
+    }).eq('id', id);
+    const draft = allDrafts.find(d => d.id === id);
+    if (draft) { draft.proposal_status = null; draft.proposed_front = null; draft.proposed_back = null; }
+    renderAllBuckets();
+    showToast(t('flashcards.proposal_rejected'));
+  } finally { _pendingProposal.delete(id); }
 };
 
 window.toggleFeedbackInput = function(id) {

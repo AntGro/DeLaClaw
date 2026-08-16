@@ -764,7 +764,7 @@ body.paused-mode:has(.schema-banner) .schema-banner{top:var(--paused-banner-h,36
 .modal-actions .modal-save:hover{opacity:0.9;transform:translateY(-1px);box-shadow:0 4px 16px rgba(100,108,255,0.35);}
 .modal-save.loading{pointer-events:none;opacity:0.7;}
 .modal-save.loading::before{content:'';display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:btnSpin 0.6s linear infinite;margin-right:6px;vertical-align:middle;}
-button.saving{opacity:0.6;pointer-events:none;cursor:wait;position:relative;overflow:hidden;}
+button.saving,button.is-pending{opacity:0.6;pointer-events:none;cursor:wait;position:relative;overflow:hidden;}
 button.saving::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent 30%,rgba(255,255,255,0.25) 50%,transparent 70%);background-size:200% 100%;animation:saving-shimmer 1.2s ease-in-out infinite;}
 @keyframes saving-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .deck-type-selector{display:flex;gap:6px;margin-top:4px;}

@@ -748,9 +748,18 @@ function showCropModal(file, id) {
       const b = state.allBirthdays.find(x => x.id === id);
       if (b) b.avatar_url = dataUrl;
       overlay.remove();
-      // Update the preview overlay image if still open
-      const previewImg = document.querySelector('#avatarPreviewOverlay .avatar-preview-img');
-      if (previewImg) previewImg.src = dataUrl;
+      // Update the preview overlay if still open
+      const previewOverlay = document.getElementById('avatarPreviewOverlay');
+      if (previewOverlay) {
+        const frame = previewOverlay.querySelector('.avatar-preview-frame');
+        if (frame) frame.innerHTML = `<img src="${esc(dataUrl)}" alt="" class="avatar-preview-img">`;
+        // Show remove button if it wasn't there (was placeholder before)
+        const actions = previewOverlay.querySelector('.avatar-preview-actions');
+        if (actions && !actions.querySelector('.avatar-remove-btn')) {
+          actions.insertAdjacentHTML('beforeend',
+            `<button class="avatar-action-btn avatar-remove-btn" data-action="remove-avatar" data-id="${esc(id)}" title="${t('birthdays.remove_photo')}">${lucideIcon('trash-2', 18)}</button>`);
+        }
+      }
       renderBirthdays();
       showToast(t('birthdays.photo_updated'), 'success');
     } catch (e) {

@@ -748,6 +748,9 @@ function showCropModal(file, id) {
       const b = state.allBirthdays.find(x => x.id === id);
       if (b) b.avatar_url = dataUrl;
       overlay.remove();
+      // Update the preview overlay image if still open
+      const previewImg = document.querySelector('#avatarPreviewOverlay .avatar-preview-img');
+      if (previewImg) previewImg.src = dataUrl;
       renderBirthdays();
       showToast(t('birthdays.photo_updated'), 'success');
     } catch (e) {

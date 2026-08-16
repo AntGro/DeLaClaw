@@ -445,4 +445,12 @@ export const LOCAL_MIGRATIONS = {
     -- Add sort_order to flashcard_notes for draft reorder
     ALTER TABLE flashcard_notes ADD COLUMN sort_order INTEGER DEFAULT 0;
   `,
+
+  '1.651': `
+    -- Consolidate frequency_rule formats
+    UPDATE habits SET frequency_rule = 'every_N_days:1' WHERE frequency_rule = 'daily';
+    UPDATE habits SET frequency_rule = 'every_N_weeks:1:' || substr(frequency_rule, 8) WHERE frequency_rule LIKE 'weekly:%';
+    UPDATE habits SET frequency_rule = 'every_N_months:1:' || substr(frequency_rule, 18) WHERE frequency_rule LIKE 'monthly_weekday:%';
+    UPDATE habits SET frequency_rule = 'every_N_months:1:' || substr(frequency_rule, 9) WHERE frequency_rule LIKE 'monthly:%' AND frequency_rule NOT LIKE 'monthly_%' ESCAPE '\\';
+  `,
 };

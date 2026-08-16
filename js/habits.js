@@ -112,13 +112,25 @@ async function saveEditHabitCategory() {
 //   monthly:1, monthly_weekday:first:Mon, every_N_months:3:1, yearly:MM-DD
 // Custom (free-text) rules → next_due = null → heartbeat handles them.
 
-const STRUCTURED_PREFIXES = ['daily', 'every_N_days:', 'weekly:', 'every_N_weeks:', 'monthly:', 'monthly_weekday:', 'every_N_months:', 'yearly:'];
+const STRUCTURED_PREFIXES = ['every_N_days:', 'every_N_weeks:', 'every_N_months:', 'yearly:'];
 const DOW_KEYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DOW_JS   = [1, 2, 3, 4, 5, 6, 0]; // JS getDay(): Sun=0
 
 function isStructuredRule(rule) {
   if (!rule) return false;
   return STRUCTURED_PREFIXES.some(p => rule === p.replace(/:$/, '') || rule.startsWith(p));
+}
+
+/** Convert legacy frequency_rule formats to the consolidated format.
+ *  daily → every_N_days:1, weekly:X → every_N_weeks:1:X,
+ *  monthly:X → every_N_months:1:X, monthly_weekday:X:Y → every_N_months:1:X:Y */
+function normalizeFrequencyRule(rule) {
+  if (!rule) return rule;
+  if (rule === 'daily') return 'every_N_days:1';
+  if (rule.startsWith('weekly:')) return 'every_N_weeks:1:' + rule.slice(7);
+  if (rule.startsWith('monthly_weekday:')) return 'every_N_months:1:' + rule.slice(17);
+  if (rule.startsWith('monthly:') && !rule.startsWith('monthly_weekday:')) return 'every_N_months:1:' + rule.slice(8);
+  return rule;
 }
 
 /** Format a Date as YYYY-MM-DD in local time (not UTC). */
@@ -136,24 +148,55 @@ function computeNextDue(frequencyRule, lastDoneDate) {
   const base = new Date(lastDoneDate);
   const baseDay = new Date(base.getFullYear(), base.getMonth(), base.getDate());
 
-  if (frequencyRule === 'daily') {
-    const next = new Date(baseDay); next.setDate(next.getDate() + 1);
-    return next < today ? localDateStr(today) : localDateStr(next);
-  }
-
   if (frequencyRule.startsWith('every_N_days:')) {
     const n = parseInt(frequencyRule.split(':')[1], 10) || 1;
     const next = new Date(baseDay); next.setDate(next.getDate() + n);
     return next < today ? localDateStr(today) : localDateStr(next);
   }
 
-  if (frequencyRule.startsWith('weekly:')) {
-    const days = frequencyRule.split(':')[1].split(',');
+  if (frequencyRule.startsWith('every_N_weeks:')) {
+    const parts = frequencyRule.split(':');
+    const n = parseInt(parts[1], 10) || 1;
+    const daysStr = parts[2] || '';
+
+    if (!daysStr) {
+      // Pure interval: N weeks from last done
+      const next = new Date(baseDay); next.setDate(next.getDate() + n * 7);
+      return next < today ? localDateStr(today) : localDateStr(next);
+    }
+
+    const days = daysStr.split(',');
     const dayIndices = days.map(d => DOW_JS[DOW_KEYS.indexOf(d)]).filter(d => d !== undefined);
-    if (dayIndices.length === 0) return null;
-    // Find next occurrence after base
-    for (let offset = 1; offset <= 7; offset++) {
+    if (dayIndices.length === 0) {
+      const next = new Date(baseDay); next.setDate(next.getDate() + n * 7);
+      return next < today ? localDateStr(today) : localDateStr(next);
+    }
+
+    if (n === 1) {
+      // Weekly: find next matching day within 7 days
+      for (let offset = 1; offset <= 7; offset++) {
+        const candidate = new Date(baseDay); candidate.setDate(candidate.getDate() + offset);
+        if (dayIndices.includes(candidate.getDay())) {
+          return candidate < today ? localDateStr(today) : localDateStr(candidate);
+        }
+      }
+      return null;
+    }
+
+    // N > 1: check remaining matching days this ISO week first
+    const isoDow = baseDay.getDay() || 7; // Mon=1..Sun=7
+    for (let offset = 1; offset <= 7 - isoDow; offset++) {
       const candidate = new Date(baseDay); candidate.setDate(candidate.getDate() + offset);
+      if (dayIndices.includes(candidate.getDay())) {
+        return candidate < today ? localDateStr(today) : localDateStr(candidate);
+      }
+    }
+    // No more matching days this week — jump to Nth week after
+    const nextWeekMon = new Date(baseDay);
+    nextWeekMon.setDate(nextWeekMon.getDate() + (8 - isoDow)); // next Monday
+    nextWeekMon.setDate(nextWeekMon.getDate() + (n - 1) * 7);  // skip N-1 more weeks
+    for (let offset = 0; offset < 7; offset++) {
+      const candidate = new Date(nextWeekMon); candidate.setDate(candidate.getDate() + offset);
       if (dayIndices.includes(candidate.getDay())) {
         return candidate < today ? localDateStr(today) : localDateStr(candidate);
       }
@@ -161,61 +204,56 @@ function computeNextDue(frequencyRule, lastDoneDate) {
     return null;
   }
 
-  if (frequencyRule.startsWith('every_N_weeks:')) {
-    const parts = frequencyRule.split(':');
-    const n = parseInt(parts[1], 10) || 1;
-    const days = (parts[2] || '').split(',');
-    const dayIndices = days.map(d => DOW_JS[DOW_KEYS.indexOf(d)]).filter(d => d !== undefined);
-    if (dayIndices.length === 0) return null;
-    const next = new Date(baseDay); next.setDate(next.getDate() + n * 7);
-    // Find the first matching day in that week
-    const weekStart = new Date(next);
-    weekStart.setDate(weekStart.getDate() - weekStart.getDay() + (weekStart.getDay() === 0 ? -6 : 1)); // Monday
-    for (let offset = 0; offset < 7; offset++) {
-      const candidate = new Date(weekStart); candidate.setDate(candidate.getDate() + offset);
-      if (dayIndices.includes(candidate.getDay()) && candidate > baseDay) {
-        return candidate < today ? localDateStr(today) : localDateStr(candidate);
-      }
-    }
-    return null;
-  }
-
-  if (frequencyRule.startsWith('monthly:')) {
-    const dom = parseInt(frequencyRule.split(':')[1], 10);
-    if (!dom || dom < 1 || dom > 31) return null;
-    let next = new Date(baseDay.getFullYear(), baseDay.getMonth(), dom);
-    if (next <= baseDay) next = new Date(baseDay.getFullYear(), baseDay.getMonth() + 1, dom);
-    return next < today ? localDateStr(today) : localDateStr(next);
-  }
-
-  if (frequencyRule.startsWith('monthly_weekday:')) {
-    const parts = frequencyRule.split(':');
-    const position = parts[1]; // 'first' or 'last'
-    const dayName = parts[2];
-    const dayIdx = DOW_JS[DOW_KEYS.indexOf(dayName)];
-    if (dayIdx === undefined) return null;
-    function findNthWeekday(year, month, targetDay, pos) {
-      if (pos === 'first') {
-        const d = new Date(year, month, 1);
-        while (d.getDay() !== targetDay) d.setDate(d.getDate() + 1);
-        return d;
-      } else {
-        const d = new Date(year, month + 1, 0); // last day
-        while (d.getDay() !== targetDay) d.setDate(d.getDate() - 1);
-        return d;
-      }
-    }
-    let next = findNthWeekday(baseDay.getFullYear(), baseDay.getMonth(), dayIdx, position);
-    if (next <= baseDay) next = findNthWeekday(baseDay.getFullYear(), baseDay.getMonth() + 1, dayIdx, position);
-    return next < today ? localDateStr(today) : localDateStr(next);
-  }
-
   if (frequencyRule.startsWith('every_N_months:')) {
     const parts = frequencyRule.split(':');
     const n = parseInt(parts[1], 10) || 1;
-    const dom = parseInt(parts[2], 10) || 1;
-    let next = new Date(baseDay.getFullYear(), baseDay.getMonth() + n, dom);
-    return next < today ? localDateStr(today) : localDateStr(next);
+
+    // Day-of-month mode: every_N_months:N:DD (part[2] is numeric)
+    if (!isNaN(parseInt(parts[2], 10))) {
+      const dom = parseInt(parts[2], 10);
+      if (!dom || dom < 1 || dom > 31) return null;
+      let next = new Date(baseDay.getFullYear(), baseDay.getMonth(), dom);
+      if (next <= baseDay) next = new Date(baseDay.getFullYear(), baseDay.getMonth() + n, dom);
+      return next < today ? localDateStr(today) : localDateStr(next);
+    }
+
+    // Weekday mode: every_N_months:N:first|last:Days
+    if (parts[2] === 'first' || parts[2] === 'last') {
+      const position = parts[2];
+      const days = (parts[3] || '').split(',');
+      const dayIndices = days.map(d => DOW_JS[DOW_KEYS.indexOf(d)]).filter(d => d !== undefined);
+      if (dayIndices.length === 0) return null;
+
+      function findPositionWeekdays(year, month, targetDays, pos) {
+        const results = [];
+        for (const targetDay of targetDays) {
+          if (pos === 'first') {
+            const d = new Date(year, month, 1);
+            while (d.getDay() !== targetDay) d.setDate(d.getDate() + 1);
+            results.push(new Date(d));
+          } else {
+            const d = new Date(year, month + 1, 0);
+            while (d.getDay() !== targetDay) d.setDate(d.getDate() - 1);
+            results.push(new Date(d));
+          }
+        }
+        return results.sort((a, b) => a - b);
+      }
+
+      // Check current month for remaining candidates after baseDay
+      let candidates = findPositionWeekdays(baseDay.getFullYear(), baseDay.getMonth(), dayIndices, position)
+        .filter(d => d > baseDay);
+      if (candidates.length === 0) {
+        // Advance N months
+        const nextMonth = new Date(baseDay.getFullYear(), baseDay.getMonth() + n, 1);
+        candidates = findPositionWeekdays(nextMonth.getFullYear(), nextMonth.getMonth(), dayIndices, position);
+      }
+      if (candidates.length === 0) return null;
+      const next = candidates[0];
+      return next < today ? localDateStr(today) : localDateStr(next);
+    }
+
+    return null;
   }
 
   if (frequencyRule.startsWith('yearly:')) {
@@ -234,42 +272,44 @@ function formatFrequency(rule) {
   if (!rule) return '';
   if (!isStructuredRule(rule)) return rule; // legacy free-text: show as-is
 
-  if (rule === 'daily') return t('habits.freq_display_daily');
-
   if (rule.startsWith('every_N_days:')) {
-    const n = rule.split(':')[1];
+    const n = parseInt(rule.split(':')[1], 10);
+    if (n === 1) return t('habits.freq_display_daily');
     return t('habits.freq_display_every_n_days', n);
-  }
-
-  if (rule.startsWith('weekly:')) {
-    const days = rule.split(':')[1].split(',');
-    const dayLabels = days.map(d => t('habits.day_' + d.toLowerCase()));
-    return t('habits.freq_display_weekly', dayLabels.join(', '));
   }
 
   if (rule.startsWith('every_N_weeks:')) {
     const parts = rule.split(':');
-    const n = parts[1];
-    const days = (parts[2] || '').split(',');
+    const n = parseInt(parts[1], 10);
+    const daysStr = parts[2] || '';
+    if (!daysStr) {
+      if (n === 1) return t('habits.freq_display_every_week');
+      return t('habits.freq_display_every_n_weeks_no_days', n);
+    }
+    const days = daysStr.split(',');
     const dayLabels = days.map(d => t('habits.day_' + d.toLowerCase()));
+    if (n === 1) return t('habits.freq_display_weekly', dayLabels.join(', '));
     return t('habits.freq_display_every_n_weeks', n, dayLabels.join(', '));
-  }
-
-  if (rule.startsWith('monthly:')) {
-    const dom = rule.split(':')[1];
-    return t('habits.freq_display_monthly', ordinalSuffix(parseInt(dom, 10)));
-  }
-
-  if (rule.startsWith('monthly_weekday:')) {
-    const parts = rule.split(':');
-    const pos = t('habits.freq_' + parts[1]);
-    const dayLabel = t('habits.day_' + parts[2].toLowerCase());
-    return t('habits.freq_display_monthly_weekday', pos, dayLabel);
   }
 
   if (rule.startsWith('every_N_months:')) {
     const parts = rule.split(':');
-    return t('habits.freq_display_every_n_months', parts[1], ordinalSuffix(parseInt(parts[2], 10)));
+    const n = parseInt(parts[1], 10);
+    // Day-of-month mode
+    if (!isNaN(parseInt(parts[2], 10))) {
+      const dom = parseInt(parts[2], 10);
+      if (n === 1) return t('habits.freq_display_monthly', ordinalSuffix(dom));
+      return t('habits.freq_display_every_n_months', n, ordinalSuffix(dom));
+    }
+    // Weekday mode
+    if (parts[2] === 'first' || parts[2] === 'last') {
+      const pos = t('habits.freq_' + parts[2]);
+      const days = (parts[3] || '').split(',');
+      const dayLabels = days.map(d => t('habits.day_' + d.toLowerCase()));
+      if (n === 1) return t('habits.freq_display_monthly_weekday', pos, dayLabels.join(', '));
+      return t('habits.freq_display_every_n_months_weekday', n, pos, dayLabels.join(', '));
+    }
+    return rule;
   }
 
   if (rule.startsWith('yearly:')) {
@@ -321,27 +361,34 @@ async function clearHabitNextDue(habitId) {
 // FREQUENCY PICKER — shared UI builder for add/edit/inline
 // ===================================================================
 const FREQ_TYPES = [
-  'daily', 'every_N_days', 'weekly', 'every_N_weeks',
-  'monthly', 'monthly_weekday', 'every_N_months', 'yearly', 'custom'
+  'every_N_days', 'every_N_weeks', 'every_N_months', 'yearly', 'custom'
 ];
 
 function buildFrequencyPicker(container, currentRule) {
   container.innerHTML = '';
   container.className = (container.className.replace(/\bfreq-picker\b/, '') + ' freq-picker').trim();
 
-  // Detect current type from rule (default to 'weekly' for new habits)
-  let currentType = currentRule ? 'custom' : 'weekly';
+  // Normalize legacy rules before parsing
+  const rule = normalizeFrequencyRule(currentRule);
+
+  // Detect current type from rule (default to 'every_N_weeks' for new habits)
+  let currentType = rule ? 'custom' : 'every_N_weeks';
   let parsed = {};
-  if (currentRule) {
-    if (currentRule === 'daily') { currentType = 'daily'; }
-    else if (currentRule.startsWith('every_N_days:')) { currentType = 'every_N_days'; parsed.n = currentRule.split(':')[1]; }
-    else if (currentRule.startsWith('weekly:')) { currentType = 'weekly'; parsed.days = currentRule.split(':')[1].split(','); }
-    else if (currentRule.startsWith('every_N_weeks:')) { currentType = 'every_N_weeks'; const p = currentRule.split(':'); parsed.n = p[1]; parsed.days = (p[2]||'').split(','); }
-    else if (currentRule.startsWith('monthly:')) { currentType = 'monthly'; parsed.dom = currentRule.split(':')[1]; }
-    else if (currentRule.startsWith('monthly_weekday:')) { currentType = 'monthly_weekday'; const p = currentRule.split(':'); parsed.position = p[1]; parsed.day = p[2]; }
-    else if (currentRule.startsWith('every_N_months:')) { currentType = 'every_N_months'; const p = currentRule.split(':'); parsed.n = p[1]; parsed.dom = p[2]; }
-    else if (currentRule.startsWith('yearly:')) { currentType = 'yearly'; parsed.mmdd = currentRule.split(':')[1]; }
-    else { currentType = 'custom'; parsed.text = currentRule; }
+  if (rule) {
+    if (rule.startsWith('every_N_days:')) { currentType = 'every_N_days'; parsed.n = rule.split(':')[1]; }
+    else if (rule.startsWith('every_N_weeks:')) { currentType = 'every_N_weeks'; const p = rule.split(':'); parsed.n = p[1]; parsed.days = p[2] ? p[2].split(',') : []; }
+    else if (rule.startsWith('every_N_months:')) {
+      currentType = 'every_N_months';
+      const p = rule.split(':');
+      parsed.n = p[1];
+      if (p[2] === 'first' || p[2] === 'last') {
+        parsed.monthMode = 'weekday'; parsed.position = p[2]; parsed.days = p[3] ? p[3].split(',') : [];
+      } else {
+        parsed.monthMode = 'dom'; parsed.dom = p[2] || '1';
+      }
+    }
+    else if (rule.startsWith('yearly:')) { currentType = 'yearly'; parsed.mmdd = rule.split(':')[1]; }
+    else { currentType = 'custom'; parsed.text = rule; }
   }
 
   // Type selector
@@ -369,22 +416,21 @@ function buildFrequencyPicker(container, currentRule) {
 
     if (type === 'every_N_days') {
       const inp = document.createElement('input');
-      inp.type = 'number'; inp.min = '2'; inp.max = '365'; inp.className = 'inline-edit-input freq-n-input';
-      inp.value = parsed.n || '2';
+      inp.type = 'number'; inp.min = '1'; inp.max = '365'; inp.className = 'inline-edit-input freq-n-input';
+      inp.value = parsed.n || '1';
       inp.dataset.freqField = 'n';
-      const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_n_label');
+      const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_n_days_label');
       opts.appendChild(label); opts.appendChild(inp);
     }
 
-    if (type === 'weekly' || type === 'every_N_weeks') {
-      if (type === 'every_N_weeks') {
-        const inp = document.createElement('input');
-        inp.type = 'number'; inp.min = '2'; inp.max = '52'; inp.className = 'inline-edit-input freq-n-input';
-        inp.value = parsed.n || '2';
-        inp.dataset.freqField = 'n';
-        const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_n_label');
-        opts.appendChild(label); opts.appendChild(inp);
-      }
+    if (type === 'every_N_weeks') {
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.min = '1'; inp.max = '52'; inp.className = 'inline-edit-input freq-n-input';
+      inp.value = parsed.n || '1';
+      inp.dataset.freqField = 'n';
+      const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_n_weeks_label');
+      opts.appendChild(label); opts.appendChild(inp);
+      // Optional weekday bar
       const dayBar = document.createElement('div'); dayBar.className = 'freq-day-bar';
       DOW_KEYS.forEach(d => {
         const btn = document.createElement('button');
@@ -398,44 +444,67 @@ function buildFrequencyPicker(container, currentRule) {
       opts.appendChild(dayBar);
     }
 
-    if (type === 'monthly' || type === 'every_N_months') {
-      if (type === 'every_N_months') {
-        const inp = document.createElement('input');
-        inp.type = 'number'; inp.min = '2'; inp.max = '12'; inp.className = 'inline-edit-input freq-n-input';
-        inp.value = parsed.n || '2';
-        inp.dataset.freqField = 'n';
-        const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_n_label');
-        opts.appendChild(label); opts.appendChild(inp);
-      }
-      const domSel = document.createElement('select'); domSel.className = 'inline-edit-input freq-dom-select';
-      domSel.dataset.freqField = 'dom';
-      for (let i = 1; i <= 31; i++) {
-        const opt = document.createElement('option'); opt.value = i; opt.textContent = ordinalSuffix(i);
-        if (String(i) === String(parsed.dom || '1')) opt.selected = true;
-        domSel.appendChild(opt);
-      }
-      const domLabel = document.createElement('span'); domLabel.className = 'freq-option-label'; domLabel.textContent = t('habits.freq_day_of_month');
-      opts.appendChild(domLabel); opts.appendChild(domSel);
-    }
+    if (type === 'every_N_months') {
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.min = '1'; inp.max = '12'; inp.className = 'inline-edit-input freq-n-input';
+      inp.value = parsed.n || '1';
+      inp.dataset.freqField = 'n';
+      const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_n_months_label');
+      opts.appendChild(label); opts.appendChild(inp);
 
-    if (type === 'monthly_weekday') {
-      const posSel = document.createElement('select'); posSel.className = 'inline-edit-input freq-pos-select';
-      posSel.dataset.freqField = 'position';
-      ['first', 'last'].forEach(p => {
-        const opt = document.createElement('option'); opt.value = p; opt.textContent = t('habits.freq_' + p);
-        if (p === (parsed.position || 'first')) opt.selected = true;
-        posSel.appendChild(opt);
+      // Mode toggle: day-of-month vs weekday
+      const modeRow = document.createElement('div'); modeRow.className = 'freq-month-mode';
+      const modeSel = document.createElement('select'); modeSel.className = 'inline-edit-input freq-mode-select';
+      modeSel.dataset.freqField = 'monthMode';
+      [{ v: 'dom', l: t('habits.freq_mode_dom') }, { v: 'weekday', l: t('habits.freq_mode_weekday') }].forEach(m => {
+        const opt = document.createElement('option'); opt.value = m.v; opt.textContent = m.l;
+        if (m.v === (parsed.monthMode || 'dom')) opt.selected = true;
+        modeSel.appendChild(opt);
       });
-      opts.appendChild(posSel);
+      modeRow.appendChild(modeSel);
+      opts.appendChild(modeRow);
 
-      const daySel = document.createElement('select'); daySel.className = 'inline-edit-input freq-weekday-select';
-      daySel.dataset.freqField = 'day';
-      DOW_KEYS.forEach(d => {
-        const opt = document.createElement('option'); opt.value = d; opt.textContent = t('habits.day_' + d.toLowerCase());
-        if (d === (parsed.day || 'Mon')) opt.selected = true;
-        daySel.appendChild(opt);
-      });
-      opts.appendChild(daySel);
+      const subOpts = document.createElement('div'); subOpts.className = 'freq-month-sub-options';
+      opts.appendChild(subOpts);
+
+      function renderMonthSub() {
+        subOpts.innerHTML = '';
+        const mode = modeSel.value;
+        if (mode === 'dom') {
+          const domSel = document.createElement('select'); domSel.className = 'inline-edit-input freq-dom-select';
+          domSel.dataset.freqField = 'dom';
+          for (let i = 1; i <= 31; i++) {
+            const opt = document.createElement('option'); opt.value = i; opt.textContent = ordinalSuffix(i);
+            if (String(i) === String(parsed.dom || '1')) opt.selected = true;
+            domSel.appendChild(opt);
+          }
+          const domLabel = document.createElement('span'); domLabel.className = 'freq-option-label'; domLabel.textContent = t('habits.freq_day_of_month');
+          subOpts.appendChild(domLabel); subOpts.appendChild(domSel);
+        } else {
+          // Weekday mode: position + multi-day bar
+          const posSel = document.createElement('select'); posSel.className = 'inline-edit-input freq-pos-select';
+          posSel.dataset.freqField = 'position';
+          ['first', 'last'].forEach(p => {
+            const opt = document.createElement('option'); opt.value = p; opt.textContent = t('habits.freq_' + p);
+            if (p === (parsed.position || 'first')) opt.selected = true;
+            posSel.appendChild(opt);
+          });
+          subOpts.appendChild(posSel);
+          const dayBar = document.createElement('div'); dayBar.className = 'freq-day-bar';
+          DOW_KEYS.forEach(d => {
+            const btn = document.createElement('button');
+            btn.type = 'button'; btn.className = 'freq-day-btn';
+            btn.textContent = t('habits.day_' + d.toLowerCase());
+            btn.dataset.day = d;
+            if (parsed.days && parsed.days.includes(d)) btn.classList.add('active');
+            btn.addEventListener('click', () => btn.classList.toggle('active'));
+            dayBar.appendChild(btn);
+          });
+          subOpts.appendChild(dayBar);
+        }
+      }
+      modeSel.addEventListener('change', () => { parsed.monthMode = modeSel.value; renderMonthSub(); });
+      renderMonthSub();
     }
 
     if (type === 'yearly') {
@@ -483,39 +552,28 @@ function getFrequencyFromPicker(container) {
   const type = sel.value;
   const opts = container.querySelector('.freq-options');
 
-  if (type === 'daily') return 'daily';
-
   if (type === 'every_N_days') {
-    const n = opts.querySelector('[data-freq-field="n"]')?.value || '2';
+    const n = opts.querySelector('[data-freq-field="n"]')?.value || '1';
     return 'every_N_days:' + n;
   }
 
-  if (type === 'weekly') {
-    const days = Array.from(opts.querySelectorAll('.freq-day-btn.active')).map(b => b.dataset.day);
-    return days.length ? 'weekly:' + days.join(',') : '';
-  }
-
   if (type === 'every_N_weeks') {
-    const n = opts.querySelector('[data-freq-field="n"]')?.value || '2';
+    const n = opts.querySelector('[data-freq-field="n"]')?.value || '1';
     const days = Array.from(opts.querySelectorAll('.freq-day-btn.active')).map(b => b.dataset.day);
-    return days.length ? 'every_N_weeks:' + n + ':' + days.join(',') : '';
-  }
-
-  if (type === 'monthly') {
-    const dom = opts.querySelector('[data-freq-field="dom"]')?.value || '1';
-    return 'monthly:' + dom;
-  }
-
-  if (type === 'monthly_weekday') {
-    const pos = opts.querySelector('[data-freq-field="position"]')?.value || 'first';
-    const day = opts.querySelector('[data-freq-field="day"]')?.value || 'Mon';
-    return 'monthly_weekday:' + pos + ':' + day;
+    return days.length ? 'every_N_weeks:' + n + ':' + days.join(',') : 'every_N_weeks:' + n;
   }
 
   if (type === 'every_N_months') {
-    const n = opts.querySelector('[data-freq-field="n"]')?.value || '2';
-    const dom = opts.querySelector('[data-freq-field="dom"]')?.value || '1';
-    return 'every_N_months:' + n + ':' + dom;
+    const n = opts.querySelector('[data-freq-field="n"]')?.value || '1';
+    const mode = opts.querySelector('[data-freq-field="monthMode"]')?.value || 'dom';
+    if (mode === 'dom') {
+      const dom = opts.querySelector('[data-freq-field="dom"]')?.value || '1';
+      return 'every_N_months:' + n + ':' + dom;
+    }
+    // weekday mode
+    const pos = opts.querySelector('[data-freq-field="position"]')?.value || 'first';
+    const days = Array.from(opts.querySelectorAll('.freq-month-sub-options .freq-day-btn.active')).map(b => b.dataset.day);
+    return days.length ? 'every_N_months:' + n + ':' + pos + ':' + days.join(',') : '';
   }
 
   if (type === 'yearly') {
@@ -545,6 +603,10 @@ async function refreshHabits() {
     return;
   }
   state.allHabits = habits || [];
+  // Normalize any legacy frequency_rule formats
+  for (const h of state.allHabits) {
+    if (h.frequency_rule) h.frequency_rule = normalizeFrequencyRule(h.frequency_rule);
+  }
 
   try {
     state.allHabitCompletions = await fetchAll(() => state.db.from('habit_completions').select('*').order('completed_at', { ascending: false }));
@@ -2306,7 +2368,7 @@ document.addEventListener('input', e => {
   }
 });
 
-export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, initHabitHoverDelay, isStructuredRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName };
+export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, initHabitHoverDelay, isStructuredRule, normalizeFrequencyRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName };
 
 window.setHabitFilter = setHabitFilter;
 window.openAddHabitModal = openAddHabitModal;

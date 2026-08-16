@@ -235,4 +235,15 @@ export const DRIVE_MIGRATIONS = {
       if (note.sort_order === undefined) note.sort_order = 0;
     }
   },
+
+  '1.651': async (store) => {
+    // Consolidate frequency_rule formats
+    for (const h of (store.habits || [])) {
+      if (!h.frequency_rule) continue;
+      if (h.frequency_rule === 'daily') { h.frequency_rule = 'every_N_days:1'; }
+      else if (h.frequency_rule.startsWith('weekly:')) { h.frequency_rule = 'every_N_weeks:1:' + h.frequency_rule.slice(7); }
+      else if (h.frequency_rule.startsWith('monthly_weekday:')) { h.frequency_rule = 'every_N_months:1:' + h.frequency_rule.slice(17); }
+      else if (h.frequency_rule.startsWith('monthly:')) { h.frequency_rule = 'every_N_months:1:' + h.frequency_rule.slice(8); }
+    }
+  },
 };

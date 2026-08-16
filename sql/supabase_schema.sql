@@ -1317,7 +1317,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE
   todo_categories, habit_categories, vestiaire_categories, flashcard_decks;
 
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.608') ON CONFLICT ("key") DO UPDATE SET "value" = '1.608', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.651') ON CONFLICT ("key") DO UPDATE SET "value" = '1.651', "updated_at" = now();
 
 -- ── Seed protected category rows (ON CONFLICT safe for idempotent re-runs) ──
 -- owner_id is NULL here; trg_set_owner_id fills it on first auth'd INSERT.

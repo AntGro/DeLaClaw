@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "1.649",
-    "generated_at": "2026-08-16T00:45:00.693Z",
+    "version": "1.650",
+    "generated_at": "2026-08-16T00:52:50.040Z",
     "loc_total": 29100,
     "files_scanned": 38,
     "tier": "T2-enriched",
@@ -94,7 +94,7 @@
         "pendingSet"
       ],
       "esc_count": 81,
-      "i18n_count": 140,
+      "i18n_count": 141,
       "window_exposed": [
         "navigateToFlashDeck",
         "filterFlashcards",

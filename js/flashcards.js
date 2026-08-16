@@ -126,7 +126,7 @@ async function loadFlashcardDecks() {
 function getFlashcardDecks() { return _deckMap; }
 
 // ── Deck helpers ──
-function getDeckColorById(deckId) { return _deckMap.get(deckId)?.color || GENERAL_CATEGORY_COLOR; }
+function getDeckColorById(deckId) { return _deckMap.get(deckId)?.color || FLASH_DEFAULT_COLOR; }
 function getDeckShortname(deckId) { return _deckMap.get(deckId)?.shortname || ''; }
 function getDeckName(deckId) { return _deckMap.get(deckId)?.name ?? ''; }
 function getDeckDisplayName(deckId) {
@@ -140,11 +140,12 @@ function deckIdForCard(card) { return card.deck_id || _deckByName.get(card.deck 
 function deckIdForText(text) { return text.deck_id || _deckByName.get(text.deck ?? '')?.id || _defaultDeckId; }
 
 // Backward-compat: accepts name or ID
+const FLASH_DEFAULT_COLOR = '#8b5cf6';
 function getDeckColor(nameOrId) {
-  if (_deckMap.has(nameOrId)) return _deckMap.get(nameOrId).color || GENERAL_CATEGORY_COLOR;
+  if (_deckMap.has(nameOrId)) return _deckMap.get(nameOrId).color || FLASH_DEFAULT_COLOR;
   const byName = _deckByName.get(nameOrId);
-  if (byName) return byName.color || GENERAL_CATEGORY_COLOR;
-  return GENERAL_CATEGORY_COLOR;
+  if (byName) return byName.color || FLASH_DEFAULT_COLOR;
+  return FLASH_DEFAULT_COLOR;
 }
 
 function getFlashShortname(nameOrId) {
@@ -203,9 +204,9 @@ function renderDeckNavButtons() {
   const cardDecks = allCards.map(c => c.deck);
   const textDecks = allTexts.map(t => t.deck);
   const deckNames = new Set([...cardDecks, ...textDecks]);
-  // Include all DB decks (even empty ones)
+  // Include all DB decks (even empty ones), but skip __shared__ if empty
   for (const row of _deckMap.values()) {
-    if (row.name !== undefined) deckNames.add(row.name);
+    if (row.name !== undefined && row.name !== SHARED_CATEGORY) deckNames.add(row.name);
   }
   // Sort by DB sort_order (fall back to alphabetical for unknown decks)
   const decks = [...deckNames].sort((a, b) => {
@@ -283,9 +284,9 @@ function renderAllBuckets() {
   const cardDecks = allCards.map(c => c.deck);
   const textDecks = allTexts.map(tx => tx.deck);
   const deckNames = new Set([...cardDecks, ...textDecks]);
-  // Include all DB decks (even empty ones)
+  // Include all DB decks (even empty ones), but skip __shared__ if empty
   for (const row of _deckMap.values()) {
-    if (row.name !== undefined) deckNames.add(row.name);
+    if (row.name !== undefined && row.name !== SHARED_CATEGORY) deckNames.add(row.name);
   }
   const decks = [...deckNames].sort((a, b) => {
     const ra = _deckByName.get(a), rb = _deckByName.get(b);
@@ -521,7 +522,7 @@ function renderFlashcardDeck(deck, q) {
       </div>
     </div>
     <div class="task-list">
-      ${cards.map(c => renderFlashcardItem(c, color)).join('')}
+      ${cards.length > 0 ? cards.map(c => renderFlashcardItem(c, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-flashcard" data-deck="${esc(deck)}">${lucideIcon('plus', 16)} ${t('flashcards.add_card')}</button></div>`}
     </div>
   </div>`;
 }
@@ -589,7 +590,7 @@ function renderTextDeck(deck, q) {
       </div>
     </div>
     <div class="task-list">
-      ${texts.map(tx => renderTextItem(tx, color)).join('')}
+      ${texts.length > 0 ? texts.map(tx => renderTextItem(tx, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-text" data-deck="${esc(deck)}">${lucideIcon('plus', 16)} ${t('flashcards.add_text')}</button></div>`}
     </div>
   </div>`;
 }
@@ -2476,7 +2477,7 @@ function openEditDeckModal(deck) {
         </div>
         <div class="modal-field">
           <label>${t('common.color')}</label>
-          <input type="color" id="editDeckColor" value="${esc(deckRow.color || GENERAL_CATEGORY_COLOR)}">
+          <input type="color" id="editDeckColor" value="${esc(deckRow.color || FLASH_DEFAULT_COLOR)}">
         </div>
       </div>
       <div class="modal-actions">

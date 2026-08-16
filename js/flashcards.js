@@ -203,6 +203,10 @@ function renderDeckNavButtons() {
   const cardDecks = allCards.map(c => c.deck);
   const textDecks = allTexts.map(t => t.deck);
   const deckNames = new Set([...cardDecks, ...textDecks]);
+  // Include all DB decks (even empty ones)
+  for (const row of _deckMap.values()) {
+    if (row.name !== undefined) deckNames.add(row.name);
+  }
   // Sort by DB sort_order (fall back to alphabetical for unknown decks)
   const decks = [...deckNames].sort((a, b) => {
     const ra = _deckByName.get(a), rb = _deckByName.get(b);
@@ -279,6 +283,10 @@ function renderAllBuckets() {
   const cardDecks = allCards.map(c => c.deck);
   const textDecks = allTexts.map(tx => tx.deck);
   const deckNames = new Set([...cardDecks, ...textDecks]);
+  // Include all DB decks (even empty ones)
+  for (const row of _deckMap.values()) {
+    if (row.name !== undefined) deckNames.add(row.name);
+  }
   const decks = [...deckNames].sort((a, b) => {
     const ra = _deckByName.get(a), rb = _deckByName.get(b);
     return (ra?.sort_order ?? Infinity) - (rb?.sort_order ?? Infinity) || a.localeCompare(b);
@@ -456,7 +464,6 @@ function renderFlashcardDeck(deck, q) {
   }
 
   if (cards.length === 0 && (q || flashcardFilter !== 'all')) return '';
-  if (cards.length === 0 && !q) return '';
 
   // Apply sort to cards
   const sortBy = document.getElementById('flashcardSortBy')?.value || 'default';
@@ -545,7 +552,6 @@ function renderTextDeck(deck, q) {
   }
 
   if (texts.length === 0 && (q || flashcardFilter !== 'all')) return '';
-  if (texts.length === 0 && !q) return '';
 
   const color = getDeckColor(deck);
   const allDeckTexts = allTexts.filter(tx => tx.deck === deck);

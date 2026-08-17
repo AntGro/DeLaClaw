@@ -242,7 +242,7 @@ export const DRIVE_MIGRATIONS = {
       if (!h.frequency_rule) continue;
       if (h.frequency_rule === 'daily') { h.frequency_rule = 'every_N_days:1'; }
       else if (h.frequency_rule.startsWith('weekly:')) { h.frequency_rule = 'every_N_weeks:1:' + h.frequency_rule.slice(7); }
-      else if (h.frequency_rule.startsWith('monthly_weekday:')) { h.frequency_rule = 'every_N_months:1:' + h.frequency_rule.slice(17); }
+      else if (h.frequency_rule.startsWith('monthly_weekday:')) { h.frequency_rule = 'every_N_months:1:' + h.frequency_rule.slice(16); }
       else if (h.frequency_rule.startsWith('monthly:')) { h.frequency_rule = 'every_N_months:1:' + h.frequency_rule.slice(8); }
     }
   },

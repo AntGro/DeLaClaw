@@ -128,7 +128,7 @@ function normalizeFrequencyRule(rule) {
   if (!rule) return rule;
   if (rule === 'daily') return 'every_N_days:1';
   if (rule.startsWith('weekly:')) return 'every_N_weeks:1:' + rule.slice(7);
-  if (rule.startsWith('monthly_weekday:')) return 'every_N_months:1:' + rule.slice(17);
+  if (rule.startsWith('monthly_weekday:')) return 'every_N_months:1:' + rule.slice(16);
   if (rule.startsWith('monthly:') && !rule.startsWith('monthly_weekday:')) return 'every_N_months:1:' + rule.slice(8);
   return rule;
 }

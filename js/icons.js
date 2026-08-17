@@ -211,3 +211,7 @@ export function brandIcon(name, size = 16) {
   if (!icon) return '';
   return `<svg class="brand-icon" width="${size}" height="${size}" viewBox="${icon.viewBox}" fill="currentColor" aria-hidden="true">${icon.paths}</svg>`;
 }
+
+export function brandFileIcon(slug, size = 16) {
+  return `<span class="brand-file-icon" style="--bi-url:url('icons/brand/${slug}.svg');--bi-size:${size}px" aria-hidden="true"></span>`;
+}

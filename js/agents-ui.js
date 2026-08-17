@@ -108,6 +108,11 @@ export async function renderAgentsPane() {
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Claude Code">${lucideIcon('terminal',12)} Claude Code</span>
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Codex CLI">${lucideIcon('code-2',12)} Codex CLI</span>
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="OpenClaw">OpenClaw</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Hermes">${lucideIcon('sparkles',12)} Hermes</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="NanoClaw">NanoClaw</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Grok Bot">${lucideIcon('brain',12)} Grok Bot</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Cursor">${lucideIcon('pencil',12)} Cursor</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Aider">${lucideIcon('git-branch',12)} Aider</span>
       </div>
     </div>`;
 

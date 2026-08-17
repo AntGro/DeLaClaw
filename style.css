@@ -374,8 +374,10 @@ input,select,button{font-family:inherit;}
 .agent-name-pill{background:var(--surface2);color:var(--text);padding:5px 10px;border-radius:999px;font-size:0.74rem;display:inline-flex;gap:4px;align-items:center;cursor:pointer;transition:background 0.15s,color 0.15s;}
 .agent-name-pill:hover{background:color-mix(in srgb, var(--accent) 14%, transparent);color:var(--accent);}
 .brand-file-icon{display:inline-block;vertical-align:middle;}
-.brand-file-icon[data-brand="codex"]{filter:invert(1);}
-[data-theme="light"] .brand-file-icon[data-brand="codex"]{filter:none;}
+.brand-file-icon[data-brand="codex"],
+.brand-file-icon[data-brand="hermes"]{filter:invert(1);}
+[data-theme="light"] .brand-file-icon[data-brand="codex"],
+[data-theme="light"] .brand-file-icon[data-brand="hermes"]{filter:none;}
 [data-theme="light"] .brand-file-icon[data-brand="grok"],
 [data-theme="light"] .brand-file-icon[data-brand="cursor"]{filter:invert(1);}
 .settings-lang-picker{display:flex;gap:6px;flex-wrap:wrap;}

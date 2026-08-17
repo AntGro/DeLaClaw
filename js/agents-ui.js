@@ -109,7 +109,7 @@ export async function renderAgentsPane() {
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Codex CLI">${brandFileIcon('codex',12)} Codex CLI</span>
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="OpenClaw">${brandFileIcon('openclaw',12)} OpenClaw</span>
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Hermes">${brandFileIcon('hermes',12)} Hermes</span>
-        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="NanoClaw">NanoClaw</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="NanoClaw">${brandFileIcon('nanoclaw',12)} NanoClaw</span>
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Grok Bot">${brandFileIcon('grok',12)} Grok Bot</span>
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Cursor">${brandFileIcon('cursor',12)} Cursor</span>
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Aider">${lucideIcon('git-branch',12)} Aider</span>

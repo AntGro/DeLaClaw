@@ -376,8 +376,10 @@ input,select,button{font-family:inherit;}
 .brand-file-icon{display:inline-block;vertical-align:middle;}
 .brand-file-icon[data-brand="codex"],
 .brand-file-icon[data-brand="hermes"]{filter:invert(1);}
+.brand-file-icon[data-brand="nanoclaw"]{filter:invert(1) hue-rotate(180deg);}
 [data-theme="light"] .brand-file-icon[data-brand="codex"],
-[data-theme="light"] .brand-file-icon[data-brand="hermes"]{filter:none;}
+[data-theme="light"] .brand-file-icon[data-brand="hermes"],
+[data-theme="light"] .brand-file-icon[data-brand="nanoclaw"]{filter:none;}
 [data-theme="light"] .brand-file-icon[data-brand="grok"],
 [data-theme="light"] .brand-file-icon[data-brand="cursor"]{filter:invert(1);}
 .settings-lang-picker{display:flex;gap:6px;flex-wrap:wrap;}

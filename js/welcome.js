@@ -563,6 +563,19 @@ function renderWelcome() {
   // Focus TODOs section
   html += `<div class="welcome-section" id="welcome-bucket-todos" style="--cat-color:#22c55e">`;
   html += `<div class="welcome-section-header">${lucideIcon('list-checks', 18)} <span>${esc(t('welcome.focus_todos'))}</span></div>`;
+  // Quick-add TODO with category selector
+  const todoCatIds = [...new Set(wTodos.map(td => catIdForTodo(td)))];
+  html += `<div class="welcome-quick-add">`;
+  html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
+  for (const catId of todoCatIds) {
+    const label = getCatDisplayName(catId);
+    html += `<option value="${esc(catId)}">${esc(label)}</option>`;
+  }
+  html += `</select>`;
+  html += `<input type="text" placeholder="${esc(t('todos.add_todo_placeholder'))}" maxlength="2000" class="todo-cat-input" data-category="${esc(todoCatIds[0] || '')}" data-priority="medium" data-action="welcome-quick-add-todo-on-enter">`;
+  html += `<button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>`;
+  html += `<button data-action="welcome-add-todo-from-quick">+</button>`;
+  html += `</div>`;
   if (focusTodos.length === 0) {
     html += `<div class="welcome-empty">${esc(t('welcome.all_clear'))}</div>`;
   } else {
@@ -587,28 +600,26 @@ function renderWelcome() {
     }
     html += `</div>`;
   }
-  // Quick-add TODO with category selector
-  const todoCatIds = [...new Set(wTodos.map(td => catIdForTodo(td)))];
-  html += `<div class="welcome-quick-add">`;
-  html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
-  for (const catId of todoCatIds) {
-    const label = getCatDisplayName(catId);
-    html += `<option value="${esc(catId)}">${esc(label)}</option>`;
-  }
-  html += `</select>`;
-  html += `<input type="text" placeholder="${esc(t('todos.add_todo_placeholder'))}" maxlength="2000" class="todo-cat-input" data-category="${esc(todoCatIds[0] || '')}" data-priority="medium" data-action="welcome-quick-add-todo-on-enter">`;
-  html += `<button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>`;
-  html += `<button data-action="welcome-add-todo-from-quick">+</button>`;
-  html += `</div>`;
   html += `</div>`;
 
   // Habits due
   html += `<div class="welcome-section" id="welcome-bucket-habits" style="--cat-color:#ec4899">`;
   html += `<div class="welcome-section-header">${lucideIcon('repeat', 18)} <span>${esc(t('welcome.habits_due'))}</span></div>`;
+  // Quick-add Habit (opens modal pre-filled with name + category)
+  const habitCatIds = [...new Set(wHabits.map(c => catIdForHabit(c)))];
+  html += `<div class="welcome-quick-add">`;
+  html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
+  for (const catId of habitCatIds) {
+    const label = getHabitCatDisplayName(catId);
+    html += `<option value="${esc(catId)}">${esc(label)}</option>`;
+  }
+  html += `</select>`;
+  html += `<input type="text" placeholder="${esc(t('habits.quick_add_placeholder'))}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(habitCatIds[0] || '')}" data-action="welcome-quick-add-habit-on-enter">`;
+  html += `<button data-action="welcome-add-habit-from-quick">+</button>`;
+  html += `</div>`;
   if (habitsDue.length === 0) {
     html += `<div class="welcome-empty">${esc(t('welcome.no_habits_due'))}</div>`;
   } else {
-    // Group habits by category
     // Group habits by category_id
     const habitsByCategory = {};
     for (const ch of habitsDue) {
@@ -628,18 +639,6 @@ function renderWelcome() {
     }
     html += `</div>`;
   }
-  // Quick-add Habit (opens modal pre-filled with name + category)
-  const habitCatIds = [...new Set(wHabits.map(c => catIdForHabit(c)))];
-  html += `<div class="welcome-quick-add">`;
-  html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
-  for (const catId of habitCatIds) {
-    const label = getHabitCatDisplayName(catId);
-    html += `<option value="${esc(catId)}">${esc(label)}</option>`;
-  }
-  html += `</select>`;
-  html += `<input type="text" placeholder="${esc(t('habits.quick_add_placeholder'))}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(habitCatIds[0] || '')}" data-action="welcome-quick-add-habit-on-enter">`;
-  html += `<button data-action="welcome-add-habit-from-quick">+</button>`;
-  html += `</div>`;
   html += `</div>`;
   html += `</div>`; // close welcome-grid
 

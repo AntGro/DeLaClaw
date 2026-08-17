@@ -172,15 +172,9 @@ function computeNextDue(frequencyRule, lastDoneDate) {
       return next < today ? localDateStr(today) : localDateStr(next);
     }
 
-    // Early-completion guard: minimum gap so completing early consumes
-    // the upcoming occurrence and advances to the next one.
-    // Single-day: half-period ensures early completion skips the closest match.
-    // Multi-day: minGap of 2 prevents landing on the very next day (1-day-early case)
-    // while still allowing the natural inter-day cycle.
-    const minGap = dayIndices.length > 1 ? 2 : Math.ceil(n * 7 / 2);
-
     if (n === 1) {
-      for (let offset = minGap; offset < minGap + 7; offset++) {
+      // Weekly: find next matching day within 7 days
+      for (let offset = 1; offset <= 7; offset++) {
         const candidate = new Date(baseDay); candidate.setDate(candidate.getDate() + offset);
         if (dayIndices.includes(candidate.getDay())) {
           return candidate < today ? localDateStr(today) : localDateStr(candidate);
@@ -189,16 +183,15 @@ function computeNextDue(frequencyRule, lastDoneDate) {
       return null;
     }
 
-    // N > 1: scan from minGap, checking current ISO week remainder first
+    // N > 1: check remaining matching days this ISO week first
     const isoDow = baseDay.getDay() || 7; // Mon=1..Sun=7
     for (let offset = 1; offset <= 7 - isoDow; offset++) {
-      if (offset < minGap) continue;
       const candidate = new Date(baseDay); candidate.setDate(candidate.getDate() + offset);
       if (dayIndices.includes(candidate.getDay())) {
         return candidate < today ? localDateStr(today) : localDateStr(candidate);
       }
     }
-    // No more matching days this week (or all too close) — jump to Nth week after
+    // No more matching days this week — jump to Nth week after
     const nextWeekMon = new Date(baseDay);
     nextWeekMon.setDate(nextWeekMon.getDate() + (8 - isoDow)); // next Monday
     nextWeekMon.setDate(nextWeekMon.getDate() + (n - 1) * 7);  // skip N-1 more weeks
@@ -214,7 +207,6 @@ function computeNextDue(frequencyRule, lastDoneDate) {
   if (frequencyRule.startsWith('every_N_months:')) {
     const parts = frequencyRule.split(':');
     const n = parseInt(parts[1], 10) || 1;
-    const halfPeriodDays = Math.ceil(n * 30 / 2);
 
     // Day-of-month mode: every_N_months:N:DD (part[2] is numeric)
     if (!isNaN(parseInt(parts[2], 10))) {
@@ -222,9 +214,6 @@ function computeNextDue(frequencyRule, lastDoneDate) {
       if (!dom || dom < 1 || dom > 31) return null;
       let next = new Date(baseDay.getFullYear(), baseDay.getMonth(), dom);
       if (next <= baseDay) next = new Date(baseDay.getFullYear(), baseDay.getMonth() + n, dom);
-      // Early-completion guard
-      const gap = Math.round((next - baseDay) / 86400000);
-      if (gap < halfPeriodDays) next = new Date(next.getFullYear(), next.getMonth() + n, dom);
       return next < today ? localDateStr(today) : localDateStr(next);
     }
 
@@ -254,8 +243,6 @@ function computeNextDue(frequencyRule, lastDoneDate) {
       // Check current month for remaining candidates after baseDay
       let candidates = findPositionWeekdays(baseDay.getFullYear(), baseDay.getMonth(), dayIndices, position)
         .filter(d => d > baseDay);
-      // Early-completion guard: skip candidates within half a period
-      candidates = candidates.filter(d => Math.round((d - baseDay) / 86400000) >= halfPeriodDays);
       if (candidates.length === 0) {
         // Advance N months
         const nextMonth = new Date(baseDay.getFullYear(), baseDay.getMonth() + n, 1);
@@ -275,9 +262,6 @@ function computeNextDue(frequencyRule, lastDoneDate) {
     if (!mm || !dd) return null;
     let next = new Date(baseDay.getFullYear(), mm - 1, dd);
     if (next <= baseDay) next = new Date(baseDay.getFullYear() + 1, mm - 1, dd);
-    // Early-completion guard (7-day window for yearly)
-    const gap = Math.round((next - baseDay) / 86400000);
-    if (gap > 0 && gap < 7) next = new Date(next.getFullYear() + 1, mm - 1, dd);
     return next < today ? localDateStr(today) : localDateStr(next);
   }
 

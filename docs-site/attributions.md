@@ -54,3 +54,9 @@ DeLaClaw uses the following third-party software and assets. No npm dependencies
 - **Website**: https://thesvg.org
 - **Purpose**: brand SVG icons for agent name pills (Claude, Codex, Grok, Cursor, Hermes, OpenClaw)
 - **Loaded from**: `icons/brand/` (self-hosted SVG files, sourced from thesvg.org mono/default variants)
+
+### Dashboard Icons (homarr-labs)
+- **License**: MIT
+- **Source**: https://github.com/homarr-labs/dashboard-icons
+- **Purpose**: brand SVG icon for NanoClaw agent pill
+- **Loaded from**: `icons/brand/nanoclaw.svg` (self-hosted, sourced from dashboard-icons collection)

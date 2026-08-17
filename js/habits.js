@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder } from './item-utils.js';
+import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
@@ -1001,7 +1001,10 @@ function initHabitNavBtnReorder() {
       const reorderable = orderedIds.filter(id => id !== _sharedHabitCatId);
       await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('habit_categories').update({ sort_order: i }).eq('id', id))));
       await loadHabitCategories();
+      const grid = document.getElementById('habitCategoryGrid');
+      const snapshot = snapshotBuckets(grid);
       renderHabits();
+      animateBucketsFromSnapshot(grid, snapshot, 600);
       showToast(t('toast.reordered'), 'success');
     },
   });

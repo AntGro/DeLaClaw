@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
-import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder } from './item-utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot } from './item-utils.js';
 import { t } from './i18n.js';
 
 // ===================================================================
@@ -308,7 +308,10 @@ function initVestiaireNavBtnReorder() {
       const reorderable = orderedIds.filter(id => id !== _sharedVestCatId);
       await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('vestiaire_categories').update({ sort_order: i }).eq('id', id))));
       await loadVestiaireCategories();
+      const grid = document.getElementById('vestiaireGrid');
+      const snapshot = snapshotBuckets(grid);
       renderVestiaire();
+      animateBucketsFromSnapshot(grid, snapshot, 600);
       showToast(t('toast.reordered'), 'success');
     },
   });

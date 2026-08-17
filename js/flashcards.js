@@ -2,7 +2,7 @@ import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, initNavBtnReorder } from './item-utils.js';
+import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
 // ===================================================================
@@ -251,7 +251,10 @@ function initFlashDeckNavBtnReorder() {
       const deckRows = reorderable.map(n => _deckByName.get(n)).filter(Boolean);
       await state.db.batch(() => Promise.all(deckRows.map((d, i) => state.db.from('flashcard_decks').update({ sort_order: i }).eq('id', d.id))));
       await loadFlashcardDecks();
+      const grid = document.getElementById('flashcardGrid');
+      const snapshot = snapshotBuckets(grid);
       renderFlashcards();
+      animateBucketsFromSnapshot(grid, snapshot, 600);
       showToast(t('toast.reordered'), 'success');
     },
   });

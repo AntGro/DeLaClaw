@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder } from './item-utils.js';
+import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
@@ -1076,7 +1076,10 @@ function initTodoNavBtnReorder() {
       const reorderable = orderedIds.filter(id => id !== _sharedCatId);
       await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('todo_categories').update({ sort_order: i }).eq('id', id))));
       await loadTodoCategories();
+      const grid = document.getElementById('todoCategoryGrid');
+      const snapshot = snapshotBuckets(grid);
       renderTodos();
+      animateBucketsFromSnapshot(grid, snapshot, 600);
       showToast(t('toast.reordered'), 'success');
     },
   });

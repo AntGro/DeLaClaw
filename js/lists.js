@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder } from './item-utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 
@@ -354,7 +354,10 @@ function initListNavBtnReorder() {
         return l && l.name !== SHARED_LIST_NAME;
       });
       await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('lists').update({ sort_order: i }).eq('id', id))));
+      const grid = document.getElementById('listsGrid');
+      const snapshot = snapshotBuckets(grid);
       await refreshLists();
+      animateBucketsFromSnapshot(grid, snapshot, 600);
       showToast(t('toast.reordered'), 'success');
     },
   });

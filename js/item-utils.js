@@ -1029,3 +1029,47 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = 
     btn.addEventListener('lostpointercapture', cancelDrag);
   });
 }
+
+// ===================================================================
+// BUCKET FLIP — smooth reorder animation for .project-card containers
+// ===================================================================
+
+function bucketKey(el) {
+  return el.id || el.dataset.category || el.dataset.project || el.dataset.listId || el.dataset.deck || null;
+}
+
+/** Snapshot positions of all .project-card elements inside a container. */
+export function snapshotBuckets(container) {
+  const map = new Map();
+  if (!container) return map;
+  container.querySelectorAll('.project-card').forEach(el => {
+    const key = bucketKey(el);
+    if (key) map.set(key, el.getBoundingClientRect());
+  });
+  return map;
+}
+
+/** FLIP-animate .project-card elements from their snapshotted positions to current ones. */
+export function animateBucketsFromSnapshot(container, snapshot, durationMs = 600) {
+  if (!container || !snapshot.size) return;
+  container.querySelectorAll('.project-card').forEach(el => {
+    const key = bucketKey(el);
+    const oldRect = key && snapshot.get(key);
+    if (!oldRect) return;
+    const newRect = el.getBoundingClientRect();
+    const dx = oldRect.left - newRect.left;
+    const dy = oldRect.top - newRect.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    // eslint-disable-next-line no-unused-expressions
+    el.offsetHeight; // force reflow before enabling transition
+    el.style.transition = `transform ${durationMs}ms ease`;
+    el.style.transform = '';
+    el.addEventListener('transitionend', function handler(e) {
+      if (e.propertyName !== 'transform') return;
+      el.style.transition = '';
+      el.removeEventListener('transitionend', handler);
+    });
+  });
+}

@@ -3,7 +3,7 @@ import { lucideIcon } from './icons.js';
 import state, { MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction,
          updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll, autoResizeTextarea } from './utils.js';
-import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
+import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
 
 // ===================================================================
 // state.PROJECTS (loaded from Supabase)
@@ -63,8 +63,11 @@ function initProjectNavBtnReorder() {
     async onReorder(orderedIds) {
       await state.db.batch(() => Promise.all(orderedIds.map((id, i) => state.db.from('projects').update({ sort_order: i }).eq('id', id))));
       await loadProjects();
+      const grid = document.getElementById('projectGrid');
+      const snapshot = snapshotBuckets(grid);
       buildProjectCards();
       renderAllTasks();
+      animateBucketsFromSnapshot(grid, snapshot, 600);
       showToast(t('toast.reordered'), 'success');
     },
   });

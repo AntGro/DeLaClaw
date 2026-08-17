@@ -415,21 +415,27 @@ function buildFrequencyPicker(container, currentRule) {
     const type = sel.value;
 
     if (type === 'every_N_days') {
+      const row = document.createElement('div'); row.className = 'freq-n-row';
+      const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_every');
       const inp = document.createElement('input');
       inp.type = 'number'; inp.min = '1'; inp.max = '365'; inp.className = 'inline-edit-input freq-n-input';
       inp.value = parsed.n || '1';
       inp.dataset.freqField = 'n';
-      const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_n_days_label');
-      opts.appendChild(label); opts.appendChild(inp);
+      const unit = document.createElement('span'); unit.className = 'freq-option-label'; unit.textContent = t('habits.freq_n_days_label');
+      row.appendChild(label); row.appendChild(inp); row.appendChild(unit);
+      opts.appendChild(row);
     }
 
     if (type === 'every_N_weeks') {
+      const row = document.createElement('div'); row.className = 'freq-n-row';
+      const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_every');
       const inp = document.createElement('input');
       inp.type = 'number'; inp.min = '1'; inp.max = '52'; inp.className = 'inline-edit-input freq-n-input';
       inp.value = parsed.n || '1';
       inp.dataset.freqField = 'n';
-      const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_n_weeks_label');
-      opts.appendChild(label); opts.appendChild(inp);
+      const unit = document.createElement('span'); unit.className = 'freq-option-label'; unit.textContent = t('habits.freq_n_weeks_label');
+      row.appendChild(label); row.appendChild(inp); row.appendChild(unit);
+      opts.appendChild(row);
       // Optional weekday bar
       const dayBar = document.createElement('div'); dayBar.className = 'freq-day-bar';
       DOW_KEYS.forEach(d => {
@@ -445,15 +451,19 @@ function buildFrequencyPicker(container, currentRule) {
     }
 
     if (type === 'every_N_months') {
+      const row = document.createElement('div'); row.className = 'freq-n-row';
+      const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_every');
       const inp = document.createElement('input');
       inp.type = 'number'; inp.min = '1'; inp.max = '12'; inp.className = 'inline-edit-input freq-n-input';
       inp.value = parsed.n || '1';
       inp.dataset.freqField = 'n';
-      const label = document.createElement('span'); label.className = 'freq-option-label'; label.textContent = t('habits.freq_n_months_label');
-      opts.appendChild(label); opts.appendChild(inp);
+      const unit = document.createElement('span'); unit.className = 'freq-option-label'; unit.textContent = t('habits.freq_n_months_label');
+      row.appendChild(label); row.appendChild(inp); row.appendChild(unit);
+      opts.appendChild(row);
 
-      // Mode toggle: day-of-month vs weekday
-      const modeRow = document.createElement('div'); modeRow.className = 'freq-month-mode';
+      // Mode toggle row: day-of-month vs weekday
+      const modeRow = document.createElement('div'); modeRow.className = 'freq-n-row';
+      const onLabel = document.createElement('span'); onLabel.className = 'freq-option-label'; onLabel.textContent = t('habits.freq_on');
       const modeSel = document.createElement('select'); modeSel.className = 'inline-edit-input freq-mode-select';
       modeSel.dataset.freqField = 'monthMode';
       [{ v: 'dom', l: t('habits.freq_mode_dom') }, { v: 'weekday', l: t('habits.freq_mode_weekday') }].forEach(m => {
@@ -461,7 +471,7 @@ function buildFrequencyPicker(container, currentRule) {
         if (m.v === (parsed.monthMode || 'dom')) opt.selected = true;
         modeSel.appendChild(opt);
       });
-      modeRow.appendChild(modeSel);
+      modeRow.appendChild(onLabel); modeRow.appendChild(modeSel);
       opts.appendChild(modeRow);
 
       const subOpts = document.createElement('div'); subOpts.className = 'freq-month-sub-options';
@@ -471,6 +481,7 @@ function buildFrequencyPicker(container, currentRule) {
         subOpts.innerHTML = '';
         const mode = modeSel.value;
         if (mode === 'dom') {
+          const domRow = document.createElement('div'); domRow.className = 'freq-n-row';
           const domSel = document.createElement('select'); domSel.className = 'inline-edit-input freq-dom-select';
           domSel.dataset.freqField = 'dom';
           for (let i = 1; i <= 31; i++) {
@@ -478,10 +489,11 @@ function buildFrequencyPicker(container, currentRule) {
             if (String(i) === String(parsed.dom || '1')) opt.selected = true;
             domSel.appendChild(opt);
           }
-          const domLabel = document.createElement('span'); domLabel.className = 'freq-option-label'; domLabel.textContent = t('habits.freq_day_of_month');
-          subOpts.appendChild(domLabel); subOpts.appendChild(domSel);
+          domRow.appendChild(domSel);
+          subOpts.appendChild(domRow);
         } else {
           // Weekday mode: position + multi-day bar
+          const posRow = document.createElement('div'); posRow.className = 'freq-n-row';
           const posSel = document.createElement('select'); posSel.className = 'inline-edit-input freq-pos-select';
           posSel.dataset.freqField = 'position';
           ['first', 'last'].forEach(p => {
@@ -489,7 +501,8 @@ function buildFrequencyPicker(container, currentRule) {
             if (p === (parsed.position || 'first')) opt.selected = true;
             posSel.appendChild(opt);
           });
-          subOpts.appendChild(posSel);
+          posRow.appendChild(posSel);
+          subOpts.appendChild(posRow);
           const dayBar = document.createElement('div'); dayBar.className = 'freq-day-bar';
           DOW_KEYS.forEach(d => {
             const btn = document.createElement('button');
@@ -508,6 +521,7 @@ function buildFrequencyPicker(container, currentRule) {
     }
 
     if (type === 'yearly') {
+      const row = document.createElement('div'); row.className = 'freq-n-row';
       const mSel = document.createElement('select'); mSel.className = 'inline-edit-input freq-month-select';
       mSel.dataset.freqField = 'month';
       for (let i = 1; i <= 12; i++) {
@@ -517,7 +531,7 @@ function buildFrequencyPicker(container, currentRule) {
         if (String(i).padStart(2, '0') === curM) opt.selected = true;
         mSel.appendChild(opt);
       }
-      opts.appendChild(mSel);
+      row.appendChild(mSel);
 
       const dSel = document.createElement('select'); dSel.className = 'inline-edit-input freq-dom-select';
       dSel.dataset.freqField = 'yearday';
@@ -527,7 +541,8 @@ function buildFrequencyPicker(container, currentRule) {
         if (String(i).padStart(2, '0') === curD) opt.selected = true;
         dSel.appendChild(opt);
       }
-      opts.appendChild(dSel);
+      row.appendChild(dSel);
+      opts.appendChild(row);
     }
 
     if (type === 'custom') {

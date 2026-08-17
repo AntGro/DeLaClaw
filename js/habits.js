@@ -337,11 +337,18 @@ function normalizeHabitNextDue(value) {
 }
 
 async function updateHabitNextDue(habitId, frequencyRule, lastDoneDate) {
-  const nextDue = isStructuredRule(frequencyRule)
+  let nextDue = isStructuredRule(frequencyRule)
     ? normalizeHabitNextDue(computeNextDue(frequencyRule, lastDoneDate))
     : null;
   const habit = state.allHabits.find(h => String(h.id) === String(habitId));
   const currentNextDue = normalizeHabitNextDue(habit?.next_due);
+
+  // Early-completion guard: if the computed next due didn't advance past the
+  // existing due date, the user completed before it arrived — recompute from
+  // the current due date so it jumps to the following occurrence.
+  if (nextDue && currentNextDue && nextDue <= currentNextDue) {
+    nextDue = normalizeHabitNextDue(computeNextDue(frequencyRule, currentNextDue));
+  }
 
   if (habit && currentNextDue === nextDue) return;
 

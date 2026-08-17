@@ -5,7 +5,7 @@
 import db from './db.js';
 import { t } from './i18n.js';
 import { esc, showToast, showConfirmAction } from './utils.js';
-import { lucideIcon } from './icons.js';
+import { lucideIcon, brandIcon } from './icons.js';
 import { STAY_CONNECTED_KEY } from './state.js';
 
 let _lastCreatedToken = null;
@@ -105,13 +105,13 @@ export async function renderAgentsPane() {
         <button class="sharing-invite-btn" data-action="agents-create" id="agentsCreateBtn" style="white-space:nowrap">${lucideIcon('plus',14)} ${esc(t('agents.create_btn'))}</button>
       </div>
       <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Claude Code">${lucideIcon('terminal',12)} Claude Code</span>
-        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Codex CLI">${lucideIcon('code-2',12)} Codex CLI</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Claude Code">${brandIcon('claude',12)} Claude Code</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Codex CLI">${brandIcon('codex',12)} Codex CLI</span>
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="OpenClaw">OpenClaw</span>
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Hermes">${lucideIcon('sparkles',12)} Hermes</span>
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="NanoClaw">NanoClaw</span>
-        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Grok Bot">${lucideIcon('brain',12)} Grok Bot</span>
-        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Cursor">${lucideIcon('pencil',12)} Cursor</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Grok Bot">${brandIcon('grok',12)} Grok Bot</span>
+        <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Cursor">${brandIcon('cursor',12)} Cursor</span>
         <span class="setting-hint agent-name-pill" data-action="agents-prefill-name" data-name="Aider">${lucideIcon('git-branch',12)} Aider</span>
       </div>
     </div>`;

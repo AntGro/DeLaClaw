@@ -1589,6 +1589,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .welcome-section-header{display:flex;align-items:center;gap:8px;font-weight:600;font-size:0.95rem;margin-bottom:12px;flex-shrink:0;}
 .welcome-section[style*="--cat-color"] > .welcome-section-header{background:var(--cat-color);color:#fff;border-radius:11px 11px 0 0;margin:-18px -20px 12px;padding:14px 20px 12px;}
 .welcome-section[style*="--cat-color"] > .welcome-section-header svg.lucide-icon{stroke:currentColor;}
+#welcome-bucket-todos > .welcome-section-header,#welcome-bucket-habits > .welcome-section-header{margin-bottom:0;}
 .welcome-section-header svg{flex-shrink:0;}
 
 .welcome-items{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;overflow-y:auto;}
@@ -1654,6 +1655,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
   .welcome-stats-grid{grid-template-columns:repeat(2,1fr);}
   .welcome-section{padding:14px 10px;overflow:hidden;}
   .welcome-section[style*="--cat-color"] > .welcome-section-header{margin:-14px -10px 10px;padding:10px 10px 8px;}
+  #welcome-bucket-todos > .welcome-section-header,#welcome-bucket-habits > .welcome-section-header{margin-bottom:0;}
   .welcome-section .habit-row,.welcome-section .todo-row{min-width:0;}
   .welcome-section .habit-info,.welcome-section .todo-text{min-width:0;overflow:hidden;text-overflow:ellipsis;}
 }

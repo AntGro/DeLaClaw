@@ -373,7 +373,11 @@ input,select,button{font-family:inherit;}
 .setting-hint{font-size:0.88rem;line-height:1.45;color:var(--muted);margin:4px 0 10px;}
 .agent-name-pill{background:var(--surface2);color:var(--text);padding:5px 10px;border-radius:999px;font-size:0.74rem;display:inline-flex;gap:4px;align-items:center;cursor:pointer;transition:background 0.15s,color 0.15s;}
 .agent-name-pill:hover{background:color-mix(in srgb, var(--accent) 14%, transparent);color:var(--accent);}
-.brand-file-icon{display:inline-block;background-color:currentColor;-webkit-mask-size:contain;mask-size:contain;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;}
+.brand-file-icon{display:inline-block;vertical-align:middle;}
+.brand-file-icon[data-brand="codex"]{filter:invert(1);}
+[data-theme="light"] .brand-file-icon[data-brand="codex"]{filter:none;}
+[data-theme="light"] .brand-file-icon[data-brand="grok"],
+[data-theme="light"] .brand-file-icon[data-brand="cursor"]{filter:invert(1);}
 .settings-lang-picker{display:flex;gap:6px;flex-wrap:wrap;}
 .settings-lang-btn{padding:8px 17px;border-radius:8px;border:1px solid var(--border);background:var(--settings-control-bg);color:var(--text);font-size:0.92rem;font-weight:550;cursor:pointer;transition:background 0.15s,border-color 0.15s;}
 .settings-lang-btn:hover{background:var(--settings-control-hover);}

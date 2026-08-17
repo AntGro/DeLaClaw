@@ -201,6 +201,5 @@ export function lucideIcon(name, size = 16, color) {
 // Brand icons — SVG files in icons/brand/, rendered via CSS mask-image
 // Source: https://thesvg.org (MIT codebase; brand trademarks belong to respective owners)
 export function brandFileIcon(slug, size = 16) {
-  const url = `icons/brand/${slug}.svg`;
-  return `<span class="brand-file-icon" style="-webkit-mask-image:url('${url}');mask-image:url('${url}');width:${size}px;height:${size}px" aria-hidden="true"></span>`;
+  return `<img class="brand-file-icon" data-brand="${slug}" src="icons/brand/${slug}.svg" width="${size}" height="${size}" alt="" aria-hidden="true">`;
 }

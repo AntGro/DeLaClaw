@@ -47,3 +47,10 @@ DeLaClaw uses the following third-party software and assets. No npm dependencies
 - **Source**: https://github.com/lucide-icons/lucide
 - **Purpose**: all UI icons throughout the app
 - **Note**: icon SVG path data is embedded directly in `js/icons.js` (not loaded from CDN). Only a subset of the full icon set is included.
+
+### theSVG
+- **License**: MIT (codebase and tooling); individual brand icons remain trademarks of their respective owners
+- **Source**: https://github.com/glincker/thesvg
+- **Website**: https://thesvg.org
+- **Purpose**: brand SVG icons for agent name pills (Claude, Codex, Grok, Cursor, Hermes, OpenClaw)
+- **Loaded from**: `icons/brand/` (self-hosted SVG files, sourced from thesvg.org mono/default variants)

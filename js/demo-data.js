@@ -104,9 +104,9 @@ function en() {
     { id: 'demo-habit-001', name: 'Morning run (5 km)', frequency_rule: 'every_N_days:1', category: 'Fitness', is_draft: false, next_due: dateOnly(0), sort_order: 0, created_at: d(-60), updated_at: d(-1) },
     { id: 'demo-habit-002', name: 'Read 30 minutes', frequency_rule: 'every_N_days:1', category: 'Learning', is_draft: false, next_due: dateOnly(0), sort_order: 1, created_at: d(-45), updated_at: d(-1) },
     { id: 'demo-habit-003', name: 'Meditate', frequency_rule: 'every_N_days:1', category: 'Wellbeing', is_draft: false, next_due: dateOnly(0), sort_order: 2, created_at: d(-40), updated_at: d(-2) },
-    { id: 'demo-habit-004', name: 'Practice guitar', frequency_rule: '3/week', category: 'Creative', is_draft: false, next_due: dateOnly(1), sort_order: 3, created_at: d(-30), updated_at: d(-3) },
-    { id: 'demo-habit-005', name: 'Water the plants', frequency_rule: '2/week', category: 'Home', is_draft: false, next_due: dateOnly(2), sort_order: 4, created_at: d(-50), updated_at: d(-4) },
-    { id: 'demo-habit-006', name: 'Weekly meal prep', frequency_rule: '1/week', category: 'Health', is_draft: false, next_due: dateOnly(0), sort_order: 5, created_at: d(-35), updated_at: d(-7) },
+    { id: 'demo-habit-004', name: 'Practice guitar', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Creative', is_draft: false, next_due: dateOnly(1), sort_order: 3, created_at: d(-30), updated_at: d(-3) },
+    { id: 'demo-habit-005', name: 'Water the plants', frequency_rule: 'every_N_weeks:1:Wed,Sat', category: 'Home', is_draft: false, next_due: dateOnly(2), sort_order: 4, created_at: d(-50), updated_at: d(-4) },
+    { id: 'demo-habit-006', name: 'Weekly meal prep', frequency_rule: 'every_N_weeks:1:Sun', category: 'Health', is_draft: false, next_due: dateOnly(0), sort_order: 5, created_at: d(-35), updated_at: d(-7) },
   ];
 
   const habit_completions = sharedHabitCompletions();
@@ -215,9 +215,9 @@ function fr() {
     { id: 'demo-habit-001', name: 'Course matinale (5 km)', frequency_rule: 'every_N_days:1', category: 'Sport', is_draft: false, next_due: dateOnly(0), sort_order: 0, created_at: d(-60), updated_at: d(-1) },
     { id: 'demo-habit-002', name: 'Lire 30 minutes', frequency_rule: 'every_N_days:1', category: 'Apprentissage', is_draft: false, next_due: dateOnly(0), sort_order: 1, created_at: d(-45), updated_at: d(-1) },
     { id: 'demo-habit-003', name: 'Méditer', frequency_rule: 'every_N_days:1', category: 'Bien-être', is_draft: false, next_due: dateOnly(0), sort_order: 2, created_at: d(-40), updated_at: d(-2) },
-    { id: 'demo-habit-004', name: 'Pratiquer la guitare', frequency_rule: '3/week', category: 'Créativité', is_draft: false, next_due: dateOnly(1), sort_order: 3, created_at: d(-30), updated_at: d(-3) },
-    { id: 'demo-habit-005', name: 'Arroser les plantes', frequency_rule: '2/week', category: 'Maison', is_draft: false, next_due: dateOnly(2), sort_order: 4, created_at: d(-50), updated_at: d(-4) },
-    { id: 'demo-habit-006', name: 'Meal prep du dimanche', frequency_rule: '1/week', category: 'Santé', is_draft: false, next_due: dateOnly(0), sort_order: 5, created_at: d(-35), updated_at: d(-7) },
+    { id: 'demo-habit-004', name: 'Pratiquer la guitare', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Créativité', is_draft: false, next_due: dateOnly(1), sort_order: 3, created_at: d(-30), updated_at: d(-3) },
+    { id: 'demo-habit-005', name: 'Arroser les plantes', frequency_rule: 'every_N_weeks:1:Wed,Sat', category: 'Maison', is_draft: false, next_due: dateOnly(2), sort_order: 4, created_at: d(-50), updated_at: d(-4) },
+    { id: 'demo-habit-006', name: 'Meal prep du dimanche', frequency_rule: 'every_N_weeks:1:Sun', category: 'Santé', is_draft: false, next_due: dateOnly(0), sort_order: 5, created_at: d(-35), updated_at: d(-7) },
   ];
 
   const flashcards = [
@@ -322,9 +322,9 @@ function es() {
     { id: 'demo-habit-001', name: 'Carrera matutina (5 km)', frequency_rule: 'every_N_days:1', category: 'Deporte', is_draft: false, next_due: dateOnly(0), sort_order: 0, created_at: d(-60), updated_at: d(-1) },
     { id: 'demo-habit-002', name: 'Leer 30 minutos', frequency_rule: 'every_N_days:1', category: 'Aprendizaje', is_draft: false, next_due: dateOnly(0), sort_order: 1, created_at: d(-45), updated_at: d(-1) },
     { id: 'demo-habit-003', name: 'Meditar', frequency_rule: 'every_N_days:1', category: 'Bienestar', is_draft: false, next_due: dateOnly(0), sort_order: 2, created_at: d(-40), updated_at: d(-2) },
-    { id: 'demo-habit-004', name: 'Practicar guitarra', frequency_rule: '3/week', category: 'Creatividad', is_draft: false, next_due: dateOnly(1), sort_order: 3, created_at: d(-30), updated_at: d(-3) },
-    { id: 'demo-habit-005', name: 'Regar las plantas', frequency_rule: '2/week', category: 'Hogar', is_draft: false, next_due: dateOnly(2), sort_order: 4, created_at: d(-50), updated_at: d(-4) },
-    { id: 'demo-habit-006', name: 'Meal prep semanal', frequency_rule: '1/week', category: 'Salud', is_draft: false, next_due: dateOnly(0), sort_order: 5, created_at: d(-35), updated_at: d(-7) },
+    { id: 'demo-habit-004', name: 'Practicar guitarra', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Creatividad', is_draft: false, next_due: dateOnly(1), sort_order: 3, created_at: d(-30), updated_at: d(-3) },
+    { id: 'demo-habit-005', name: 'Regar las plantas', frequency_rule: 'every_N_weeks:1:Wed,Sat', category: 'Hogar', is_draft: false, next_due: dateOnly(2), sort_order: 4, created_at: d(-50), updated_at: d(-4) },
+    { id: 'demo-habit-006', name: 'Meal prep semanal', frequency_rule: 'every_N_weeks:1:Sun', category: 'Salud', is_draft: false, next_due: dateOnly(0), sort_order: 5, created_at: d(-35), updated_at: d(-7) },
   ];
 
   const flashcards = [

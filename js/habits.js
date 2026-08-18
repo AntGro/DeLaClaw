@@ -336,18 +336,26 @@ function normalizeHabitNextDue(value) {
   return value ? String(value).slice(0, 10) : null;
 }
 
-async function updateHabitNextDue(habitId, frequencyRule, lastDoneDate) {
+async function updateHabitNextDue(habitId, frequencyRule, lastDoneDate, { earlyGuard = true } = {}) {
   let nextDue = isStructuredRule(frequencyRule)
     ? normalizeHabitNextDue(computeNextDue(frequencyRule, lastDoneDate))
     : null;
   const habit = state.allHabits.find(h => String(h.id) === String(habitId));
   const currentNextDue = normalizeHabitNextDue(habit?.next_due);
 
-  // Early-completion guard: if the computed next due didn't advance past the
-  // existing due date, the user completed before it arrived — recompute from
-  // the current due date so it jumps to the following occurrence.
-  if (nextDue && currentNextDue && nextDue <= currentNextDue) {
-    nextDue = normalizeHabitNextDue(computeNextDue(frequencyRule, currentNextDue));
+  if (earlyGuard) {
+    // Early-completion guard: if the computed next due didn't advance past the
+    // existing due date, the user completed before it arrived — recompute from
+    // the current due date so it jumps to the following occurrence.
+    if (nextDue && currentNextDue && nextDue <= currentNextDue) {
+      nextDue = normalizeHabitNextDue(computeNextDue(frequencyRule, currentNextDue));
+    }
+  } else {
+    // Manual edit path: use max(currentNextDue, computedNextDue) so editing
+    // last-done to an earlier date never pushes the due date backward.
+    if (nextDue && currentNextDue && nextDue < currentNextDue) {
+      nextDue = currentNextDue;
+    }
   }
 
   if (habit && currentNextDue === nextDue) return;
@@ -1535,7 +1543,7 @@ async function saveEditHabit() {
     }
   }
 
-  await updateHabitNextDue(id, freq, latestForNextDue);
+  await updateHabitNextDue(id, freq, latestForNextDue, { earlyGuard: false });
   closeEditHabitModal();
   showToast(t('habits.habit_updated'), 'success');
   await refreshHabits();
@@ -1665,7 +1673,7 @@ function editHabitLastDone(habitId, event, triggerEl) {
       }
 
       if (habit) {
-        await updateHabitNextDue(habitId, habit.frequency_rule, latestForNextDue);
+        await updateHabitNextDue(habitId, habit.frequency_rule, latestForNextDue, { earlyGuard: false });
       }
 
       showToast(t('habits.last_done_updated'), 'success');

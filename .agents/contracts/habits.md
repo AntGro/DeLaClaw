@@ -44,6 +44,9 @@ User jobs:
 - `isStructuredRule()` in `js/habits.js` is **SINGLE SOURCE OF TRUTH** (const `STRUCTURED_PREFIXES`: `daily`, `every_N_days:`, `weekly:`, `every_N_weeks:`, `monthly:`, `monthly_weekday:`, `every_N_months:`, `yearly:`)
 - `computeNextDue()` deterministic client-side for structured rules — must not be duplicated elsewhere
 - For free-text / custom rules (`isStructuredRule()==false`), `updateHabitNextDue()` sets `next_due = null` to indicate that due date is not client-deterministic and will be resolved externally
+- **`updateHabitNextDue` two-mode behavior:**
+  - **Completion path** (`earlyGuard: true`, default): if the computed next-due ≤ current due date, recompute from the current due date — early-completion guard (e.g. `weekly:Fri` done on Wednesday → next Friday, not same Friday)
+  - **Manual edit path** (`earlyGuard: false`): `next_due = min(currentDue, computedDue)` — due date can move earlier but never double-advances. Used when editing last-done or changing frequency
 - Shared completions merge by `habit_id`, latest per day
 
 ## Adapter & Backend
@@ -72,6 +75,8 @@ User jobs:
 ## Test Hooks
 - `bun tests/tests.js`: esc usage, pendingSet existence, CODEMAP freshness
 - Manual: create habit `weekly:Fri`, mark done Wed, verify next_due = Friday (not Wed+5)
+- Manual: edit `weekly:Fri` habit's last-done to Monday → next_due stays at current Friday (min keeps the earlier)
+- Manual: change frequency from `weekly:Fri` to `daily` → next_due moves earlier (min picks closer date)
 
 ## References
 - `CODEMAP.json:features[habits]`

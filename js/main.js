@@ -3887,12 +3887,16 @@ window.toggleNvidiaUsageDetail = toggleNvidiaUsageDetail;
 // ── Data Backup & Restore ──
 
 const BACKUP_TABLES = [
-  // parent tables first (import order matters for FK)
+  // category / deck parents first (items FK into these)
+  'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
+  // parent tables
   'projects', 'habits', 'texts', 'lists',
   // child / independent tables
   'todos', 'tasks', 'habit_completions', 'flashcards', 'flashcard_notes',
   'text_line_progress', 'birthdays', 'vestiaire', 'list_items',
   'settings', 'prompts', 'nvidia_usage', 'daily_visits',
+  // sharing membership + agent access
+  'joined_groups', 'agent_grants',
 ];
 
 async function generateBackupJSON() {
@@ -4115,13 +4119,30 @@ async function performImport(file) {
     }
     // Delete in reverse order (children before parents)
     const tables = [...(backup._meta.tables || [])].reverse();
+    const CATEGORY_TABLES = new Set(['todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks']);
+    const PROTECTED_IDS = new Set([
+      '_default_todo_cat', '_shared_todo_cat',
+      '_default_habit_cat', '_shared_habit_cat',
+      '_default_vest_cat', '_shared_vest_cat',
+      '_default_deck', '_shared_deck',
+    ]);
     const totalSteps = tables.length + (backup._meta.tables || []).length;
     let step = 0;
     for (const table of tables) {
       showProgress(t('menu.settings_restore_clearing', table), ++step, totalSteps);
       try {
         const pk = (table === 'settings' || table === 'prompts') ? 'key' : 'id';
-        await state.db.from(table).delete().neq(pk, '___nonexistent___');
+        if (CATEGORY_TABLES.has(table)) {
+          // Delete non-protected rows individually — bulk delete would be blocked
+          // by the protect trigger when it hits a protected row (rolls back entire statement)
+          const { data: rows } = await state.db.from(table).select('id,is_protected');
+          for (const row of (rows || [])) {
+            if (row.is_protected) continue;
+            try { await state.db.from(table).delete().eq('id', row.id); } catch {}
+          }
+        } else {
+          await state.db.from(table).delete().neq(pk, '___nonexistent___');
+        }
       } catch (e) { console.warn(`Could not clear ${table}:`, e.message); }
     }
     // Insert in forward order (parents before children)
@@ -4133,7 +4154,10 @@ async function performImport(file) {
       if (!rows || !rows.length) continue;
       try {
         for (let i = 0; i < rows.length; i += 100) {
-          const batch = rows.slice(i, i + 100);
+          const batch = rows.slice(i, i + 100)
+            .filter(r => !PROTECTED_IDS.has(r.id))        // skip protected defaults (already exist)
+            .map(r => { const { owner_id, ...rest } = r; return rest; }); // strip owner_id — trigger stamps new uid
+          if (!batch.length) continue;
           const { error } = await state.db.from(table).insert(batch);
           if (error) { console.warn(`Insert into ${table} batch ${i}:`, error.message); }
         }

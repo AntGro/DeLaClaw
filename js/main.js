@@ -3895,7 +3895,9 @@ const BACKUP_TABLES = [
   'todos', 'tasks', 'habit_completions', 'flashcards', 'flashcard_notes',
   'text_line_progress', 'birthdays', 'vestiaire', 'list_items',
   'settings', 'prompts', 'nvidia_usage', 'daily_visits',
-  // sharing membership + agent access
+  // sharing: owned groups (creator side) — FK order: groups → members → items
+  'sharing_groups', 'sharing_members', 'sharing_items',
+  // sharing: joined groups (joiner side) + agent access
   'joined_groups', 'agent_grants',
 ];
 
@@ -4131,7 +4133,10 @@ async function performImport(file) {
     for (const table of tables) {
       showProgress(t('menu.settings_restore_clearing', table), ++step, totalSteps);
       try {
-        const pk = (table === 'settings' || table === 'prompts') ? 'key' : 'id';
+        const pk = (table === 'settings' || table === 'prompts') ? 'key'
+          : table === 'sharing_items' ? 'item_id'
+          : table === 'sharing_members' ? 'member_id'
+          : 'id';
         if (CATEGORY_TABLES.has(table)) {
           // Delete non-protected rows individually — bulk delete would be blocked
           // by the protect trigger when it hits a protected row (rolls back entire statement)
@@ -4147,6 +4152,7 @@ async function performImport(file) {
     }
     // Insert in forward order (parents before children)
     const importOrder = backup._meta.tables || [];
+    const newUid = state.authUser?.id || null; // for sharing_groups.auth_owner_id rewrite
     let totalRows = 0;
     for (const table of importOrder) {
       showProgress(t('menu.settings_restore_restoring', table), ++step, totalSteps);
@@ -4156,7 +4162,18 @@ async function performImport(file) {
         for (let i = 0; i < rows.length; i += 100) {
           const batch = rows.slice(i, i + 100)
             .filter(r => !PROTECTED_IDS.has(r.id))        // skip protected defaults (already exist)
-            .map(r => { const { owner_id, ...rest } = r; return rest; }); // strip owner_id — trigger stamps new uid
+            .map(r => {
+              const { owner_id, ...rest } = r;            // strip owner_id — trigger stamps new uid
+              // sharing_groups uses auth_owner_id instead of owner_id (no trigger)
+              if (table === 'sharing_groups' && rest.auth_owner_id != null && newUid) {
+                rest.auth_owner_id = newUid;
+              }
+              // sharing_members: rewrite creator's auth_user_id to new uid
+              if (table === 'sharing_members' && rest.role === 'creator' && rest.auth_user_id != null && newUid) {
+                rest.auth_user_id = newUid;
+              }
+              return rest;
+            });
           if (!batch.length) continue;
           const { error } = await state.db.from(table).insert(batch);
           if (error) { console.warn(`Insert into ${table} batch ${i}:`, error.message); }

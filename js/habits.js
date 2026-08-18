@@ -351,9 +351,10 @@ async function updateHabitNextDue(habitId, frequencyRule, lastDoneDate, { earlyG
       nextDue = normalizeHabitNextDue(computeNextDue(frequencyRule, currentNextDue));
     }
   } else {
-    // Manual edit path: use max(currentNextDue, computedNextDue) so editing
-    // last-done to an earlier date never pushes the due date backward.
-    if (nextDue && currentNextDue && nextDue < currentNextDue) {
+    // Manual edit path (last-done or frequency change): use
+    // min(currentNextDue, computedNextDue) so the due date can move
+    // earlier but completing early doesn't double-advance.
+    if (nextDue && currentNextDue && nextDue > currentNextDue) {
       nextDue = currentNextDue;
     }
   }
@@ -1443,7 +1444,7 @@ function editHabitInline(habitId, itemEl) {
         }
         if (updates.frequency_rule) {
           const lastDone = getHabitLastDone(habitId);
-          await updateHabitNextDue(habitId, updates.frequency_rule, lastDone);
+          await updateHabitNextDue(habitId, updates.frequency_rule, lastDone, { earlyGuard: false });
         }
         showToast(t('habits.habit_updated'), 'success');
       }

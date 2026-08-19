@@ -1207,14 +1207,19 @@ function initHabitModals() {
   app.appendChild(m6);
 }
 
-function openAddHabitModal(preselectedGroupId) {
+function openAddHabitModal(opts = {}) {
+  const { name = '', categoryId, groupId } = typeof opts === 'string' ? { groupId: opts } : opts;
+  const catId = categoryId || _defaultHabitCatId;
   const modal = document.getElementById('addHabitModal');
   modal.innerHTML = addHabitModalHTML();
-  document.getElementById('newHabitName').value = '';
+  const nameEl = document.getElementById('newHabitName');
+  nameEl.value = name;
+  if (name) setTimeout(() => autoResizeTextarea(nameEl), 0);
   document.getElementById('newHabitLastDone').value = '';
   document.getElementById('newHabitDraft').checked = false;
   buildFrequencyPicker(document.getElementById('newHabitFreqPicker'), '');
   populateHabitCategorySelect('newHabitCategory');
+  document.getElementById('newHabitCategory').value = catId;
   // Show group selector if user belongs to any sharing groups
   const groupRow = document.getElementById('newHabitGroupRow');
   const groupSel = document.getElementById('newHabitGroup');
@@ -1224,16 +1229,21 @@ function openAddHabitModal(preselectedGroupId) {
       groupSel.innerHTML = `<option value="">${t('sharing.no_group')}</option>` +
         groups.map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
       groupRow.style.display = '';
-      if (preselectedGroupId) groupSel.value = preselectedGroupId;
+      if (groupId) groupSel.value = groupId;
     } else {
       groupRow.style.display = 'none';
     }
   } else {
     groupRow.style.display = 'none';
   }
-  modal.style.setProperty('--cat-color', getHabitCatColor(_defaultHabitCatId));
+  modal.style.setProperty('--cat-color', getHabitCatColor(catId));
   modal.classList.add('visible');
-  setTimeout(() => document.getElementById('newHabitName').focus(), 100);
+  // Focus frequency picker when name is pre-filled, name field otherwise
+  if (name) {
+    setTimeout(() => document.getElementById('newHabitFreqPicker').querySelector('select')?.focus(), 100);
+  } else {
+    setTimeout(() => nameEl.focus(), 100);
+  }
 }
 
 function closeAddHabitModal() {
@@ -1244,8 +1254,12 @@ function shareHabitFromAdd(btn) {
   if (!state.sharing) return;
   const groups = state.sharing.getAllGroups();
   if (!groups.length) return;
+  const inputEl = btn.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.habit-add-input, .todo-cat-input');
+  const name = inputEl?.value?.trim() || '';
+  const catId = inputEl?.dataset?.category || _defaultHabitCatId;
   openSharePopover(btn, (groupId) => {
-    openAddHabitModal(groupId);
+    openAddHabitModal({ name, categoryId: catId, groupId });
+    if (inputEl) { inputEl.value = ''; if (inputEl.tagName === 'TEXTAREA') inputEl.style.height = ''; }
   }, { showAssignees: false });
 }
 
@@ -1265,38 +1279,9 @@ async function addHabitFromInput(inputEl) {
   const name = inputEl.value.trim();
   if (!name) return;
   const catId = inputEl.dataset.category || _defaultHabitCatId;
-
-  // Quick-add: opens the full modal pre-filled with name + category
-  const addNameEl = document.getElementById('newHabitName');
-  addNameEl.value = name;
-  setTimeout(() => autoResizeTextarea(addNameEl), 0);
-  document.getElementById('newHabitLastDone').value = '';
-  document.getElementById('newHabitDraft').checked = false;
-  buildFrequencyPicker(document.getElementById('newHabitFreqPicker'), '');
-  populateHabitCategorySelect('newHabitCategory');
-  document.getElementById('newHabitCategory').value = catId;
-  // Show group selector if user belongs to any sharing groups
-  const groupRow = document.getElementById('newHabitGroupRow');
-  const groupSel = document.getElementById('newHabitGroup');
-  if (state.sharing) {
-    const groups = state.sharing.getAllGroups();
-    if (groups.length > 0) {
-      groupSel.innerHTML = `<option value="">${t('sharing.no_group')}</option>` +
-        groups.map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
-      groupRow.style.display = '';
-    } else {
-      groupRow.style.display = 'none';
-    }
-  } else {
-    groupRow.style.display = 'none';
-  }
-  const addModal = document.getElementById('addHabitModal');
-  const addCatColor = getHabitCatColor(catId);
-  addModal.style.setProperty('--cat-color', addCatColor);
-  addModal.classList.add('visible');
+  openAddHabitModal({ name, categoryId: catId });
   inputEl.value = '';
   if (inputEl.tagName === 'TEXTAREA') { inputEl.style.height = ''; }
-  setTimeout(() => document.getElementById('newHabitFreqPicker').querySelector('select')?.focus(), 100);
 }
 
 async function saveNewHabit() {

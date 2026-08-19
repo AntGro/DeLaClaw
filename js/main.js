@@ -796,18 +796,7 @@ async function sendAuthFromSharing() {
 }
 window.sendAuthFromSharing = sendAuthFromSharing;
 
-/** Sign out from Settings > Sharing pane. */
-async function signOutFromSharing() {
-  try {
-    const { signOut } = await import('./auth.js');
-    await signOut(state._rawSupabaseAdapter);
-  } catch { /* ignore */ }
-  state.authUser = null;
-  if (state.sharing) { try { state.sharing.destroy(); } catch {} }
-  state.sharing = null;
-  location.reload();
-}
-window.signOutFromSharing = signOutFromSharing;
+
 
 function getStayConnectedCreds() {
   try {

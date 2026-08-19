@@ -1821,14 +1821,11 @@ test('sharing-ui.js renderSharingPane has inline auth prompt for unauthenticated
 test('sharing-ui.js renderSharingPane shows signed-in badge for authenticated supabase', () => {
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
   assert(sui.includes('auth-signed-in-badge'), 'auth-signed-in-badge class missing');
-  // Accept both direct function reference and delegated data-action
-  assert(sui.includes('signOutFromSharing') || sui.includes('sign-out-from-sharing'), 'signOutFromSharing reference missing (expected data-action or direct call)');
 });
 
-test('window.sendAuthFromSharing and window.signOutFromSharing are exposed', () => {
+test('window.sendAuthFromSharing is exposed', () => {
   const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
   assert(main.includes('window.sendAuthFromSharing'), 'window.sendAuthFromSharing not exposed');
-  assert(main.includes('window.signOutFromSharing'), 'window.signOutFromSharing not exposed');
 });
 
 test('Setup guide mentions Site URL for sharing', () => {

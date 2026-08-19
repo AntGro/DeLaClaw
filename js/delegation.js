@@ -274,7 +274,7 @@
       case 'close-edit-vestiaire-category': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditVestiaireCategoryModal', []); break;
       case 'save-edit-vestiaire-category': callWindow('saveEditVestiaireCategory', []); break;
       case 'send-auth-from-sharing': callWindow('sendAuthFromSharing', []); break;
-      case 'sign-out-from-sharing': callWindow('signOutFromSharing', []); break;
+
       case 'sharing-copy-code':
       case 'sharing-copy-link': callWindow('sharingCopyCode', [getId(el)||el.dataset.groupId]); break;
       case 'sharing-leave-group': callWindow('sharingLeaveGroup', [el.dataset.groupId||getId(el)]); break;

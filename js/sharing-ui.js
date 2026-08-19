@@ -125,7 +125,6 @@ export async function renderSharingPane() {
     const email = esc(state.authUser.email || '');
     authBadgeHtml = `<div class="setting-group">
       <div class="auth-signed-in-badge">${lucideIcon('shield-check', 14)} ${t('auth.signed_in_as', email)}</div>
-      <button class="btn-secondary sharing-danger-btn" data-action="sign-out-from-sharing" style="font-size:0.8rem;padding:4px 12px;margin-top:0">${t('auth.sign_out')}</button>
     </div>`;
   }
 

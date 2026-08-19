@@ -677,12 +677,14 @@ async function refreshHabits() {
           }
           // Re-sort after injection
           state.allHabitCompletions.sort((a, b) => b.completed_at.localeCompare(a.completed_at));
-          // Compute next_due from latest completion
+          // Compute next_due from latest completion (sync enrichment, not a
+          // user action — earlyGuard off to avoid unnecessary writes that
+          // feed the realtime → refreshHabits loop)
           const latest = sh.completions[sh.completions.length - 1];
-          await updateHabitNextDue(habit.id, sh.frequency_rule, latest.completed_at);
+          await updateHabitNextDue(habit.id, sh.frequency_rule, latest.completed_at, { earlyGuard: false });
         } else {
           // No completions yet — compute first next_due from now
-          await updateHabitNextDue(habit.id, sh.frequency_rule, null);
+          await updateHabitNextDue(habit.id, sh.frequency_rule, null, { earlyGuard: false });
         }
       }
     }
@@ -1762,7 +1764,7 @@ async function deleteHabitCompletion(compId) {
             await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: sh.completions });
             // Recompute next_due from new latest completion (or null if none left)
             const latest = sh.completions.length ? sh.completions[sh.completions.length - 1].completed_at : null;
-            await updateHabitNextDue(habit.id, habit.frequency_rule, latest);
+            await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
           }
         } catch (e) { showToast(t('toast.failed_to_delete'), 'error'); return; }
       } else {
@@ -1827,7 +1829,7 @@ async function saveHabitCompletion(compId) {
           await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: sh.completions });
           // Recompute next_due from latest completion
           const latest = sh.completions[sh.completions.length - 1]?.completed_at || null;
-          await updateHabitNextDue(habit.id, habit.frequency_rule, latest);
+          await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
         }
       }
     } catch (e) { showToast(t('toast.failed_to_update'), 'error'); return; }

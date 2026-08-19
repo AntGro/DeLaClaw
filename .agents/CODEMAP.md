@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-08-19T11:38:32.055Z from 38 modules (v1.680). Total LOC 29606. Do not hand-edit.
+> Generated 2026-08-19T11:41:58.983Z from 38 modules (v1.681). Total LOC 29616. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -32,7 +32,7 @@
 | sharing-drive | 1402 | - | sharing-envelope,utils | main.js,sharing.js | - |
 | sharing-supabase | 1369 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
 | sharing-ui | 1214 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:41,pendingSet,window:8 |
-| item-utils | 1146 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
+| item-utils | 1156 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | utils | 932 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:6 |
 | drive | 856 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
 | hero | 473 | - | logo,storm3d | main.js | - |

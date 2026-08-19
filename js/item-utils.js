@@ -745,7 +745,16 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     if (onFinish) onFinish();
     delete spanEl.dataset.editing;
 
-    // Always restore the span in-place (fast, keeps DOM stable)
+    // Fade out the edit wrapper, then restore the span
+    root.classList.remove('inline-edit-visible');
+    await new Promise(r => {
+      const done = () => r();
+      root.addEventListener('transitionend', function h(e) {
+        if (e.propertyName === 'opacity') { root.removeEventListener('transitionend', h); done(); }
+      });
+      setTimeout(done, 200);
+    });
+
     spanEl.textContent = save && trimmed ? trimmed : originalText;
     root.replaceWith(spanEl);
 
@@ -797,6 +806,7 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
 
   spanEl.replaceWith(root);
   requestAnimationFrame(() => {
+    root.classList.add('inline-edit-visible');
     requestAnimationFrame(() => {
       autoSize();
       if (extraEl) {

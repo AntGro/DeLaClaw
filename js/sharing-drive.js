@@ -1322,6 +1322,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     },
 
     /** Leave a joined group (removes from joined-groups.json + group.json). */
+    // reconnectGroup is Supabase-only (remote URL migration); no-op for Drive
+    async reconnectGroup() { return null; },
+
     async unjoinGroup(groupId) {
       // Remove self from remote group.json member list (best-effort)
       const e = _groups.get(groupId);

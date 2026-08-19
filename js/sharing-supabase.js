@@ -707,6 +707,71 @@ export async function createSupabaseSharing(adapter, config) {
     return group;
   }
 
+  /**
+   * Reconnect an already-joined group to a new remote URL (owner migrated).
+   * Updates joined_groups connection details + rebuilds remote client + reloads data.
+   * @param {string} groupId
+   * @param {string} newUrl - new Supabase project URL
+   * @param {string} newAnonKey - new project anon key
+   * @param {string} token - member token (same as original)
+   */
+  async function reconnectGroup(groupId, newUrl, newAnonKey, token) {
+    const authUser = getAuthUser();
+    if (!authUser) throw new Error('Auth required to reconnect group');
+
+    // Verify the token works on the new remote
+    const remote = _createRemoteClient(newUrl, newAnonKey);
+    const { data: members } = await remote.rpc('get_group_members', {
+      p_token: token,
+      p_group_id: groupId,
+    });
+    if (!members || members.length === 0) {
+      throw new Error('Token not valid on new remote — re-invite needed');
+    }
+
+    // Update joined_groups with new connection details
+    const existing = (await adapter.from('joined_groups').select('*').eq('group_id', groupId)).data?.[0];
+    if (!existing) throw new Error('Group not found in joined_groups');
+
+    const encrypted = await _encryptForJoined(token, newAnonKey);
+    await adapter.from('joined_groups').update({
+      remote_url: newUrl,
+      remote_anon_key_ciphertext: encrypted.remote_anon_key_ciphertext || null,
+      remote_anon_key_iv: encrypted.remote_anon_key_iv || null,
+      token_ciphertext: encrypted.token_ciphertext || null,
+      token_iv: encrypted.token_iv || null,
+    }).eq('group_id', groupId);
+
+    // Replace remote client
+    _remoteClients[groupId] = { client: remote, token, memberId: existing.member_id };
+
+    // Refresh group data in memory
+    const memberList = (members || []).map(m => _normalizeMember(m));
+    const creatorMemberId = memberList.find(m => m.role === 'creator' || m.role === 'owner')?.memberId || null;
+    const idx = _joinedGroups.findIndex(g => g.id === groupId);
+    const updatedGroup = {
+      id: groupId,
+      name: existing.group_name,
+      backendType: 'supabase',
+      created_by: creatorMemberId,
+      members: memberList,
+      _isJoined: true,
+    };
+    if (idx >= 0) _joinedGroups[idx] = updatedGroup;
+    else _joinedGroups.push(updatedGroup);
+    _memberCache[groupId] = memberList;
+
+    // Reload shared items from new remote
+    _allItems = _allItems.filter(it => it.groupId !== groupId);
+    const { data: items } = await remote.rpc('get_shared_items', { p_token: token, p_group_id: groupId });
+    if (items) {
+      for (const it of items) _allItems.push(_mapItem(it));
+    }
+
+    _notifyUpdate();
+    return updatedGroup;
+  }
+
   async function unjoinGroup(groupId) {
     await leaveGroup(groupId);
   }
@@ -1264,6 +1329,7 @@ export async function createSupabaseSharing(adapter, config) {
     leaveGroup,
     tryDirectJoin,
     joinWithFileIds,
+    reconnectGroup,
     unjoinGroup,
     getAllGroups,
     getGroup,

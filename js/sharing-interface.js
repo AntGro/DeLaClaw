@@ -54,6 +54,7 @@ export const SHARING_INTERFACE = {
   // ── Groups — join flow ──────────────────────────────────────
   tryDirectJoin:            'fn',   // (connectionRef) => Promise<Group|null>
   joinWithFileIds:          'fn',   // (connectionRef, fileIds) => Promise<Group>
+  reconnectGroup:           'fn',   // (groupId, newUrl, newAnonKey, token) => Promise<Group>
   unjoinGroup:              'fn',   // (groupId) => Promise<void>
 
   // ── Groups — queries ────────────────────────────────────────

@@ -571,8 +571,75 @@ async function deleteTask(id) {
 // ADD PROJECT MODAL
 // ===================================================================
 // ===================================================================
+
+function addProjectModalHTML() {
+  return `<div class="modal">
+    <h2>${lucideIcon('plus', 20)} ${t('projects.add_project')}</h2>
+    <label>${t('projects.slug')} (${t('projects.slug_hint')})</label>
+    <input type="text" id="newProjectId" placeholder="${t('projects.slug_placeholder')}">
+    <label>${t('projects.display_name')}</label>
+    <input type="text" id="newProjectName" placeholder="${t('projects.name_placeholder')}">
+    <label>${t('projects.shortname')} (${t('projects.shortname_hint')})</label>
+    <input type="text" id="newProjectShortname" placeholder="${t('projects.shortname_placeholder')}" maxlength="20">
+    <label>${t('common.color')}</label>
+    <input type="color" id="newProjectColor" value="#646cff">
+    <label>${t('projects.stack')}</label>
+    <input type="text" id="newProjectTech" placeholder="${t('projects.tech_placeholder')}">
+    <label>${t('projects.repo_url')} (${t('common.optional')})</label>
+    <input type="url" id="newProjectGithub" placeholder="${t('projects.github_placeholder')}">
+    <label>${t('projects.live_url')} (${t('common.optional')})</label>
+    <input type="url" id="newProjectLive" placeholder="${t('projects.live_placeholder')}">
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-add-project">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-new-project">${t('common.create')}</button>
+    </div>
+  </div>`;
+}
+
+function editProjectModalHTML() {
+  return `<div class="modal">
+    <h2>${lucideIcon('pencil', 20)} ${t('projects.edit_project')}</h2>
+    <input type="hidden" id="editProjectId">
+    <label>${t('projects.display_name')}</label>
+    <input type="text" id="editProjectName">
+    <label>${t('projects.shortname')} (${t('projects.shortname_hint')})</label>
+    <input type="text" id="editProjectShortname" maxlength="20">
+    <label>${t('common.color')}</label>
+    <input type="color" id="editProjectColor">
+    <label>${t('projects.stack')}</label>
+    <input type="text" id="editProjectTech">
+    <label>${t('projects.repo_url')}</label>
+    <input type="url" id="editProjectGithub" placeholder="${t('projects.github_placeholder')}">
+    <label>${t('projects.live_url')}</label>
+    <input type="url" id="editProjectLive" placeholder="${t('projects.live_placeholder')}">
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-edit-project">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-project">${t('common.save')}</button>
+    </div>
+  </div>`;
+}
+
+function initProjectModals() {
+  const app = document.getElementById('app');
+
+  const m1 = document.createElement('div');
+  m1.className = 'modal-overlay';
+  m1.id = 'addProjectModal';
+  m1.innerHTML = addProjectModalHTML();
+  app.appendChild(m1);
+
+  const m2 = document.createElement('div');
+  m2.className = 'modal-overlay';
+  m2.id = 'editProjectModal';
+  m2.dataset.action = 'close-edit-project';
+  m2.dataset.overlayClose = 'true';
+  m2.innerHTML = editProjectModalHTML();
+  app.appendChild(m2);
+}
+
 function openAddProjectModal() {
-  document.getElementById('addProjectModal').classList.add('visible');
+  const modal = document.getElementById('addProjectModal');
+  modal.innerHTML = addProjectModalHTML();
   document.getElementById('newProjectId').value = '';
   document.getElementById('newProjectName').value = '';
   document.getElementById('newProjectShortname').value = '';
@@ -580,6 +647,7 @@ function openAddProjectModal() {
   document.getElementById('newProjectTech').value = '';
   document.getElementById('newProjectGithub').value = '';
   document.getElementById('newProjectLive').value = '';
+  modal.classList.add('visible');
   document.getElementById('newProjectId').focus();
 }
 
@@ -769,6 +837,8 @@ async function reorderProjects(draggedId, targetId) {
 function openEditProjectModal(id) {
   const p = state.PROJECTS.find(pr => pr.id === id);
   if (!p) return;
+  const modal = document.getElementById('editProjectModal');
+  modal.innerHTML = editProjectModalHTML();
   document.getElementById('editProjectId').value = p.id;
   document.getElementById('editProjectName').value = p.name;
   document.getElementById('editProjectShortname').value = p.shortname || '';
@@ -778,7 +848,7 @@ function openEditProjectModal(id) {
   const live = (p.links || []).find(l => l.label === 'Live' || l.label === 'Play');
   document.getElementById('editProjectGithub').value = github ? github.url : '';
   document.getElementById('editProjectLive').value = live ? live.url : '';
-  document.getElementById('editProjectModal').classList.add('visible');
+  modal.classList.add('visible');
 }
 
 function closeEditProjectModal() {
@@ -1007,7 +1077,7 @@ document.addEventListener('input', e => {
   }
 });
 export {
-  loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
+  loadProjects, buildProjectCards, initProjectDragDrop, initProjectModals, updateArchiveToggleBtn,
   renderArchivedProjects, refreshAll, renderAllTasks, getArchivedProjectIds, loadPrompts,
 };
 

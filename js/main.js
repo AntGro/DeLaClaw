@@ -12,7 +12,7 @@ import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
 
 import { esc, showToast, showConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
-         renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
+         renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
 
 const SETTINGS_PANES = ['general', 'ai', 'sharing', 'data', 'stats', 'agents'];
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
@@ -1610,6 +1610,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   await loadProjects();
   buildProjectCards();
+  initProjectModals();
   initProjectDragDrop();
   updateArchiveToggleBtn();
   renderArchivedProjects();

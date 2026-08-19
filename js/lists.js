@@ -720,14 +720,8 @@ async function deleteListItem(id) {
 // CRUD — LISTS
 // ===================================================================
 
-function initListModals() {
-  const app = document.getElementById('app');
-
-  // Add List Modal
-  const m1 = document.createElement('div');
-  m1.className = 'modal-overlay';
-  m1.id = 'addListModal';
-  m1.innerHTML = `<div class="modal">
+function addListModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('list', 20)} ${t('lists.add_list')}</h2>
     <label>${t('common.name')}</label>
     <input type="text" id="newListName" placeholder="${t('lists.name_placeholder')}" maxlength="100"
@@ -748,15 +742,10 @@ function initListModals() {
       <button class="modal-save" data-action="save-new-list">${t('common.add')}</button>
     </div>
   </div>`;
-  app.appendChild(m1);
+}
 
-  // Edit List Modal
-  const m2 = document.createElement('div');
-  m2.className = 'modal-overlay';
-  m2.id = 'editListModal';
-  m2.dataset.action = 'close-edit-list';
-  m2.dataset.overlayClose = 'true';
-  m2.innerHTML = `<div class="modal">
+function editListModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('lists.edit_list')}</h2>
     <input type="hidden" id="editListId">
     <label>${t('common.name')}</label>
@@ -778,14 +767,33 @@ function initListModals() {
       <button class="modal-save" data-action="save-edit-list">${t('common.save')}</button>
     </div>
   </div>`;
+}
+
+function initListModals() {
+  const app = document.getElementById('app');
+
+  const m1 = document.createElement('div');
+  m1.className = 'modal-overlay';
+  m1.id = 'addListModal';
+  m1.innerHTML = addListModalHTML();
+  app.appendChild(m1);
+
+  const m2 = document.createElement('div');
+  m2.className = 'modal-overlay';
+  m2.id = 'editListModal';
+  m2.dataset.action = 'close-edit-list';
+  m2.dataset.overlayClose = 'true';
+  m2.innerHTML = editListModalHTML();
   app.appendChild(m2);
 }
 
 function openAddListModal() {
+  const modal = document.getElementById('addListModal');
+  modal.innerHTML = addListModalHTML();
   document.getElementById('newListName').value = '';
   document.getElementById('newListShortname').value = '';
   document.getElementById('newListColor').value = nextPaletteColor(state.allLists);
-  document.getElementById('addListModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('newListName').focus(), 100);
 }
 
@@ -818,11 +826,13 @@ async function saveNewList() {
 function openEditListModal(listId) {
   const list = (state.allLists || []).find(l => l.id === listId);
   if (!list) return;
+  const modal = document.getElementById('editListModal');
+  modal.innerHTML = editListModalHTML();
   document.getElementById('editListId').value = listId;
   document.getElementById('editListName').value = list.name || '';
   document.getElementById('editListShortname').value = list.shortname || '';
   document.getElementById('editListColor').value = list.color || '#14b8a6';
-  document.getElementById('editListModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('editListName').focus(), 100);
 }
 

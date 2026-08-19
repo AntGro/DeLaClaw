@@ -280,14 +280,8 @@ function renderBirthdayCard(b, isUpcoming) {
 // MODALS — ADD / EDIT
 // ===================================================================
 
-function initBirthdayModals() {
-  const app = document.getElementById('app');
-
-  // Add Birthday Modal
-  const m1 = document.createElement('div');
-  m1.className = 'modal-overlay';
-  m1.id = 'addBirthdayModal';
-  m1.innerHTML = `<div class="modal">
+function addBirthdayModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('cake', 20)} ${t('birthdays.add_birthday')}</h2>
     <label>${t('common.name')}</label>
     <input type="text" id="newBirthdayName" placeholder="${t('birthdays.name_placeholder')}" maxlength="200"
@@ -307,15 +301,10 @@ function initBirthdayModals() {
       <button class="modal-save" data-action="save-new-birthday">${t('common.add')}</button>
     </div>
   </div>`;
-  app.appendChild(m1);
+}
 
-  // Edit Birthday Modal
-  const m2 = document.createElement('div');
-  m2.className = 'modal-overlay';
-  m2.id = 'editBirthdayModal';
-  m2.dataset.action = 'close-edit-birthday';
-  m2.dataset.overlayClose = 'true';
-  m2.innerHTML = `<div class="modal">
+function editBirthdayModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('birthdays.edit_birthday')}</h2>
     <input type="hidden" id="editBirthdayId">
     <label>${t('common.name')}</label>
@@ -329,6 +318,25 @@ function initBirthdayModals() {
       <button class="modal-save" data-action="save-edit-birthday">${t('common.save')}</button>
     </div>
   </div>`;
+}
+
+function initBirthdayModals() {
+  const app = document.getElementById('app');
+
+  // Add Birthday Modal
+  const m1 = document.createElement('div');
+  m1.className = 'modal-overlay';
+  m1.id = 'addBirthdayModal';
+  m1.innerHTML = addBirthdayModalHTML();
+  app.appendChild(m1);
+
+  // Edit Birthday Modal
+  const m2 = document.createElement('div');
+  m2.className = 'modal-overlay';
+  m2.id = 'editBirthdayModal';
+  m2.dataset.action = 'close-edit-birthday';
+  m2.dataset.overlayClose = 'true';
+  m2.innerHTML = editBirthdayModalHTML();
   app.appendChild(m2);
 }
 
@@ -454,11 +462,13 @@ function clearNewBirthdayAvatar() {
 }
 
 function openAddBirthdayModal() {
+  const modal = document.getElementById('addBirthdayModal');
+  modal.innerHTML = addBirthdayModalHTML();
   document.getElementById('newBirthdayName').value = '';
   document.getElementById('newBirthdayDate').value = '';
   document.getElementById('newBirthdayNote').value = '';
   clearNewBirthdayAvatar();
-  document.getElementById('addBirthdayModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('newBirthdayName').focus(), 100);
 }
 
@@ -559,11 +569,13 @@ function editBirthdayInline(id) {
 function openEditBirthdayModal(id) {
   const b = state.allBirthdays.find(x => x.id === id);
   if (!b) return;
+  const modal = document.getElementById('editBirthdayModal');
+  modal.innerHTML = editBirthdayModalHTML();
   document.getElementById('editBirthdayId').value = id;
   document.getElementById('editBirthdayName').value = b.name;
   document.getElementById('editBirthdayDate').value = b.birthday;
   document.getElementById('editBirthdayNote').value = b.note || '';
-  document.getElementById('editBirthdayModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('editBirthdayName').focus(), 100);
 }
 

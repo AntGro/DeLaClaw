@@ -69,11 +69,13 @@ function getHabitCategoryColor(nameOrId) {
 function openEditHabitCategoryModal(catId) {
   const cat = _habitCatMap.get(catId);
   if (!cat) return;
+  const modal = document.getElementById('editHabitCategoryModal');
+  modal.innerHTML = editHabitCategoryModalHTML();
   document.getElementById('editHabitCatOldName').value = catId; // store ID, not name
   document.getElementById('editHabitCatName').value = cat.name;
   document.getElementById('editHabitCatShortname').value = cat.shortname || '';
   document.getElementById('editHabitCatColor').value = cat.color || GENERAL_CATEGORY_COLOR;
-  document.getElementById('editHabitCategoryModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('editHabitCatName').focus(), 50);
 }
 
@@ -1149,31 +1151,51 @@ function formatHabitRelative(d) {
 // ===================================================================
 // HABIT CRUD
 // ===================================================================
+function addHabitModalHTML() {
+  return `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><textarea id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="200" data-action="save-new-habit-on-enter" rows="1" style="resize:none;overflow:hidden;"></textarea><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><div id="newHabitGroupRow" style="display:none"><label>${t('sharing.group')}</label><select id="newHabitGroup"><option value="">${t('sharing.no_group')}</option></select></div><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit">${t("common.create")}</button></div></div>`;
+}
+
+function editHabitModalHTML() {
+  return `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><textarea id="editHabitName" maxlength="200" rows="1" style="resize:none;overflow:hidden;"></textarea><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-modal" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
+}
+
+function habitHistoryModalHTML() {
+  return `<div class="modal habit-history-modal"><h2>` + lucideIcon("clipboard-list",20) + ` ${t('habits.habit_history')}</h2><p id="habitHistoryName" style="font-size:0.88rem;color:var(--muted);margin-bottom:12px;"></p><div id="habitHistoryList"></div><div class="modal-actions"><button class="modal-cancel" data-action="close-habit-history-modal">${t('common.close')}</button></div></div>`;
+}
+
+function addHabitCategoryModalHTML() {
+  return `<div class="modal"><h2>` + lucideIcon("folder-plus",20) + ` ${t('habits.add_category')}</h2><label>${t('habits.category_name')}</label><input type="text" id="newHabitCategoryName" placeholder="${t('habits.category_placeholder')}" maxlength="40" data-action="save-new-habit-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newHabitCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-habit-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newHabitCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit-category">${t("common.create")}</button></div></div>`;
+}
+
+function editHabitCategoryModalHTML() {
+  return `<div class="modal"><h2>` + lucideIcon("pencil",20) + ` ${t('habits.edit_category')}</h2><input type="hidden" id="editHabitCatOldName"><label>${t('habits.category_name')}</label><input type="text" id="editHabitCatName" maxlength="40" data-action="save-edit-habit-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="editHabitCatShortname" maxlength="20" placeholder="${t('common.shortname_placeholder')}" data-action="save-edit-habit-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="editHabitCatColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit-category">${t('common.save')}</button></div></div>`;
+}
+
 function initHabitModals() {
   const app = document.getElementById('app');
 
   // Add Habit Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'addHabitModal';
-  m1.innerHTML = `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><textarea id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="200" data-action="save-new-habit-on-enter" rows="1" style="resize:none;overflow:hidden;"></textarea><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><div id="newHabitGroupRow" style="display:none"><label>${t('sharing.group')}</label><select id="newHabitGroup"><option value="">${t('sharing.no_group')}</option></select></div><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit">${t("common.create")}</button></div></div>`;
+  m1.innerHTML = addHabitModalHTML();
   app.appendChild(m1);
 
   // Edit Habit Modal
   const m2 = document.createElement('div');
   m2.className = 'modal-overlay'; m2.id = 'editHabitModal';
-  m2.innerHTML = `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><textarea id="editHabitName" maxlength="200" rows="1" style="resize:none;overflow:hidden;"></textarea><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-modal" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
+  m2.innerHTML = editHabitModalHTML();
   app.appendChild(m2);
 
   // Habit History Modal
   const m3 = document.createElement('div');
   m3.className = 'modal-overlay'; m3.id = 'habitHistoryModal';
-  m3.innerHTML = `<div class="modal habit-history-modal"><h2>` + lucideIcon("clipboard-list",20) + ` ${t('habits.habit_history')}</h2><p id="habitHistoryName" style="font-size:0.88rem;color:var(--muted);margin-bottom:12px;"></p><div id="habitHistoryList"></div><div class="modal-actions"><button class="modal-cancel" data-action="close-habit-history-modal">${t('common.close')}</button></div></div>`;
+  m3.innerHTML = habitHistoryModalHTML();
   app.appendChild(m3);
 
   // Add Habit Category Modal
   const m5 = document.createElement('div');
   m5.className = 'modal-overlay'; m5.id = 'addHabitCategoryModal';
-  m5.innerHTML = `<div class="modal"><h2>` + lucideIcon("folder-plus",20) + ` ${t('habits.add_category')}</h2><label>${t('habits.category_name')}</label><input type="text" id="newHabitCategoryName" placeholder="${t('habits.category_placeholder')}" maxlength="40" data-action="save-new-habit-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newHabitCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-habit-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newHabitCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit-category">${t("common.create")}</button></div></div>`;
+  m5.innerHTML = addHabitCategoryModalHTML();
   app.appendChild(m5);
 
   // Edit Habit Category Modal
@@ -1181,11 +1203,13 @@ function initHabitModals() {
   m6.className = 'modal-overlay'; m6.id = 'editHabitCategoryModal';
   m6.dataset.action = 'close-edit-habit-category-modal';
   m6.dataset.overlayClose = 'true';
-  m6.innerHTML = `<div class="modal"><h2>` + lucideIcon("pencil",20) + ` ${t('habits.edit_category')}</h2><input type="hidden" id="editHabitCatOldName"><label>${t('habits.category_name')}</label><input type="text" id="editHabitCatName" maxlength="40" data-action="save-edit-habit-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="editHabitCatShortname" maxlength="20" placeholder="${t('common.shortname_placeholder')}" data-action="save-edit-habit-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="editHabitCatColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit-category">${t('common.save')}</button></div></div>`;
+  m6.innerHTML = editHabitCategoryModalHTML();
   app.appendChild(m6);
 }
 
 function openAddHabitModal(preselectedGroupId) {
+  const modal = document.getElementById('addHabitModal');
+  modal.innerHTML = addHabitModalHTML();
   document.getElementById('newHabitName').value = '';
   document.getElementById('newHabitLastDone').value = '';
   document.getElementById('newHabitDraft').checked = false;
@@ -1207,7 +1231,6 @@ function openAddHabitModal(preselectedGroupId) {
   } else {
     groupRow.style.display = 'none';
   }
-  const modal = document.getElementById('addHabitModal');
   modal.style.setProperty('--cat-color', getHabitCatColor(_defaultHabitCatId));
   modal.classList.add('visible');
   setTimeout(() => document.getElementById('newHabitName').focus(), 100);
@@ -1460,21 +1483,8 @@ function editHabitInline(habitId, itemEl) {
 function openEditHabitModal(habitId) {
   const habit = state.allHabits.find(c => c.id === habitId);
   if (!habit) return;
-  // Refresh i18n labels on the modal
-  const titleEl = document.getElementById('editHabitTitle');
-  if (titleEl) titleEl.innerHTML = lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}`;
-  const nameLabel = document.getElementById('editHabitNameLabel');
-  if (nameLabel) nameLabel.textContent = t('common.name');
-  const freqLabel = document.getElementById('editHabitFreqLabel');
-  if (freqLabel) freqLabel.textContent = t('habits.frequency_rule');
-  const catLabel = document.getElementById('editHabitCategoryLabel');
-  if (catLabel) catLabel.textContent = t('common.category');
-  const lastDoneLabel = document.getElementById('editHabitLastDoneLabel');
-  if (lastDoneLabel) lastDoneLabel.textContent = t('habits.last_done_optional');
-  const cancelBtn = document.getElementById('editHabitCancelBtn');
-  if (cancelBtn) cancelBtn.textContent = t('common.cancel');
-  const saveBtn = document.getElementById('editHabitSaveBtn');
-  if (saveBtn) saveBtn.textContent = t('common.save');
+  const modal = document.getElementById('editHabitModal');
+  modal.innerHTML = editHabitModalHTML();
 
   document.getElementById('editHabitId').value = habitId;
   const editNameEl = document.getElementById('editHabitName');
@@ -1490,7 +1500,6 @@ function openEditHabitModal(habitId) {
     lastDoneInput.value = lastDone ? localDateStr(lastDone) : '';
     lastDoneInput.max = localDateStr(new Date());
   }
-  const modal = document.getElementById('editHabitModal');
   const catColor = getHabitCatColor(catIdForHabit(habit));
   modal.style.setProperty('--cat-color', catColor);
   modal.classList.add('visible');
@@ -1712,8 +1721,9 @@ function openHabitHistory(habitId) {
   const habit = state.allHabits.find(c => c.id === habitId);
   if (!habit) return;
   state._historyHabitId = habitId;
-  renderHabitHistoryList(habitId, habit);
   const histModal = document.getElementById('habitHistoryModal');
+  histModal.innerHTML = habitHistoryModalHTML();
+  renderHabitHistoryList(habitId, habit);
   histModal.style.setProperty('--cat-color', getHabitCatColor(catIdForHabit(habit)));
   histModal.classList.add('visible');
 }
@@ -1861,10 +1871,12 @@ function closeHabitHistoryModal() {
 // HABIT CATEGORY MANAGEMENT
 // ===================================================================
 function openAddHabitCategoryModal() {
+  const modal = document.getElementById('addHabitCategoryModal');
+  modal.innerHTML = addHabitCategoryModalHTML();
   document.getElementById('newHabitCategoryName').value = '';
   document.getElementById('newHabitCategoryShortname').value = '';
   document.getElementById('newHabitCategoryColor').value = nextPaletteColor(_habitCatMap);
-  document.getElementById('addHabitCategoryModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('newHabitCategoryName').focus(), 100);
 }
 

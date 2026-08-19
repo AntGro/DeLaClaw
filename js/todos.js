@@ -889,15 +889,21 @@ function initTodoModals() {
   // Add Category Modal
   const m2 = document.createElement('div');
   m2.className = 'modal-overlay'; m2.id = 'addCategoryModal';
-  m2.innerHTML = `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="40" data-action="save-new-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-category">${t('common.add')}</button></div></div>`;
+function addCategoryModalHTML() {
+  return `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="40" data-action="save-new-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-category">${t('common.add')}</button></div></div>`;
+}
+
+  m2.innerHTML = addCategoryModalHTML();
   app.appendChild(m2);
 }
 
 function openAddCategoryModal() {
+  const modal = document.getElementById('addCategoryModal');
+  modal.innerHTML = addCategoryModalHTML();
   document.getElementById('newCategoryName').value = '';
   document.getElementById('newCategoryShortname').value = '';
   document.getElementById('newCategoryColor').value = nextPaletteColor(_todoCatMap);
-  document.getElementById('addCategoryModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('newCategoryName').focus(), 100);
 }
 

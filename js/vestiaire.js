@@ -530,14 +530,8 @@ async function cycleVestiaireStatus(id) {
 
 
 
-function initVestiaireModals() {
-  const app = document.getElementById('app');
-
-  // Add Item Modal
-  const m1 = document.createElement('div');
-  m1.className = 'modal-overlay';
-  m1.id = 'addVestiaireModal';
-  m1.innerHTML = `<div class="modal">
+function addVestiaireModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('shirt', 20)} ${t('vestiaire.add_item')}</h2>
     <input type="hidden" id="newVestiaireCategory">
     <label>${t('common.name')}</label>
@@ -562,13 +556,10 @@ function initVestiaireModals() {
       <button class="modal-save" data-action="save-new-vestiaire">${t('common.add')}</button>
     </div>
   </div>`;
-  app.appendChild(m1);
+}
 
-  // Edit Item Modal
-  const m2 = document.createElement('div');
-  m2.className = 'modal-overlay';
-  m2.id = 'editVestiaireModal';
-  m2.innerHTML = `<div class="modal">
+function editVestiaireModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('vestiaire.edit_item')}</h2>
     <input type="hidden" id="editVestiaireId">
     <label>${t('common.name')}</label>
@@ -594,13 +585,10 @@ function initVestiaireModals() {
       <button class="modal-save" data-action="save-edit-vestiaire">${t('common.save')}</button>
     </div>
   </div>`;
-  app.appendChild(m2);
+}
 
-  // Add Category Modal
-  const m3 = document.createElement('div');
-  m3.className = 'modal-overlay';
-  m3.id = 'addVestiaireCategoryModal';
-  m3.innerHTML = `<div class="modal">
+function addVestiaireCategoryModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('folder-plus', 20)} ${t('vestiaire.add_category')}</h2>
     <label>${t('common.name')}</label>
     <input type="text" id="newVestiaireCategoryName" placeholder="${t('vestiaire.category_placeholder')}" maxlength="40"
@@ -621,15 +609,10 @@ function initVestiaireModals() {
       <button class="modal-save" data-action="save-new-vestiaire-category">${t('common.add')}</button>
     </div>
   </div>`;
-  app.appendChild(m3);
+}
 
-  // Edit Category Modal
-  const m4 = document.createElement('div');
-  m4.className = 'modal-overlay';
-  m4.id = 'editVestiaireCategoryModal';
-  m4.dataset.action = 'close-edit-vestiaire-category';
-  m4.dataset.overlayClose = 'true';
-  m4.innerHTML = `<div class="modal">
+function editVestiaireCategoryModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('vestiaire.edit_category')}</h2>
     <input type="hidden" id="editVestiaireCategoryOldName">
     <label>${t('common.name')}</label>
@@ -651,6 +634,35 @@ function initVestiaireModals() {
       <button class="modal-save" data-action="save-edit-vestiaire-category">${t('common.save')}</button>
     </div>
   </div>`;
+}
+
+function initVestiaireModals() {
+  const app = document.getElementById('app');
+
+  const m1 = document.createElement('div');
+  m1.className = 'modal-overlay';
+  m1.id = 'addVestiaireModal';
+  m1.innerHTML = addVestiaireModalHTML();
+  app.appendChild(m1);
+
+  const m2 = document.createElement('div');
+  m2.className = 'modal-overlay';
+  m2.id = 'editVestiaireModal';
+  m2.innerHTML = editVestiaireModalHTML();
+  app.appendChild(m2);
+
+  const m3 = document.createElement('div');
+  m3.className = 'modal-overlay';
+  m3.id = 'addVestiaireCategoryModal';
+  m3.innerHTML = addVestiaireCategoryModalHTML();
+  app.appendChild(m3);
+
+  const m4 = document.createElement('div');
+  m4.className = 'modal-overlay';
+  m4.id = 'editVestiaireCategoryModal';
+  m4.dataset.action = 'close-edit-vestiaire-category';
+  m4.dataset.overlayClose = 'true';
+  m4.innerHTML = editVestiaireCategoryModalHTML();
   app.appendChild(m4);
 }
 
@@ -667,6 +679,8 @@ function populateCategorySelect(selectId, preselectId) {
 // ===================================================================
 
 function openAddVestiaireModal(preselectedCatId) {
+  const modal = document.getElementById('addVestiaireModal');
+  modal.innerHTML = addVestiaireModalHTML();
   document.getElementById('newVestiaireName').value = '';
   document.getElementById('newVestiaireBrand').value = '';
   document.getElementById('newVestiaireSize').value = '';
@@ -676,7 +690,7 @@ function openAddVestiaireModal(preselectedCatId) {
   const catRows = Array.from(_vestCatMap.values()).sort((a, b) => a.sort_order - b.sort_order);
   const firstCatId = preselectedCatId || (catRows[0]?.id || '');
   populateCategorySelect('newVestiaireCategory', firstCatId);
-  document.getElementById('addVestiaireModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('newVestiaireName').focus(), 100);
 }
 
@@ -718,6 +732,8 @@ async function saveNewVestiaire() {
 function openEditVestiaireModal(id) {
   const v = (state.allVestiaire || []).find(x => x.id === id);
   if (!v) return;
+  const modal = document.getElementById('editVestiaireModal');
+  modal.innerHTML = editVestiaireModalHTML();
   document.getElementById('editVestiaireId').value = id;
   document.getElementById('editVestiaireName').value = v.name || '';
   document.getElementById('editVestiaireBrand').value = v.brand || '';
@@ -726,7 +742,7 @@ function openEditVestiaireModal(id) {
   document.getElementById('editVestiaireNotes').value = v.note || '';
   document.getElementById('editVestiairePurchaseStatus').value = v.purchase_status || '';
   populateCategorySelect('editVestiaireCategory', catIdForVest(v));
-  document.getElementById('editVestiaireModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('editVestiaireName').focus(), 100);
 }
 
@@ -787,10 +803,12 @@ async function deleteVestiaire(id) {
 // ===================================================================
 
 function openAddVestiaireCategoryModal() {
+  const modal = document.getElementById('addVestiaireCategoryModal');
+  modal.innerHTML = addVestiaireCategoryModalHTML();
   document.getElementById('newVestiaireCategoryName').value = '';
   document.getElementById('newVestiaireCategoryShortname').value = '';
   document.getElementById('newVestiaireCategoryColor').value = nextPaletteColor(_vestCatMap);
-  document.getElementById('addVestiaireCategoryModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('newVestiaireCategoryName').focus(), 100);
 }
 
@@ -820,11 +838,13 @@ async function saveNewVestiaireCategory() {
 function openEditVestiaireCategoryModal(catId) {
   const cat = _vestCatMap.get(catId);
   if (!cat) return;
+  const modal = document.getElementById('editVestiaireCategoryModal');
+  modal.innerHTML = editVestiaireCategoryModalHTML();
   document.getElementById('editVestiaireCategoryOldName').value = catId; // store ID
   document.getElementById('editVestiaireCategoryName').value = cat.name;
   document.getElementById('editVestiaireCategoryShortname').value = cat.shortname || '';
   document.getElementById('editVestiaireCategoryColor').value = cat.color || GENERAL_CATEGORY_COLOR;
-  document.getElementById('editVestiaireCategoryModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('editVestiaireCategoryName').focus(), 100);
 }
 

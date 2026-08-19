@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
 import { esc, showToast, showConfirmAction, balanceGrid, fetchAll } from './utils.js';
-import { scrollToAndHighlight, initItemHoverDelay, inlineEditText } from './item-utils.js';
+import { scrollToAndHighlight, initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 
 // ===================================================================
@@ -209,8 +209,10 @@ function renderBirthdays() {
   }
 
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(grid, innerScrolls);
   initBirthdayHoverDelay(grid);
   balanceGrid(grid);
 }
@@ -597,6 +599,11 @@ async function deleteBirthday(id) {
     async () => {
       const { error } = await state.db.from('birthdays').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Animate item out before re-rendering
+      const el = document.querySelector(`.birthday-card[data-id="${CSS.escape(id)}"]`);
+      await animateItemRemoval(el);
+
       showToast(t('birthdays.birthday_removed'), 'info');
       await refreshBirthdays();
     }

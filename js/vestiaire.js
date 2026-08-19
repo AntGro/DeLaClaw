@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
-import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot } from './item-utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
 
 // ===================================================================
@@ -172,9 +172,11 @@ function renderVestiaire() {
   }
 
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   grid.className = 'project-grid';
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(grid, innerScrolls);
 
   // Init hover-delay action buttons & drag-drop for each category card
   catRows.forEach(cat => {
@@ -768,6 +770,11 @@ async function deleteVestiaire(id) {
     async () => {
       const { error } = await state.db.from('vestiaire').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Animate item out before re-rendering
+      const el = document.querySelector(`[data-vest-id="${CSS.escape(id)}"]`);
+      await animateItemRemoval(el);
+
       showToast(t('toast.removed'), 'info');
       await refreshVestiaire();
     }

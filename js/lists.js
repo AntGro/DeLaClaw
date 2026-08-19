@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot } from './item-utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 
@@ -201,9 +201,11 @@ function renderLists() {
   });
 
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   grid.className = 'project-grid';
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(grid, innerScrolls);
 
   // Init hover-delay + drag-drop for each list card
   visibleLists.forEach(list => {
@@ -702,6 +704,11 @@ async function deleteListItem(id) {
       }
       const { error } = await state.db.from('list_items').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Animate item out before re-rendering
+      const el = document.querySelector(`[data-item-id="${CSS.escape(id)}"]`);
+      await animateItemRemoval(el);
+
       showToast(t('toast.removed'), 'info');
       await refreshLists();
     }

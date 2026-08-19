@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot } from './item-utils.js';
+import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
@@ -933,8 +933,10 @@ function renderHabits() {
     html += renderHabitCategoryCard(catId);
   }
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(grid, innerScrolls);
   initHabitHoverDelay(grid);
   // Init cross-category drag (no within-category reorder)
   for (const catId of categoryIdList) {
@@ -1567,6 +1569,11 @@ async function deleteHabit(habitId) {
       }
       const { error } = await state.db.from('habits').delete().eq('id', habitId);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Animate item out before re-rendering
+      const el = document.querySelector(`[data-habit-id="${CSS.escape(habitId)}"]`);
+      await animateItemRemoval(el);
+
       showToast(t('habits.habit_deleted'), 'info');
       await refreshHabits();
     }

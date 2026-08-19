@@ -2,7 +2,7 @@ import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot } from './item-utils.js';
+import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
 // ===================================================================
@@ -312,8 +312,10 @@ function renderAllBuckets() {
   }
 
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(grid, innerScrolls);
   initFlashcardHoverDelay(grid);
   // Init draft reorder
   const draftDeck = document.getElementById('flashDraftsDeck');
@@ -769,6 +771,10 @@ window.deleteDraft = function(id) {
   if (!draft) return;
   showConfirmAction('Delete Draft', 'Are you sure?', async () => {
     if (state.db.connected) await state.db.from('flashcard_notes').delete().eq('id', id);
+
+    const el = document.querySelector(`[data-draft-id="${CSS.escape(id)}"]`);
+    await animateItemRemoval(el);
+
     await refreshFlashcards();
     showToast(t('flashcards.draft_deleted'));
   });
@@ -1005,6 +1011,10 @@ window.deleteFlashcard = function(id) {
   if (!card) return;
   showConfirmAction('Delete Flashcard', 'Are you sure?', async () => {
     if (state.db.connected) await state.db.from('flashcards').delete().eq('id', id);
+
+    const el = document.querySelector(`[data-card-id="${CSS.escape(id)}"]`);
+    await animateItemRemoval(el);
+
     await refreshFlashcards();
     showToast(t('flashcards.card_deleted'));
   });
@@ -1454,6 +1464,10 @@ window.deleteText = function(id) {
   if (!tx) return;
   showConfirmAction(t('text_revision.delete_text'), t('text_revision.delete_confirm'), async () => {
     if (state.db.connected) await state.db.from('texts').delete().eq('id', id);
+
+    const el = document.querySelector(`[data-text-id="${CSS.escape(id)}"]`);
+    await animateItemRemoval(el);
+
     await refreshFlashcards();
     showToast(t('text_revision.text_deleted'));
   });

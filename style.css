@@ -529,6 +529,7 @@ input,select,button{font-family:inherit;}
 .bucket-item.drag-over{border-top:2px solid var(--accent);}
 .bucket-item.item-dragging{box-shadow:0 4px 16px rgba(0,0,0,0.25);background:var(--surface);border-radius:8px;}
 .item-drag-placeholder{border-radius:8px;background:color-mix(in srgb, var(--accent) 8%, transparent);transition:height 0.15s ease;flex-shrink:0;}
+.item-removing{opacity:0;padding-top:0 !important;padding-bottom:0 !important;margin-top:0 !important;margin-bottom:0 !important;border-top-width:0 !important;border-bottom-width:0 !important;transition:opacity 0.15s ease,height 0.2s ease 0.05s,padding 0.2s ease 0.05s,margin 0.2s ease 0.05s,border-width 0.2s ease 0.05s;pointer-events:none;}
 .bucket-item-actions{display:flex;gap:4px;opacity:0;transition:opacity 0.15s;}
 .bucket-item:hover .bucket-item-actions{opacity:1;}
 

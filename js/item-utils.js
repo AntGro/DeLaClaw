@@ -567,6 +567,76 @@ export async function reorderItems({
     orderedIds.map((id, i) => db.from(tableName).update({ sort_order: i }).eq('id', id))
   )).catch(e => console.error(`${tableName} reorder sync failed:`, e));
 }
+// ===================================================================
+// INNER SCROLL POSITION CAPTURE / RESTORE
+// ===================================================================
+// When a grid is rebuilt via innerHTML, scrollable inner lists (task-list,
+// todo-cat-list, list-item-list, vestiaire-item-list, birthday-bucket-list)
+// lose their scrollTop. Capture before innerHTML, restore after.
+
+const SCROLLABLE_LIST_SELECTOR = '.task-list, .todo-cat-list, .list-item-list, .vestiaire-item-list, .birthday-bucket-list';
+
+function scrollContainerKey(el) {
+  if (el.id) return 'id:' + el.id;
+  const cat = el.dataset?.category;
+  if (cat) return 'cat:' + cat;
+  const card = el.closest('[id]');
+  if (card?.id) return 'id:' + card.id;
+  return null;
+}
+
+export function captureInnerScrollPositions(gridEl) {
+  const map = new Map();
+  if (!gridEl) return map;
+  gridEl.querySelectorAll(SCROLLABLE_LIST_SELECTOR).forEach(el => {
+    if (el.scrollTop <= 0) return;
+    const key = scrollContainerKey(el);
+    if (key) map.set(key, el.scrollTop);
+  });
+  return map;
+}
+
+export function restoreInnerScrollPositions(gridEl, map) {
+  if (!gridEl || !map.size) return;
+  gridEl.querySelectorAll(SCROLLABLE_LIST_SELECTOR).forEach(el => {
+    const key = scrollContainerKey(el);
+    if (key && map.has(key)) el.scrollTop = map.get(key);
+  });
+}
+
+
+// ===================================================================
+// ITEM REMOVAL ANIMATION
+// ===================================================================
+// Smoothly collapses and fades an item out. Returns a Promise that
+// resolves when the transition finishes (or after a safety timeout).
+export function animateItemRemoval(el) {
+  return new Promise(resolve => {
+    if (!el) { resolve(); return; }
+    const h = el.offsetHeight;
+    // Lock current height so it can be transitioned to 0
+    el.style.height = h + 'px';
+    el.style.overflow = 'hidden';
+    // eslint-disable-next-line no-unused-expressions
+    el.offsetHeight; // force reflow
+    el.classList.add('item-removing');
+    let resolved = false;
+    const done = () => { if (!resolved) { resolved = true; resolve(); } };
+    el.addEventListener('transitionend', function handler(e) {
+      if (e.propertyName === 'height') {
+        el.removeEventListener('transitionend', handler);
+        done();
+      }
+    });
+    // Safety: resolve even if transitionend never fires
+    setTimeout(done, 350);
+    requestAnimationFrame(() => {
+      el.style.height = '0';
+    });
+  });
+}
+
+
 // SCROLL TO & HIGHLIGHT
 // ===================================================================
 export function scrollToAndHighlight(element, color, durationMs = 1500) {

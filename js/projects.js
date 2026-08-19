@@ -3,7 +3,7 @@ import { lucideIcon } from './icons.js';
 import state, { MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction,
          updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll, autoResizeTextarea } from './utils.js';
-import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
+import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, LONG_PRESS_MS, DRAG_THRESHOLD, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 
 // ===================================================================
 // state.PROJECTS (loaded from Supabase)
@@ -333,8 +333,10 @@ function renderAllTasks() {
     const archivedTasks = projectTasks.filter(t => t.status === 'approved');
 
     // Active tasks
+    const prevScroll = container.scrollTop;
     if (!activeTasks.length) { container.innerHTML = '<p class="empty-msg">No tasks yet</p>'; }
     else { container.innerHTML = activeTasks.map(t => renderTask(t)).join(''); initDragDrop(container, p.id); initTaskHoverDelay(container); }
+    container.scrollTop = prevScroll;
 
     // Archived tasks toggle
     const toggleEl = document.getElementById(`archive-toggle-${p.id}`);
@@ -552,8 +554,14 @@ async function deleteTask(id) {
     'Delete this task? This cannot be undone.',
     async () => {
       const { error } = await state.db.from('tasks').delete().eq('id', id);
-      if (error) showToast(t('toast.delete_failed'), 'error');
-      else { showToast(t('toast.deleted'), 'success'); await refreshAll(); }
+      if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Animate item out before re-rendering
+      const el = document.querySelector(`[data-task-id="${CSS.escape(id)}"]`);
+      await animateItemRemoval(el);
+
+      showToast(t('toast.deleted'), 'success');
+      await refreshAll();
     }
   );
 }

@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot } from './item-utils.js';
+import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
@@ -253,8 +253,10 @@ function renderTodos() {
   }
 
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(grid, innerScrolls);
 
   // Init drag-and-drop for each card (individual TODO items)
   categoryIdList.forEach(catId => {
@@ -711,6 +713,10 @@ async function deleteTodo(id) {
           await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
         } catch (e) { console.warn('Failed to delete shared todo from Drive:', e); }
       }
+
+      // Animate item out before re-rendering
+      const el = document.querySelector(`[data-todo-id="${CSS.escape(id)}"]`);
+      await animateItemRemoval(el);
 
       showToast(t('toast.deleted'), 'info');
       await refreshTodos();

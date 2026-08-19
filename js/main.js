@@ -3903,6 +3903,7 @@ const BACKUP_TABLES = [
 
 async function generateBackupJSON() {
   const backup = { _meta: { version: 1, exported_at: new Date().toISOString(), tables: [] } };
+  if (state.supabaseUrl) backup._meta.source_url = state.supabaseUrl;
   for (const table of BACKUP_TABLES) {
     try {
       backup[table] = await fetchAll(() => state.db.from(table).select('*'));
@@ -4204,6 +4205,12 @@ async function performImport(file) {
     showToast(t('menu.settings_restore_done', totalRows));
     if (sharedCleaned > 0) {
       showToast(t('menu.settings_restore_shared_cleaned', sharedCleaned), 'info');
+    }
+    // Notify owner if sharing groups were migrated to a different Supabase project
+    const hasSharingGroups = backup.sharing_groups && backup.sharing_groups.length > 0;
+    const urlChanged = backup._meta.source_url && state.supabaseUrl && backup._meta.source_url !== state.supabaseUrl;
+    if (hasSharingGroups && urlChanged) {
+      showToast(t('menu.settings_restore_reshare_hint'), 'info', 8000);
     }
     // In demo/drive mode, reseed the in-memory adapter instead of reloading
     // (reload would re-create the adapter with default/empty data)

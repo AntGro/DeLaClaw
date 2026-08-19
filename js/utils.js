@@ -162,11 +162,11 @@ function buildTable(tableLines) {
   return tableHtml;
 }
 
-function showToast(msg, type = 'info') {
+function showToast(msg, type = 'info', duration = 2500) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = `toast show ${type}`;
-  setTimeout(() => t.className = 'toast', 2500);
+  setTimeout(() => t.className = 'toast', duration);
 }
 
 

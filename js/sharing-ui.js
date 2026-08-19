@@ -639,8 +639,8 @@ export async function handleJoinCode(rawCode, opts = {}) {
       // Check if the invite URL differs from the stored remote — owner may have migrated
       if (env.u && state.sharing.reconnectGroup) {
         const { data: jgRow } = await state.db.from('joined_groups').select('remote_url').eq('group_id', env.g).limit(1);
-        const storedUrl = jgRow?.[0]?.remote_url;
-        if (storedUrl && storedUrl !== env.u) {
+        const storedUrl = jgRow?.[0]?.remote_url?.replace(/\/+$/, '');
+        if (storedUrl && storedUrl !== env.u?.replace(/\/+$/, '')) {
           showReconnectConfirmModal(alreadyJoined, env);
           return true;
         }
@@ -652,7 +652,7 @@ export async function handleJoinCode(rawCode, opts = {}) {
     // Group not loaded (remote unreachable?) but exists in joined_groups — check for reconnect
     if (env.u && state.sharing.reconnectGroup) {
       const { data: jgRow } = await state.db.from('joined_groups').select('remote_url,group_name').eq('group_id', env.g).limit(1);
-      if (jgRow?.[0] && jgRow[0].remote_url !== env.u) {
+      if (jgRow?.[0] && jgRow[0].remote_url?.replace(/\/+$/, '') !== env.u?.replace(/\/+$/, '')) {
         const stubGroup = { id: env.g, name: jgRow[0].group_name || env.g };
         showReconnectConfirmModal(stubGroup, env);
         return true;

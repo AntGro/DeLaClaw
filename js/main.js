@@ -4208,7 +4208,8 @@ async function performImport(file) {
     }
     // Notify owner if sharing groups were migrated to a different Supabase project
     const hasSharingGroups = backup.sharing_groups && backup.sharing_groups.length > 0;
-    const urlChanged = backup._meta.source_url && state.supabaseUrl && backup._meta.source_url !== state.supabaseUrl;
+    const urlChanged = backup._meta.source_url && state.supabaseUrl
+      && backup._meta.source_url.replace(/\/+$/, '') !== state.supabaseUrl.replace(/\/+$/, '');
     if (hasSharingGroups && urlChanged) {
       showToast(t('menu.settings_restore_reshare_hint'), 'info', 8000);
     }

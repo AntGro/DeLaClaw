@@ -635,6 +635,24 @@ function initProjectModals() {
   m2.dataset.overlayClose = 'true';
   m2.innerHTML = editProjectModalHTML();
   app.appendChild(m2);
+
+  const m3 = document.createElement('div');
+  m3.className = 'modal-overlay';
+  m3.id = 'revisionModal';
+  m3.innerHTML = revisionModalHTML();
+  app.appendChild(m3);
+
+  const m4 = document.createElement('div');
+  m4.className = 'modal-overlay';
+  m4.id = 'promptEditorModal';
+  m4.innerHTML = promptEditorModalHTML();
+  app.appendChild(m4);
+
+  const m5 = document.createElement('div');
+  m5.className = 'modal-overlay';
+  m5.id = 'projectPromptModal';
+  m5.innerHTML = projectPromptModalHTML();
+  app.appendChild(m5);
 }
 
 function openAddProjectModal() {
@@ -941,10 +959,26 @@ function closeTaskExpandModal() {
 // ===================================================================
 // REVISION FEEDBACK MODAL
 // ===================================================================
+
+function revisionModalHTML() {
+  return `<div class="modal modal-wide revision-modal">
+    <h2>${lucideIcon('refresh-cw', 20)} ${t('projects.request_revision')}</h2>
+    <p class="modal-hint">${t('projects.revision_hint')}</p>
+    <textarea id="revisionFeedback" placeholder="${t('projects.revision_placeholder')}"></textarea>
+    <input type="hidden" id="revisionTaskId">
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-revision">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="submit-revision">${t('projects.submit_revision')}</button>
+    </div>
+  </div>`;
+}
+
 function openRevisionModal(taskId) {
+  const modal = document.getElementById('revisionModal');
+  modal.innerHTML = revisionModalHTML();
   document.getElementById('revisionTaskId').value = taskId;
   document.getElementById('revisionFeedback').value = '';
-  document.getElementById('revisionModal').classList.add('visible');
+  modal.classList.add('visible');
   const ta = document.getElementById('revisionFeedback');
   ta.focus();
   // Enter submits, Shift+Enter inserts newline
@@ -997,11 +1031,38 @@ async function loadPrompts() {
   (data || []).forEach(p => { promptsCache[p.key] = p.text; });
 }
 
+function promptEditorModalHTML() {
+  return `<div class="modal prompt-modal">
+    <h2>${lucideIcon('file-text', 20)} ${t('projects.global_prompt')}</h2>
+    <p class="prompt-hint">${t('projects.global_prompt_hint')}</p>
+    <textarea id="promptGlobalText" placeholder="${t('projects.global_prompt_placeholder')}"></textarea>
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-prompt-editor">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-global-prompt">${t('common.save')}</button>
+    </div>
+  </div>`;
+}
+
+function projectPromptModalHTML() {
+  return `<div class="modal prompt-modal">
+    <h2 id="projectPromptTitle">${lucideIcon('file-text', 20)} ${t('projects.project_prompt')}</h2>
+    <p class="prompt-hint">${t('projects.project_prompt_hint')}</p>
+    <textarea id="promptProjectText" placeholder="${t('projects.project_prompt_placeholder')}"></textarea>
+    <input type="hidden" id="promptProjectId">
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-project-prompt">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-project-prompt">${t('common.save')}</button>
+    </div>
+  </div>`;
+}
+
 // Global prompt (header button)
 async function openPromptEditor() {
   await loadPrompts();
+  const modal = document.getElementById('promptEditorModal');
+  modal.innerHTML = promptEditorModalHTML();
   document.getElementById('promptGlobalText').value = promptsCache['global'] || '';
-  document.getElementById('promptEditorModal').classList.add('visible');
+  modal.classList.add('visible');
   document.getElementById('promptGlobalText').focus();
 }
 
@@ -1020,11 +1081,13 @@ async function saveGlobalPrompt() {
 // Per-project prompt (card button)
 async function openProjectPrompt(projectId) {
   await loadPrompts();
+  const modal = document.getElementById('projectPromptModal');
+  modal.innerHTML = projectPromptModalHTML();
   const project = state.PROJECTS.find(p => p.id === projectId);
   document.getElementById('projectPromptTitle').innerHTML = `${lucideIcon("file-text",20)} ${esc(project ? project.name : projectId)} — ${t('projects.project_prompt')}`;
   document.getElementById('promptProjectId').value = projectId;
   document.getElementById('promptProjectText').value = promptsCache[projectId] || '';
-  document.getElementById('projectPromptModal').classList.add('visible');
+  modal.classList.add('visible');
   document.getElementById('promptProjectText').focus();
 }
 

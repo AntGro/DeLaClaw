@@ -647,30 +647,6 @@ bun run server.js</pre>
   <!-- Add Category Modal is created dynamically by js/todos.js -->
 
   <!-- Delete Confirmation Modal -->
-  <div class="modal-overlay" id="editCategoryModal" data-action="close-edit-category" data-overlay-close="true">
-    <div class="modal">
-      <h2><span data-icon="pencil" data-size="20"></span> Edit Category</h2>
-      <input type="hidden" id="editCategoryOldName">
-      <label>Category Name</label>
-      <input type="text" id="editCategoryName" maxlength="40" data-action="save-edit-category-on-enter">
-      <div class="modal-row">
-        <div class="modal-field">
-          <label>Shortname</label>
-          <input type="text" id="editCategoryShortname" maxlength="20" data-action="save-edit-category-on-enter">
-        </div>
-        <div class="modal-field">
-          <label>Color</label>
-          <input type="color" id="editCategoryColor">
-        </div>
-      </div>
-      <div class="modal-actions">
-        <button class="modal-cancel" data-action="close-edit-category">Cancel</button>
-        <button class="modal-save" data-action="save-edit-category">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Delete Confirmation Modal -->
   <div class="modal-overlay" id="confirmActionModal">
     <div class="modal confirm-action-modal">
       <div class="confirm-action-icon-wrap">

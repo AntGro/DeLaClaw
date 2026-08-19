@@ -69,11 +69,13 @@ async function setCategoryColor(nameOrId, color) {
 function openEditCategoryModal(catId) {
   const cat = _todoCatMap.get(catId);
   if (!cat) return;
+  const modal = document.getElementById('editCategoryModal');
+  modal.innerHTML = editCategoryModalHTML();
   document.getElementById('editCategoryOldName').value = catId; // store ID, not name
   document.getElementById('editCategoryName').value = cat.name;
   document.getElementById('editCategoryShortname').value = cat.shortname || '';
   document.getElementById('editCategoryColor').value = cat.color || GENERAL_CATEGORY_COLOR;
-  document.getElementById('editCategoryModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('editCategoryName').focus(), 50);
 }
 
@@ -877,6 +879,33 @@ function snoozeModalHTML() {
   return `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button data-action="snooze-for" data-amount="1" data-unit="h">${t('todos.snooze_1h')}</button><button data-action="snooze-for" data-amount="3" data-unit="h">${t('todos.snooze_3h')}</button><button data-action="snooze-for" data-amount="1" data-unit="d">${t('todos.snooze_1d')}</button><button data-action="snooze-for" data-amount="3" data-unit="d">${t('todos.snooze_3d')}</button><button data-action="snooze-for" data-amount="7" data-unit="d">${t('todos.snooze_1w')}</button><button data-action="snooze-for" data-amount="1" data-unit="M">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">${t('todos.snooze_custom')}</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" data-action="close-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-snooze">${t('todos.snooze')}</button></div></div>`;
 }
 
+function addCategoryModalHTML() {
+  return `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="40" data-action="save-new-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-category">${t('common.add')}</button></div></div>`;
+}
+
+function editCategoryModalHTML() {
+  return `<div class="modal">
+    <h2>${lucideIcon('pencil', 20)} ${t('todos.edit_category')}</h2>
+    <input type="hidden" id="editCategoryOldName">
+    <label>${t('todos.category_name')}</label>
+    <input type="text" id="editCategoryName" maxlength="40" data-action="save-edit-category-on-enter">
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>${t('common.shortname')}</label>
+        <input type="text" id="editCategoryShortname" maxlength="20" data-action="save-edit-category-on-enter">
+      </div>
+      <div class="modal-field">
+        <label>${t('common.color')}</label>
+        <input type="color" id="editCategoryColor">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-edit-category">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-category">${t('common.save')}</button>
+    </div>
+  </div>`;
+}
+
 function initTodoModals() {
   const app = document.getElementById('app');
 
@@ -889,12 +918,16 @@ function initTodoModals() {
   // Add Category Modal
   const m2 = document.createElement('div');
   m2.className = 'modal-overlay'; m2.id = 'addCategoryModal';
-function addCategoryModalHTML() {
-  return `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="40" data-action="save-new-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-category">${t('common.add')}</button></div></div>`;
-}
-
   m2.innerHTML = addCategoryModalHTML();
   app.appendChild(m2);
+
+  // Edit Category Modal
+  const m3 = document.createElement('div');
+  m3.className = 'modal-overlay'; m3.id = 'editCategoryModal';
+  m3.dataset.action = 'close-edit-category';
+  m3.dataset.overlayClose = 'true';
+  m3.innerHTML = editCategoryModalHTML();
+  app.appendChild(m3);
 }
 
 function openAddCategoryModal() {

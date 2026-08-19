@@ -41,6 +41,7 @@ Five modules, layered:
 - Creator generates invite → `sharing_members` row with `token_hash`, `joined_at=NULL`, `invited_label`
 - Joiner decodes invite → calls `verify_join_token(token)` RPC → on success `confirm_join(token, display_name)`
 - Joined credentials (url, anonKey, token) encrypted client-side via `crypto-sync.js` and stored in local `joined_groups`
+- **Reconnect (owner migration):** if a joiner opens an invite link for a group_id already in `joined_groups` but the URL differs (trailing-slash-normalized), the UI shows a reconnect confirmation modal instead of "already joined". `reconnectGroup()` updates the stored URL + anon key, re-encrypts credentials, rebuilds the remote client, and reloads shared items — no new membership created, no `confirm_join` needed (member already confirmed)
 
 ## Security
 - **Token hashing:** member tokens hashed at rest (`SHA-256 hex`). RPCs verify `token_hash = encode(digest(token,'sha256'),'hex')`
@@ -95,6 +96,14 @@ All RPCs validate token hash, joined status, and non-revoked before proceeding:
 - **lists.js:** shared list items enriched with `_shared` metadata; `_myCreatedSharedListItemIds` tracks creator info
 - **welcome.js:** aggregates shared TODOs/habits alongside personal ones
 - **Category FK cascade:** app-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members
+
+## Backup & Restore
+- **Creator-side tables** (`sharing_groups`, `sharing_members`, `sharing_items`) included in `BACKUP_TABLES` — exported/imported in FK order (groups → members → items)
+- **Joiner-side** (`joined_groups`) also in `BACKUP_TABLES`; `sync_secret` transfers via `settings`
+- **Owner ID rewriting on import:** `sharing_groups.auth_owner_id` rewritten to new `auth.uid()` (no trigger on this table). `sharing_members.auth_user_id` rewritten on creator rows only (`role='creator'`). `owner_id` on `joined_groups` stripped (trigger stamps new UID)
+- **URL comparison:** all remote URL comparisons normalize trailing slashes before `!==`
+- **Migration hint:** backup `_meta.source_url` captures the Supabase URL at export. On import, if URL changed and backup has sharing groups, a toast tells the owner to re-send invite links
+- **Limitation:** joiners' stored `remote_url` still points to the old project after owner migrates — requires re-invite (see Reconnect above)
 
 ## Risks / Gotchas
 - Remote Supabase unavailable → joined group items stale until next successful poll

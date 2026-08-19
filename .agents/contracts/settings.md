@@ -28,6 +28,7 @@ Cross-cutting app configuration — theme, language, category shortnames/colors,
 - **XSS:** all category names/shortnames via `esc()` when rendering tabs and bucket headers
 - Settings keys like `todo_category_colors` contain user-controlled hex — validate via allowlist, not raw style injection
 - Backup JSON export must not leak `agent_grants` raw tokens (only hashes), no secrets
+- Backup `_meta` includes `source_url` (Supabase project URL at export time) for migration detection
 
 ## i18n
 - **Prefix:** `settings.` + `auth.` + `agents.` — ~80 keys
@@ -57,6 +58,8 @@ Cross-cutting app configuration — theme, language, category shortnames/colors,
 - Wardrobe category duplication on lang switch (fixed May 31) — root cause SW caching stale JS
 - Demo mode leaking real categories — fixed via `swapLsScope` sandbox
 - Backup import must run migrations before applying settings
+- Backup import strips `owner_id` from all rows (trigger stamps new UID) and rewrites `auth_owner_id` on `sharing_groups` to new `auth.uid()`
+- `BACKUP_TABLES` order: category/deck parents → data tables → sharing creator tables (groups → members → items) → joined_groups, agent_grants. Clear runs in reverse (children before parents)
 
 ## Test Hooks
 - `bun tests/tests.js`: checks category shortnames DB-sync, theme var usage, esc for category names, CODEMAP freshness

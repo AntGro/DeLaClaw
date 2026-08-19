@@ -2,7 +2,7 @@ import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
 import state, { MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction,
-         updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll, autoResizeTextarea } from './utils.js';
+         updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll, autoResizeTextarea, nextPaletteColor } from './utils.js';
 import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, LONG_PRESS_MS, DRAG_THRESHOLD, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 
 // ===================================================================
@@ -582,7 +582,7 @@ function addProjectModalHTML() {
     <label>${t('projects.shortname')} (${t('projects.shortname_hint')})</label>
     <input type="text" id="newProjectShortname" placeholder="${t('projects.shortname_placeholder')}" maxlength="20">
     <label>${t('common.color')}</label>
-    <input type="color" id="newProjectColor" value="#646cff">
+    <input type="color" id="newProjectColor">
     <label>${t('projects.stack')}</label>
     <input type="text" id="newProjectTech" placeholder="${t('projects.tech_placeholder')}">
     <label>${t('projects.repo_url')} (${t('common.optional')})</label>
@@ -661,7 +661,7 @@ function openAddProjectModal() {
   document.getElementById('newProjectId').value = '';
   document.getElementById('newProjectName').value = '';
   document.getElementById('newProjectShortname').value = '';
-  document.getElementById('newProjectColor').value = '#646cff';
+  document.getElementById('newProjectColor').value = nextPaletteColor(state.PROJECTS);
   document.getElementById('newProjectTech').value = '';
   document.getElementById('newProjectGithub').value = '';
   document.getElementById('newProjectLive').value = '';

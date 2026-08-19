@@ -230,7 +230,7 @@ function renderFocusTodoItem(td) {
 
   let snoozeInfo = '';
   if (isSnoozed) {
-    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon", 16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
+    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon", 16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
   }
 
   const classes = [
@@ -317,7 +317,7 @@ function renderFocusHabitItem(habit) {
   const dueHtml = formatHabitDue(habit);
 
   const lastDoneStr = lastDone
-    ? `${t('habits.last_done')}: ${lastDone.toLocaleDateString([], { month: 'short', day: 'numeric' })} (${formatHabitRelative(lastDone)})`
+    ? `${t('habits.last_done')}: ${lastDone.toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })} (${formatHabitRelative(lastDone)})`
     : t('habits.never_done');
 
   const isShared = habit.shared_id && habit.shared_group_id;

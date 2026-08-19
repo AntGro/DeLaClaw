@@ -316,7 +316,7 @@ function formatFrequency(rule) {
     const mmdd = rule.split(':')[1];
     const [mm, dd] = mmdd.split('-').map(Number);
     const d = new Date(2000, mm - 1, dd);
-    return t('habits.freq_display_yearly', d.toLocaleDateString([], { month: 'long', day: 'numeric' }));
+    return t('habits.freq_display_yearly', d.toLocaleDateString(getLang(), { month: 'long', day: 'numeric' }));
   }
 
   return rule;
@@ -542,7 +542,7 @@ function buildFrequencyPicker(container, currentRule) {
       mSel.dataset.freqField = 'month';
       for (let i = 1; i <= 12; i++) {
         const opt = document.createElement('option'); opt.value = String(i).padStart(2, '0');
-        opt.textContent = new Date(2000, i - 1, 1).toLocaleString([], { month: 'long' });
+        opt.textContent = new Date(2000, i - 1, 1).toLocaleString(getLang(), { month: 'long' });
         const curM = parsed.mmdd ? parsed.mmdd.split('-')[0] : '01';
         if (String(i).padStart(2, '0') === curM) opt.selected = true;
         mSel.appendChild(opt);
@@ -838,7 +838,7 @@ function formatHabitDue(habit) {
   const diffDays = Math.round((dueDay - todayStart) / (1000 * 60 * 60 * 24));
   const status = habitDueStatus(habit);
 
-  const dateStr = due.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  const dateStr = due.toLocaleDateString(getLang(), { month: 'short', day: 'numeric' });
   if (status === 'overdue') return `<span class="habit-due overdue">${lucideIcon('alert-triangle', 14)} ${t('habits.overdue')} (${dateStr}, ${t('habits.days_ago', Math.abs(diffDays))})</span>`;
   if (status === 'due-today') return `<span class="habit-due due-today">${lucideIcon("bell",16)} ${t('habits.due_today')}</span>`;
   if (status === 'due-tomorrow') return `<span class="habit-due due-today">${lucideIcon("calendar",16)} ${t('habits.tomorrow')} (${dateStr})</span>`;
@@ -1096,7 +1096,7 @@ function renderHabitItem(habit) {
   const dueHtml = isDraft ? `<span class="habit-due draft">${lucideIcon("file-text",16)} ${t('habits.draft')}</span>` : formatHabitDue(habit);
 
   const lastDoneStr = lastDone
-    ? `${t('habits.last_done')}: ${lastDone.toLocaleDateString([], { month: 'short', day: 'numeric' })} (${formatHabitRelative(lastDone)})`
+    ? `${t('habits.last_done')}: ${lastDone.toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })} (${formatHabitRelative(lastDone)})`
     : t('habits.never_done');
 
   const promoteBtn = isDraft ? `<button data-action="promote-habit" data-id="${esc(habit.id)}" title="${t('habits.promote')}" class="habit-promote-btn">▶ ${t('habits.promote')}</button>` : '';
@@ -1729,7 +1729,7 @@ function renderHabitHistoryList(habitId, habit) {
   } else {
     const items = completions.map(comp => {
       const d = new Date(comp.completed_at);
-      const dateStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+      const dateStr = d.toLocaleDateString(getLang(), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
       const noteStr = comp.note ? ` — <em>${esc(comp.note)}</em>` : '';
       return `<div class="habit-history-item" data-comp-id="${comp.id}">
         <span class="habit-history-date">${lucideIcon("circle-check",16)} ${dateStr}</span>
@@ -1748,7 +1748,7 @@ async function deleteHabitCompletion(compId) {
   const comp = state.allHabitCompletions.find(c => c.id === compId);
   if (!comp) return;
   const habit = state.allHabits.find(h => h.id === comp.habit_id);
-  const dateStr = new Date(comp.completed_at).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  const dateStr = new Date(comp.completed_at).toLocaleDateString(getLang(), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   showConfirmAction(
     t('common.delete'),
     'Are you sure you want to delete this completion record?',

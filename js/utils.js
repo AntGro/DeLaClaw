@@ -1,5 +1,5 @@
 import { lucideIcon } from './icons.js';
-import { t } from './i18n.js';
+import { t, getLang } from './i18n.js';
 import state, { DEFAULT_CATEGORY_PALETTE } from './state.js';
 import { APP_VERSION } from './version.js';
 
@@ -474,7 +474,7 @@ function formatRelativeDate(d) {
   if (diffDays === -1) return t('common.yesterday_at', timeStr);
   if (diffDays > 1 && diffDays <= 7) return t('common.in_days', diffDays);
   if (diffDays < -1 && diffDays >= -7) return t('common.days_ago', Math.abs(diffDays));
-  const dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  const dateStr = d.toLocaleDateString(getLang(), { month: 'short', day: 'numeric' });
   return t('common.date_at', dateStr, timeStr);
 }
 

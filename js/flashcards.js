@@ -1284,22 +1284,10 @@ function showSessionSummary() {
 
 // Show "all caught up" overlay when no cards/texts are due
 function showAllCaughtUp(kind) {
-  showPracticeOverlay();
-  const overlay = document.getElementById('practiceOverlay');
-  if (!overlay) return;
   const subtitle = kind === 'texts'
     ? t('text_revision.all_caught_up_texts')
     : t('flashcards.all_caught_up_cards');
-  overlay.innerHTML = `
-    <div class="practice-summary">
-      ${practiceSummaryLogo()}
-      <div class="practice-summary-emoji">${lucideIcon('circle-check', 32, '#22c55e')}</div>
-      <h2>${t('flashcards.all_caught_up')}</h2>
-      <p class="all-caught-up-detail">${subtitle}</p>
-      <div class="practice-summary-actions">
-        <button class="btn practice-done-btn" data-action="end-practice">${t('common.close')}</button>
-      </div>
-    </div>`;
+  showToast(`${t('flashcards.all_caught_up')} ${subtitle}`, 'success');
 }
 
 // ===================================================================

@@ -873,13 +873,17 @@ async function editTodoInline(id, itemEl) {
 // ===================================================================
 // CATEGORY MANAGEMENT
 // ===================================================================
+function snoozeModalHTML() {
+  return `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button data-action="snooze-for" data-amount="1" data-unit="h">${t('todos.snooze_1h')}</button><button data-action="snooze-for" data-amount="3" data-unit="h">${t('todos.snooze_3h')}</button><button data-action="snooze-for" data-amount="1" data-unit="d">${t('todos.snooze_1d')}</button><button data-action="snooze-for" data-amount="3" data-unit="d">${t('todos.snooze_3d')}</button><button data-action="snooze-for" data-amount="7" data-unit="d">${t('todos.snooze_1w')}</button><button data-action="snooze-for" data-amount="1" data-unit="M">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">${t('todos.snooze_custom')}</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" data-action="close-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-snooze">${t('todos.snooze')}</button></div></div>`;
+}
+
 function initTodoModals() {
   const app = document.getElementById('app');
 
   // Snooze Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'snoozeModal';
-  m1.innerHTML = `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button data-action="snooze-for" data-amount="1" data-unit="h">${t('todos.snooze_1h')}</button><button data-action="snooze-for" data-amount="3" data-unit="h">${t('todos.snooze_3h')}</button><button data-action="snooze-for" data-amount="1" data-unit="d">${t('todos.snooze_1d')}</button><button data-action="snooze-for" data-amount="3" data-unit="d">${t('todos.snooze_3d')}</button><button data-action="snooze-for" data-amount="7" data-unit="d">${t('todos.snooze_1w')}</button><button data-action="snooze-for" data-amount="1" data-unit="M">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">${t('todos.snooze_custom')}</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" data-action="close-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-snooze">${t('todos.snooze')}</button></div></div>`;
+  m1.innerHTML = snoozeModalHTML();
   app.appendChild(m1);
 
   // Add Category Modal
@@ -956,9 +960,11 @@ async function deleteCategory(catId) {
 // SNOOZE MODAL
 // ===================================================================
 function openSnoozeModal(todoId) {
+  const modal = document.getElementById('snoozeModal');
+  modal.innerHTML = snoozeModalHTML();
   document.getElementById('snoozeTaskId').value = todoId;
   document.getElementById('snoozeCustomDate').value = '';
-  document.getElementById('snoozeModal').classList.add('visible');
+  modal.classList.add('visible');
 }
 
 function closeSnoozeModal() {

@@ -1442,6 +1442,7 @@ async function unshareTodo(id, el) {
           category: cat?.name ?? '',
           category_id: catIdForTodo(todo),
           sort_order: todo.sort_order || 0,
+          snooze_until: todo.snooze_until || null,
         });
         if (insErr) { showToast(insErr.message, 'error'); return; }
         // 2. Delete shared item from sharing layer
@@ -1484,6 +1485,7 @@ async function copyTodoToPersonal(id, el) {
       category: targetCatName,
       category_id: targetCatId,
       sort_order: minOrder,
+      snooze_until: todo.snooze_until || null,
     });
     if (insErr) { showToast(insErr.message, 'error'); return; }
     // Do NOT delete shared item — it stays for other members

@@ -74,8 +74,8 @@
       case 'open-add-flash-deck': callWindow('openAddFlashDeckModal', []); break;
       case 'open-add-list': callWindow('openAddListModal', []); break;
       case 'open-import': callWindow('openImportModal', []); break;
-      case 'start-practice': callWindow('startPractice', [el.dataset.deck || el.dataset.scope || '__all']); break;
-      case 'start-text-practice': callWindow('startTextPractice', [el.dataset.deck || el.dataset.scope || '__all']); break;
+      case 'start-practice': callWindow('startPractice', [el.dataset.deck || el.dataset.scope || '__all', el]); break;
+      case 'start-text-practice': callWindow('startTextPractice', [el.dataset.deck || el.dataset.scope || '__all', el]); break;
       case 'toggle-search': callWindow('toggleSearch', [el]); break;
       case 'clear-search': callWindow('clearPageSearch', [el]); break;
       case 'close-add-project': callWindow('closeAddProjectModal', []); break;
@@ -174,7 +174,7 @@
       case 'prompt-flash-shortname': callWindow('openEditDeckModal', [el.dataset.deck||getId(el)]); break;
       case 'open-add-flashcard': callWindow('openAddFlashcardModal', [el.dataset.deck||getId(el)]); break;
       case 'delete-deck': callWindow('deleteDeck', [el.dataset.deck||getId(el)]); break;
-      case 'start-text-practice': callWindow('startTextPractice', [el.dataset.scope||el.dataset.deck||'__all']); break;
+      case 'start-text-practice': callWindow('startTextPractice', [el.dataset.scope||el.dataset.deck||'__all', el]); break;
       case 'open-add-text': callWindow('openAddTextModal', [el.dataset.deck||getId(el)]); break;
       case 'open-edit-flashcard': callWindow('openEditFlashcardModal', [getId(el)]); break;
       case 'delete-flashcard': callWindow('deleteFlashcard', [getId(el)]); break;

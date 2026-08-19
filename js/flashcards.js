@@ -1099,11 +1099,11 @@ function closeAllFlashModals() {
 }
 
 // ── Practice Session ──
-function startPractice(deckFilter) {
+function startPractice(deckFilter, anchorEl) {
   const now = new Date();
   let pool = allCards.filter(c => !c.last_review || !c.next_review || new Date(c.next_review) <= now);
   if (deckFilter && deckFilter !== '__all') pool = pool.filter(c => c.deck === deckFilter);
-  if (pool.length === 0) { showAllCaughtUp('cards'); return; }
+  if (pool.length === 0) { showAllCaughtUp('cards', anchorEl); return; }
 
   sessionDeck = deckFilter || null;
 
@@ -1132,6 +1132,7 @@ function startPractice(deckFilter) {
   showNextCard();
 }
 window.startPractice = startPractice;
+
 
 // Generate storm logo watermark SVG for practice overlays
 function practiceHeaderLogo() {
@@ -1283,11 +1284,39 @@ function showSessionSummary() {
 }
 
 // Show "all caught up" overlay when no cards/texts are due
-function showAllCaughtUp(kind) {
+function showAllCaughtUp(kind, anchorEl) {
   const subtitle = kind === 'texts'
     ? t('text_revision.all_caught_up_texts')
     : t('flashcards.all_caught_up_cards');
-  showToast(`${t('flashcards.all_caught_up')} ${subtitle}`, 'success');
+  const msg = `${t('flashcards.all_caught_up')} ${subtitle}`;
+
+  // Show as an anchored tooltip near the clicked button
+  if (anchorEl) {
+    // Remove any existing tooltip
+    document.querySelectorAll('.caught-up-tooltip').forEach(el => el.remove());
+    const tip = document.createElement('div');
+    tip.className = 'caught-up-tooltip';
+    tip.textContent = msg;
+    document.body.appendChild(tip);
+    const rect = anchorEl.getBoundingClientRect();
+    tip.style.left = `${rect.left + rect.width / 2}px`;
+    tip.style.top = `${rect.bottom + 8}px`;
+    // Nudge into viewport if overflowing right
+    requestAnimationFrame(() => {
+      const tipRect = tip.getBoundingClientRect();
+      if (tipRect.right > window.innerWidth - 8) {
+        tip.style.left = `${window.innerWidth - tipRect.width - 8}px`;
+        tip.style.transform = 'none';
+      }
+    });
+    setTimeout(() => tip.classList.add('caught-up-tooltip-visible'), 10);
+    setTimeout(() => {
+      tip.classList.remove('caught-up-tooltip-visible');
+      setTimeout(() => tip.remove(), 200);
+    }, 2500);
+  } else {
+    showToast(msg, 'success');
+  }
 }
 
 // ===================================================================
@@ -1510,7 +1539,7 @@ window.saveEditText = async function() {
 };
 
 // ── Text Practice Session ──
-function startTextPractice(deckFilter) {
+function startTextPractice(deckFilter, anchorEl) {
   const now = new Date();
   let pool = [];
 
@@ -1528,7 +1557,7 @@ function startTextPractice(deckFilter) {
     }
   }
 
-  if (pool.length === 0) { showAllCaughtUp('texts'); return; }
+  if (pool.length === 0) { showAllCaughtUp('texts', anchorEl); return; }
 
   // Pick the single most due chunk (one revision per session)
   // Among chunks with the same priority, pick randomly

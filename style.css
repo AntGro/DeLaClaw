@@ -1238,6 +1238,8 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .inline-edit-input:focus{border-color:var(--accent);}
 select.inline-edit-input{appearance:auto;cursor:pointer;background-image:none;padding-right:8px;}
 .todo-edit-wrapper.inline-edit-visible{opacity:1;}
+.caught-up-tooltip{position:fixed;z-index:9999;padding:8px 14px;background:var(--surface2,#333);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:0.82rem;max-width:280px;text-align:center;transform:translateX(-50%);opacity:0;transition:opacity 0.2s ease;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,0.15);}
+.caught-up-tooltip-visible{opacity:1;}
 .inline-edit-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:4px;}
 .inline-edit-actions button{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;font-size:0.75rem;font-family:inherit;cursor:pointer;line-height:1;}
 .inline-edit-save-btn{background:var(--accent);color:#fff;border-color:var(--accent);}

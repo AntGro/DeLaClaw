@@ -47,6 +47,7 @@ User jobs:
 - **Prefix:** `todos.` — 48 keys EN/FR/ES
 - No hardcoded UI text in JS
 - Shared keys via `t()` in `js/i18n.js`
+- Modals rebuild innerHTML on open (not on page load) so translations reflect the active language
 
 ## Business Invariants
 - `priority ∈ {urgent, high, medium, low, normal}`

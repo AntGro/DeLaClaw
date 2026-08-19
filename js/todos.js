@@ -493,7 +493,7 @@ function renderTodoItem(td) {
       ${td.done && td.updated_at ? `<span class="todo-completed-date">${new Date(td.updated_at).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })}</span>` : ''}
       <div class="todo-actions">
         ${!td.done ? `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="true" title="${t('common.done')}" class="todo-done-btn">${lucideIcon("circle-check",16)}</button>` : `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="false" title="${t('common.undo')}" class="todo-undo-btn">${lucideIcon("refresh-cw",16)}</button>`}
-        ${!td.done ? `<button data-action="open-snooze-modal" data-id="${esc(td.id)}" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>` : ''}
+        ${!td.done ? (isSnoozed ? `<button data-action="unsnooze-todo" data-id="${esc(td.id)}" title="${t('todos.unsnooze')}">${lucideIcon("moon-off",16)}</button>` : `<button data-action="open-snooze-modal" data-id="${esc(td.id)}" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>`) : ''}
         ${!isShared && !td.done && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-todo" data-id="${esc(td.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         ${isShared && !td.done && _myCreatedSharedIds.has(td.shared_id) ? `<button data-action="unshare-todo" data-id="${esc(td.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
         ${isShared && !td.done && !_myCreatedSharedIds.has(td.shared_id) ? `<button data-action="copy-todo-to-personal" data-id="${esc(td.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
@@ -1019,6 +1019,30 @@ async function doSnooze(snoozeUntil) {
   }
 }
 
+async function unsnoozeTodo(id, el) {
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unsnooze-todo"][data-id="${CSS.escape(id)}"]`);
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  try {
+    const todo = allTodos.find(t => t.id === id);
+    if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
+      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+        payload: { ...currentPayload, snooze_until: null },
+      });
+    } else {
+      const { error } = await state.db.from('todos').update({ snooze_until: null }).eq('id', id);
+      if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    }
+    showToast(t('todos.unsnoozed'), 'success');
+    await refreshTodos();
+  } catch (e) {
+    console.warn('Failed to unsnooze todo:', e);
+    showToast(t('toast.update_failed'), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+  }
+}
+
 
 // ===================================================================
 // TODO DRAG & DROP REORDER (delegates to shared item-utils)
@@ -1457,6 +1481,7 @@ window.openSnoozeModal = openSnoozeModal;
 window.closeSnoozeModal = closeSnoozeModal;
 window.snoozeFor = snoozeFor;
 window.submitSnooze = submitSnooze;
+window.unsnoozeTodo = unsnoozeTodo;
 window.openAddCategoryModal = openAddCategoryModal;
 window.closeAddCategoryModal = closeAddCategoryModal;
 window.saveNewCategory = saveNewCategory;

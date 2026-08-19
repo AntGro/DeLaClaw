@@ -122,6 +122,7 @@
       case 'open-priority-picker': callWindow('openPriorityPicker', [getId(el), e, el]); break;
       case 'toggle-todo': { var done = el.dataset.done === 'true'; callWindow('toggleTodo', [getId(el) || el.dataset.todoId, done, el]); } break;
       case 'open-snooze-modal': callWindow('openSnoozeModal', [getId(el)]); break;
+      case 'unsnooze-todo': callWindow('unsnoozeTodo', [getId(el), el]); break;
       case 'edit-todo-inline': callWindow('editTodoInline', [getId(el)]); break;
       case 'delete-todo': callWindow('deleteTodo', [getId(el)]); break;
       case 'set-todo-priority': callWindow('setTodoPriority', [getId(el), el.dataset.priority]); break;

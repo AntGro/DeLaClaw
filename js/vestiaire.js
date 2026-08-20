@@ -285,7 +285,8 @@ function renderVestiaireItem(v) {
 function renderVestiaireNavButtons(catRows, items) {
   const container = document.getElementById('vestiaireNavButtons');
   if (!container) return;
-  container.innerHTML = catRows.map(cat => {
+  const visibleCats = catRows.filter(cat => !cat.is_protected || items.some(v => catIdForVest(v) === cat.id));
+  container.innerHTML = visibleCats.map(cat => {
     const count = items.filter(v => catIdForVest(v) === cat.id).length;
     const color = cat.color || GENERAL_CATEGORY_COLOR;
     const sn = cat.shortname || '';

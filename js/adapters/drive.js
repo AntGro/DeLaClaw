@@ -418,12 +418,13 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     emit('loading', t('menu.drive_creating_tables'), 0, total);
     const tok = await getToken();
     if (tok) {
-      for (let i = 0; i < DRIVE_TABLES.length; i++) {
-        const table = DRIVE_TABLES[i];
-        emit('loading', t('menu.drive_creating_table', table), i + 1, total);
+      let created = 0;
+      await Promise.all(DRIVE_TABLES.map(async (table) => {
         const result = await uploadFile(tok, folderId, null, `${table}.json`, []);
         fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
-      }
+        created++;
+        emit('loading', t('menu.drive_creating_progress', created, total, table), created, total);
+      }));
     }
     // Set schema_version to latest — no migrations needed
     if (!inner._store.settings) inner._store.settings = [];
@@ -444,21 +445,21 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         { id: sharedId, name: '__shared__', shortname: null, color: null, sort_order: 9999, is_protected: 1, owner_id: null, created_at: now, updated_at: now },
       );
     }
-    // Flush seeded category tables to Drive
-    const catTok = await getToken();
-    if (catTok) {
-      for (const [table] of catSeed) {
+    // Flush seeded category tables + settings to Drive (parallel)
+    const seedTok = await getToken();
+    if (seedTok) {
+      const seedFlushes = catSeed.map(async ([table]) => {
         const meta = fileMeta[table] || {};
-        const result = await uploadFile(catTok, folderId, meta.fileId, `${table}.json`, inner._store[table]);
+        const result = await uploadFile(seedTok, folderId, meta.fileId, `${table}.json`, inner._store[table]);
         fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
-      }
-    }
-    // Flush settings with the version stamp
-    const settingsTok = await getToken();
-    if (settingsTok) {
-      const meta = fileMeta.settings || {};
-      const result = await uploadFile(settingsTok, folderId, meta.fileId, 'settings.json', inner._store.settings);
-      fileMeta.settings = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+      });
+      // Settings flush
+      const settingsMeta = fileMeta.settings || {};
+      seedFlushes.push((async () => {
+        const result = await uploadFile(seedTok, folderId, settingsMeta.fileId, 'settings.json', inner._store.settings);
+        fileMeta.settings = { fileId: result.id || settingsMeta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+      })());
+      await Promise.all(seedFlushes);
     }
   } else {
     // ── Run pending migrations (existing installs only) ──

@@ -1304,11 +1304,12 @@ function showAllCaughtUp(kind, anchorEl) {
     // Nudge into viewport if overflowing
     requestAnimationFrame(() => {
       const tipRect = tip.getBoundingClientRect();
+      const vw = document.documentElement.clientWidth;
       if (tipRect.left < 12) {
         tip.style.left = '12px';
         tip.style.transform = 'none';
-      } else if (tipRect.right > window.innerWidth - 12) {
-        tip.style.left = `${window.innerWidth - tipRect.width - 12}px`;
+      } else if (tipRect.right > vw - 12) {
+        tip.style.left = `${vw - tipRect.width - 12}px`;
         tip.style.transform = 'none';
       }
     });

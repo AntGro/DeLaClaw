@@ -1299,19 +1299,16 @@ function showAllCaughtUp(kind, anchorEl) {
     tip.textContent = msg;
     document.body.appendChild(tip);
     const rect = anchorEl.getBoundingClientRect();
-    tip.style.left = `${rect.left + rect.width / 2}px`;
+    const vw = document.documentElement.clientWidth;
     tip.style.top = `${rect.bottom + 8}px`;
-    // Nudge into viewport if overflowing
+    // Position centered on button, then clamp to 12px from each edge
     requestAnimationFrame(() => {
-      const tipRect = tip.getBoundingClientRect();
-      const vw = document.documentElement.clientWidth;
-      if (tipRect.left < 12) {
-        tip.style.left = '12px';
-        tip.style.transform = 'none';
-      } else if (tipRect.right > vw - 12) {
-        tip.style.left = `${vw - tipRect.width - 12}px`;
-        tip.style.transform = 'none';
-      }
+      const tipW = tip.offsetWidth;
+      const center = rect.left + rect.width / 2;
+      let left = center - tipW / 2;
+      left = Math.max(12, Math.min(left, vw - tipW - 12));
+      tip.style.left = `${left}px`;
+      tip.style.transform = 'none';
     });
     setTimeout(() => tip.classList.add('caught-up-tooltip-visible'), 10);
     setTimeout(() => {

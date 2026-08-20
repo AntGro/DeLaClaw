@@ -743,6 +743,9 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
       if (extra) await saveFn(originalText, extra);
     }
     if (onFinish) onFinish();
+    if (_containerMousedownHandler && containerEl) {
+      containerEl.removeEventListener('mousedown', _containerMousedownHandler, true);
+    }
     delete spanEl.dataset.editing;
 
     // Fade out the edit wrapper, then restore the span
@@ -789,6 +792,16 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
   });
   input.addEventListener('input', autoSize);
 
+  // Track whether the most recent mousedown was inside the container so the
+  // focusout handler can distinguish "clicked empty space in the same item"
+  // (should keep the edit open) from "clicked outside" (should cancel).
+  let _clickedInsideContainer = false;
+  let _containerMousedownHandler = null;
+  if (containerEl) {
+    _containerMousedownHandler = () => { _clickedInsideContainer = true; setTimeout(() => { _clickedInsideContainer = false; }, 200); };
+    containerEl.addEventListener('mousedown', _containerMousedownHandler, true);
+  }
+
   // Blur anywhere inside the wrapper → cancel (delay lets button clicks register first)
   root.addEventListener('focusout', () => {
     setTimeout(() => {
@@ -797,6 +810,8 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
       // If focus moved to another interactive element in the same item (e.g.
       // last-done date picker), keep the inline edit open.
       if (containerEl && containerEl.contains(document.activeElement)) return;
+      // If the user clicked non-focusable space inside the item, keep open.
+      if (_clickedInsideContainer) return;
       finishEdit(false, true);
     }, 150);
   });

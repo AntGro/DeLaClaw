@@ -679,14 +679,14 @@ async function refreshHabits() {
           }
           // Re-sort after injection
           state.allHabitCompletions.sort((a, b) => b.completed_at.localeCompare(a.completed_at));
-          // Compute next_due from latest completion (sync enrichment, not a
-          // user action — earlyGuard off to avoid unnecessary writes that
-          // feed the realtime → refreshHabits loop)
-          const latest = sh.completions[sh.completions.length - 1];
-          await updateHabitNextDue(habit.id, sh.frequency_rule, latest.completed_at, { earlyGuard: false });
-        } else {
-          // No completions yet — compute first next_due from now
-          await updateHabitNextDue(habit.id, sh.frequency_rule, null, { earlyGuard: false });
+        }
+        // Read next_due from shared storage — no local recomputation
+        if (sh.next_due != null) {
+          const sharedNextDue = normalizeHabitNextDue(sh.next_due);
+          if (sharedNextDue !== normalizeHabitNextDue(habit.next_due)) {
+            const { error } = await state.db.from('habits').update({ next_due: sharedNextDue }).eq('id', habit.id);
+            if (!error) habit.next_due = sharedNextDue;
+          }
         }
       }
     }
@@ -1339,9 +1339,11 @@ async function saveNewHabit() {
       showToast(t('toast.failed_to_add') + ' (shared)', 'error');
       return;
     }
-    // Compute next_due on the pointer immediately
+    // Compute next_due on the pointer immediately and publish to shared storage
     if (pointerData?.id) {
       await updateHabitNextDue(pointerData.id, freq, lastDoneVal || null);
+      const ptr = state.allHabits.find(h => String(h.id) === String(pointerData.id));
+      if (ptr) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: ptr.next_due });
     }
   } else {
     // ─── Normal (non-shared) habit ───
@@ -1457,6 +1459,8 @@ function editHabitInline(habitId, itemEl) {
         if (updates.frequency_rule) {
           const lastDone = getHabitLastDone(habitId);
           await updateHabitNextDue(habitId, updates.frequency_rule, lastDone, { earlyGuard: false });
+          // Publish next_due so other members read it directly
+          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
         }
         showToast(t('habits.habit_updated'), 'success');
       }
@@ -1543,6 +1547,10 @@ async function saveEditHabit() {
   }
 
   await updateHabitNextDue(id, freq, latestForNextDue, { earlyGuard: false });
+  // Publish next_due for shared habits so other members read it directly
+  if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+    await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+  }
   closeEditHabitModal();
   showToast(t('habits.habit_updated'), 'success');
   await refreshHabits();
@@ -1614,6 +1622,8 @@ async function markHabitDone(habitId, btnEl) {
         };
         await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion);
         await updateHabitNextDue(habitId, habit.frequency_rule, now);
+        // Publish next_due so other members read it directly
+        await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
       } catch (e) {
         console.warn('Failed to push shared habit completion:', e);
         showToast(t('habits.failed_record'), 'error');
@@ -1760,6 +1770,8 @@ async function deleteHabitCompletion(compId) {
             // Recompute next_due from new latest completion (or null if none left)
             const latest = sh.completions.length ? sh.completions[sh.completions.length - 1].completed_at : null;
             await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
+            // Publish next_due so other members read it directly
+            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
           }
         } catch (e) { showToast(t('toast.failed_to_delete'), 'error'); return; }
       } else {
@@ -1825,6 +1837,8 @@ async function saveHabitCompletion(compId) {
           // Recompute next_due from latest completion
           const latest = sh.completions[sh.completions.length - 1]?.completed_at || null;
           await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
+          // Publish next_due so other members read it directly
+          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
         }
       }
     } catch (e) { showToast(t('toast.failed_to_update'), 'error'); return; }
@@ -2462,10 +2476,12 @@ async function shareExistingHabit(id, el) {
       // 3. Delete local completions then the personal habit
       await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
       await state.db.from('habits').delete().eq('id', habit.id);
-      // Compute next_due on the pointer
+      // Compute next_due on the pointer and publish to shared storage
       if (pointer?.id) {
         await updateHabitNextDue(pointer.id, habit.frequency_rule,
           localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
+        const ptr = state.allHabits.find(h => String(h.id) === String(pointer.id));
+        if (ptr) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: ptr.next_due });
       }
       showToast(t('sharing.shared') + '!', 'success');
       await refreshHabits();
@@ -2529,6 +2545,8 @@ async function bulkShareHabitCategory(catId, el) {
               if (pointer?.id) {
                 await updateHabitNextDue(pointer.id, habit.frequency_rule,
                   localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
+                const ptr = state.allHabits.find(h => String(h.id) === String(pointer.id));
+                if (ptr) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: ptr.next_due });
               }
               shared++;
             } catch (e) { console.error('[DeLaClaw] bulk share habit failed:', e); }

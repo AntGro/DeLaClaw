@@ -292,7 +292,7 @@ test('Orphan handler deletes empty pointers instead of nullifying', () => {
   assert(handler.includes('.update('), 'orphan confirm must nullify items with local content');
 });
 
-test('Shared habit next_due updates are idempotent during refresh', () => {
+test('Shared habit next_due read from shared storage during refresh', () => {
   const habits = jsFiles['habits.js'];
   assert(habits.includes('function normalizeHabitNextDue'),
     'habits.js must normalize next_due before comparing stored and computed values');
@@ -300,8 +300,8 @@ test('Shared habit next_due updates are idempotent during refresh', () => {
     'updateHabitNextDue must skip DB writes when next_due is unchanged');
   assert(habits.includes('if (habit) habit.next_due = nextDue'),
     'updateHabitNextDue must update in-memory state after a successful write');
-  assert(habits.includes('await updateHabitNextDue(habit.id, sh.frequency_rule'),
-    'refreshHabits must await shared habit next_due updates to avoid dangling writes');
+  assert(habits.includes('sh.next_due'),
+    'refreshHabits must read next_due from shared storage instead of recomputing');
 });
 
 test('Habit quick-add button resolves the sibling input before adding', () => {

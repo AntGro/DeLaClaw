@@ -294,6 +294,7 @@
       case 'sharing-join-code-submit': callWindow('sharingJoinCodeSubmit', []); break;
       case 'sharing-open-join-picker': callWindow('sharingOpenJoinPicker', [el.dataset.folderId||getId(el)]); break;
       case 'submit-share-popover': callWindow('submitSharePopover', []); break;
+      case 'share-popover-open-sharing': callWindow('sharePopoverOpenSharing', []); break;
       case 'sharing-complete-submit': callWindow('sharingCompleteSubmit', [el.dataset.groupId, el.dataset.itemId]); break;
       case 'welcome-set-priority': e.stopPropagation(); callWindow('welcomeSetPriority', [el.dataset.todoId||getId(el), el.dataset.priority]); break;
       case 'welcome-open-priority-picker': callWindow('welcomeOpenPriorityPicker', [el.dataset.todoId||getId(el), e, el]); break;

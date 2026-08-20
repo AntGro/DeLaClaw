@@ -2050,6 +2050,9 @@ a.sharing-drive-link{text-decoration:none;}
 .share-popover-radio input,.share-popover-check input{accent-color:var(--accent);flex-shrink:0;}
 .share-popover-submit{width:100%;padding:9px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:0.9rem;font-weight:600;display:flex;align-items:center;justify-content:center;gap:4px;transition:opacity 0.15s;flex-shrink:0;margin-top:10px;}
 .share-popover-submit:hover{opacity:0.9;}
+.share-popover-empty-hint{font-size:0.88rem;color:var(--muted);margin:0 0 10px;}
+.share-popover-create-link{display:flex;align-items:center;gap:6px;font-size:0.88rem;font-weight:600;color:var(--accent);cursor:pointer;text-decoration:none;}
+.share-popover-create-link:hover{text-decoration:underline;}
 .sharing-completion-modal .sharing-completion-list{margin:12px 0;}
 .sharing-share-btn{border:none;background:transparent;color:var(--muted);cursor:pointer;padding:4px;border-radius:4px;transition:color 0.15s;display:inline-flex;align-items:center;}
 .sharing-share-btn:hover{color:var(--accent);}

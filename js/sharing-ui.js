@@ -1037,9 +1037,25 @@ export function openSharePopover(anchorEl, onShare, opts = {}) {
   if (!state.sharing) return;
   const groups = state.sharing.getAllGroups();
   if (!groups.length) {
-    showToast(t('sharing.no_groups_create_hint'), 'info');
-    if (typeof window.openSettings === 'function') window.openSettings('sharing');
-    else location.hash = '#settings/sharing';
+    // Show popover with a prompt to create a group
+    const popover = document.createElement('div');
+    popover.className = 'share-popover';
+    popover.id = 'sharePopover';
+    popover.style.visibility = 'hidden';
+    popover.innerHTML = `
+      <div class="share-popover-body">
+        <div class="share-popover-section">
+          <p class="share-popover-empty-hint">${t('sharing.no_groups_create_hint')}</p>
+          <a class="share-popover-create-link" data-action="share-popover-open-sharing">${lucideIcon('settings', 14)} ${t('sharing.open_sharing_settings')}</a>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(popover);
+    positionSharePopover(popover, anchorEl);
+    popover.style.visibility = '';
+    setTimeout(() => {
+      document.addEventListener('click', _closeSharePopoverOutside, true);
+    }, 0);
     return;
   }
 
@@ -1214,4 +1230,9 @@ window.sharingCopyLinkValue = sharingCopyCodeValue;
 window.sharingOpenJoinPicker = sharingOpenJoinPicker;
 window.toggleRevokedMembers = toggleRevokedMembers;
 window.submitSharePopover = submitSharePopover;
+window.sharePopoverOpenSharing = function() {
+  closeSharePopover();
+  if (typeof window.openSettings === 'function') window.openSettings('sharing');
+  else location.hash = '#settings/sharing';
+};
 window.sharingCompleteSubmit = sharingCompleteSubmit;

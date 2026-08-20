@@ -1263,15 +1263,15 @@ function shareHabitFromAdd(btn) {
   }, { showAssignees: false });
 }
 
-function populateHabitCategorySelect(selectId) {
+function populateHabitCategorySelect(selectId, currentCatId) {
   const sel = document.getElementById(selectId);
   const catRows = Array.from(_habitCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
-  // Include Shared in dropdown if any habit uses it (so user can move habits in/out)
-  const hasShared = state.allHabits.some(h => catIdForHabit(h) === _sharedHabitCatId);
+  // Include Shared only if the habit being edited is already in __shared__
+  const includeShared = currentCatId && currentCatId === _sharedHabitCatId;
   sel.innerHTML = catRows.map(c => {
     const label = c.is_protected ? t('common.category_default') : c.name;
     return `<option value="${esc(c.id)}">${esc(label)}</option>`;
-  }).join('') + (hasShared && _sharedHabitCatId ? `<option value="${esc(_sharedHabitCatId)}">${esc(t('sharing.shared'))}</option>` : '');
+  }).join('') + (includeShared ? `<option value="${esc(_sharedHabitCatId)}">${esc(t('sharing.shared'))}</option>` : '');
 }
 
 async function addHabitFromInput(inputEl) {
@@ -1476,7 +1476,7 @@ function openEditHabitModal(habitId) {
   editNameEl.value = habit.name;
   setTimeout(() => autoResizeTextarea(editNameEl), 0);
   buildFrequencyPicker(document.getElementById('editHabitFreqPicker'), habit.frequency_rule);
-  populateHabitCategorySelect('editHabitCategory');
+  populateHabitCategorySelect('editHabitCategory', catIdForHabit(habit));
   document.getElementById('editHabitCategory').value = catIdForHabit(habit);
   // Populate last done date
   const lastDone = getHabitLastDone(habitId);

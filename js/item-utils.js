@@ -672,7 +672,7 @@ export function scrollToAndHighlight(element, color, durationMs = 1500) {
 let _activeInlineEdit = null;
 let _inlineEditRefreshTimer = null;
 
-export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refreshFn, extraEl, onStart, onFinish, collectExtra, multiline }) {
+export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refreshFn, extraEl, onStart, onFinish, collectExtra, multiline, containerEl }) {
   if (spanEl.dataset.editing) return;
 
   // Cancel any other active inline edit first (discard + restore span)
@@ -794,6 +794,9 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     setTimeout(() => {
       if (finished) return;
       if (root.contains(document.activeElement)) return;
+      // If focus moved to another interactive element in the same item (e.g.
+      // last-done date picker), keep the inline edit open.
+      if (containerEl && containerEl.contains(document.activeElement)) return;
       finishEdit(false, true);
     }, 150);
   });

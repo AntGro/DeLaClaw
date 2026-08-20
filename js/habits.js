@@ -1418,6 +1418,7 @@ function editHabitInline(habitId, itemEl) {
   inlineEditText(nameEl, habit.name, {
     maxLength: 200,
     extraEl: extras,
+    containerEl: nameEl.closest('.habit-item'),
     collectExtra: () => ({
       frequency_rule: getFrequencyFromPicker(freqContainer),
       category_id: catSelect.value || _defaultHabitCatId,

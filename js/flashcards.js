@@ -1308,7 +1308,6 @@ function showAllCaughtUp(kind, anchorEl) {
       let left = center - tipW / 2;
       left = Math.max(12, Math.min(left, vw - tipW - 12));
       tip.style.left = `${left}px`;
-      tip.style.transform = 'none';
     });
     setTimeout(() => tip.classList.add('caught-up-tooltip-visible'), 10);
     setTimeout(() => {

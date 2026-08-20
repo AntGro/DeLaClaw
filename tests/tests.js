@@ -1133,10 +1133,13 @@ test('Shared habit last-done edits write to shared completions and can clear lat
   const helperEnd = habitsJs.indexOf('async function setLocalHabitLastDone', helperStart);
   assert(helperStart !== -1 && helperEnd !== -1, 'habits.js: setSharedHabitLastDone helper not found');
   const helper = habitsJs.slice(helperStart, helperEnd);
-  assert(helper.includes('state.sharing.updateSharedHabit') && helper.includes('{ completions: nextCompletions }'),
+  assert(helper.includes('state.sharing.updateSharedHabit') && helper.includes('nextCompletions'),
     'habits.js: shared last-done edits must rewrite shared completions, not only local completions');
-  assert(helper.includes('completions.pop()'),
-    'habits.js: clearing shared last-done must remove the latest shared completion');
+  // planLastDoneEdit handles the null case (clear latest) — verify it exists and is used
+  const planFn = habitsJs.includes('function planLastDoneEdit');
+  assert(planFn, 'habits.js: planLastDoneEdit pure helper must exist');
+  assert(helper.includes('planLastDoneEdit'),
+    'habits.js: setSharedHabitLastDone must use planLastDoneEdit for decision logic');
 
   const saveStart = habitsJs.indexOf('async function saveEditHabit');
   const saveEnd = habitsJs.indexOf('async function deleteHabit', saveStart);

@@ -1301,11 +1301,14 @@ function showAllCaughtUp(kind, anchorEl) {
     const rect = anchorEl.getBoundingClientRect();
     tip.style.left = `${rect.left + rect.width / 2}px`;
     tip.style.top = `${rect.bottom + 8}px`;
-    // Nudge into viewport if overflowing right
+    // Nudge into viewport if overflowing
     requestAnimationFrame(() => {
       const tipRect = tip.getBoundingClientRect();
-      if (tipRect.right > window.innerWidth - 8) {
-        tip.style.left = `${window.innerWidth - tipRect.width - 8}px`;
+      if (tipRect.left < 12) {
+        tip.style.left = '12px';
+        tip.style.transform = 'none';
+      } else if (tipRect.right > window.innerWidth - 12) {
+        tip.style.left = `${window.innerWidth - tipRect.width - 12}px`;
         tip.style.transform = 'none';
       }
     });

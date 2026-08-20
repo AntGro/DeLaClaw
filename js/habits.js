@@ -681,12 +681,10 @@ async function refreshHabits() {
           state.allHabitCompletions.sort((a, b) => b.completed_at.localeCompare(a.completed_at));
         }
         // Read next_due from shared storage — no local recomputation
-        if (sh.next_due != null) {
-          const sharedNextDue = normalizeHabitNextDue(sh.next_due);
-          if (sharedNextDue !== normalizeHabitNextDue(habit.next_due)) {
-            const { error } = await state.db.from('habits').update({ next_due: sharedNextDue }).eq('id', habit.id);
-            if (!error) habit.next_due = sharedNextDue;
-          }
+        const sharedNextDue = sh.next_due != null ? normalizeHabitNextDue(sh.next_due) : null;
+        if (sharedNextDue !== normalizeHabitNextDue(habit.next_due)) {
+          const { error } = await state.db.from('habits').update({ next_due: sharedNextDue }).eq('id', habit.id);
+          if (!error) habit.next_due = sharedNextDue;
         }
       }
     }

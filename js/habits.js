@@ -772,48 +772,76 @@ async function setSharedHabitLastDone(habit, newIso) {
 
   const completions = sortHabitCompletionList(sh.completions).map(c => ({ ...c }));
   if (newIso) {
-    const latest = completions[completions.length - 1];
-    if (latest) {
-      latest.completed_at = newIso;
-    } else {
-      completions.push({
-        id: crypto.randomUUID(),
-        completed_at: newIso,
-        completed_by: await getSharedHabitCompletionActor(habit.shared_group_id),
-      });
+    const newDateStr = localDateStr(new Date(newIso));
+    // Remove completions after the new last-done date
+    const kept = completions.filter(c => localDateStr(new Date(c.completed_at)) <= newDateStr);
+    // Ensure a completion exists on the new date
+    const hasExact = kept.some(c => localDateStr(new Date(c.completed_at)) === newDateStr);
+    if (!hasExact) {
+      const latest = kept[kept.length - 1]; // sorted ascending
+      if (latest) {
+        latest.completed_at = newIso;
+      } else {
+        kept.push({
+          id: crypto.randomUUID(),
+          completed_at: newIso,
+          completed_by: await getSharedHabitCompletionActor(habit.shared_group_id),
+        });
+      }
     }
-  } else if (completions.length > 0) {
-    completions.pop();
+    const nextCompletions = sortHabitCompletionList(kept);
+    await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions });
+    return latestHabitCompletion(nextCompletions)?.completed_at || null;
   }
 
+  // null → clear the latest
+  if (completions.length > 0) completions.pop();
   const nextCompletions = sortHabitCompletionList(completions);
   await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions });
   return latestHabitCompletion(nextCompletions)?.completed_at || null;
 }
 
 async function setLocalHabitLastDone(habitId, newIso) {
-  const latest = getLatestLocalHabitCompletion(habitId);
-  const projected = getHabitCompletions(habitId).map(c => ({ ...c }));
+  const allComps = getHabitCompletions(habitId).map(c => ({ ...c }));
 
   if (newIso) {
-    if (latest) {
-      const { error } = await state.db.from('habit_completions').update({ completed_at: newIso }).eq('id', latest.id);
-      if (error) throw new Error(error.message || 'Failed to update completion');
-      const idx = projected.findIndex(c => c.id === latest.id);
-      if (idx >= 0) projected[idx].completed_at = newIso;
-    } else {
-      const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: newIso });
-      if (error) throw new Error(error.message || 'Failed to add completion');
-      projected.push({ id: crypto.randomUUID(), habit_id: habitId, completed_at: newIso });
+    const newDateStr = localDateStr(new Date(newIso));
+
+    // Delete completions after the new last-done date
+    const toDelete = allComps.filter(c => localDateStr(new Date(c.completed_at)) > newDateStr);
+    for (const c of toDelete) {
+      const { error } = await state.db.from('habit_completions').delete().eq('id', c.id);
+      if (error) throw new Error(error.message || 'Failed to delete completion');
     }
-  } else if (latest) {
-    const { error } = await state.db.from('habit_completions').delete().eq('id', latest.id);
-    if (error) throw new Error(error.message || 'Failed to delete completion');
-    const idx = projected.findIndex(c => c.id === latest.id);
-    if (idx >= 0) projected.splice(idx, 1);
+
+    const kept = allComps.filter(c => localDateStr(new Date(c.completed_at)) <= newDateStr);
+
+    // Ensure a completion exists on the new date
+    const hasExact = kept.some(c => localDateStr(new Date(c.completed_at)) === newDateStr);
+    if (!hasExact) {
+      const latestKept = latestHabitCompletion(kept);
+      if (latestKept) {
+        const { error } = await state.db.from('habit_completions').update({ completed_at: newIso }).eq('id', latestKept.id);
+        if (error) throw new Error(error.message || 'Failed to update completion');
+        latestKept.completed_at = newIso;
+      } else {
+        const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: newIso });
+        if (error) throw new Error(error.message || 'Failed to add completion');
+        kept.push({ id: crypto.randomUUID(), habit_id: habitId, completed_at: newIso });
+      }
+    }
+
+    return latestHabitCompletion(kept)?.completed_at || null;
   }
 
-  return latestHabitCompletion(projected)?.completed_at || null;
+  // null → clear the latest
+  const latest = getLatestLocalHabitCompletion(habitId);
+  if (latest) {
+    const { error } = await state.db.from('habit_completions').delete().eq('id', latest.id);
+    if (error) throw new Error(error.message || 'Failed to delete completion');
+  }
+  const remaining = allComps.filter(c => c.id !== latest?.id);
+  return latestHabitCompletion(remaining)?.completed_at || null;
 }
 
 function habitDueStatus(habit) {

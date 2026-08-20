@@ -1069,7 +1069,7 @@ function renderHabitCategoryCard(catId) {
   const statsText = `${totalInCat} habit${totalInCat !== 1 ? 's' : ''}` + (overdueCount > 0 ? ` · <span style="color:var(--red)">${overdueCount} ${t('habits.overdue').toLowerCase()}</span>` : '');
 
   const shareableHabits = state.allHabits.filter(h => catIdForHabit(h) === catId && !h.shared_id);
-  const shareAllBtn = (!isSharedDeck && state.sharing?.getAllGroups().length && shareableHabits.length > 0)
+  const shareAllBtn = (!isSharedDeck && state.sharing && shareableHabits.length > 0)
     ? `<button class="todo-cat-shortname-btn" data-action="bulk-share-habit-category" data-category="${esc(catId)}" title="${esc(t('sharing.share_all'))}">${lucideIcon("share",14)}</button>`
     : '';
 
@@ -1090,7 +1090,7 @@ function renderHabitCategoryCard(catId) {
   const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
       <textarea placeholder="${t('habits.quick_add_placeholder')}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(catId)}" data-action="add-habit-from-input" rows="1" style="resize:none;overflow:hidden;"></textarea>
       <button data-action="add-habit-from-input">${lucideIcon('plus', 16)}</button>
-      ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-habit-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
+      ${state.sharing ? `<button class="sharing-share-btn" data-action="share-habit-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
     </div>`;
 
   return `<div class="project-card" data-category="${esc(catId)}" style="--cat-color:${catColor}">
@@ -1146,7 +1146,7 @@ function renderHabitItem(habit) {
         ${promoteBtn}
         ${!isDraft ? `<button data-habit-id="${esc(habit.id)}" data-action="mark-habit-done" data-id="${esc(habit.id)}" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
         <button data-action="open-habit-history" data-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list",16)} ${completionCount}</button>
-        ${!isShared && !isDraft && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
+        ${!isShared && !isDraft && state.sharing ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         ${isShared && !isDraft && _myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="unshare-habit" data-id="${esc(habit.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
         ${isShared && !isDraft && !_myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="copy-habit-to-personal" data-id="${esc(habit.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
         <button data-action="copy-item-link" data-link-type="habit" data-id="${esc(habit.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link",16)}</button>
@@ -1276,8 +1276,6 @@ function closeAddHabitModal() {
 
 function shareHabitFromAdd(btn) {
   if (!state.sharing) return;
-  const groups = state.sharing.getAllGroups();
-  if (!groups.length) return;
   const inputEl = btn.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.habit-add-input, .todo-cat-input');
   const name = inputEl?.value?.trim() || '';
   const catId = inputEl?.dataset?.category || _defaultHabitCatId;
@@ -2469,8 +2467,6 @@ async function shareExistingHabit(id, el) {
   if (_pendingShare.has(id)) return;
   const habit = state.allHabits.find(h => h.id === id);
   if (!habit || habit.shared_id) return;
-  const groups = state.sharing.getAllGroups();
-  if (!groups.length) return;
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-habit"][data-id="${CSS.escape(id)}"]`);
   if (!btn) return;
   openSharePopover(btn, async (groupId) => {
@@ -2535,8 +2531,6 @@ window.shareExistingHabit = shareExistingHabit;
 async function bulkShareHabitCategory(catId, el) {
   if (!state.sharing) return;
   if (_bulkShareInProgress.has(catId)) return;
-  const groups = state.sharing.getAllGroups();
-  if (!groups.length) return;
   const items = state.allHabits.filter(h => catIdForHabit(h) === catId && !h.shared_id);
   if (!items.length) { showToast(t('sharing.share_all_nothing'), 'info'); return; }
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="bulk-share-habit-category"][data-category="${CSS.escape(catId)}"]`);

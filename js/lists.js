@@ -239,11 +239,11 @@ function renderListCard(list, items, idx) {
     <textarea class="list-quick-input" placeholder="${esc(t('lists.add_item'))}" maxlength="2000"
       data-action="quick-add-input" data-list-id="${esc(list.id)}" rows="1" style="resize:none;overflow:hidden;"></textarea>
     <button class="list-quick-add-btn" data-action="quick-add-list-item" data-list-id="${esc(list.id)}" title="${esc(t('lists.add_item'))}">${lucideIcon('plus', 16)}</button>
-    ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-list-item-from-add" data-list-id="${esc(list.id)}" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
+    ${state.sharing ? `<button class="sharing-share-btn" data-action="share-list-item-from-add" data-list-id="${esc(list.id)}" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
   </div>`;
 
   const shareableItems = items.filter(i => !i.shared_id);
-  const shareListBtn = (state.sharing?.getAllGroups().length && shareableItems.length > 0)
+  const shareListBtn = (state.sharing && shareableItems.length > 0)
     ? `<button class="archive-project-btn" data-action="bulk-share-list" data-id="${esc(list.id)}" title="${esc(t('sharing.share_all'))}">
           ${lucideIcon('share', 14)}
         </button>`
@@ -289,7 +289,7 @@ function renderListItem(item) {
 
   // Shared list item badge
   const isShared = item.shared_id && item.shared_group_id;
-  const hasShareBtn = isShared || (!isShared && state.sharing?.getAllGroups().length);
+  const hasShareBtn = isShared || (!isShared && !!state.sharing);
   let sharedHtml = '';
   if (isShared && state.sharing) {
     const group = state.sharing.getAllGroups().find(g => g.id === item.shared_group_id);
@@ -305,7 +305,7 @@ function renderListItem(item) {
         ${noteHtml}
       </div>
       <div class="list-item-actions${hasShareBtn ? ' cols-2' : ''}">
-        ${!isShared && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-list-item" data-id="${esc(item.id)}" title="${t('sharing.share')}">${lucideIcon('share', 14)}</button>` : ''}
+        ${!isShared && state.sharing ? `<button data-action="share-existing-list-item" data-id="${esc(item.id)}" title="${t('sharing.share')}">${lucideIcon('share', 14)}</button>` : ''}
         ${isShared && _myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="unshare-list-item" data-id="${esc(item.id)}" title="${t('sharing.unshare')}">${lucideIcon('share-off', 14)}</button>` : ''}
         ${isShared && !_myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="copy-list-item-to-personal" data-id="${esc(item.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon('copy', 14)}</button>` : ''}
         <button data-action="copy-item-link" data-link-type="listitem" data-id="${esc(item.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
@@ -1107,8 +1107,6 @@ async function shareExistingListItem(id, el) {
   if (_pendingShare.has(id)) return;
   const item = (state.allListItems || []).find(i => i.id === id);
   if (!item || item.shared_id) return;
-  const groups = state.sharing.getAllGroups();
-  if (!groups.length) return;
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-list-item"][data-id="${CSS.escape(id)}"]`);
   if (!btn) return;
   const listObj = (state.allLists || []).find(l => l.id === item.list_id);
@@ -1151,8 +1149,6 @@ window.shareExistingListItem = shareExistingListItem;
 async function bulkShareList(listId, el) {
   if (!state.sharing) return;
   if (_bulkShareInProgress.has(listId)) return;
-  const groups = state.sharing.getAllGroups();
-  if (!groups.length) return;
   const listItems = (state.allListItems || []).filter(i => i.list_id === listId && !i.shared_id);
   if (!listItems.length) { showToast(t('sharing.share_all_nothing'), 'info'); return; }
   const listObj = (state.allLists || []).find(l => l.id === listId);

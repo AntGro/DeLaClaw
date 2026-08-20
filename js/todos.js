@@ -378,7 +378,7 @@ function renderCategoryCard(catId) {
     : (activeEmptyMsg || displayActive.map(t => renderTodoItem(t)).join(''));
 
   const shareableCount = allInCat.filter(td => !td.shared_id && !td.done).length;
-  const shareAllBtn = (!isSharedDeck && state.sharing?.getAllGroups().length && shareableCount > 0)
+  const shareAllBtn = (!isSharedDeck && state.sharing && shareableCount > 0)
     ? `<button class="todo-cat-shortname-btn" data-action="bulk-share-todo-category" data-category="${esc(catId)}" title="${esc(t('sharing.share_all'))}">${lucideIcon("share",14)}</button>`
     : '';
 
@@ -392,7 +392,7 @@ function renderCategoryCard(catId) {
       <textarea placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(catId)}" data-priority="medium" data-action="add-todo-to-category" rows="1" style="resize:none;overflow:hidden;"></textarea>
       <button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>
       <button data-action="add-todo-from-add-row">${lucideIcon('plus', 16)}</button>
-      ${state.sharing?.getAllGroups().length ? `<button class="sharing-share-btn" data-action="share-todo-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
+      ${state.sharing ? `<button class="sharing-share-btn" data-action="share-todo-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
     </div>
     <div class="char-counter" id="todo-counter-${domId}"></div>`;
 
@@ -496,7 +496,7 @@ function renderTodoItem(td) {
       <div class="todo-actions">
         ${!td.done ? `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="true" title="${t('common.done')}" class="todo-done-btn">${lucideIcon("circle-check",16)}</button>` : `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="false" title="${t('common.undo')}" class="todo-undo-btn">${lucideIcon("refresh-cw",16)}</button>`}
         ${!td.done ? (isSnoozed ? `<button data-action="unsnooze-todo" data-id="${esc(td.id)}" title="${t('todos.unsnooze')}">${lucideIcon("moon-off",16)}</button>` : `<button data-action="open-snooze-modal" data-id="${esc(td.id)}" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>`) : ''}
-        ${!isShared && !td.done && state.sharing?.getAllGroups().length ? `<button data-action="share-existing-todo" data-id="${esc(td.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
+        ${!isShared && !td.done && state.sharing ? `<button data-action="share-existing-todo" data-id="${esc(td.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         ${isShared && !td.done && _myCreatedSharedIds.has(td.shared_id) ? `<button data-action="unshare-todo" data-id="${esc(td.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
         ${isShared && !td.done && !_myCreatedSharedIds.has(td.shared_id) ? `<button data-action="copy-todo-to-personal" data-id="${esc(td.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
         <button data-action="copy-item-link" data-link-type="todo" data-id="${esc(td.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link",16)}</button>
@@ -1324,8 +1324,6 @@ async function shareExistingTodo(id, el) {
   if (_pendingShare.has(id)) return;
   const todo = allTodos.find(t => t.id === id);
   if (!todo || todo.shared_id) return;
-  const groups = state.sharing.getAllGroups();
-  if (!groups.length) return;
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-todo"][data-id="${CSS.escape(id)}"]`);
   if (!btn) return;
   openSharePopover(btn, async (groupId) => {
@@ -1368,8 +1366,6 @@ window.shareExistingTodo = shareExistingTodo;
 async function bulkShareTodoCategory(catId, el) {
   if (!state.sharing) return;
   if (_bulkShareInProgress.has(catId)) return;
-  const groups = state.sharing.getAllGroups();
-  if (!groups.length) return;
   const items = allTodos.filter(td => catIdForTodo(td) === catId && !td.shared_id && !td.done);
   if (!items.length) { showToast(t('sharing.share_all_nothing'), 'info'); return; }
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="bulk-share-todo-category"][data-category="${CSS.escape(catId)}"]`);

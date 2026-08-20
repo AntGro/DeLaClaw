@@ -1036,7 +1036,12 @@ export function openSharePopover(anchorEl, onShare, opts = {}) {
   closeSharePopover();
   if (!state.sharing) return;
   const groups = state.sharing.getAllGroups();
-  if (!groups.length) return;
+  if (!groups.length) {
+    showToast(t('sharing.no_groups_create_hint'), 'info');
+    if (typeof window.openSettings === 'function') window.openSettings('sharing');
+    else location.hash = '#settings/sharing';
+    return;
+  }
 
   const showAssignees = opts.showAssignees !== false;
 

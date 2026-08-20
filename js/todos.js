@@ -1339,7 +1339,7 @@ async function shareExistingTodo(id, el) {
       await state.sharing.addItem(groupId, {
         id: sharedId,
         item_type: 'todo',
-        payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'medium', note: todo.note || '' },
+        payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'medium', note: todo.note || '', snooze_until: todo.snooze_until || null },
       });
       // 2. Create local pointer — keep original sort_order so position stays
       const { error: ptrErr } = await state.db.from('todos').insert({
@@ -1392,7 +1392,7 @@ async function bulkShareTodoCategory(catId, el) {
               await state.sharing.addItem(groupId, {
                 id: sharedId,
                 item_type: 'todo',
-                payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'medium', note: todo.note || '' },
+                payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'medium', note: todo.note || '', snooze_until: todo.snooze_until || null },
               });
               const { error: ptrErr } = await state.db.from('todos').insert({
                 text: '', priority: 'medium', done: false,

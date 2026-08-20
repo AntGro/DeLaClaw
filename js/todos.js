@@ -551,12 +551,15 @@ function openPriorityPicker(id, event, triggerEl) {
   // Close on outside click (next tick to avoid immediate close)
   setTimeout(() => {
     document.addEventListener('click', closePriorityPicker, { once: true });
+    window.addEventListener('scroll', closePriorityPicker, { once: true, capture: true });
   }, 0);
 }
 
 function closePriorityPicker() {
   const el = document.getElementById('priorityPickerPopover');
   if (el) el.remove();
+  document.removeEventListener('click', closePriorityPicker);
+  window.removeEventListener('scroll', closePriorityPicker, { capture: true });
 }
 
 function updateQuickAddPriorityBtn(btn, level) {
@@ -598,6 +601,11 @@ function openQuickAddPriorityPicker(btn, event) {
   if (left + picker.offsetWidth > window.innerWidth - 8) left = window.innerWidth - picker.offsetWidth - 8;
   picker.style.top = top + 'px';
   picker.style.left = left + 'px';
+
+  setTimeout(() => {
+    document.addEventListener('click', closePriorityPicker, { once: true });
+    window.addEventListener('scroll', closePriorityPicker, { once: true, capture: true });
+  }, 0);
 }
 
 function setQuickAddPriority(optionEl, level) {

@@ -1688,6 +1688,10 @@ function editHabitLastDone(habitId, event, triggerEl) {
 
       if (habit) {
         await updateHabitNextDue(habitId, habit.frequency_rule, latestForNextDue, { earlyGuard: false });
+        // Publish next_due for shared habits so other members read it directly
+        if (habit.shared_id && habit.shared_group_id && state.sharing) {
+          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+        }
       }
 
       showToast(t('habits.last_done_updated'), 'success');

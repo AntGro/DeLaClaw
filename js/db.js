@@ -113,15 +113,6 @@ const db = {
     return _adapter.rpc(fn, params);
   },
 
-  /**
-   * Batch multiple mutations — adapters that flush per-mutation (Drive)
-   * defer flushing until the batch ends for a single upload.
-   * Adapters without batch support just run fn() normally.
-   */
-  async batch(fn) {
-    if (_adapter?.batch) return _adapter.batch(fn);
-    return fn();
-  },
 };
 
 export default db;

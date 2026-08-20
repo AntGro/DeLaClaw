@@ -231,10 +231,14 @@ async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag) 
   };
   if (ifMatchEtag) headers['If-Match'] = ifMatchEtag;
 
+  // keepalive: true lets beforeunload flushes survive tab close (64KB body limit)
+  const useKeepalive = body.length <= 65536;
+
   const resp = await fetch(url, {
     method: fileId ? 'PATCH' : 'POST',
     headers,
     body,
+    ...(useKeepalive ? { keepalive: true } : {}),
   });
 
   if (resp.status === 412) {
@@ -619,10 +623,15 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   function scheduleSave(table) {
     dirtyTables.add(table);
     if (saveTimers[table]) clearTimeout(saveTimers[table]);
-    saveTimers[table] = setTimeout(() => {
+    updateSyncBarState(); // show orange (pending)
+    saveTimers[table] = setTimeout(async () => {
       dirtyTables.delete(table);
       delete saveTimers[table];
-      flushTable(table);
+      syncStart(); // show blue (uploading)
+      let _err = false;
+      try { await flushTable(table); }
+      catch (e) { _err = true; console.error(`Drive: debounced flush failed for ${table}`, e); }
+      finally { syncEnd(_err); }
     }, DEBOUNCE_MS);
   }
 
@@ -675,39 +684,51 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
 
-  // ── Global sync bar (covers ALL write operations) ──
+  // ── Global sync bar (permanent, 4-state) ──
+  // green = all clear | orange = dirty/debounce pending | blue animated = uploading | red = error
 
   let _syncCount = 0;
   let _syncBar = null;
+  let _syncErrorTimeout = null;
 
   function ensureSyncBar() {
     if (_syncBar) return _syncBar;
     _syncBar = document.createElement('div');
-    _syncBar.className = 'drive-sync-bar';
+    _syncBar.className = 'drive-sync-bar synced';
     document.body.appendChild(_syncBar);
     return _syncBar;
   }
 
-  function syncStart() {
-    if (++_syncCount > 1) return;
+  function updateSyncBarState() {
     const bar = ensureSyncBar();
-    bar.classList.remove('done', 'error');
-    bar.classList.add('active');
+    if (_syncErrorTimeout) return; // error state holds until timeout clears it
+    bar.classList.remove('synced', 'pending', 'active', 'error');
+    if (_syncCount > 0) {
+      bar.classList.add('active');
+    } else if (dirtyTables.size > 0 || Object.keys(saveTimers).length > 0) {
+      bar.classList.add('pending');
+    } else {
+      bar.classList.add('synced');
+    }
+  }
+
+  function syncStart() {
+    _syncCount++;
+    updateSyncBarState();
   }
 
   function syncEnd(error) {
-    if (--_syncCount > 0) return;
-    _syncCount = 0;
-    if (!_syncBar) return;
-    _syncBar.classList.remove('active');
-    _syncBar.classList.add(error ? 'error' : 'done');
-    setTimeout(() => { if (_syncBar) _syncBar.classList.remove('done', 'error'); }, error ? 2500 : 400);
+    _syncCount = Math.max(0, _syncCount - 1);
+    if (error) {
+      const bar = ensureSyncBar();
+      bar.classList.remove('synced', 'pending', 'active');
+      bar.classList.add('error');
+      if (_syncErrorTimeout) clearTimeout(_syncErrorTimeout);
+      _syncErrorTimeout = setTimeout(() => { _syncErrorTimeout = null; updateSyncBarState(); }, 2500);
+    } else {
+      updateSyncBarState();
+    }
   }
-
-  // ── Batch mode: defer flushing during batch, flush once at end ──
-
-  let _batching = false;
-  const _batchDirty = new Set();
 
   // ── Wrapped adapter ──
 
@@ -718,22 +739,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       builder.then = (resolve, reject) => {
         origThen(async (result) => {
           if (builder._method !== 'GET') {
-            if (_batching) {
-              // In batch mode: skip per-mutation flush, just track the table
-              _batchDirty.add(table);
-            } else {
-              // Cancel any pending debounced save — we flush immediately
-              if (saveTimers[table]) {
-                clearTimeout(saveTimers[table]);
-                delete saveTimers[table];
-                dirtyTables.delete(table);
-              }
-              syncStart();
-              let _err = false;
-              try { await flushTable(table); }
-              catch (e) { _err = true; console.error(`Drive: sync flush failed for ${table}`, e); }
-              finally { syncEnd(_err); }
-            }
+            scheduleSave(table);
           }
           resolve(result);
         }, reject);
@@ -741,29 +747,6 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       return builder;
     },
 
-    async batch(fn) {
-      _batching = true;
-      _batchDirty.clear();
-      try {
-        await fn();
-      } finally {
-        _batching = false;
-        // Flush each affected table once
-        for (const table of _batchDirty) {
-          if (saveTimers[table]) {
-            clearTimeout(saveTimers[table]);
-            delete saveTimers[table];
-            dirtyTables.delete(table);
-          }
-          syncStart();
-          let _err = false;
-          try { await flushTable(table); }
-          catch (e) { _err = true; console.error(`Drive: batch flush failed for ${table}`, e); }
-          finally { syncEnd(_err); }
-        }
-        _batchDirty.clear();
-      }
-    },
     channel() { return inner.channel(); },
     rpc(fn, params) { return inner.rpc(fn, params); },
 
@@ -781,7 +764,13 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       }
       const tablesToSave = [...dirtyTables];
       dirtyTables.clear();
-      await Promise.all(tablesToSave.map(t => flushTable(t)));
+      if (tablesToSave.length > 0) {
+        syncStart();
+        let _err = false;
+        try { await Promise.all(tablesToSave.map(t => flushTable(t))); }
+        catch (e) { _err = true; }
+        finally { syncEnd(_err); }
+      }
     },
 
     get connected() { return true; },

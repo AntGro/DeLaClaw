@@ -355,7 +355,7 @@ function initListNavBtnReorder() {
         const l = (state.allLists || []).find(ls => ls.id === id);
         return l && l.name !== SHARED_LIST_NAME;
       });
-      await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('lists').update({ sort_order: i }).eq('id', id))));
+      await Promise.all(reorderable.map((id, i) => state.db.from('lists').update({ sort_order: i }).eq('id', id)));
       const grid = document.getElementById('listsGrid');
       const snapshot = snapshotBuckets(grid);
       await refreshLists();
@@ -413,19 +413,17 @@ function initListItemDragDrop(listId, listEl) {
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
         sourceItems.forEach((it, i) => { it.sort_order = i; });
 
-        // DB: batch all writes (list_id change + sort_order for both lists)
-        await state.db.batch(async () => {
-          // Move item to new list
-          await state.db.from('list_items').update({ list_id: targetContainerId }).eq('id', draggedId);
-          // Update sort_order in target list
-          await Promise.all(orderedIds.map((id, i) =>
-            state.db.from('list_items').update({ sort_order: i }).eq('id', id)
-          ));
-          // Update sort_order in source list
-          await Promise.all(sourceItems.map((it, i) =>
-            state.db.from('list_items').update({ sort_order: i }).eq('id', it.id)
-          ));
-        });
+        // DB: write list_id change + sort_order for both lists
+        // Move item to new list
+        await state.db.from('list_items').update({ list_id: targetContainerId }).eq('id', draggedId);
+        // Update sort_order in target list
+        await Promise.all(orderedIds.map((id, i) =>
+          state.db.from('list_items').update({ sort_order: i }).eq('id', id)
+        ));
+        // Update sort_order in source list
+        await Promise.all(sourceItems.map((it, i) =>
+          state.db.from('list_items').update({ sort_order: i }).eq('id', it.id)
+        ));
 
         // Refresh: sharing cleanup if needed
         if (movedItem.shared_id && movedItem.shared_group_id && state.sharing) {

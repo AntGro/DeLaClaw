@@ -61,7 +61,7 @@ function initProjectNavBtnReorder() {
   initNavBtnReorder('projectNavButtons', {
     idAttr: 'id',
     async onReorder(orderedIds) {
-      await state.db.batch(() => Promise.all(orderedIds.map((id, i) => state.db.from('projects').update({ sort_order: i }).eq('id', id))));
+      await Promise.all(orderedIds.map((id, i) => state.db.from('projects').update({ sort_order: i }).eq('id', id)));
       await loadProjects();
       const grid = document.getElementById('projectGrid');
       const snapshot = snapshotBuckets(grid);
@@ -458,11 +458,9 @@ function initDragDrop(container, projectId) {
           .filter(x => x.project === sourceContainerId && x.id !== draggedId && x.status !== 'approved')
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
         sourceItems.forEach((it, i) => { it.sort_order = i; });
-        await state.db.batch(async () => {
-          await state.db.from('tasks').update({ project: targetContainerId }).eq('id', draggedId);
-          await Promise.all(orderedIds.map((id, i) => state.db.from('tasks').update({ sort_order: i }).eq('id', id)));
-          await Promise.all(sourceItems.map((it, i) => state.db.from('tasks').update({ sort_order: i }).eq('id', it.id)));
-        });
+        await state.db.from('tasks').update({ project: targetContainerId }).eq('id', draggedId);
+        await Promise.all(orderedIds.map((id, i) => state.db.from('tasks').update({ sort_order: i }).eq('id', id)));
+        await Promise.all(sourceItems.map((it, i) => state.db.from('tasks').update({ sort_order: i }).eq('id', it.id)));
         await refreshAll();
         showToast(t('toast.moved'), 'success');
       } else {

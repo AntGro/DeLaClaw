@@ -249,7 +249,7 @@ function initFlashDeckNavBtnReorder() {
     async onReorder(orderedNames) {
       const reorderable = orderedNames.filter(n => n !== SHARED_CATEGORY && n !== '__drafts');
       const deckRows = reorderable.map(n => _deckByName.get(n)).filter(Boolean);
-      await state.db.batch(() => Promise.all(deckRows.map((d, i) => state.db.from('flashcard_decks').update({ sort_order: i }).eq('id', d.id))));
+      await Promise.all(deckRows.map((d, i) => state.db.from('flashcard_decks').update({ sort_order: i }).eq('id', d.id)));
       await loadFlashcardDecks();
       const grid = document.getElementById('flashcardGrid');
       const snapshot = snapshotBuckets(grid);

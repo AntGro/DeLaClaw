@@ -1045,7 +1045,7 @@ function initHabitNavBtnReorder() {
     skipIds,
     async onReorder(orderedIds) {
       const reorderable = orderedIds.filter(id => id !== _sharedHabitCatId);
-      await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('habit_categories').update({ sort_order: i }).eq('id', id))));
+      await Promise.all(reorderable.map((id, i) => state.db.from('habit_categories').update({ sort_order: i }).eq('id', id)));
       await loadHabitCategories();
       const grid = document.getElementById('habitCategoryGrid');
       const snapshot = snapshotBuckets(grid);

@@ -309,7 +309,7 @@ function initVestiaireNavBtnReorder() {
     skipIds,
     async onReorder(orderedIds) {
       const reorderable = orderedIds.filter(id => id !== _sharedVestCatId);
-      await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('vestiaire_categories').update({ sort_order: i }).eq('id', id))));
+      await Promise.all(reorderable.map((id, i) => state.db.from('vestiaire_categories').update({ sort_order: i }).eq('id', id)));
       await loadVestiaireCategories();
       const grid = document.getElementById('vestiaireGrid');
       const snapshot = snapshotBuckets(grid);
@@ -378,11 +378,9 @@ function initVestiaireDragDrop(catId, listEl) {
           .filter(x => catIdForVest(x) === sourceContainerId && x.id !== draggedId)
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
         sourceItems.forEach((it, i) => { it.sort_order = i; });
-        await state.db.batch(async () => {
-          await state.db.from('vestiaire').update({ category_id: targetContainerId, category: targetCatName }).eq('id', draggedId);
-          await Promise.all(orderedIds.map((id, i) => state.db.from('vestiaire').update({ sort_order: i }).eq('id', id)));
-          await Promise.all(sourceItems.map((it, i) => state.db.from('vestiaire').update({ sort_order: i }).eq('id', it.id)));
-        });
+        await state.db.from('vestiaire').update({ category_id: targetContainerId, category: targetCatName }).eq('id', draggedId);
+        await Promise.all(orderedIds.map((id, i) => state.db.from('vestiaire').update({ sort_order: i }).eq('id', id)));
+        await Promise.all(sourceItems.map((it, i) => state.db.from('vestiaire').update({ sort_order: i }).eq('id', it.id)));
         await refreshVestiaire();
         showToast(t('toast.moved'), 'success');
       } else {

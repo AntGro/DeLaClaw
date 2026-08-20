@@ -563,9 +563,9 @@ export async function reorderItems({
   if (reinitFn) reinitFn();
   showToast(t('toast.reordered'), 'success');
 
-  db.batch(() => Promise.all(
+  Promise.all(
     orderedIds.map((id, i) => db.from(tableName).update({ sort_order: i }).eq('id', id))
-  )).catch(e => console.error(`${tableName} reorder sync failed:`, e));
+  ).catch(e => console.error(`${tableName} reorder sync failed:`, e));
 }
 // ===================================================================
 // INNER SCROLL POSITION CAPTURE / RESTORE

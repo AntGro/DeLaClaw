@@ -1126,11 +1126,9 @@ function initTodoDragDropForCard(catId) {
           .filter(x => catIdForTodo(x) === sourceContainerId && x.id !== draggedId)
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
         sourceItems.forEach((it, i) => { it.sort_order = i; });
-        await state.db.batch(async () => {
-          await state.db.from('todos').update({ category_id: targetContainerId, category: targetCatName }).eq('id', draggedId);
-          await Promise.all(orderedIds.map((id, i) => state.db.from('todos').update({ sort_order: i }).eq('id', id)));
-          await Promise.all(sourceItems.map((it, i) => state.db.from('todos').update({ sort_order: i }).eq('id', it.id)));
-        });
+        await state.db.from('todos').update({ category_id: targetContainerId, category: targetCatName }).eq('id', draggedId);
+        await Promise.all(orderedIds.map((id, i) => state.db.from('todos').update({ sort_order: i }).eq('id', id)));
+        await Promise.all(sourceItems.map((it, i) => state.db.from('todos').update({ sort_order: i }).eq('id', it.id)));
         await refreshTodos();
         showToast(t('toast.moved'), 'success');
       } else {
@@ -1157,7 +1155,7 @@ function initTodoNavBtnReorder() {
     skipIds,
     async onReorder(orderedIds) {
       const reorderable = orderedIds.filter(id => id !== _sharedCatId);
-      await state.db.batch(() => Promise.all(reorderable.map((id, i) => state.db.from('todo_categories').update({ sort_order: i }).eq('id', id))));
+      await Promise.all(reorderable.map((id, i) => state.db.from('todo_categories').update({ sort_order: i }).eq('id', id)));
       await loadTodoCategories();
       const grid = document.getElementById('todoCategoryGrid');
       const snapshot = snapshotBuckets(grid);

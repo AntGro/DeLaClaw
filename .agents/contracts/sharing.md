@@ -86,6 +86,7 @@ All RPCs validate token hash, joined status, and non-revoked before proceeding:
 - **Group deletion:** deleting a group cascades to `sharing_members` and `sharing_items` (FK CASCADE). Open design question: what happens to local pointers when a group is deleted
 - **Polling:** joined groups poll every 30s (`POLL_MS`). Owner groups use Supabase Realtime when available
 - **Member identity:** `memberId` is an 8-char UUID prefix, stable per group. Display names are group-local and mutable via `update_member_display_name`
+- **Shared habit `next_due` — write-once, read on refresh:** `next_due` is computed at write time (mark done, edit frequency, edit last-done, etc.) and published to the shared item payload via `updateSharedHabit`. Recipients read `sh.next_due` from shared storage during `refreshHabits()` — no local recomputation. A null `sh.next_due` clears the local pointer's stale value
 
 ## Adapter & Backend
 - Adapter pattern: `sharing.js` factory creates Supabase or Drive adapter, validates via `SHARING_INTERFACE`

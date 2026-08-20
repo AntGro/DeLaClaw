@@ -48,6 +48,8 @@ User jobs:
   - **Completion path** (`earlyGuard: true`, default): if the computed next-due ≤ current due date, recompute from the current due date — early-completion guard (e.g. `weekly:Fri` done on Wednesday → next Friday, not same Friday)
   - **Manual edit path** (`earlyGuard: false`): `next_due = min(currentDue, computedDue)` — due date can move earlier but never double-advances. Used when editing last-done or changing frequency
 - Shared completions merge by `habit_id`, latest per day
+- **`planLastDoneEdit` pure helper:** shared decision logic for editing last-done date. Both `setLocalHabitLastDone` (DB operations) and `setSharedHabitLastDone` (shared storage array) delegate to it. Returns `{ kept, toDelete, updateId, needsInsert }`
+- **Last-done edit deletes future completions:** setting last-done to date X removes all completions after X and ensures one exists on X. The "last done" display always reflects the latest remaining completion
 
 ## Adapter & Backend
 - `db.from('habits')`, `db.from('habit_completions')`

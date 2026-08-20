@@ -4529,7 +4529,7 @@ function toggleSearch(btn) {
       if (!input.value.trim()) {
         wrapper.classList.remove('expanded');
         input.value = '';
-        input.dispatchEvent(new Event('input'));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
       }
     });
   }
@@ -4669,7 +4669,7 @@ function clearPageSearch(btn) {
   const input = btn.closest('.search-input-wrap').querySelector('.page-search');
   if (input) {
     input.value = '';
-    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
     input.focus();
   }
 }

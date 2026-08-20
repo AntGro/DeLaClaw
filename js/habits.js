@@ -1705,8 +1705,15 @@ function editHabitLastDone(habitId, event, triggerEl) {
 
   input.addEventListener('change', save);
   input.addEventListener('blur', () => {
-    // Small delay to avoid race with change event
-    setTimeout(() => { if (!didSave && document.contains(input)) refreshHabits(); }, 150);
+    // The native date-picker popup may fire blur while staying open.
+    // Wait long enough for the popup interaction to finish, then clean up
+    // only if the input truly lost focus and no save happened.
+    setTimeout(() => {
+      if (!didSave && document.contains(input) && document.activeElement !== input) {
+        const restored = span.cloneNode(true);
+        input.replaceWith(restored);
+      }
+    }, 300);
   });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { didSave = true; refreshHabits(); }

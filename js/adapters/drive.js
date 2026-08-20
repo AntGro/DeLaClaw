@@ -417,15 +417,14 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     const total = DRIVE_TABLES.length;
     emit('loading', t('menu.drive_creating_tables'), 0, total);
     const tok = await getToken();
-    if (tok) {
-      let created = 0;
-      await Promise.all(DRIVE_TABLES.map(async (table) => {
-        const result = await uploadFile(tok, folderId, null, `${table}.json`, []);
-        fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
-        created++;
-        emit('loading', t('menu.drive_creating_progress', created, total, table), created, total);
-      }));
-    }
+    if (!tok) throw new Error('Drive setup failed: could not obtain auth token');
+    let created = 0;
+    await Promise.all(DRIVE_TABLES.map(async (table) => {
+      const result = await uploadFile(tok, folderId, null, `${table}.json`, []);
+      fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
+      created++;
+      emit('loading', t('menu.drive_creating_progress', created, total, table), created, total);
+    }));
     // Set schema_version to latest — no migrations needed
     if (!inner._store.settings) inner._store.settings = [];
     inner._store.settings.push({ key: 'schema_version', value: latestVersion });
@@ -447,20 +446,19 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     }
     // Flush seeded category tables + settings to Drive (parallel)
     const seedTok = await getToken();
-    if (seedTok) {
-      const seedFlushes = catSeed.map(async ([table]) => {
-        const meta = fileMeta[table] || {};
-        const result = await uploadFile(seedTok, folderId, meta.fileId, `${table}.json`, inner._store[table]);
-        fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
-      });
-      // Settings flush
-      const settingsMeta = fileMeta.settings || {};
-      seedFlushes.push((async () => {
-        const result = await uploadFile(seedTok, folderId, settingsMeta.fileId, 'settings.json', inner._store.settings);
-        fileMeta.settings = { fileId: result.id || settingsMeta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
-      })());
-      await Promise.all(seedFlushes);
-    }
+    if (!seedTok) throw new Error('Drive setup failed: could not obtain auth token for seed flush');
+    const seedFlushes = catSeed.map(async ([table]) => {
+      const meta = fileMeta[table] || {};
+      const result = await uploadFile(seedTok, folderId, meta.fileId, `${table}.json`, inner._store[table]);
+      fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+    });
+    // Settings flush
+    const settingsMeta = fileMeta.settings || {};
+    seedFlushes.push((async () => {
+      const result = await uploadFile(seedTok, folderId, settingsMeta.fileId, 'settings.json', inner._store.settings);
+      fileMeta.settings = { fileId: result.id || settingsMeta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+    })());
+    await Promise.all(seedFlushes);
   } else {
     // ── Run pending migrations (existing installs only) ──
 

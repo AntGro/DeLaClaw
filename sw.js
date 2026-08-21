@@ -1,6 +1,6 @@
 // Service Worker for DeLaClaw (PWA)
 // CACHE_VERSION is updated by the pre-commit hook from VERSION file
-const CACHE_VERSION = 'dlc-1.764';
+const CACHE_VERSION = 'dlc-1.765';
 
 
 const PRECACHE_URLS = [
@@ -56,6 +56,7 @@ const PRECACHE_URLS = [
   'icons/brand/claude.svg',
   'icons/brand/codex.svg',
   'icons/brand/cursor.svg',
+  'icons/brand/googledrive.svg',
   'icons/brand/grok.svg',
   'icons/brand/hermes.svg',
   'icons/brand/nanoclaw.svg',

@@ -1817,7 +1817,12 @@ async function deleteHabitCompletion(compId) {
       showToast(t('habits.completion_deleted'), 'success');
       await refreshHabits();
       if (state._historyHabitId) {
-        await clearHabitNextDue(state._historyHabitId);
+        const h = state.allHabits.find(x => String(x.id) === String(state._historyHabitId));
+        const comps = state.allHabitCompletions
+          .filter(c => String(c.habit_id) === String(state._historyHabitId))
+          .sort((a, b) => new Date(a.completed_at) - new Date(b.completed_at));
+        const latest = comps.length ? comps[comps.length - 1].completed_at : null;
+        if (h) await updateHabitNextDue(h.id, h.frequency_rule, latest, { earlyGuard: false });
         renderHabitHistoryList(state._historyHabitId);
       }
     },
@@ -1887,7 +1892,12 @@ async function saveHabitCompletion(compId) {
   showToast(t('habits.completion_updated'), 'success');
   await refreshHabits();
   if (state._historyHabitId) {
-    await clearHabitNextDue(state._historyHabitId);
+    const h = state.allHabits.find(x => String(x.id) === String(state._historyHabitId));
+    const comps = state.allHabitCompletions
+      .filter(c => String(c.habit_id) === String(state._historyHabitId))
+      .sort((a, b) => new Date(a.completed_at) - new Date(b.completed_at));
+    const latest = comps.length ? comps[comps.length - 1].completed_at : null;
+    if (h) await updateHabitNextDue(h.id, h.frequency_rule, latest, { earlyGuard: false });
     renderHabitHistoryList(state._historyHabitId);
   }
 }

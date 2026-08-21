@@ -1840,7 +1840,7 @@ async function editHabitCompletion(compId) {
       <input type="date" id="editCompDate_${compId}" value="${dateVal}">
       <label>${t('habits.edit_note')}</label>
       <input type="text" id="editCompNote_${compId}" value="${esc(noteVal)}" placeholder="${t('habits.note_optional')}" maxlength="500">
-      <div class="habit-history-edit-actions">
+      <div class="habit-history-edit-actions modal-actions">
         <button data-action="save-habit-completion" data-id="${esc(compId)}" class="modal-save">${t('common.save')}</button>
         <button data-action="cancel-edit-completion" class="modal-cancel">${t('common.cancel')}</button>
       </div>

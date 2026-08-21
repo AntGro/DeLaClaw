@@ -43,12 +43,162 @@ export async function createSupabaseSharing(adapter, config) {
   let _revokedCache = {};  // groupId -> revoked members array
   let _remoteClients = {}; // groupId -> { client, token, memberId }
   let _groupNameCache = {}; // groupId -> name (survives group deletion)
+  let _groupHealth = {};   // groupId -> health tracking state
   let _pollTimer = null;
   let _realtimeChannel = null;
   let _updateCallbacks = [];
   let _loaded = false;
 
   const POLL_MS = 30000;
+  const GRACE_CONSECUTIVE = 3;       // empty responses before confirmation
+  const GRACE_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+  const TOKEN_REVOKED_CONSECUTIVE = 2;
+  const BACKOFF_INITIAL_MS = 30000;
+  const BACKOFF_CAP_MS = 5 * 60 * 1000;
+  const BACKOFF_STOP_AFTER = 3;      // stop polling after N attempts at cap
+
+  // ── Group health tracking ─────────────────────────────────────
+
+  function _initGroupHealth(groupId) {
+    if (!_groupHealth[groupId]) {
+      _groupHealth[groupId] = {
+        status: 'healthy',
+        consecutiveEmpty: 0,
+        consecutive401: 0,
+        lastHealthyAt: Date.now(),
+        backoffMs: BACKOFF_INITIAL_MS,
+        attemptsAtCap: 0,
+        pollStopped: false,
+        nextPollAt: 0,
+        unreachableNotified: false,
+      };
+    }
+    return _groupHealth[groupId];
+  }
+
+  function _markHealthy(groupId) {
+    const h = _initGroupHealth(groupId);
+    const wasUnhealthy = h.status !== 'healthy';
+    h.status = 'healthy';
+    h.consecutiveEmpty = 0;
+    h.consecutive401 = 0;
+    h.lastHealthyAt = Date.now();
+    h.backoffMs = BACKOFF_INITIAL_MS;
+    h.attemptsAtCap = 0;
+    h.pollStopped = false;
+    h.nextPollAt = 0;
+    h.unreachableNotified = false;
+    if (wasUnhealthy) {
+      _notifyUpdate();
+      // Dismiss any pending confirmation
+      try { document.dispatchEvent(new CustomEvent('sharing-group-recovered', { detail: { groupId } })); } catch {}
+    }
+  }
+
+  /**
+   * Classify an RPC error as UNREACHABLE or TOKEN_REVOKED.
+   * supabase-js may return { data, error } or throw.
+   */
+  function _classifyRpcError(error) {
+    if (!error) return 'UNREACHABLE';
+    const status = error.status || error.code;
+    const msg = String(error.message || '').toLowerCase();
+    if (status === 401 || status === 403 ||
+        msg.includes('401') || msg.includes('403') ||
+        msg.includes('unauthorized') || msg.includes('forbidden')) {
+      return 'TOKEN_REVOKED';
+    }
+    return 'UNREACHABLE';
+  }
+
+  function _handleUnreachable(groupId) {
+    const h = _initGroupHealth(groupId);
+    if (h.status === 'pending_confirmation') return; // don't overwrite pending confirmation
+    h.status = 'unreachable';
+    // Apply exponential backoff
+    if (h.backoffMs >= BACKOFF_CAP_MS) {
+      h.attemptsAtCap++;
+      if (h.attemptsAtCap >= BACKOFF_STOP_AFTER) {
+        h.pollStopped = true;
+      }
+    } else {
+      h.backoffMs = Math.min(h.backoffMs * 2, BACKOFF_CAP_MS);
+    }
+    h.nextPollAt = Date.now() + h.backoffMs;
+    // Notify UI on first detection only
+    if (!h.unreachableNotified) {
+      h.unreachableNotified = true;
+      const groupName = _groupName(groupId);
+      try { document.dispatchEvent(new CustomEvent('sharing-group-unreachable', { detail: { groupId, groupName } })); } catch {}
+    }
+    _notifyUpdate();
+  }
+
+  function _handlePossiblyDeleted(groupId) {
+    const h = _initGroupHealth(groupId);
+    h.consecutiveEmpty++;
+    const cooldownElapsed = (Date.now() - h.lastHealthyAt) >= GRACE_COOLDOWN_MS;
+    if (h.consecutiveEmpty >= GRACE_CONSECUTIVE && cooldownElapsed) {
+      h.status = 'pending_confirmation';
+      const groupName = _groupName(groupId);
+      try { document.dispatchEvent(new CustomEvent('sharing-group-deletion-confirm', { detail: { groupId, groupName } })); } catch {}
+    } else {
+      h.status = 'possibly_deleted';
+    }
+    _notifyUpdate();
+  }
+
+  function _handleTokenRevoked(groupId) {
+    const h = _initGroupHealth(groupId);
+    h.consecutive401++;
+    if (h.consecutive401 >= TOKEN_REVOKED_CONSECUTIVE) {
+      // Immediate cleanup — token revocation is intentional
+      h.status = 'token_revoked';
+      const groupName = _groupName(groupId);
+      _cleanupJoinedGroup(groupId);
+      try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName } })); } catch {}
+    } else {
+      h.status = 'unreachable';
+      _notifyUpdate();
+    }
+  }
+
+  function _shouldPollGroup(groupId) {
+    const h = _groupHealth[groupId];
+    if (!h) return true;
+    if (h.pollStopped) return false;
+    if (h.status === 'pending_confirmation') return false;
+    return Date.now() >= h.nextPollAt;
+  }
+
+  function getGroupHealthStatus(groupId) {
+    const h = _groupHealth[groupId];
+    if (!h) return 'healthy';
+    return h.status;
+  }
+
+  /** Called by UI when user confirms deletion of a group in pending_confirmation state. */
+  async function confirmGroupDeletion(groupId) {
+    const groupName = _groupName(groupId);
+    await _cleanupJoinedGroup(groupId);
+    delete _groupHealth[groupId];
+    try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName } })); } catch {}
+    _notifyUpdate();
+  }
+
+  /** Called by UI when user wants to keep a group in pending_confirmation state. */
+  function keepGroup(groupId) {
+    const h = _initGroupHealth(groupId);
+    h.status = 'unreachable';
+    h.consecutiveEmpty = 0;
+    h.consecutive401 = 0;
+    h.backoffMs = BACKOFF_INITIAL_MS;
+    h.attemptsAtCap = 0;
+    h.pollStopped = false;
+    h.nextPollAt = 0;
+    h.unreachableNotified = false;
+    _notifyUpdate();
+  }
 
   // ── Helpers ─────────────────────────────────────────────────
 
@@ -339,6 +489,10 @@ export async function createSupabaseSharing(adapter, config) {
     if (joined && joined.length > 0) {
       _joinedGroups = [];
       for (const jg of joined) {
+        // loadAll always tries all groups (reset pollStopped for fresh page load)
+        const h = _initGroupHealth(jg.group_id);
+        h.pollStopped = false;
+
         try {
           const { token, anonKey } = await _decryptJoinedRow(jg);
           if (!token || !anonKey) {
@@ -352,18 +506,73 @@ export async function createSupabaseSharing(adapter, config) {
             memberId: jg.member_id,
           };
 
-          const { data: members } = await remote.rpc('get_group_members', {
-            p_token: token,
-            p_group_id: jg.group_id,
-          });
-
-          if (!members || members.length === 0) {
-            // Group deleted or token revoked — clean up + notify
-            const groupName = jg.group_name || jg.group_id;
-            await _cleanupJoinedGroup(jg.group_id);
-            try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName } })); } catch {}
+          let members = null;
+          let rpcError = null;
+          try {
+            const result = await remote.rpc('get_group_members', {
+              p_token: token,
+              p_group_id: jg.group_id,
+            });
+            members = result.data;
+            rpcError = result.error;
+          } catch (fetchErr) {
+            // Network-level failure (503, timeout, connection refused)
+            const errType = _classifyRpcError(fetchErr);
+            if (errType === 'TOKEN_REVOKED') {
+              _handleTokenRevoked(jg.group_id);
+            } else {
+              _handleUnreachable(jg.group_id);
+            }
+            // Keep group in list with stale/empty state
+            _groupNameCache[jg.group_id] = jg.group_name;
+            _joinedGroups.push({
+              id: jg.group_id,
+              name: jg.group_name,
+              backendType: jg.remote_backend_type,
+              created_by: null,
+              members: [],
+              _isJoined: true,
+            });
             continue;
           }
+
+          // RPC returned but with an error object
+          if (rpcError) {
+            const errType = _classifyRpcError(rpcError);
+            if (errType === 'TOKEN_REVOKED') {
+              _handleTokenRevoked(jg.group_id);
+            } else {
+              _handleUnreachable(jg.group_id);
+            }
+            _groupNameCache[jg.group_id] = jg.group_name;
+            _joinedGroups.push({
+              id: jg.group_id,
+              name: jg.group_name,
+              backendType: jg.remote_backend_type,
+              created_by: null,
+              members: [],
+              _isJoined: true,
+            });
+            continue;
+          }
+
+          // Successful RPC but empty members → possibly deleted
+          if (!members || members.length === 0) {
+            _handlePossiblyDeleted(jg.group_id);
+            _groupNameCache[jg.group_id] = jg.group_name;
+            _joinedGroups.push({
+              id: jg.group_id,
+              name: jg.group_name,
+              backendType: jg.remote_backend_type,
+              created_by: null,
+              members: [],
+              _isJoined: true,
+            });
+            continue;
+          }
+
+          // Successful response with members — group is healthy
+          _markHealthy(jg.group_id);
 
           const memberList = (members || []).map(m => _normalizeMember(m));
           const creatorMemberId = memberList.find(m => m.role === 'creator' || m.role === 'owner')?.memberId || null;
@@ -391,6 +600,16 @@ export async function createSupabaseSharing(adapter, config) {
           }
         } catch (e) {
           console.warn('sharing: failed to load joined group', jg.group_id, e);
+          _handleUnreachable(jg.group_id);
+          _groupNameCache[jg.group_id] = jg.group_name;
+          _joinedGroups.push({
+            id: jg.group_id,
+            name: jg.group_name,
+            backendType: jg.remote_backend_type,
+            created_by: null,
+            members: [],
+            _isJoined: true,
+          });
         }
       }
     }
@@ -590,6 +809,7 @@ export async function createSupabaseSharing(adapter, config) {
     delete _memberCache[groupId];
     delete _revokedCache[groupId];
     delete _remoteClients[groupId];
+    delete _groupHealth[groupId];
   }
 
   async function tryDirectJoin(connectionRef) {
@@ -1198,20 +1418,48 @@ export async function createSupabaseSharing(adapter, config) {
       const remote = _getRemote(group.id);
       if (!remote) continue;
 
-      try {
-        const { data: members } = await remote.client.rpc('get_group_members', {
-          p_token: remote.token,
-          p_group_id: group.id,
-        });
+      // Respect per-group backoff
+      if (!_shouldPollGroup(group.id)) continue;
 
-        if (!members || members.length === 0) {
-          // Group deleted or token revoked — notify user
-          const groupName = group.name || group.id;
-          await _cleanupJoinedGroup(group.id);
-          try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName } })); } catch {}
-          changed = true;
+      try {
+        let members = null;
+        let rpcError = null;
+        try {
+          const result = await remote.client.rpc('get_group_members', {
+            p_token: remote.token,
+            p_group_id: group.id,
+          });
+          members = result.data;
+          rpcError = result.error;
+        } catch (fetchErr) {
+          const errType = _classifyRpcError(fetchErr);
+          if (errType === 'TOKEN_REVOKED') {
+            _handleTokenRevoked(group.id);
+            changed = true;
+          } else {
+            _handleUnreachable(group.id);
+          }
           continue;
         }
+
+        if (rpcError) {
+          const errType = _classifyRpcError(rpcError);
+          if (errType === 'TOKEN_REVOKED') {
+            _handleTokenRevoked(group.id);
+            changed = true;
+          } else {
+            _handleUnreachable(group.id);
+          }
+          continue;
+        }
+
+        if (!members || members.length === 0) {
+          _handlePossiblyDeleted(group.id);
+          continue;
+        }
+
+        // Successful non-empty response — group is healthy
+        _markHealthy(group.id);
 
         const ml = members.map(m => _normalizeMember(m));
         const oldMl = _memberCache[group.id] || [];
@@ -1235,7 +1483,10 @@ export async function createSupabaseSharing(adapter, config) {
             changed = true;
           }
         }
-      } catch (e) { console.warn('sharing poll joined', group.id, e); }
+      } catch (e) {
+        console.warn('sharing poll joined', group.id, e);
+        _handleUnreachable(group.id);
+      }
     }
 
     if (changed) _notifyUpdate();
@@ -1253,6 +1504,7 @@ export async function createSupabaseSharing(adapter, config) {
     }
     _updateCallbacks = [];
     _remoteClients = {};
+    _groupHealth = {};
   }
 
   // ── Realtime (owned groups — instant member/item updates) ───
@@ -1363,6 +1615,9 @@ export async function createSupabaseSharing(adapter, config) {
     getRevokedMembers,
     updateMyDisplayName,
     isReady() { return _loaded; },
+    getGroupHealthStatus,
+    confirmGroupDeletion,
+    keepGroup,
     openJoinPicker: null,
   };
 }

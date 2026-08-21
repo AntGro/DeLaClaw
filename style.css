@@ -2022,6 +2022,10 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-member-revoked-tag{color:var(--muted);font-size:0.84rem;font-style:italic;margin-left:4px;}
 .sharing-remove-btn{border:none;background:transparent;cursor:pointer;color:var(--muted);padding:2px;line-height:1;border-radius:4px;transition:color 0.15s;}
 .sharing-remove-btn:hover{color:#ef4444;}
+/* Disconnected group state */
+.sharing-group-disconnected{opacity:0.55;filter:grayscale(0.6);}
+.sharing-group-disconnected-stamp{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 8px;border-radius:6px;font-size:0.76rem;font-weight:600;color:var(--muted);background:color-mix(in srgb,var(--muted) 12%,transparent);vertical-align:middle;white-space:nowrap;}
+.sharing-group-disconnected-stamp svg{width:14px;height:14px;flex-shrink:0;}
 .sharing-invite-row{display:flex;gap:6px;margin-bottom:8px;}
 .sharing-invite-input{flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--settings-bg);color:var(--text);font-size:0.9rem;}
 .sharing-invite-btn{display:inline-flex;align-items:center;gap:4px;padding:7px 11px;border-radius:8px;border:1px solid var(--accent);background:color-mix(in srgb, var(--accent) 12%, var(--settings-bg));color:var(--accent);cursor:pointer;font-size:0.86rem;font-weight:600;transition:all 0.15s;white-space:nowrap;flex-shrink:0;}

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-08-21T19:53:40.804Z from 38 modules (v1.771). Total LOC 30077. Do not hand-edit.
+> Generated 2026-08-21T22:09:47.813Z from 38 modules (v1.772). Total LOC 30397. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,11 +27,11 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 4716 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:49,guard+pendingSet,window:8 |
-| i18n | 2262 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
+| main | 4753 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:49,guard+pendingSet,window:8 |
+| i18n | 2280 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
+| sharing-supabase | 1624 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
 | sharing-drive | 1402 | - | sharing-envelope,utils | main.js,sharing.js | - |
-| sharing-supabase | 1369 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |
-| sharing-ui | 1239 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:41,pendingSet,window:8 |
+| sharing-ui | 1247 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:41,pendingSet,window:8 |
 | item-utils | 1174 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | utils | 935 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:6 |
 | drive | 914 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
@@ -44,7 +44,7 @@
 | auth | 264 | auth_email_guard,settings |  | - | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
 | agents-ui | 229 | agent_grants | db,i18n,icons,state | main.js | esc:32,window:5 |
-| icons | 208 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
+| icons | 210 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | storm3d | 185 | - |  | hero.js | - |
 | rest | 154 | x |  | main.js | - |
 | sharing-interface | 124 | - |  | sharing.js | - |

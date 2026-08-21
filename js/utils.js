@@ -220,9 +220,9 @@ function showConfirmAction(title, message, onConfirm, detail, opts) {
       btnSvg.outerHTML = opts.btnIconSvg;
     }
   }
-  // Translate Cancel button
+  // Translate Cancel button (allow custom label via opts)
   const cancelBtn = document.getElementById('confirmActionCancelBtn');
-  if (cancelBtn) cancelBtn.textContent = t('common.cancel');
+  if (cancelBtn) cancelBtn.textContent = opts?.cancelLabel || t('common.cancel');
   // Variant: 'neutral' uses accent color instead of red
   const modal = document.querySelector('.confirm-action-modal');
   if (modal) {

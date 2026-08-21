@@ -1833,6 +1833,43 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     showToast(t('sharing.group_removed_remotely', name), 'info');
   });
 
+  // Notify user when a joined group becomes unreachable (503, timeout, etc.)
+  document.addEventListener('sharing-group-unreachable', (e) => {
+    const name = e.detail?.groupName || '';
+    showToast(t('sharing.group_unreachable', name), 'info');
+    renderSharingPane();
+  });
+
+  // Show confirmation popup when a joined group appears deleted (grace period exhausted)
+  document.addEventListener('sharing-group-deletion-confirm', async (e) => {
+    const { groupId, groupName } = e.detail || {};
+    if (!groupId) return;
+    showConfirmAction(
+      t('sharing.group_confirm_delete_title'),
+      t('sharing.group_confirm_delete_msg', groupName),
+      async () => {
+        await state.sharing.confirmGroupDeletion(groupId);
+        renderSharingPane();
+      },
+      null,
+      {
+        btnText: t('sharing.group_confirm_remove_btn'),
+        cancelLabel: t('sharing.group_confirm_keep_btn'),
+        variant: 'neutral',
+        iconSvg: lucideIcon('wifi-off', 24),
+        onCancel: () => {
+          state.sharing.keepGroup(groupId);
+          renderSharingPane();
+        },
+      }
+    );
+  });
+
+  // Auto-recovery: re-render when group comes back
+  document.addEventListener('sharing-group-recovered', () => {
+    renderSharingPane();
+  });
+
   // Show demo banner if in demo mode
   if (mode === 'demo') initDemoBanner();
 

@@ -156,10 +156,18 @@ export async function renderSharingPane() {
     const inviteCode = isCreator ? state.sharing.getInviteLink(group.id) : null;
     const invitePlaceholder = group.backendType === 'supabase' ? t('sharing.invite_name_placeholder') : t('sharing.invite_placeholder');
 
-    html += `<div class="sharing-group-card">
+    // Group health status
+    const healthStatus = state.sharing.getGroupHealthStatus?.(group.id) || 'healthy';
+    const isDisconnected = healthStatus !== 'healthy';
+    const disconnectedClass = isDisconnected ? ' sharing-group-disconnected' : '';
+    const disconnectedStamp = isDisconnected
+      ? `<span class="sharing-group-disconnected-stamp">${lucideIcon('wifi-off', 14)} ${t('sharing.group_disconnected')}</span>`
+      : '';
+
+    html += `<div class="sharing-group-card${disconnectedClass}">
       <div class="sharing-group-header">
         <div class="sharing-group-info">
-          <h4>${esc(group.name)}</h4>
+          <h4>${esc(group.name)}${disconnectedStamp}</h4>
           <span class="sharing-group-stats">${memberStr} \u00b7 ${itemStr}</span>
         </div>
         <div class="sharing-group-actions">

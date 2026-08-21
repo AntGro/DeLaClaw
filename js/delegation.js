@@ -169,7 +169,7 @@
       case 'reject-proposal': callWindow('rejectProposal', [getId(el)]); break;
       case 'submit-feedback': callWindow('submitFeedback', [getId(el)]); break;
       case 'request-proposal': callWindow('requestProposal', [getId(el)]); break;
-      case 'start-inline-edit-draft': callWindow('startInlineEditDraft', [getId(el), el]); break;
+      case 'start-inline-edit-draft': callWindow('startInlineEditDraftById', [getId(el)]); break;
       case 'delete-draft': callWindow('deleteDraft', [getId(el)]); break;
       case 'prompt-flash-shortname': callWindow('openEditDeckModal', [el.dataset.deck||getId(el)]); break;
       case 'open-add-flashcard': callWindow('openAddFlashcardModal', [el.dataset.deck||getId(el)]); break;

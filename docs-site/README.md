@@ -6,13 +6,23 @@ DeLaClaw is a zero-dependency, no-build, self-hosted personal dashboard. It runs
 
 ## Features
 
-- **Projects & Tasks** — Kanban-style project boards with task workflows
-- **TODOs** — Categorised to-do lists with snooze, priority, and deadlines
-- **Habits** — Recurring habit tracker with calendar view and streak stats
+- **Today** — Aggregated daily view: focus TODOs, due habits, flashcard reviews, upcoming birthdays
+- **Projects & Tasks** — Project boards with task workflows (todo → in-progress → review → approved)
+- **TODOs** — Categorised to-do lists with snooze, priority, deadlines, and sharing
+- **Habits** — Recurring habit tracker with calendar view, streak stats, and sharing
 - **Flashcards** — Spaced-repetition flashcards and text revision decks
-- **Lists** — Generic lists for anything that doesn't fit elsewhere
+- **Lists** — Shareable lists for anything that doesn't fit elsewhere
 - **Vestiaire** — Wardrobe inventory tracker
 - **Birthdays** — Birthday reminders with avatar photos
+- **Sharing** — Share TODOs, habits, and lists with groups (Supabase backend)
+
+## Highlights
+
+- PWA — install on any device, works offline via service worker + IndexedDB cache
+- Internationalised — English, French, Spanish
+- Dark and light themes
+- Drag-and-drop reorder, inline editing, keyboard shortcuts across all pages
+- AI-agent friendly — CODEMAP dependency index + feature contracts for safe automated edits
 
 ## Getting started
 
@@ -29,3 +39,4 @@ Head to the [Setup Guide](setup.md) to pick a backend and start using DeLaClaw i
 
 - [GitHub](https://github.com/AntGro/DeLaClaw)
 - [Live app](https://delaclaw.com)
+- [Docs](https://antgro.github.io/DeLaClaw)

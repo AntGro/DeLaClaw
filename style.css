@@ -2027,7 +2027,7 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-group-disconnected .sharing-group-info h4,
 .sharing-group-disconnected .sharing-group-stats,
 .sharing-group-disconnected .sharing-members{filter:grayscale(0.6);opacity:0.7;}
-.sharing-group-disconnected-stamp{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:3px 10px;border-radius:6px;font-size:0.76rem;font-weight:700;color:#d97706;background:color-mix(in srgb,#d97706 12%,transparent);vertical-align:middle;white-space:nowrap;}
+.sharing-group-disconnected-stamp{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:3px 10px;border-radius:6px;font-size:0.76rem;font-weight:700;color:#fff;background:#e67e22;vertical-align:middle;white-space:nowrap;}
 .sharing-group-disconnected-stamp svg{width:14px;height:14px;flex-shrink:0;}
 .sharing-invite-row{display:flex;gap:6px;margin-bottom:8px;}
 .sharing-invite-input{flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--settings-bg);color:var(--text);font-size:0.9rem;}

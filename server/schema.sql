@@ -1,7 +1,7 @@
 -- Last — local SQLite schema (mirrors Supabase tables)
 
 CREATE TABLE IF NOT EXISTS projects (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   name TEXT NOT NULL,
   shortname TEXT,
   color TEXT,

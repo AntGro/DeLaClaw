@@ -573,8 +573,6 @@ async function deleteTask(id) {
 function addProjectModalHTML() {
   return `<div class="modal">
     <h2>${lucideIcon('plus', 20)} ${t('projects.add_project')}</h2>
-    <label>${t('projects.slug')} (${t('projects.slug_hint')})</label>
-    <input type="text" id="newProjectId" placeholder="${t('projects.slug_placeholder')}">
     <label>${t('projects.display_name')}</label>
     <input type="text" id="newProjectName" placeholder="${t('projects.name_placeholder')}">
     <label>${t('projects.shortname')} (${t('projects.shortname_hint')})</label>
@@ -656,7 +654,6 @@ function initProjectModals() {
 function openAddProjectModal() {
   const modal = document.getElementById('addProjectModal');
   modal.innerHTML = addProjectModalHTML();
-  document.getElementById('newProjectId').value = '';
   document.getElementById('newProjectName').value = '';
   document.getElementById('newProjectShortname').value = '';
   document.getElementById('newProjectColor').value = nextPaletteColor(state.PROJECTS);
@@ -664,7 +661,7 @@ function openAddProjectModal() {
   document.getElementById('newProjectGithub').value = '';
   document.getElementById('newProjectLive').value = '';
   modal.classList.add('visible');
-  document.getElementById('newProjectId').focus();
+  document.getElementById('newProjectName').focus();
 }
 
 function closeAddProjectModal() {
@@ -677,7 +674,6 @@ document.addEventListener('click', e => {
 });
 
 async function saveNewProject() {
-  const id = document.getElementById('newProjectId').value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
   const name = document.getElementById('newProjectName').value.trim();
   const shortname = document.getElementById('newProjectShortname').value.trim() || null;
   const color = document.getElementById('newProjectColor').value;
@@ -685,8 +681,7 @@ async function saveNewProject() {
   const github = document.getElementById('newProjectGithub').value.trim();
   const live = document.getElementById('newProjectLive').value.trim();
 
-  if (!id || !name) { showToast(t('toast.name_required'), 'error'); return; }
-  if (state.PROJECTS.find(p => p.id === id)) { showToast(t('projects.id_exists'), 'error'); return; }
+  if (!name) { showToast(t('toast.name_required'), 'error'); return; }
 
   const links = [];
   if (github) links.push({ label: 'GitHub', url: github });
@@ -694,7 +689,7 @@ async function saveNewProject() {
 
   const maxOrder = state.PROJECTS.length > 0 ? Math.max(...state.PROJECTS.map(p => p.sort_order || 0)) + 1 : 0;
 
-  const { error } = await state.db.from('projects').insert({ id, name, shortname, color, tech, links, sort_order: maxOrder });
+  const { error } = await state.db.from('projects').insert({ id: crypto.randomUUID(), name, shortname, color, tech, links, sort_order: maxOrder });
   if (error) { showToast(t('toast.failed_to_add') + ': ' + (error.message || ''), 'error'); return; }
 
   closeAddProjectModal();

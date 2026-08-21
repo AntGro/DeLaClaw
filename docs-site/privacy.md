@@ -33,11 +33,16 @@ Sharing is entirely opt-in. If you do not enable sharing, no data is exchanged w
 
 ## What DeLaClaw does not do
 
-- **No analytics.** No usage tracking, no page view counting, no event logging.
 - **No telemetry.** The app sends no data to any DeLaClaw-operated service.
 - **No cookies.** DeLaClaw does not set any cookies.
 - **No third-party tracking.** No Google Analytics, no Meta Pixel, no advertising scripts.
 - **No user accounts on our side.** There is no DeLaClaw account system. Authentication is handled entirely by your chosen backend (Supabase auth, or none for local/demo).
+
+## Analytics
+
+The hosted version at `delaclaw.com` includes **Cloudflare Web Analytics**, a privacy-focused analytics service that collects aggregate page-view metrics (no cookies, no client-side state, no personal data, no cross-site tracking). See [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/). If you self-host DeLaClaw, no analytics script is included unless you add one yourself.
+
+DeLaClaw also records a `daily_visits` table in your own database (one row per day you open the app) to power the usage statistics shown in Settings. This data stays entirely in your chosen backend — it is never sent to any external service.
 
 ## What is stored in your browser
 
@@ -56,10 +61,11 @@ When using DeLaClaw, your browser makes requests to:
 - **Your Supabase project** (if using Supabase mode): API calls to your own database.
 - **Google Identity Services** (`accounts.google.com/gsi/client`) (if using Google Drive mode): OAuth token flow for Drive authentication. Subject to [Google's privacy policy](https://policies.google.com/privacy).
 - **Google Drive API** (`www.googleapis.com`) (if using Google Drive mode): reading and writing your data files and shared folders. Subject to [Google's privacy policy](https://policies.google.com/privacy).
-- **Google Static** (`www.gstatic.com`): Google Drive logo image on the login screen.
+- **Google Static** (`www.gstatic.com`): Google Identity Services scripts used during Google Drive authentication. Subject to [Google's privacy policy](https://policies.google.com/privacy).
 - **Google Fonts** (`fonts.googleapis.com`): to load the DM Sans typeface. Subject to [Google's privacy policy](https://policies.google.com/privacy).
-- **jsDelivr CDN** (`cdn.jsdelivr.net`): to load the Supabase JS client and Three.js. Subject to [jsDelivr's privacy policy](https://www.jsdelivr.com/terms/privacy-policy-jsdelivr-net).
+- **Cloudflare Web Analytics** (`static.cloudflareinsights.com`): aggregate page-view metrics on the hosted version (no cookies, no personal data). Subject to [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
 - **GitHub Pages** (`delaclaw.com`): serves the static app files if you use the hosted version. Subject to [GitHub's privacy policy](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
+- **Cloudflare Pages** (`dev.delaclaw.pages.dev`): serves the development preview. Subject to [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
 
 No other external requests are made.
 

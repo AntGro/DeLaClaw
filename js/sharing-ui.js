@@ -161,7 +161,7 @@ export async function renderSharingPane() {
     const isDisconnected = healthStatus !== 'healthy';
     const disconnectedClass = isDisconnected ? ' sharing-group-disconnected' : '';
     const disconnectedStamp = isDisconnected
-      ? `<span class="sharing-group-disconnected-stamp">${lucideIcon('wifi-off', 14)} ${t('sharing.group_disconnected')}</span>`
+      ? `<span class="sharing-group-disconnected-stamp">${lucideIcon('wifi-off', 14, 'currentColor')} ${t('sharing.group_disconnected')}</span>`
       : '';
 
     html += `<div class="sharing-group-card${disconnectedClass}">

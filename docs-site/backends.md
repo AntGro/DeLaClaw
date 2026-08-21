@@ -9,7 +9,7 @@ DeLaClaw supports four backend adapters. This document is the single source of t
 | Backend | Storage | Auth | Sync | Offline | Agent support |
 |---------|---------|------|------|---------|---------------|
 | **Supabase** | Postgres (cloud) | Anon key | Realtime (websocket) | IndexedDB cache | ✅ Full (REST API) |
-| **Google Drive** | Per-table JSON files | OAuth 2.0 | None (single-device) | In-memory only | ⚠️ Via per-table JSON (see §8) |
+| **Google Drive** | Per-table JSON files | OAuth 2.0 | 30s polling (single-user) | In-memory only | ✅ Via per-table JSON (see §8) |
 | **Local** | SQLite (Bun server) | None | None (single-device) | N/A (is local) | ⚠️ Possible via REST |
 | **Demo** | In-memory | None | None | N/A | ❌ |
 
@@ -87,11 +87,11 @@ These **must stay in sync**. The `draft` status bug (v1.105) was caused by the d
 
 |  | **Supabase** | **Google Drive** | **Local (Bun + SQLite)** | **Demo** |
 |---|---|---|---|---|
-| **Adapter** | `supabase.js` (31 lines) — thin pass-through to `@supabase/supabase-js` | `drive.js` — wraps the demo adapter with per-table Drive persistence, ETag-based conflict resolution, and polling for external changes | `rest.js` (153 lines) — plain HTTP client with chainable PostgREST-like API | `demo.js` (292 lines) — full in-memory query builder with CHECK constraints |
+| **Adapter** | `supabase.js` — thin pass-through to `@supabase/supabase-js` | `drive.js` — wraps the demo adapter with per-table Drive persistence, ETag-based conflict resolution, and polling for external changes | `rest.js` — plain HTTP client with chainable PostgREST-like API | `demo.js` — full in-memory query builder with CHECK constraints |
 | **Architecture** | Direct Postgres queries via Supabase JS client | Stores one JSON file per table in a `DeLaClaw/` Drive folder. Reads/writes hit in-memory store (instant). Debounced per-table write-back flushes to Drive after 2s of inactivity. Polls Drive every 30s for external changes | `server/server.js` — Bun REST server + static file server. SQLite schema applied on startup via `CREATE TABLE IF NOT EXISTS` | Seeded with localized sample data from `demo-data.js` (EN/FR/ES). All operations run against in-memory JS objects. Nothing persists across refresh |
 | **Auth** | **Since 1.300: mandatory magic-link**. Anon key still in Bearer header, but RLS is `owner only` (`owner_id = auth.uid()`). `set_owner_id()` + `claim_ownership()`. Invites store `token_hash=SHA256` + `expires_at` 24h + `revoked_at` (1.301) | Google OAuth 2.0 via Google Identity Services. Scope: `drive.file` (only files created by the app). "Stay connected" triggers silent re-auth on reload (`prompt: ''`); clears credentials on failure | None. ⚠️ Server binds to `0.0.0.0` by default, exposing the API to the local network | None |
 | **Session** | Auth session (access+refresh 1y) + `sync_secret` 32B (`localStorage`) encrypts `joined_groups` token+anon_key via AES-GCM (1.301) — KEK = SHA256(refresh_token) via `js/crypto-sync.js` | Token in memory. "Stay connected" saves client ID to localStorage | N/A | N/A |
-| **Realtime / Sync** | `postgres_changes` websocket subscription. Fires on INSERT/UPDATE/DELETE → calls `refreshAll()` or specific `refresh*()`. Edits in progress protected by `isEditing()` guard. Requires `supabase_realtime` publication (migration `1.099`) | Polls Drive every 30s via `files.list` — re-fetches only tables whose `modifiedTime` changed. Skips locally-dirty tables. External change callback available for UI refresh | None. Single-server, single-device | N/A |
+| **Realtime / Sync** | `postgres_changes` websocket subscription. Fires on INSERT/UPDATE/DELETE → calls `refreshAll()` or specific `refresh*()`. Edits in progress protected by `isEditing()` guard. Requires `supabase_realtime` publication (migration `1.099`) | Polls Drive every 30s via `files.list` — re-fetches only tables whose `modifiedTime` changed. Skips locally-dirty tables. External change callback available for UI refresh. Immediate poll also fires on tab focus / `visibilitychange` → visible | None. Single-server, single-device | N/A |
 | **Offline** | `offline-cache.js` wrapper. Network failure → IndexedDB cache serves reads, writes fail silently, "Offline — read-only" banner. Cache scoped by `{mode}:{url}`. Tables in `EXCLUDE` set (`prompts`, `nvidia_usage`) not cached. No write queue — changes while offline are lost | None. Initial Drive fetch failure → connect fails. Mid-session flush failure → changes lost on reload | N/A — data is local. Server process dying → connection errors | N/A |
 | **Agent support** | ✅ Full. Claw agent reads/writes via REST API with same anon key. Heartbeat picks up `status=todo` / `status=revision` tasks | ✅ Agent reads/writes individual per-table JSON files via Drive API. Concurrent edits on different tables can't conflict. Same-table conflicts resolved via ETag optimistic locking (412 → merge by id, newer `updated_at` wins) | ⚠️ Possible in theory — REST API matches PostgREST shape. Not currently wired | ❌ N/A |
 | **Storage limits** | Free tier: 500 MB DB, 1 GB file storage, 2 GB bandwidth/month, 50 MB max upload. Row count unlimited | Free tier: 15 GB shared across Gmail/Drive/Photos. DeLaClaw JSON typically < 1 MB | SQLite limit: ~281 TB. Effectively unlimited | N/A |
@@ -167,7 +167,7 @@ A write queue (store pending writes in IndexedDB, replay on reconnect) would mak
 ### Supabase: Realtime
 
 - Uses Supabase Realtime `postgres_changes` websocket channel.
-- Subscribes to all data tables on connect (see `js/main.js` line ~882).
+- Subscribes to all data tables on connect (see `js/main.js` realtime setup).
 - On change: calls `refreshAll()` or the specific `refresh*()` function.
 - **Edit guard:** `isEditing()` prevents incoming changes from clobbering an active inline edit.
 - **Requirement:** Tables must be in the `supabase_realtime` publication. Migration `1.099` adds them.
@@ -295,7 +295,7 @@ Options:
 | Auth | **Since 1.300**: magic-link mandatory (`auth.uid()`), anon key in Bearer header but worthless without session | Google OAuth | None | None |
 | Encryption in transit | HTTPS | HTTPS | HTTP (localhost) | N/A |
 | Encryption at rest | Supabase-managed + client-side AES-GCM for `joined_groups` (sync_secret, KEK=SHA256(refresh_token)) since 1.301 | Google-managed | None | N/A |
-| Access control | **Owner-only RLS** `owner_id=auth.uid()` (1.300) on 13 tables + `joined_groups`; Sharing RPCs check `token_hash`+expiry+revocation (1.301) | `drive.file` scope | None — **open API** | N/A |
+| Access control | **Owner-only RLS** `owner_id=auth.uid()` (1.300) on all personal tables + `joined_groups`; Sharing RPCs check `token_hash`+expiry+revocation (1.301) | `drive.file` scope | None — **open API** | N/A |
 | Invite token storage | `token_hash=SHA256` + 24h expiry + `revoked_at` (1.301). Plaintext `token` column kept for compat but not used for lookups | N/A | N/A | N/A |
 | Key exposure | Anon key in invite envelope `{u,k,g,t}` — now safe because RLS requires auth.uid() | OAuth token in memory + scoped by clientId + dedup promise | N/A | N/A |
 
@@ -318,7 +318,7 @@ Options:
 
 ### Static tests (every commit)
 
-- **Test 31: CHECK constraint parity.** Verifies `demo.js CHECK_CONSTRAINTS` match `supabase_schema.sql` CHECK constraints. Catches drift between adapters.
+- **CHECK constraint parity test.** Verifies `demo.js CHECK_CONSTRAINTS` match `supabase_schema.sql` CHECK constraints. Catches drift between adapters.
 
 ### Integration tests (Playwright + local Bun server)
 
@@ -348,20 +348,29 @@ Tables tracked in `BACKUP_TABLES` (import order):
 
 | Table | Purpose | FK dependencies |
 |-------|---------|-----------------|
+| `todo_categories` | TODO category containers | — |
+| `habit_categories` | Habit category containers | — |
+| `vestiaire_categories` | Wardrobe category containers | — |
+| `flashcard_decks` | Flashcard deck containers | — |
 | `projects` | Project cards | — |
 | `habits` | Habit definitions | — |
 | `texts` | Long-form texts | — |
 | `lists` | User-created lists | — |
-| `todos` | TODO items | — |
+| `todos` | TODO items | `todo_categories.id` |
 | `tasks` | Project tasks | `projects.id` |
 | `habit_completions` | Habit check-ins | `habits.id` |
-| `flashcards` | Flashcard Q/A pairs | — |
+| `flashcards` | Flashcard Q/A pairs | `flashcard_decks.id` |
 | `flashcard_notes` | Draft flashcard proposals | — |
 | `text_line_progress` | Reading progress per line | `texts.id` |
 | `birthdays` | Birthday tracker | — |
-| `vestiaire` | Wardrobe items | — |
+| `vestiaire` | Wardrobe items | `vestiaire_categories.id` |
 | `list_items` | Items within lists | `lists.id` |
 | `settings` | App settings (key/value) | — |
 | `prompts` | AI prompts (global + per-project) | — |
 | `nvidia_usage` | LLM API usage tracking | — |
 | `daily_visits` | Daily visit log | — |
+| `sharing_groups` | Shared group definitions | — |
+| `sharing_members` | Group membership | `sharing_groups.id` |
+| `sharing_items` | Shared items (TODOs, habits, list items) | `sharing_groups.id` |
+| `joined_groups` | Groups the user has joined | — |
+| `agent_grants` | AI agent permission grants | — |

@@ -11,12 +11,12 @@ User jobs:
 
 ## Entry & Ownership
 - **Entry:** `js/agents-ui.js`
-- **State:** transient `_lastCreatedToken`, `_lastCreatedPrompt` (in-memory only, never persisted raw)
+- **State:** transient `_lastCreatedToken`, `_lastCreatedPrompt` (closure-local, never persisted raw)
 - **Tables:** `agent_grants` (id UUID PK, owner_id, display_name, token_hash UNIQUE, scope='full', last_used_at, expires_at, revoked_at, created_at)
-- **CODEMAP:** `core[agents-ui]` — see CODEMAP.json for current stats
+- **CODEMAP:** `core[agents-ui]` — see CODEMAP.json for current loc, esc_count, i18n_count, guards
 
 ## Dependencies
-- **Depends on:** `db` (proxy), `i18n` (t()), `icons` (lucideIcon), `state` (STAY_CONNECTED_KEY), `utils` (esc, toast, delete confirm)
+- **Depends on:** `db` (proxy), `i18n` (t()), `icons` (lucideIcon + brandFileIcon for agent brand SVGs), `state` (STAY_CONNECTED_KEY), `utils` (esc, toast, delete confirm)
 - **Dependents (blast radius):** `main.js` → `switchSettingsPane()` + delegation fallback; editing RLS affects 18 personal tables
 
 ## UI / UX
@@ -26,16 +26,17 @@ User jobs:
   - `.page-empty-state` for demo / no tokens
   - `.settings-data-btn` + `.sharing-group-card` for token rows
   - `.setting-group-label`, `.setting-hint` for explainer
+  - `.agent-name-pill` — quick-select pills with `brandFileIcon` brand icons for known agents (Claude Code, Codex CLI, OpenClaw, Hermes, NanoClaw, Grok Bot, Cursor, Aider); click prefills display name input via `agentsPrefillName`
 - **Copy UX:** textarea readonly `min-height:260px` monospace, select-on-render, two buttons: Copy setup + Copy token only
 - **Demo guard:** if `localStorage.claw_cc_active_mode==='demo'` → show empty state, no token creation
 
 ## Interaction Guards
-- **Create:** disables button `disabled=true` + opacity 0.5 until fulfilled (`agentsCreate`)
-- **Revoke:** via `showDeleteConfirm` → `executeDeleteConfirm` which is `guard()`'d in `main.js` (global inFlight). Allows same-ID double-click block, but different-ID concurrent revokes serialized (could add per-ID Set `_pendingAgentRevokes` like todos/habits).
-- **Button contract:** `data-action="agents-create"` / `data-action="agents-revoke" data-id` + kebab→camelCase fallback in `delegation.js`
+- **Create:** manual disable (`disabled=true` + `opacity:0.5`) on button until fulfilled — no `guard()` or pendingSet in agents-ui itself
+- **Revoke:** via `showDeleteConfirm` → `executeDeleteConfirm` which is `guard()`'d in `main.js` (global inFlight)
+- **Button contract:** `data-action="agents-create"` / `data-action="agents-revoke" data-id` routed via `delegation.js`
 
 ## Security
-- **XSS:** esc_count 32 — wrap `display_name`, `id`, `created_at`, `last_used_at`, `creds.url/key` slice in `esc()`
+- **XSS:** see CODEMAP for current esc_count — wrap `display_name`, `id`, `created_at`, `last_used_at`, `creds.url/key` slice in `esc()`
 - **Token storage:** `token_hash = encode(digest(token::text,'sha256'::text),'hex')` UNIQUE, raw never stored. Client generates 32-byte `crypto.getRandomValues` hex if RPC unavailable, hashed via `crypto.subtle.digest('SHA-256')`
 - **RLS:**
   - `agent_grants`: `owner only` — `FOR ALL USING owner_id=auth.uid() WITH CHECK owner_id=auth.uid()`
@@ -45,7 +46,7 @@ User jobs:
 - **Risks:** token leak via clipboard/history, edge logs may capture header — docs warn "copy once, paste privately"
 
 ## i18n
-- **Prefix:** `agents.` — 29+ keys EN/FR/ES
+- **Prefix:** `agents.` — see CODEMAP for current key count (EN/FR/ES)
 - Keys: `title`, `nav`, `description_friendly`, `create_title`, `create_hint_friendly`, `name_placeholder`, `token_created_for`, `copy_prompt_hint`, `how_it_works_body`, `missing_creds_hint`
 - All UI via `t()`, placeholder via `esc(t(...))`
 

@@ -113,6 +113,9 @@ const db = {
     return _adapter.rpc(fn, params);
   },
 
+  /** No-op passthrough — batch() was removed from the Drive adapter (v1.729)
+   *  but kept here as a safe fallback so any remaining caller doesn't crash. */
+  async batch(fn) { return fn(); },
 };
 
 export default db;

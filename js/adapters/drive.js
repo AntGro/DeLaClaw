@@ -625,13 +625,18 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     if (saveTimers[table]) clearTimeout(saveTimers[table]);
     updateSyncBarState(); // show orange (pending)
     saveTimers[table] = setTimeout(async () => {
-      dirtyTables.delete(table);
       delete saveTimers[table];
       syncStart(); // show blue (uploading)
       let _err = false;
-      try { await flushTable(table); }
-      catch (e) { _err = true; console.error(`Drive: debounced flush failed for ${table}`, e); }
-      finally { syncEnd(_err); }
+      try {
+        await flushTable(table);
+        dirtyTables.delete(table); // only clear dirty after successful flush
+      } catch (e) {
+        _err = true;
+        console.error(`Drive: debounced flush failed for ${table}`, e);
+        // Re-schedule retry — table stays in dirtyTables, bar will show orange
+        scheduleSave(table);
+      } finally { syncEnd(_err); }
     }, DEBOUNCE_MS);
   }
 
@@ -701,12 +706,15 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   function updateSyncBarState() {
     const bar = ensureSyncBar();
-    if (_syncErrorTimeout) return; // error state holds until timeout clears it
     bar.classList.remove('synced', 'pending', 'active', 'error');
     if (_syncCount > 0) {
       bar.classList.add('active');
+      // New upload started — cancel lingering error display
+      if (_syncErrorTimeout) { clearTimeout(_syncErrorTimeout); _syncErrorTimeout = null; }
     } else if (dirtyTables.size > 0 || Object.keys(saveTimers).length > 0) {
       bar.classList.add('pending');
+      // New pending work — cancel lingering error display
+      if (_syncErrorTimeout) { clearTimeout(_syncErrorTimeout); _syncErrorTimeout = null; }
     } else {
       bar.classList.add('synced');
     }

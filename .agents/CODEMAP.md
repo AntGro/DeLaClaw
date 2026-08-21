@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-08-20T23:49:35.124Z from 38 modules (v1.730). Total LOC 29988. Do not hand-edit.
+> Generated 2026-08-21T10:06:57.831Z from 38 modules (v1.731). Total LOC 29999. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -34,7 +34,7 @@
 | sharing-ui | 1239 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:41,pendingSet,window:8 |
 | item-utils | 1174 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,demo-chooser.js,flashcards.js | - |
 | utils | 935 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:6 |
-| drive | 844 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
+| drive | 852 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 459 | - | i18n,icons,utils | - | - |
 | delegation | 430 | - |  | - | window:1 |
@@ -48,7 +48,7 @@
 | storm3d | 185 | - |  | hero.js | - |
 | rest | 154 | x |  | main.js | - |
 | sharing-interface | 124 | - |  | sharing.js | - |
-| db | 119 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
+| db | 122 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
 | sharing-envelope | 73 | - |  | sharing-drive.js,sharing-supabase.js,sharing-ui.js | - |
 | sharing | 64 | - | sharing-drive,sharing-interface | - | - |
 | state | 54 | - | db | agents-ui.js,birthdays.js,flashcards.js,habits.js | window:1 |

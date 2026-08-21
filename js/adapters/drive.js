@@ -706,7 +706,10 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
       if (toFetch.length === 0) return;
 
-      await Promise.all(toFetch.map(async ({ file, tableName }) => {
+      syncStart(); // show blue while downloading external changes
+      let _err = false;
+      try {
+        await Promise.all(toFetch.map(async ({ file, tableName }) => {
         const { data, etag } = await downloadFile(tok, file.id);
         const newData = Array.isArray(data) ? data : [];
         const oldData = inner._store[tableName] || [];
@@ -721,6 +724,8 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
           fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
         }
       }));
+      } catch (e) { _err = true; throw e; }
+      finally { syncEnd(_err); }
     } catch (e) {
       console.warn('Drive: poll failed', e);
     }

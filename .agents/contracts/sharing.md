@@ -12,18 +12,18 @@ User jobs:
 - view shared items inline alongside personal items
 
 ## Architecture Overview
-Five modules, layered:
+Six modules, layered:
 - `sharing-interface.js` — canonical method contract; `validateSharingAdapter()` enforces at init
 - `sharing-envelope.js` — invite code encode/decode (`DLC1.<base64url JSON>`)
 - `sharing-supabase.js` — Supabase adapter implementing `SharingInterface`
-- `sharing-ui.js` — settings pane, share popovers, badges, completion modals
-- `sharing.js` — factory that picks adapter (Supabase or Drive) and validates it
+- `sharing-ui.js` — settings pane, share popovers, badges, join picker, completion modals
+- `sharing.js` — factory that picks adapter and validates it
 - `crypto-sync.js` — client-side encryption for joined-group credentials in `joined_groups`
 
 ## Entry & Ownership
 - **Entry:** `js/sharing-ui.js` (UI), `js/sharing-supabase.js` (adapter), `js/sharing.js` (factory)
 - **State:** `state.sharing` (adapter instance or null), `state.authUser`
-- **Tables:** `sharing_groups`, `sharing_members`, `sharing_items` (on group creator's Supabase); `joined_groups` (on each member's own DB)
+- **Tables:** `sharing_groups`, `sharing_members`, `sharing_items` (on group creator's Supabase); `joined_groups` (on each member's own DB). `sharing-ui` also reads `habit_categories`, `habit_completions`, `habits`, `todo_categories`, `todos`, `list_items` for category assignment and sync rendering
 - **CODEMAP:** `core[sharing-ui]`, `core[sharing-supabase]`, `core[sharing]`, `core[sharing-interface]`, `core[sharing-envelope]` — see CODEMAP.json for current stats
 
 ## Dependencies
@@ -53,6 +53,13 @@ Five modules, layered:
 ## Interaction Guards
 - **sharing-ui:** pendingSet per CODEMAP. Share/unshare popovers disable buttons until fulfilled
 - **sharing-supabase:** pendingSet. `_pendingJoin` state machine for two-phase join (verify → confirm)
+
+## UI Actions
+- **Settings pane:** create group, delete group, invite member, revoke member, leave group, unjoin group, edit own display name, toggle revoked member visibility (`toggleRevokedMembers`)
+- **Join picker:** `sharingOpenJoinPicker` — method picker for joining (paste invite code or open invite link)
+- **Share popovers:** `submitSharePopover` — share/unshare items to groups; `sharePopoverOpenSharing` — no-groups hint links to Settings → Sharing
+- **Clipboard:** `sharingCopyCode` / `sharingCopyLink` / `sharingCopyMemberCode` / `sharingCopyMemberLink` — copy invite code or link to clipboard
+- **Completion modal:** `sharingCompleteSubmit` — submit shared habit/todo completions with attribution
 
 ## RPCs (SECURITY DEFINER)
 All RPCs validate token hash, joined status, and non-revoked before proceeding:
@@ -89,9 +96,8 @@ All RPCs validate token hash, joined status, and non-revoked before proceeding:
 - **Shared habit `next_due` — write-once, read on refresh:** `next_due` is computed at write time (mark done, edit frequency, edit last-done, etc.) and published to the shared item payload via `updateSharedHabit`. Recipients read `sh.next_due` from shared storage during `refreshHabits()` — no local recomputation. A null `sh.next_due` clears the local pointer's stale value
 
 ## Adapter & Backend
-- Adapter pattern: `sharing.js` factory creates Supabase or Drive adapter, validates via `SHARING_INTERFACE`
+- Adapter pattern: `sharing.js` factory creates adapter and validates via `SHARING_INTERFACE`
 - All view code (`todos.js`, `habits.js`, `lists.js`) talks to `state.sharing` abstraction, never directly to Supabase
-- Drive sharing exists but shows "coming soon" in UI — not yet functional for cross-user sync
 
 ## Cross-Feature Edges
 - **todos.js:** `syncSharedTodos()` merges shared items into `state.allTodos`; shared badge via `sharedBadge()`

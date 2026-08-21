@@ -85,7 +85,14 @@ const state = {
   allListItems: [],          // list item objects
   currentView: 'projects',   // active tab
   offlineMode: false,         // true when serving cached data
+  pausedMode: false,          // true when sync is paused
   dbSchemaVersion: '0.000',   // from settings table
+  sharing: null,              // sharing adapter instance
+  authUser: null,             // authenticated user object
+  tabVisibility: null,        // {key: bool} from settings DB
+  tabOrder: null,             // [key, …] from settings DB
+  archivedProjectIds: [],     // [id, …] from settings DB
+  showArchived: false,        // bool from settings DB
   // ...
 };
 ```
@@ -96,21 +103,25 @@ There is no virtual DOM, no reactivity system, and no framework state management
 
 ## Database schema
 
-22 tables on Supabase, 19 on Local SQLite (sharing server tables are Supabase-only):
+The canonical table list lives in `server/schema.sql` (Local SQLite base schema) and `migrations/1.484_sharing_ownership_categories.sql` (Supabase-only tables). Supabase has all local tables plus sharing and auth-guard tables.
 
 | Table | Purpose | Key relationships | Backend |
 |---|---|---|---|
 | `projects` | Project metadata (name, color, links, sort order) | -- | All |
 | `tasks` | Tasks within projects | `project` -> `projects.id` | All |
-| `todos` | Standalone TODOs with priority and due dates | -- | All |
-| `habits` | Habit definitions with scheduling rules | -- | All |
+| `todos` | Standalone TODOs with priority and due dates | `category_id` -> `todo_categories.id` | All |
+| `todo_categories` | TODO category containers | -- | All |
+| `habits` | Habit definitions with scheduling rules | `category_id` -> `habit_categories.id` | All |
+| `habit_categories` | Habit category containers | -- | All |
 | `habit_completions` | Completion log for habits | `habit_id` -> `habits.id` | All |
-| `flashcards` | SRS flashcards with FSRS scheduling data | -- | All |
+| `flashcards` | SRS flashcards with FSRS scheduling data | `deck_id` -> `flashcard_decks.id` | All |
+| `flashcard_decks` | Flashcard deck containers | -- | All |
 | `flashcard_notes` | Draft notes with AI proposal workflow | -- | All |
 | `texts` | Full texts for memorization (chunked) | -- | All |
 | `text_line_progress` | Per-chunk SRS progress for texts | `text_id` -> `texts.id` | All |
 | `birthdays` | Birthday records with optional avatars | -- | All |
-| `vestiaire` | Wardrobe inventory | -- | All |
+| `vestiaire` | Wardrobe inventory | `category_id` -> `vestiaire_categories.id` | All |
+| `vestiaire_categories` | Wardrobe category containers | -- | All |
 | `lists` | Checklist containers | -- | All |
 | `list_items` | Items within lists | `list_id` -> `lists.id` | All |
 | `settings` | Key-value store (schema version, preferences) | -- | All |
@@ -122,6 +133,13 @@ There is no virtual DOM, no reactivity system, and no framework state management
 | `sharing_groups` | Shared group definitions | -- | Supabase only |
 | `sharing_members` | Group membership with hashed invite tokens | `group_id` -> `sharing_groups.id` | Supabase only |
 | `sharing_items` | Shared items (TODOs, habits, list items) | `group_id` -> `sharing_groups.id` | Supabase only |
+| `auth_email_guard` | Single-owner email lock (see Security) | -- | Supabase only |
+
+### Category integrity
+
+Each category/deck table has one protected default row (`name=''`, `is_protected=1`). A `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item foreign keys (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user-created category deletes all its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to group members.
+
+### CHECK constraints
 
 CHECK constraints are enforced at the database level:
 - `tasks.status`: `todo`, `in-progress`, `review`, `approved`, `revision`
@@ -228,7 +246,9 @@ The pre-commit hook (`.githooks/pre-commit`):
 2. Validates the `latest_compat_deprec <= latest_compat <= latest` invariant
 3. Regenerates `js/version.js` with exported constants
 4. Updates `CACHE_VERSION` in `sw.js`
-5. Stages both generated files
+5. Regenerates `.agents/CODEMAP.json` and `.agents/CODEMAP.md` from source
+6. Stages all generated files
+7. Prints an impact hint from CODEMAP `dependents` to help fill the `Checked:` trailer
 
 Schema version is stored in the `settings` table (`key = 'schema_version'`). The app compares it against `latest_compat` and `latest_compat_deprec` at startup, showing a warning banner if the database is behind.
 
@@ -286,13 +306,19 @@ js/
 
 server/
   server.js                Bun HTTP server (PostgREST-compatible API)
-  schema.sql               SQLite schema (19 tables)
+  schema.sql               SQLite base schema
 
-migrations/                Incremental schema migrations (21 files)
+migrations/                Incremental schema migrations
 tests/
-  tests.js                 179 tests (unit + adapter + integration + e2e)
+  tests.js                 Unit + adapter + integration + guard tests
+icons/
+  brand/                   Self-hosted brand SVGs (thesvg.org + dashboard-icons)
+.agents/
+  CODEMAP.json             Auto-generated dependency index (see AGENTS.md §1.4)
+  CODEMAP.md               Human-readable matrix summary
+  contracts/               Feature contracts (business invariants per feature)
 .githooks/
-  pre-commit               VERSION enforcement + code generation
+  pre-commit               VERSION enforcement + CODEMAP regeneration + impact hint
 ```
 
 ## Internationalization
@@ -303,4 +329,10 @@ Language is stored in `localStorage` and can be changed in Settings. The `t()` f
 
 ## Drag-and-drop
 
-`js/item-utils.js` provides reusable drag-and-drop reordering. Items are repositioned via `sort_order` updates. The implementation uses native HTML drag events with custom styling during the drag operation.
+`js/item-utils.js` provides reusable drag-and-drop reordering via long-press (100ms threshold). Both category nav buttons and bucket items (TODOs, Projects, Vestiaire, Lists, Flashcard drafts) share the same UX:
+
+- **Activation**: long-press on touch/pointer (`LONG_PRESS_MS = 100`), not native HTML drag events
+- **Visual**: the real item follows the cursor/finger; a placeholder gap shows the drop position; siblings slide with FLIP animation. No visible drag handles — shadow-only to indicate float
+- **Cross-container**: TODOs, Vestiaire, Projects, Habits, and Lists support dragging items between categories/lists — drop updates the FK and re-numbers `sort_order` in both source and target containers
+- **Persistence**: `sort_order` updates are batched into a single DB write
+- **Auto-scroll**: scrollable containers auto-scroll when dragging near edges

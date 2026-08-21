@@ -5,6 +5,7 @@
   - [Demo Mode](setup.md?id=demo-mode-no-setup)
 - **Reference**
   - [Architecture](architecture.md)
+  - [Sharing](sharing.md)
   - [Backends](backends.md)
   - [Browser Support](browser-support.md)
   - [Performance](performance.md)

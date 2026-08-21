@@ -405,12 +405,57 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   // ── Token refresh helper ──
 
+  let _tokenDead = false;
+  let _reauthPending = false;
+
+  function isUserBusy() {
+    // Inline editing, modal open, or flashcard/text practice active
+    return !!(
+      document.querySelector('.task-edit-input, .todo-edit-wrapper, [data-editing="true"]') ||
+      document.querySelector('.modal-overlay[style*="flex"]') ||
+      document.querySelector('.practice-overlay')
+    );
+  }
+
+  async function proactiveReauth() {
+    if (_reauthPending) return;
+    _reauthPending = true;
+    try {
+      const tok = await getGoogleAccessToken(clientId, true);
+      if (tok) {
+        _tokenDead = false;
+        // Flush any dirty tables now that we have a valid token
+        const tables = [...dirtyTables];
+        for (const t of tables) scheduleSave(t);
+      }
+    } catch {
+      // User dismissed the popup — stay in dead state, retry next flush cycle
+    } finally {
+      _reauthPending = false;
+    }
+  }
+
+  function scheduleReauthWhenFree() {
+    if (!_tokenDead || _reauthPending) return;
+    if (!isUserBusy()) {
+      proactiveReauth();
+    } else {
+      // Check again in 2s until user finishes
+      setTimeout(scheduleReauthWhenFree, 2000);
+    }
+  }
+
   async function getToken() {
     try {
-      return await getGoogleAccessToken(clientId, false);
-    } catch {
-      return _cachedToken;
+      const tok = await getGoogleAccessToken(clientId, false);
+      if (tok) { _tokenDead = false; return tok; }
+    } catch { /* silent refresh failed */ }
+    // Silent refresh failed — token is dead
+    if (!_tokenDead) {
+      _tokenDead = true;
+      scheduleReauthWhenFree();
     }
+    return _cachedToken;
   }
 
   // ── Run pending migrations ──

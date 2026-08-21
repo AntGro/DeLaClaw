@@ -1172,6 +1172,7 @@ export async function createSupabaseSharing(adapter, config) {
       });
       if (error) throw new Error('add_shared_item: ' + error.message);
       const row = Array.isArray(data) ? data[0] : data;
+      if (!row) throw new Error('add_shared_item: group unreachable or no longer exists');
       if (row) {
         const mapped = _mapItem(row);
         _allItems.push(mapped);
@@ -1201,12 +1202,14 @@ export async function createSupabaseSharing(adapter, config) {
     const payload = Object.assign({}, existing?.payload || {}, changes.payload || changes);
 
     if (w.type === 'rpc') {
-      const { error } = await w.client.rpc('update_shared_item', {
+      const { data, error } = await w.client.rpc('update_shared_item', {
         p_token: w.token,
         p_item_id: itemId,
         p_payload: payload,
       });
       if (error) throw new Error('update_shared_item: ' + error.message);
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) throw new Error('update_shared_item: group unreachable or no longer exists');
     } else {
       const { error } = await adapter.from('sharing_items')
         .update({ payload, updated_at: new Date().toISOString() })

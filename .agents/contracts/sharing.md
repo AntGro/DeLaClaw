@@ -77,7 +77,7 @@ All RPCs validate token hash, joined status, and non-revoked before proceeding:
 - `list_item` — shared via `sharing_items`, synced into local `list_items` with `shared_id` pointer
 
 ## Business Invariants
-- **Share-button visibility:** share buttons in TODOs, Habits, and Lists render when `!!state.sharing` (adapter initialized), not when groups exist. This means buttons appear as soon as the user is authenticated on Supabase (and schema ≥ 1.295), even with zero groups
+- **Share-button visibility:** buttons render when `!!state.sharing`, not when groups exist
 - **No-groups popover:** clicking a share button with no groups opens the same `share-popover` container with a hint message and a link to Settings → Sharing (via `sharePopoverOpenSharing`), instead of silently returning
 - **Collaborative editing:** shared items are collaboratively editable — any group member can update or delete any item in a group they belong to, not just items they created
 - **Completion attribution:** completions carry `created_by` (member_id) for attribution. Personal/non-shared items don't need attribution

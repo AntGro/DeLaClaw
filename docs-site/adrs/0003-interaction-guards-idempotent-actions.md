@@ -1,4 +1,4 @@
-# ADR 0003: Interaction guards for idempotent UI actions
+# ADR 0003: Interaction guards for duplicate-safe UI actions
 
 Date: 2026-07-20
 Status: Accepted

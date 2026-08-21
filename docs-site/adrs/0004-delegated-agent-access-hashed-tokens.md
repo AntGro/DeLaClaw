@@ -23,7 +23,7 @@ Contract:
 - Storage: only `token_hash = sha256(token)` UNIQUE is persisted, plus `owner_id`, `scope`, `expires_at`, `revoked_at`, `last_used_at`; plaintext returned once on creation via `create_agent_grant()`
 - Verification: hash the bearer, lookup unrevoked + unexpired grant, check scope, enforce `owner_id`
 - Authorization: `owner only` for management, `owner or agent` for data access where verified agent's `owner_id` equals row's `owner_id`
-- Lifecycle: revocation via `revoke_agent_grant(id)` → `revoked_at`; `last_used_at` throttled (1h)
+- Lifecycle: revocation via `revoke_agent_grant(id)` → `revoked_at`; `last_used_at` throttled (5 min)
 
 Trust model: storage adapter is trusted to verify hash + enforce owner isolation; agent is untrusted, limited by scope/expiry/revocation.
 

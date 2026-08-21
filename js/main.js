@@ -1558,9 +1558,14 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       adapter.forceSave().catch(() => {});
       if (adapter.destroy) adapter.destroy();
     });
-    // Flush when tab goes background (mobile doesn't reliably fire beforeunload)
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') adapter.forceSave().catch(() => {});
+      if (document.visibilityState === 'hidden') {
+        // Flush when tab goes background (mobile doesn't reliably fire beforeunload)
+        adapter.forceSave().catch(() => {});
+      } else if (document.visibilityState === 'visible' && adapter.pollNow) {
+        // Catch up on external changes immediately when tab comes back
+        adapter.pollNow();
+      }
     });
   }
 

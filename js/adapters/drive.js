@@ -891,6 +891,8 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
     startPolling,
     stopPolling,
+    /** Trigger an immediate poll for external changes (e.g. on tab foreground). */
+    pollNow() { pollForChanges().catch(() => {}); },
 
     destroy() {
       stopPolling();

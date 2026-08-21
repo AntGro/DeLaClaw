@@ -196,7 +196,7 @@ export async function createSupabaseSharing(adapter, config) {
     h.attemptsAtCap = 0;
     h.pollStopped = false;
     h.nextPollAt = 0;
-    h.unreachableNotified = false;
+    // Keep unreachableNotified=true — user already knows, don't re-toast
     _notifyUpdate();
   }
 
@@ -615,6 +615,14 @@ export async function createSupabaseSharing(adapter, config) {
     }
 
     _loaded = true;
+
+    // Re-dispatch pending confirmation popups that were lost (e.g. user navigated away)
+    for (const [groupId, h] of Object.entries(_groupHealth)) {
+      if (h.status === 'pending_confirmation') {
+        const groupName = _groupName(groupId);
+        try { document.dispatchEvent(new CustomEvent('sharing-group-deletion-confirm', { detail: { groupId, groupName } })); } catch {}
+      }
+    }
   }
 
   function _mapItem(row) {

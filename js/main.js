@@ -1567,6 +1567,8 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
         adapter.pollNow();
       }
     });
+    // Poll on window focus (catches desktop window switching, not just tab switching)
+    window.addEventListener('focus', () => { if (adapter.pollNow) adapter.pollNow(); });
   }
 
   document.getElementById('gate').style.display = 'none';

@@ -1172,7 +1172,7 @@ export async function createSupabaseSharing(adapter, config) {
       });
       if (error) throw new Error('add_shared_item: ' + error.message);
       const row = Array.isArray(data) ? data[0] : data;
-      if (!row) throw new Error('add_shared_item: group unreachable or no longer exists');
+      if (!row) throw new Error('This group is no longer available');
       if (row) {
         const mapped = _mapItem(row);
         _allItems.push(mapped);
@@ -1209,7 +1209,7 @@ export async function createSupabaseSharing(adapter, config) {
       });
       if (error) throw new Error('update_shared_item: ' + error.message);
       const row = Array.isArray(data) ? data[0] : data;
-      if (!row) throw new Error('update_shared_item: group unreachable or no longer exists');
+      if (!row) throw new Error('This group is no longer available');
     } else {
       const { error } = await adapter.from('sharing_items')
         .update({ payload, updated_at: new Date().toISOString() })

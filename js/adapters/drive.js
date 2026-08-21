@@ -422,12 +422,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     _reauthPending = true;
     try {
       const tok = await getGoogleAccessToken(clientId, true);
-      if (tok) {
-        _tokenDead = false;
-        // Flush any dirty tables now that we have a valid token
-        const tables = [...dirtyTables];
-        for (const t of tables) scheduleSave(t);
-      }
+      if (tok) _tokenDead = false;
     } catch {
       // User dismissed the popup — stay in dead state, retry next flush cycle
     } finally {

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-08-21T11:01:54.828Z from 38 modules (v1.734). Total LOC 29999. Do not hand-edit.
+> Generated 2026-08-21T11:12:48.914Z from 38 modules (v1.735). Total LOC 30003. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,7 +27,7 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 4705 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:49,guard+pendingSet,window:8 |
+| main | 4709 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:49,guard+pendingSet,window:8 |
 | i18n | 2262 | - |  | agents-ui.js,birthdays.js,demo-chooser.js,drive.js | pendingSet |
 | sharing-drive | 1402 | - | sharing-envelope,utils | main.js,sharing.js | - |
 | sharing-supabase | 1369 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,sharing-envelope,utils | main.js | pendingSet |

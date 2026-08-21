@@ -1558,6 +1558,10 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       adapter.forceSave().catch(() => {});
       if (adapter.destroy) adapter.destroy();
     });
+    // Flush when tab goes background (mobile doesn't reliably fire beforeunload)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') adapter.forceSave().catch(() => {});
+    });
   }
 
   document.getElementById('gate').style.display = 'none';

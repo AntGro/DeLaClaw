@@ -710,19 +710,27 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     return _syncBar;
   }
 
+  const SYNC_TITLES = {
+    synced: 'All changes saved to Drive',
+    pending: 'Changes waiting to sync',
+    active: 'Uploading to Drive…',
+    error: 'Sync error — retrying'
+  };
+
   function updateSyncBarState() {
     const bar = ensureSyncBar();
     bar.classList.remove('synced', 'pending', 'active', 'error');
     if (_syncCount > 0) {
       bar.classList.add('active');
-      // New upload started — cancel lingering error display
+      bar.title = SYNC_TITLES.active;
       if (_syncErrorTimeout) { clearTimeout(_syncErrorTimeout); _syncErrorTimeout = null; }
     } else if (dirtyTables.size > 0 || Object.keys(saveTimers).length > 0) {
       bar.classList.add('pending');
-      // New pending work — cancel lingering error display
+      bar.title = SYNC_TITLES.pending;
       if (_syncErrorTimeout) { clearTimeout(_syncErrorTimeout); _syncErrorTimeout = null; }
     } else {
       bar.classList.add('synced');
+      bar.title = SYNC_TITLES.synced;
     }
   }
 
@@ -737,6 +745,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       const bar = ensureSyncBar();
       bar.classList.remove('synced', 'pending', 'active');
       bar.classList.add('error');
+      bar.title = SYNC_TITLES.error;
       if (_syncErrorTimeout) clearTimeout(_syncErrorTimeout);
       _syncErrorTimeout = setTimeout(() => { _syncErrorTimeout = null; updateSyncBarState(); }, 2500);
     } else {

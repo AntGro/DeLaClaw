@@ -650,31 +650,37 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       if (!tok) return;
 
       const files = await listFolderFiles(tok, folderId);
+
+      // Collect changed tables, then download in parallel
+      const toFetch = [];
       for (const file of files) {
         const tableName = file.name.replace('.json', '');
         if (!DRIVE_TABLES.includes(tableName)) continue;
         const meta = fileMeta[tableName];
         if (!meta) continue;
-
-        // Skip tables currently being edited locally
         if (dirtyTables.has(tableName) || flushingTables.has(tableName)) continue;
-
         if (meta.modifiedTime && file.modifiedTime > meta.modifiedTime) {
-          const { data, etag } = await downloadFile(tok, file.id);
-          const newData = Array.isArray(data) ? data : [];
-          const oldData = inner._store[tableName] || [];
-
-          // Only update + notify if data actually changed (skip our own writes)
-          if (JSON.stringify(newData) !== JSON.stringify(oldData)) {
-            inner._store[tableName] = newData;
-            fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
-            if (adapter._onExternalChange) adapter._onExternalChange(tableName);
-          } else {
-            // Same data (our own flush reflected back) — update metadata only
-            fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
-          }
+          toFetch.push({ file, tableName });
         }
       }
+
+      if (toFetch.length === 0) return;
+
+      await Promise.all(toFetch.map(async ({ file, tableName }) => {
+        const { data, etag } = await downloadFile(tok, file.id);
+        const newData = Array.isArray(data) ? data : [];
+        const oldData = inner._store[tableName] || [];
+
+        // Only update + notify if data actually changed (skip our own writes)
+        if (JSON.stringify(newData) !== JSON.stringify(oldData)) {
+          inner._store[tableName] = newData;
+          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+          if (adapter._onExternalChange) adapter._onExternalChange(tableName);
+        } else {
+          // Same data (our own flush reflected back) — update metadata only
+          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+        }
+      }));
     } catch (e) {
       console.warn('Drive: poll failed', e);
     }

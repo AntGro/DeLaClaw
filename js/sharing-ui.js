@@ -66,9 +66,9 @@ let _currentUser = null;
 export function updateSharingNavVisibility() {
   const btn = document.getElementById('settingsNavSharingBtn');
   if (!btn) return;
-  // Show sharing nav for Drive users with sharing, or Supabase users (even if not yet authenticated)
+  // Show sharing nav for Drive users with sharing, Supabase users (even if not yet authenticated), or demo
   const activeMode = localStorage.getItem('claw_cc_active_mode');
-  btn.style.display = (state.sharing || activeMode === 'supabase') ? '' : 'none';
+  btn.style.display = (state.sharing || activeMode === 'supabase' || activeMode === 'demo') ? '' : 'none';
 }
 
 /** Render the full sharing settings pane content. */
@@ -84,6 +84,16 @@ export async function renderSharingPane() {
       <div class="auth-icon">${lucideIcon('clock', 28)}</div>
       <h4>${t('sharing.coming_soon')}</h4>
       <p class="auth-inline-hint">${t('sharing.coming_soon_hint')}</p>
+    </div>`;
+    return;
+  }
+
+  // Demo mode — sharing UI is visible but group creation is not available
+  if (activeMode === 'demo') {
+    container.innerHTML = `<div class="auth-inline-prompt">
+      <div class="auth-icon">${lucideIcon('users', 28)}</div>
+      <h4>${t('sharing.demo_title')}</h4>
+      <p class="auth-inline-hint">${t('sharing.demo_hint')}</p>
     </div>`;
     return;
   }

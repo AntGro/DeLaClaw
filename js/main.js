@@ -1408,6 +1408,9 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     state.demoAdapter = adapter;
     state.demoMode = true;
     setDemoCategoriesFromData(demoData);
+    // Initialize sharing stub so share buttons render (groups are gated)
+    const { createSharing } = await import('./sharing.js');
+    state.sharing = await createSharing('demo');
   } else if (mode === 'googledrive') {
     const { createDriveAdapter } = await import('./adapters/drive.js');
     const errEl = document.getElementById('loginError');

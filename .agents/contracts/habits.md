@@ -61,6 +61,7 @@ User jobs:
 - **`updateHabitNextDue` two-mode behavior:**
   - **Completion path** (`earlyGuard: true`, default): if the computed next-due ≤ current due date, recompute from the current due date — early-completion guard (e.g. `weekly:Fri` done on Wednesday → next Friday, not same Friday)
   - **Manual edit path** (`earlyGuard: false`): `next_due = min(currentDue, computedDue)` — due date can move earlier but never double-advances. Used when editing last-done or changing frequency
+- **Completion delete/edit recomputation:** deleting or editing a completion recomputes `next_due` from the habit's frequency rule and the new latest remaining completion (`earlyGuard: false`). Never blindly clears to null — always passes the real rule and latest date through `updateHabitNextDue`
 
 ### Draft Habits
 - `is_draft` field: draft habits have no `next_due`, skip due computation, show a distinct "draft" status badge

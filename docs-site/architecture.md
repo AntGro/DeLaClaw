@@ -52,7 +52,7 @@ All adapters return `{ data, error }` objects. Successful queries return `{ data
 
 ### Google Drive adapter (drive.js)
 
-Combines the demo adapter's in-memory query engine with Google Drive persistence. On connect, it authenticates via Google Identity Services (`drive.file` scope), finds or creates a `DeLaClaw/` folder, and loads per-table JSON files (e.g. `todos.json`, `habits.json`) into memory. All runtime queries hit the in-memory store (instant). On any mutation, a 2-second debounced write-back uploads the changed table to Drive as its own JSON file. The adapter exposes `forceSave()` for explicit flushes (called on disconnect and `beforeunload`), and `reseed()` for backup imports. Legacy single-file stores (`delaclaw-data.json`) are automatically migrated to per-table files on first connect.
+Combines the demo adapter's in-memory query engine with Google Drive persistence. On connect, it authenticates via Google Identity Services (`drive.file` scope), finds or creates a `DeLaClaw/` folder, and loads per-table JSON files (e.g. `todos.json`, `habits.json`) into memory. All runtime queries hit the in-memory store (instant). On any mutation, a 2-second debounced write-back uploads the changed table to Drive as its own JSON file. The adapter exposes `forceSave()` for explicit flushes (called on `beforeunload` and `visibilitychange` → hidden), and `reseed()` for backup imports. A 30-second polling loop checks Drive for external changes; an immediate poll also fires on tab switch (`visibilitychange` → visible) and window focus. Legacy single-file stores (`delaclaw-data.json`) are automatically migrated to per-table files on first connect.
 
 ### Offline cache (offline-cache.js)
 

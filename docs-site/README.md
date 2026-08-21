@@ -39,4 +39,4 @@ Head to the [Setup Guide](setup.md) to pick a backend and start using DeLaClaw i
 
 - [GitHub](https://github.com/AntGro/DeLaClaw)
 - [Live app](https://delaclaw.com)
-- [Docs](https://antgro.github.io/DeLaClaw)
+- [YouTube](https://www.youtube.com/@DeLaClaw)

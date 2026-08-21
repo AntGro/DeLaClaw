@@ -73,11 +73,11 @@ This paste-to-verify flow works identically on desktop, Android, and **iPhone PW
 
 ### Notes
 
-- **Security 1.300**: RLS is `owner only` on all 13 personal tables (`projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `joined_groups`). Policies are `FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid())`. Even if the anon key leaks inside an invite code, `B` cannot read `A`'s private tables.
+- **Security 1.300+**: RLS enforces `owner or agent` policies on all personal and category tables. Policies are `FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (...)`. Even if the anon key leaks inside an invite code, `B` cannot read `A`'s private tables. The only exception is `agent_grants`, which uses a strict `owner only` policy. Sharing tables (`sharing_groups`, `sharing_members`, `sharing_items`) use group-scoped policies. See `sql/supabase_schema.sql` for the full policy set.
 - **Security 1.301**: Invite tokens are never stored plaintext for lookups. `sharing_members` stores `token_hash = encode(digest(token,'sha256'),'hex')`, `expires_at` (24h) and `revoked_at`. All sharing RPCs (`verify_join_token`, `confirm_join`, `get_shared_items`, ...) verify hash + revocation + expiry.
 - **Privacy 1.436**: Shared-group identity is `member_id` + group-local `display_name`. Creator-provided invite labels live in `invited_label`; emails are permission material only and are not emitted through shared group state or agent-safe serialization.
 - **Encrypted joins**: `joined_groups` stores `token_ciphertext`/`token_iv` and `remote_anon_key_ciphertext/_iv` encrypted with a per-user `sync_secret` (WebCrypto AES-GCM, 32 bytes in localStorage `claw_sync_secret`). Plaintext columns remain only for fallback/migration.
-- The app uses the Supabase JS client v2 from CDN. No server-side code is needed.
+- The app uses the Supabase JS client v2, self-hosted in `vendor/supabase.js`. No server-side code is needed.
 - Real-time subscriptions are enabled: changes from other tabs or devices appear automatically.
 - The app checks DB `schema_version` against the `VERSION` file and shows a banner if migrations are pending.
 

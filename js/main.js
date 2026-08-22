@@ -1693,6 +1693,39 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       .subscribe();
   }
 
+  // ── Sharing resilience event listeners (must be registered before any loadAll fires) ──
+  document.addEventListener('sharing-group-unreachable', (e) => {
+    const name = e.detail?.groupName || '';
+    showToast(t('sharing.group_unreachable', name), 'info');
+    renderSharingPane();
+  });
+  document.addEventListener('sharing-group-deletion-confirm', async (e) => {
+    const { groupId, groupName } = e.detail || {};
+    if (!groupId) return;
+    showConfirmAction(
+      t('sharing.group_confirm_delete_title'),
+      t('sharing.group_confirm_delete_msg', groupName),
+      async () => {
+        await state.sharing.confirmGroupDeletion(groupId);
+        renderSharingPane();
+      },
+      null,
+      {
+        btnText: t('sharing.group_confirm_remove_btn'),
+        cancelLabel: t('sharing.group_confirm_keep_btn'),
+        variant: 'neutral',
+        iconSvg: lucideIcon('wifi-off', 24, 'currentColor'),
+        onCancel: () => {
+          state.sharing.keepGroup(groupId);
+          renderSharingPane();
+        },
+      }
+    );
+  });
+  document.addEventListener('sharing-group-recovered', () => {
+    renderSharingPane();
+  });
+
   // Drive: wire poll-based change detection to the same refresh functions
   if (mode === 'googledrive' && state.driveAdapter) {
     const driveRefreshMap = {
@@ -1716,39 +1749,6 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       if (fn) fn().then(() => markLastUpdated()).catch(e => console.warn('Drive refresh error:', e));
       else markLastUpdated();
     };
-
-    // ── Sharing resilience event listeners (must be registered before loadAll fires) ──
-    document.addEventListener('sharing-group-unreachable', (e) => {
-      const name = e.detail?.groupName || '';
-      showToast(t('sharing.group_unreachable', name), 'info');
-      renderSharingPane();
-    });
-    document.addEventListener('sharing-group-deletion-confirm', async (e) => {
-      const { groupId, groupName } = e.detail || {};
-      if (!groupId) return;
-      showConfirmAction(
-        t('sharing.group_confirm_delete_title'),
-        t('sharing.group_confirm_delete_msg', groupName),
-        async () => {
-          await state.sharing.confirmGroupDeletion(groupId);
-          renderSharingPane();
-        },
-        null,
-        {
-          btnText: t('sharing.group_confirm_remove_btn'),
-          cancelLabel: t('sharing.group_confirm_keep_btn'),
-          variant: 'neutral',
-          iconSvg: lucideIcon('wifi-off', 24, 'currentColor'),
-          onCancel: () => {
-            state.sharing.keepGroup(groupId);
-            renderSharingPane();
-          },
-        }
-      );
-    });
-    document.addEventListener('sharing-group-recovered', () => {
-      renderSharingPane();
-    });
 
     // Wire up Drive sharing module
     try {

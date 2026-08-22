@@ -30,14 +30,14 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 ### Capabilities
 
 - **Four backend modes**: Supabase (cloud PostgreSQL), Google Drive (per-table JSON files in your Drive), local REST server (Bun + SQLite), in-memory demo
-- **Sharing**: Drive-backed group sharing for TODOs, habits, and lists — invite by email, multi-assignee completion, Google Picker for joining
+- **Sharing**: Cross-user collaborative sharing for TODOs, habits, and lists — create groups, invite via opaque codes, collaborative editing and completion tracking (Supabase primary; Drive adapter exists but stale)
 - **Offline-first**: IndexedDB cache serves read-only data when the network is down, with automatic recovery
 - **PWA**: installable on mobile and desktop via service worker with network-first caching
 - **Dark and light themes** with automatic OS preference detection
 - **Internationalization**: English, French, Spanish
 - **Drag-and-drop** reordering across all list views
 - **Keyboard shortcuts** for common actions
-- **Zero frameworks**: vanilla JavaScript with ES modules (~17k lines, no build step)
+- **Zero frameworks**: vanilla JavaScript with ES modules, no build step
 
 ## Screenshots
 
@@ -93,14 +93,20 @@ js/
   main.js               App bootstrap, view switching, settings, footer
   state.js              Centralized state and constants
   db.js                 Adapter abstraction with Proxy-based activity tracking
+  auth.js               Authentication flows (magic link, email guard)
   adapters/
     supabase.js         Supabase PostgREST adapter
     rest.js             Local Bun+SQLite REST adapter
     demo.js             In-memory adapter with sample data
     drive.js            Google Drive adapter (in-memory + per-table JSON persistence)
     offline-cache.js    IndexedDB caching layer (wraps any adapter)
-  sharing.js            Drive-based multi-user sharing (groups, items, Picker)
+  sharing.js            Sharing adapter factory (picks backend, validates interface)
+  sharing-interface.js  Canonical sharing adapter contract
+  sharing-supabase.js   Supabase sharing adapter (RPCs, token auth, polling)
+  sharing-drive.js      Drive sharing adapter (stale)
+  sharing-envelope.js   Invite code encode/decode (DLC1 format)
   sharing-ui.js         Sharing UI: settings pane, share popovers, completion modal
+  crypto-sync.js        AES-GCM encryption for joined-group credentials
   welcome.js            Today dashboard
   projects.js           Project boards and task management
   todos.js              TODO management
@@ -109,26 +115,30 @@ js/
   birthdays.js          Birthday tracker
   vestiaire.js          Wardrobe inventory
   lists.js              Checklists
+  delegation.js         AI agent delegation and task routing
   i18n.js               Translation strings (en/fr/es)
   icons.js              Lucide icon rendering
   utils.js              Shared utilities
   item-utils.js         Drag-and-drop, inline editing
+  backend-logos.js      Backend brand icons (SVG)
   hero.js               Landing page animations
   logo.js               Logo animation engine
   storm3d.js            Three.js hero effect
+  bootstrap.js          Extracted inline init script (CSP-safe)
+  sw-register.js        Service worker registration (CSP-safe)
   version.js            Auto-generated version constant
   demo-chooser.js       Demo dataset selector
   demo-data.js          Sample data for demo mode
 server/
   server.js             Bun HTTP server (SQLite backend)
-  schema.sql            SQLite schema (23 tables)
+  schema.sql            SQLite base schema
 migrations/             Incremental SQL migrations
 sw.js                   Service worker (network-first + precache)
 ```
 
-The adapter pattern (`db.js`) means the app logic never touches the backend directly. Each adapter exposes the same `.from(table).select()/.insert()/.update()/.delete()` interface. The offline cache wraps any adapter transparently, caching reads in IndexedDB and serving them when the network fails.
+The adapter pattern (`db.js`) means the app logic never touches the backend directly. Each adapter exposes the same `.from(table).select()/.insert()/.update()/.delete()` interface. The offline cache wraps any adapter transparently, caching reads in IndexedDB and serving them when the network fails. Sharing follows the same pattern — a validated adapter interface with Supabase as the primary implementation.
 
-27 database tables (Supabase) / 23 (Local SQLite): 16 personal (`projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `nvidia_usage`), 4 category/deck (`todo_categories`, `habit_categories`, `vestiaire_categories`, `flashcard_decks`), 3 infra (`daily_visits`, `joined_groups`, `agent_grants`), and 4 Supabase-only (`sharing_groups`, `sharing_members`, `sharing_items`, `auth_email_guard`). Category/deck FKs use CASCADE on delete — deleting a category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
+The canonical table list lives in `sql/supabase_schema.sql` (Supabase) and `server/schema.sql` (Local SQLite). Category/deck foreign keys use CASCADE on delete — deleting a category deletes its items.
 
 See [docs-site/architecture.md](docs-site/architecture.md) for details.
 
@@ -138,7 +148,7 @@ See [docs-site/architecture.md](docs-site/architecture.md) for details.
 node tests/tests.js
 ```
 
-54 tests covering unit logic, adapter compliance, REST server integration, and browser-based end-to-end flows. All tests must pass before pushing to `main`.
+Tests covering unit logic, adapter compliance, REST server integration, and browser-based end-to-end flows. All tests must pass before pushing to `dev`.
 
 ## Contributing
 

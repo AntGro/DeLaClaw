@@ -150,7 +150,7 @@ export function initItemHoverDelay(container, {
           clickTimer = setTimeout(() => {
             actions.classList.add('visible');
             if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
-          }, 250);
+          }, 150);
         });
       }
     } else {

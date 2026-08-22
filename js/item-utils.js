@@ -554,18 +554,41 @@ export async function reorderItems({
   tableName,
   reinitFn,
 }) {
-  // Update sort_order in-memory
+  // Diff: only PATCH items whose sort_order actually changed
+  const updates = [];
   orderedIds.forEach((id, i) => {
     const item = allItems.find(x => x.id === id);
-    if (item) item.sort_order = i;
+    if (!item) return;
+    if (Number(item.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+    item.sort_order = i; // optimistic in-memory update after diff
   });
 
   if (reinitFn) reinitFn();
   showToast(t('toast.reordered'), 'success');
 
-  Promise.all(
-    orderedIds.map((id, i) => db.from(tableName).update({ sort_order: i }).eq('id', id))
-  ).catch(e => console.error(`${tableName} reorder sync failed:`, e));
+  if (updates.length === 0) return;
+
+  bulkSortOrder(tableName, updates)
+    .catch(e => console.error(`${tableName} reorder sync failed:`, e));
+}
+
+// ===================================================================
+// BULK SORT ORDER — single RPC when available, parallel PATCHes fallback
+// ===================================================================
+export async function bulkSortOrder(tableName, updates) {
+  if (updates.length === 0) return;
+  try {
+    await db.rpc('bulk_sort_order', { p_table: tableName, p_updates: updates });
+  } catch (e) {
+    const code = e?.code || e?.message || '';
+    if (code === '42883' || code === 'PGRST202' || /function.*not exist/i.test(String(code))) {
+      await Promise.all(
+        updates.map(u => db.from(tableName).update({ sort_order: u.sort_order }).eq('id', u.id))
+      );
+    } else {
+      throw e;
+    }
+  }
 }
 // ===================================================================
 // INNER SCROLL POSITION CAPTURE / RESTORE

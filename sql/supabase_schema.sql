@@ -1317,7 +1317,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE
   todo_categories, habit_categories, vestiaire_categories, flashcard_decks;
 
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.651') ON CONFLICT ("key") DO UPDATE SET "value" = '1.651', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.781') ON CONFLICT ("key") DO UPDATE SET "value" = '1.781', "updated_at" = now();
 
 -- ── Seed protected category rows (ON CONFLICT safe for idempotent re-runs) ──
 -- owner_id is NULL here; trg_set_owner_id fills it on first auth'd INSERT.
@@ -1363,3 +1363,23 @@ CREATE TRIGGER trg_protect_todo_categories BEFORE DELETE OR UPDATE ON "public"."
 CREATE TRIGGER trg_protect_habit_categories BEFORE DELETE OR UPDATE ON "public"."habit_categories" FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION "public"."protect_category_row"();
 CREATE TRIGGER trg_protect_vestiaire_categories BEFORE DELETE OR UPDATE ON "public"."vestiaire_categories" FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION "public"."protect_category_row"();
 CREATE TRIGGER trg_protect_flashcard_decks BEFORE DELETE OR UPDATE ON "public"."flashcard_decks" FOR EACH ROW WHEN (OLD.is_protected = TRUE) EXECUTE FUNCTION "public"."protect_category_row"();
+
+-- Batch sort_order updates: one RPC call replaces N individual PATCHes during reorder
+CREATE OR REPLACE FUNCTION "public"."bulk_sort_order"(p_table text, p_updates jsonb)
+RETURNS void LANGUAGE plpgsql SECURITY INVOKER SET search_path = public AS $$
+BEGIN
+  IF p_table NOT IN (
+    'todos', 'tasks', 'projects', 'vestiaire', 'lists', 'list_items',
+    'flashcards', 'flashcard_notes', 'todo_categories', 'habit_categories',
+    'vestiaire_categories', 'flashcard_decks', 'habits'
+  ) THEN
+    RAISE EXCEPTION 'bulk_sort_order: table not allowed: %', p_table;
+  END IF;
+  EXECUTE format(
+    'UPDATE %I SET sort_order = (u->>''sort_order'')::int, updated_at = now()
+     FROM jsonb_array_elements($1) u
+     WHERE %I.id = (u->>''id'')::uuid',
+    p_table, p_table
+  ) USING p_updates;
+END;
+$$;

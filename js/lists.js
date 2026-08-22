@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 
@@ -355,7 +355,13 @@ function initListNavBtnReorder() {
         const l = (state.allLists || []).find(ls => ls.id === id);
         return l && l.name !== SHARED_LIST_NAME;
       });
-      await Promise.all(reorderable.map((id, i) => state.db.from('lists').update({ sort_order: i }).eq('id', id)));
+      const updates = [];
+      reorderable.forEach((id, i) => {
+        const l = (state.allLists || []).find(ls => ls.id === id);
+        if (l && Number(l.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+        if (l) l.sort_order = i;
+      });
+      await bulkSortOrder('lists', updates);
       const grid = document.getElementById('listsGrid');
       const snapshot = snapshotBuckets(grid);
       await refreshLists();
@@ -401,29 +407,33 @@ function initListItemDragDrop(listId, listEl) {
         // Update list_id in memory
         movedItem.list_id = targetContainerId;
 
-        // Update sort_order for all items in target list (new order from DOM)
+        // Diff target list — dragged item always patches (list_id changed)
+        const targetUpdates = [];
         orderedIds.forEach((id, i) => {
           const it = allItems.find(x => x.id === id);
-          if (it) it.sort_order = i;
+          if (!it) return;
+          if (id === draggedId || Number(it.sort_order ?? 0) !== i) targetUpdates.push({ id, sort_order: i });
+          it.sort_order = i;
         });
 
-        // Re-number source list items
+        // Diff source list
         const sourceItems = allItems
           .filter(x => x.list_id === sourceContainerId)
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-        sourceItems.forEach((it, i) => { it.sort_order = i; });
+        const sourceUpdates = [];
+        sourceItems.forEach((it, i) => {
+          if (Number(it.sort_order ?? 0) !== i) sourceUpdates.push({ id: it.id, sort_order: i });
+          it.sort_order = i;
+        });
 
         // DB: write list_id change + sort_order for both lists
         // Move item to new list
         await state.db.from('list_items').update({ list_id: targetContainerId }).eq('id', draggedId);
-        // Update sort_order in target list
-        await Promise.all(orderedIds.map((id, i) =>
-          state.db.from('list_items').update({ sort_order: i }).eq('id', id)
-        ));
-        // Update sort_order in source list
-        await Promise.all(sourceItems.map((it, i) =>
-          state.db.from('list_items').update({ sort_order: i }).eq('id', it.id)
-        ));
+        // Update sort_order in target and source lists
+        await Promise.all([
+          bulkSortOrder('list_items', targetUpdates.filter(u => u.id !== draggedId)),
+          bulkSortOrder('list_items', sourceUpdates),
+        ]);
 
         // Refresh: sharing cleanup if needed
         if (movedItem.shared_id && movedItem.shared_group_id && state.sharing) {

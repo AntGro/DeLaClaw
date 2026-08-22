@@ -2,7 +2,7 @@ import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
+import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
 // ===================================================================
@@ -249,7 +249,12 @@ function initFlashDeckNavBtnReorder() {
     async onReorder(orderedNames) {
       const reorderable = orderedNames.filter(n => n !== SHARED_CATEGORY && n !== '__drafts');
       const deckRows = reorderable.map(n => _deckByName.get(n)).filter(Boolean);
-      await Promise.all(deckRows.map((d, i) => state.db.from('flashcard_decks').update({ sort_order: i }).eq('id', d.id)));
+      const updates = [];
+      deckRows.forEach((d, i) => {
+        if (Number(d.sort_order ?? 0) !== i) updates.push({ id: d.id, sort_order: i });
+        d.sort_order = i;
+      });
+      await bulkSortOrder('flashcard_decks', updates);
       await loadFlashcardDecks();
       const grid = document.getElementById('flashcardGrid');
       const snapshot = snapshotBuckets(grid);

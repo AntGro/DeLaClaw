@@ -1341,7 +1341,7 @@ const T = {
       group_deleted: 'Groupe supprim\u00e9',
       group_removed_remotely: 'Vous avez \u00e9t\u00e9 retir\u00e9 de \u00ab\u202f{0}\u202f\u00bb',
       orphan_detected_title: 'Groupe inaccessible',
-      orphan_detected_message: 'Le groupe \u00ab\u202f{0}\u202f\u00bb est introuvable. S'il a \u00e9t\u00e9 supprim\u00e9e, vous pouvez d\u00e9lier ses \u00e9l\u00e9ments pour qu\u2019ils redeviennent personnels.',
+      orphan_detected_message: 'Le groupe \u00ab\u202f{0}\u202f\u00bb est introuvable. S\u2019il a \u00e9t\u00e9 supprim\u00e9, vous pouvez d\u00e9lier ses \u00e9l\u00e9ments pour qu\u2019ils redeviennent personnels.',
       orphan_unlink: 'D\u00e9lier les \u00e9l\u00e9ments',
       group_unreachable: '\u00ab\u202f{0}\u202f\u00bb est temporairement inaccessible',
       group_disconnected: 'D\u00e9connect\u00e9',

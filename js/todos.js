@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
+import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
@@ -1118,17 +1118,32 @@ function initTodoDragDropForCard(catId) {
       if (crossMove) {
         const movedItem = allTodos.find(x => x.id === draggedId);
         if (!movedItem) return;
+        const oldCatId = movedItem.category_id;
         movedItem.category_id = targetContainerId;
         const targetCatName = _todoCatMap.get(targetContainerId)?.name ?? '';
         movedItem.category = targetCatName;
-        orderedIds.forEach((id, i) => { const it = allTodos.find(x => x.id === id); if (it) it.sort_order = i; });
+        // Diff target list — dragged item always patches (category changed)
+        const targetUpdates = [];
+        orderedIds.forEach((id, i) => {
+          const it = allTodos.find(x => x.id === id);
+          if (!it) return;
+          if (id === draggedId || Number(it.sort_order ?? 0) !== i) targetUpdates.push({ id, sort_order: i });
+          it.sort_order = i;
+        });
+        // Diff source list
         const sourceItems = allTodos
           .filter(x => catIdForTodo(x) === sourceContainerId && x.id !== draggedId)
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-        sourceItems.forEach((it, i) => { it.sort_order = i; });
+        const sourceUpdates = [];
+        sourceItems.forEach((it, i) => {
+          if (Number(it.sort_order ?? 0) !== i) sourceUpdates.push({ id: it.id, sort_order: i });
+          it.sort_order = i;
+        });
         await state.db.from('todos').update({ category_id: targetContainerId, category: targetCatName }).eq('id', draggedId);
-        await Promise.all(orderedIds.map((id, i) => state.db.from('todos').update({ sort_order: i }).eq('id', id)));
-        await Promise.all(sourceItems.map((it, i) => state.db.from('todos').update({ sort_order: i }).eq('id', it.id)));
+        await Promise.all([
+          bulkSortOrder('todos', targetUpdates.filter(u => u.id !== draggedId)),
+          bulkSortOrder('todos', sourceUpdates),
+        ]);
         await refreshTodos();
         showToast(t('toast.moved'), 'success');
       } else {
@@ -1155,7 +1170,14 @@ function initTodoNavBtnReorder() {
     skipIds,
     async onReorder(orderedIds) {
       const reorderable = orderedIds.filter(id => id !== _sharedCatId);
-      await Promise.all(reorderable.map((id, i) => state.db.from('todo_categories').update({ sort_order: i }).eq('id', id)));
+      const updates = [];
+      reorderable.forEach((id, i) => {
+        const cat = _todoCatMap.get(id);
+        if (cat && Number(cat.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+      });
+      // Optimistic in-memory update
+      reorderable.forEach((id, i) => { const cat = _todoCatMap.get(id); if (cat) cat.sort_order = i; });
+      await bulkSortOrder('todo_categories', updates);
       await loadTodoCategories();
       const grid = document.getElementById('todoCategoryGrid');
       const snapshot = snapshotBuckets(grid);

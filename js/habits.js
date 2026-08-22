@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
-import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
+import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder, bulkSortOrder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
@@ -1045,7 +1045,13 @@ function initHabitNavBtnReorder() {
     skipIds,
     async onReorder(orderedIds) {
       const reorderable = orderedIds.filter(id => id !== _sharedHabitCatId);
-      await Promise.all(reorderable.map((id, i) => state.db.from('habit_categories').update({ sort_order: i }).eq('id', id)));
+      const updates = [];
+      reorderable.forEach((id, i) => {
+        const cat = _habitCatMap.get(id);
+        if (cat && Number(cat.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+        if (cat) cat.sort_order = i;
+      });
+      await bulkSortOrder('habit_categories', updates);
       await loadHabitCategories();
       const grid = document.getElementById('habitCategoryGrid');
       const snapshot = snapshotBuckets(grid);

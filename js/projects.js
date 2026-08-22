@@ -3,7 +3,7 @@ import { lucideIcon } from './icons.js';
 import state, { MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction,
          updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll, autoResizeTextarea, nextPaletteColor } from './utils.js';
-import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, LONG_PRESS_MS, DRAG_THRESHOLD, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
+import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, LONG_PRESS_MS, DRAG_THRESHOLD, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 
 // ===================================================================
 // state.PROJECTS (loaded from Supabase)
@@ -61,7 +61,13 @@ function initProjectNavBtnReorder() {
   initNavBtnReorder('projectNavButtons', {
     idAttr: 'id',
     async onReorder(orderedIds) {
-      await Promise.all(orderedIds.map((id, i) => state.db.from('projects').update({ sort_order: i }).eq('id', id)));
+      const updates = [];
+      orderedIds.forEach((id, i) => {
+        const proj = state.projects.find(p => p.id === id);
+        if (proj && Number(proj.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+        if (proj) proj.sort_order = i;
+      });
+      await bulkSortOrder('projects', updates);
       await loadProjects();
       const grid = document.getElementById('projectGrid');
       const snapshot = snapshotBuckets(grid);
@@ -453,14 +459,28 @@ function initDragDrop(container, projectId) {
         const movedItem = state.allTasks.find(x => x.id === draggedId);
         if (!movedItem) return;
         movedItem.project = targetContainerId;
-        orderedIds.forEach((id, i) => { const it = state.allTasks.find(x => x.id === id); if (it) it.sort_order = i; });
+        // Diff target list — dragged item always patches (project changed)
+        const targetUpdates = [];
+        orderedIds.forEach((id, i) => {
+          const it = state.allTasks.find(x => x.id === id);
+          if (!it) return;
+          if (id === draggedId || Number(it.sort_order ?? 0) !== i) targetUpdates.push({ id, sort_order: i });
+          it.sort_order = i;
+        });
+        // Diff source list
         const sourceItems = state.allTasks
           .filter(x => x.project === sourceContainerId && x.id !== draggedId && x.status !== 'approved')
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-        sourceItems.forEach((it, i) => { it.sort_order = i; });
+        const sourceUpdates = [];
+        sourceItems.forEach((it, i) => {
+          if (Number(it.sort_order ?? 0) !== i) sourceUpdates.push({ id: it.id, sort_order: i });
+          it.sort_order = i;
+        });
         await state.db.from('tasks').update({ project: targetContainerId }).eq('id', draggedId);
-        await Promise.all(orderedIds.map((id, i) => state.db.from('tasks').update({ sort_order: i }).eq('id', id)));
-        await Promise.all(sourceItems.map((it, i) => state.db.from('tasks').update({ sort_order: i }).eq('id', it.id)));
+        await Promise.all([
+          bulkSortOrder('tasks', targetUpdates.filter(u => u.id !== draggedId)),
+          bulkSortOrder('tasks', sourceUpdates),
+        ]);
         await refreshAll();
         showToast(t('toast.moved'), 'success');
       } else {

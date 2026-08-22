@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
-import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
 
 // ===================================================================
@@ -309,7 +309,13 @@ function initVestiaireNavBtnReorder() {
     skipIds,
     async onReorder(orderedIds) {
       const reorderable = orderedIds.filter(id => id !== _sharedVestCatId);
-      await Promise.all(reorderable.map((id, i) => state.db.from('vestiaire_categories').update({ sort_order: i }).eq('id', id)));
+      const updates = [];
+      reorderable.forEach((id, i) => {
+        const cat = _vestCatMap.get(id);
+        if (cat && Number(cat.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+        if (cat) cat.sort_order = i;
+      });
+      await bulkSortOrder('vestiaire_categories', updates);
       await loadVestiaireCategories();
       const grid = document.getElementById('vestiaireGrid');
       const snapshot = snapshotBuckets(grid);
@@ -373,14 +379,28 @@ function initVestiaireDragDrop(catId, listEl) {
         movedItem.category_id = targetContainerId;
         const targetCatName = _vestCatMap.get(targetContainerId)?.name ?? '';
         movedItem.category = targetCatName;
-        orderedIds.forEach((id, i) => { const it = allItems.find(x => x.id === id); if (it) it.sort_order = i; });
+        // Diff target list — dragged item always patches (category changed)
+        const targetUpdates = [];
+        orderedIds.forEach((id, i) => {
+          const it = allItems.find(x => x.id === id);
+          if (!it) return;
+          if (id === draggedId || Number(it.sort_order ?? 0) !== i) targetUpdates.push({ id, sort_order: i });
+          it.sort_order = i;
+        });
+        // Diff source list
         const sourceItems = allItems
           .filter(x => catIdForVest(x) === sourceContainerId && x.id !== draggedId)
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-        sourceItems.forEach((it, i) => { it.sort_order = i; });
+        const sourceUpdates = [];
+        sourceItems.forEach((it, i) => {
+          if (Number(it.sort_order ?? 0) !== i) sourceUpdates.push({ id: it.id, sort_order: i });
+          it.sort_order = i;
+        });
         await state.db.from('vestiaire').update({ category_id: targetContainerId, category: targetCatName }).eq('id', draggedId);
-        await Promise.all(orderedIds.map((id, i) => state.db.from('vestiaire').update({ sort_order: i }).eq('id', id)));
-        await Promise.all(sourceItems.map((it, i) => state.db.from('vestiaire').update({ sort_order: i }).eq('id', it.id)));
+        await Promise.all([
+          bulkSortOrder('vestiaire', targetUpdates.filter(u => u.id !== draggedId)),
+          bulkSortOrder('vestiaire', sourceUpdates),
+        ]);
         await refreshVestiaire();
         showToast(t('toast.moved'), 'success');
       } else {

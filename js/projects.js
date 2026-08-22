@@ -63,7 +63,7 @@ function initProjectNavBtnReorder() {
     async onReorder(orderedIds) {
       const updates = [];
       orderedIds.forEach((id, i) => {
-        const proj = state.projects.find(p => p.id === id);
+        const proj = state.PROJECTS.find(p => p.id === id);
         if (proj && Number(proj.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
         if (proj) proj.sort_order = i;
       });

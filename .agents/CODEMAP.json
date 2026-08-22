@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "1.787",
-    "generated_at": "2026-08-22T23:49:29.446Z",
+    "version": "1.788",
+    "generated_at": "2026-08-22T23:54:47.620Z",
     "loc_total": 30608,
     "files_scanned": 38,
     "tier": "T2-enriched",
@@ -228,7 +228,6 @@
         "archivedProjectIds",
         "db",
         "js",
-        "projects",
         "showArchived"
       ],
       "depends_on": [

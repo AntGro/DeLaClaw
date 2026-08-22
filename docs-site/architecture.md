@@ -44,7 +44,7 @@ Each adapter implements the same interface:
 |---|---|---|---|---|
 | `from(table)` | Supabase PostgREST builder | HTTP `QueryBuilder` class | In-memory array filter | In-memory (delegates to demo engine) |
 | `channel(name)` | Supabase Realtime | No-op | No-op | No-op |
-| `rpc(fn, params)` | Supabase RPC | HTTP POST | No-op | No-op |
+| `rpc(fn, params)` | Supabase RPC | HTTP POST | Rejects `42883` (no server-side functions) | Rejects `42883` (delegates to demo) |
 
 The chainable query builder supports: `.select()`, `.insert()`, `.update()`, `.delete()`, `.upsert()`, `.eq()`, `.neq()`, `.gt()`, `.gte()`, `.lt()`, `.lte()`, `.is()`, `.order()`, `.limit()`, `.single()`.
 

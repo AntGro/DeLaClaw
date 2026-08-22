@@ -40,7 +40,7 @@ export function createDemoAdapter(initialData) {
   const adapter = {
     from(table) { return new DemoQueryBuilder(store, table); },
     channel() { return new NoopChannel(); },
-    rpc(_fn, _params) { return Promise.resolve({ data: null, error: null }); },
+    rpc(_fn, _params) { return Promise.reject({ code: '42883', message: `function ${_fn} does not exist` }); },
     /** Re-seed all in-memory data (for demo toggle) */
     reseed(data) { seed(data); },
     /** Return a reference to the raw store (for debugging) */

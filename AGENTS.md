@@ -25,7 +25,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 
 **1.3 Modular & abstract-first**
 - Adapter pattern: all business logic talks to `db.js` proxy, never directly to Supabase/Drive. Each backend in `js/adapters/` must implement the same surface: `.from(table).select/insert/update/delete`, plus auth helpers. Offline-cache wraps any adapter transparently.
-- Sharing protocols: Drive-based sharing (`js/sharing*.js`) must implement a common top-level interface/class (groups, invites, items, completions). Don't leak Drive-specific code into views (`todos.js`, `habits.js`, `lists.js` check `sharing` abstraction).
+- Sharing protocols: all sharing goes through an adapter interface (`js/sharing-interface.js`), validated at init by `validateSharingAdapter()`. Views (`todos.js`, `habits.js`, `lists.js`) talk to `state.sharing` abstraction, never to Supabase or Drive directly. Supabase is the primary sharing path; Drive sharing is stale.
 - Don't add `if (backend === 'supabase')` in views. Add a method to the adapter interface instead.
 - Single responsibility: `utils.js` = generic helpers, `item-utils.js` = drag-drop + inline edit, `db.js` = activity tracking proxy only. Abstract first, implement second.
 
@@ -56,13 +56,13 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 
 - **XSS**: No `innerHTML` with user data unless escaped. Wrap all user fields (`name`, `text`, `note`, `brand`, etc.) in `esc()` when interpolating into template literals. `renderMd()` and `truncateWithShowMore()` already esc internally, don't double-wrap. `showDeleteConfirm` uses `.textContent` (safe).
 - **Safe DOM for URLs**: TODO/project links with user-provided URLs must use safe allowlist check, not raw `innerHTML`.
-- **CSP hardening (sec-004)**: Vendor JS self-hosted in `vendor/` (`supabase@2.110.6`, `three@0.170.0`). No `cdn.jsdelivr.net` for app code. CSP meta in `index.html`: `default-src 'self'; script-src 'self' 'sha256-...importmap...' accounts.google.com apis.google.com gstatic; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes.
+- **CSP hardening (sec-004)**: Vendor JS self-hosted in `vendor/` (`supabase@2.110.6`, `three@0.170.0`). No `cdn.jsdelivr.net` for app code. CSP meta in `index.html`: `default-src 'self'; script-src 'self' 'sha256-...importmap...' accounts.google.com apis.google.com gstatic cloudflareinsights; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes. Cloudflare Web Analytics beacon allowed in both `script-src` (`static.cloudflareinsights.com`) and `connect-src` (`cloudflareinsights.com`).
 - **Google Identity exception**: GSI (`accounts.google.com/gsi/client` + `apis.google.com/js/api.js`) must stay CDN per Google ToS, no SRI allowed. Documented exception allowed only via CSP.
 - **Supabase auth quirk**: use `anon_key` (`sb_publishable_*`) in BOTH `apikey:` and `Authorization: Bearer` headers. `service_role_key` (`sb_secret_*`) doesn't resolve to JWT in curl context. Confirmed June 11, 2026.
 
 ## 4. Backend & Data
 
-- Tables (27 Supabase / 23 Local): 16 personal (`projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `nvidia_usage`) + 4 category/deck tables (`todo_categories`, `habit_categories`, `vestiaire_categories`, `flashcard_decks`) + `daily_visits`, `joined_groups`, `agent_grants` (all backends) + `sharing_groups`, `sharing_members`, `sharing_items`, `auth_email_guard` (Supabase only).
+- Tables: canonical list lives in `sql/supabase_schema.sql` (Supabase) and `server/schema.sql` (Local SQLite). Personal tables, category/deck tables, and cross-backend tables (`daily_visits`, `joined_groups`, `agent_grants`) exist on all backends; sharing tables (`sharing_groups`, `sharing_members`, `sharing_items`) and `auth_email_guard` are Supabase-only.
 - **Category integrity**: each category/deck table has one protected default row (`name=''`, `is_protected=1`). `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item FKs (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
 - Schema version in `settings` key `schema_version`, migrations in `migrations/`. Check `latest_compat` logic in `VERSION`.
 - Base schema + migrations must be runnable in Supabase SQL editor + local SQLite (`server/schema.sql`).
@@ -85,7 +85,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 ## 7. Docs
 
 - `docs-site/attributions.md` must list all third-party assets with correct load source (vendor/ vs CDN). Update when vendor versions change.
-- `docs-site/setup.md`, `architecture.md`, `contributing.md` must stay in sync with adapter changes.
+- `docs-site/setup.md`, `architecture.md`, `sharing.md`, `contributing.md` must stay in sync with adapter changes.
 - No personal info, workspace config, memory files in public repo.
 
 Keep this file short, accurate, and alive. When you learn a durable lesson that prevents a bug, add it here.

@@ -858,10 +858,13 @@ async function reorderProjects(draggedId, targetId) {
   initProjectDragDrop();
   showToast(t('toast.reordered'), 'success');
 
-  // Background Supabase sync
-  Promise.all(visible.map((p, i) =>
-    state.db.from('projects').update({ sort_order: i }).eq('id', p.id)
-  )).catch(e => console.error('Project reorder sync failed:', e));
+  // Background Supabase sync — diff before patching
+  const updates = [];
+  visible.forEach((p, i) => {
+    if (Number(p.sort_order ?? 0) !== i) updates.push({ id: p.id, sort_order: i });
+  });
+  bulkSortOrder('projects', updates)
+    .catch(e => console.error('Project reorder sync failed:', e));
 }
 
 

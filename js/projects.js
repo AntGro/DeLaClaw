@@ -839,6 +839,12 @@ async function reorderProjects(draggedId, targetId) {
   const [dragged] = visible.splice(draggedIdx, 1);
   visible.splice(targetIdx, 0, dragged);
 
+  // Diff BEFORE updating memory — capture which rows actually changed
+  const updates = [];
+  visible.forEach((p, i) => {
+    if (Number(p.sort_order ?? 0) !== i) updates.push({ id: p.id, sort_order: i });
+  });
+
   // Update sort_order in memory
   visible.forEach((p, i) => { p.sort_order = i; });
   visible.forEach(p => {
@@ -858,11 +864,7 @@ async function reorderProjects(draggedId, targetId) {
   initProjectDragDrop();
   showToast(t('toast.reordered'), 'success');
 
-  // Background Supabase sync — diff before patching
-  const updates = [];
-  visible.forEach((p, i) => {
-    if (Number(p.sort_order ?? 0) !== i) updates.push({ id: p.id, sort_order: i });
-  });
+  // Background sync
   bulkSortOrder('projects', updates)
     .catch(e => console.error('Project reorder sync failed:', e));
 }

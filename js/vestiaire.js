@@ -368,6 +368,7 @@ function initVestiaireDragDrop(catId, listEl) {
   initItemDragDrop(listEl, {
     itemSelector: '.vestiaire-item',
     idAttr: 'vestId',
+    actionsSelector: '.vest-actions',
     crossContainerSelector: '.vestiaire-item-list',
     getContainerId: (el) => el.dataset.category,
     onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {

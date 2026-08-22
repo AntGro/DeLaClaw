@@ -366,6 +366,7 @@ function initDraftDragDrop(listEl) {
     itemSelector: '.todo-item[data-draft-id]',
     excludeSelector: 'button, a, input, textarea, select, .todo-actions, .fc-proposal',
     idAttr: 'draftId',
+    actionsSelector: '.todo-actions',
     onReorder: async (orderedIds) => {
       await reorderItems({
         orderedIds,

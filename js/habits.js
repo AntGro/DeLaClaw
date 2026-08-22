@@ -998,6 +998,7 @@ function initHabitCrossDrag(catId, listEl) {
     itemSelector: '.habit-item',
     excludeSelector: 'button, a, input, textarea, select, .habit-actions',
     idAttr: 'habitId',
+    actionsSelector: '.habit-actions',
     crossContainerSelector: '.habit-list',
     getContainerId: (el) => el.dataset.category,
     crossOnly: true,

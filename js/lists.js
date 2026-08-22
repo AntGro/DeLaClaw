@@ -393,6 +393,7 @@ function initListItemDragDrop(listId, listEl) {
   initItemDragDrop(listEl, {
     itemSelector: '.list-item',
     idAttr: 'itemId',
+    actionsSelector: '.list-item-actions',
     crossContainerSelector: '.list-item-list',
     getContainerId: (el) => el.dataset.listId,
     onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {

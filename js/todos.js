@@ -1111,6 +1111,7 @@ function initTodoDragDropForCard(catId) {
     itemSelector: '.todo-item:not(.todo-done)',
     excludeSelector: 'button, a, input, textarea, select, .todo-actions',
     idAttr: 'todoId',
+    actionsSelector: '.todo-actions',
     crossContainerSelector: '.todo-cat-list:not(.habit-list)',
     getContainerId: (el) => el.dataset.category,
     onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {

@@ -201,6 +201,7 @@ export function initItemDragDrop(container, {
   crossContainerSelector = null,
   getContainerId = null,
   crossOnly = false,
+  actionsSelector = null,
 }) {
   cleanupDragArtifacts();
   let dragState = null;
@@ -308,6 +309,10 @@ export function initItemDragDrop(container, {
             targetContainer: dropContainer,
           });
         } catch (e) { console.error('Item reorder failed:', e); }
+      } else if (actionsSelector) {
+        // Long press that ended in place — show action buttons as fallback
+        const actions = item.querySelector(actionsSelector);
+        if (actions) actions.classList.add('visible');
       }
     };
 

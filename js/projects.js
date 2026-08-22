@@ -451,6 +451,7 @@ function initDragDrop(container, projectId) {
     excludeSelector: 'button, a, input, textarea, select, .task-actions',
     skipInsideSelector: '.archived-tasks',
     idAttr: 'taskId',
+    actionsSelector: '.task-actions',
     crossContainerSelector: '.task-list[data-project]',
     getContainerId: (el) => el.dataset.project,
     onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {

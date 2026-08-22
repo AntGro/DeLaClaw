@@ -379,12 +379,14 @@ function initVestiaireDragDrop(catId, listEl) {
         movedItem.category_id = targetContainerId;
         const targetCatName = _vestCatMap.get(targetContainerId)?.name ?? '';
         movedItem.category = targetCatName;
-        // Diff target list — dragged item always patches (category changed)
+        // Diff target list — dragged item handled in FK update below
         const targetUpdates = [];
+        let draggedSortOrder = 0;
         orderedIds.forEach((id, i) => {
           const it = allItems.find(x => x.id === id);
           if (!it) return;
-          if (id === draggedId || Number(it.sort_order ?? 0) !== i) targetUpdates.push({ id, sort_order: i });
+          if (id === draggedId) { draggedSortOrder = i; }
+          else if (Number(it.sort_order ?? 0) !== i) { targetUpdates.push({ id, sort_order: i }); }
           it.sort_order = i;
         });
         // Diff source list
@@ -396,9 +398,9 @@ function initVestiaireDragDrop(catId, listEl) {
           if (Number(it.sort_order ?? 0) !== i) sourceUpdates.push({ id: it.id, sort_order: i });
           it.sort_order = i;
         });
-        await state.db.from('vestiaire').update({ category_id: targetContainerId, category: targetCatName }).eq('id', draggedId);
+        await state.db.from('vestiaire').update({ category_id: targetContainerId, category: targetCatName, sort_order: draggedSortOrder }).eq('id', draggedId);
         await Promise.all([
-          bulkSortOrder('vestiaire', targetUpdates.filter(u => u.id !== draggedId)),
+          bulkSortOrder('vestiaire', targetUpdates),
           bulkSortOrder('vestiaire', sourceUpdates),
         ]);
         await refreshVestiaire();

@@ -459,12 +459,14 @@ function initDragDrop(container, projectId) {
         const movedItem = state.allTasks.find(x => x.id === draggedId);
         if (!movedItem) return;
         movedItem.project = targetContainerId;
-        // Diff target list — dragged item always patches (project changed)
+        // Diff target list — dragged item handled in FK update below
         const targetUpdates = [];
+        let draggedSortOrder = 0;
         orderedIds.forEach((id, i) => {
           const it = state.allTasks.find(x => x.id === id);
           if (!it) return;
-          if (id === draggedId || Number(it.sort_order ?? 0) !== i) targetUpdates.push({ id, sort_order: i });
+          if (id === draggedId) { draggedSortOrder = i; }
+          else if (Number(it.sort_order ?? 0) !== i) { targetUpdates.push({ id, sort_order: i }); }
           it.sort_order = i;
         });
         // Diff source list
@@ -476,9 +478,9 @@ function initDragDrop(container, projectId) {
           if (Number(it.sort_order ?? 0) !== i) sourceUpdates.push({ id: it.id, sort_order: i });
           it.sort_order = i;
         });
-        await state.db.from('tasks').update({ project: targetContainerId }).eq('id', draggedId);
+        await state.db.from('tasks').update({ project: targetContainerId, sort_order: draggedSortOrder }).eq('id', draggedId);
         await Promise.all([
-          bulkSortOrder('tasks', targetUpdates.filter(u => u.id !== draggedId)),
+          bulkSortOrder('tasks', targetUpdates),
           bulkSortOrder('tasks', sourceUpdates),
         ]);
         await refreshAll();

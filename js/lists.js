@@ -407,12 +407,14 @@ function initListItemDragDrop(listId, listEl) {
         // Update list_id in memory
         movedItem.list_id = targetContainerId;
 
-        // Diff target list — dragged item always patches (list_id changed)
+        // Diff target list — dragged item handled in FK update below
         const targetUpdates = [];
+        let draggedSortOrder = 0;
         orderedIds.forEach((id, i) => {
           const it = allItems.find(x => x.id === id);
           if (!it) return;
-          if (id === draggedId || Number(it.sort_order ?? 0) !== i) targetUpdates.push({ id, sort_order: i });
+          if (id === draggedId) { draggedSortOrder = i; }
+          else if (Number(it.sort_order ?? 0) !== i) { targetUpdates.push({ id, sort_order: i }); }
           it.sort_order = i;
         });
 
@@ -426,12 +428,10 @@ function initListItemDragDrop(listId, listEl) {
           it.sort_order = i;
         });
 
-        // DB: write list_id change + sort_order for both lists
-        // Move item to new list
-        await state.db.from('list_items').update({ list_id: targetContainerId }).eq('id', draggedId);
-        // Update sort_order in target and source lists
+        // DB: write list_id + sort_order for dragged item, then bulk the rest
+        await state.db.from('list_items').update({ list_id: targetContainerId, sort_order: draggedSortOrder }).eq('id', draggedId);
         await Promise.all([
-          bulkSortOrder('list_items', targetUpdates.filter(u => u.id !== draggedId)),
+          bulkSortOrder('list_items', targetUpdates),
           bulkSortOrder('list_items', sourceUpdates),
         ]);
 

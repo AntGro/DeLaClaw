@@ -564,9 +564,10 @@ export async function reorderItems({
   });
 
   if (reinitFn) reinitFn();
-  showToast(t('toast.reordered'), 'success');
 
   if (updates.length === 0) return;
+
+  showToast(t('toast.reordered'), 'success');
 
   bulkSortOrder(tableName, updates)
     .catch(e => console.error(`${tableName} reorder sync failed:`, e));

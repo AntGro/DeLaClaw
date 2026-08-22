@@ -21,6 +21,7 @@
 import { encodeInviteEnvelope, decodeInviteEnvelope } from './sharing-envelope.js';
 import { ensureSyncSecret, getSyncSecretWithSettings, encryptText, decryptText, hashTokenClient, getKEK, storeWrappedSecret } from './crypto-sync.js';
 import { deepEqual } from './utils.js';
+import { t } from './i18n.js';
 
 /**
  * Create a Supabase sharing adapter.
@@ -1172,7 +1173,7 @@ export async function createSupabaseSharing(adapter, config) {
       });
       if (error) throw new Error('add_shared_item: ' + error.message);
       const row = Array.isArray(data) ? data[0] : data;
-      if (!row) throw new Error('This group is no longer available');
+      if (!row) throw new Error(t('sharing.group_unavailable'));
       if (row) {
         const mapped = _mapItem(row);
         _allItems.push(mapped);
@@ -1209,7 +1210,7 @@ export async function createSupabaseSharing(adapter, config) {
       });
       if (error) throw new Error('update_shared_item: ' + error.message);
       const row = Array.isArray(data) ? data[0] : data;
-      if (!row) throw new Error('This group is no longer available');
+      if (!row) throw new Error(t('sharing.group_unavailable'));
     } else {
       const { error } = await adapter.from('sharing_items')
         .update({ payload, updated_at: new Date().toISOString() })

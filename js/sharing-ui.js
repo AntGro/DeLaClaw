@@ -182,8 +182,8 @@ export async function renderSharingPane() {
         </div>
         <div class="sharing-group-actions">
           ${group.folderId ? `<a class="sharing-action-btn sharing-drive-link" href="https://drive.google.com/drive/folders/${encodeURIComponent(group.folderId)}" target="_blank" rel="noopener" title="${t('sharing.open_drive_folder')}">${LOGOS.googledrive(14)} ${t('sharing.open_drive_folder')}</a>` : ''}
-          ${inviteCode ? `<button class="sharing-action-btn sharing-copy-link-btn" data-action="sharing-copy-code" data-group-id="${esc(group.id)}" title="${t('sharing.copy_code')}">${lucideIcon('key', 14)} ${t('sharing.copy_code')}</button>` : ''}
-          ${!isCreator ? (isJoined ? `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-unjoin-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}">${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>` : `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-leave-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}">${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>`) : ''}
+          ${inviteCode ? `<button class="sharing-action-btn sharing-copy-link-btn" data-action="sharing-copy-code" data-group-id="${esc(group.id)}" title="${t('sharing.copy_code')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('key', 14)} ${t('sharing.copy_code')}</button>` : ''}
+          ${!isCreator ? (isJoined ? `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-unjoin-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>` : `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-leave-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>`) : ''}
         </div>
       </div>
       <div class="sharing-members">`;

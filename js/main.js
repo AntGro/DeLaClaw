@@ -13,7 +13,6 @@ import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
 import { esc, showToast, showConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
-import { isDragging } from './item-utils.js';
 
 const SETTINGS_PANES = ['general', 'ai', 'sharing', 'data', 'stats', 'agents'];
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
@@ -1687,7 +1686,6 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   if (mode !== 'demo' && mode !== 'googledrive') {
     state.db.channel('tasks-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, debouncedHandler(() => { if (!isEditing()) refreshAll().then(() => markLastUpdated()); }))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, debouncedHandler(async () => { if (isEditing() || isDragging || state._suppressProjectsRealtime) { state._suppressProjectsRealtime = false; return; } await loadProjects(); buildProjectCards(); initProjectDragDrop(); await refreshAll(); markLastUpdated(); }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'prompts' }, debouncedHandler(() => loadPrompts()))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, debouncedHandler(() => { if (!isEditing()) refreshTodos().then(() => markLastUpdated()); }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'habits' }, debouncedHandler(() => refreshHabits().then(() => markLastUpdated())))

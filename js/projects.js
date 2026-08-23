@@ -68,7 +68,6 @@ function initProjectNavBtnReorder() {
         if (proj) proj.sort_order = i;
       });
       state.PROJECTS.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
-      state._suppressProjectsRealtime = true;
       await bulkSortOrder('projects', updates);
       const grid = document.getElementById('projectGrid');
       const snapshot = snapshotBuckets(grid);

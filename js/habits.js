@@ -346,29 +346,24 @@ async function updateHabitNextDue(habitId, frequencyRule, lastDoneDate, { earlyG
   const currentNextDue = normalizeHabitNextDue(habit?.next_due);
 
   if (earlyGuard) {
-    // Early-completion guard: if the computed next due didn't advance past the
-    // existing due date, the user completed before it arrived — recompute from
-    // the current due date so it jumps to the following occurrence.
     if (nextDue && currentNextDue && nextDue <= currentNextDue) {
       nextDue = normalizeHabitNextDue(computeNextDue(frequencyRule, currentNextDue));
     }
   } else {
-    // Manual edit path (last-done or frequency change): use
-    // min(currentNextDue, computedNextDue) so the due date can move
-    // earlier but completing early doesn't double-advance.
     if (nextDue && currentNextDue && nextDue > currentNextDue) {
       nextDue = currentNextDue;
     }
   }
 
-  if (habit && currentNextDue === nextDue) return;
+  if (habit && currentNextDue === nextDue) return nextDue;
 
   const { error } = await state.db.from('habits').update({ next_due: nextDue }).eq('id', habitId);
   if (error) {
     console.warn(nextDue ? 'Failed to update next_due:' : 'Failed to clear next_due:', error.message);
-    return;
+    return nextDue;
   }
   if (habit) habit.next_due = nextDue;
+  return nextDue;
 }
 
 async function clearHabitNextDue(habitId) {
@@ -1370,9 +1365,8 @@ async function saveNewHabit() {
     }
     // Compute next_due on the pointer immediately and publish to shared storage
     if (pointerData?.id) {
-      await updateHabitNextDue(pointerData.id, freq, lastDoneVal || null);
-      const ptr = state.allHabits.find(h => String(h.id) === String(pointerData.id));
-      if (ptr) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: ptr.next_due });
+      const nextDue = await updateHabitNextDue(pointerData.id, freq, lastDoneVal || null);
+      if (nextDue != null) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: nextDue });
     }
   } else {
     // ─── Normal (non-shared) habit ───
@@ -2527,10 +2521,9 @@ async function shareExistingHabit(id, el) {
       await state.db.from('habits').delete().eq('id', habit.id);
       // Compute next_due on the pointer and publish to shared storage
       if (pointer?.id) {
-        await updateHabitNextDue(pointer.id, habit.frequency_rule,
+        const nextDue = await updateHabitNextDue(pointer.id, habit.frequency_rule,
           localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
-        const ptr = state.allHabits.find(h => String(h.id) === String(pointer.id));
-        if (ptr) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: ptr.next_due });
+        if (nextDue != null) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: nextDue });
       }
       showToast(t('sharing.shared') + '!', 'success');
       await refreshHabits();

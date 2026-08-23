@@ -514,7 +514,7 @@ function renderFlashcardDeck(deck, q) {
   if (practiceCount > 0) {
     practiceButton = `<button class="fc-practice-btn" data-action="start-practice" data-deck="${esc(deck)}" title="${t('flashcards.practice')}">${lucideIcon('play', 14, '#fff')} ${practiceCount}</button>`;
   } else if (allDeckCards.length > 0) {
-    practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')} ${t('flashcards.caught_up')}</span>`;
+    practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')}</span>`;
   }
 
   return `<div class="project-card" id="flashDeck-${esc(deck)}" style="--cat-color:${color}">
@@ -582,7 +582,7 @@ function renderTextDeck(deck, q) {
   if (trPracticeCount > 0) {
     practiceButton = `<button class="fc-practice-btn tr-practice-btn" data-action="start-text-practice" data-deck="${esc(deck)}" title="${t('text_revision.practice')}">${lucideIcon('book-open', 14, '#fff')} ${trPracticeCount}</button>`;
   } else if (allDeckTexts.length > 0) {
-    practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')} ${t('flashcards.caught_up')}</span>`;
+    practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')}</span>`;
   }
 
   return `<div class="project-card" id="flashDeck-${esc(deck)}" style="--cat-color:${color}">

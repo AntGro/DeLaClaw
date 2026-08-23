@@ -67,8 +67,9 @@ function initProjectNavBtnReorder() {
         if (proj && Number(proj.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
         if (proj) proj.sort_order = i;
       });
+      state.PROJECTS.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      state._suppressProjectsRealtime = true;
       await bulkSortOrder('projects', updates);
-      await loadProjects();
       const grid = document.getElementById('projectGrid');
       const snapshot = snapshotBuckets(grid);
       buildProjectCards();

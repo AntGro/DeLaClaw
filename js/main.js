@@ -1687,7 +1687,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   if (mode !== 'demo' && mode !== 'googledrive') {
     state.db.channel('tasks-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, debouncedHandler(() => { if (!isEditing()) refreshAll().then(() => markLastUpdated()); }))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, debouncedHandler(async () => { if (isEditing() || isDragging) return; await loadProjects(); buildProjectCards(); initProjectDragDrop(); await refreshAll(); markLastUpdated(); }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, debouncedHandler(async () => { if (isEditing() || isDragging || state._suppressProjectsRealtime) { state._suppressProjectsRealtime = false; return; } await loadProjects(); buildProjectCards(); initProjectDragDrop(); await refreshAll(); markLastUpdated(); }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'prompts' }, debouncedHandler(() => loadPrompts()))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, debouncedHandler(() => { if (!isEditing()) refreshTodos().then(() => markLastUpdated()); }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'habits' }, debouncedHandler(() => refreshHabits().then(() => markLastUpdated())))

@@ -1317,7 +1317,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE
   todo_categories, habit_categories, vestiaire_categories, flashcard_decks;
 
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.781') ON CONFLICT ("key") DO UPDATE SET "value" = '1.781', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.793') ON CONFLICT ("key") DO UPDATE SET "value" = '1.793', "updated_at" = now();
 
 -- ── Seed protected category rows (ON CONFLICT safe for idempotent re-runs) ──
 -- owner_id is NULL here; trg_set_owner_id fills it on first auth'd INSERT.
@@ -1367,6 +1367,8 @@ CREATE TRIGGER trg_protect_flashcard_decks BEFORE DELETE OR UPDATE ON "public"."
 -- Batch sort_order updates: one RPC call replaces N individual PATCHes during reorder
 CREATE OR REPLACE FUNCTION "public"."bulk_sort_order"(p_table text, p_updates jsonb)
 RETURNS void LANGUAGE plpgsql SECURITY INVOKER SET search_path = public AS $$
+DECLARE
+  has_updated_at boolean;
 BEGIN
   IF p_table NOT IN (
     'todos', 'tasks', 'projects', 'vestiaire', 'lists', 'list_items',
@@ -1375,11 +1377,24 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'bulk_sort_order: table not allowed: %', p_table;
   END IF;
-  EXECUTE format(
-    'UPDATE %I SET sort_order = (u->>''sort_order'')::int, updated_at = now()
-     FROM jsonb_array_elements($1) u
-     WHERE %I.id = (u->>''id'')::uuid',
-    p_table, p_table
-  ) USING p_updates;
+  SELECT EXISTS(
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = p_table AND column_name = 'updated_at'
+  ) INTO has_updated_at;
+  IF has_updated_at THEN
+    EXECUTE format(
+      'UPDATE %I SET sort_order = (u->>''sort_order'')::int, updated_at = now()
+       FROM jsonb_array_elements($1) u
+       WHERE %I.id::text = u->>''id''',
+      p_table, p_table
+    ) USING p_updates;
+  ELSE
+    EXECUTE format(
+      'UPDATE %I SET sort_order = (u->>''sort_order'')::int
+       FROM jsonb_array_elements($1) u
+       WHERE %I.id::text = u->>''id''',
+      p_table, p_table
+    ) USING p_updates;
+  END IF;
 END;
 $$;

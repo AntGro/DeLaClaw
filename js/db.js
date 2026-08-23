@@ -113,6 +113,12 @@ const db = {
     return _adapter.rpc(fn, params);
   },
 
+  /** Batch-update sort_order — delegates to adapter */
+  async bulkSortOrder(table, updates) {
+    if (!_adapter?.bulkSortOrder) throw new Error('db: adapter does not support bulkSortOrder');
+    return _adapter.bulkSortOrder(table, updates);
+  },
+
   /** No-op passthrough — batch() was removed from the Drive adapter (v1.729)
    *  but kept here as a safe fallback so any remaining caller doesn't crash. */
   async batch(fn) { return fn(); },

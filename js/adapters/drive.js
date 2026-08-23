@@ -818,6 +818,11 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     channel() { return inner.channel(); },
     rpc(fn, params) { return inner.rpc(fn, params); },
 
+    async bulkSortOrder(table, updates) {
+      await inner.bulkSortOrder(table, updates);
+      if (updates.length > 0) scheduleSave(table);
+    },
+
     reseed(data) {
       inner.reseed(data);
       for (const table of DRIVE_TABLES) scheduleSave(table);

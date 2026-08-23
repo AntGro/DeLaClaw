@@ -40,7 +40,17 @@ export function createDemoAdapter(initialData) {
   const adapter = {
     from(table) { return new DemoQueryBuilder(store, table); },
     channel() { return new NoopChannel(); },
-    rpc(_fn, _params) { return Promise.reject({ code: '42883', message: `function ${_fn} does not exist` }); },
+    rpc(_fn, _params) { return Promise.resolve({ data: null, error: null }); },
+    /** Batch-update sort_order directly in the in-memory store */
+    async bulkSortOrder(table, updates) {
+      if (updates.length === 0) return;
+      const rows = store[table];
+      if (!rows) return;
+      for (const { id, sort_order } of updates) {
+        const row = rows.find(r => r.id === id);
+        if (row) row.sort_order = sort_order;
+      }
+    },
     /** Re-seed all in-memory data (for demo toggle) */
     reseed(data) { seed(data); },
     /** Return a reference to the raw store (for debugging) */

@@ -21,9 +21,10 @@ Every adapter must expose this interface:
 
 ```js
 {
-  from(table)        → QueryBuilder   // chainable: .select() .eq() .insert() .update() .delete() .order() .limit() .single()
-  channel(name)      → Channel        // { .on().subscribe() } or NoopChannel
-  rpc(fn, params)    → Promise<{data, error}>
+  from(table)              → QueryBuilder   // chainable: .select() .eq() .insert() .update() .delete() .order() .limit() .single()
+  channel(name)            → Channel        // { .on().subscribe() } or NoopChannel
+  rpc(fn, params)          → Promise<{data, error}>
+  bulkSortOrder(table, updates) → Promise   // batch-update sort_order; each adapter implements natively
 }
 ```
 

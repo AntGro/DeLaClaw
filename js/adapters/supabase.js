@@ -38,6 +38,12 @@ export function createSupabaseAdapter(url, key) {
     /** RPC call */
     rpc(fn, params) { return client.rpc(fn, params); },
 
+    /** Batch-update sort_order via RPC */
+    async bulkSortOrder(table, updates) {
+      if (updates.length === 0) return;
+      await client.rpc('bulk_sort_order', { p_table: table, p_updates: updates });
+    },
+
     /** Escape hatch: raw Supabase client for anything not yet abstracted */
     raw: client,
   };

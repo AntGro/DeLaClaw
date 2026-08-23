@@ -583,18 +583,7 @@ export async function reorderItems({
 // ===================================================================
 export async function bulkSortOrder(tableName, updates) {
   if (updates.length === 0) return;
-  try {
-    await db.rpc('bulk_sort_order', { p_table: tableName, p_updates: updates });
-  } catch (e) {
-    const code = e?.code || e?.message || '';
-    if (code === '42883' || code === 'PGRST202' || /function.*not exist/i.test(String(code))) {
-      await Promise.all(
-        updates.map(u => db.from(tableName).update({ sort_order: u.sort_order }).eq('id', u.id))
-      );
-    } else {
-      throw e;
-    }
-  }
+  await db.bulkSortOrder(tableName, updates);
 }
 // ===================================================================
 // INNER SCROLL POSITION CAPTURE / RESTORE

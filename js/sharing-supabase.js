@@ -1177,7 +1177,9 @@ export async function createSupabaseSharing(adapter, config) {
       if (row) {
         const mapped = _mapItem(row);
         _allItems.push(mapped);
-        _notifyUpdate();
+        // Cache updated — poll() will detect no diff for this self-write.
+        // Callers handle their own UI refresh; _notifyUpdate reserved for
+        // external changes detected by poll().
         return mapped;
       }
     } else {
@@ -1192,7 +1194,6 @@ export async function createSupabaseSharing(adapter, config) {
       if (error) throw new Error('insert sharing_items: ' + error.message);
       const mapped = _mapItem(data);
       _allItems.push(mapped);
-      _notifyUpdate();
       return mapped;
     }
   }
@@ -1218,7 +1219,7 @@ export async function createSupabaseSharing(adapter, config) {
       if (error) throw new Error('update sharing_items: ' + error.message);
     }
 
-    // Update cache
+    // Update cache — poll() will detect no diff for this self-write
     const idx = _allItems.findIndex(i => i.id === itemId);
     if (idx >= 0) {
       _allItems[idx].payload = payload;
@@ -1227,7 +1228,6 @@ export async function createSupabaseSharing(adapter, config) {
       _allItems[idx].done_at = payload.done_at || null;
       _allItems[idx].updated_at = new Date().toISOString();
     }
-    _notifyUpdate();
     return _allItems[idx] || null;
   }
 
@@ -1247,7 +1247,6 @@ export async function createSupabaseSharing(adapter, config) {
     }
 
     _allItems = _allItems.filter(i => i.id !== itemId);
-    _notifyUpdate();
   }
 
   async function completeItem(groupId, itemId, doneBy) {

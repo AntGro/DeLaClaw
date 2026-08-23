@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-08-23T09:13:17.439Z from 38 modules (v1.790). Total LOC 30632. Do not hand-edit.
+> Generated 2026-08-23T09:15:21.944Z from 38 modules (v1.791). Total LOC 30631. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -37,7 +37,7 @@
 | drive | 919 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 459 | - | i18n,icons,utils | - | - |
-| delegation | 430 | - |  | - | window:1 |
+| delegation | 429 | - |  | - | window:1 |
 | demo | 303 | x |  | drive.js | - |
 | offline-cache | 299 | - | ./state,state.js | main.js | - |
 | crypto-sync | 297 | settings |  | sharing-supabase.js | - |

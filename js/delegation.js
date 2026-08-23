@@ -69,7 +69,7 @@
       case 'copy-habit-to-personal': callWindow('copyHabitToPersonal', [getId(el), el]); break;
       case 'open-add-habit-category': callWindow('openAddHabitCategoryModal', []); break;
       case 'open-add-birthday': callWindow('openAddBirthdayModal', []); break;
-      case 'open-add-vestiaire': callWindow('openAddVestiaireModal', []); break;
+      case 'open-add-vestiaire': callWindow('openAddVestiaireModal', [getCat(el)]); break;
       case 'open-add-vestiaire-category': callWindow('openAddVestiaireCategoryModal', []); break;
       case 'open-add-flash-deck': callWindow('openAddFlashDeckModal', []); break;
       case 'open-add-list': callWindow('openAddListModal', []); break;
@@ -255,8 +255,7 @@
       case 'bulk-share-list': callWindow('bulkShareList', [getId(el), el]); break;
       case 'unshare-list-item': callWindow('unshareListItem', [getId(el), el]); break;
       case 'copy-list-item-to-personal': callWindow('copyListItemToPersonal', [getId(el), el]); break;
-      case 'open-add-vestiaire': callWindow('openAddVestiaireModal', []); break;
-      case 'navigate-to-vestiaire-cat': callWindow('navigateToVestiaireCat', [getCat(el)]); break;
+      case 'open-add-vestiaire': callWindow('openAddVestiaireModal', [getCat(el)]); break;      case 'navigate-to-vestiaire-cat': callWindow('navigateToVestiaireCat', [getCat(el)]); break;
       case 'open-add-vestiaire-category': callWindow('openAddVestiaireCategoryModal', []); break;
       case 'open-edit-vestiaire': callWindow('openEditVestiaireModal', [getId(el)]); break;
       case 'delete-vestiaire': callWindow('deleteVestiaire', [getId(el)]); break;

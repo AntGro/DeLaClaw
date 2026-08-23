@@ -555,7 +555,8 @@ async function cycleVestiaireStatus(id) {
 function addVestiaireModalHTML() {
   return `<div class="modal">
     <h2>${lucideIcon('shirt', 20)} ${t('vestiaire.add_item')}</h2>
-    <input type="hidden" id="newVestiaireCategory">
+    <label>${t('common.category')}</label>
+    <select id="newVestiaireCategory"></select>
     <label>${t('common.name')}</label>
     <input type="text" id="newVestiaireName" placeholder="${t('vestiaire.name_placeholder')}" maxlength="200"
       data-action="save-new-vestiaire-on-enter">

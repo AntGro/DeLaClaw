@@ -106,8 +106,13 @@ async function saveEditCategory() {
 }
 
 
+let _lastRefreshTodos = 0;
 async function refreshTodos() {
   if (!state.db.connected) return;
+  // Cooldown: skip if a refresh completed within 500ms (avoids double-fetch
+  // when explicit refresh + realtime-triggered refresh fire back-to-back).
+  const now = Date.now();
+  if (now - _lastRefreshTodos < 500) return;
   await loadTodoCategories();
   let data;
   try {
@@ -157,6 +162,8 @@ async function refreshTodos() {
     // Drop shared pointers whose remote data couldn't be resolved
     allTodos = allTodos.filter(t => !t.shared_id || t._shared);
   }
+
+  _lastRefreshTodos = Date.now();
 
   if (state.currentView === 'todos') {
     renderTodos();

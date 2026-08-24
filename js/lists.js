@@ -41,8 +41,13 @@ function getListColor(list, idx) {
 // DATA
 // ===================================================================
 
+let _lastRefreshLists = 0;
 async function refreshLists() {
   if (!state.db.connected) return;
+  // Cooldown: skip if a refresh completed within 500ms (avoids double-fetch
+  // when explicit refresh + realtime-triggered refresh fire back-to-back).
+  const now = Date.now();
+  if (now - _lastRefreshLists < 500) return;
   let lists;
   try {
     lists = await fetchAll(() => state.db
@@ -104,6 +109,8 @@ async function refreshLists() {
     // Drop shared pointers whose remote data couldn't be resolved
     state.allListItems = state.allListItems.filter(i => !i.shared_id || i._shared);
   }
+
+  _lastRefreshLists = Date.now();
 
   if (state.currentView === 'lists') {
     renderLists();

@@ -619,8 +619,13 @@ function getFrequencyFromPicker(container) {
 
 // getHabitCategories / saveHabitCategories / syncHabitCategoriesFromData — removed (now DB table-based via loadHabitCategories)
 
+let _lastRefreshHabits = 0;
 async function refreshHabits() {
   if (!state.db.connected) return;
+  // Cooldown: skip if a refresh completed within 500ms (avoids double-fetch
+  // when explicit refresh + realtime-triggered refresh fire back-to-back).
+  const now = Date.now();
+  if (now - _lastRefreshHabits < 500) return;
   await loadHabitCategories();
   let habits;
   try {
@@ -702,6 +707,8 @@ async function refreshHabits() {
     // Drop shared pointers whose remote data couldn't be resolved
     state.allHabits = state.allHabits.filter(h => !h.shared_id || h._shared);
   }
+
+  _lastRefreshHabits = Date.now();
 
   // Categories already loaded via loadHabitCategories() above
   if (state.currentView === 'habits') {

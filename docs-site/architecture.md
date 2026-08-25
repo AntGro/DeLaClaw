@@ -69,6 +69,71 @@ Cache details:
 - `birthdays.avatar_url` is stripped from cache (base64 images, 30-80 KB each)
 - New tables are included without code changes (exclusion list, not inclusion list)
 
+## Data flow by backend
+
+The read/write/sync paths differ fundamentally between backends:
+
+### Supabase — backend-first
+
+```
+WRITE (user action)
+  view code ──► db.from(table).update() ──► Supabase (HTTP PATCH) ──► response
+                                                 │
+                                                 ▼
+                                          refreshTodos() ──► re-fetch from Supabase ──► state.* ──► render
+
+EXTERNAL CHANGE (realtime)
+  Supabase Realtime ws ──► debouncedHandler (300ms) ──► refreshTodos() ──► same path
+                                                         └─ cooldown guard: skips if <500ms since last refresh
+
+SHARING (realtime + polling)
+  sharing module poll ──► compare cache ──► 'sharing-changed' event ──► syncShared*() + refresh*()
+```
+
+Writes go to Supabase first; the app re-fetches after each mutation to update in-memory state.
+Realtime subscriptions on item tables (`todos`, `habits`, etc.) detect changes from other
+devices or sharing members. A 500ms cooldown on refresh functions deduplicates self-triggered
+realtime events.
+
+### Google Drive — local-first
+
+```
+WRITE (user action)
+  view code ──► db.from(table).update() ──► in-memory store (instant) ──► render
+                                                 │
+                                                 ▼ (debounced, 2s)
+                                          upload table JSON to Drive
+
+EXTERNAL CHANGE (polling)
+  Drive polling (30s) ──► ETag check ──► re-fetch changed tables ──► merge into memory ──► render
+```
+
+All reads and writes hit the in-memory store immediately. The Drive adapter delegates to the
+demo engine for query execution. Mutations mark the table dirty; a 2-second debounce per table
+uploads the JSON file to Drive. Conflict resolution uses ETags (412 → re-read, merge by
+`updated_at`, retry). `forceSave()` flushes on `beforeunload` / `visibilitychange`.
+
+### Demo — ephemeral in-memory
+
+```
+WRITE (user action)
+  view code ──► db.from(table).update() ──► in-memory store (instant) ──► render
+
+No persistence, no sync. Data resets on page reload.
+```
+
+### Local (Bun + SQLite) — backend-first
+
+```
+WRITE (user action)
+  view code ──► db.from(table).update() ──► HTTP POST to localhost ──► SQLite ──► response
+                                                 │
+                                                 ▼
+                                          refresh*() ──► re-fetch via HTTP ──► state.* ──► render
+
+No realtime. Single-user, single-device.
+```
+
 ## State management
 
 All shared state lives in `js/state.js` as a single exported `state` object:

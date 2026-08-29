@@ -246,4 +246,21 @@ export const DRIVE_MIGRATIONS = {
       else if (h.frequency_rule.startsWith('monthly:')) { h.frequency_rule = 'every_N_months:1:' + h.frequency_rule.slice(8); }
     }
   },
+
+  '1.805': async (store, ctx) => {
+    // Add gcal_sync table (empty). The Drive adapter's DRIVE_TABLES list
+    // already includes it, so it will be flushed as gcal_sync.json.
+    if (!store.gcal_sync) store.gcal_sync = [];
+    // Create the Drive file if it does not exist yet
+    if (ctx && ctx.getToken && ctx.uploadFile && ctx.folderId) {
+      const meta = ctx.fileMeta?.gcal_sync;
+      if (!meta?.fileId) {
+        const tok = await ctx.getToken();
+        if (tok) {
+          const result = await ctx.uploadFile(tok, ctx.folderId, null, 'gcal_sync.json', []);
+          if (ctx.fileMeta) ctx.fileMeta.gcal_sync = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
+        }
+      }
+    }
+  },
 };

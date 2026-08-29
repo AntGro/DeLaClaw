@@ -46,5 +46,35 @@ export function createSupabaseAdapter(url, key) {
 
     /** Escape hatch: raw Supabase client for anything not yet abstracted */
     raw: client,
+
+    /**
+     * Delete the user's account: truncate all personal tables (RLS scopes
+     * deletes to the current user) and sign out. Does NOT delete the
+     * Supabase Auth user (requires admin/service-role key).
+     */
+    async deleteAccount() {
+      try {
+        // Children first, then parents; FK cascades handle the rest
+        const ID_TABLES = [
+          'tasks', 'habit_completions', 'flashcard_notes', 'text_line_progress',
+          'list_items', 'flashcards', 'texts',
+          'todos', 'habits', 'vestiaire', 'birthdays',
+          'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
+          'projects', 'lists', 'nvidia_usage',
+        ];
+        for (const table of ID_TABLES) {
+          await client.from(table).delete().neq('id', '__never__');
+        }
+        // Tables with non-id PKs
+        await client.from('settings').delete().neq('key', '__never__');
+        await client.from('prompts').delete().neq('key', '__never__');
+        await client.from('daily_visits').delete().neq('visit_date', '1970-01-01');
+        await client.from('gcal_sync').delete().neq('item_type', '__never__');
+        await client.auth.signOut();
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e.message || 'Unexpected error' };
+      }
+    },
   };
 }

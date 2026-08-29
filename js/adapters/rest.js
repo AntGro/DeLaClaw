@@ -24,6 +24,18 @@ export function createRestAdapter(baseUrl) {
         updates.map(u => adapter.from(table).update({ sort_order: u.sort_order }).eq('id', u.id))
       );
     },
+    /**
+     * Delete account: call the server's reset endpoint to drop/recreate tables.
+     */
+    async deleteAccount() {
+      try {
+        const resp = await fetch(`${baseUrl}/reset`, { method: 'POST' });
+        if (!resp.ok) return { ok: false, error: `Server reset failed (${resp.status})` };
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e.message || 'Unexpected error' };
+      }
+    },
   };
   return adapter;
 }

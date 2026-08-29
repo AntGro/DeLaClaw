@@ -122,6 +122,9 @@ const db = {
   /** No-op passthrough — batch() was removed from the Drive adapter (v1.729)
    *  but kept here as a safe fallback so any remaining caller doesn't crash. */
   async batch(fn) { return fn(); },
+
+  /** Direct access to the raw adapter (for deleteAccount, etc.) */
+  get adapter() { return _adapter; },
 };
 
 export default db;

@@ -177,6 +177,8 @@ function showToast(msg, type = 'info', duration = 2500) {
 // ===================================================================
 // ===================================================================
 let _confirmActionCallback = null;
+let _confirmActionKeepOpen = false;
+let _confirmActionLocked = false;
 let _confirmCancelCallback = null;
 
 function showConfirmAction(title, message, onConfirm, detail, opts) {
@@ -184,7 +186,11 @@ function showConfirmAction(title, message, onConfirm, detail, opts) {
   document.getElementById('confirmActionMessage').textContent = message;
   const detailEl = document.getElementById('confirmActionDetail');
   if (detail) {
-    detailEl.textContent = detail;
+    if (opts?.detailHtml) {
+      detailEl.innerHTML = detail;
+    } else {
+      detailEl.textContent = detail;
+    }
     detailEl.style.display = 'block';
   } else {
     detailEl.style.display = 'none';
@@ -228,12 +234,31 @@ function showConfirmAction(title, message, onConfirm, detail, opts) {
   if (modal) {
     modal.classList.toggle('confirm-neutral', opts?.variant === 'neutral');
   }
+  // Confirm word (type "DELETE" to confirm)
+  const confirmWordWrap = document.getElementById('confirmWordWrap');
+  const confirmWordInput = document.getElementById('confirmWordInput');
+  if (opts?.confirmWord && confirmWordWrap && confirmWordInput) {
+    confirmWordInput.value = '';
+    confirmWordInput.placeholder = opts.confirmPlaceholder || `Type ${opts.confirmWord} to confirm`;
+    confirmWordWrap.style.display = '';
+    // Disable confirm button until word matches
+    const btn = document.getElementById('confirmActionBtn');
+    if (btn) btn.disabled = true;
+    confirmWordInput._handler = () => {
+      if (btn) btn.disabled = confirmWordInput.value.trim() !== opts.confirmWord;
+    };
+    confirmWordInput.addEventListener('input', confirmWordInput._handler);
+  } else if (confirmWordWrap) {
+    confirmWordWrap.style.display = 'none';
+  }
   _confirmActionCallback = onConfirm;
+  _confirmActionKeepOpen = !!opts?.keepOpen;
   _confirmCancelCallback = opts?.onCancel || null;
   document.getElementById('confirmActionModal').classList.add('visible');
 }
 
 function closeConfirmAction() {
+  if (_confirmActionLocked) return; // deletion in progress
   document.getElementById('confirmActionModal').classList.remove('visible');
   const cancelCb = _confirmCancelCallback;
   _confirmActionCallback = null;
@@ -245,6 +270,19 @@ function closeConfirmAction() {
   // Reset toggle
   const toggleWrap = document.getElementById('confirmActionToggle');
   if (toggleWrap) toggleWrap.style.display = 'none';
+  // Reset confirm word input
+  const confirmWordWrap = document.getElementById('confirmWordWrap');
+  const confirmWordInput = document.getElementById('confirmWordInput');
+  if (confirmWordWrap) confirmWordWrap.style.display = 'none';
+  if (confirmWordInput) {
+    if (confirmWordInput._handler) {
+      confirmWordInput.removeEventListener('input', confirmWordInput._handler);
+      delete confirmWordInput._handler;
+    }
+    confirmWordInput.value = '';
+  }
+  const confirmBtn = document.getElementById('confirmActionBtn');
+  if (confirmBtn) confirmBtn.disabled = false;
   // Reset custom button text
   const btnTextEl = document.getElementById('confirmActionBtnText');
   if (btnTextEl) btnTextEl.textContent = 'Delete';
@@ -266,11 +304,30 @@ function closeConfirmAction() {
 async function executeConfirmAction() {
   if (_confirmActionCallback) {
     const cb = _confirmActionCallback;
+    const keepOpen = _confirmActionKeepOpen;
     const toggleInput = document.getElementById('confirmActionToggleInput');
     const toggleChecked = toggleInput ? toggleInput.checked : false;
     _confirmCancelCallback = null; // confirm path — do not fire cancel
-    closeConfirmAction();
-    await cb(toggleChecked);
+    if (keepOpen) {
+      // Disable interactions but keep modal visible
+      _confirmActionLocked = true;
+      const btn = document.getElementById('confirmActionBtn');
+      const cancelBtn = document.getElementById('confirmActionCancelBtn');
+      if (btn) btn.style.display = 'none';
+      if (cancelBtn) cancelBtn.style.display = 'none';
+      const wordWrap = document.getElementById('confirmWordWrap');
+      if (wordWrap) wordWrap.style.display = 'none';
+      _confirmActionCallback = null;
+      _confirmActionKeepOpen = false;
+      try {
+        await cb(toggleChecked);
+      } finally {
+        _confirmActionLocked = false;
+      }
+    } else {
+      closeConfirmAction();
+      await cb(toggleChecked);
+    }
   }
 }
 

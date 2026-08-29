@@ -97,6 +97,10 @@
       case 'overlay-close-auth': { var ov = document.getElementById('authPromptOverlay'); if (ov) ov.classList.remove('visible'); } break;
       case 'switch-settings-pane': if (el.dataset.pane) callWindow('switchSettingsPane', [el.dataset.pane]); break;
       case 'toggle-theme': callWindow('toggleTheme', []); break;
+      case 'toggle-cal-sync': callWindow('toggleCalSync', []); break;
+      case 'toggle-cal-sync-habits': callWindow('toggleCalSyncSub', ['habits']); break;
+      case 'toggle-cal-sync-todos': callWindow('toggleCalSyncSub', ['todos']); break;
+      case 'toggle-cal-sync-birthdays': callWindow('toggleCalSyncSub', ['birthdays']); break;
       case 'toggle-nvidia-key-visibility': callWindow('toggleNvidiaKeyVisibility', []); break;
       case 'save-nvidia-key': callWindow('saveNvidiaKey', []); break;
       case 'apply-custom-model': callWindow('applyCustomModel', []); break;

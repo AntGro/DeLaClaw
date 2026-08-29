@@ -9,12 +9,13 @@ import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
+import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, syncTable as syncCalendarTable, markDirty as markCalDirty, deleteTypeEvents, pushType as pushCalType, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
-import { esc, showToast, showConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
+import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
 
-const SETTINGS_PANES = ['general', 'ai', 'sharing', 'data', 'stats', 'agents'];
+const SETTINGS_PANES = ['general', 'ai', 'calendar', 'sharing', 'data', 'stats', 'agents', 'account'];
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
 import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
 import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthdays.js';
@@ -1632,6 +1633,23 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   // Load user settings from DB (before tab visibility / view restore)
   await loadSettings();
 
+  // Init calendar sync module (for Drive and Demo backends only)
+  if (state.demoMode || state.driveMode) {
+    initCalSync(state.driveMode ? adapter.getToken : null);
+    // Hook calendar sync to Drive flush so they stay coupled
+    if (state.driveMode) {
+      adapter._markCalDirty = markCalDirty;
+      adapter._onTableFlushed = (table) => {
+        // Category table flush → sync the corresponding item table
+        const itemTable = CAT_TABLE_TO_ITEM_TABLE[table];
+        const syncTarget = itemTable || table;
+        syncCalendarTable(syncTarget).catch(e => console.warn('Calendar table sync:', e));
+      };
+    }
+    // No full sync on page load — trust calendar is already synced.
+    // Full push only happens on first enable (toggleCalSync).
+  }
+
   // Restore view early (before async refreshes) to avoid flash
   applyTabVisibility();
   const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'vestiaire', 'flashcards', 'lists'];
@@ -1670,6 +1688,42 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   });
 
   await refreshAll();
+
+  // Calendar sync onboarding prompt for first-time Drive users
+  if (state.driveMode && state.driveAdapter?.isFreshInstall) {
+    const { data: syncSetting } = await state.db.from('settings').select('value').eq('key', 'gcal_sync_enabled');
+    const configured = syncSetting && syncSetting.length > 0;
+    if (!configured) {
+      // Never configured — show onboarding prompt
+      showConfirmAction(
+        t('cal_sync.onboarding_title'),
+        t('cal_sync.onboarding_body'),
+        async () => {
+          try {
+            const calId = await enableCalSync();
+            if (calId) {
+              showToast(t('cal_sync.enabled'), 'success');
+              // Update the Settings toggle if it's rendered
+              const toggle = document.getElementById('calSyncToggle');
+              if (toggle) toggle.checked = true;
+              // Push all existing data to the new calendar
+              await reconcileCalendar();
+            }
+          } catch (e) {
+            console.warn('Calendar sync onboarding failed:', e);
+          }
+        },
+        t('cal_sync.onboarding_detail'),
+        {
+          detailHtml: true,
+          variant: 'neutral',
+          btnText: t('cal_sync.onboarding_enable'),
+          iconSvg: lucideIcon('calendar-check', 32),
+          btnIconSvg: lucideIcon('calendar-check', 16, '#fff'),
+        }
+      );
+    }
+  }
 
   checkSchemaVersion();
   recordDailyVisit();
@@ -2513,6 +2567,22 @@ function updateStaticLabels() {
   if (settingsPaneGeneralTitle) settingsPaneGeneralTitle.textContent = t('menu.settings_general');
   const settingsPaneAiTitle = document.getElementById('settingsPaneAiTitle');
   if (settingsPaneAiTitle) settingsPaneAiTitle.textContent = t('menu.settings_ai');
+  const settingsNavCalendar = document.getElementById('settingsNavCalendar');
+  if (settingsNavCalendar) settingsNavCalendar.textContent = t('cal_sync.nav');
+  const settingsPaneCalendarTitle = document.getElementById('settingsPaneCalendarTitle');
+  if (settingsPaneCalendarTitle) settingsPaneCalendarTitle.textContent = t('cal_sync.pane_title');
+  const settingsCalSyncLabel = document.getElementById('settingsCalSyncLabel');
+  if (settingsCalSyncLabel) settingsCalSyncLabel.textContent = t('cal_sync.label');
+  const settingsCalSyncHint = document.getElementById('settingsCalSyncHint');
+  if (settingsCalSyncHint) settingsCalSyncHint.textContent = t('cal_sync.hint');
+  const settingsCalSyncToggleLabel = document.getElementById('settingsCalSyncToggleLabel');
+  if (settingsCalSyncToggleLabel) settingsCalSyncToggleLabel.textContent = t('cal_sync.toggle');
+  const settingsCalSyncHabitsLabel = document.getElementById('settingsCalSyncHabitsLabel');
+  if (settingsCalSyncHabitsLabel) settingsCalSyncHabitsLabel.textContent = t('cal_sync.habits');
+  const settingsCalSyncTodosLabel = document.getElementById('settingsCalSyncTodosLabel');
+  if (settingsCalSyncTodosLabel) settingsCalSyncTodosLabel.textContent = t('cal_sync.todos');
+  const settingsCalSyncBirthdaysLabel = document.getElementById('settingsCalSyncBirthdaysLabel');
+  if (settingsCalSyncBirthdaysLabel) settingsCalSyncBirthdaysLabel.textContent = t('cal_sync.birthdays');
   const settingsTabsLabel = document.getElementById('settingsTabsLabel');
   if (settingsTabsLabel) settingsTabsLabel.textContent = t('menu.settings_tabs');
   const settingsTabsHint = document.getElementById('settingsTabsHint');
@@ -2529,6 +2599,17 @@ function updateStaticLabels() {
   if (settingsPaneStatsTitle) settingsPaneStatsTitle.textContent = t('menu.settings_stats');
   applySharingI18n();
   applyAgentsI18n();
+  // Account pane i18n
+  const settingsNavAccountLabel = document.getElementById('settingsNavAccountLabel');
+  if (settingsNavAccountLabel) settingsNavAccountLabel.textContent = t('account.nav');
+  const settingsPaneAccountTitle = document.getElementById('settingsPaneAccountTitle');
+  if (settingsPaneAccountTitle) settingsPaneAccountTitle.textContent = t('account.title');
+  const settingsDangerZoneLabel = document.getElementById('settingsDangerZoneLabel');
+  if (settingsDangerZoneLabel) settingsDangerZoneLabel.textContent = t('account.danger_zone');
+  const settingsDangerZoneHint = document.getElementById('settingsDangerZoneHint');
+  if (settingsDangerZoneHint) settingsDangerZoneHint.textContent = t('account.danger_hint');
+  const deleteAccountBtnText = document.getElementById('deleteAccountBtnText');
+  if (deleteAccountBtnText) deleteAccountBtnText.textContent = t('account.delete_btn');
   const settingsDisplayLabel = document.getElementById('settingsDisplayLabel');
   if (settingsDisplayLabel) settingsDisplayLabel.textContent = t('menu.settings_display');
   const settingsNvidiaKeyLabel = document.getElementById('settingsNvidiaKeyLabel');
@@ -2848,6 +2929,8 @@ function openSettings(pane) {
   switchSettingsPane(pane && SETTINGS_PANES.includes(pane) ? pane : 'general');
   // Init theme toggle state
   updateMenuThemeItem();
+  // Init calendar sync toggles
+  updateCalSyncUI().catch(() => {});
   hydrateIcons();
   document.getElementById('settingsModal').classList.add('visible');
   const scrollY = window.scrollY;
@@ -4727,6 +4810,158 @@ function clearPageSearch(btn) {
 
 window.toggleTheme = toggleTheme;
 window.disconnect = disconnect;
+
+// ── Calendar sync settings ──
+
+async function updateCalSyncUI() {
+  const prefs = await getCalSyncPrefs();
+  const mainRow = document.querySelector('[data-action="toggle-cal-sync"]');
+  const subSettings = document.getElementById('calSyncSubSettings');
+  if (mainRow) mainRow.classList.toggle('checked', prefs.enabled);
+  if (subSettings) subSettings.style.display = prefs.enabled ? '' : 'none';
+  // Sub-toggles
+  const hRow = document.querySelector('[data-action="toggle-cal-sync-habits"]');
+  const tRow = document.querySelector('[data-action="toggle-cal-sync-todos"]');
+  const bRow = document.querySelector('[data-action="toggle-cal-sync-birthdays"]');
+  if (hRow) hRow.classList.toggle('checked', prefs.habits);
+  if (tRow) tRow.classList.toggle('checked', prefs.todos);
+  if (bRow) bRow.classList.toggle('checked', prefs.birthdays);
+  // Show calendar nav button only for Drive and Demo backends
+  const calNavBtn = document.getElementById('settingsNavCalendarBtn');
+  if (calNavBtn) calNavBtn.style.display = (state.demoMode || state.driveMode) ? '' : 'none';
+}
+
+let _calSyncBusy = false;
+
+async function toggleCalSync() {
+  if (_calSyncBusy) return;
+  _calSyncBusy = true;
+  try {
+    const prefs = await getCalSyncPrefs();
+    if (prefs.enabled) {
+      await disableCalSync();
+      showToast(t('cal_sync.disabled'), 'success');
+    } else {
+      const calId = await enableCalSync();
+      if (!calId) return;
+      showToast(t('cal_sync.enabled'), 'success');
+      // Sync existing items on first enable
+      reconcileCalendar().catch(e => console.warn('Initial calendar sync failed:', e));
+    }
+    await updateCalSyncUI();
+  } finally {
+    _calSyncBusy = false;
+  }
+}
+
+async function toggleCalSyncSub(subKey) {
+  if (_calSyncBusy) return;
+  _calSyncBusy = true;
+  try {
+    const settingKey = `gcal_sync_${subKey}`;
+    const { data } = await state.db.from('settings').select('value').eq('key', settingKey).single();
+    const current = data?.value !== 'false'; // defaults to true
+    const newVal = !current;
+    await state.db.from('settings').upsert(
+      { key: settingKey, value: newVal ? 'true' : 'false', updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
+    await updateCalSyncUI();
+    // subKey is 'habits', 'todos', or 'birthdays' → item type is singular
+    const itemType = subKey.replace(/s$/, ''); // 'habit', 'todo', 'birthday'
+    if (!newVal) {
+      // Disabling: delete all calendar events for this type
+      deleteTypeEvents(itemType).catch(e => console.warn('Calendar type delete:', e));
+    } else {
+      // Re-enabling: full push of this type
+      pushCalType(itemType).catch(e => console.warn('Calendar type push:', e));
+    }
+  } finally {
+    _calSyncBusy = false;
+  }
+}
+
+window.toggleCalSync = toggleCalSync;
+window.toggleCalSyncSub = toggleCalSyncSub;
+
+// ── Delete account (Settings > Account > Danger Zone) ──
+
+(function initDeleteAccount() {
+  const btn = document.getElementById('deleteAccountBtn');
+  if (!btn) return;
+  // Hide in demo mode — no account to delete
+  if (state.demoMode) {
+    const pane = document.getElementById('settingsPane-account');
+    if (pane) pane.style.display = 'none';
+    const nav = document.querySelector('[data-pane="account"]');
+    if (nav) nav.style.display = 'none';
+    return;
+  }
+  btn.addEventListener('click', () => {
+    const lang = getLang();
+    const confirmWord = lang === 'fr' ? 'SUPPRIMER' : lang === 'es' ? 'ELIMINAR' : 'DELETE';
+    // Pick backend-specific message
+    const bodyKey = state.driveMode ? 'account.confirm_body_drive'
+      : state.supabaseUrl ? 'account.confirm_body_supabase'
+      : 'account.confirm_body_local';
+    showConfirmAction(
+      t('account.confirm_title'),
+      t(bodyKey),
+      async () => {
+        // Show progress inside the modal
+        const msgEl = document.getElementById('confirmActionMessage');
+        const detailEl = document.getElementById('confirmActionDetail');
+        const iconWrap = document.querySelector('.confirm-action-icon-wrap');
+        if (detailEl) detailEl.style.display = 'none';
+        if (iconWrap) iconWrap.innerHTML = '';
+
+        function setStep(text) {
+          if (msgEl) msgEl.textContent = text;
+        }
+
+        // 1. Calendar cleanup
+        try {
+          const prefs = await getCalSyncPrefs();
+          if (prefs?.enabled) {
+            setStep(t('account.step_calendar'));
+            await disableCalSync();
+          }
+        } catch { /* best effort */ }
+
+        // 2. Delete data via adapter
+        setStep(t('account.step_data'));
+        const rawAdapter = db.adapter;
+        const result = await (rawAdapter?.deleteAccount?.() || { ok: false, error: 'Not supported' });
+        if (!result.ok) {
+          closeConfirmAction();
+          showToast(t('account.delete_failed'), 'error');
+          return;
+        }
+
+        // 3. Sign out + cleanup
+        setStep(t('account.step_signout'));
+        localStorage.clear();
+        // Prevent browser credential auto-select on the reload
+        try { await navigator.credentials.preventSilentAccess(); } catch {}
+
+        // 4. Done
+        setStep(t('account.step_done'));
+        await new Promise(r => setTimeout(r, 800));
+        location.reload();
+      },
+      null,
+      {
+        keepOpen: true,
+        btnText: t('account.delete_btn'),
+        iconSvg: lucideIcon('alert-triangle', 32, '#ef4444'),
+        btnIconSvg: lucideIcon('trash-2', 16, '#fff'),
+        confirmWord,
+        confirmPlaceholder: t('account.confirm_placeholder'),
+      }
+    );
+  });
+})();
+
 window.toggleSearch = toggleSearch;
 window.clearPageSearch = clearPageSearch;
 window.dismissSchemaBanner = dismissSchemaBanner;

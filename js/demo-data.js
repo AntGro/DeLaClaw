@@ -190,7 +190,7 @@ function en() {
     { id: 'demo-li-010', list_id: 'demo-list-003', text: 'In the Mood for Love', checked: 0, note: null, sort_order: 2, created_at: d(-15), updated_at: d(-15) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items, gcal_sync: [] };
 }
 
 // ── FRENCH ──
@@ -302,7 +302,7 @@ function fr() {
   ];
 
   // Re-use same habit_completions (ids are the same, habit_ids match)
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items, gcal_sync: [] };
 }
 
 // ── SPANISH ──
@@ -413,7 +413,7 @@ function es() {
     { id: 'demo-li-010', list_id: 'demo-list-003', text: 'In the Mood for Love', checked: 0, note: null, sort_order: 2, created_at: d(-15), updated_at: d(-15) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items, gcal_sync: [] };
 }
 
 // ── MAIN EXPORT ──
@@ -485,5 +485,6 @@ export function getEmptyData() {
     lists: [], list_items: [],
     settings: [], prompts: [], texts: [], text_line_progress: [], nvidia_usage: [], daily_visits: [],
     todo_categories: [], habit_categories: [], vestiaire_categories: [], flashcard_decks: [],
+    gcal_sync: [],
   };
 }

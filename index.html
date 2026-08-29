@@ -575,6 +575,9 @@ bun run server.js</pre>
         <input type="checkbox" id="confirmActionToggleInput" checked>
         <span id="confirmActionToggleLabel"></span>
       </label>
+      <div id="confirmWordWrap" class="confirm-word-wrap" style="display:none;">
+        <input type="text" id="confirmWordInput" class="confirm-word-input" autocomplete="off" spellcheck="false">
+      </div>
       <div class="modal-actions">
         <button class="modal-cancel" id="confirmActionCancelBtn" data-action="close-confirm-action">Cancel</button>
         <button class="modal-save confirm-action-btn" id="confirmActionBtn" data-action="execute-confirm-action">
@@ -610,6 +613,10 @@ bun run server.js</pre>
             <span data-icon="sparkles" data-size="16"></span>
             <span id="settingsNavAi">AI</span>
           </button>
+          <button class="settings-nav-btn" data-pane="calendar" data-action="switch-settings-pane" data-pane="calendar" id="settingsNavCalendarBtn" style="display:none">
+            <span data-icon="calendar" data-size="16"></span>
+            <span id="settingsNavCalendar">Calendar</span>
+          </button>
           <button class="settings-nav-btn" data-pane="data" data-action="switch-settings-pane" data-pane="data">
             <span data-icon="hard-drive" data-size="16"></span>
             <span id="settingsNavData">Data</span>
@@ -625,6 +632,10 @@ bun run server.js</pre>
           <button class="settings-nav-btn" data-pane="agents" data-action="switch-settings-pane" data-pane="agents" id="settingsNavAgentsBtn">
             <span data-icon="bot" data-size="16"></span>
             <span id="settingsNavAgents">Agents</span>
+          </button>
+          <button class="settings-nav-btn" data-pane="account" data-action="switch-settings-pane" data-pane="account">
+            <span data-icon="user" data-size="16"></span>
+            <span id="settingsNavAccountLabel">Account</span>
           </button>
         </nav>
       </div>
@@ -652,6 +663,32 @@ bun run server.js</pre>
               <span class="setting-toggle-switch" id="themeSwitch"></span>
             </div>
 
+          </div>
+        </div>
+        <div class="settings-pane" id="settingsPane-calendar">
+          <h3 id="settingsPaneCalendarTitle">Calendar & Notifications</h3>
+          <div class="setting-group" id="settingsCalSyncGroup">
+            <div class="setting-group-label" id="settingsCalSyncLabel">Google Calendar</div>
+            <p class="setting-hint" id="settingsCalSyncHint">Sync due items to a dedicated Google Calendar to get notifications on your phone and desktop.</p>
+            <div class="setting-toggle-row" data-action="toggle-cal-sync">
+              <span class="setting-toggle-icon"><span data-icon="calendar" data-size="16"></span></span>
+              <span class="setting-toggle-text" id="settingsCalSyncToggleLabel">Sync to Google Calendar</span>
+              <span class="setting-toggle-switch" id="calSyncSwitch"></span>
+            </div>
+            <div id="calSyncSubSettings" style="display:none">
+              <div class="setting-toggle-row cal-sync-sub" data-action="toggle-cal-sync-habits">
+                <span class="setting-toggle-text" id="settingsCalSyncHabitsLabel">Habits</span>
+                <span class="setting-toggle-switch" id="calSyncHabitsSwitch"></span>
+              </div>
+              <div class="setting-toggle-row cal-sync-sub" data-action="toggle-cal-sync-todos">
+                <span class="setting-toggle-text" id="settingsCalSyncTodosLabel">TODOs</span>
+                <span class="setting-toggle-switch" id="calSyncTodosSwitch"></span>
+              </div>
+              <div class="setting-toggle-row cal-sync-sub" data-action="toggle-cal-sync-birthdays">
+                <span class="setting-toggle-text" id="settingsCalSyncBirthdaysLabel">Birthdays</span>
+                <span class="setting-toggle-switch" id="calSyncBirthdaysSwitch"></span>
+              </div>
+            </div>
           </div>
         </div>
         <div class="settings-pane" id="settingsPane-ai">
@@ -749,6 +786,17 @@ bun run server.js</pre>
         <div class="settings-pane" id="settingsPane-agents">
           <h3 id="settingsPaneAgentsTitle">Agents</h3>
           <div id="agentsPaneContent"></div>
+        </div>
+        <div class="settings-pane" id="settingsPane-account">
+          <h3 id="settingsPaneAccountTitle">Account</h3>
+          <div class="setting-group danger-zone">
+            <div class="setting-group-label" id="settingsDangerZoneLabel">Danger Zone</div>
+            <p class="setting-hint" id="settingsDangerZoneHint">Permanently delete your account and all associated data. This action cannot be undone.</p>
+            <button class="settings-data-btn danger-btn" id="deleteAccountBtn">
+              <span data-icon="trash-2" data-size="16" data-color="#fff"></span>
+              <span id="deleteAccountBtnText">Delete Account</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

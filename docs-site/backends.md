@@ -82,6 +82,8 @@ These **must stay in sync**. The `draft` status bug (v1.105) was caused by the d
 | `updated_at` | `now()` | `datetime('now')` | `new Date().toISOString()` |
 | `status` (tasks) | CHECK constraint | CHECK constraint | `CHECK_CONSTRAINTS` |
 
+> **All timestamps are UTC.** Supabase `timestamptz` stores UTC internally (`now()` returns UTC). SQLite `datetime('now')` returns UTC. The demo/Drive adapter uses `new Date().toISOString()`, which is UTC by spec. Consumers comparing timestamps across backends can rely on this invariant.
+
 ---
 
 ## 4. Per-Backend Details

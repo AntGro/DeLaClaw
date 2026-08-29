@@ -53,6 +53,11 @@ export function createDemoAdapter(initialData) {
     },
     /** Re-seed all in-memory data (for demo toggle) */
     reseed(data) { seed(data); },
+    /** Delete account: wipe in-memory data */
+    async deleteAccount() {
+      for (const key of Object.keys(store)) delete store[key];
+      return { ok: true };
+    },
     /** Return a reference to the raw store (for debugging) */
     get _store() { return store; },
   };

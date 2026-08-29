@@ -397,9 +397,16 @@ input,select,button{font-family:inherit;}
 .setting-toggle-switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform 0.2s;}
 .setting-toggle-row.checked .setting-toggle-switch{background:var(--accent);}
 .setting-toggle-row.checked .setting-toggle-switch::after{transform:translateX(16px);}
+.cal-sync-sub{padding-left:42px;}
 .settings-data-btn{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:9px;border:1px solid var(--border);background:var(--settings-control-bg);color:var(--text);font-size:0.92rem;font-weight:550;cursor:pointer;transition:background 0.15s;}
 .settings-data-btn:hover{background:var(--settings-control-hover);}
 .settings-data-btn:disabled{opacity:0.5;cursor:not-allowed;}
+.settings-data-btn.danger-btn{color:#fff;background:var(--danger,#e74c3c);border-color:var(--danger,#e74c3c);}
+.settings-data-btn.danger-btn:hover{background:color-mix(in srgb,var(--danger,#e74c3c) 85%,#000);}
+.danger-zone .setting-group-label{color:var(--danger,#e74c3c);}
+.confirm-word-wrap{margin:12px 0 0;}
+.confirm-word-input{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:0.9rem;box-sizing:border-box;}
+.confirm-word-input:focus{outline:none;border-color:var(--danger,#e74c3c);box-shadow:0 0 0 2px color-mix(in srgb,var(--danger,#e74c3c) 20%,transparent);}
 .import-progress{margin-top:10px;}.import-progress-text{font-size:0.86rem;color:var(--muted);margin-bottom:4px;}
 .import-progress-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden;}
 .import-progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width 0.2s ease;width:0%;}
@@ -627,7 +634,8 @@ input,select,button{font-family:inherit;}
 .task-draft .task-actions .promote-btn{grid-column:1/-1;box-sizing:border-box;}
 
 /* ===== TOAST ===== */
-.toast{position:fixed;bottom:20px;right:20px;padding:12px 22px;background:var(--bg);border:1.5px solid var(--border);border-radius:10px;font-size:0.88rem;font-weight:500;z-index:999;opacity:0;transform:translateY(8px);transition:all 0.3s;pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,0.18);}
+.toast{position:fixed;bottom:20px;right:20px;padding:12px 22px;background:var(--bg);border:1.5px solid var(--border);border-radius:10px;font-size:0.88rem;font-weight:500;z-index:999;opacity:0;transform:translateY(8px);transition:all 0.3s;pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,0.18);user-select:text;}
+.toast.show{pointer-events:auto;}
 .toast.show{opacity:1;transform:translateY(0);}
 .toast.success{border-color:var(--green);color:var(--green);}
 .toast.error{border-color:var(--red);color:var(--red);}
@@ -806,8 +814,11 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .confirm-neutral{border-top-color:var(--accent) !important;box-shadow:0 20px 60px rgba(0,0,0,0.5),0 0 40px rgba(59,130,246,0.1) !important;}
 .confirm-neutral .confirm-action-icon-wrap{background:rgba(59,130,246,0.12);}
 .confirm-neutral .confirm-action-icon-svg{color:var(--accent);}
+.confirm-neutral .confirm-action-msg{color:var(--text);font-size:0.92rem;}
 .confirm-neutral h2{color:var(--accent) !important;}
-.confirm-neutral .confirm-action-detail{background:rgba(59,130,246,0.06);border-color:rgba(59,130,246,0.15);}
+.confirm-neutral .confirm-action-detail{background:rgba(59,130,246,0.06);border-color:rgba(59,130,246,0.15);color:var(--text);font-size:0.88rem;line-height:1.6;text-align:left;}
+.confirm-neutral .confirm-action-detail b{color:var(--accent);font-weight:600;}
+.confirm-neutral .confirm-action-detail ul{list-style:disc;}
 .confirm-neutral .confirm-action-btn{background:var(--accent) !important;box-shadow:0 2px 12px rgba(59,130,246,0.25) !important;}
 .confirm-neutral .confirm-action-btn:hover{background:#2563eb !important;box-shadow:0 4px 20px rgba(59,130,246,0.35) !important;}
 [data-theme="light"] .confirm-neutral{box-shadow:0 20px 60px rgba(0,0,0,0.12),0 0 40px rgba(59,130,246,0.06) !important;}

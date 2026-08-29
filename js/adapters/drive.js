@@ -828,6 +828,48 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       for (const table of DRIVE_TABLES) scheduleSave(table);
     },
 
+    /**
+     * Run any pending Drive migrations on the in-memory store.
+     * Call after reseed() when importing a backup whose schema_version
+     * may be behind the current app version.
+     * Dirty tables are scheduled for save automatically.
+     */
+    async runPendingMigrations() {
+      const pendingMigrations = Object.keys(DRIVE_MIGRATIONS)
+        .sort((a, b) => parseFloat(a) - parseFloat(b));
+      if (!pendingMigrations.length) return 0;
+
+      const settings = inner._store.settings || [];
+      const svEntry = settings.find(s => s.key === 'schema_version');
+      const currentVersion = svEntry ? String(svEntry.value) : '0';
+
+      const toRun = pendingMigrations.filter(v => v > currentVersion);
+      if (!toRun.length) return 0;
+
+      const migrationCtx = {
+        token: await getToken(), folderId, fileMeta, filesByName,
+        getToken, DRIVE_TABLES,
+        uploadFile, downloadFile, deleteFile, listFolderFiles,
+      };
+
+      for (const version of toRun) {
+        await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
+
+        // Bump schema_version in memory
+        const entry = (inner._store.settings || []).find(s => s.key === 'schema_version');
+        if (entry) {
+          entry.value = version;
+        } else {
+          if (!inner._store.settings) inner._store.settings = [];
+          inner._store.settings.push({ key: 'schema_version', value: version });
+        }
+      }
+
+      // Schedule save for all tables — migrations may have touched any of them
+      for (const table of DRIVE_TABLES) scheduleSave(table);
+      return toRun.length;
+    },
+
     get _store() { return inner._store; },
 
     async forceSave() {

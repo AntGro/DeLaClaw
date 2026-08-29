@@ -1,6 +1,6 @@
 // Service Worker for DeLaClaw (PWA)
 // CACHE_VERSION is updated by the pre-commit hook from VERSION file
-const CACHE_VERSION = 'dlc-1.804';
+const CACHE_VERSION = 'dlc-1.836';
 
 
 const PRECACHE_URLS = [
@@ -20,6 +20,7 @@ const PRECACHE_URLS = [
   'js/auth.js',
   'js/backend-logos.js',
   'js/birthdays.js',
+  'js/calendar-sync.js',
   'js/crypto-sync.js',
   'js/db.js',
   'js/delegation.js',
@@ -91,6 +92,11 @@ self.addEventListener('fetch', (event) => {
 
   // Network-first for Supabase API calls — pass through, don't intercept
   if (url.hostname.includes('supabase.co') || url.hostname.includes('supabase.com')) {
+    return;
+  }
+
+  // Pass through Google API calls (Drive, Calendar, Identity) — never intercept
+  if (url.hostname.includes('googleapis.com') || url.hostname.includes('accounts.google.com')) {
     return;
   }
 

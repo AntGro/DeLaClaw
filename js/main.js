@@ -995,6 +995,8 @@ async function doLogin() {
       err.textContent = t('login.drive_gis_blocked') || 'Google sign-in is blocked. Disable your ad blocker or allow third-party scripts.';
     } else if (e.message === 'popup_closed_by_user' || e.message === 'access_denied') {
       err.textContent = t('login.drive_cancelled') || 'Google sign-in was cancelled.';
+    } else if (e.message === 'drive_scope_denied') {
+      err.textContent = t('login.drive_scope_denied') || 'DeLaClaw needs Google Drive access to store your data. Please try again and accept the Drive permission.';
     } else if (e.message === 'popup_failed_to_open') {
       err.textContent = t('login.drive_popup_blocked') || 'Pop-up blocked by your browser — please try again.';
     } else {
@@ -1689,39 +1691,22 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   await refreshAll();
 
-  // Calendar sync onboarding prompt for first-time Drive users
-  if (state.driveMode && state.driveAdapter?.isFreshInstall) {
+  // Calendar sync auto-enable: if Calendar scope was granted at sign-in, enable sync silently
+  if (state.driveMode && state.driveAdapter?.calendarScopeGranted) {
     const { data: syncSetting } = await state.db.from('settings').select('value').eq('key', 'gcal_sync_enabled');
-    const configured = syncSetting && syncSetting.length > 0;
-    if (!configured) {
-      // Never configured — show onboarding prompt
-      showConfirmAction(
-        t('cal_sync.onboarding_title'),
-        t('cal_sync.onboarding_body'),
-        async () => {
-          try {
-            const calId = await enableCalSync();
-            if (calId) {
-              showToast(t('cal_sync.enabled'), 'success');
-              // Update the Settings toggle if it's rendered
-              const toggle = document.getElementById('calSyncToggle');
-              if (toggle) toggle.checked = true;
-              // Push all existing data to the new calendar
-              await reconcileCalendar();
-            }
-          } catch (e) {
-            console.warn('Calendar sync onboarding failed:', e);
-          }
-        },
-        t('cal_sync.onboarding_detail'),
-        {
-          detailHtml: true,
-          variant: 'neutral',
-          btnText: t('cal_sync.onboarding_enable'),
-          iconSvg: lucideIcon('calendar-check', 32),
-          btnIconSvg: lucideIcon('calendar-check', 16, '#fff'),
+    const alreadyEnabled = syncSetting?.some(r => r.value === 'true');
+    if (!alreadyEnabled) {
+      try {
+        const calId = await enableCalSync();
+        if (calId) {
+          showToast(t('cal_sync.enabled'), 'success');
+          const toggle = document.getElementById('calSyncToggle');
+          if (toggle) toggle.checked = true;
+          await reconcileCalendar();
         }
-      );
+      } catch (e) {
+        console.warn('Calendar sync auto-enable failed:', e);
+      }
     }
   }
 

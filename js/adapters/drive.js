@@ -27,7 +27,7 @@ export const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
 export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
 
 export function getDriveScope() {
-  return DRIVE_SCOPE_FILE;
+  return `${DRIVE_SCOPE_FILE} ${CALENDAR_SCOPE}`;
 }
 const DRIVE_FOLDER_NAME = 'DeLaClaw';
 const DEBOUNCE_MS = 2000;
@@ -60,9 +60,9 @@ function _tokenKey(clientId) {
   return `${_TOKEN_KEY_PREFIX}${clientId || 'default'}`;
 }
 
-function _persistToken(token, expiryMs, clientId) {
+function _persistToken(token, expiryMs, clientId, scopes) {
   try {
-    sessionStorage.setItem(_tokenKey(clientId), JSON.stringify({ token, expiry: expiryMs }));
+    sessionStorage.setItem(_tokenKey(clientId), JSON.stringify({ token, expiry: expiryMs, scopes: scopes || '' }));
   } catch (_) {}
 }
 
@@ -70,12 +70,16 @@ function _loadPersistedToken(clientId) {
   try {
     const raw = sessionStorage.getItem(_tokenKey(clientId));
     if (!raw) return null;
-    const { token, expiry } = JSON.parse(raw);
+    const { token, expiry, scopes } = JSON.parse(raw);
     // Still valid with ≥60s margin
-    if (token && expiry && Date.now() < expiry - 60000) return { token, expiry };
+    if (token && expiry && Date.now() < expiry - 60000) return { token, expiry, scopes: scopes || '' };
   } catch (_) {}
   return null;
 }
+
+/** Whether the most recent OAuth grant included calendar.app.created */
+let _calendarScopeGranted = false;
+export function wasCalendarScopeGranted() { return _calendarScopeGranted; }
 
 function clearDriveTokenCache(clientId) {
   // If clientId given, clear only that scoped entry; otherwise clear all prefixed entries (defense on mode switch)
@@ -112,6 +116,10 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
     _cachedToken = persisted.token;
     _cachedClientId = clientId;
     _tokenExpiry = persisted.expiry;
+    // Restore calendar scope flag from persisted data
+    if (persisted.scopes) {
+      _calendarScopeGranted = persisted.scopes.includes(CALENDAR_SCOPE);
+    }
     return Promise.resolve(_cachedToken);
   }
   // 3. Dedup in-flight request — prevents popup spam on concurrent getToken()
@@ -131,13 +139,20 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
       callback: (resp) => {
         if (resp.error) {
           reject(new Error(resp.error));
-        } else {
-          _cachedToken = resp.access_token;
-          _cachedClientId = clientId;
-          _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
-          _persistToken(_cachedToken, _tokenExpiry, clientId);
-          resolve(resp.access_token);
+          return;
         }
+        // Check granted scopes — Drive is mandatory
+        const granted = resp.scope || '';
+        if (!granted.includes(DRIVE_SCOPE_FILE)) {
+          reject(new Error('drive_scope_denied'));
+          return;
+        }
+        _calendarScopeGranted = granted.includes(CALENDAR_SCOPE);
+        _cachedToken = resp.access_token;
+        _cachedClientId = clientId;
+        _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
+        _persistToken(_cachedToken, _tokenExpiry, clientId, granted);
+        resolve(resp.access_token);
       },
       error_callback: (err) => {
         reject(new Error(err.type || 'auth_error'));
@@ -868,6 +883,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
     get connected() { return true; },
     get isFreshInstall() { return isFreshInstall; },
+    get calendarScopeGranted() { return _calendarScopeGranted; },
     get driveFolderId() { return folderId; },
     get driveFileMeta() { return { ...fileMeta }; },
 

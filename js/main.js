@@ -4332,6 +4332,13 @@ async function performImport(file) {
         reseedData[table] = backup[table] || [];
       }
       inMemAdapter.reseed(reseedData);
+      // Run pending migrations if the backup's schema is behind the app
+      if (inMemAdapter.runPendingMigrations) {
+        const migrated = await inMemAdapter.runPendingMigrations();
+        if (migrated > 0) {
+          showToast(t('menu.settings_restore_migrated', migrated), 'info');
+        }
+      }
       setDemoCategoriesFromData(reseedData);
       await loadProjects();
       buildProjectCards();

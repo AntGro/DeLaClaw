@@ -814,6 +814,8 @@ const T = {
       scope_prompt_detail: '<b>What happens next</b><ul style="margin:6px 0 0;padding-left:18px;line-height:1.7"><li>A Google sign-in popup will open</li><li>Make sure to check the <b>Calendar</b> permission</li><li>DeLaClaw only creates events in its own calendar</li></ul>',
       scope_prompt_btn: 'Continue',
       onboarding_skip: 'Not now',
+      syncing_type: 'Syncing {0}…',
+      sync_complete: 'Calendar sync complete',
     },
   },
   fr: {
@@ -1605,6 +1607,8 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       scope_prompt_detail: '<b>Prochaine \u00e9tape</b><ul style="margin:6px 0 0;padding-left:18px;line-height:1.7"><li>Une fen\u00eatre de connexion Google va s\'ouvrir</li><li>Pensez \u00e0 cocher la permission <b>Calendar</b></li><li>DeLaClaw ne cr\u00e9e des \u00e9v\u00e9nements que dans son propre calendrier</li></ul>',
       scope_prompt_btn: 'Continuer',
       onboarding_skip: 'Plus tard',
+      syncing_type: 'Synchronisation des {0}…',
+      sync_complete: 'Synchronisation terminée',
     },
   },
   es: {
@@ -2396,6 +2400,8 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       scope_prompt_detail: '<b>Siguiente paso</b><ul style="margin:6px 0 0;padding-left:18px;line-height:1.7"><li>Se abrir\u00e1 una ventana de inicio de sesi\u00f3n de Google</li><li>Aseg\u00farate de marcar el permiso de <b>Calendar</b></li><li>DeLaClaw solo crea eventos en su propio calendario</li></ul>',
       scope_prompt_btn: 'Continuar',
       onboarding_skip: 'Ahora no',
+      syncing_type: 'Sincronizando {0}…',
+      sync_complete: 'Sincronización completada',
     },
   },
 };

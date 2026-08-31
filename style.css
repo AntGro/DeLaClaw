@@ -399,6 +399,10 @@ input,select,button{font-family:inherit;}
 .setting-toggle-row.checked .setting-toggle-switch{background:var(--accent);}
 .setting-toggle-row.checked .setting-toggle-switch::after{transform:translateX(16px);}
 .cal-sync-sub{padding-left:42px;}
+.cal-sync-progress{margin:8px 0 4px 42px;text-align:left;}
+.cal-sync-progress-text{font-size:0.82rem;color:var(--muted);margin:0 0 6px;line-height:1.3;}
+.cal-sync-progress-bar{width:100%;height:4px;background:var(--border);border-radius:2px;overflow:hidden;}
+.cal-sync-progress-fill{height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.3s ease;}
 .settings-data-btn.danger-btn{color:#fff;background:var(--danger,#e74c3c);border-color:var(--danger,#e74c3c);}
 .settings-data-btn.danger-btn:hover{background:color-mix(in srgb,var(--danger,#e74c3c) 85%,#000);}
 .danger-zone .setting-group-label{color:var(--danger,#e74c3c);}

@@ -591,14 +591,22 @@ export async function syncTable(tableName) {
  * Full push: sync all items for all enabled types.
  * Called on first enable only (not on page load).
  */
-export async function reconcileAll() {
+export async function reconcileAll(onProgress) {
   const prefs = await getCalSyncPrefs();
   if (!prefs.enabled || !prefs.calendarId || state.demoMode || !_getToken) return;
 
-  // Force full scan for each type
-  if (prefs.habits) { markDirty('habits', null); await syncTable('habits'); }
-  if (prefs.todos) { markDirty('todos', null); await syncTable('todos'); }
-  if (prefs.birthdays) { markDirty('birthdays', null); await syncTable('birthdays'); }
+  const types = [];
+  if (prefs.habits) types.push({ table: 'habits', type: 'habit' });
+  if (prefs.todos) types.push({ table: 'todos', type: 'todo' });
+  if (prefs.birthdays) types.push({ table: 'birthdays', type: 'birthday' });
+
+  for (let i = 0; i < types.length; i++) {
+    const { table, type } = types[i];
+    if (onProgress) onProgress({ type, index: i, total: types.length });
+    markDirty(table, null);
+    await syncTable(table);
+  }
+  if (onProgress) onProgress({ type: null, index: types.length, total: types.length, done: true });
 }
 
 /**

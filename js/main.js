@@ -4987,6 +4987,9 @@ async function toggleCalSync() {
   _calSyncBusy = true;
   const row = document.querySelector('[data-action="toggle-cal-sync"]');
   if (row) row.classList.add('is-pending');
+  const progressEl = document.getElementById('calSyncProgress');
+  const progressText = document.getElementById('calSyncProgressText');
+  const progressFill = document.getElementById('calSyncProgressFill');
   try {
     const prefs = await getCalSyncPrefs();
     if (prefs.enabled) {
@@ -4995,9 +4998,23 @@ async function toggleCalSync() {
     } else {
       const calId = await enableCalSync();
       if (!calId) return;
+      // Show progress bar and sync with per-type feedback
+      if (progressEl) progressEl.style.display = '';
+      if (progressFill) progressFill.style.width = '0%';
+      await updateCalSyncUI();
+      await reconcileCalendar((ev) => {
+        if (!ev) return;
+        if (ev.done) {
+          if (progressText) progressText.textContent = t('cal_sync.sync_complete');
+          if (progressFill) progressFill.style.width = '100%';
+          setTimeout(() => { if (progressEl) progressEl.style.display = 'none'; }, 1500);
+        } else {
+          const label = t(`cal_sync.${ev.type === 'habit' ? 'habits' : ev.type === 'todo' ? 'todos' : 'birthdays'}`);
+          if (progressText) progressText.textContent = t('cal_sync.syncing_type', label);
+          if (progressFill && ev.total > 0) progressFill.style.width = `${Math.round(((ev.index + 0.5) / ev.total) * 100)}%`;
+        }
+      });
       showToast(t('cal_sync.enabled'), 'success');
-      // Sync existing items on first enable
-      reconcileCalendar().catch(e => console.warn('Initial calendar sync failed:', e));
     }
     await updateCalSyncUI();
   } finally {

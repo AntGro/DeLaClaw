@@ -104,12 +104,12 @@ function en() {
 
   const todos = [
     { id: 'demo-todo-001', text: 'Buy groceries (avocados, oat milk, spinach)', done: false, priority: 'urgent', category: 'Personal', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
-    { id: 'demo-todo-002', text: 'Schedule dentist appointment', done: false, priority: 'medium', category: 'Health', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
-    { id: 'demo-todo-003', text: 'Renew gym membership', done: false, priority: 'low', category: 'Health', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-todo-002', text: 'Schedule dentist appointment', done: false, priority: 'normal', category: 'Health', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-todo-003', text: 'Renew gym membership', done: false, priority: 'normal', category: 'Health', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-todo-004', text: 'Send birthday card to Mum', done: false, priority: 'high', category: 'Family', sort_order: 3, due_date: dateOnly(3), created_at: d(-1), updated_at: d(-1) },
-    { id: 'demo-todo-005', text: 'Review Q2 budget spreadsheet', done: true, priority: 'medium', category: 'Work', sort_order: 4, due_date: dateOnly(5), created_at: d(-7), updated_at: d(-7) },
-    { id: 'demo-todo-006', text: 'Fix leaking kitchen tap', done: false, priority: 'medium', category: 'Home', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
-    { id: 'demo-todo-007', text: 'Return library books', done: true, priority: 'low', category: 'Personal', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
+    { id: 'demo-todo-005', text: 'Review Q2 budget spreadsheet', done: true, priority: 'normal', category: 'Work', sort_order: 4, due_date: dateOnly(5), created_at: d(-7), updated_at: d(-7) },
+    { id: 'demo-todo-006', text: 'Fix leaking kitchen tap', done: false, priority: 'normal', category: 'Home', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
+    { id: 'demo-todo-007', text: 'Return library books', done: true, priority: 'normal', category: 'Personal', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-todo-008', text: 'Prepare slides for Monday standup', done: false, priority: 'high', category: 'Work', sort_order: 7, due_date: dateOnly(2), created_at: d(-1), updated_at: d(-1) },
   ];
 
@@ -220,12 +220,12 @@ function fr() {
 
   const todos = [
     { id: 'demo-todo-001', text: 'Faire les courses (avocat, lait d\'avoine, épinards)', done: false, priority: 'urgent', category: 'Personnel', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
-    { id: 'demo-todo-002', text: 'Prendre rendez-vous chez le dentiste', done: false, priority: 'medium', category: 'Santé', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
-    { id: 'demo-todo-003', text: 'Renouveler l\'abonnement salle de sport', done: false, priority: 'low', category: 'Santé', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-todo-002', text: 'Prendre rendez-vous chez le dentiste', done: false, priority: 'normal', category: 'Santé', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-todo-003', text: 'Renouveler l\'abonnement salle de sport', done: false, priority: 'normal', category: 'Santé', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-todo-004', text: 'Envoyer une carte d\'anniversaire à Maman', done: false, priority: 'high', category: 'Famille', sort_order: 3, due_date: dateOnly(3), created_at: d(-1), updated_at: d(-1) },
-    { id: 'demo-todo-005', text: 'Revoir le budget T2 sur le tableur', done: true, priority: 'medium', category: 'Travail', sort_order: 4, due_date: dateOnly(5), created_at: d(-7), updated_at: d(-7) },
-    { id: 'demo-todo-006', text: 'Réparer le robinet de la cuisine', done: false, priority: 'medium', category: 'Maison', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
-    { id: 'demo-todo-007', text: 'Rendre les livres à la bibliothèque', done: true, priority: 'low', category: 'Personnel', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
+    { id: 'demo-todo-005', text: 'Revoir le budget T2 sur le tableur', done: true, priority: 'normal', category: 'Travail', sort_order: 4, due_date: dateOnly(5), created_at: d(-7), updated_at: d(-7) },
+    { id: 'demo-todo-006', text: 'Réparer le robinet de la cuisine', done: false, priority: 'normal', category: 'Maison', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
+    { id: 'demo-todo-007', text: 'Rendre les livres à la bibliothèque', done: true, priority: 'normal', category: 'Personnel', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-todo-008', text: 'Préparer les slides pour le standup de lundi', done: false, priority: 'high', category: 'Travail', sort_order: 7, due_date: dateOnly(2), created_at: d(-1), updated_at: d(-1) },
   ];
 
@@ -332,12 +332,12 @@ function es() {
 
   const todos = [
     { id: 'demo-todo-001', text: 'Comprar víveres (aguacate, leche de avena, espinacas)', done: false, priority: 'urgent', category: 'Personal', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
-    { id: 'demo-todo-002', text: 'Pedir cita con el dentista', done: false, priority: 'medium', category: 'Salud', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
-    { id: 'demo-todo-003', text: 'Renovar membresía del gimnasio', done: false, priority: 'low', category: 'Salud', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-todo-002', text: 'Pedir cita con el dentista', done: false, priority: 'normal', category: 'Salud', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-todo-003', text: 'Renovar membresía del gimnasio', done: false, priority: 'normal', category: 'Salud', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-todo-004', text: 'Enviar tarjeta de cumpleaños a Mamá', done: false, priority: 'high', category: 'Familia', sort_order: 3, due_date: dateOnly(3), created_at: d(-1), updated_at: d(-1) },
-    { id: 'demo-todo-005', text: 'Revisar el presupuesto T2 en la hoja de cálculo', done: true, priority: 'medium', category: 'Trabajo', sort_order: 4, due_date: dateOnly(5), created_at: d(-7), updated_at: d(-7) },
-    { id: 'demo-todo-006', text: 'Arreglar el grifo de la cocina', done: false, priority: 'medium', category: 'Hogar', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
-    { id: 'demo-todo-007', text: 'Devolver los libros a la biblioteca', done: true, priority: 'low', category: 'Personal', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
+    { id: 'demo-todo-005', text: 'Revisar el presupuesto T2 en la hoja de cálculo', done: true, priority: 'normal', category: 'Trabajo', sort_order: 4, due_date: dateOnly(5), created_at: d(-7), updated_at: d(-7) },
+    { id: 'demo-todo-006', text: 'Arreglar el grifo de la cocina', done: false, priority: 'normal', category: 'Hogar', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
+    { id: 'demo-todo-007', text: 'Devolver los libros a la biblioteca', done: true, priority: 'normal', category: 'Personal', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-todo-008', text: 'Preparar las diapositivas para el standup del lunes', done: false, priority: 'high', category: 'Trabajo', sort_order: 7, due_date: dateOnly(2), created_at: d(-1), updated_at: d(-1) },
   ];
 

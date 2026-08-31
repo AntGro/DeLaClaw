@@ -8,7 +8,7 @@
 
 // CHECK constraints — mirrors Supabase / SQLite schema constraints
 const CHECK_CONSTRAINTS = {
-  todos:          { priority: ['urgent', 'high', 'medium', 'low'] },
+  todos:          { priority: ['urgent', 'high', 'medium', 'low', 'normal'] },
   tasks:          { status: ['draft', 'todo', 'in-progress', 'review', 'approved', 'revision', 'idea', 'idea-shipped', 'idea-plan-requested'] },
   flashcard_notes:{ proposal_status: ['pending', 'ready', 'accepted', 'rejected'] },
 };

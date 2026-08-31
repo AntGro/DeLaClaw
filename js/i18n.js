@@ -1872,7 +1872,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       snooze_custom: 'O elige una fecha y hora:',
       unsnooze: 'Despertar', unsnoozed: 'Despertado',
       flag_to_high: 'Marcar importante', flag_to_urgent: 'Marcar urgente', unflag: 'Desmarcar',
-      priority_urgent: 'Urgente', priority_high: 'Importante', priority_medium: 'Medio', priority_low: 'Bajo', priority_none: 'Ninguna',
+      priority_urgent: 'Urgente', priority_high: 'Importante', priority_medium: 'Medio', priority_low: 'Bajo', priority_none: 'Ninguna', priority_normal: 'Ninguna',
       set_priority: 'Establecer prioridad',
       empty_title: 'Nada en la lista',
       empty_hint: 'Captura tareas, recados e ideas para no olvidar nada.',

@@ -143,7 +143,7 @@ async function refreshTodos() {
       const sh = sharedById.get(todo.shared_id);
       if (sh) {
         todo.text = sh.payload?.text || sh.payload?.title || '';
-        todo.priority = sh.payload?.priority || 'medium';
+        todo.priority = sh.payload?.priority || 'normal';
         todo.done = sh.done ? 1 : 0;
         todo.due_date = sh.payload?.due_date || null;
         todo.snooze_until = sh.payload?.snooze_until || null;
@@ -403,8 +403,8 @@ function renderCategoryCard(catId) {
   const headerIcon = isSharedDeck ? `${lucideIcon('users', 16)} ` : '';
 
   const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
-      <textarea placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(catId)}" data-priority="medium" data-action="add-todo-to-category" rows="1" style="resize:none;overflow:hidden;"></textarea>
-      <button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>
+      <textarea placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(catId)}" data-priority="normal" data-action="add-todo-to-category" rows="1" style="resize:none;overflow:hidden;"></textarea>
+      <button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('circle-off', 16, 'var(--muted)')}</button>
       <button data-action="add-todo-from-add-row">${lucideIcon('plus', 16)}</button>
       ${state.sharing ? `<button class="sharing-share-btn" data-action="share-todo-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
     </div>
@@ -447,7 +447,7 @@ function renderTodoItem(td) {
   const isOverdue = td.due_date && !td.done && new Date(td.due_date) < now;
   const isSnoozed = td.snooze_until && new Date(td.snooze_until) > now;
   const isOutdated = isTodoOutdated(td);
-  const isFlagged = td.priority && td.priority !== 'medium';
+  const isFlagged = td.priority && td.priority !== 'normal';
 
   // Priority button: opens picker popover
   const prioColors = { urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6' };
@@ -527,6 +527,7 @@ const PRIORITY_LEVELS = [
   { key: 'high', color: '#f97316', icon: 'flag' },
   { key: 'medium', color: '#eab308', icon: 'flag' },
   { key: 'low', color: '#3b82f6', icon: 'flag' },
+  { key: 'normal', color: null, icon: 'circle-off' },
 ];
 
 function openPriorityPicker(id, event, triggerEl) {
@@ -544,7 +545,7 @@ function openPriorityPicker(id, event, triggerEl) {
 
   // If inline edit is active, use the pending priority for the active marker
   const flagBtn = btn.closest('.todo-item')?.querySelector('.todo-flag-btn');
-  const currentPrio = flagBtn?.dataset.pendingPriority || todo.priority || 'medium';
+  const currentPrio = flagBtn?.dataset.pendingPriority || todo.priority || 'normal';
 
   picker.innerHTML = PRIORITY_LEVELS.map(lv => {
     const isActive = currentPrio === lv.key;
@@ -590,9 +591,9 @@ function closePriorityPicker() {
 }
 
 function updateQuickAddPriorityBtn(btn, level) {
-  const lv = PRIORITY_LEVELS.find(l => l.key === level) || PRIORITY_LEVELS.find(l => l.key === 'medium');
+  const lv = PRIORITY_LEVELS.find(l => l.key === level) || PRIORITY_LEVELS.find(l => l.key === 'normal');
   const color = lv.color || 'var(--muted)';
-  const iconName = level === 'urgent' ? 'alert-triangle' : 'flag';
+  const iconName = level === 'urgent' ? 'alert-triangle' : (level === 'normal' ? 'circle-off' : 'flag');
   btn.innerHTML = lucideIcon(iconName, 16, color);
   btn.dataset.priority = level;
 }
@@ -604,7 +605,7 @@ function openQuickAddPriorityPicker(btn, event) {
   const rect = btn.getBoundingClientRect();
   const container = btn.closest('.todo-cat-add, .welcome-quick-add');
   const inputEl = container?.querySelector('.todo-cat-input');
-  const currentPriority = inputEl?.dataset.priority || 'medium';
+  const currentPriority = inputEl?.dataset.priority || 'normal';
 
   const picker = document.createElement('div');
   picker.className = 'priority-picker';
@@ -666,9 +667,9 @@ async function setTodoPriority(id, level) {
       // Update flag icon visually
       const prioColors = { urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6' };
       const color = prioColors[level] || null;
-      const iconName = level === 'urgent' ? 'alert-triangle' : 'flag';
-      flagBtn.innerHTML = color ? lucideIcon(iconName, 14, color) : lucideIcon('flag', 14);
-      flagBtn.classList.toggle('flagged', level && level !== 'medium');
+      const iconName = level === 'urgent' ? 'alert-triangle' : (level === 'normal' ? 'circle-off' : 'flag');
+      flagBtn.innerHTML = color ? lucideIcon(iconName, 14, color) : lucideIcon('circle-off', 14, 'var(--muted)');
+      flagBtn.classList.toggle('flagged', level && level !== 'normal');
     }
     // Refocus the edit textarea so focusout/cancel mechanics stay intact
     const editInput = isEditing.querySelector('textarea');
@@ -681,7 +682,7 @@ async function setTodoPriority(id, level) {
   if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
     // ─── Shared: write only to Drive ───
     try {
-      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
+      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
       await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
         payload: { ...currentPayload, priority: level },
       });
@@ -703,7 +704,7 @@ async function addTodoToCategory(inputEl) {
   if (!text) return;
   const catId = inputEl.dataset.category || _defaultCatId;
   const cat = _todoCatMap.get(catId);
-  const priority = inputEl.dataset.priority || 'medium';
+  const priority = inputEl.dataset.priority || 'normal';
 
   const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catId);
   const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
@@ -713,9 +714,9 @@ async function addTodoToCategory(inputEl) {
   inputEl.value = '';
   if (inputEl.tagName === 'TEXTAREA') { inputEl.style.height = ''; }
   // Reset priority to medium after adding
-  inputEl.dataset.priority = 'medium';
+  inputEl.dataset.priority = 'normal';
   const prioBtn = inputEl.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.todo-add-priority-btn');
-  if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'medium');
+  if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'normal');
   showToast(t('toast.added'), 'success');
   await refreshTodos();
 }
@@ -905,7 +906,7 @@ async function editTodoInline(id, itemEl) {
           updates.category_id = extra.category_id;
           updates.category = extra.category;
         }
-        if (extra.priority && extra.priority !== (todo.priority || 'medium')) {
+        if (extra.priority && extra.priority !== (todo.priority || 'normal')) {
           updates.priority = extra.priority;
         }
       }
@@ -921,7 +922,7 @@ async function editTodoInline(id, itemEl) {
             if (updates.due_date !== undefined) driveUpdates.due_date = updates.due_date;
             if (updates.priority) driveUpdates.priority = updates.priority;
             if (Object.keys(driveUpdates).length > 0) {
-              const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
+              const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
               await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
                 payload: { ...currentPayload, ...driveUpdates },
               });
@@ -1118,7 +1119,7 @@ async function doSnooze(snoozeUntil) {
   try {
     if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
       // ─── Shared: write snooze to Drive payload ───
-      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
+      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
       await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
         payload: { ...currentPayload, snooze_until: snoozeUntil.toISOString() },
       });
@@ -1144,7 +1145,7 @@ async function unsnoozeTodo(id, el) {
   try {
     const todo = allTodos.find(t => t.id === id);
     if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
+      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
       await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
         payload: { ...currentPayload, snooze_until: null },
       });
@@ -1325,7 +1326,7 @@ async function _doSyncSharedTodos() {
       const { data: existing } = await state.db.from('todos').select('id').eq('shared_id', sh.id).limit(1);
       if (existing?.length) continue;
       const { error } = await state.db.from('todos').insert({
-        text: '', category: SHARED_CATEGORY, priority: 'medium', done: false,
+        text: '', category: SHARED_CATEGORY, priority: 'normal', done: false,
         shared_id: sh.id, shared_group_id: sh.group_id,
       });
       if (error) { console.warn('syncSharedTodos: failed to create pointer', sh.id, error); continue; }
@@ -1364,7 +1365,7 @@ async function shareTodoFromAdd(btn) {
   if (!text) return;
   const catId = input.dataset.category || _defaultCatId;
   const cat = _todoCatMap.get(catId);
-  const priority = input.dataset.priority || 'medium';
+  const priority = input.dataset.priority || 'normal';
   const guardKey = `add-${catId}`;
   if (_pendingShare.has(guardKey)) return;
 
@@ -1377,7 +1378,7 @@ async function shareTodoFromAdd(btn) {
       const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catId);
       const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
       const { data: localRow, error: localErr } = await state.db.from('todos').insert({
-        text: '', priority: 'medium', done: false,
+        text: '', priority: 'normal', done: false,
         category: cat?.name ?? '', category_id: catId,
         sort_order: minOrder,
         shared_id: sharedId,
@@ -1399,9 +1400,9 @@ async function shareTodoFromAdd(btn) {
       }
 
       input.value = '';
-      input.dataset.priority = 'medium';
+      input.dataset.priority = 'low';
       const prioBtn = addRow.querySelector('.todo-add-priority-btn');
-      if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'medium');
+      if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'normal');
       showToast(t('sharing.shared') + '!', 'success');
       await refreshTodos();
     } catch (e) {
@@ -1433,11 +1434,11 @@ async function shareExistingTodo(id, el) {
       await state.sharing.addItem(groupId, {
         id: sharedId,
         item_type: 'todo',
-        payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'medium', note: todo.note || '', snooze_until: todo.snooze_until || null },
+        payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', snooze_until: todo.snooze_until || null },
       });
       // 2. Create local pointer — keep original sort_order so position stays
       const { error: ptrErr } = await state.db.from('todos').insert({
-        text: '', priority: 'medium', done: false,
+        text: '', priority: 'normal', done: false,
         category: cat?.name ?? '', category_id: catIdForTodo(todo),
         sort_order: todo.sort_order || 0,
         shared_id: sharedId,
@@ -1484,10 +1485,10 @@ async function bulkShareTodoCategory(catId, el) {
               await state.sharing.addItem(groupId, {
                 id: sharedId,
                 item_type: 'todo',
-                payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'medium', note: todo.note || '', snooze_until: todo.snooze_until || null },
+                payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', snooze_until: todo.snooze_until || null },
               });
               const { error: ptrErr } = await state.db.from('todos').insert({
-                text: '', priority: 'medium', done: false,
+                text: '', priority: 'normal', done: false,
                 category: cat?.name ?? '', category_id: catId,
                 sort_order: todo.sort_order ?? 0,
                 shared_id: sharedId,
@@ -1529,7 +1530,7 @@ async function unshareTodo(id, el) {
         // 1. Create personal todo (same category, keep text/priority/note)
         const { error: insErr } = await state.db.from('todos').insert({
           text: todo.text || '',
-          priority: todo.priority || 'medium',
+          priority: todo.priority || 'normal',
           done: todo.done ? 1 : 0,
           category: cat?.name ?? '',
           category_id: catIdForTodo(todo),
@@ -1572,7 +1573,7 @@ async function copyTodoToPersonal(id, el) {
     const minOrder = pendingInCat.length > 0 ? Math.min(...pendingInCat.map(t => t.sort_order || 0)) - 1 : 0;
     const { error: insErr } = await state.db.from('todos').insert({
       text: todo.text || '',
-      priority: todo.priority || 'medium',
+      priority: todo.priority || 'normal',
       done: todo.done ? 1 : 0,
       category: targetCatName,
       category_id: targetCatId,

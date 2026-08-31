@@ -137,6 +137,8 @@ const W_PRIORITY_LEVELS = window.PRIORITY_LEVELS || [
 
 function welcomeOpenPriorityPicker(id, event, triggerEl) {
   event.stopPropagation();
+  const existing = document.getElementById('welcomePriorityPickerPopover');
+  if (existing) { welcomeClosePriorityPicker(); return; }
   welcomeClosePriorityPicker();
   const todo = wTodos.find(t => t.id === id);
   if (!todo) return;
@@ -174,6 +176,7 @@ function welcomeOpenPriorityPicker(id, event, triggerEl) {
 function welcomeClosePriorityPicker() {
   const el = document.getElementById('welcomePriorityPickerPopover');
   if (el) el.remove();
+  document.removeEventListener('click', welcomeClosePriorityPicker);
 }
 
 function welcomeSetPriority(id, level) {

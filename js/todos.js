@@ -532,6 +532,8 @@ const PRIORITY_LEVELS = [
 
 function openPriorityPicker(id, event, triggerEl) {
   event.stopPropagation();
+  const existing = document.getElementById('priorityPickerPopover');
+  if (existing) { closePriorityPicker(); return; }
   closePriorityPicker();
   const todo = allTodos.find(t => t.id === id);
   if (!todo) return;
@@ -600,6 +602,8 @@ function updateQuickAddPriorityBtn(btn, level) {
 
 function openQuickAddPriorityPicker(btn, event) {
   event.stopPropagation();
+  const existing = document.getElementById('priorityPickerPopover');
+  if (existing) { closePriorityPicker(); return; }
   closePriorityPicker();
   _lastQuickAddPrioBtn = btn;
   const rect = btn.getBoundingClientRect();

@@ -575,8 +575,8 @@ function renderWelcome() {
     html += `<option value="${esc(catId)}">${esc(label)}</option>`;
   }
   html += `</select>`;
-  html += `<input type="text" placeholder="${esc(t('todos.add_todo_placeholder'))}" maxlength="2000" class="todo-cat-input" data-category="${esc(todoCatIds[0] || '')}" data-priority="normal" data-action="welcome-quick-add-todo-on-enter">`;
-  html += `<button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('circle-off', 16, 'var(--muted)')}</button>`;
+  html += `<input type="text" placeholder="${esc(t('todos.add_todo_placeholder'))}" maxlength="2000" class="todo-cat-input" data-category="${esc(todoCatIds[0] || '')}" data-priority="medium" data-action="welcome-quick-add-todo-on-enter">`;
+  html += `<button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>`;
   html += `<button data-action="welcome-add-todo-from-quick">+</button>`;
   html += `</div>`;
   if (focusTodos.length === 0) {

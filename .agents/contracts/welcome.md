@@ -33,9 +33,11 @@ Today / Welcome aggregation — focus TODOs, due habits, flashcard reviews, text
 
 ## Business Invariants
 - Focus TODOs: `priority ∈ {urgent,high}` + due today / overdue, not snoozed
+- **TODO/habit actions from Welcome**: toggle, snooze, edit, copy-item-link (deep-links to native page via `#todo/{id}` / `#habit/{id}`), delete
 - **Quick-add category selector**: shows all categories sorted by `sort_order`, excluding `__shared__` — not limited to categories of currently visible items
+- **Quick-add default priority**: `medium` (differs from TODOs page default of `normal`)
 - Due habits: computed via `isStructuredRule()` + `computeNextDue()` + completions today excluded
-- **Habit actions from Welcome**: mark-done, delete, and history are exposed — must behave identically to the Habits page (delegates to `window.markHabitDone`, `window.deleteHabit`, `window.openHabitHistory`)
+- **Habit actions from Welcome**: mark-done, delete, history, and copy-item-link are exposed — must behave identically to the Habits page (delegates to `window.markHabitDone`, `window.deleteHabit`, `window.openHabitHistory`, `window.copyItemLink`)
 - Flashcard reviews: due count per deck
 - **Text reading progress**: aggregates texts via `getTexts()` + `getTextProgress()` from flashcards module — shows reading completion status
 - Birthdays: next 7 days

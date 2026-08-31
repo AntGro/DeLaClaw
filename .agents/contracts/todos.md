@@ -71,6 +71,7 @@ User jobs:
 ### Quick-Add
 - Priority can be set during quick-add via `openQuickAddPriorityPicker` / `setQuickAddPriority`
 - Priority button updates dynamically (`updateQuickAddPriorityBtn`)
+- Default quick-add priority: `normal` (no flag); Welcome page quick-add defaults to `medium`
 
 ### Category CRUD
 - `openAddCategoryModal` / `saveNewCategory` — create with name, shortname, color

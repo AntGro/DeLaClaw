@@ -5037,6 +5037,9 @@ async function toggleCalSyncSub(subKey) {
   _calSyncBusy = true;
   const row = document.querySelector(`[data-action="toggle-cal-sync-${subKey}"]`);
   if (row) row.classList.add('is-pending');
+  const progressEl = document.getElementById('calSyncProgress');
+  const progressText = document.getElementById('calSyncProgressText');
+  const progressFill = document.getElementById('calSyncProgressFill');
   try {
     const settingKey = `gcal_sync_${subKey}`;
     const { data } = await state.db.from('settings').select('value').eq('key', settingKey).single();
@@ -5049,13 +5052,20 @@ async function toggleCalSyncSub(subKey) {
     await updateCalSyncUI();
     // subKey is 'habits', 'todos', or 'birthdays' → item type is singular
     const itemType = subKey.replace(/s$/, ''); // 'habit', 'todo', 'birthday'
+    const label = t(`cal_sync.${subKey}`);
+    const msgKey = newVal ? 'syncing_type' : 'removing_type';
+    const doneKey = newVal ? 'sync_complete' : 'remove_complete';
+    if (progressEl) progressEl.style.display = '';
+    if (progressFill) progressFill.style.width = '40%'; // indeterminate pulse
+    if (progressText) progressText.textContent = t(`cal_sync.${msgKey}`, label);
     if (!newVal) {
-      // Disabling: delete all calendar events for this type
-      deleteTypeEvents(itemType).catch(e => console.warn('Calendar type delete:', e));
+      await deleteTypeEvents(itemType);
     } else {
-      // Re-enabling: full push of this type
-      pushCalType(itemType).catch(e => console.warn('Calendar type push:', e));
+      await pushCalType(itemType);
     }
+    if (progressText) progressText.textContent = t(`cal_sync.${doneKey}`);
+    if (progressFill) progressFill.style.width = '100%';
+    setTimeout(() => { if (progressEl) progressEl.style.display = 'none'; }, 1500);
   } finally {
     _calSyncBusy = false;
     if (row) row.classList.remove('is-pending');

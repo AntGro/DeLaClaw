@@ -537,6 +537,7 @@ function editListItemInlineFull(id) {
   inlineEditText(el, item.text, {
     maxLength: 2000,
     extraEl: extras,
+    containerEl: el.closest('.list-item'),
     collectExtra: () => ({
       note: input.value.trim(),
       list_id: listSelect ? listSelect.value : item.list_id,

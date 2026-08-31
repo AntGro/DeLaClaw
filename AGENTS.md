@@ -4,7 +4,7 @@ For any coding agent (Human, Claude, Cursor, Codex) working in this repo. This i
 
 ## 0. Purpose
 
-DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, vanilla JS (ES modules). Own your data: Supabase | Local Bun+SQLite | Google Drive | Demo. PWA, offline-first via IndexedDB cache, dark/light, i18n (EN/FR/ES).
+DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, vanilla JS (ES modules). Own your data: Google Drive | Local Bun+SQLite | Demo. PWA, offline-first via IndexedDB cache, dark/light, i18n (EN/FR/ES). The Supabase adapter remains in the codebase for migration support but is deprecated for new use.
 
 ## 1. Core Product Principles
 
@@ -23,23 +23,29 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
   - Always pass `this` from `onclick="fn(id,this)"` and add `data-*-id` attribute for queryability.
 - Enforced from v1.346. Tests guard existence of debounce/pending logic.
 
-**1.3 Modular & abstract-first**
-- Adapter pattern: all business logic talks to `db.js` proxy, never directly to Supabase/Drive. Each backend in `js/adapters/` must implement the same surface: `.from(table).select/insert/update/delete`, plus auth helpers. Offline-cache wraps any adapter transparently.
-- Sharing protocols: all sharing goes through an adapter interface (`js/sharing-interface.js`), validated at init by `validateSharingAdapter()`. Views (`todos.js`, `habits.js`, `lists.js`) talk to `state.sharing` abstraction, never to Supabase or Drive directly. Supabase is the primary sharing path; Drive sharing is stale.
-- Don't add `if (backend === 'supabase')` in views. Add a method to the adapter interface instead.
+**1.3 Event delegation**
+- `js/delegation.js` owns all click/change/input/keydown handling via 4 document-level listeners. Elements declare their action with `data-action="do-something"`.
+- Explicit `case` entries in the switch handle actions that need specific argument mapping. The `default` fallback camelCases the action name and calls the matching `window` function.
+- **Never add `.onclick` or `addEventListener('click')` on an element that has `data-action`** — delegation already fires the handler, and the duplicate will call it twice (the calendar-sync double-toggle bug, v1.884).
+- Dynamic elements without `data-action` (modals, overlays, one-time dismiss handlers) can use direct handlers safely.
+
+**1.4 Modular & abstract-first**
+- Adapter pattern: all business logic talks to `db.js` proxy, never directly to any backend. Each backend in `js/adapters/` must implement the same surface: `.from(table).select/insert/update/delete`, plus auth helpers.
+- Sharing protocols: all sharing goes through an adapter interface (`js/sharing-interface.js`), validated at init by `validateSharingAdapter()`. Views (`todos.js`, `habits.js`, `lists.js`) talk to `state.sharing` abstraction, never to a backend directly.
+- Don't add backend-specific conditionals in views. Add a method to the adapter interface instead.
 - Single responsibility: `utils.js` = generic helpers, `item-utils.js` = drag-drop + inline edit, `db.js` = activity tracking proxy only. Abstract first, implement second.
 
-**1.4 AI-native dependency index (CODEMAP) + Feature contracts — mandatory for agents**
+**1.5 AI-native dependency index (CODEMAP) + Feature contracts — mandatory for agents**
 - Generated: `.agents/CODEMAP.json` (T2, ~25KB pretty / ~15KB compact) + `.agents/CODEMAP.md` (6KB matrix). Source: `scripts/generate-codemap.js`. Do not hand-edit.
 - Contains per `js/*.js`: `entry`, `loc`, `tables`, `state`, `depends_on`, `dependents` (blast radius), `ui_components` (reusable CSS), `i18n_prefix`, `guards` (`guard`/`pendingSet`), `esc_count`, `window_exposed`.
-- 8 features: `todos`, `habits`, `projects`, `birthdays`, `vestiaire`, `flashcards`, `lists`, `welcome`. Core modules + 5 adapters (`supabase`, `rest`, `demo`, `drive`, `offline-cache`). `welcome` aggregates all features. Exact counts live in CODEMAP itself.
+- 8 features: `todos`, `habits`, `projects`, `birthdays`, `vestiaire`, `flashcards`, `lists`, `welcome`. Core modules + 3 active adapters (`rest`, `demo`, `drive`) + 2 legacy adapters (`supabase`, `offline-cache` — migration support only). `welcome` aggregates all features. Exact counts live in CODEMAP itself.
 - Feature contracts: `.agents/contracts/*.md` — agent-only, NOT in `docs-site`. Captures invariants CODEMAP can't: single source of truth (`isStructuredRule()`), guard patterns, XSS fields, RLS policies, welcome edges, business rules. BEFORE editing a feature, agents MUST read `CODEMAP.json:features[feature]` + `contracts/<feature>.md` if present.
 - Rule: BEFORE editing any `js/*.js`, agents MUST read `.agents/CODEMAP.json` → `features[feature]` and relevant `core` entries. Reuse `depends_on` + `ui_components`, check `dependents` for impact scope, follow `guards` per AGENTS 1.2, verify `esc_count`/`tables` for XSS/schema impact.
 - Freshness: pre-commit auto-regenerates JSON+MD and stages them. `tests/tests.js` will fail if JSON is out-of-date (CODEMAP freshness test). No manual sync.
 - Impact: `scripts/impact.js` reads staged diff + CODEMAP `dependents` to suggest `Checked:` trailer (e.g. `birthdays` change → `welcome [x]` + `xss [x]`). Pre-commit prints `[impact] Checked: …` hint; commit-msg prints full blast-radius report on failure.
 - Keep it small: exclude `demo-data.js`, don't index function bodies. If it grows >50KB, trim `window_exposed` to 8.
 
-**1.5 Architecture Decision Records (ADRs) — public context, SHOULD read**
+**1.6 Architecture Decision Records (ADRs) — public context, SHOULD read**
 - Location: `docs-site/adrs/` — numbered `0001-*.md`, `0002-*.md` …
 - Public, NOT agent-only — captures *why* a decision was made, vs contracts which capture *what* must stay true.
 - Agents SHOULD read relevant ADR before major refactor: adapter change → `0002-byob-pluggable-backends.md`, build/tooling/hosting → `0001-no-build-github-pages-byob.md`.
@@ -58,14 +64,13 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - **Safe DOM for URLs**: TODO/project links with user-provided URLs must use safe allowlist check, not raw `innerHTML`.
 - **CSP hardening (sec-004)**: Vendor JS self-hosted in `vendor/` (`supabase@2.110.6`, `three@0.170.0`). No `cdn.jsdelivr.net` for app code. CSP meta in `index.html`: `default-src 'self'; script-src 'self' 'sha256-...importmap...' accounts.google.com apis.google.com gstatic cloudflareinsights; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes. Cloudflare Web Analytics beacon allowed in both `script-src` (`static.cloudflareinsights.com`) and `connect-src` (`cloudflareinsights.com`).
 - **Google Identity exception**: GSI (`accounts.google.com/gsi/client` + `apis.google.com/js/api.js`) must stay CDN per Google ToS, no SRI allowed. Documented exception allowed only via CSP.
-- **Supabase auth quirk**: use `anon_key` (`sb_publishable_*`) in BOTH `apikey:` and `Authorization: Bearer` headers. `service_role_key` (`sb_secret_*`) doesn't resolve to JWT in curl context. Confirmed June 11, 2026.
 
 ## 4. Backend & Data
 
-- Tables: canonical list lives in `sql/supabase_schema.sql` (Supabase) and `server/schema.sql` (Local SQLite). Personal tables, category/deck tables, and cross-backend tables (`daily_visits`, `joined_groups`, `agent_grants`) exist on all backends; sharing tables (`sharing_groups`, `sharing_members`, `sharing_items`) and `auth_email_guard` are Supabase-only.
+- Tables: canonical list lives in `server/schema.sql` (Local SQLite). `sql/supabase_schema.sql` is retained as a legacy reference for Supabase migration support. Personal tables, category/deck tables, and cross-backend tables (`daily_visits`, `joined_groups`, `agent_grants`) exist on all backends.
 - **Category integrity**: each category/deck table has one protected default row (`name=''`, `is_protected=1`). `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item FKs (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
 - Schema version in `settings` key `schema_version`, migrations in `migrations/`. Check `latest_compat` logic in `VERSION`.
-- Base schema + migrations must be runnable in Supabase SQL editor + local SQLite (`server/schema.sql`).
+- Base schema + migrations must be runnable in local SQLite (`server/schema.sql`).
 - Vendor: `scripts/update-vendor.sh [supabase_ver] [three_ver]` updates `vendor/` + `index.html` comment + `docs-site/attributions.md`. Weekly GitHub Action `vendor-check.yml` opens PR to `dev` if new versions.
 
 ## 5. Git, Versioning, Commit
@@ -87,5 +92,6 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - `docs-site/attributions.md` must list all third-party assets with correct load source (vendor/ vs CDN). Update when vendor versions change.
 - `docs-site/setup.md`, `architecture.md`, `sharing.md`, `contributing.md` must stay in sync with adapter changes.
 - No personal info, workspace config, memory files in public repo.
+- **Mermaid diagrams** (`docs-site/`): read `.agents/skills/mermaid-diagrams.md` before creating or editing Mermaid diagrams.
 
 Keep this file short, accurate, and alive. When you learn a durable lesson that prevents a bug, add it here.

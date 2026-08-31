@@ -1317,7 +1317,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE
   todo_categories, habit_categories, vestiaire_categories, flashcard_decks;
 
 
-INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.793') ON CONFLICT ("key") DO UPDATE SET "value" = '1.793', "updated_at" = now();
+INSERT INTO "public"."settings" ("key", "value") VALUES ('schema_version', '1.809') ON CONFLICT ("key") DO UPDATE SET "value" = '1.809', "updated_at" = now();
 
 -- ── Seed protected category rows (ON CONFLICT safe for idempotent re-runs) ──
 -- owner_id is NULL here; trg_set_owner_id fills it on first auth'd INSERT.
@@ -1398,3 +1398,12 @@ BEGIN
   END IF;
 END;
 $$;
+
+-- ── Google Calendar sync tracking ──
+CREATE TABLE IF NOT EXISTS gcal_sync (
+  item_type TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  gcal_event_id TEXT NOT NULL,
+  last_synced_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (item_type, item_id)
+);

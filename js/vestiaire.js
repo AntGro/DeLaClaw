@@ -427,6 +427,7 @@ async function editVestiaireInline(id) {
 
   inlineEditText(el, v.name, {
     maxLength: 200,
+    containerEl: el.closest('.vestiaire-item'),
     saveFn: async (newName) => {
       const { error } = await state.db.from('vestiaire').update({
         name: newName,
@@ -448,6 +449,7 @@ async function editVestiaireBrandInline(id) {
 
   inlineEditText(el, v.brand || '', {
     maxLength: 200,
+    containerEl: el.closest('.vestiaire-item'),
     saveFn: async (newBrand) => {
       const { error } = await state.db.from('vestiaire').update({
         brand: newBrand || null,
@@ -500,6 +502,7 @@ function editVestiaireInlineFull(id) {
   inlineEditText(nameEl, v.name, {
     maxLength: 200,
     extraEl: extras,
+    containerEl: nameEl.closest('.vestiaire-item'),
     collectExtra: () => ({
       brand: brandInput.value.trim(),
       size: sizeInput.value.trim(),

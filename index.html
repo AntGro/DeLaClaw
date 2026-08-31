@@ -8,7 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- Content-Security-Policy: self-hosted vendor + Google Identity exception (Google forbids SRI, see https://developers.google.com/identity/gsi/web/guides/content-security-policy) -->
 <!-- CSP hardened: all inline handlers removed via delegation (Phase 1 index.html 109, Phase 2 js/*.js 254 → 0). Secure hash for importmap restored, unsafe-* removed. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com https://cloudflareinsights.com; frame-src 'self' https://accounts.google.com https://content.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com https://cloudflareinsights.com; frame-src 'self' https://accounts.google.com https://content.google.com https://www.youtube.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <!-- Vendor: self-hosted (was CDN jsdelivr) — supabase @2.110.6 (203KB raw) + three @0.170.0 -->
 <script src="vendor/supabase.js"></script>
 <!-- Google Identity: must stay on CDN per ToS, no SRI per Google docs -->
@@ -144,11 +144,7 @@
         <span class="setup-path-name" id="setupDriveName">Google Drive</span>
         <span class="setup-path-desc" id="setupDriveDesc">Sign in with Google. Data stored in your Drive.</span>
       </button>
-      <button class="setup-path-card" id="setupPathCloud" type="button">
-        <span class="setup-path-icon" data-backend-logo="supabase" data-logo-size="22"></span>
-        <span class="setup-path-name" id="setupCloudName">Supabase</span>
-        <span class="setup-path-desc" id="setupCloudDesc">Free, no install, works everywhere.</span>
-      </button>
+      <!-- Supabase removed from setup guide (deprecated) -->
       <button class="setup-path-card" id="setupPathLocal" type="button">
         <span class="setup-path-icon" data-backend-logo="local" data-logo-size="22"></span>
         <span class="setup-path-name" id="setupLocalName">Local</span>
@@ -173,64 +169,6 @@
         </div>
       </div>
       <button class="setup-done-btn" id="setupDriveDone" type="button">Go to login</button>
-    </div>
-
-    <!-- Cloud steps (Supabase) -->
-    <div class="setup-steps" id="setupCloudSteps" style="display:none;">
-      <div class="setup-progress" id="setupCloudProgress">
-        <div class="setup-progress-step active" data-step="1">1</div>
-        <div class="setup-progress-line"></div>
-        <div class="setup-progress-step" data-step="2">2</div>
-        <div class="setup-progress-line"></div>
-        <div class="setup-progress-step" data-step="3">3</div>
-      </div>
-      <div class="setup-step" data-step="1">
-        <span class="setup-step-num">1</span>
-        <div class="setup-step-body">
-          <h3 id="setupCloud1Title">Create a free Supabase project</h3>
-          <div id="setupCloud1Desc"><ol class="setup-substeps"><li>Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noopener">supabase.com/dashboard</a> and <strong>create a free account</strong> (GitHub or email).</li><li>Once logged in, create an <strong>organization</strong> (any name), then click <strong>New Project</strong> &mdash; pick a name and choose a region.</li></ol></div>
-          <div class="setup-url-input-wrap">
-            <label for="setupProjectUrl" id="setupProjectUrlLabel">Paste your project URL</label>
-            <p class="setup-url-hint" id="setupProjectUrlHint">Copy the URL from your browser's address bar after creating the project.</p>
-            <input type="url" id="setupProjectUrl" class="setup-url-input" placeholder="https://xyz.supabase.co or https://supabase.com/dashboard/project/xyz">
-            <p class="setup-url-error" id="setupProjectUrlError">Please enter a valid Supabase project URL</p>
-          </div>
-        </div>
-      </div>
-      <div class="setup-step" data-step="2">
-        <span class="setup-step-num">2</span>
-        <div class="setup-step-body">
-          <h3 id="setupCloud2Title">Run the database schema</h3>
-          <p id="setupCloud2Desc">In your Supabase dashboard, open the <a href="https://supabase.com/dashboard/project/_/sql" target="_blank" rel="noopener"><strong>SQL Editor</strong></a>, paste the schema below, and click <strong>Run</strong>. If prompted about Row Level Security, choose <strong>Run without RLS</strong> — it is enabled later in the script.</p>
-          <div class="setup-schema-wrap">
-            <button class="setup-schema-toggle" id="setupSchemaToggle" type="button"><span class="chevron">&#9654;</span> <span id="setupSchemaToggleLabel">Show schema</span></button>
-            <div class="setup-schema-box" id="setupSchemaBox">
-              <pre class="setup-schema-sql" id="setupSchemaSql"></pre>
-            </div>
-            <button class="setup-copy-btn" id="setupCopySchema" type="button"><span id="setupCopyLabel">Copy schema</span></button>
-          </div>
-        </div>
-      </div>
-      <div class="setup-step" data-step="3">
-        <span class="setup-step-num">3</span>
-        <div class="setup-step-body">
-          <h3 id="setupCloud3Title">Connect</h3>
-          <p id="setupCloud3Desc">In your Supabase dashboard, go to <a href="https://supabase.com/dashboard/project/_/settings/api-keys" target="_blank" rel="noopener"><strong>Settings &rarr; API Keys</strong></a>. Copy the <strong>anon (public) key</strong> and paste it below.</p>
-          <p class="setup-note" style="font-size:0.82rem;color:var(--muted);margin:0.25rem 0 0.75rem;line-height:1.4;"><strong>Want sharing?</strong> Set your <strong>Site URL</strong> in Supabase &rarr; Authentication &rarr; URL Configuration to your DeLaClaw URL.</p>
-          <form id="setupLoginForm" method="post" action="">
-            <label for="setupLoginUrl" class="gate-label" id="setupLoginUrlLabel">Project URL</label>
-            <input type="text" id="setupLoginUrl" name="username" placeholder="https://xyz.supabase.co" autocomplete="username">
-            <label for="setupLoginKey" class="gate-label" id="setupLoginKeyLabel"><a target="_blank" rel="noopener" id="setupKeyLabelLink">API Key (anon)</a></label>
-            <input type="password" id="setupLoginKey" name="password" placeholder="eyJhbG..." autocomplete="current-password">
-            <p class="error" id="setupLoginError"></p>
-            <label class="stay-connected-label">
-              <input type="checkbox" id="setupStayConnected" checked>
-              <span id="setupStayConnectedLabel" data-i18n="login.stay_connected">Stay connected on this device</span>
-            </label>
-            <button type="submit" class="setup-done-btn" id="setupLoginBtn">Connect</button>
-          </form>
-        </div>
-      </div>
     </div>
 
     <!-- Local steps -->
@@ -571,6 +509,9 @@ bun run server.js</pre>
       <h2 id="confirmActionTitle">Confirm</h2>
       <p id="confirmActionMessage" class="confirm-action-msg"></p>
       <div id="confirmActionDetail" class="confirm-action-detail" style="display:none;"></div>
+      <div id="confirmWordWrap" class="confirm-word-wrap" style="display:none;">
+        <input type="text" id="confirmWordInput" class="confirm-word-input" autocomplete="off" spellcheck="false">
+      </div>
       <label id="confirmActionToggle" class="confirm-action-toggle" style="display:none;">
         <input type="checkbox" id="confirmActionToggleInput" checked>
         <span id="confirmActionToggleLabel"></span>
@@ -610,6 +551,10 @@ bun run server.js</pre>
             <span data-icon="sparkles" data-size="16"></span>
             <span id="settingsNavAi">AI</span>
           </button>
+          <button class="settings-nav-btn" data-pane="calendar" data-action="switch-settings-pane" data-pane="calendar" id="settingsNavCalendarBtn" style="display:none">
+            <span data-icon="calendar" data-size="16"></span>
+            <span id="settingsNavCalendar">Calendar</span>
+          </button>
           <button class="settings-nav-btn" data-pane="data" data-action="switch-settings-pane" data-pane="data">
             <span data-icon="hard-drive" data-size="16"></span>
             <span id="settingsNavData">Data</span>
@@ -622,9 +567,17 @@ bun run server.js</pre>
             <span data-icon="users" data-size="16"></span>
             <span id="settingsNavSharing">Sharing</span>
           </button>
+          <button class="settings-nav-btn" data-pane="calendar" data-action="switch-settings-pane" data-pane="calendar" id="settingsNavCalendarBtn" style="display:none">
+            <span data-icon="calendar" data-size="16"></span>
+            <span data-i18n="cal_sync.nav">Calendar</span>
+          </button>
           <button class="settings-nav-btn" data-pane="agents" data-action="switch-settings-pane" data-pane="agents" id="settingsNavAgentsBtn">
             <span data-icon="bot" data-size="16"></span>
             <span id="settingsNavAgents">Agents</span>
+          </button>
+          <button class="settings-nav-btn" data-pane="account" data-action="switch-settings-pane" data-pane="account">
+            <span data-icon="user" data-size="16"></span>
+            <span id="settingsNavAccountLabel">Account</span>
           </button>
         </nav>
       </div>
@@ -746,9 +699,46 @@ bun run server.js</pre>
           <h3 id="settingsPaneSharingTitle">Sharing</h3>
           <div id="sharingPaneContent"></div>
         </div>
+        <div class="settings-pane" id="settingsPane-calendar">
+          <h3 id="settingsPaneCalendarTitle">Calendar & Notifications</h3>
+          <div class="setting-group" id="settingsCalSyncGroup">
+            <div class="setting-group-label" id="settingsCalSyncLabel">Google Calendar</div>
+            <p class="setting-hint" id="settingsCalSyncHint">Sync due items to a dedicated Google Calendar to get notifications on your phone and desktop.</p>
+            <div class="setting-toggle-row" data-action="toggle-cal-sync">
+              <span class="setting-toggle-icon"><img src="icons/brand/googlecalendar.svg" width="16" height="16" alt="Google Calendar" style="display:block;"></span>
+              <span class="setting-toggle-text" id="settingsCalSyncToggleLabel">Sync to Google Calendar</span>
+              <span class="setting-toggle-switch" id="calSyncSwitch"></span>
+            </div>
+            <div id="calSyncSubSettings" style="display:none">
+              <div class="setting-toggle-row cal-sync-sub" data-action="toggle-cal-sync-habits">
+                <span class="setting-toggle-text" id="settingsCalSyncHabitsLabel">Habits</span>
+                <span class="setting-toggle-switch" id="calSyncHabitsSwitch"></span>
+              </div>
+              <div class="setting-toggle-row cal-sync-sub" data-action="toggle-cal-sync-todos">
+                <span class="setting-toggle-text" id="settingsCalSyncTodosLabel">TODOs</span>
+                <span class="setting-toggle-switch" id="calSyncTodosSwitch"></span>
+              </div>
+              <div class="setting-toggle-row cal-sync-sub" data-action="toggle-cal-sync-birthdays">
+                <span class="setting-toggle-text" id="settingsCalSyncBirthdaysLabel">Birthdays</span>
+                <span class="setting-toggle-switch" id="calSyncBirthdaysSwitch"></span>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="settings-pane" id="settingsPane-agents">
           <h3 id="settingsPaneAgentsTitle">Agents</h3>
           <div id="agentsPaneContent"></div>
+        </div>
+        <div class="settings-pane" id="settingsPane-account">
+          <h3 id="settingsPaneAccountTitle">Account</h3>
+          <div class="setting-group danger-zone">
+            <div class="setting-group-label" id="settingsDangerZoneLabel">Danger Zone</div>
+            <p class="setting-hint" id="settingsDangerZoneHint">Permanently delete your account and all associated data. This action cannot be undone.</p>
+            <button class="settings-data-btn danger-btn" id="deleteAccountBtn">
+              <span data-icon="trash-2" data-size="16" data-color="#fff"></span>
+              <span id="deleteAccountBtnText">Delete Account</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -762,6 +752,24 @@ bun run server.js</pre>
   </div>
 
   <div class="toast" id="toast"></div>
+</div>
+
+<!-- Supabase migration modal (outside #gate for z-index independence) -->
+<div class="modal-overlay" id="sbMigrationOverlay" style="z-index:10001">
+  <div class="modal sb-migration-modal">
+    <div class="sb-migration-content">
+      <div class="auth-icon" id="sbMigrationIcon"></div>
+      <h3 data-i18n="migration.title">Supabase support has been removed</h3>
+      <p class="auth-hint" data-i18n="migration.description">DeLaClaw no longer supports Supabase as a backend. You can download your data as a backup file, or migrate it directly to Google Drive.</p>
+      <p class="auth-hint sb-migration-sharing-warn" id="sbMigrationSharingWarn" style="display:none" data-i18n="migration.sharing_warning">Your Supabase data includes shared groups. Sharing is not available on Google Drive — shared items will be imported as personal items.</p>
+      <div class="sb-migration-actions">
+        <button type="button" class="settings-data-btn" id="sbMigrationDownload" data-i18n="migration.download_backup">Download your data</button>
+        <button type="button" class="settings-data-btn sb-migration-drive-btn" id="sbMigrationDrive" data-i18n="migration.migrate_drive">Migrate to Google Drive</button>
+      </div>
+      <p class="sb-migration-status" id="sbMigrationStatus"></p>
+      <a href="#" class="sb-migration-back" id="sbMigrationBack" data-i18n="migration.back">← Back to login</a>
+    </div>
+  </div>
 </div>
 
 <script type="module" src="js/main.js"></script>

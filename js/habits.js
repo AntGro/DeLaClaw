@@ -93,12 +93,19 @@ async function saveEditHabitCategory() {
   if (!newName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
 
   // Update the DB row directly
+  const oldShortname = cat.shortname;
+  const oldName = cat.name;
   const updates = { shortname: shortname || null, color };
   if (!cat.is_protected) updates.name = newName;
   await state.db.from('habit_categories').update(updates).eq('id', catId);
   Object.assign(cat, updates);
   _habitCatByName.clear();
   for (const row of _habitCatMap.values()) _habitCatByName.set(row.name, row);
+
+  // Calendar: only resync items if the label used in event summaries changed
+  if (updates.shortname !== oldShortname || updates.name !== oldName) {
+    window.markCategoryRenamed?.('habit_categories');
+  }
 
   closeEditHabitCategoryModal();
   renderHabits();
@@ -144,13 +151,17 @@ function computeNextDue(frequencyRule, lastDoneDate) {
   if (!frequencyRule || !isStructuredRule(frequencyRule)) return null;
   const today = new Date(); today.setHours(0,0,0,0);
 
-  // No completions yet — due today
-  if (!lastDoneDate) return localDateStr(today);
+  // No completions yet: for pure interval rules, due today;
+  // for anchored rules (specific weekdays, day-of-month, yearly date),
+  // find the next valid occurrence from today by using yesterday as the base.
+  const noHistory = !lastDoneDate;
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
 
-  const base = new Date(lastDoneDate);
+  const base = noHistory ? yesterday : new Date(lastDoneDate);
   const baseDay = new Date(base.getFullYear(), base.getMonth(), base.getDate());
 
   if (frequencyRule.startsWith('every_N_days:')) {
+    if (noHistory) return localDateStr(today);
     const n = parseInt(frequencyRule.split(':')[1], 10) || 1;
     const next = new Date(baseDay); next.setDate(next.getDate() + n);
     return next < today ? localDateStr(today) : localDateStr(next);
@@ -162,7 +173,8 @@ function computeNextDue(frequencyRule, lastDoneDate) {
     const daysStr = parts[2] || '';
 
     if (!daysStr) {
-      // Pure interval: N weeks from last done
+      // Pure interval: N weeks from last done (or today if new)
+      if (noHistory) return localDateStr(today);
       const next = new Date(baseDay); next.setDate(next.getDate() + n * 7);
       return next < today ? localDateStr(today) : localDateStr(next);
     }
@@ -170,6 +182,7 @@ function computeNextDue(frequencyRule, lastDoneDate) {
     const days = daysStr.split(',');
     const dayIndices = days.map(d => DOW_JS[DOW_KEYS.indexOf(d)]).filter(d => d !== undefined);
     if (dayIndices.length === 0) {
+      if (noHistory) return localDateStr(today);
       const next = new Date(baseDay); next.setDate(next.getDate() + n * 7);
       return next < today ? localDateStr(today) : localDateStr(next);
     }
@@ -1487,6 +1500,7 @@ function editHabitInline(habitId, itemEl) {
           const { error } = await state.db.from('habits').update(updates).eq('id', habitId);
           if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
         }
+        Object.assign(habit, updates);
         if (updates.frequency_rule) {
           const lastDone = getHabitLastDone(habitId);
           await updateHabitNextDue(habitId, updates.frequency_rule, lastDone, { earlyGuard: false });
@@ -1973,7 +1987,11 @@ async function deleteHabitCategory(catId) {
         }
       }
     }
-    // CASCADE on FK — deleting the category removes all its habits + completions
+    // Explicitly delete items so calendar sync (markDirty) fires for each.
+    // SQL CASCADE would handle this on Supabase, but Drive/Demo have no FK enforcement.
+    for (const habit of habitsInCat) {
+      await state.db.from('habits').delete().eq('id', habit.id);
+    }
     const { error } = await state.db.from('habit_categories').delete().eq('id', catId);
     if (error) { showToast(t('toast.delete_failed') + ': ' + error.message, 'error'); return; }
     showToast(t('habits.category_deleted', cat.name), 'info');

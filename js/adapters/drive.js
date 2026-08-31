@@ -24,9 +24,10 @@ import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
 import { t } from '../i18n.js';
 
 export const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
+export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
 
 export function getDriveScope() {
-  return DRIVE_SCOPE_FILE;
+  return `${DRIVE_SCOPE_FILE} ${CALENDAR_SCOPE}`;
 }
 const DRIVE_FOLDER_NAME = 'DeLaClaw';
 const DEBOUNCE_MS = 2000;
@@ -40,6 +41,7 @@ const DRIVE_TABLES = [
   'birthdays', 'vestiaire', 'lists', 'list_items',
   'settings', 'prompts', 'nvidia_usage', 'daily_visits',
   'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
+  'gcal_sync',
 ];
 
 // ── Google Identity Services helpers ────────────────────────────
@@ -58,9 +60,9 @@ function _tokenKey(clientId) {
   return `${_TOKEN_KEY_PREFIX}${clientId || 'default'}`;
 }
 
-function _persistToken(token, expiryMs, clientId) {
+function _persistToken(token, expiryMs, clientId, scopes) {
   try {
-    sessionStorage.setItem(_tokenKey(clientId), JSON.stringify({ token, expiry: expiryMs }));
+    sessionStorage.setItem(_tokenKey(clientId), JSON.stringify({ token, expiry: expiryMs, scopes: scopes || '' }));
   } catch (_) {}
 }
 
@@ -68,12 +70,16 @@ function _loadPersistedToken(clientId) {
   try {
     const raw = sessionStorage.getItem(_tokenKey(clientId));
     if (!raw) return null;
-    const { token, expiry } = JSON.parse(raw);
+    const { token, expiry, scopes } = JSON.parse(raw);
     // Still valid with ≥60s margin
-    if (token && expiry && Date.now() < expiry - 60000) return { token, expiry };
+    if (token && expiry && Date.now() < expiry - 60000) return { token, expiry, scopes: scopes || '' };
   } catch (_) {}
   return null;
 }
+
+/** Whether the most recent OAuth grant included calendar.app.created */
+let _calendarScopeGranted = false;
+export function wasCalendarScopeGranted() { return _calendarScopeGranted; }
 
 function clearDriveTokenCache(clientId) {
   // If clientId given, clear only that scoped entry; otherwise clear all prefixed entries (defense on mode switch)
@@ -110,6 +116,10 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
     _cachedToken = persisted.token;
     _cachedClientId = clientId;
     _tokenExpiry = persisted.expiry;
+    // Restore calendar scope flag from persisted data
+    if (persisted.scopes) {
+      _calendarScopeGranted = persisted.scopes.includes(CALENDAR_SCOPE);
+    }
     return Promise.resolve(_cachedToken);
   }
   // 3. Dedup in-flight request — prevents popup spam on concurrent getToken()
@@ -129,13 +139,21 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
       callback: (resp) => {
         if (resp.error) {
           reject(new Error(resp.error));
-        } else {
-          _cachedToken = resp.access_token;
-          _cachedClientId = clientId;
-          _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
-          _persistToken(_cachedToken, _tokenExpiry, clientId);
-          resolve(resp.access_token);
+          return;
         }
+        // Check granted scopes — Drive is mandatory
+        const granted = resp.scope || '';
+        console.log('[DeLaClaw] initial sign-in granted scopes:', granted);
+        if (!granted.includes(DRIVE_SCOPE_FILE)) {
+          reject(new Error('drive_scope_denied'));
+          return;
+        }
+        _calendarScopeGranted = granted.includes(CALENDAR_SCOPE);
+        _cachedToken = resp.access_token;
+        _cachedClientId = clientId;
+        _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
+        _persistToken(_cachedToken, _tokenExpiry, clientId, granted);
+        resolve(resp.access_token);
       },
       error_callback: (err) => {
         reject(new Error(err.type || 'auth_error'));
@@ -209,7 +227,7 @@ async function downloadFile(token, fileId) {
 
 /** Upload/update a file with optional ETag for optimistic locking.
  *  Returns { id, etag } on success, throws on 412 (conflict). */
-async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag) {
+async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag, keepalive = false) {
   const json = JSON.stringify(data, null, 2);
   const metadata = { name: fileName, mimeType: 'application/json' };
   if (!fileId) metadata.parents = [folderId];
@@ -232,7 +250,7 @@ async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag) 
   if (ifMatchEtag) headers['If-Match'] = ifMatchEtag;
 
   // keepalive: true lets beforeunload flushes survive tab close (64KB body limit)
-  const useKeepalive = body.length <= 65536;
+  const useKeepalive = keepalive && body.length <= 65536;
 
   const resp = await fetch(url, {
     method: fileId ? 'PATCH' : 'POST',
@@ -400,6 +418,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   const isFreshInstall = !hasPerTableFiles && !legacyFile;
 
   // ── Create in-memory adapter seeded with loaded data ──
+
+  const gcalKeysAtInit = (initialData.settings || []).filter(r => r.key?.startsWith('gcal_')).map(r => r.key);
+  console.log('[drive-init] settings loaded from Drive, gcal keys:', gcalKeysAtInit);
 
   const inner = createDemoAdapter(initialData);
 
@@ -613,7 +634,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   const flushingTables = new Set();
   const flushPromises = {};
 
-  async function flushTable(table, retries = 0) {
+  async function flushTable(table, retries = 0, keepalive = false) {
     // If a flush is already in progress, wait for it then re-flush
     // to capture any writes that happened during the previous flush.
     while (flushingTables.has(table)) {
@@ -630,7 +651,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         const fileName = `${table}.json`;
 
         try {
-          const result = await uploadFile(tok, folderId, meta.fileId, fileName, localData, meta.etag);
+          const result = await uploadFile(tok, folderId, meta.fileId, fileName, localData, meta.etag, keepalive);
           fileMeta[table] = {
             fileId: result.id || meta.fileId,
             etag: result.etag,
@@ -645,7 +666,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             fileMeta[table] = { ...meta, etag: newEtag };
             flushingTables.delete(table);
             delete flushPromises[table];
-            return flushTable(table, retries + 1);
+            return flushTable(table, retries + 1, keepalive);
           }
           throw err;
         }
@@ -671,6 +692,10 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       try {
         await flushTable(table);
         dirtyTables.delete(table); // only clear dirty after successful flush
+        // Notify listener (e.g. calendar sync) — skip keepalive flushes
+        if (adapter._onTableFlushed) {
+          try { adapter._onTableFlushed(table); } catch (_) {}
+        }
       } catch (e) {
         _err = true;
         console.error(`Drive: debounced flush failed for ${table}`, e);
@@ -716,6 +741,11 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
         // Only update + notify if data actually changed (skip our own writes)
         if (JSON.stringify(newData) !== JSON.stringify(oldData)) {
+          if (tableName === 'settings') {
+            const oldGcal = oldData.filter(r => r.key?.startsWith('gcal_')).map(r => r.key);
+            const newGcal = newData.filter(r => r.key?.startsWith('gcal_')).map(r => r.key);
+            console.log('[drive-poll] settings overwritten, gcal keys: old=%o new=%o', oldGcal, newGcal);
+          }
           inner._store[tableName] = newData;
           fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
           if (adapter._onExternalChange) adapter._onExternalChange(tableName);
@@ -803,11 +833,33 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   const adapter = {
     from(table) {
       const builder = inner.from(table);
+      // Ensure insert/upsert always returns data (including auto-generated IDs)
+      // so the dirty-tracking wrapper can extract the item ID from result.data.
+      builder._returnRow = true;
       const origThen = builder.then.bind(builder);
       builder.then = (resolve, reject) => {
         origThen(async (result) => {
           if (builder._method !== 'GET') {
             scheduleSave(table);
+            // Track dirty item IDs for calendar sync
+            if (adapter._markCalDirty) {
+              let itemId = null;
+              const idFilter = builder._filters?.find(f => f.col === 'id' && f.op === 'eq');
+              if (idFilter) {
+                itemId = idFilter.val;
+              } else {
+                // Try result first (covers auto-generated IDs from insert/upsert)
+                const rows = Array.isArray(result?.data) ? result.data : (result?.data ? [result.data] : []);
+                if (rows.length === 1 && rows[0]?.id) {
+                  itemId = rows[0].id;
+                } else if (builder._body) {
+                  const body = Array.isArray(builder._body) ? builder._body : [builder._body];
+                  if (body.length === 1 && body[0]?.id) itemId = body[0].id;
+                }
+                // Multi-row or no id → null triggers full scan
+              }
+              adapter._markCalDirty(table, itemId);
+            }
           }
           resolve(result);
         }, reject);
@@ -882,18 +934,61 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       if (tablesToSave.length > 0) {
         syncStart();
         let _err = false;
-        try { await Promise.all(tablesToSave.map(t => flushTable(t))); }
+        try { await Promise.all(tablesToSave.map(t => flushTable(t, 0, true))); }
         catch (e) { _err = true; }
         finally { syncEnd(_err); }
       }
     },
 
     get connected() { return true; },
+    get isFreshInstall() { return isFreshInstall; },
+    get calendarScopeGranted() { return _calendarScopeGranted; },
     get driveFolderId() { return folderId; },
     get driveFileMeta() { return { ...fileMeta }; },
 
     /** Expose token getter for sharing module. */
     getToken,
+
+    /** Force a prompted re-auth that includes the Calendar scope.
+     *  Requests only calendar.app.created incrementally;
+     *  include_granted_scopes preserves the existing Drive grant.
+     *  No prompt:'consent' — Google shows consent for the new scope only. */
+    async requestCalendarScope() {
+      _cachedToken = null;
+      _cachedClientId = null;
+      _tokenExpiry = 0;
+      try { sessionStorage.removeItem(_tokenKey(clientId)); } catch {}
+      return new Promise((resolve, reject) => {
+        if (typeof google === 'undefined' || !google.accounts) {
+          reject(new Error('google_not_loaded'));
+          return;
+        }
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: CALENDAR_SCOPE,
+          include_granted_scopes: true,
+          callback: (resp) => {
+            if (resp.error) {
+              reject(new Error(resp.error));
+            } else {
+              const granted = resp.scope || '';
+              console.log('[DeLaClaw] requestCalendarScope granted scopes:', granted);
+              console.log('[DeLaClaw] calendar.app.created present:', granted.includes(CALENDAR_SCOPE));
+              _calendarScopeGranted = granted.includes(CALENDAR_SCOPE);
+              _cachedToken = resp.access_token;
+              _cachedClientId = clientId;
+              _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
+              _persistToken(_cachedToken, _tokenExpiry, clientId, granted);
+              resolve(resp.access_token);
+            }
+          },
+          error_callback: (err) => {
+            reject(new Error(err.type || 'auth_error'));
+          },
+        });
+        client.requestAccessToken();
+      });
+    },
 
     /** Open Google Picker to select files inside a shared folder.
      *  Used for drive.file scope: Picker grants per-file access. */
@@ -941,6 +1036,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     // Callback for external change notification
     _onExternalChange: null,
 
+    // Callback after a table flush (e.g. calendar sync)
+    _onTableFlushed: null,
+
     startPolling,
     stopPolling,
     /** Trigger an immediate poll for external changes (e.g. on tab foreground). */
@@ -950,6 +1048,48 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       stopPolling();
       for (const t of Object.keys(saveTimers)) clearTimeout(saveTimers[t]);
       clearDriveTokenCache(clientId);
+    },
+
+    /**
+     * Delete the user's DeLaClaw account: trash the Drive folder (and all
+     * files inside it), revoke the OAuth token, and clear local state.
+     * Returns { ok: true } on success or { ok: false, error: string }.
+     */
+    async deleteAccount() {
+      try {
+        const tok = await getToken();
+        if (!tok) return { ok: false, error: 'No valid token — please sign in again' };
+
+        // 1. Delete the DeLaClaw calendar if sync was enabled
+        try {
+          const calRow = store.settings?.find(r => r.key === 'gcal_calendar_id');
+          const calId = calRow?.value;
+          if (calId) {
+            await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}`, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${tok}` },
+            });
+          }
+        } catch { /* best effort */ }
+
+        // 2. Trash the DeLaClaw folder (cascades to all files inside)
+        try {
+          await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trashed: true }),
+          });
+        } catch { /* best effort */ }
+
+        // 3. Revoke the OAuth token
+        try {
+          await fetch(`https://oauth2.googleapis.com/revoke?token=${tok}`, { method: 'POST' });
+        } catch { /* best effort */ }
+
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e.message || 'Unexpected error' };
+      }
     },
   };
 

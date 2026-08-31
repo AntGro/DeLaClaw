@@ -711,9 +711,11 @@ window.startInlineEditDraft = function(id, spanEl) {
   const draft = allDrafts.find(d => d.id === id);
   if (!draft) return;
   inlineEditText(spanEl, draft.content, {
+    containerEl: spanEl.closest('.todo-item, .draft-item'),
     saveFn: async (content) => {
       if (state.db.connected) {
         await state.db.from('flashcard_notes').update({ content }).eq('id', id);
+        draft.content = content;
         showToast(t('flashcards.draft_updated'));
       }
     },
@@ -758,6 +760,7 @@ window.editFlashcardInline = function(id) {
   inlineEditText(spanEl, card.front, {
     multiline: true,
     extraEl: answerRow,
+    containerEl: spanEl.closest('.flashcard-item, .todo-item'),
     collectExtra: () => ({ back: answerInput.value.trim() }),
     saveFn: async (newFront, extra) => {
       const updates = {};
@@ -765,6 +768,7 @@ window.editFlashcardInline = function(id) {
       if (extra && extra.back && extra.back !== card.back) updates.back = extra.back;
       if (Object.keys(updates).length > 0 && state.db.connected) {
         await state.db.from('flashcards').update(updates).eq('id', id);
+        Object.assign(card, updates);
         showToast(t('flashcards.card_updated'));
       }
     },

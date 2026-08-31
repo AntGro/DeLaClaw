@@ -543,6 +543,7 @@ function editBirthdayInline(id) {
   inlineEditText(nameEl, b.name, {
     maxLength: 200,
     extraEl: extras,
+    containerEl: nameEl.closest('.birthday-card'),
     collectExtra: () => ({
       birthday: dateInput.value,
       note: noteInput.value.trim(),
@@ -559,6 +560,7 @@ function editBirthdayInline(id) {
         updates.updated_at = new Date().toISOString();
         const { error } = await state.db.from('birthdays').update(updates).eq('id', id);
         if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+        Object.assign(b, updates);
         showToast(t('birthdays.birthday_updated'), 'success');
       }
     },

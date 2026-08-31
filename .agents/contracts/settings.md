@@ -39,7 +39,7 @@ Cross-cutting app configuration — theme, language, backend picker, AI/NVIDIA c
 ## Business Invariants
 
 ### Settings Table
-- Key-value store: `schema_version`, `nvidia_api_key`, `nvidia_model`, archived project IDs
+- Key-value store: `schema_version`, `nvidia_api_key`, `nvidia_model`, archived project IDs, `gcal_sync_enabled`, `gcal_calendar_id`, `gcal_sync_habits`, `gcal_sync_todos`, `gcal_sync_birthdays`
 - `loadSettings()` reads at startup, populates `state.nvidiaApiKey`, `state.nvidiaModel`
 - `schema_version` checked against `VERSION` `latest_compat` / `latest_compat_deprec` for compatibility banners
 

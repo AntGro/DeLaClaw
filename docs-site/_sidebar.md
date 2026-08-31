@@ -7,6 +7,7 @@
   - [Architecture](architecture.md)
   - [Sharing](sharing.md)
   - [Backends](backends.md)
+  - [Sync Architecture](sync-architecture.md)
   - [Browser Support](browser-support.md)
   - [Performance](performance.md)
   - [Accessibility](accessibility.md)

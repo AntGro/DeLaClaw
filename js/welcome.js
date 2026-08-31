@@ -3,11 +3,11 @@
 // ===================================================================
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
-import state from './state.js';
+import state, { SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText } from './item-utils.js';
-import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName } from './habits.js';
-import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName } from './todos.js';
+import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCategories } from './habits.js';
+import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCategories } from './todos.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
 
@@ -563,8 +563,11 @@ function renderWelcome() {
   // Focus TODOs section
   html += `<div class="welcome-section" id="welcome-bucket-todos" style="--cat-color:#22c55e">`;
   html += `<div class="welcome-section-header">${lucideIcon('list-checks', 18)} <span>${esc(t('welcome.focus_todos'))}</span></div>`;
-  // Quick-add TODO with category selector
-  const todoCatIds = [...new Set(wTodos.map(td => catIdForTodo(td)))];
+  // Quick-add TODO with category selector — always show all categories
+  const todoCatIds = Array.from(getTodoCategories().values())
+    .filter(c => c.name !== SHARED_CATEGORY)
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map(c => c.id);
   html += `<div class="welcome-quick-add">`;
   html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
   for (const catId of todoCatIds) {
@@ -606,7 +609,10 @@ function renderWelcome() {
   html += `<div class="welcome-section" id="welcome-bucket-habits" style="--cat-color:#ec4899">`;
   html += `<div class="welcome-section-header">${lucideIcon('repeat', 18)} <span>${esc(t('welcome.habits_due'))}</span></div>`;
   // Quick-add Habit (opens modal pre-filled with name + category)
-  const habitCatIds = [...new Set(wHabits.map(c => catIdForHabit(c)))];
+  const habitCatIds = Array.from(getHabitCategories().values())
+    .filter(c => c.name !== SHARED_CATEGORY)
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map(c => c.id);
   html += `<div class="welcome-quick-add">`;
   html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
   for (const catId of habitCatIds) {

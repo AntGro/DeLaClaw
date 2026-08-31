@@ -2,7 +2,7 @@
 
 > A personal command center you own.
 
-DeLaClaw is a zero-dependency, no-build, self-hosted personal dashboard. It runs entirely in the browser as vanilla JavaScript ES modules, with pluggable backends — Google Drive, Supabase, local SQLite, or in-memory demo.
+DeLaClaw is a zero-dependency, no-build, self-hosted personal dashboard. It runs entirely in the browser as vanilla JavaScript ES modules, with pluggable backends — Google Drive, local SQLite, or in-memory demo.
 
 ## Features
 
@@ -14,7 +14,8 @@ DeLaClaw is a zero-dependency, no-build, self-hosted personal dashboard. It runs
 - **Lists** — Shareable lists for anything that doesn't fit elsewhere
 - **Vestiaire** — Wardrobe inventory tracker
 - **Birthdays** — Birthday reminders with avatar photos
-- **Sharing** — Share TODOs, habits, and lists with groups (Supabase backend)
+- **Sharing** — Share TODOs, habits, and lists with groups via shared Drive folders
+- **Google Calendar sync** — Optionally mirror habits, TODOs, and birthdays to a dedicated Google Calendar
 
 ## Highlights
 

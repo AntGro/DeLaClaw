@@ -33,6 +33,7 @@ Today / Welcome aggregation — focus TODOs, due habits, flashcard reviews, text
 
 ## Business Invariants
 - Focus TODOs: `priority ∈ {urgent,high}` + due today / overdue, not snoozed
+- **Quick-add category selector**: shows all categories sorted by `sort_order`, excluding `__shared__` — not limited to categories of currently visible items
 - Due habits: computed via `isStructuredRule()` + `computeNextDue()` + completions today excluded
 - **Habit actions from Welcome**: mark-done, delete, and history are exposed — must behave identically to the Habits page (delegates to `window.markHabitDone`, `window.deleteHabit`, `window.openHabitHistory`)
 - Flashcard reviews: due count per deck

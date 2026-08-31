@@ -61,7 +61,7 @@ Vendor versions are checked weekly by the `vendor-check` GitHub Action, which op
 - **License**: MIT (codebase and tooling); individual brand icons remain trademarks of their respective owners
 - **Source**: https://github.com/glincker/thesvg
 - **Website**: https://thesvg.org
-- **Purpose**: brand SVG icons for agent name pills (Claude, Codex, Grok, Cursor, Hermes, OpenClaw) and the Google Drive backend logo
+- **Purpose**: brand SVG icons for agent name pills (Claude, Codex, Grok, Cursor, Hermes, OpenClaw), the Google Drive backend logo, and the Google Calendar Settings icon
 - **Loaded from**: `icons/brand/` (self-hosted SVG files, sourced from thesvg.org mono/default variants)
 
 ### Dashboard Icons (homarr-labs)
@@ -92,3 +92,9 @@ The documentation site (`docs-site/`) uses the following libraries loaded from C
 - **License**: MIT
 - **Source**: https://github.com/PrismJS/prism
 - **Purpose**: syntax highlighting in docs code blocks (JavaScript, SQL, Bash, JSON)
+
+### Mermaid
+- **Package**: `mermaid` v10
+- **License**: MIT
+- **Source**: https://github.com/mermaid-js/mermaid
+- **Purpose**: renders flowchart and sequence diagrams in docs (sync architecture)

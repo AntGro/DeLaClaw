@@ -76,6 +76,7 @@ User jobs:
 - `openAddCategoryModal` / `saveNewCategory` — create with name, shortname, color
 - `openEditCategoryModal` / `saveEditCategory` — edit name, shortname, color
 - `deleteCategory` — deletes category (CASCADE deletes all its TODOs; sharing cleanup runs first)
+- **Explicit item deletion before category delete**: items are deleted individually before the category row so that calendar dirty tracking (`markDirty`) fires for each item. Drive/Demo have no FK enforcement, so CASCADE alone would not trigger per-item sync
 - Protected default row (`name=''`, `is_protected=1`) cannot be deleted
 - `sort_order` on categories persisted and reorderable via nav button drag
 
@@ -95,6 +96,7 @@ User jobs:
 - `welcome.js` → `renderWelcome()` reads focus TODOs (urgent/high + due today)
 - Any change to filter/sort/priority → verify Welcome still shows expected set
 - Sharing: uses `sharing-ui` + `sharing_items` type=todo
+- **Calendar sync**: category rename/shortname change calls `markCategoryRenamed('todo_categories')` → full calendar resync of all TODO events in that type
 
 ## Risks / Gotchas
 - Double toggle creates done/undone race → must use `_pendingTodoToggles`

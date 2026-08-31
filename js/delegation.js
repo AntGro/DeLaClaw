@@ -315,6 +315,9 @@
       case 'check-migration-status': callWindow('checkMigrationStatus', []); break;
       case 'close-migration-modal': callWindow('closeMigrationModal', []); break;
       case 'close-compare-modal': callWindow('closeCompareModal', []); break;
+      case 'toggle-cal-sync-habits': callWindow('toggleCalSyncSub', ['habits']); break;
+      case 'toggle-cal-sync-todos': callWindow('toggleCalSyncSub', ['todos']); break;
+      case 'toggle-cal-sync-birthdays': callWindow('toggleCalSyncSub', ['birthdays']); break;
       default: {
         var camel = action.replace(/-([a-z])/g, function(_,c){ return c.toUpperCase(); });
         if (window[camel] && typeof window[camel] === 'function') {

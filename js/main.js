@@ -9,12 +9,13 @@ import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
+import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
-import { esc, showToast, showConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
+import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
 
-const SETTINGS_PANES = ['general', 'ai', 'sharing', 'data', 'stats', 'agents'];
+const SETTINGS_PANES = ['general', 'ai', 'calendar', 'sharing', 'data', 'stats', 'agents', 'account'];
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
 import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
 import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthdays.js';
@@ -436,6 +437,7 @@ function initGate() {
     _urlInput.addEventListener('input', _updateKeyLink);
     _updateKeyLink();
   }
+  // Try auto-fill from Credential Management API
   // Try auto-fill from Credential Management API
   if (window.PasswordCredential) {
     navigator.credentials.get({ password: true, mediation: 'optional' }).then(cred => {
@@ -994,6 +996,8 @@ async function doLogin() {
       err.textContent = t('login.drive_gis_blocked') || 'Google sign-in is blocked. Disable your ad blocker or allow third-party scripts.';
     } else if (e.message === 'popup_closed_by_user' || e.message === 'access_denied') {
       err.textContent = t('login.drive_cancelled') || 'Google sign-in was cancelled.';
+    } else if (e.message === 'drive_scope_denied') {
+      err.textContent = t('login.drive_scope_denied') || 'DeLaClaw needs Google Drive access to store your data. Please try again and accept the Drive permission.';
     } else if (e.message === 'popup_failed_to_open') {
       err.textContent = t('login.drive_popup_blocked') || 'Pop-up blocked by your browser — please try again.';
     } else {
@@ -1354,6 +1358,130 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ===================================================================
+// SUPABASE DEPRECATION — MIGRATION MODAL
+// ===================================================================
+let _pendingMigrationBackup = null;
+
+function showSupabaseMigrationModal(backupPromise) {
+  console.log('[migration] showSupabaseMigrationModal called');
+  const overlay = document.getElementById('sbMigrationOverlay');
+  console.log('[migration] overlay element:', overlay);
+  if (!overlay) return;
+
+  // Set Supabase logo as icon
+  const iconEl = document.getElementById('sbMigrationIcon');
+  if (iconEl) iconEl.innerHTML = LOGOS.supabase(36);
+
+  const statusEl = document.getElementById('sbMigrationStatus');
+  const downloadBtn = document.getElementById('sbMigrationDownload');
+  const driveBtn = document.getElementById('sbMigrationDrive');
+  const backBtn = document.getElementById('sbMigrationBack');
+  const warnEl = document.getElementById('sbMigrationSharingWarn');
+
+  // Apply i18n first (textContent replaces everything)
+  overlay.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const val = t(key);
+    if (val && val !== key) el.textContent = val;
+  });
+
+  // Inject icons into buttons after i18n
+  if (downloadBtn && !downloadBtn.querySelector('svg')) {
+    downloadBtn.insertAdjacentHTML('afterbegin', lucideIcon('download', 16));
+  }
+  if (driveBtn && !driveBtn.querySelector('img')) {
+    driveBtn.insertAdjacentHTML('afterbegin', LOGOS.googledrive(16));
+  }
+
+  // Show modal immediately in loading state
+  downloadBtn.disabled = true;
+  driveBtn.disabled = true;
+  if (statusEl) statusEl.textContent = t('migration.preparing');
+  overlay.classList.add('visible');
+  console.log('[migration] overlay.visible added, computed display:', getComputedStyle(overlay).display);
+
+  // Fetch backup data in background, then enable actions
+  let backup = null;
+  backupPromise.then(b => {
+    backup = b;
+    downloadBtn.disabled = false;
+    driveBtn.disabled = false;
+    if (statusEl) statusEl.textContent = '';
+    // Show sharing warning if backup has sharing data
+    const hasSharingData = backup.sharing_groups && backup.sharing_groups.length > 0;
+    if (warnEl) warnEl.style.display = hasSharingData ? '' : 'none';
+  }).catch(e => {
+    console.warn('[DeLaClaw] backup generation failed:', e);
+    if (statusEl) statusEl.textContent = t('migration.error');
+  });
+
+  // Download backup
+  downloadBtn.onclick = () => {
+    if (!backup) return;
+    try {
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const date = new Date().toISOString().slice(0, 10);
+      a.href = blobUrl; a.download = `delaclaw-backup-${date}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(blobUrl);
+      if (statusEl) statusEl.textContent = t('menu.settings_backup_done') || 'Backup downloaded.';
+    } catch (e) {
+      if (statusEl) statusEl.textContent = t('menu.settings_backup_error') || 'Export failed.';
+    }
+  };
+
+  // Migrate to Google Drive
+  driveBtn.onclick = async () => {
+    if (!backup) return;
+    driveBtn.disabled = true;
+    downloadBtn.disabled = true;
+    if (statusEl) statusEl.textContent = t('migration.migrating');
+
+    try {
+      // Store backup for the Drive connect path to pick up
+      _pendingMigrationBackup = backup;
+
+      // Close the modal
+      overlay.classList.remove('visible');
+
+      // Clear saved Supabase credentials so auto-connect doesn't loop back
+      try { localStorage.removeItem(STAY_CONNECTED_KEY); } catch {}
+
+      // Trigger Drive connect — the Google OAuth popup opens on this user click
+      await connect(null, null, 'googledrive');
+
+      // If we get here, Drive connected successfully and the dashboard loaded.
+      // Save Drive as the "Stay connected" mode
+      saveStayConnectedCreds('', '', 'googledrive');
+
+    } catch (e) {
+      // Drive connect failed — show modal again with error
+      _pendingMigrationBackup = null;
+      overlay.classList.add('visible');
+      driveBtn.disabled = false;
+      downloadBtn.disabled = false;
+      if (statusEl) statusEl.textContent = t('migration.error');
+      console.warn('[DeLaClaw] migration to Drive failed:', e.message);
+    }
+  };
+
+  // Back to login
+  backBtn.onclick = (e) => {
+    e.preventDefault();
+    overlay.classList.remove('visible');
+    // Clear saved Supabase credentials
+    try { localStorage.removeItem(STAY_CONNECTED_KEY); } catch {}
+    // Show login form
+    const form = document.getElementById('loginForm');
+    if (form) form.style.display = 'flex';
+    // Switch mode to googledrive as default
+    switchBackendMode('googledrive');
+  };
+}
+
+// ===================================================================
 // UNLOCK & INIT APP
 // ===================================================================
 async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { silentAuth = false } = {}) {
@@ -1433,6 +1561,41 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     }, { silent: silentAuth });
     state.driveAdapter = adapter;
     state.driveMode = true;
+
+    // ── Supabase → Drive migration: import pending backup ──
+    if (_pendingMigrationBackup) {
+      const backup = _pendingMigrationBackup;
+      _pendingMigrationBackup = null;
+
+      // Filter to Drive-supported tables only
+      const driveTables = new Set([
+        'projects', 'tasks', 'todos', 'habits', 'habit_completions',
+        'flashcards', 'flashcard_notes', 'texts', 'text_line_progress',
+        'birthdays', 'vestiaire', 'lists', 'list_items',
+        'settings', 'prompts', 'nvidia_usage', 'daily_visits',
+        'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
+      ]);
+      const reseedData = {};
+      const sharingFields = ['shared_id', 'shared_group_id', 'owner_id'];
+      let tableCount = 0;
+      for (const table of (backup._meta?.tables || [])) {
+        if (!driveTables.has(table) || !backup[table]) continue;
+        // Strip sharing references and owner_id from items
+        reseedData[table] = backup[table].map(row => {
+          const clean = { ...row };
+          for (const f of sharingFields) delete clean[f];
+          return clean;
+        });
+        tableCount++;
+      }
+      adapter.reseed(reseedData);
+      if (adapter.runPendingMigrations) {
+        await adapter.runPendingMigrations();
+      }
+      // Set category colors from imported data
+      setDemoCategoriesFromData(reseedData);
+      console.log(`[DeLaClaw] migrated ${tableCount} tables from Supabase to Drive`);
+    }
   } else if (mode === 'local') {
     adapter = createRestAdapter(url);
     // Test connection with raw adapter BEFORE wrapping with offline cache
@@ -1485,73 +1648,25 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   }
   db.setAdapter(adapter);
 
-  // Initialize Supabase Auth (check for existing session / magic link callback)
+  // ── Supabase deprecated: show migration modal instead of loading dashboard ──
   if (mode === 'supabase') {
+    console.log('[migration] reached deprecation block');
+    // Try transparent auth (existing session / magic link callback)
     try {
+      console.log('[migration] starting initAuth');
       const { initAuth, claimOwnership } = await import('./auth.js');
       const authResult = await initAuth(state._rawSupabaseAdapter);
+      console.log('[migration] initAuth done, user:', authResult.user?.id);
       state.authUser = authResult.user;
       if (authResult.user) {
         await claimOwnership(adapter, authResult.user.id);
       }
-    } catch (e) { console.warn('auth init:', e); }
-    // Mandatory auth since 1.300 owner-only: show prompt if not signed in
-    if (!state.authUser) {
-      // Pre-auth schema check: if DB is readable without auth and < 1.484,
-      // the schema predates owner-only RLS — force migration before auth.
-      let needsPreAuthMigration = false;
-      let preAuthDbVer = '0.00';
-      try {
-        const { data, error } = await state._rawSupabaseAdapter
-          .from('settings').select('value').eq('key', 'schema_version').maybeSingle();
-        if (!error && data) {
-          const ver = data.value || '0.00';
-          preAuthDbVer = ver;
-          if (cmpVer(ver, '1.484') < 0) needsPreAuthMigration = true;
-        }
-      } catch { /* table may not exist — treat as needs migration */ }
-      if (needsPreAuthMigration) {
-        showPreAuthMigrationModal(state._rawSupabaseAdapter, url, key, preAuthDbVer);
-      } else {
-        showAuthPrompt(state._rawSupabaseAdapter, url, key);
-      }
-    }
-    // Listen for late auth events (magic link callback may resolve after getSession)
-    try {
-      const { onAuthStateChange, claimOwnership: claimOwn } = await import('./auth.js');
-      onAuthStateChange(state._rawSupabaseAdapter, async (event, session) => {
-        if (event === 'SIGNED_IN' && session?.user && !state.authUser) {
-          state.authUser = session.user;
-          // Claim unclaimed rows
-          try { await claimOwn(adapter, session.user.id); } catch {}
-          // Close auth prompt if open
-          const overlay = document.getElementById('authPromptOverlay');
-          if (overlay) overlay.classList.remove('visible');
-          // Initialize sharing if not already done
-          const ver = parseFloat(state.dbSchemaVersion || '0');
-          if (!state.sharing && ver >= 1.295) {
-            try {
-              const { createSharing } = await import('./sharing.js');
-              state.sharing = await createSharing('supabase', {
-                adapter,
-                getAuthUser: () => state.authUser,
-                supabaseUrl: url,
-                anonKey: key,
-              });
-              loadSharingAndNotify('sharing');
-              state.sharing.startPolling();
-              state.sharing.onUpdate(() => {
-                document.dispatchEvent(new CustomEvent('sharing-changed'));
-              });
-            } catch (e) { console.warn('late sharing init:', e); }
-          }
-          updateSharingNavVisibility();
-          // Now that auth is resolved, reload settings and re-check schema version
-          await loadSettings();
-          checkSchemaVersion();
-        }
-      });
-    } catch {}
+    } catch (e) { console.warn('[migration] auth init failed:', e); }
+
+    // Show modal immediately; backup loads in background
+    console.log('[migration] calling showSupabaseMigrationModal');
+    showSupabaseMigrationModal(generateBackupJSON());
+    return false;
   }
 
   // Flush pending Drive saves and stop polling on page close
@@ -1632,6 +1747,23 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   // Load user settings from DB (before tab visibility / view restore)
   await loadSettings();
 
+  // Init calendar sync module (for Drive and Demo backends only)
+  if (state.demoMode || state.driveMode) {
+    initCalSync(state.driveMode ? adapter.getToken : null);
+    // Hook calendar sync to Drive flush so they stay coupled
+    if (state.driveMode) {
+      adapter._markCalDirty = markCalDirty;
+      adapter._onTableFlushed = (table) => {
+        // Category table flush → sync the corresponding item table
+        const itemTable = CAT_TABLE_TO_ITEM_TABLE[table];
+        const syncTarget = itemTable || table;
+        syncCalendarTable(syncTarget).catch(e => console.warn('Calendar table sync:', e));
+      };
+    }
+    // No full sync on page load — trust calendar is already synced.
+    // Full push only happens on first enable (toggleCalSync).
+  }
+
   // Restore view early (before async refreshes) to avoid flash
   applyTabVisibility();
   const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'vestiaire', 'flashcards', 'lists'];
@@ -1670,6 +1802,26 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   });
 
   await refreshAll();
+
+  // Calendar sync auto-enable: if Calendar scope was granted at sign-in
+  // and the user has never had calendar sync set (key absent), enable it.
+  // Once the key exists (true or false), the user's choice is respected.
+  if (state.driveMode && state.driveAdapter?.calendarScopeGranted) {
+    const { data: syncSetting } = await state.db.from('settings').select('value').eq('key', 'gcal_sync_enabled');
+    const keyExists = syncSetting && syncSetting.length > 0;
+    if (!keyExists) {
+      try {
+        const calId = await enableCalSync();
+        if (calId) {
+          showToast(t('cal_sync.enabled'), 'success');
+          await updateCalSyncUI();
+          await reconcileCalendar();
+        }
+      } catch (e) {
+        console.warn('Calendar sync auto-enable failed:', e);
+      }
+    }
+  }
 
   checkSchemaVersion();
   recordDailyVisit();
@@ -2513,6 +2665,22 @@ function updateStaticLabels() {
   if (settingsPaneGeneralTitle) settingsPaneGeneralTitle.textContent = t('menu.settings_general');
   const settingsPaneAiTitle = document.getElementById('settingsPaneAiTitle');
   if (settingsPaneAiTitle) settingsPaneAiTitle.textContent = t('menu.settings_ai');
+  const settingsNavCalendar = document.getElementById('settingsNavCalendar');
+  if (settingsNavCalendar) settingsNavCalendar.textContent = t('cal_sync.nav');
+  const settingsPaneCalendarTitle = document.getElementById('settingsPaneCalendarTitle');
+  if (settingsPaneCalendarTitle) settingsPaneCalendarTitle.textContent = t('cal_sync.pane_title');
+  const settingsCalSyncLabel = document.getElementById('settingsCalSyncLabel');
+  if (settingsCalSyncLabel) settingsCalSyncLabel.textContent = t('cal_sync.label');
+  const settingsCalSyncHint = document.getElementById('settingsCalSyncHint');
+  if (settingsCalSyncHint) settingsCalSyncHint.textContent = t('cal_sync.hint');
+  const settingsCalSyncToggleLabel = document.getElementById('settingsCalSyncToggleLabel');
+  if (settingsCalSyncToggleLabel) settingsCalSyncToggleLabel.textContent = t('cal_sync.toggle');
+  const settingsCalSyncHabitsLabel = document.getElementById('settingsCalSyncHabitsLabel');
+  if (settingsCalSyncHabitsLabel) settingsCalSyncHabitsLabel.textContent = t('cal_sync.habits');
+  const settingsCalSyncTodosLabel = document.getElementById('settingsCalSyncTodosLabel');
+  if (settingsCalSyncTodosLabel) settingsCalSyncTodosLabel.textContent = t('cal_sync.todos');
+  const settingsCalSyncBirthdaysLabel = document.getElementById('settingsCalSyncBirthdaysLabel');
+  if (settingsCalSyncBirthdaysLabel) settingsCalSyncBirthdaysLabel.textContent = t('cal_sync.birthdays');
   const settingsTabsLabel = document.getElementById('settingsTabsLabel');
   if (settingsTabsLabel) settingsTabsLabel.textContent = t('menu.settings_tabs');
   const settingsTabsHint = document.getElementById('settingsTabsHint');
@@ -2529,6 +2697,17 @@ function updateStaticLabels() {
   if (settingsPaneStatsTitle) settingsPaneStatsTitle.textContent = t('menu.settings_stats');
   applySharingI18n();
   applyAgentsI18n();
+  // Account pane i18n
+  const settingsNavAccountLabel = document.getElementById('settingsNavAccountLabel');
+  if (settingsNavAccountLabel) settingsNavAccountLabel.textContent = t('account.nav');
+  const settingsPaneAccountTitle = document.getElementById('settingsPaneAccountTitle');
+  if (settingsPaneAccountTitle) settingsPaneAccountTitle.textContent = t('account.title');
+  const settingsDangerZoneLabel = document.getElementById('settingsDangerZoneLabel');
+  if (settingsDangerZoneLabel) settingsDangerZoneLabel.textContent = t('account.danger_zone');
+  const settingsDangerZoneHint = document.getElementById('settingsDangerZoneHint');
+  if (settingsDangerZoneHint) settingsDangerZoneHint.textContent = t('account.danger_hint');
+  const deleteAccountBtnText = document.getElementById('deleteAccountBtnText');
+  if (deleteAccountBtnText) deleteAccountBtnText.textContent = t('account.delete_btn');
   const settingsDisplayLabel = document.getElementById('settingsDisplayLabel');
   if (settingsDisplayLabel) settingsDisplayLabel.textContent = t('menu.settings_display');
   const settingsNvidiaKeyLabel = document.getElementById('settingsNvidiaKeyLabel');
@@ -2848,6 +3027,11 @@ function openSettings(pane) {
   switchSettingsPane(pane && SETTINGS_PANES.includes(pane) ? pane : 'general');
   // Init theme toggle state
   updateMenuThemeItem();
+  // Init calendar sync toggles
+  updateCalSyncUI().catch(() => {});
+  // Calendar sync click handlers: all handled via delegation.js
+  // (data-action="toggle-cal-sync" → window.toggleCalSync,
+  //  data-action="toggle-cal-sync-*" → explicit cases calling toggleCalSyncSub)
   hydrateIcons();
   document.getElementById('settingsModal').classList.add('visible');
   const scrollY = window.scrollY;
@@ -3400,15 +3584,15 @@ function showCompareModal() {
   const cross = '<span class="compare-cross"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
 
   const rows = [
-    { key: 'compare.setup', vals: ['compare.setup_drive', 'compare.setup_supa', 'compare.setup_local'] },
-    { key: 'compare.multi_device', vals: [check + ' ' + esc(t('compare.polling')), check + ' ' + esc(t('compare.live')), cross], raw: true },
-    { key: 'compare.offline', vals: [cross, cross, check], raw: true },
-    { key: 'compare.data_location', vals: ['compare.loc_drive', 'compare.loc_supa', 'compare.loc_local'] },
-    { key: 'compare.storage', vals: ['compare.sto_drive', 'compare.sto_supa', 'compare.sto_local'] },
-    { key: 'compare.cost', vals: ['compare.free', 'compare.free', 'compare.free'] },
+    { key: 'compare.setup', vals: ['compare.setup_drive', 'compare.setup_local'] },
+    { key: 'compare.multi_device', vals: [check + ' ' + esc(t('compare.polling')), cross], raw: true },
+    { key: 'compare.offline', vals: [cross, check], raw: true },
+    { key: 'compare.data_location', vals: ['compare.loc_drive', 'compare.loc_local'] },
+    { key: 'compare.storage', vals: ['compare.sto_drive', 'compare.sto_local'] },
+    { key: 'compare.cost', vals: ['compare.free', 'compare.free'] },
   ];
 
-  const backends = ['googledrive', 'supabase', 'local'];
+  const backends = ['googledrive', 'local'];
   const thead = `<tr><th></th>${backends.map(b =>
     `<th class="compare-th-${b}"><span class="compare-th-inner">${LOGOS[b](16)}${esc(LABELS[b])}</span></th>`
   ).join('')}</tr>`;
@@ -4161,6 +4345,28 @@ async function performImport(file) {
       showToast(t('menu.settings_restore_invalid'));
       return;
     }
+    // ── Snapshot calendar settings BEFORE any table is touched ──
+    // The backup's own calendar keys are meaningless in this account, so we
+    // always re-inject the pre-import values after reseed.
+    const CAL_KEYS = ['gcal_sync_enabled', 'gcal_calendar_id',
+      'gcal_sync_habits', 'gcal_sync_todos', 'gcal_sync_birthdays'];
+    const savedCalSettings = {};
+    if (state.driveMode) {
+      for (const k of CAL_KEYS) {
+        const { data } = await state.db.from('settings').select('value').eq('key', k).single();
+        if (data?.value != null) savedCalSettings[k] = data.value;
+      }
+    }
+
+    // ── Clear existing calendar events BEFORE the delete loop wipes
+    //    gcal_sync records and settings from the in-memory store. ──
+    const syncWasEnabled = savedCalSettings.gcal_sync_enabled === 'true';
+    if (syncWasEnabled && savedCalSettings.gcal_calendar_id) {
+      for (const itemType of ['todo', 'habit', 'birthday']) {
+        try { await deleteTypeEvents(itemType); } catch (_) { /* best effort */ }
+      }
+    }
+
     // Delete in reverse order (children before parents)
     const tables = [...(backup._meta.tables || [])].reverse();
     const CATEGORY_TABLES = new Set(['todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks']);
@@ -4264,6 +4470,7 @@ async function performImport(file) {
         reseedData[table] = backup[table] || [];
       }
       inMemAdapter.reseed(reseedData);
+
       // Run pending migrations if the backup's schema is behind the app
       if (inMemAdapter.runPendingMigrations) {
         const migrated = await inMemAdapter.runPendingMigrations();
@@ -4272,6 +4479,17 @@ async function performImport(file) {
         }
       }
       setDemoCategoriesFromData(reseedData);
+
+      // Re-inject saved calendar settings over whatever the backup had
+      if (state.driveMode && Object.keys(savedCalSettings).length > 0) {
+        const now = new Date().toISOString();
+        for (const [k, v] of Object.entries(savedCalSettings)) {
+          await state.db.from('settings').upsert(
+            { key: k, value: v, updated_at: now },
+            { onConflict: 'key' }
+          );
+        }
+      }
       await loadProjects();
       buildProjectCards();
       initProjectDragDrop();
@@ -4285,6 +4503,11 @@ async function performImport(file) {
       await refreshFlashcards();
       await refreshLists();
       refreshWelcome();
+      // Reconcile calendar AFTER refreshes so state.allHabits / state.allBirthdays
+      // are populated (syncTable reads them from state, not from the DB).
+      if (syncWasEnabled) {
+        await reconcileCalendar();
+      }
       closeSettings();
     } else {
       // Reload to reflect new data
@@ -4471,6 +4694,8 @@ function switchView(view, skipHash) {
   // Scroll active tab into view on mobile (horizontal carousel)
   const activeTab = document.querySelector('.view-tab.active');
   if (activeTab) activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+
+  updateViewFooterStats();
 }
 
 // ===================================================================
@@ -4734,6 +4959,157 @@ function clearPageSearch(btn) {
 
 window.toggleTheme = toggleTheme;
 window.disconnect = disconnect;
+
+// ── Calendar sync settings ──
+
+async function updateCalSyncUI() {
+  const prefs = await getCalSyncPrefs();
+  const mainRow = document.querySelector('[data-action="toggle-cal-sync"]');
+  const subSettings = document.getElementById('calSyncSubSettings');
+  if (mainRow) mainRow.classList.toggle('checked', prefs.enabled);
+  if (subSettings) subSettings.style.display = prefs.enabled ? '' : 'none';
+  // Sub-toggles
+  const hRow = document.querySelector('[data-action="toggle-cal-sync-habits"]');
+  const tRow = document.querySelector('[data-action="toggle-cal-sync-todos"]');
+  const bRow = document.querySelector('[data-action="toggle-cal-sync-birthdays"]');
+  if (hRow) hRow.classList.toggle('checked', prefs.habits);
+  if (tRow) tRow.classList.toggle('checked', prefs.todos);
+  if (bRow) bRow.classList.toggle('checked', prefs.birthdays);
+  // Show calendar nav button only for Drive and Demo backends
+  const calNavBtn = document.getElementById('settingsNavCalendarBtn');
+  if (calNavBtn) calNavBtn.style.display = (state.demoMode || state.driveMode) ? '' : 'none';
+}
+
+let _calSyncBusy = false;
+
+async function toggleCalSync() {
+  if (_calSyncBusy) return;
+  _calSyncBusy = true;
+  const row = document.querySelector('[data-action="toggle-cal-sync"]');
+  if (row) row.classList.add('is-pending');
+  try {
+    const prefs = await getCalSyncPrefs();
+    if (prefs.enabled) {
+      await disableCalSync();
+      showToast(t('cal_sync.disabled'), 'success');
+    } else {
+      const calId = await enableCalSync();
+      if (!calId) return;
+      showToast(t('cal_sync.enabled'), 'success');
+      // Sync existing items on first enable
+      reconcileCalendar().catch(e => console.warn('Initial calendar sync failed:', e));
+    }
+    await updateCalSyncUI();
+  } finally {
+    _calSyncBusy = false;
+    if (row) row.classList.remove('is-pending');
+  }
+}
+
+async function toggleCalSyncSub(subKey) {
+  if (_calSyncBusy) return;
+  _calSyncBusy = true;
+  const row = document.querySelector(`[data-action="toggle-cal-sync-${subKey}"]`);
+  if (row) row.classList.add('is-pending');
+  try {
+    const settingKey = `gcal_sync_${subKey}`;
+    const { data } = await state.db.from('settings').select('value').eq('key', settingKey).single();
+    const current = data?.value !== 'false'; // defaults to true
+    const newVal = !current;
+    await state.db.from('settings').upsert(
+      { key: settingKey, value: newVal ? 'true' : 'false', updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
+    await updateCalSyncUI();
+    // subKey is 'habits', 'todos', or 'birthdays' → item type is singular
+    const itemType = subKey.replace(/s$/, ''); // 'habit', 'todo', 'birthday'
+    if (!newVal) {
+      // Disabling: delete all calendar events for this type
+      deleteTypeEvents(itemType).catch(e => console.warn('Calendar type delete:', e));
+    } else {
+      // Re-enabling: full push of this type
+      pushCalType(itemType).catch(e => console.warn('Calendar type push:', e));
+    }
+  } finally {
+    _calSyncBusy = false;
+    if (row) row.classList.remove('is-pending');
+  }
+}
+
+window.toggleCalSync = toggleCalSync;
+window.toggleCalSyncSub = toggleCalSyncSub;
+window.markCategoryRenamed = markCategoryRenamed;
+
+// ── Delete account (Settings > Account > Danger Zone) ──
+
+(function initDeleteAccount() {
+  const btn = document.getElementById('deleteAccountBtn');
+  if (!btn) return;
+  // Hide in demo mode — no account to delete
+  if (state.demoMode) {
+    const pane = document.getElementById('settingsPane-account');
+    if (pane) pane.style.display = 'none';
+    const nav = document.querySelector('[data-pane="account"]');
+    if (nav) nav.style.display = 'none';
+    return;
+  }
+  btn.addEventListener('click', () => {
+    const lang = getLang();
+    const confirmWord = lang === 'fr' ? 'SUPPRIMER' : lang === 'es' ? 'ELIMINAR' : 'DELETE';
+    // Pick backend-specific message
+    const bodyKey = state.driveMode ? 'account.confirm_body_drive'
+      : state.supabaseUrl ? 'account.confirm_body_supabase'
+      : 'account.confirm_body_local';
+    showConfirmAction(
+      t('account.confirm_title'),
+      t(bodyKey),
+      async () => {
+        // Show progress inside the modal
+        const msgEl = document.getElementById('confirmActionMessage');
+        const detailEl = document.getElementById('confirmActionDetail');
+        const iconWrap = document.querySelector('.confirm-action-icon-wrap');
+        if (detailEl) detailEl.style.display = 'none';
+        if (iconWrap) iconWrap.innerHTML = '';
+
+        function setStep(text) {
+          if (msgEl) msgEl.textContent = text;
+        }
+
+        // 1. Calendar cleanup
+        try {
+          const prefs = await getCalSyncPrefs();
+          if (prefs?.enabled) {
+            setStep(t('account.step_calendar'));
+            await disableCalSync({ deleteCalendar: true });
+          }
+        } catch { /* best effort */ }
+
+        // 2. Delete data via adapter
+        setStep(t('account.step_data'));
+        const result = await (db.adapter?.deleteAccount?.() || { ok: false, error: 'Not supported' });
+        if (!result.ok) {
+          showToast(t('account.delete_failed'), 'error');
+          window.location.href = window.location.origin + window.location.pathname;
+          return;
+        }
+
+        // 3. Disconnect — tears down adapter, clears creds, reloads to gate
+        setStep(t('account.step_signout'));
+        await disconnect();
+      },
+      null,
+      {
+        keepOpen: true,
+        btnText: t('account.delete_btn'),
+        iconSvg: lucideIcon('alert-triangle', 32, '#ef4444'),
+        btnIconSvg: lucideIcon('trash-2', 16, '#fff'),
+        confirmWord,
+        confirmPlaceholder: t('account.confirm_placeholder'),
+      }
+    );
+  });
+})();
+
 window.toggleSearch = toggleSearch;
 window.clearPageSearch = clearPageSearch;
 window.dismissSchemaBanner = dismissSchemaBanner;

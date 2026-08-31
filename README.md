@@ -12,7 +12,7 @@ A personal command center you own. No SaaS lock-in, no frameworks, bring your ow
 
 ## What it does
 
-DeLaClaw is a single-page productivity dashboard that runs entirely in the browser. It connects to your own database (Supabase, local SQLite, or an in-memory demo) and gives you a unified view of your projects, tasks, habits, flashcards, and more.
+DeLaClaw is a single-page productivity dashboard that runs entirely in the browser. It connects to your own storage (Google Drive, local SQLite, or an in-memory demo) and gives you a unified view of your projects, tasks, habits, flashcards, and more.
 
 ### Modules
 
@@ -29,8 +29,9 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 
 ### Capabilities
 
-- **Four backend modes**: Supabase (cloud PostgreSQL), Google Drive (per-table JSON files in your Drive), local REST server (Bun + SQLite), in-memory demo
-- **Sharing**: Cross-user collaborative sharing for TODOs, habits, and lists — create groups, invite via opaque codes, collaborative editing and completion tracking (Supabase primary; Drive adapter exists but stale)
+- **Three backend modes**: Google Drive (per-table JSON files in your Drive), local REST server (Bun + SQLite), in-memory demo
+- **Google Calendar sync**: optionally mirror habits, TODOs, and birthdays to a dedicated Google Calendar (Drive backend)
+- **Sharing**: Cross-user collaborative sharing for TODOs, habits, and lists — create groups, invite via opaque codes, collaborative editing and completion tracking
 - **Offline-first**: IndexedDB cache serves read-only data when the network is down, with automatic recovery
 - **PWA**: installable on mobile and desktop via service worker with network-first caching
 - **Dark and light themes** with automatic OS preference detection
@@ -47,7 +48,7 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 
 ## Quick start
 
-DeLaClaw supports four backend modes. Pick one:
+DeLaClaw supports three backend modes. Pick one:
 
 ### Demo (no setup)
 
@@ -61,13 +62,6 @@ DeLaClaw supports four backend modes. Pick one:
 2. Select "Drive" and click "Connect with Google"
 3. Sign in with your Google account — DeLaClaw creates a `DeLaClaw/` folder in your Drive with one JSON file per table
 4. All data syncs automatically; no API keys or database setup needed
-
-### Supabase (cloud)
-
-1. Create a [Supabase](https://supabase.com) project
-2. Run the base schema and migrations in the SQL editor (see [Setup Guide](docs-site/setup.md))
-3. Serve `index.html` with any static server, or use [delaclaw.com](https://delaclaw.com)
-4. Select "Supabase", enter your project URL and anon key
 
 ### Local (Bun + SQLite)
 
@@ -93,20 +87,21 @@ js/
   main.js               App bootstrap, view switching, settings, footer
   state.js              Centralized state and constants
   db.js                 Adapter abstraction with Proxy-based activity tracking
-  auth.js               Authentication flows (magic link, email guard)
+  auth.js               Authentication flows (legacy — Supabase migration support)
   adapters/
-    supabase.js         Supabase PostgREST adapter
+    supabase.js         Supabase PostgREST adapter (legacy — migration support)
     rest.js             Local Bun+SQLite REST adapter
     demo.js             In-memory adapter with sample data
     drive.js            Google Drive adapter (in-memory + per-table JSON persistence)
-    offline-cache.js    IndexedDB caching layer (wraps any adapter)
+    offline-cache.js    IndexedDB caching layer (legacy — Supabase migration support)
+  calendar-sync.js      Google Calendar sync (Drive backend)
   sharing.js            Sharing adapter factory (picks backend, validates interface)
   sharing-interface.js  Canonical sharing adapter contract
-  sharing-supabase.js   Supabase sharing adapter (RPCs, token auth, polling)
-  sharing-drive.js      Drive sharing adapter (stale)
+  sharing-supabase.js   Supabase sharing adapter (legacy — migration support)
+  sharing-drive.js      Drive sharing adapter
   sharing-envelope.js   Invite code encode/decode (DLC1 format)
   sharing-ui.js         Sharing UI: settings pane, share popovers, completion modal
-  crypto-sync.js        AES-GCM encryption for joined-group credentials
+  crypto-sync.js        AES-GCM encryption for joined-group credentials (legacy — Supabase migration support)
   welcome.js            Today dashboard
   projects.js           Project boards and task management
   todos.js              TODO management
@@ -136,9 +131,9 @@ migrations/             Incremental SQL migrations
 sw.js                   Service worker (network-first + precache)
 ```
 
-The adapter pattern (`db.js`) means the app logic never touches the backend directly. Each adapter exposes the same `.from(table).select()/.insert()/.update()/.delete()` interface. The offline cache wraps any adapter transparently, caching reads in IndexedDB and serving them when the network fails. Sharing follows the same pattern — a validated adapter interface with Supabase as the primary implementation.
+The adapter pattern (`db.js`) means the app logic never touches the backend directly. Each adapter exposes the same `.from(table).select()/.insert()/.update()/.delete()` interface. Sharing follows the same pattern via a validated adapter interface.
 
-The canonical table list lives in `sql/supabase_schema.sql` (Supabase) and `server/schema.sql` (Local SQLite). Category/deck foreign keys use CASCADE on delete — deleting a category deletes its items.
+The canonical table list lives in `server/schema.sql` (Local SQLite). `sql/supabase_schema.sql` is retained as a legacy reference. Category/deck foreign keys use CASCADE on delete — deleting a category deletes its items.
 
 See [docs-site/architecture.md](docs-site/architecture.md) for details.
 
@@ -164,7 +159,7 @@ DeLaClaw is free software. You can use, modify, and distribute it under the term
 
 - [Lucide](https://lucide.dev) icons (ISC License)
 - [DM Sans](https://fonts.google.com/specimen/DM+Sans) font (Open Font License)
-- [Supabase JS](https://github.com/supabase/supabase-js) client (MIT License)
+- [Supabase JS](https://github.com/supabase/supabase-js) client (MIT License) — legacy, retained for migration support
 - [Three.js](https://threejs.org) for hero animations (MIT License)
 
 See [Attributions](docs-site/attributions.md) for full details.

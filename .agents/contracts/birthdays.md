@@ -57,6 +57,7 @@ User jobs:
 ## Cross-Feature Edges
 - Welcome aggregates upcoming birthdays (next 7 days)
 - Changing avatar → verify Welcome birthday cards show new crop
+- **Calendar sync**: birthdays participate in calendar sync as yearly recurring events (`RRULE:FREQ=YEARLY`). Delete, rename, and date changes trigger calendar event updates
 
 ## Risks / Gotchas
 - Crop modal symmetric resize with custom grip — must preserve aspect

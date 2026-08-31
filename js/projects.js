@@ -560,10 +560,11 @@ async function promptEditTask(id) {
 
   inlineEditText(textSpan, originalText, {
     maxLength: MAX_TEXT_LEN,
+    containerEl: taskEl,
     saveFn: async (trimmed) => {
       const { error } = await state.db.from('tasks').update({ text: trimmed }).eq('id', id);
       if (error) showToast(t('toast.update_failed'), 'error');
-      else showToast(t('projects.task_updated'), 'success');
+      else { task.text = trimmed; showToast(t('projects.task_updated'), 'success'); }
     },
     refreshFn: refreshAll,
   });

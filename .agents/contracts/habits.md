@@ -57,6 +57,11 @@ User jobs:
 - For free-text / custom rules (`isStructuredRule()==false`), `updateHabitNextDue()` sets `next_due = null` to indicate that due date is not client-deterministic and will be resolved externally
 - Bug history: duplicated prefix list once computed `weekly:Fri` as lastDone+5 days (confused day index with offset) → produced Wednesday. Fixed by exporting single source `isStructuredRule()` from `js/habits.js`.
 
+### Initial Next-Due (No Completions)
+- **Pure interval rules** (`every_N_days`, `every_N_weeks` without specific days): `next_due = today` — habit starts immediately
+- **Anchored rules** (weekly on specific days, monthly on a date/weekday, yearly): `next_due` = next valid occurrence on or after today — e.g. "first Monday of each month" created on a Sunday schedules the next first Monday, not today
+- Implementation: anchored rules use yesterday as the base date so the existing "next after base" logic naturally includes today as a candidate
+
 ### Early Completion & Next-Due
 - **`updateHabitNextDue` two-mode behavior:**
   - **Completion path** (`earlyGuard: true`, default): if the computed next-due ≤ current due date, recompute from the current due date — early-completion guard (e.g. `weekly:Fri` done on Wednesday → next Friday, not same Friday)
@@ -76,6 +81,7 @@ User jobs:
 ### Categories
 - Category CRUD: create (with name, shortname, color), edit (rename, recolor), delete
 - **Category FK**: `category_id` FK → `habit_categories(id)`, CASCADE on delete. Deleting a category deletes all its habits + completions. App-level sharing cleanup runs first — shared items are removed from `sharing_items` before CASCADE fires
+- **Explicit item deletion before category delete**: items are deleted individually before the category row so that calendar dirty tracking (`markDirty`) fires for each item. Drive/Demo have no FK enforcement, so CASCADE alone would not trigger per-item sync
 - Protected default row (`name=''`, `is_protected=1`) cannot be deleted
 - Category nav order persisted via `sort_order`, reorderable by long-press drag
 
@@ -95,6 +101,7 @@ User jobs:
 - Welcome aggregates due habits via `state.allHabits` + `allHabitCompletions`; drafts excluded
 - `frequency_rule` change → verify `welcome.js` rendering
 - Habit mark-done, delete, and history are also exposed from Welcome — must behave identically
+- **Calendar sync**: category rename/shortname change calls `markCategoryRenamed('habit_categories')` → full calendar resync of all habit events in that type
 
 ## Risks / Gotchas
 - Double DONE → duplicate completion row → must guard with pendingSet
@@ -105,6 +112,8 @@ User jobs:
 ## Test Hooks
 - `bun tests/tests.js`: esc usage, pendingSet existence, CODEMAP freshness
 - Manual: create habit `weekly:Fri`, mark done Wed, verify next_due = Friday (not Wed+5)
+- Manual: create habit `every_N_months:1:first:Mon` with no last-done, verify next_due = next first Monday (not today)
+- Manual: create habit `every_N_days:3` with no last-done, verify next_due = today
 - Manual: edit `weekly:Fri` habit's last-done to Monday → next_due stays at current Friday (min keeps the earlier)
 - Manual: change frequency from `weekly:Fri` to `daily` → next_due moves earlier (min picks closer date)
 - Manual: save habit as draft, verify no next_due, promote, verify next_due computed

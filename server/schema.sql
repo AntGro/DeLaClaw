@@ -369,3 +369,12 @@ CREATE TRIGGER IF NOT EXISTS trg_protect_flashcard_decks_upd
   BEFORE UPDATE ON flashcard_decks FOR EACH ROW
   WHEN OLD.is_protected = 1
   BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
+
+-- Google Calendar sync tracking
+CREATE TABLE IF NOT EXISTS gcal_sync (
+  item_type TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  gcal_event_id TEXT NOT NULL,
+  last_synced_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (item_type, item_id)
+);

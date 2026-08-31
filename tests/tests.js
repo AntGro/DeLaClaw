@@ -1831,9 +1831,7 @@ test('window.sendAuthFromSharing is exposed', () => {
   assert(main.includes('window.sendAuthFromSharing'), 'window.sendAuthFromSharing not exposed');
 });
 
-test('Setup guide mentions Site URL for sharing', () => {
-  assert(indexHtml.includes('Site URL'), 'Setup guide missing Site URL mention');
-});
+// (Removed: test for Supabase Site URL in setup guide — Supabase setup steps removed in deprecation)
 
 // ===================================================================
 // 30. Browser smoke test: all JS modules load without runtime errors

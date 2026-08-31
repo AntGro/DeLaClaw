@@ -18,68 +18,14 @@ The simplest persistent backend — no database, no API keys.
 
 1. Open [delaclaw.com](https://delaclaw.com) or serve `index.html` locally
 2. Select **Drive** in the backend picker and click **Connect with Google**
-3. Sign in with your Google account and grant the `drive.file` scope (lets DeLaClaw access only files it creates)
+3. Sign in with your Google account and grant the `drive.file` scope (lets DeLaClaw access only files it creates). You may also be offered a `calendar.app.created` permission — this is optional and enables [Google Calendar sync](sync-architecture.md). You can decline it and enable it later from Settings
 4. DeLaClaw creates a `DeLaClaw/` folder in your Google Drive containing one JSON file per table (e.g. `todos.json`, `habits.json`, `settings.json`)
 
 All data loads into memory on connect and writes back to Drive with a 2-second debounce per table after each mutation. The JSON files are plain exports — you can download, inspect, or delete them from Drive at any time.
 
-## Supabase (cloud PostgreSQL)
+## Supabase (deprecated)
 
-### 1. Create a Supabase project
-
-Sign up at [supabase.com](https://supabase.com) and create a new project. Note your **Project URL** and **anon (public) key** from Settings > API.
-
-### 2. Create the database schema
-
-Open the **SQL Editor** in your Supabase dashboard.
-
-**New installs**: run `sql/supabase_schema.sql`. This is the complete current schema with all migrations folded in. It sets `schema_version` automatically and enables `pgcrypto` for invite token hashing.
-
-**Existing installs**: run any pending migrations in `migrations/` in order (files are named by target version, e.g. `1.099_enable_realtime.sql`). See `migrations/MIGRATION_GUIDE.md` for the full versioning system. Since `1.300` mandatory auth and `1.301` hashed invites are security-critical, run them as soon as possible.
-
-### 3. Configure Auth (mandatory since 1.300)
-
-DeLaClaw uses Supabase Auth email sign-in. Owner-only RLS means **no data is readable without a session**.
-
-In your Supabase dashboard → **Authentication → Providers**:
-
-1. Enable **Email** provider
-2. Set **Site URL** to your deployed origin, e.g. `https://delaclaw.com`
-3. Under **Additional Redirect URLs**, add:
-   - `https://delaclaw.com`
-   - `https://dev.delaclaw.pages.dev` (preview)
-   - `http://localhost:3737` (local dev)
-   - any custom domain you self-host on
-
-In **Authentication → Settings**:
-
-- Keep email sign-in enabled
-- Set **JWT expiry** to 1 hour (default)
-- Set **Refresh token lifetime** to **1 year** (`8760 hours` / `31536000 seconds`) — DeLaClaw stores the refresh token in localStorage; long lifetime avoids repeated logins.
-
-Default Supabase confirmation emails work: the app asks the user to paste the confirmation link back into DeLaClaw, so verification happens inside the app context. If you use custom SMTP/templates, keep a confirmation link or token in the email that can be pasted into the app.
-
-> Since 1.300, the "Skip" anonymous path is removed. You must sign in by email after entering URL + anon key. `owner_id = auth.uid()` is enforced via `trg_set_owner_id`, and `claim_ownership()` backfills legacy rows.
-
-### 4. Connect the app
-
-1. Open [delaclaw.com](https://delaclaw.com) (or serve `index.html` locally)
-2. Select **Supabase** on the login screen, enter Project URL + anon key
-3. Enter your email → **Send link**
-4. Open email → copy the confirmation link → paste it in the app → **Verify**
-5. Optionally check "Stay connected" to persist URL + anon key (session itself stored separately by Supabase Auth)
-
-This paste-to-verify flow works identically on desktop, Android, and **iPhone PWA** because the session is created inside the app context.
-
-### Notes
-
-- **Security 1.300+**: RLS enforces `owner or agent` policies on all personal and category tables. Policies are `FOR ALL USING (owner_id = auth.uid() OR has_agent_access(owner_id)) WITH CHECK (...)`. Even if the anon key leaks inside an invite code, `B` cannot read `A`'s private tables. The only exception is `agent_grants`, which uses a strict `owner only` policy. Sharing tables (`sharing_groups`, `sharing_members`, `sharing_items`) use group-scoped policies. See `sql/supabase_schema.sql` for the full policy set.
-- **Security 1.301**: Invite tokens are never stored plaintext for lookups. `sharing_members` stores `token_hash = encode(digest(token,'sha256'),'hex')`, `expires_at` (24h) and `revoked_at`. All sharing RPCs (`verify_join_token`, `confirm_join`, `get_shared_items`, ...) verify hash + revocation + expiry.
-- **Privacy 1.436**: Shared-group identity is `member_id` + group-local `display_name`. Creator-provided invite labels live in `invited_label`; emails are permission material only and are not emitted through shared group state or agent-safe serialization.
-- **Encrypted joins**: `joined_groups` stores `token_ciphertext`/`token_iv` and `remote_anon_key_ciphertext/_iv` encrypted with a per-user `sync_secret` (WebCrypto AES-GCM, 32 bytes in localStorage `claw_sync_secret`). Plaintext columns remain only for fallback/migration.
-- The app uses the Supabase JS client v2, self-hosted in `vendor/supabase.js`. No server-side code is needed.
-- Real-time subscriptions are enabled: changes from other tabs or devices appear automatically.
-- The app checks DB `schema_version` against the `VERSION` file and shows a banner if migrations are pending.
+> **Supabase backend support has been removed.** Existing users who connect with their Supabase credentials will be offered a one-click migration to Google Drive or a data backup download. The Supabase adapter and client library remain in the codebase temporarily to support this migration path. The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
 
 ## Local mode (Bun + SQLite)
 

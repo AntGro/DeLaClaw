@@ -93,12 +93,19 @@ async function saveEditCategory() {
   if (!newName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
 
   // Update the DB row directly — no need to rename strings on items since they reference by ID
+  const oldShortname = cat.shortname;
+  const oldName = cat.name;
   const updates = { shortname: shortname || null, color };
   if (!cat.is_protected) updates.name = newName;
   await state.db.from('todo_categories').update(updates).eq('id', catId);
   Object.assign(cat, updates);
   _todoCatByName.clear();
   for (const row of _todoCatMap.values()) _todoCatByName.set(row.name, row);
+
+  // Calendar: only resync items if the label used in event summaries changed
+  if (updates.shortname !== oldShortname || updates.name !== oldName) {
+    window.markCategoryRenamed?.('todo_categories');
+  }
 
   closeEditCategoryModal();
   renderTodos();
@@ -839,6 +846,7 @@ async function editTodoInline(id, itemEl) {
   inlineEditText(textEl, todo.text, {
     maxLength: 2000,
     extraEl: extras,
+    containerEl: itemEl,
     collectExtra: () => {
       const newDeadline = deadlineInput.value ? new Date(deadlineInput.value).toISOString() : null;
       const selectedCatId = catSelect.value;
@@ -874,12 +882,14 @@ async function editTodoInline(id, itemEl) {
               });
             }
           } catch (e) { console.warn('Failed to update shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+          Object.assign(todo, updates);
           showToast(t('todos.todo_updated'), 'success');
         } else {
           // ─── Normal: write all to local DB ───
           const { error } = await state.db.from('todos').update(updates).eq('id', id);
-          if (error) showToast(t('toast.update_failed'), 'error');
-          else showToast(t('todos.todo_updated'), 'success');
+          if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+          Object.assign(todo, updates);
+          showToast(t('todos.todo_updated'), 'success');
         }
       }
     },
@@ -1002,7 +1012,11 @@ async function deleteCategory(catId) {
         }
       }
     }
-    // CASCADE on FK — deleting the category removes all its items
+    // Explicitly delete items so calendar sync (markDirty) fires for each.
+    // SQL CASCADE would handle this on Supabase, but Drive/Demo have no FK enforcement.
+    for (const todo of todosInCat) {
+      await state.db.from('todos').delete().eq('id', todo.id);
+    }
     await state.db.from('todo_categories').delete().eq('id', catId);
     showToast(t('toast.deleted'), 'info');
     await refreshTodos();

@@ -828,8 +828,9 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
       // If focus moved to another interactive element in the same item (e.g.
       // last-done date picker), keep the inline edit open.
       if (containerEl && containerEl.contains(document.activeElement)) return;
-      // If the user clicked non-focusable space inside the item, keep open.
-      if (_clickedInsideContainer) return;
+      // If the user clicked non-focusable space inside the item, keep open
+      // and re-focus the input so the next outside click still triggers focusout.
+      if (_clickedInsideContainer) { input.focus(); return; }
       finishEdit(false, true);
     }, 150);
   });

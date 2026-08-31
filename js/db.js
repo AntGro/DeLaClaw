@@ -92,6 +92,9 @@ const db = {
   /** Install a backend adapter (supabase, pocketbase, rest …) */
   setAdapter(adapter) { _adapter = adapter; },
 
+  /** The raw backend adapter (for adapter-level operations like deleteAccount) */
+  get adapter() { return _adapter; },
+
   /** True once an adapter has been installed */
   get connected() { return _adapter !== null; },
 

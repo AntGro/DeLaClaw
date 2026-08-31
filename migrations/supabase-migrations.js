@@ -1115,6 +1115,7 @@ INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', '1.793',
 `,
 
   '1.809': `-- Migration 1.809: Add gcal_sync table for Google Calendar integration
+-- frozen — last Supabase migration (Supabase backend deprecated)
 -- Tracks which habits/todos/birthdays have been synced to Google Calendar
 -- and stores the corresponding Calendar event ID for updates/deletes.
 

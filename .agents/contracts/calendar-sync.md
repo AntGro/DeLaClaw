@@ -8,7 +8,7 @@ Calendar sync creates and maintains a dedicated **DeLaClaw** calendar in the use
 
 - **Drive backend**: fully operational (reuses the Drive OAuth token which includes `calendar.app.created` scope).
 - **Demo backend**: tables and settings exist, but no real Calendar API calls are made.
-- **Supabase backend**: `gcal_sync` schema exists (migration `1.809`), but calendar sync is not wired.
+- **Supabase backend**: removed — see `dev-latest-supabase-support` branch. Migration `1.809` (`gcal_sync` table) is frozen.
 - **Local SQLite**: not wired.
 
 ## Token

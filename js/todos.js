@@ -1617,6 +1617,7 @@ window.setQuickAddPriority = setQuickAddPriority;
 window.updateQuickAddPriorityBtn = updateQuickAddPriorityBtn;
 window.setTodoPriority = setTodoPriority;
 window.closePriorityPicker = closePriorityPicker;
+window.PRIORITY_LEVELS = PRIORITY_LEVELS;
 window.openSnoozeModal = openSnoozeModal;
 window.closeSnoozeModal = closeSnoozeModal;
 window.snoozeFor = snoozeFor;

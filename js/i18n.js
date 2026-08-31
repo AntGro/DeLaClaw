@@ -816,6 +816,8 @@ const T = {
       onboarding_skip: 'Not now',
       syncing_type: 'Syncing {0}…',
       sync_complete: 'Calendar sync complete',
+      removing_type: 'Removing {0}…',
+      remove_complete: 'Calendar events removed',
     },
   },
   fr: {
@@ -1609,6 +1611,8 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       onboarding_skip: 'Plus tard',
       syncing_type: 'Synchronisation des {0}…',
       sync_complete: 'Synchronisation terminée',
+      removing_type: 'Suppression des {0}…',
+      remove_complete: 'Événements supprimés',
     },
   },
   es: {
@@ -2402,6 +2406,8 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       onboarding_skip: 'Ahora no',
       syncing_type: 'Sincronizando {0}…',
       sync_complete: 'Sincronización completada',
+      removing_type: 'Eliminando {0}…',
+      remove_complete: 'Eventos eliminados',
     },
   },
 };

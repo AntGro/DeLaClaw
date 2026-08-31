@@ -304,7 +304,7 @@ export async function enableCalSync() {
  * DeLaClaw calendar but keeps the calendar itself so it can
  * be reused on re-enable (avoids orphaned/duplicate calendars).
  */
-export async function disableCalSync({ deleteCalendar = false } = {}) {
+export async function disableCalSync({ deleteCalendar = false, onProgress } = {}) {
   if (!state.demoMode && _getToken) {
     try {
       const token = await _getToken();
@@ -320,9 +320,12 @@ export async function disableCalSync({ deleteCalendar = false } = {}) {
           await state.db.from('gcal_sync').delete().neq('item_type', '__never__');
         } else {
           // Normal toggle — delete events but keep the calendar for re-use
-          for (const itemType of ['todo', 'habit', 'birthday']) {
-            try { await deleteTypeEvents(itemType); } catch (_) { /* best effort */ }
+          const types = ['habit', 'todo', 'birthday'];
+          for (let i = 0; i < types.length; i++) {
+            if (onProgress) onProgress({ type: types[i], index: i, total: types.length });
+            try { await deleteTypeEvents(types[i]); } catch (_) { /* best effort */ }
           }
+          if (onProgress) onProgress({ type: null, index: types.length, total: types.length, done: true });
         }
       }
     } catch (_) { /* best effort */ }

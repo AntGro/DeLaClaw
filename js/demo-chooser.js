@@ -17,7 +17,7 @@ function buildPrompt(lang) {
     { "project": "Project Name", "text": "Task description", "status": "todo|review|approved" }
   ],
   "todos": [
-    { "text": "To-do item", "priority": "urgent|high|medium|low|normal", "category": "Category", "due_date": "YYYY-MM-DD or null" }
+    { "text": "To-do item", "priority": "urgent|high|medium|low", "category": "Category", "due_date": "YYYY-MM-DD or null" }
   ],
   "habits": [
     { "name": "Habit name", "frequency_rule": "see below", "category": "Category" }
@@ -154,7 +154,7 @@ function normalizeCustomData(data) {
     data.todos = data.todos.map((r, i) => {
       base(r, 'todo', i);
       if (r.done == null) r.done = false;
-      if (!r.priority) r.priority = 'normal';
+      if (!r.priority) r.priority = 'medium';
       if (!r.category) r.category = 'General';
       return r;
     });

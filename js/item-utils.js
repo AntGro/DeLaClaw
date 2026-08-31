@@ -689,6 +689,7 @@ export function scrollToAndHighlight(element, color, durationMs = 1500) {
 // Track the active inline edit so we can cancel it cleanly
 let _activeInlineEdit = null;
 let _inlineEditRefreshTimer = null;
+let _datePickerJustClosed = false;
 
 export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refreshFn, extraEl, onStart, onFinish, collectExtra, multiline, containerEl }) {
   if (spanEl.dataset.editing) return;
@@ -820,6 +821,18 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     containerEl.addEventListener('mousedown', _containerMousedownHandler, true);
   }
 
+  // Native date-picker guard: on iOS, tapping "Done" blurs the date input
+  // and moves focus to <body>, which would otherwise trigger cancel. On
+  // desktop Chrome the picker has no confirm button, so clicking outside to
+  // dismiss it can also land outside the edit wrapper. Setting a short flag
+  // on date-input blur lets the focusout handler skip cancellation.
+  root.querySelectorAll('input[type="date"], input[type="datetime-local"]').forEach(di => {
+    di.addEventListener('blur', () => {
+      _datePickerJustClosed = true;
+      setTimeout(() => { _datePickerJustClosed = false; }, 300);
+    });
+  });
+
   // Blur anywhere inside the wrapper → cancel (delay lets button clicks register first)
   root.addEventListener('focusout', () => {
     setTimeout(() => {
@@ -831,6 +844,9 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
       // If the user clicked non-focusable space inside the item, keep open
       // and re-focus the input so the next outside click still triggers focusout.
       if (_clickedInsideContainer) { input.focus(); return; }
+      // If a native date picker just closed (iOS Done / Chrome dismiss),
+      // keep the edit open — the value landed in the input already.
+      if (_datePickerJustClosed) { input.focus(); return; }
       finishEdit(false, true);
     }, 150);
   });

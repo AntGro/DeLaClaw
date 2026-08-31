@@ -447,7 +447,7 @@ function renderTodoItem(td) {
   const isOverdue = td.due_date && !td.done && new Date(td.due_date) < now;
   const isSnoozed = td.snooze_until && new Date(td.snooze_until) > now;
   const isOutdated = isTodoOutdated(td);
-  const isFlagged = td.priority && td.priority !== 'normal';
+  const isFlagged = td.priority && td.priority !== 'medium';
 
   // Priority button: opens picker popover
   const prioColors = { urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6' };
@@ -527,7 +527,6 @@ const PRIORITY_LEVELS = [
   { key: 'high', color: '#f97316', icon: 'flag' },
   { key: 'medium', color: '#eab308', icon: 'flag' },
   { key: 'low', color: '#3b82f6', icon: 'flag' },
-  { key: 'normal', color: null, icon: 'circle-off' },
 ];
 
 function openPriorityPicker(id, event, triggerEl) {
@@ -536,14 +535,19 @@ function openPriorityPicker(id, event, triggerEl) {
   const todo = allTodos.find(t => t.id === id);
   if (!todo) return;
   const btn = triggerEl || (event.currentTarget instanceof HTMLElement && event.currentTarget !== document ? event.currentTarget : event.target?.closest('[data-action="open-priority-picker"]')) || event.target;
+  const itemEl = btn.closest('.todo-item');
   const rect = btn.getBoundingClientRect();
 
   const picker = document.createElement('div');
   picker.className = 'priority-picker';
   picker.id = 'priorityPickerPopover';
 
+  // If inline edit is active, use the pending priority for the active marker
+  const flagBtn = btn.closest('.todo-item')?.querySelector('.todo-flag-btn');
+  const currentPrio = flagBtn?.dataset.pendingPriority || todo.priority || 'medium';
+
   picker.innerHTML = PRIORITY_LEVELS.map(lv => {
-    const isActive = (todo.priority || 'normal') === lv.key;
+    const isActive = currentPrio === lv.key;
     const label = t(`todos.priority_${lv.key}`) || lv.key;
     const dot = lv.color
       ? `<span class="priority-picker-dot" style="background:${lv.color}"></span>`
@@ -552,6 +556,15 @@ function openPriorityPicker(id, event, triggerEl) {
   }).join('');
 
   document.body.appendChild(picker);
+
+  // If inline edit is active, prevent picker interactions from triggering
+  // the focusout→cancel handler by keeping focus on the edit input.
+  const editWrapper = itemEl?.querySelector('.todo-edit-wrapper');
+  if (editWrapper) {
+    picker.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // keep focus on the edit input
+    });
+  }
 
   // Position below the button, flip up if near bottom
   const ph = picker.offsetHeight;
@@ -577,7 +590,7 @@ function closePriorityPicker() {
 }
 
 function updateQuickAddPriorityBtn(btn, level) {
-  const lv = PRIORITY_LEVELS.find(l => l.key === level) || PRIORITY_LEVELS[4];
+  const lv = PRIORITY_LEVELS.find(l => l.key === level) || PRIORITY_LEVELS.find(l => l.key === 'medium');
   const color = lv.color || 'var(--muted)';
   const iconName = level === 'urgent' ? 'alert-triangle' : 'flag';
   btn.innerHTML = lucideIcon(iconName, 16, color);
@@ -641,6 +654,28 @@ let _lastQuickAddPrioBtn = null;
 
 async function setTodoPriority(id, level) {
   closePriorityPicker();
+
+  // If inline edit is active for this TODO, defer the change — save it
+  // visually and let collectExtra pick it up on confirm.
+  const itemEl = document.querySelector(`.todo-item[data-todo-id="${id}"]`);
+  const isEditing = itemEl?.querySelector('.todo-edit-wrapper');
+  if (isEditing) {
+    const flagBtn = itemEl.querySelector('.todo-flag-btn');
+    if (flagBtn) {
+      flagBtn.dataset.pendingPriority = level;
+      // Update flag icon visually
+      const prioColors = { urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6' };
+      const color = prioColors[level] || null;
+      const iconName = level === 'urgent' ? 'alert-triangle' : 'flag';
+      flagBtn.innerHTML = color ? lucideIcon(iconName, 14, color) : lucideIcon('flag', 14);
+      flagBtn.classList.toggle('flagged', level && level !== 'medium');
+    }
+    // Refocus the edit textarea so focusout/cancel mechanics stay intact
+    const editInput = isEditing.querySelector('textarea');
+    if (editInput) editInput.focus();
+    return;
+  }
+
   const todo = allTodos.find(t => t.id === id);
 
   if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
@@ -785,6 +820,10 @@ async function editTodoInline(id, itemEl) {
   const textEl = itemEl.querySelector('.todo-text');
   if (!textEl || textEl.dataset.editing) return;
 
+  // Clear any stale pending priority from a previous cancelled edit
+  const existingFlag = itemEl.querySelector('.todo-flag-btn');
+  if (existingFlag) delete existingFlag.dataset.pendingPriority;
+
   // Hide action buttons while editing
   const actionsEl = itemEl.querySelector('.todo-actions');
   if (actionsEl) actionsEl.classList.remove('visible');
@@ -851,7 +890,9 @@ async function editTodoInline(id, itemEl) {
       const newDeadline = deadlineInput.value ? new Date(deadlineInput.value).toISOString() : null;
       const selectedCatId = catSelect.value;
       const selectedCat = _todoCatMap.get(selectedCatId);
-      return { due_date: newDeadline, category_id: selectedCatId, category: selectedCat?.name ?? '' };
+      const flagBtn = itemEl.querySelector('.todo-flag-btn');
+      const pendingPriority = flagBtn?.dataset.pendingPriority || null;
+      return { due_date: newDeadline, category_id: selectedCatId, category: selectedCat?.name ?? '', priority: pendingPriority };
     },
     saveFn: async (newText, extra) => {
       const updates = {};
@@ -864,6 +905,9 @@ async function editTodoInline(id, itemEl) {
           updates.category_id = extra.category_id;
           updates.category = extra.category;
         }
+        if (extra.priority && extra.priority !== (todo.priority || 'medium')) {
+          updates.priority = extra.priority;
+        }
       }
       if (Object.keys(updates).length > 0) {
         if (todo.shared_id && todo.shared_group_id && state.sharing) {
@@ -875,6 +919,7 @@ async function editTodoInline(id, itemEl) {
             const driveUpdates = {};
             if (updates.text) driveUpdates.text = updates.text;
             if (updates.due_date !== undefined) driveUpdates.due_date = updates.due_date;
+            if (updates.priority) driveUpdates.priority = updates.priority;
             if (Object.keys(driveUpdates).length > 0) {
               const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'medium' };
               await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {

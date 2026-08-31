@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS todos (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   text TEXT,
   done INTEGER DEFAULT 0,
-  priority TEXT DEFAULT 'normal' CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'normal')),
+  priority TEXT DEFAULT 'medium' CHECK (priority IN ('urgent', 'high', 'medium', 'low')),
   due_date TEXT,
   snooze_until TEXT,
   category TEXT DEFAULT '',

@@ -1956,10 +1956,10 @@ async function todoPriorityIntegrationTest() {
     // Seed a todo with default priority
     await fetch(`${BASE}/todos`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: 'todo-prio-1', text: 'Priority test todo', priority: 'normal', category: 'Test', sort_order: 0 }),
+      body: JSON.stringify({ id: 'todo-prio-1', text: 'Priority test todo', priority: 'medium', category: 'Test', sort_order: 0 }),
     });
 
-    const PRIORITY_LEVELS = ['urgent', 'high', 'medium', 'low', 'normal'];
+    const PRIORITY_LEVELS = ['urgent', 'high', 'medium', 'low'];
 
     // Test setting each priority via REST (simulates what setTodoPriority does)
     for (const level of PRIORITY_LEVELS) {
@@ -1979,8 +1979,8 @@ async function todoPriorityIntegrationTest() {
       });
     }
 
-    // Test sort order: urgent < high < medium < low < normal
-    const sortMap = { urgent: 0, high: 1, medium: 2, low: 3, normal: 4 };
+    // Test sort order: urgent < high < medium < low
+    const sortMap = { urgent: 0, high: 1, medium: 2, low: 3 };
     // Seed todos with all priorities
     for (const level of PRIORITY_LEVELS) {
       await fetch(`${BASE}/todos`, {
@@ -1991,10 +1991,10 @@ async function todoPriorityIntegrationTest() {
     const allResp = await fetch(`${BASE}/todos?category=eq.Sort`);
     const allTodos = await allResp.json();
     const sorted = [...allTodos].sort((a, b) => (sortMap[a.priority] ?? 99) - (sortMap[b.priority] ?? 99));
-    test('Priority sort order: urgent < high < medium < low < normal', () => {
+    test('Priority sort order: urgent < high < medium < low', () => {
       const actual = sorted.map(t => t.priority);
-      assert(JSON.stringify(actual) === JSON.stringify(['urgent', 'high', 'medium', 'low', 'normal']),
-        `Expected [urgent,high,medium,low,normal], got [${actual}]`);
+      assert(JSON.stringify(actual) === JSON.stringify(['urgent', 'high', 'medium', 'low']),
+        `Expected [urgent,high,medium,low], got [${actual}]`);
     });
 
     // Test distinct colors for each priority

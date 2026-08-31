@@ -132,7 +132,6 @@ const W_PRIORITY_LEVELS = [
   { key: 'high', color: '#f97316', icon: 'flag' },
   { key: 'medium', color: '#eab308', icon: 'flag' },
   { key: 'low', color: '#3b82f6', icon: 'flag' },
-  { key: 'normal', color: null, icon: 'circle-off' },
 ];
 
 function welcomeOpenPriorityPicker(id, event, triggerEl) {
@@ -148,7 +147,7 @@ function welcomeOpenPriorityPicker(id, event, triggerEl) {
   picker.id = 'welcomePriorityPickerPopover';
 
   picker.innerHTML = W_PRIORITY_LEVELS.map(lv => {
-    const isActive = (todo.priority || 'normal') === lv.key;
+    const isActive = (todo.priority || 'medium') === lv.key;
     const label = t(`todos.priority_${lv.key}`) || lv.key;
     const dot = lv.color
       ? `<span class="priority-picker-dot" style="background:${lv.color}"></span>`
@@ -205,7 +204,7 @@ function renderFocusTodoItem(td) {
   const todayStart = startOfDay(now);
   const isOverdue = td.due_date && !td.done && new Date(td.due_date) < now;
   const isSnoozed = td.snooze_until && new Date(td.snooze_until) > now;
-  const isFlagged = td.priority && td.priority !== 'normal';
+  const isFlagged = td.priority && td.priority !== 'medium';
 
   const prioColors = { urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6' };
   const flagColor = prioColors[td.priority] || null;
@@ -471,7 +470,7 @@ function renderWelcome() {
     // Snoozed and still sleeping → skip
     if (td.snooze_until && new Date(td.snooze_until) > now) return false;
     // Flagged
-    if (td.priority && td.priority !== 'normal') return true;
+    if (td.priority && td.priority !== 'medium') return true;
     // Deadline today or overdue
     if (td.due_date) {
       const due = startOfDay(new Date(td.due_date));

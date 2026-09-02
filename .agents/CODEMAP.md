@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-08-31T23:36:03.983Z from 39 modules (v1.916). Total LOC 32293. Do not hand-edit.
+> Generated 2026-09-02T21:04:31.445Z from 39 modules (v1.917). Total LOC 32297. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -16,7 +16,7 @@
 |---------|-----|--------|-------|---------|------------|----|--------|-----|------|
 | birthdays | 861 | birthdays | allBirthdays,currentView,db,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,btn,project-card,empty-state,toast | - | 16 | 37 |
 | flashcards | 2571 | flashcard_decks,flashcard_notes,flashcards,text_line_progress,texts | currentView,db,js | i18n,icons,item-utils,logo,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,card-header,empty-state,toast | pendingSet | 81 | 140 |
-| habits | 2757 | habit_categories,habit_completions,habits | _historyHabitId,allHabitCompletions,allHabits,currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | calendar-sync.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 54 | 89 |
+| habits | 2757 | habit_categories,habit_completions,habits | _historyHabitId,allHabitCompletions,allHabits,currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | calendar-sync.js,demo-chooser.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 54 | 89 |
 | lists | 1325 | list_items,lists | allListItems,allLists,currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | pendingSet | 24 | 40 |
 | projects | 1205 | projects,prompts,settings,tasks | PROJECTS,allTasks,archivedProjectIds,db,js,showArchived | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,btn,project-card,card-header,empty-state,toast | pendingSet | 37 | 62 |
 | todos | 1660 | todo_categories,todos | currentView,db,js,sharing | i18n,icons,item-utils,sharing-ui,state,utils | calendar-sync.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 31 | 66 |
@@ -37,7 +37,7 @@
 | utils | 993 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:6 |
 | calendar-sync | 694 | birthdays,gcal_sync,habits,settings,todos | habits,i18n,icons,state | main.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |
-| demo-chooser | 459 | - | i18n,icons,utils | - | - |
+| demo-chooser | 463 | - | habits,i18n,icons,utils | - | - |
 | delegation | 432 | - |  | - | window:1 |
 | demo | 303 | x |  | drive.js | - |
 | offline-cache | 299 | - | ./state,state.js | main.js | - |

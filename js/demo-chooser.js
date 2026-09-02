@@ -4,7 +4,7 @@
 import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
 import { isMobileUA } from './utils.js';
-import { computeNextDue, isStructuredRule } from './habits.js';
+import { computeNextDue, isStructuredRule, normalizeFrequencyRule } from './habits.js';
 
 // ── Prompt generators (EN / FR / ES) ──────────────────────────────
 
@@ -18,7 +18,7 @@ function buildPrompt(lang) {
     { "project": "Project Name", "text": "Task description", "status": "todo|review|approved" }
   ],
   "todos": [
-    { "text": "To-do item", "priority": "urgent|high|medium|low", "category": "Category", "due_date": "YYYY-MM-DD or null" }
+    { "text": "To-do item", "priority": "urgent|high|medium|low|normal", "category": "Category", "due_date": "YYYY-MM-DD or null" }
   ],
   "habits": [
     { "name": "Habit name", "frequency_rule": "see below", "category": "Category" }
@@ -165,6 +165,7 @@ function normalizeCustomData(data) {
     data.habits = data.habits.map((r, i) => {
       base(r, 'habit', i);
       if (r.is_draft == null) r.is_draft = false;
+      if (r.frequency_rule) r.frequency_rule = normalizeFrequencyRule(r.frequency_rule);
       if (!r.next_due) {
         const computed = isStructuredRule(r.frequency_rule) ? computeNextDue(r.frequency_rule, null) : null;
         r.next_due = computed || (today + 'T00:00:00+00:00');

@@ -1505,7 +1505,9 @@ function editHabitInline(habitId, itemEl) {
           const lastDone = getHabitLastDone(habitId);
           await updateHabitNextDue(habitId, updates.frequency_rule, lastDone, { earlyGuard: false });
           // Publish next_due so other members read it directly
-          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+          if (habit.shared_id && habit.shared_group_id && state.sharing) {
+            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+          }
         }
         showToast(t('habits.habit_updated'), 'success');
       }

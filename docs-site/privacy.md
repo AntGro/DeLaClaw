@@ -6,24 +6,49 @@ DeLaClaw is designed so that your data stays yours. This document explains what 
 
 DeLaClaw does not operate a central server. Depending on which backend mode you choose:
 
-- **Supabase**: your data is stored in your own Supabase project. DeLaClaw connects directly from your browser to your Supabase instance. No data passes through any DeLaClaw server.
-- **Google Drive**: your data is stored as a single JSON file (`delaclaw-data.json`) in a `DeLaClaw/` folder in your own Google Drive. Authentication uses Google Identity Services directly in the browser. DeLaClaw requests only the `drive.file` scope, which limits access to files it creates. No data passes through any DeLaClaw server.
+- **Google Drive**: your data is stored as JSON files in a `DeLaClaw/` folder in your own Google Drive. Authentication uses Google Identity Services directly in the browser. No data passes through any DeLaClaw server.
 - **Local (Bun + SQLite)**: your data is stored in a SQLite file on your machine.
 - **Demo**: data exists only in browser memory and is lost when you close or refresh the page.
 
+## Google scopes
+
+DeLaClaw requests one or more Google scopes depending on your usage:
+
+- **`drive.file`** (default) — limits access strictly to files and folders that DeLaClaw itself creates. Used for personal data storage and backups.
+- **`drive`** (when sharing is enabled) — broader access required to discover and read folders shared with you by other DeLaClaw users. This scope is requested only when you explicitly enable the sharing feature. DeLaClaw uses this access solely to list folders shared with you and read/write shared group data within those folders.
+- **`calendar.app.created`** (optional) — limits access to calendars that DeLaClaw itself creates. Requested only when you enable Calendar sync in Settings. DeLaClaw creates a dedicated "DeLaClaw" calendar and writes events for your habits, TODOs, and birthdays. It does not read or modify any other calendar.
+
+You can revoke the broader Drive scope at any time by disabling sharing in Settings. Calendar sync can be disabled independently, which stops writing events but does not delete the calendar.
+
+## Sharing and user-to-user data exchange
+
+DeLaClaw offers an optional sharing feature that lets you exchange TODOs, habits, and lists with other users via shared Google Drive folders. When you use sharing:
+
+- You explicitly choose which items to share and with whom by creating sharing groups and inviting members by email.
+- Shared data (group metadata, shared TODOs, habits, and lists) is stored in shared Google Drive folders that all group members can access.
+- A **trusted contacts** system controls whose shared folders your app will load. Only folders from people you have added to your trusted contacts list are accepted; all others are automatically rejected.
+- Your trusted contacts list is stored in your own Google Drive (`DeLaClaw/trusted-contacts.json`) and is not shared with anyone.
+
+Sharing is entirely opt-in. If you do not enable sharing, no data is exchanged with other users.
+
 ## What DeLaClaw does not do
 
-- **No analytics.** No usage tracking, no page view counting, no event logging.
 - **No telemetry.** The app sends no data to any DeLaClaw-operated service.
 - **No cookies.** DeLaClaw does not set any cookies.
 - **No third-party tracking.** No Google Analytics, no Meta Pixel, no advertising scripts.
-- **No user accounts on our side.** There is no DeLaClaw account system. Authentication is handled entirely by your chosen backend (Supabase auth, or none for local/demo).
+- **No user accounts on our side.** There is no DeLaClaw account system. Authentication is handled entirely by your chosen backend (Google OAuth, or none for local/demo).
+
+## Analytics
+
+The hosted version at `delaclaw.com` includes **Cloudflare Web Analytics**, a privacy-focused analytics service that collects aggregate page-view metrics (no cookies, no client-side state, no personal data, no cross-site tracking). See [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/). If you self-host DeLaClaw, no analytics script is included unless you add one yourself.
+
+DeLaClaw also records a `daily_visits` table in your own database (one row per day you open the app) to power the usage statistics shown in Settings. This data stays entirely in your chosen backend — it is never sent to any external service.
 
 ## What is stored in your browser
 
 DeLaClaw uses browser-standard storage mechanisms for local preferences:
 
-- **localStorage**: theme preference, language, active tab, stay-connected credentials (your Supabase URL and anon key, if you opt in), tab visibility/order settings.
+- **localStorage**: theme preference, language, active tab, stay-connected credentials, sharing preferences, and tab visibility/order settings.
 - **IndexedDB**: offline cache of your database tables, scoped by backend mode. Used to serve read-only data when the network is unavailable. Cleared automatically when you reconnect.
 - **Service Worker cache**: static app assets (HTML, CSS, JS, icons) for offline loading. Versioned and replaced on each update.
 
@@ -33,15 +58,20 @@ None of this data leaves your browser.
 
 When using DeLaClaw, your browser makes requests to:
 
-- **Your Supabase project** (if using Supabase mode): API calls to your own database.
-- **Google Identity Services** (`accounts.google.com/gsi/client`) (if using Google Drive mode): OAuth token flow for Drive authentication. Subject to [Google's privacy policy](https://policies.google.com/privacy).
-- **Google Drive API** (`www.googleapis.com`) (if using Google Drive mode): reading and writing your `delaclaw-data.json` file. Subject to [Google's privacy policy](https://policies.google.com/privacy).
-- **Google Static** (`www.gstatic.com`): Google Drive logo image on the login screen.
+- **Google Identity Services** (`accounts.google.com/gsi/client`) (if using Google Drive mode): OAuth token flow for Drive and Calendar authentication. Subject to [Google's privacy policy](https://policies.google.com/privacy).
+- **Google Drive API** (`www.googleapis.com`) (if using Google Drive mode): reading and writing your data files and shared folders. Subject to [Google's privacy policy](https://policies.google.com/privacy).
+- **Google Calendar API** (`www.googleapis.com/calendar/`) (if Calendar sync is enabled): creating and updating events in the dedicated DeLaClaw calendar. Subject to [Google's privacy policy](https://policies.google.com/privacy).
+- **Google Static** (`www.gstatic.com`): Google Identity Services scripts used during Google Drive authentication. Subject to [Google's privacy policy](https://policies.google.com/privacy).
 - **Google Fonts** (`fonts.googleapis.com`): to load the DM Sans typeface. Subject to [Google's privacy policy](https://policies.google.com/privacy).
-- **jsDelivr CDN** (`cdn.jsdelivr.net`): to load the Supabase JS client and Three.js. Subject to [jsDelivr's privacy policy](https://www.jsdelivr.com/terms/privacy-policy-jsdelivr-net).
+- **Cloudflare Web Analytics** (`static.cloudflareinsights.com`): aggregate page-view metrics on the hosted version (no cookies, no personal data). Subject to [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
 - **GitHub Pages** (`delaclaw.com`): serves the static app files if you use the hosted version. Subject to [GitHub's privacy policy](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
+- **Cloudflare Pages** (`dev.delaclaw.pages.dev`): serves the development preview. Subject to [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
 
 No other external requests are made.
+
+## Data sharing with third parties
+
+DeLaClaw does not sell, share, or transfer any user data to third parties for any purpose, including advertising, analytics, or AI training. The only data exchange is user-to-user sharing as described above, which you control entirely.
 
 ## Open source
 

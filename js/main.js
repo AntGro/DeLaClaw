@@ -3,25 +3,35 @@ import { initHero, showHero, hideHero, injectGateLogo } from './hero.js';
 import { t, getLang, setLang, nextLang } from './i18n.js';
 import { renderStorm, generateStorm, LOGO_DEFAULTS, animLoading, animLock, animUnlock } from './logo.js';
 import { LOGOS, LABELS } from './backend-logos.js';
-import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY, TAB_VISIBILITY_KEY, TAB_ORDER_KEY } from './supabase.js';
+import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY } from './state.js';
 import db from './db.js';
 import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
+import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
+import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
-import { esc, showToast, showDeleteConfirm, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA } from './utils.js';
+import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
-         renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts } from './projects.js';
-import { refreshTodos, renderTodos, getTodoCounts, initTodoModals } from './todos.js';
-import { refreshHabits, renderHabits, initHabitModals } from './habits.js';
+         renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
+
+const SETTINGS_PANES = ['general', 'ai', 'calendar', 'sharing', 'data', 'stats', 'agents', 'account'];
+import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
+import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
 import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthdays.js';
 import { refreshVestiaire, renderVestiaire, initVestiaireModals } from './vestiaire.js';
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
-import { refreshLists, renderLists, initListModals } from './lists.js';
+import { refreshLists, renderLists, initListModals, syncSharedListItems } from './lists.js';
+import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
+import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
-import { HABIT_CATEGORIES_KEY } from './supabase.js';
+import { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR } from './state.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
 import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
+
+// Last-updated tracking (declared early so renderLastUpdated can be called from updateStaticLabels)
+let _lastUpdatedAt = null;
+let _lastUpdatedTimer = null;
 
 // ===================================================================
 // BACKEND-SCOPED localStorage — isolate per-backend settings so switching
@@ -32,20 +42,7 @@ import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
 const SCOPED_LS_KEYS = [
   'claw_cc_theme',
   'claw_cc_current_view',
-  'claw_cc_archived_projects',
-  'claw_cc_show_archived',
   'claw_cc_ideas',
-  'claw_cc_habit_categories',
-  'claw_cc_tab_visibility',
-  'claw_cc_tab_order',
-  'claw_cc_compact_nav',
-  'claw_cc_vestiaire_categories',
-  'claw_cc_vest_shortnames',
-  'claw_flash_shortnames',
-  'claw_habit_shortnames',
-  'todo_categories',
-  'todo_category_colors',
-  'todo_category_shortnames',
 ];
 const ACTIVE_MODE_KEY = 'claw_cc_active_mode';
 
@@ -89,26 +86,55 @@ function swapLsScope(newMode) {
   localStorage.setItem(ACTIVE_MODE_KEY, newMode);
 }
 
-/** Replace demo category keys to match the current demo dataset. */
+/** Build category table rows in the demo adapter store from item data. */
 function setDemoCategoriesFromData(data) {
-  const todoCats = [...new Set((data.todos || []).map(t => t.category).filter(c => c && c !== 'General'))];
-  const habitCats = [...new Set((data.habits || []).map(h => h.category).filter(c => c && c !== 'General'))];
-  const vestCats = [...new Set((data.vestiaire || []).map(v => v.category).filter(Boolean))];
-  localStorage.setItem('todo_categories', JSON.stringify(todoCats));
-  localStorage.setItem(HABIT_CATEGORIES_KEY, JSON.stringify(habitCats));
-  localStorage.setItem('claw_cc_vestiaire_categories', JSON.stringify(vestCats));
-  localStorage.setItem('todo_category_colors', '{}');
-  localStorage.setItem('todo_category_shortnames', '{}');
-  localStorage.setItem('claw_habit_shortnames', '{}');
-  localStorage.setItem('claw_cc_vest_shortnames', '{}');
-  localStorage.setItem('claw_flash_shortnames', '{}');
+  if (!state.demoAdapter) return;
+  const store = state.demoAdapter._store;
+
+  function buildCatRows(items, nameField, tableName) {
+    const names = [...new Set((items || []).map(i => i[nameField]).filter(Boolean))];
+    const rows = [
+      // Protected default row (empty name, like real DB)
+      { id: `demo-cat-${tableName}-default`, name: '', shortname: null, color: GENERAL_CATEGORY_COLOR, sort_order: 0, is_protected: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      // Protected __shared__ row
+      { id: `demo-cat-${tableName}-shared`, name: '__shared__', shortname: null, color: GENERAL_CATEGORY_COLOR, sort_order: 9999, is_protected: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      // User-defined categories from data
+      ...names.map((name, idx) => ({
+        id: `demo-cat-${tableName}-${idx}`,
+        name,
+        shortname: null,
+        color: DEFAULT_CATEGORY_PALETTE[idx % DEFAULT_CATEGORY_PALETTE.length],
+        sort_order: idx + 1,
+        is_protected: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })),
+    ];
+    store[tableName] = rows;
+    // Build name→id lookup for enriching items
+    const lookup = new Map(rows.map(r => [r.name, r.id]));
+    return lookup;
+  }
+
+  const todoLookup = buildCatRows(data.todos, 'category', 'todo_categories');
+  const habitLookup = buildCatRows(data.habits, 'category', 'habit_categories');
+  const vestLookup = buildCatRows(data.vestiaire, 'category', 'vestiaire_categories');
+  const deckLookup = buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks');
+
+  // Enrich items with category_id / deck_id (fall back to default row)
+  for (const t of (store.todos || [])) t.category_id = todoLookup.get(t.category) || todoLookup.get('') || null;
+  for (const h of (store.habits || [])) h.category_id = habitLookup.get(h.category) || habitLookup.get('') || null;
+  for (const v of (store.vestiaire || [])) v.category_id = vestLookup.get(v.category) || vestLookup.get('') || null;
+  for (const f of (store.flashcards || [])) f.deck_id = deckLookup.get(f.deck) || deckLookup.get('') || null;
+  for (const tx of (store.texts || [])) tx.deck_id = deckLookup.get(tx.deck) || deckLookup.get('') || null;
 }
 
 // ===================================================================
 // ACTION GUARD — prevents double-fire on async save/add/edit actions.
 // Wraps any async function so concurrent calls are silently dropped.
 // Also adds .saving class on the triggering button for visual feedback
-// (shimmer + disabled appearance via CSS).
+// (shimmer + disabled appearance via CSS) and disables it to enforce
+// core principle: one click → disable till fulfilled.
 // ===================================================================
 function guard(fn) {
   let inFlight = false;
@@ -116,14 +142,31 @@ function guard(fn) {
     if (inFlight) return;
     inFlight = true;
     // Find the triggering button for visual feedback
-    const active = document.activeElement;
-    const btn = (active && active.tagName === 'BUTTON') ? active
-      : document.querySelector('.modal-overlay[style*="flex"] button.modal-save');
-    if (btn) btn.classList.add('saving');
+    // Prefer explicit button passed as last arg (via this), else activeElement, else modal save
+    let btn = null;
+    // If last arg is an HTMLElement button (when caller passes `this`), use it
+    const lastArg = args[args.length - 1];
+    if (lastArg instanceof HTMLElement && lastArg.tagName === 'BUTTON') {
+      btn = lastArg;
+      args = args.slice(0, -1); // remove button from args
+    } else {
+      const active = document.activeElement;
+      btn = (active && active.tagName === 'BUTTON') ? active
+        : document.querySelector('.modal-overlay[style*="flex"] button.modal-save');
+    }
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('saving', 'is-pending');
+      btn.setAttribute('aria-busy', 'true');
+    }
     try { await fn.apply(this, args); }
     finally {
       inFlight = false;
-      if (btn) btn.classList.remove('saving');
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove('saving', 'is-pending');
+        btn.removeAttribute('aria-busy');
+      }
     }
   };
 }
@@ -266,35 +309,40 @@ function switchBackendMode(mode) {
   const urlLabelLink = document.getElementById('urlLabelLink');
   const keyLabelLink = document.getElementById('keyLabelLink');
   const hintEl = document.getElementById('loginHint');
+  const highlightsEl = document.getElementById('gateHighlights');
   const submitBtn = document.querySelector('#loginForm button[type="submit"]');
 
   // All fields stay in flow (visibility:hidden, not display:none)
   // so .gate-box height is constant across modes.
   if (mode === 'demo') {
-    if (keyField) keyField.style.visibility = 'hidden';
-    if (urlField) urlField.style.visibility = 'hidden';
-    if (urlLabel) urlLabel.style.visibility = 'hidden';
-    if (hintEl) hintEl.textContent = t('login.hint_demo');
+    if (keyField) { keyField.style.display = ''; keyField.style.visibility = 'hidden'; }
+    if (urlField) { urlField.style.display = ''; urlField.style.visibility = 'hidden'; }
+    if (urlLabel) { urlLabel.style.display = ''; urlLabel.style.visibility = 'hidden'; }
+    if (hintEl) { hintEl.style.display = ''; hintEl.textContent = t('login.hint_demo'); }
+    if (highlightsEl) highlightsEl.style.display = 'none';
     if (submitBtn) submitBtn.textContent = t('login.btn_demo');
   } else if (mode === 'googledrive') {
-    if (keyField) keyField.style.visibility = 'hidden';
-    if (urlField) urlField.style.visibility = 'hidden';
-    if (urlLabel) urlLabel.style.visibility = 'hidden';
-    if (hintEl) hintEl.textContent = t('login.hint_googledrive');
+    if (keyField) keyField.style.display = 'none';
+    if (urlField) urlField.style.display = 'none';
+    if (urlLabel) urlLabel.style.display = 'none';
+    if (hintEl) hintEl.style.display = 'none';
+    if (highlightsEl) highlightsEl.style.display = '';
     if (submitBtn) submitBtn.textContent = t('login.btn_googledrive');
   } else if (mode === 'local') {
-    if (keyField) keyField.style.visibility = 'hidden';
-    if (urlField) { urlField.style.visibility = ''; urlField.placeholder = 'http://localhost:3737'; }
-    if (urlLabel) urlLabel.style.visibility = '';
+    if (keyField) { keyField.style.display = ''; keyField.style.visibility = 'hidden'; }
+    if (urlField) { urlField.style.display = ''; urlField.style.visibility = ''; urlField.placeholder = 'http://localhost:3737'; }
+    if (urlLabel) { urlLabel.style.display = ''; urlLabel.style.visibility = ''; }
     if (urlLabelLink) { urlLabelLink.textContent = t('login.url_label_local'); urlLabelLink.removeAttribute('href'); }
-    if (hintEl) hintEl.textContent = t('login.hint_local');
+    if (hintEl) { hintEl.style.display = ''; hintEl.textContent = t('login.hint_local'); }
+    if (highlightsEl) highlightsEl.style.display = 'none';
     if (submitBtn) submitBtn.textContent = t('login.connect');
   } else {
-    if (keyField) keyField.style.visibility = '';
-    if (urlField) { urlField.style.visibility = ''; urlField.placeholder = 'https://xyz.supabase.co'; }
-    if (urlLabel) urlLabel.style.visibility = '';
+    if (keyField) { keyField.style.display = ''; keyField.style.visibility = ''; }
+    if (urlField) { urlField.style.display = ''; urlField.style.visibility = ''; urlField.placeholder = 'https://xyz.supabase.co'; }
+    if (urlLabel) { urlLabel.style.display = ''; urlLabel.style.visibility = ''; }
     if (urlLabelLink) { urlLabelLink.textContent = t('login.url_label'); urlLabelLink.href = 'https://supabase.com/dashboard/projects'; urlLabelLink.dataset.tooltip = t('toast.url_tooltip'); }
-    if (hintEl) hintEl.textContent = t('login.hint_supabase');
+    if (hintEl) { hintEl.style.display = ''; hintEl.textContent = t('login.hint_supabase'); }
+    if (highlightsEl) highlightsEl.style.display = 'none';
     if (submitBtn) submitBtn.textContent = t('login.connect');
   }
 }
@@ -322,7 +370,7 @@ function initGate() {
     btn.addEventListener('click', () => switchBackendMode(btn.dataset.mode));
   });
   // Wire up compare link
-  document.getElementById('backendCompareLink')?.addEventListener('click', showCompareModal);
+  document.getElementById('backendCompareLink')?.addEventListener('click', (e)=>{e.preventDefault(); showCompareModal();});
   // Hero demo button: click starts demo directly
   const heroDemoBtn = document.getElementById('heroDemoBtn');
   if (heroDemoBtn) {
@@ -361,7 +409,7 @@ function initGate() {
   if (signupMode) {
     gateWelcome.style.display = 'none';
     document.getElementById('loginForm').style.display = 'flex';
-    document.getElementById('gateGuideLink').style.display = '';
+    document.getElementById('gateGuideLink').style.display = 'none';
   } else {
     gateWelcome.style.display = 'block';
     document.getElementById('loginForm').style.display = 'none';
@@ -373,10 +421,10 @@ function initGate() {
     doLogin();
   });
   // "I already have an account" link
-  document.getElementById('gateWelcomeLogin').addEventListener('click', () => {
+  document.getElementById('gateWelcomeLogin').addEventListener('click', (e) => { e.preventDefault();
     gateWelcome.style.display = 'none';
     document.getElementById('loginForm').style.display = 'flex';
-    document.getElementById('gateGuideLink').style.display = '';
+    document.getElementById('gateGuideLink').style.display = 'none';
   });
   // Update API Key link when project URL changes
   const _urlInput = document.getElementById('username');
@@ -395,6 +443,7 @@ function initGate() {
     _updateKeyLink();
   }
   // Try auto-fill from Credential Management API
+  // Try auto-fill from Credential Management API
   if (window.PasswordCredential) {
     navigator.credentials.get({ password: true, mediation: 'optional' }).then(cred => {
       if (cred) {
@@ -409,12 +458,27 @@ async function autoConnect(url, key, mode) {
   try {
     await connect(url, key, mode, /* skipDemoChooser */ true, { silentAuth: mode === 'googledrive' });
   } catch (e) {
+    console.warn('[DeLaClaw] autoConnect failed:', e.message, e.orig || e);
     if (mode === 'googledrive') {
       // Silent OAuth refresh failed (common on mobile — Safari ITP blocks
       // third-party cookies in the GIS iframe). Show a minimal reconnect
       // screen instead of the full hero/gate. The "Reconnect" tap provides
       // the user gesture the browser needs for the OAuth popup.
       showDriveReconnectScreen(url, key);
+      return;
+    }
+    if (e.message === 'schema_missing') {
+      // New project without schema — don't clear creds, show actionable message
+      showHero();
+      const form = document.getElementById('loginForm');
+      if (form) form.style.display = 'flex';
+      const err = document.getElementById('loginError');
+      renderSchemaMissingError(err, url);
+      // Keep URL/key in form for user to retry after running schema
+      const uEl = document.getElementById('username');
+      const kEl = document.getElementById('password');
+      if (uEl) uEl.value = url;
+      if (kEl) kEl.value = key;
       return;
     }
     // Stored credentials are stale — clear them and show the full login form
@@ -492,11 +556,268 @@ function showDriveReconnectScreen(url, key) {
   document.body.appendChild(screen);
 }
 
+// ── Auth prompt modal ─────────────────────────────────────────
+
+/**
+ * Show magic-link auth prompt after Supabase connect.
+ * @param {Object} rawAdapter — unwrapped Supabase adapter (needs .raw.auth)
+ * @param {string} url — Supabase project URL
+ * @param {string} key — Supabase anon key
+ */
+function showAuthPrompt(rawAdapter, url, key) {
+  const overlay = document.getElementById('authPromptOverlay');
+  const content = document.getElementById('authPromptContent');
+  if (!overlay || !content) return;
+
+  // Build Supabase dashboard URL for Site URL config — use direct url param first, fall back to stored creds
+  const creds = (() => { try { return JSON.parse(localStorage.getItem(STAY_CONNECTED_KEY) || '{}'); } catch { return {}; } })();
+  const projRef = getSupabaseProjectRef(url) || getSupabaseProjectRef(creds.url || '') || null;
+  const authConfigUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/url-configuration` : 'https://supabase.com/dashboard/projects';
+
+  // ── Sign-in form state ──
+  function renderForm() {
+    const steps = buildAuthSteps('auth', authConfigUrl);
+    content.innerHTML = `
+      <div class="auth-icon">${lucideIcon('lock', 28)}</div>
+      <h3>${t('auth.sign_in')}</h3>
+      <p class="auth-hint">${t('auth.sign_in_hint_mandatory')}</p>
+      ${steps.html}
+    `;
+    steps.wireUp(content);
+    const emailEl = content.querySelector('#authEmail');
+    const errEl = content.querySelector('#authError');
+    const sendBtn = content.querySelector('#authSendBtn');
+
+    sendBtn.addEventListener('click', async () => {
+      const email = emailEl.value.trim();
+      if (!email || !email.includes('@')) {
+        errEl.textContent = t('auth.error');
+        errEl.style.display = '';
+        return;
+      }
+      sendBtn.disabled = true;
+      sendBtn.textContent = t('auth.sending');
+      errEl.style.display = 'none';
+      try {
+        // ── Email guard: block mismatched email before sending ──
+        const { checkEmailGuard, sendMagicLink } = await import('./auth.js');
+        const { allowed } = await checkEmailGuard(rawAdapter, email);
+        if (!allowed) {
+          errEl.textContent = t('auth.email_mismatch');
+          errEl.style.display = '';
+          sendBtn.disabled = false;
+          sendBtn.textContent = t('auth.send_magic_link');
+          return;
+        }
+        const { error } = await sendMagicLink(rawAdapter, email);
+        if (error) {
+          const isRateLimit = error.status === 429 || (error.message || '').toLowerCase().includes('rate');
+          errEl.textContent = isRateLimit ? t('auth.rate_limit') : t('auth.error');
+          errEl.style.display = '';
+          sendBtn.disabled = false;
+          sendBtn.textContent = t('auth.send_magic_link');
+        } else {
+          renderInbox(email);
+        }
+      } catch {
+        errEl.textContent = t('auth.error');
+        errEl.style.display = '';
+        sendBtn.disabled = false;
+        sendBtn.textContent = t('auth.send_magic_link');
+      }
+    });
+
+    emailEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); sendBtn.click(); }
+    });
+  }
+
+  // ── Check-inbox state ──
+  function renderInbox(email) {
+    const isStandalonePWA = (() => { try { return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; } catch { return false; } })();
+    const pwaAckKey = 'cc-pwa-copy-hint-ack';
+    const pwaAlreadyAcked = (() => { try { return localStorage.getItem(pwaAckKey) === '1'; } catch { return true; } })();
+    const needsPwaAck = isStandalonePWA && !pwaAlreadyAcked;
+
+    content.innerHTML = `
+      <div class="auth-icon">${lucideIcon('mail', 28)}</div>
+      <h3>${t('auth.check_inbox')}</h3>
+      <p class="auth-hint">${t('auth.check_inbox_hint', esc(email))}</p>
+      <div style="margin:14px 0; padding:10px 14px; border:1px solid var(--warning-border, #e6a817); border-radius:10px; background:color-mix(in srgb, var(--warning-border, #e6a817) 10%, var(--bg)); display:flex; gap:10px; align-items:flex-start;">
+        <span style="flex-shrink:0; margin-top:1px; color:var(--warning-border, #e6a817);">${lucideIcon('alert-triangle', 18)}</span>
+        <p style="margin:0; font-size:0.9em; line-height:1.45; color:var(--text);">${t('auth.do_not_click')}</p>
+      </div>
+      <div id="authPwaHint" style="${needsPwaAck ? '' : 'display:none;'} margin:16px 0; padding:12px 14px; border:1px solid var(--accent); border-radius:10px; background:color-mix(in srgb, var(--accent) 8%, var(--bg));">
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div style="margin-top:2px;">${lucideIcon('smartphone', 20)}</div>
+          <div style="flex:1;">
+            <strong style="display:block; margin-bottom:4px; font-size:0.95em;">${t('auth.pwa_copy_title')}</strong>
+            <p style="margin:0 0 10px 0; font-size:0.9em; line-height:1.4; color:var(--text-muted);">${t('auth.pwa_copy_body')}</p>
+            <button id="authPwaAckBtn" class="auth-send-btn" style="width:auto; padding:6px 14px; font-size:0.9em;">${t('auth.pwa_copy_ack')}</button>
+          </div>
+        </div>
+      </div>
+      <div class="auth-otp-box" style="margin:16px 0; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-subtle,#f8f9fa);">
+        <p class="auth-hint" style="font-size:0.9em; margin-bottom:8px;">${t('auth.otp_hint')}</p>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="text" id="authOtpInput" placeholder="${t('auth.otp_placeholder')}" inputmode="text" autocomplete="one-time-code" maxlength="500" style="flex:1; min-width:0; padding:10px 12px; font-size:14px; text-align:left; border:1px solid var(--border); border-radius:6px; overflow:hidden; text-overflow:ellipsis;" ${needsPwaAck ? 'disabled' : ''}>
+          <button class="auth-send-btn" id="authVerifyBtn" style="width:auto; flex:0 0 auto; white-space:nowrap;" ${needsPwaAck ? 'disabled' : ''}>${t('auth.verify_code')}</button>
+        </div>
+        <div class="auth-error" id="authOtpError" style="display:none; margin-top:8px;"></div>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <button class="auth-send-btn" id="authResendBtn" style="flex:0 0 auto; width:auto;">${t('auth.resend')}</button>
+        <button class="auth-skip" id="authCloseBtn">${t('auth.close')}</button>
+      </div>
+      <div class="auth-status" id="authResendStatus" style="display:none; margin-top:8px;"></div>
+    `;
+    const resendBtn = content.querySelector('#authResendBtn');
+    const closeBtn = content.querySelector('#authCloseBtn');
+    const statusEl = content.querySelector('#authResendStatus');
+    const otpInput = content.querySelector('#authOtpInput');
+    const verifyBtn = content.querySelector('#authVerifyBtn');
+    const otpErrEl = content.querySelector('#authOtpError');
+
+    async function doVerify() {
+      const code = (otpInput?.value || '').trim();
+      if (!code || code.length < 6) {
+        if (otpErrEl) { otpErrEl.textContent = t('auth.otp_invalid') || 'Paste the confirmation link or token from your email.'; otpErrEl.style.display = ''; }
+        return;
+      }
+      verifyBtn.disabled = true;
+      verifyBtn.textContent = t('auth.verifying') || 'Verifying...';
+      if (otpErrEl) otpErrEl.style.display = 'none';
+      try {
+        const { verifyOtpCode } = await import('./auth.js');
+        const { user, error } = await verifyOtpCode(rawAdapter, email, code);
+        if (error || !user) {
+          const msg = error?.message || '';
+          const isExpired = msg.toLowerCase().includes('expired');
+          otpErrEl.textContent = isExpired ? (t('auth.otp_expired') || 'Link expired — resend a new one.') : (t('auth.otp_invalid') || 'Invalid link or token. Check the email and paste it again.');
+          otpErrEl.style.display = '';
+          verifyBtn.disabled = false;
+          verifyBtn.textContent = t('auth.verify_code') || 'Verify';
+          return;
+        }
+        // Success — close prompt, session will be handled by onAuthStateChange + init logic
+        // Store email guard hash (no-op if already set)
+        try {
+          const { setEmailGuard } = await import('./auth.js');
+          await setEmailGuard(rawAdapter, email);
+        } catch { /* guard table may not exist yet */ }
+        statusEl.textContent = t('auth.verified') || 'Verified! Signing you in...';
+        statusEl.style.display = '';
+        overlay.classList.remove('visible');
+        // Force reload to pick up session (initAuth runs on next connect)
+        window.location.reload();
+      } catch (e) {
+        console.warn('otp verify failed', e);
+        if (otpErrEl) { otpErrEl.textContent = t('auth.error'); otpErrEl.style.display = ''; }
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = t('auth.verify_code') || 'Verify';
+      }
+    }
+
+    verifyBtn.addEventListener('click', doVerify);
+    otpInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doVerify(); });
+    // Auto-focus verification input for PWA users (only if not blocked by PWA ack)
+    if (!needsPwaAck) {
+      setTimeout(() => { try { otpInput.focus(); } catch {} }, 100);
+    }
+
+    const pwaAckBtn = content.querySelector('#authPwaAckBtn');
+    const pwaHint = content.querySelector('#authPwaHint');
+    if (pwaAckBtn) {
+      pwaAckBtn.addEventListener('click', () => {
+        try { localStorage.setItem(pwaAckKey, '1'); } catch {}
+        if (pwaHint) pwaHint.style.display = 'none';
+        verifyBtn.disabled = false;
+        otpInput.disabled = false;
+        setTimeout(() => { try { otpInput.focus(); } catch {} }, 50);
+      });
+    }
+
+    resendBtn.addEventListener('click', async () => {
+      resendBtn.disabled = true;
+      resendBtn.textContent = t('auth.sending');
+      try {
+        const { sendMagicLink } = await import('./auth.js');
+        const { error } = await sendMagicLink(rawAdapter, email);
+        if (error) {
+          const isRateLimit = error.status === 429 || (error.message || '').toLowerCase().includes('rate');
+          statusEl.textContent = isRateLimit ? t('auth.rate_limit') : t('auth.error');
+          statusEl.style.color = 'var(--danger,#e74c3c)';
+        } else {
+          statusEl.textContent = t('auth.sent');
+          statusEl.style.color = '';
+        }
+        statusEl.style.display = '';
+      } catch { /* ignore */ }
+      resendBtn.disabled = false;
+      resendBtn.textContent = t('auth.resend');
+    });
+
+    closeBtn.addEventListener('click', () => {
+      overlay.classList.remove('visible');
+    });
+  }
+
+  renderForm();
+  overlay.style.removeProperty('display');
+  overlay.classList.add('visible');
+}
+
+/** Global entry point for sending auth link from Settings > Sharing pane. */
+async function sendAuthFromSharing() {
+  const emailEl = document.getElementById('sharingAuthEmail');
+  const errEl = document.getElementById('sharingAuthError');
+  const statusEl = document.getElementById('sharingAuthStatus');
+  const btn = document.getElementById('sharingAuthSendBtn');
+  if (!emailEl || !btn) return;
+  const email = emailEl.value.trim();
+  if (!email || !email.includes('@')) {
+    if (errEl) { errEl.textContent = t('auth.error'); errEl.style.display = ''; }
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = t('auth.sending');
+  if (errEl) errEl.style.display = 'none';
+  try {
+    const { sendMagicLink } = await import('./auth.js');
+    const { error } = await sendMagicLink(state._rawSupabaseAdapter, email);
+    if (error) {
+      const isRateLimit = error.status === 429 || (error.message || '').toLowerCase().includes('rate');
+      if (errEl) { errEl.textContent = isRateLimit ? t('auth.rate_limit') : t('auth.error'); errEl.style.display = ''; }
+      btn.disabled = false;
+      btn.textContent = t('auth.send_magic_link');
+    } else {
+      if (statusEl) { statusEl.textContent = t('auth.check_inbox_hint', esc(email)); statusEl.style.display = ''; }
+      btn.textContent = t('auth.sent');
+      setTimeout(() => { btn.disabled = false; btn.textContent = t('auth.send_magic_link'); }, 5000);
+    }
+  } catch {
+    if (errEl) { errEl.textContent = t('auth.error'); errEl.style.display = ''; }
+    btn.disabled = false;
+    btn.textContent = t('auth.send_magic_link');
+  }
+}
+window.sendAuthFromSharing = sendAuthFromSharing;
+
+
+
 function getStayConnectedCreds() {
   try {
     const raw = localStorage.getItem(STAY_CONNECTED_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    // Self-heal: purge if service_role was ever stored (pre-fix data)
+    if (parsed && parsed.key) {
+      const role = getSupabaseKeyRole(parsed.key);
+      if (role === 'service_role' || parsed.key.startsWith('sb_secret_')) {
+        try { localStorage.removeItem(STAY_CONNECTED_KEY); } catch {}
+        return null;
+      }
+    }
     if (parsed && parsed.mode === 'demo') return parsed;
     if (parsed && parsed.mode === 'googledrive') return parsed;
     if (parsed && parsed.url && (parsed.key || parsed.mode === 'local')) return parsed;
@@ -505,7 +826,20 @@ function getStayConnectedCreds() {
 }
 
 function saveStayConnectedCreds(url, key, mode) {
-  localStorage.setItem(STAY_CONNECTED_KEY, JSON.stringify({ url, key, mode: mode || 'supabase' }));
+  const m = mode || 'supabase';
+  // Defense in depth: never persist service_role, never persist key for local/demo/drive
+  if (m === 'local' || m === 'demo' || m === 'googledrive') {
+    key = '';
+  }
+  if (key) {
+    const role = getSupabaseKeyRole(key);
+    if (role === 'service_role' || key.startsWith('sb_secret_')) {
+      // Do not persist — caller should have already blocked, but belt-and-braces
+      return;
+    }
+  }
+  // For supabase, strip whitespace; for local/demo/drive key is already ''
+  localStorage.setItem(STAY_CONNECTED_KEY, JSON.stringify({ url, key: key || '', mode: m }));
 }
 
 function clearStayConnectedCreds() {
@@ -516,8 +850,14 @@ async function disconnect() {
   // Force-save and clean up Drive adapter before disconnecting
   if (state.driveMode && state.driveAdapter) {
     try { await state.driveAdapter.forceSave(); } catch {}
+    if (state.sharing) { try { state.sharing.destroy(); } catch {} }
     if (state.driveAdapter.destroy) state.driveAdapter.destroy();
   }
+  // Clean up Supabase sharing
+  if (state.sharing && !state.driveMode) {
+    try { state.sharing.destroy(); } catch {}
+  }
+  state.authUser = null;
   clearStayConnectedCreds();
   location.reload();
 }
@@ -529,6 +869,77 @@ function normalizeSupabaseUrl(raw) {
   return raw;
 }
 
+
+function renderSchemaMissingError(container, projectUrl) {
+  if (!container) return;
+  container.textContent = '';
+  container.style.lineHeight = '1.4';
+  container.style.maxWidth = '360px';
+
+  const title = document.createElement('div');
+  title.textContent = t('toast.schema_missing') || 'Tables not found — run sql/supabase_schema.sql in Supabase SQL Editor.';
+  title.style.fontWeight = '600';
+  title.style.marginBottom = '2px';
+  container.appendChild(title);
+
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.flexWrap = 'wrap';
+  actions.style.gap = '8px';
+  actions.style.marginTop = '10px';
+
+  const ref = getSupabaseProjectRef(projectUrl);
+  const sqlEditorUrl = ref ? `https://supabase.com/dashboard/project/${ref}/sql/new` : 'https://supabase.com/dashboard/projects';
+
+  // Primary: Copy schema (nice UI) — first left to right
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  const copyLabel = t('toast.copy_schema') || t('setup.copy_btn') || 'Copy schema';
+  copyBtn.innerHTML = `${lucideIcon('copy', 14)} ${copyLabel}`;
+  copyBtn.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:0.85rem;font-weight:600;cursor:pointer;line-height:1;box-shadow:0 2px 8px rgba(0,0,0,0.12);transition:all 0.15s;';
+  copyBtn.addEventListener('click', async () => {
+    try {
+      let sql = window._SUPABASE_SCHEMA_CACHED || '';
+      if (!sql) {
+        const r = await fetch('./sql/supabase_schema.sql', { cache: 'no-store' });
+        if (!r.ok) throw new Error('fetch failed ' + r.status);
+        sql = await r.text();
+        window._SUPABASE_SCHEMA_CACHED = sql;
+      }
+      await navigator.clipboard.writeText(sql);
+      copyBtn.innerHTML = `${lucideIcon('check', 14)} ${t('toast.copied') || t('setup.copy_done') || 'Copied!'}`;
+      copyBtn.style.opacity = '0.9';
+      setTimeout(() => {
+        copyBtn.innerHTML = `${lucideIcon('copy', 14)} ${copyLabel}`;
+        copyBtn.style.opacity = '1';
+      }, 2000);
+    } catch {
+      window.open('https://raw.githubusercontent.com/AntGro/DeLaClaw/dev/sql/supabase_schema.sql', '_blank');
+    }
+  });
+  copyBtn.addEventListener('mouseenter', () => { copyBtn.style.transform = 'translateY(-1px)'; copyBtn.style.boxShadow = '0 4px 14px rgba(0,0,0,0.18)'; });
+  copyBtn.addEventListener('mouseleave', () => { copyBtn.style.transform = 'none'; copyBtn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)'; });
+  actions.appendChild(copyBtn);
+
+  // Secondary: Open SQL Editor
+  const openLink = document.createElement('a');
+  openLink.href = sqlEditorUrl;
+  openLink.target = '_blank';
+  openLink.rel = 'noopener';
+  openLink.innerHTML = `${lucideIcon('external-link', 14)} ${t('toast.open_sql_editor') || 'Open SQL Editor'}`;
+  openLink.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);text-decoration:none;font-size:0.85rem;font-weight:600;line-height:1;transition:all 0.15s;';
+  actions.appendChild(openLink);
+
+  container.appendChild(actions);
+
+  const hint = document.createElement('div');
+  hint.textContent = t('toast.schema_missing_hint') || 'Paste in SQL Editor → Run, then retry Connect.';
+  hint.style.fontSize = '0.8em';
+  hint.style.opacity = '0.75';
+  hint.style.marginTop = '8px';
+  container.appendChild(hint);
+}
+
 async function doLogin() {
   const url = normalizeSupabaseUrl(document.getElementById('username').value.trim());
   const key = document.getElementById('password').value.trim();
@@ -536,6 +947,14 @@ async function doLogin() {
   const err = document.getElementById('loginError');
   const mode = getSelectedMode();
   if (mode !== 'demo' && mode !== 'googledrive' && (!url || (!key && mode !== 'local'))) { err.textContent = t('toast.enter_name'); return; }
+  // sec: reject service_role / sb_secret_ — anon / sb_publishable_ only
+  if (mode === 'supabase' && key) {
+    const role = getSupabaseKeyRole(key);
+    if (role === 'service_role' || key.startsWith('sb_secret_')) {
+      err.textContent = t('login.err_service_role');
+      return;
+    }
+  }
   // Detect org URL
   if (/supabase\.com\/dashboard\/org\//i.test(url)) {
     err.innerHTML = t('toast.org_url_tip');
@@ -563,15 +982,31 @@ async function doLogin() {
       } catch(e) {}
     }
   } catch (e) {
-    if (e.message === 'project_paused') {
-      err.innerHTML = `${t('toast.project_paused')} <a href="${e.dashboardUrl}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;">Check on Supabase ↗</a>`;
+    if (e.message === 'schema_missing') {
+      renderSchemaMissingError(err, url);
+    } else if (e.message === 'project_paused') {
+      // Safe DOM — no innerHTML with URL interpolation (P0 sec-002)
+      const safeUrl = /^https:\/\/supabase\.com\/dashboard\/project\/[a-z0-9]+$/i.test(e.dashboardUrl) ? e.dashboardUrl : 'https://supabase.com/dashboard/projects';
+      err.textContent = '';
+      err.appendChild(document.createTextNode((t('toast.project_paused') ? t('toast.project_paused') + ' ' : 'Database paused — ')));
+      const a = document.createElement('a');
+      a.href = safeUrl;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.style.color = 'var(--accent)';
+      a.style.textDecoration = 'underline';
+      a.textContent = 'Check on Supabase ↗';
+      err.appendChild(a);
     } else if (e.message === 'google_not_loaded') {
       err.textContent = t('login.drive_gis_blocked') || 'Google sign-in is blocked. Disable your ad blocker or allow third-party scripts.';
     } else if (e.message === 'popup_closed_by_user' || e.message === 'access_denied') {
       err.textContent = t('login.drive_cancelled') || 'Google sign-in was cancelled.';
+    } else if (e.message === 'drive_scope_denied') {
+      err.textContent = t('login.drive_scope_denied') || 'DeLaClaw needs Google Drive access to store your data. Please try again and accept the Drive permission.';
     } else if (e.message === 'popup_failed_to_open') {
       err.textContent = t('login.drive_popup_blocked') || 'Pop-up blocked by your browser — please try again.';
     } else {
+      console.error('[DeLaClaw] connect error:', e);
       err.textContent = t('toast.connection_failed');
     }
   }
@@ -580,17 +1015,19 @@ async function doLogin() {
 document.addEventListener('DOMContentLoaded', () => {
   // Wrap all save/add/submit actions with guard() to prevent double-fire
   const guardedNames = [
-    'saveNewBirthday', 'saveEditBirthday',
+    'saveNewBirthday', 'saveEditBirthday', 'removeAvatar',
     'saveNewDraft', 'saveEditedProposal', 'saveNewFlashcard', 'saveEditFlashcard',
     'saveNewText', 'saveEditText', 'submitFeedback', 'submitTextReview',
+    'saveEditDeck',
     'saveNewHabit', 'saveEditHabit', 'saveHabitCompletion', 'addHabitFromInput',
     'saveNewHabitCategory', 'saveEditHabitCategory',
+    'promoteHabit',
     'saveNewList', 'saveEditList',
     'addTask', 'saveNewProject', 'saveEditProject', 'submitRevision',
-    'saveNewCategory', 'saveEditCategory', 'submitSnooze', 'addTodoToCategory',
+    'saveNewCategory', 'saveEditCategory', 'snoozeFor', 'submitSnooze', 'addTodoToCategory',
     'saveNewVestiaire', 'saveEditVestiaire',
     'saveNewVestiaireCategory', 'saveEditVestiaireCategory',
-    'executeDeleteConfirm',
+    'executeConfirmAction',
     'quickAddDraft', 'quickAddListItem',
     'saveGlobalPrompt', 'saveProjectPrompt',
   ];
@@ -671,6 +1108,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('setupPathCloud')?.addEventListener('click', () => showSteps('cloud'));
   document.getElementById('setupPathLocal')?.addEventListener('click', () => showSteps('local'));
   document.getElementById('setupPathDrive')?.addEventListener('click', () => showSteps('drive'));
+  document.getElementById('setupCompareLink')?.addEventListener('click', (e) => { e.preventDefault(); showCompareModal(); });
 
   // ── Schema copy + toggle ──
   let SUPABASE_SCHEMA = '';
@@ -878,6 +1316,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (_setupLoginError) _setupLoginError.textContent = t('toast.enter_name') || 'Please fill in both fields.';
         return;
       }
+      // sec: anon only
+      if (key && (getSupabaseKeyRole(key)==='service_role' || key.startsWith('sb_secret_'))) {
+        if (_setupLoginError) _setupLoginError.textContent = t('login.err_service_role');
+        return;
+      }
       if (_setupLoginError) _setupLoginError.textContent = t('toast.connecting') || 'Connecting…';
       try {
         const result = await connect(url, key, 'supabase');
@@ -892,8 +1335,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       } catch (e) {
         if (_setupLoginError) {
-          if (e.message === 'project_paused') {
-            _setupLoginError.innerHTML = `${t('toast.project_paused')} <a href="${e.dashboardUrl}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;">Check on Supabase ↗</a>`;
+          if (e.message === 'schema_missing') {
+            renderSchemaMissingError(_setupLoginError, url);
+          } else if (e.message === 'project_paused') {
+            // Safe DOM — no innerHTML with URL interpolation (P0 sec-002)
+            const safeUrl = /^https:\/\/supabase\.com\/dashboard\/project\/[a-z0-9]+$/i.test(e.dashboardUrl) ? e.dashboardUrl : 'https://supabase.com/dashboard/projects';
+            _setupLoginError.textContent = '';
+            _setupLoginError.appendChild(document.createTextNode((t('toast.project_paused') ? t('toast.project_paused') + ' ' : 'Database paused — ')));
+            const a = document.createElement('a');
+            a.href = safeUrl;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.style.color = 'var(--accent)';
+            a.style.textDecoration = 'underline';
+            a.textContent = 'Check on Supabase ↗';
+            _setupLoginError.appendChild(a);
           } else {
             _setupLoginError.textContent = t('toast.connection_failed') || 'Connection failed.';
           }
@@ -907,11 +1363,151 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ===================================================================
+// SUPABASE DEPRECATION — MIGRATION MODAL
+// ===================================================================
+let _pendingMigrationBackup = null;
+
+function showSupabaseMigrationModal(backupPromise) {
+  console.log('[migration] showSupabaseMigrationModal called');
+  const overlay = document.getElementById('sbMigrationOverlay');
+  console.log('[migration] overlay element:', overlay);
+  if (!overlay) return;
+
+  // Set Supabase logo as icon
+  const iconEl = document.getElementById('sbMigrationIcon');
+  if (iconEl) iconEl.innerHTML = LOGOS.supabase(36);
+
+  const statusEl = document.getElementById('sbMigrationStatus');
+  const downloadBtn = document.getElementById('sbMigrationDownload');
+  const driveBtn = document.getElementById('sbMigrationDrive');
+  const backBtn = document.getElementById('sbMigrationBack');
+  const warnEl = document.getElementById('sbMigrationSharingWarn');
+
+  // Apply i18n first (textContent replaces everything)
+  overlay.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const val = t(key);
+    if (val && val !== key) el.textContent = val;
+  });
+
+  // Inject icons into buttons after i18n
+  if (downloadBtn && !downloadBtn.querySelector('svg')) {
+    downloadBtn.insertAdjacentHTML('afterbegin', lucideIcon('download', 16));
+  }
+  if (driveBtn && !driveBtn.querySelector('img')) {
+    driveBtn.insertAdjacentHTML('afterbegin', LOGOS.googledrive(16));
+  }
+
+  // Show modal immediately in loading state
+  downloadBtn.disabled = true;
+  driveBtn.disabled = true;
+  if (statusEl) statusEl.textContent = t('migration.preparing');
+  overlay.classList.add('visible');
+  console.log('[migration] overlay.visible added, computed display:', getComputedStyle(overlay).display);
+
+  // Fetch backup data in background, then enable actions
+  let backup = null;
+  backupPromise.then(b => {
+    backup = b;
+    downloadBtn.disabled = false;
+    driveBtn.disabled = false;
+    if (statusEl) statusEl.textContent = '';
+    // Show sharing warning if backup has sharing data
+    const hasSharingData = backup.sharing_groups && backup.sharing_groups.length > 0;
+    if (warnEl) warnEl.style.display = hasSharingData ? '' : 'none';
+  }).catch(e => {
+    console.warn('[DeLaClaw] backup generation failed:', e);
+    if (statusEl) statusEl.textContent = t('migration.error');
+  });
+
+  // Download backup
+  downloadBtn.onclick = () => {
+    if (!backup) return;
+    try {
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const date = new Date().toISOString().slice(0, 10);
+      a.href = blobUrl; a.download = `delaclaw-backup-${date}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(blobUrl);
+      if (statusEl) statusEl.textContent = t('menu.settings_backup_done') || 'Backup downloaded.';
+    } catch (e) {
+      if (statusEl) statusEl.textContent = t('menu.settings_backup_error') || 'Export failed.';
+    }
+  };
+
+  // Migrate to Google Drive
+  driveBtn.onclick = async () => {
+    if (!backup) return;
+    driveBtn.disabled = true;
+    downloadBtn.disabled = true;
+    if (statusEl) statusEl.textContent = t('migration.migrating');
+
+    try {
+      // Store backup for the Drive connect path to pick up
+      _pendingMigrationBackup = backup;
+
+      // Close the modal
+      overlay.classList.remove('visible');
+
+      // Clear saved Supabase credentials so auto-connect doesn't loop back
+      try { localStorage.removeItem(STAY_CONNECTED_KEY); } catch {}
+
+      // Trigger Drive connect — the Google OAuth popup opens on this user click
+      await connect(null, null, 'googledrive');
+
+      // If we get here, Drive connected successfully and the dashboard loaded.
+      // Save Drive as the "Stay connected" mode
+      saveStayConnectedCreds('', '', 'googledrive');
+
+    } catch (e) {
+      // Drive connect failed — show modal again with error
+      _pendingMigrationBackup = null;
+      overlay.classList.add('visible');
+      driveBtn.disabled = false;
+      downloadBtn.disabled = false;
+      if (statusEl) statusEl.textContent = t('migration.error');
+      console.warn('[DeLaClaw] migration to Drive failed:', e.message);
+    }
+  };
+
+  // Back to login
+  backBtn.onclick = (e) => {
+    e.preventDefault();
+    overlay.classList.remove('visible');
+    // Clear saved Supabase credentials
+    try { localStorage.removeItem(STAY_CONNECTED_KEY); } catch {}
+    // Show login form
+    const form = document.getElementById('loginForm');
+    if (form) form.style.display = 'flex';
+    // Switch mode to googledrive as default
+    switchBackendMode('googledrive');
+  };
+}
+
+// ===================================================================
 // UNLOCK & INIT APP
 // ===================================================================
 async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { silentAuth = false } = {}) {
   state.supabaseUrl = url;
   state.supabaseKey = key;
+
+  let initialSharingLoad = Promise.resolve();
+  const loadInitialSharing = (label = 'sharing') => {
+    if (!state.sharing?.loadAll) {
+      initialSharingLoad = Promise.resolve();
+      return initialSharingLoad;
+    }
+    initialSharingLoad = state.sharing.loadAll()
+      .catch(e => console.warn(`${label} loadAll:`, e));
+    return initialSharingLoad;
+  };
+  const loadSharingAndNotify = (label = 'sharing') => {
+    const p = loadInitialSharing(label);
+    p.then(() => document.dispatchEvent(new CustomEvent('sharing-changed')));
+    return p;
+  };
 
   // For demo mode, resolve the chooser BEFORE any state changes.
   // If the user cancels, nothing was modified — clean exit.
@@ -945,6 +1541,9 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     state.demoAdapter = adapter;
     state.demoMode = true;
     setDemoCategoriesFromData(demoData);
+    // Initialize sharing stub so share buttons render (groups are gated)
+    const { createSharing } = await import('./sharing.js');
+    state.sharing = await createSharing('demo');
   } else if (mode === 'googledrive') {
     const { createDriveAdapter } = await import('./adapters/drive.js');
     const errEl = document.getElementById('loginError');
@@ -967,19 +1566,79 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     }, { silent: silentAuth });
     state.driveAdapter = adapter;
     state.driveMode = true;
+
+    // ── Supabase → Drive migration: import pending backup ──
+    if (_pendingMigrationBackup) {
+      const backup = _pendingMigrationBackup;
+      _pendingMigrationBackup = null;
+
+      // Filter to Drive-supported tables only
+      const driveTables = new Set([
+        'projects', 'tasks', 'todos', 'habits', 'habit_completions',
+        'flashcards', 'flashcard_notes', 'texts', 'text_line_progress',
+        'birthdays', 'vestiaire', 'lists', 'list_items',
+        'settings', 'prompts', 'nvidia_usage', 'daily_visits',
+        'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
+      ]);
+      const reseedData = {};
+      const sharingFields = ['shared_id', 'shared_group_id', 'owner_id'];
+      let tableCount = 0;
+      for (const table of (backup._meta?.tables || [])) {
+        if (!driveTables.has(table) || !backup[table]) continue;
+        // Strip sharing references and owner_id from items
+        reseedData[table] = backup[table].map(row => {
+          const clean = { ...row };
+          for (const f of sharingFields) delete clean[f];
+          return clean;
+        });
+        tableCount++;
+      }
+      adapter.reseed(reseedData);
+      if (adapter.runPendingMigrations) {
+        await adapter.runPendingMigrations();
+      }
+      // Set category colors from imported data
+      setDemoCategoriesFromData(reseedData);
+      console.log(`[DeLaClaw] migrated ${tableCount} tables from Supabase to Drive`);
+    }
   } else if (mode === 'local') {
     adapter = createRestAdapter(url);
     // Test connection with raw adapter BEFORE wrapping with offline cache
     const { error } = await adapter.from('projects').select('id').limit(1);
-    if (error) throw new Error('Connection failed');
+    if (error) {
+      console.warn('[DeLaClaw] local projects check failed:', error);
+      const st = error.status || error.statusCode;
+      const m = String(error.message || '').toLowerCase();
+      const d = String(error.details || '').toLowerCase();
+      const missing = st === 404 || m.includes('does not exist') || d.includes('does not exist') || m.includes('not found') || m.includes('could not find') || m.includes('schema');
+      if (missing) {
+        const e = new Error('schema_missing');
+        e.orig = error;
+        throw e;
+      }
+      throw new Error('Connection failed');
+    }
     const scopeRef = url.replace(/^https?:\/\//, '');
     adapter = wrapWithOfflineCache(adapter, `local:${scopeRef}`);
   } else {
     adapter = createSupabaseAdapter(url, key);
+    state._rawSupabaseAdapter = adapter; // Keep unwrapped for auth calls
     // Test connection with raw adapter BEFORE wrapping with offline cache
     const { error } = await adapter.from('projects').select('id').limit(1);
     if (error) {
+      console.warn('[DeLaClaw] supabase projects check failed:', error);
       const msg = String(error.message || '').toLowerCase();
+      const details = String(error.details || '').toLowerCase();
+      const combined = msg + ' ' + details;
+      const status = error.status || error.statusCode;
+      const code = String(error.code || '').toUpperCase();
+      const isSchemaMissing = status === 404 || code === '42P01' || code.startsWith('PGRST') ||
+        combined.includes('does not exist') || combined.includes('schema cache') || combined.includes('could not find') || combined.includes('not found');
+      if (isSchemaMissing) {
+        const e = new Error('schema_missing');
+        e.orig = error;
+        throw e;
+      }
       const isNetFail = msg.includes('fetch') || msg.includes('network') || msg.includes('cors') || msg.includes('err_failed');
       if (isNetFail && navigator.onLine) {
         const ref = url.replace('https://', '').replace('.supabase.co', '');
@@ -994,6 +1653,27 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   }
   db.setAdapter(adapter);
 
+  // ── Supabase deprecated: show migration modal instead of loading dashboard ──
+  if (mode === 'supabase') {
+    console.log('[migration] reached deprecation block');
+    // Try transparent auth (existing session / magic link callback)
+    try {
+      console.log('[migration] starting initAuth');
+      const { initAuth, claimOwnership } = await import('./auth.js');
+      const authResult = await initAuth(state._rawSupabaseAdapter);
+      console.log('[migration] initAuth done, user:', authResult.user?.id);
+      state.authUser = authResult.user;
+      if (authResult.user) {
+        await claimOwnership(adapter, authResult.user.id);
+      }
+    } catch (e) { console.warn('[migration] auth init failed:', e); }
+
+    // Show modal immediately; backup loads in background
+    console.log('[migration] calling showSupabaseMigrationModal');
+    showSupabaseMigrationModal(generateBackupJSON());
+    return false;
+  }
+
   // Flush pending Drive saves and stop polling on page close
   if (mode === 'googledrive' && adapter.forceSave) {
     window.addEventListener('beforeunload', () => {
@@ -1001,6 +1681,17 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       adapter.forceSave().catch(() => {});
       if (adapter.destroy) adapter.destroy();
     });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        // Flush when tab goes background (mobile doesn't reliably fire beforeunload)
+        adapter.forceSave().catch(() => {});
+      } else if (document.visibilityState === 'visible' && adapter.pollNow) {
+        // Catch up on external changes immediately when tab comes back
+        adapter.pollNow();
+      }
+    });
+    // Poll on window focus (catches desktop window switching, not just tab switching)
+    window.addEventListener('focus', () => { if (adapter.pollNow) adapter.pollNow(); });
   }
 
   document.getElementById('gate').style.display = 'none';
@@ -1022,13 +1713,29 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     const label = LABELS[mode] || mode;
     let href = null;
     if (mode === 'supabase') {
+      // Validate projectRef: alphanumeric only (from _projectRef regex)
       const projectRef = url.replace('https://', '').replace('.supabase.co', '');
-      href = `https://supabase.com/dashboard/project/${projectRef}`;
+      if (/^[a-z0-9]+$/i.test(projectRef)) {
+        href = `https://supabase.com/dashboard/project/${projectRef}`;
+      }
     } else if (mode === 'googledrive') {
-      href = 'https://drive.google.com';
+      const fid = state.driveAdapter?.driveFolderId;
+      // Drive folder ID: allowlist alphanumeric + -_ (Google ID format)
+      if (fid && /^[\w-]+$/.test(fid)) {
+        href = `https://drive.google.com/drive/folders/${fid}`;
+      } else {
+        href = 'https://drive.google.com';
+      }
     }
-    if (href) {
-      footerBackend.innerHTML = `<a href="${href}" target="_blank" rel="noopener">${logo} <span>${label} ↗</span></a>`;
+    // Safe DOM: href set via property, logo is trusted SVG from LOGOS
+    footerBackend.textContent = '';
+    if (href && /^https:\/\/(supabase\.com|drive\.google\.com)\//.test(href)) {
+      const a = document.createElement('a');
+      a.href = href;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.innerHTML = `${logo} <span>${label} ↗</span>`;
+      footerBackend.appendChild(a);
     } else {
       footerBackend.innerHTML = `${logo} <span>${label}</span>`;
     }
@@ -1037,33 +1744,90 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   await loadProjects();
   buildProjectCards();
+  initProjectModals();
   initProjectDragDrop();
   updateArchiveToggleBtn();
   renderArchivedProjects();
 
+  // Load user settings from DB (before tab visibility / view restore)
+  await loadSettings();
+
+  // Init calendar sync module (for Drive and Demo backends only)
+  if (state.demoMode || state.driveMode) {
+    initCalSync(state.driveMode ? adapter.getToken : null);
+    // Hook calendar sync to Drive flush so they stay coupled
+    if (state.driveMode) {
+      adapter._markCalDirty = markCalDirty;
+      adapter._onTableFlushed = (table) => {
+        // Category table flush → sync the corresponding item table
+        const itemTable = CAT_TABLE_TO_ITEM_TABLE[table];
+        const syncTarget = itemTable || table;
+        syncCalendarTable(syncTarget).catch(e => console.warn('Calendar table sync:', e));
+      };
+    }
+    // No full sync on page load — trust calendar is already synced.
+    // Full push only happens on first enable (toggleCalSync).
+  }
+
   // Restore view early (before async refreshes) to avoid flash
   applyTabVisibility();
-  const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'vestiaire', 'flashcards'];
+  const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'vestiaire', 'flashcards', 'lists'];
   const rawHash = location.hash.replace('#', '');
+  const isSettingsHash = location.hash === '#settings' || location.hash.startsWith('#settings/');
   const hashView = validViews.includes(rawHash) ? rawHash : null;
   let savedView = hashView || localStorage.getItem(CURRENT_VIEW_KEY) || 'welcome';
   if (!isTabVisible(savedView)) {
     const firstVisible = getVisibleTabs()[0];
     savedView = firstVisible ? firstVisible.key : 'welcome';
   }
-  switchView(savedView);
+  switchView(savedView, isSettingsHash);
 
   // Listen for back/forward navigation
   window.addEventListener('hashchange', () => {
-    const raw = location.hash.replace('#', '');
+    const hash = location.hash;
+    // Settings deep links
+    if (hash === '#settings' || hash.startsWith('#settings/')) {
+      const pane = hash.split('/')[1] || 'general';
+      const modal = document.getElementById('settingsModal');
+      if (!modal?.classList.contains('visible')) openSettings(pane);
+      else if (SETTINGS_PANES.includes(pane)) switchSettingsPane(pane);
+      return;
+    }
+    // Close settings if navigating away
+    const settingsModal = document.getElementById('settingsModal');
+    if (settingsModal?.classList.contains('visible')) closeSettings();
+    const deepLink = parseDeepLink(hash);
+    if (deepLink) {
+      navigateToItem(deepLink.type, deepLink.id);
+      return;
+    }
+    const raw = hash.replace('#', '');
     const h = validViews.includes(raw) ? raw : 'welcome';
     if (h !== state.currentView) switchView(h);
   });
 
   await refreshAll();
 
-  // Load user settings from DB
-  await loadSettings();
+  // Calendar sync auto-enable: if Calendar scope was granted at sign-in
+  // and the user has never had calendar sync set (key absent), enable it.
+  // Once the key exists (true or false), the user's choice is respected.
+  if (state.driveMode && state.driveAdapter?.calendarScopeGranted) {
+    const { data: syncSetting } = await state.db.from('settings').select('value').eq('key', 'gcal_sync_enabled');
+    const keyExists = syncSetting && syncSetting.length > 0;
+    if (!keyExists) {
+      try {
+        const calId = await enableCalSync();
+        if (calId) {
+          showToast(t('cal_sync.enabled'), 'success');
+          await updateCalSyncUI();
+          await reconcileCalendar();
+        }
+      } catch (e) {
+        console.warn('Calendar sync auto-enable failed:', e);
+      }
+    }
+  }
+
   checkSchemaVersion();
   recordDailyVisit();
 
@@ -1071,20 +1835,57 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   localStorage.removeItem(IDEAS_KEY);
 
   // Realtime subscription (skip for demo/googledrive — no Postgres backend)
+  // Debounce: bulk sort_order updates emit one event per row; collapse into a single refresh.
+  function debouncedHandler(fn, ms = 300) {
+    let timer = null;
+    return () => { clearTimeout(timer); timer = setTimeout(fn, ms); };
+  }
   if (mode !== 'demo' && mode !== 'googledrive') {
     state.db.channel('tasks-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => { if (!isEditing()) { refreshAll().then(() => markLastUpdated()); } })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, async () => { if (isEditing()) return; await loadProjects(); buildProjectCards(); initProjectDragDrop(); await refreshAll(); markLastUpdated(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'prompts' }, () => loadPrompts())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, () => { if (!isEditing()) { refreshTodos().then(() => markLastUpdated()); } })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'habits' }, () => refreshHabits().then(() => markLastUpdated()))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'habit_completions' }, () => refreshHabits().then(() => markLastUpdated()))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'birthdays' }, () => refreshBirthdays().then(() => markLastUpdated()))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vestiaire' }, () => refreshVestiaire().then(() => markLastUpdated()))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'flashcards' }, () => refreshFlashcards().then(() => markLastUpdated()))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'flashcard_notes' }, () => refreshFlashcards().then(() => markLastUpdated()))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, debouncedHandler(() => { if (!isEditing()) refreshAll().then(() => markLastUpdated()); }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'prompts' }, debouncedHandler(() => loadPrompts()))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, debouncedHandler(() => { if (!isEditing()) refreshTodos().then(() => markLastUpdated()); }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'habits' }, debouncedHandler(() => refreshHabits().then(() => markLastUpdated())))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'habit_completions' }, debouncedHandler(() => refreshHabits().then(() => markLastUpdated())))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'birthdays' }, debouncedHandler(() => refreshBirthdays().then(() => markLastUpdated())))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vestiaire' }, debouncedHandler(() => refreshVestiaire().then(() => markLastUpdated())))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'flashcards' }, debouncedHandler(() => refreshFlashcards().then(() => markLastUpdated())))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'flashcard_notes' }, debouncedHandler(() => refreshFlashcards().then(() => markLastUpdated())))
       .subscribe();
   }
+
+  // ── Sharing resilience event listeners (must be registered before any loadAll fires) ──
+  document.addEventListener('sharing-group-unreachable', (e) => {
+    const name = e.detail?.groupName || '';
+    showToast(t('sharing.group_unreachable', name), 'info');
+    renderSharingPane();
+  });
+  document.addEventListener('sharing-group-deletion-confirm', async (e) => {
+    const { groupId, groupName } = e.detail || {};
+    if (!groupId) return;
+    showConfirmAction(
+      t('sharing.group_confirm_delete_title'),
+      t('sharing.group_confirm_delete_msg', groupName),
+      async () => {
+        await state.sharing.confirmGroupDeletion(groupId);
+        renderSharingPane();
+      },
+      null,
+      {
+        btnText: t('sharing.group_confirm_remove_btn'),
+        cancelLabel: t('sharing.group_confirm_keep_btn'),
+        variant: 'neutral',
+        iconSvg: lucideIcon('wifi-off', 24, 'currentColor'),
+        onCancel: () => {
+          state.sharing.keepGroup(groupId);
+          renderSharingPane();
+        },
+      }
+    );
+  });
+  document.addEventListener('sharing-group-recovered', () => {
+    renderSharingPane();
+  });
 
   // Drive: wire poll-based change detection to the same refresh functions
   if (mode === 'googledrive' && state.driveAdapter) {
@@ -1109,14 +1910,63 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       if (fn) fn().then(() => markLastUpdated()).catch(e => console.warn('Drive refresh error:', e));
       else markLastUpdated();
     };
+
+    // Wire up Drive sharing module
+    try {
+      const { createSharing } = await import('./sharing.js');
+      state.sharing = await createSharing('googledrive', {
+        getToken: () => state.driveAdapter.getToken(),
+        personalFolderId: state.driveAdapter.driveFolderId,
+        capabilities: {
+          openJoinPicker: (folderId) => state.driveAdapter.openSharedFolderPicker(folderId),
+        },
+      });
+      loadInitialSharing('sharing');
+      state.sharing.startPolling();
+      state.sharing.onUpdate(() => {
+        document.dispatchEvent(new CustomEvent('sharing-changed'));
+      });
+      updateSharingNavVisibility();
+
+    } catch (e) { console.warn('sharing init:', e); }
   }
+
+  // Supabase sharing init (requires auth + sharing tables ≥ 1.295)
+  const dbVerForSharing = parseFloat(state.dbSchemaVersion || '0');
+  if (mode === 'supabase' && state.authUser && dbVerForSharing >= 1.295) {
+    try {
+      const { createSharing } = await import('./sharing.js');
+      state.sharing = await createSharing('supabase', {
+        adapter,
+        getAuthUser: () => state.authUser,
+        supabaseUrl: url,
+        anonKey: key,
+      });
+      loadInitialSharing('supabase sharing');
+      state.sharing.startPolling();
+      state.sharing.onUpdate(() => {
+        document.dispatchEvent(new CustomEvent('sharing-changed'));
+      });
+      updateSharingNavVisibility();
+    } catch (e) { console.warn('supabase sharing init:', e); state._sharingInitError = e; }
+  }
+
+
+  // Always update sharing nav visibility (even if sharing init failed or was skipped)
+  updateSharingNavVisibility();
+
+  // Ensure shared groups/items are loaded before the first feature refresh.
+  // Otherwise local shared pointers render as blank rows until the next poll.
+  await initialSharingLoad;
 
   // Initialize TODOs
   initTodoModals();
+  if (state.sharing) await syncSharedTodos();
   await refreshTodos();
 
   // Initialize Habits
   initHabitModals();
+  if (state.sharing) await syncSharedHabits();
   await refreshHabits();
 
   // Initialize Birthdays
@@ -1133,6 +1983,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
 
   // Initialize Lists
   initListModals();
+  if (state.sharing) await syncSharedListItems();
   await refreshLists();
 
   // Re-render Welcome now that all data (birthdays, habits, flashcards…) is loaded.
@@ -1143,6 +1994,41 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   }
 
   markLastUpdated();
+
+  // Deep-link navigation on startup — all page data is loaded, no retry loop needed
+  handleStartupDeepLink();
+
+  // Listen for sharing updates (Drive sharing module polls and fires sharing-changed)
+  document.addEventListener('sharing-changed', async () => {
+    try {
+      // syncShared* functions refresh their own data when pointers change;
+      // always do a full refresh afterwards so deletions / conversions are
+      // picked up even when sync itself found nothing new.
+      await syncSharedTodos();
+      await syncSharedHabits();
+      await syncSharedListItems();
+      await refreshTodos();
+      await refreshHabits();
+      await refreshLists();
+    } catch (e) {
+      console.warn('sharing refresh:', e);
+    }
+    // Re-render sharing pane if it's currently visible
+    const sharingPane = document.getElementById('settingsPane-sharing');
+    if (sharingPane?.classList.contains('active')) renderSharingPane();
+    // Update footer groups count
+    const footerGc = document.getElementById('footerGroupCount');
+    if (footerGc && state.sharing) {
+      const gc = state.sharing.getAllGroups().length;
+      footerGc.innerHTML = `${lucideIcon('users', 14)} ${gc} group${gc !== 1 ? 's' : ''}`;
+    }
+  });
+
+  // Notify user when a group is removed remotely (kicked or group deleted)
+  document.addEventListener('sharing-group-removed-remotely', (e) => {
+    const name = e.detail?.groupName || '';
+    showToast(t('sharing.group_removed_remotely', name), 'info');
+  });
 
   // Show demo banner if in demo mode
   if (mode === 'demo') initDemoBanner();
@@ -1206,7 +2092,11 @@ function initDemoBanner() {
   const startOwnBtn = document.createElement('button');
   startOwnBtn.className = 'demo-banner-start';
   startOwnBtn.textContent = t('demo.start_own');
-  startOwnBtn.addEventListener('click', () => showSignupOverlay());
+  startOwnBtn.addEventListener('click', () => {
+    clearStayConnectedCreds();
+    location.hash = '#setup';
+    location.reload();
+  });
 
   // Exit demo
   const exitBtn = document.createElement('button');
@@ -1231,6 +2121,79 @@ function removeDemoBanner() {
   document.body.classList.remove('demo-mode');
   document.body.style.removeProperty('--demo-banner-h');
 }
+
+
+// ===================================================================
+// ORPHAN SHARED-ITEM HANDLER (module-level, survives reconnect)
+// ===================================================================
+const _orphanCounts = {};    // groupId -> consecutive detection count
+const _orphanConfirmed = new Set();  // groups already unlinked
+const _orphanQueue = [];     // queued groupIds awaiting dialog
+let _orphanDialogOpen = false;
+
+const ORPHAN_THRESHOLD = 2; // require N consecutive sync detections before prompting
+
+document.addEventListener('sharing-orphan-detected', (e) => {
+  const groupId = e.detail?.groupId;
+  if (!groupId || _orphanConfirmed.has(groupId)) return;
+
+  // Increment counter — only prompt after threshold consecutive detections
+  _orphanCounts[groupId] = (_orphanCounts[groupId] || 0) + 1;
+  if (_orphanCounts[groupId] < ORPHAN_THRESHOLD) return;
+
+  // Avoid duplicate queue entries
+  if (_orphanQueue.includes(groupId)) return;
+  _orphanQueue.push(groupId);
+  _processOrphanQueue();
+});
+
+function _processOrphanQueue() {
+  if (_orphanDialogOpen || _orphanQueue.length === 0) return;
+  const groupId = _orphanQueue[0];
+  _orphanDialogOpen = true;
+  const label = state.sharing?.getGroupName?.(groupId) || groupId.slice(0, 8);
+  showConfirmAction(
+    t('sharing.orphan_detected_title'),
+    t('sharing.orphan_detected_message', label),
+    async () => {
+      _orphanConfirmed.add(groupId);
+      _orphanQueue.shift();
+      _orphanDialogOpen = false;
+      // Delete pointer items with no local content; nullify ones that have text
+      for (const table of ['habits', 'todos', 'list_items']) {
+        const nameCol = table === 'habits' ? 'name' : 'text';
+        const { data: rows } = await state.db.from(table).select('id,' + nameCol).eq('shared_group_id', groupId);
+        if (!rows) continue;
+        for (const row of rows) {
+          const hasContent = (row[nameCol] || '').trim() !== '';
+          if (hasContent) {
+            await state.db.from(table).update({ shared_id: null, shared_group_id: null }).eq('id', row.id);
+          } else {
+            await state.db.from(table).delete().eq('id', row.id);
+          }
+        }
+      }
+      await refreshHabits(); await refreshTodos(); await refreshLists();
+      showToast(t('sharing.group_deleted'), 'info');
+      _processOrphanQueue(); // next in queue
+    },
+    null,
+    {
+      variant: 'neutral',
+      btnText: t('sharing.orphan_unlink'),
+      iconSvg: lucideIcon('unlink', 24),
+      btnIconSvg: lucideIcon('unlink', 15, 'currentColor'),
+      onCancel: () => {
+        // Cancel — allow retry on next sync cycle
+        delete _orphanCounts[groupId];
+        _orphanQueue.shift();
+        _orphanDialogOpen = false;
+        _processOrphanQueue(); // next in queue
+      },
+    }
+  );
+}
+
 
 // ===================================================================
 // INSTALL BANNER (PWA)
@@ -1542,7 +2505,7 @@ function updateStaticLabels() {
     }
   }
   // Todo filters
-  const todoFilterMap = { pending: 'todos.pending', done: 'todos.done', all: 'todos.all' };
+  const todoFilterMap = { pending: 'todos.pending' };
   document.querySelectorAll('#todoFilters .filter-btn').forEach(btn => {
     const f = btn.dataset.filter;
     if (f === 'outdated') { const svg = btn.querySelector('svg'); btn.innerHTML = (svg ? svg.outerHTML : '') + ' ' + t('todos.outdated'); }
@@ -1707,6 +2670,22 @@ function updateStaticLabels() {
   if (settingsPaneGeneralTitle) settingsPaneGeneralTitle.textContent = t('menu.settings_general');
   const settingsPaneAiTitle = document.getElementById('settingsPaneAiTitle');
   if (settingsPaneAiTitle) settingsPaneAiTitle.textContent = t('menu.settings_ai');
+  const settingsNavCalendar = document.getElementById('settingsNavCalendar');
+  if (settingsNavCalendar) settingsNavCalendar.textContent = t('cal_sync.nav');
+  const settingsPaneCalendarTitle = document.getElementById('settingsPaneCalendarTitle');
+  if (settingsPaneCalendarTitle) settingsPaneCalendarTitle.textContent = t('cal_sync.pane_title');
+  const settingsCalSyncLabel = document.getElementById('settingsCalSyncLabel');
+  if (settingsCalSyncLabel) settingsCalSyncLabel.textContent = t('cal_sync.label');
+  const settingsCalSyncHint = document.getElementById('settingsCalSyncHint');
+  if (settingsCalSyncHint) settingsCalSyncHint.textContent = t('cal_sync.hint');
+  const settingsCalSyncToggleLabel = document.getElementById('settingsCalSyncToggleLabel');
+  if (settingsCalSyncToggleLabel) settingsCalSyncToggleLabel.textContent = t('cal_sync.toggle');
+  const settingsCalSyncHabitsLabel = document.getElementById('settingsCalSyncHabitsLabel');
+  if (settingsCalSyncHabitsLabel) settingsCalSyncHabitsLabel.textContent = t('cal_sync.habits');
+  const settingsCalSyncTodosLabel = document.getElementById('settingsCalSyncTodosLabel');
+  if (settingsCalSyncTodosLabel) settingsCalSyncTodosLabel.textContent = t('cal_sync.todos');
+  const settingsCalSyncBirthdaysLabel = document.getElementById('settingsCalSyncBirthdaysLabel');
+  if (settingsCalSyncBirthdaysLabel) settingsCalSyncBirthdaysLabel.textContent = t('cal_sync.birthdays');
   const settingsTabsLabel = document.getElementById('settingsTabsLabel');
   if (settingsTabsLabel) settingsTabsLabel.textContent = t('menu.settings_tabs');
   const settingsTabsHint = document.getElementById('settingsTabsHint');
@@ -1721,6 +2700,19 @@ function updateStaticLabels() {
   if (settingsNavStats) settingsNavStats.textContent = t('menu.settings_stats');
   const settingsPaneStatsTitle = document.getElementById('settingsPaneStatsTitle');
   if (settingsPaneStatsTitle) settingsPaneStatsTitle.textContent = t('menu.settings_stats');
+  applySharingI18n();
+  applyAgentsI18n();
+  // Account pane i18n
+  const settingsNavAccountLabel = document.getElementById('settingsNavAccountLabel');
+  if (settingsNavAccountLabel) settingsNavAccountLabel.textContent = t('account.nav');
+  const settingsPaneAccountTitle = document.getElementById('settingsPaneAccountTitle');
+  if (settingsPaneAccountTitle) settingsPaneAccountTitle.textContent = t('account.title');
+  const settingsDangerZoneLabel = document.getElementById('settingsDangerZoneLabel');
+  if (settingsDangerZoneLabel) settingsDangerZoneLabel.textContent = t('account.danger_zone');
+  const settingsDangerZoneHint = document.getElementById('settingsDangerZoneHint');
+  if (settingsDangerZoneHint) settingsDangerZoneHint.textContent = t('account.danger_hint');
+  const deleteAccountBtnText = document.getElementById('deleteAccountBtnText');
+  if (deleteAccountBtnText) deleteAccountBtnText.textContent = t('account.delete_btn');
   const settingsDisplayLabel = document.getElementById('settingsDisplayLabel');
   if (settingsDisplayLabel) settingsDisplayLabel.textContent = t('menu.settings_display');
   const settingsNvidiaKeyLabel = document.getElementById('settingsNvidiaKeyLabel');
@@ -1806,6 +2798,8 @@ function updateStaticLabels() {
     const val = t(key);
     if (val) el.textContent = val;
   });
+  // Re-render footer "Updated" label in the new language
+  renderLastUpdated();
   // Re-render schema banner in new language (if visible)
   checkSchemaVersion();
 }
@@ -1891,7 +2885,7 @@ function initGateToolbar() {
 
     // Step 2: if any tab is narrower than 2.5× the icon size, switch to icon-only
     const ICON_SIZE = 18;
-    const iconOnlyThreshold = 60;
+    const iconOnlyThreshold = 85;
     const visibleTabs = Array.from(tabs).filter(tab => tab.style.display !== 'none');
     if (visibleTabs.some(tab => tab.clientWidth < iconOnlyThreshold)) {
       switcher.classList.add('icon-only');
@@ -1958,34 +2952,28 @@ const ALL_TABS = [
 ];
 
 function getTabVisibility() {
-  try {
-    const raw = localStorage.getItem(TAB_VISIBILITY_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch { return null; }
+  return state.tabVisibility;
 }
 
 function saveTabVisibility(vis) {
-  localStorage.setItem(TAB_VISIBILITY_KEY, JSON.stringify(vis));
+  state.tabVisibility = vis;
+  _persistSetting('tab_visibility', JSON.stringify(vis));
 }
 
 function isTabVisible(key) {
-  const vis = getTabVisibility();
+  const vis = state.tabVisibility;
   if (!vis) return true; // all visible by default
   return vis[key] !== false;
 }
 
 // ── Tab Order ──
 function getTabOrder() {
-  try {
-    const raw = localStorage.getItem(TAB_ORDER_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch { return null; }
+  return state.tabOrder;
 }
 
 function saveTabOrder(order) {
-  localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(order));
+  state.tabOrder = order;
+  _persistSetting('tab_order', JSON.stringify(order));
 }
 
 function getOrderedTabs() {
@@ -2022,7 +3010,7 @@ function getVisibleTabs() {
 let _tabConfigState = {};
 let _tabConfigOrder = []; // current order of tab keys in the settings list
 
-function openSettings() {
+function openSettings(pane) {
   const vis = getTabVisibility() || {};
   _tabConfigState = {};
   const ordered = getOrderedTabs();
@@ -2040,10 +3028,15 @@ function openSettings() {
   // Reset visibility toggle icon
   const toggleBtn = document.getElementById('settingsToggleVis');
   if (toggleBtn) toggleBtn.innerHTML = `<span data-icon="eye" data-size="16"></span>`;
-  // Reset to first pane
-  switchSettingsPane('general');
+  // Reset to first pane (or target pane if specified)
+  switchSettingsPane(pane && SETTINGS_PANES.includes(pane) ? pane : 'general');
   // Init theme toggle state
   updateMenuThemeItem();
+  // Init calendar sync toggles
+  updateCalSyncUI().catch(() => {});
+  // Calendar sync click handlers: all handled via delegation.js
+  // (data-action="toggle-cal-sync" → window.toggleCalSync,
+  //  data-action="toggle-cal-sync-*" → explicit cases calling toggleCalSyncSub)
   hydrateIcons();
   document.getElementById('settingsModal').classList.add('visible');
   const scrollY = window.scrollY;
@@ -2058,6 +3051,9 @@ function closeSettings() {
   const scrollY = parseInt(document.body.dataset.scrollY || '0', 10);
   document.body.style.top = '';
   window.scrollTo(0, scrollY);
+  // Restore view hash
+  const viewHash = '#' + (state.currentView || 'welcome');
+  if (location.hash.startsWith('#settings')) history.replaceState(null, '', viewHash);
 }
 
 function switchSettingsPane(paneKey) {
@@ -2069,6 +3065,11 @@ function switchSettingsPane(paneKey) {
   });
   if (paneKey === 'ai') { populateNvidiaModels(); loadNvidiaUsage(); }
   if (paneKey === 'stats') { loadUsageStats(); }
+  if (paneKey === 'sharing') { renderSharingPane(); }
+  if (paneKey === 'agents') { renderAgentsPane(); }
+  // Sync URL hash
+  const settingsHash = paneKey === 'general' ? '#settings' : '#settings/' + paneKey;
+  if (location.hash !== settingsHash) history.replaceState(null, '', settingsHash);
 }
 
 function renderTabConfigList() {
@@ -2179,6 +3180,14 @@ function toggleTabConfigItem(key) {
 
 // ── AI Settings ──
 
+// Fire-and-forget upsert to settings table (used by tab config + project archive)
+function _persistSetting(key, value) {
+  if (!state.db?.connected) return;
+  state.db.from('settings').upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' }).then(({ error }) => {
+    if (error) console.warn(`Could not save setting ${key}:`, error.message);
+  });
+}
+
 async function loadSettings() {
   try {
     const { data, error } = await state.db.from('settings').select('key,value');
@@ -2188,6 +3197,10 @@ async function loadSettings() {
         if (row.key === 'nvidia_api_key') state.nvidiaApiKey = row.value || null;
         if (row.key === 'nvidia_model') state.nvidiaModel = row.value || 'meta/llama-3.1-8b-instruct';
         if (row.key === 'schema_version') state.dbSchemaVersion = row.value || '0.00';
+        if (row.key === 'tab_visibility') { try { state.tabVisibility = JSON.parse(row.value); } catch { /* keep null */ } }
+        if (row.key === 'tab_order') { try { state.tabOrder = JSON.parse(row.value); } catch { /* keep null */ } }
+        if (row.key === 'archived_project_ids') { try { state.archivedProjectIds = JSON.parse(row.value) || []; } catch { /* keep [] */ } }
+        if (row.key === 'show_archived') state.showArchived = row.value === 'true';
       }
     }
   } catch (e) { console.warn('Could not load settings:', e.message); }
@@ -2199,7 +3212,12 @@ async function recordDailyVisit() {
   try {
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    await state.db.from('daily_visits').upsert({ visit_date: today }, { onConflict: 'visit_date' });
+    try {
+      await state.db.from('daily_visits').upsert({ visit_date: today }, { onConflict: 'visit_date,owner_id' });
+    } catch {
+      // fallback for pre-1.398 DBs with old PK
+      await state.db.from('daily_visits').upsert({ visit_date: today }, { onConflict: 'visit_date' });
+    }
   } catch (e) { console.warn('Could not record visit:', e.message); }
 }
 
@@ -2286,11 +3304,17 @@ function getPendingMigrationSQL(dbVer) {
     .filter(v => cmpVer(v, dbVer) > 0 && cmpVer(v, LATEST_COMPAT) <= 0)
     .sort((a, b) => cmpVer(a, b));
   if (!versions.length) return null;
-  return versions.map(v => SUPABASE_MIGRATIONS[v]).join('\n\n');
+  const sql = versions.map(v => SUPABASE_MIGRATIONS[v]).join('\n\n');
+  return sql + "\n\n-- Refresh PostgREST schema cache so new columns are visible immediately\nNOTIFY pgrst, 'reload schema';";
 }
 
 function checkSchemaVersion() {
   if (state.demoMode || state.driveMode || !state.db?.connected) {
+    document.getElementById('schema-banner')?.remove();
+    return;
+  }
+  // Supabase with RLS: settings table is auth-gated, so skip until signed in
+  if (!state.demoMode && !state.driveMode && state.supabaseUrl && !state.authUser) {
     document.getElementById('schema-banner')?.remove();
     return;
   }
@@ -2305,6 +3329,13 @@ function checkSchemaVersion() {
   banner.id = 'schema-banner';
 
   const isCritical = cmpVer(dbVer, LATEST_COMPAT_DEPREC) < 0;
+
+  // Non-critical migration banners: hide on phone (Supabase SQL Editor is not phone-friendly)
+  if (!isCritical && deviceClass() === 'phone') {
+    dismissSchemaBanner();
+    return;
+  }
+
   banner.className = isCritical ? 'schema-banner schema-banner-critical' : 'schema-banner';
 
   const icon = lucideIcon(isCritical ? 'alert-octagon' : 'alert-triangle', 16);
@@ -2314,9 +3345,9 @@ function checkSchemaVersion() {
 
   const sql = getPendingMigrationSQL(dbVer);
   const updateBtn = sql
-    ? `<button onclick="showMigrationModal()">${esc(t('schema.how_to_update'))}</button>`
+    ? `<button data-action="show-migration-modal">${esc(t('schema.how_to_update'))}</button>`
     : '';
-  banner.innerHTML = `${icon}<span>${label}</span>${updateBtn}<button onclick="dismissSchemaBanner()">${esc(t('schema.dismiss'))}</button>`;
+  banner.innerHTML = `${icon}<span>${label}</span>${updateBtn}<button data-action="dismiss-schema-banner">${esc(t('schema.dismiss'))}</button>`;
   document.body.prepend(banner);
   // Measure actual banner height and expose as CSS variable (handles multi-line text on mobile)
   const updateSchemaH = () => {
@@ -2382,8 +3413,8 @@ function showMigrationModal() {
       <li>${t('schema.step_3')}</li>
     </ol>
     <div class="migration-actions">
-      <button class="migration-check-btn" id="migrationCheckBtn" onclick="checkMigrationStatus()">${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}</button>
-      <button class="migration-close-btn" onclick="closeMigrationModal()">${esc(t('schema.close'))}</button>
+      <button class="migration-check-btn" id="migrationCheckBtn" data-action="check-migration-status">${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}</button>
+      <button class="migration-close-btn" data-action="close-migration-modal">${esc(t('schema.close'))}</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
@@ -2414,8 +3445,16 @@ async function checkMigrationStatus() {
     if (cmpVer(newVer, LATEST_COMPAT) >= 0) {
       btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.check_success', { ver: newVer }))}`;
       btn.classList.add('migration-check-ok');
-      // Dismiss banner after short delay
-      setTimeout(() => { closeMigrationModal(); checkSchemaVersion(); }, 1500);
+      // Dismiss banner after short delay, refresh footer & trigger auth
+      setTimeout(() => {
+        closeMigrationModal();
+        checkSchemaVersion();
+        markLastUpdated();
+        // Mandatory auth since 1.300 — show prompt if not signed in
+        if (getSelectedMode() === 'supabase' && !state.authUser) {
+          showAuthPrompt(state._rawSupabaseAdapter);
+        }
+      }, 1500);
     } else {
       btn.innerHTML = `${lucideIcon('alert-triangle', 14)} ${esc(t('schema.check_still_old', { ver: newVer }))}`;
       btn.classList.add('migration-check-fail');
@@ -2435,6 +3474,108 @@ async function checkMigrationStatus() {
 function closeMigrationModal() {
   document.getElementById('migrationModal')?.remove();
 }
+/**
+ * Pre-auth migration modal: shown when schema is readable without auth
+ * and < 1.484 (pre-RLS). Forces migration before auth.
+ * After migration, RLS blocks the read → we know it worked → show auth.
+ */
+function showPreAuthMigrationModal(rawAdapter, url, key, dbVer) {
+  // Compute SQL from detected version up to LATEST_COMPAT
+  const sql = getPendingMigrationSQL(dbVer || '0.00');
+  if (!sql) { showAuthPrompt(rawAdapter, url, key); return; }
+
+  document.getElementById('preAuthMigrationModal')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'preAuthMigrationModal';
+  overlay.className = 'modal-overlay visible';
+
+  const projectRef = (url || '').replace('https://', '').replace('.supabase.co', '') || '_';
+  const sqlEditorUrl = `https://supabase.com/dashboard/project/${projectRef}/sql/new?skip=true`;
+
+  overlay.innerHTML = `<div class="modal migration-modal">
+    <h2>${LOGOS.supabase(18)} ${esc(t('schema.modal_title'))}</h2>
+    <p class="migration-hint">${esc(t('schema.pre_auth_hint'))}</p>
+    <ol class="migration-steps">
+      <li>${t('schema.step_1')}
+        <div class="migration-sql-wrap">
+          <div class="migration-sql-header">
+            <span>SQL</span>
+            <button class="migration-copy-btn" id="preAuthMigrationCopyBtn">${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}</button>
+          </div>
+          <pre class="migration-sql-code" id="preAuthMigrationSqlCode">${esc(sql)}</pre>
+        </div>
+      </li>
+      <li>${t('schema.step_2', { url: sqlEditorUrl })}</li>
+      <li>${t('schema.step_3')}</li>
+    </ol>
+    <div class="migration-actions">
+      <button class="migration-check-btn" id="preAuthMigrationCheckBtn">${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+
+  // Wire copy button
+  document.getElementById('preAuthMigrationCopyBtn').addEventListener('click', async () => {
+    const code = document.getElementById('preAuthMigrationSqlCode')?.textContent;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      const btn = document.getElementById('preAuthMigrationCopyBtn');
+      btn.innerHTML = `${lucideIcon('check', 14)} ${esc(t('schema.copied'))}`;
+      setTimeout(() => { btn.innerHTML = `${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}`; }, 2000);
+    } catch { showToast(t('schema.copy_fallback')); }
+  });
+
+  // Wire check button: after migration, RLS blocks the read → success
+  document.getElementById('preAuthMigrationCheckBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('preAuthMigrationCheckBtn');
+    btn.disabled = true;
+    btn.innerHTML = `${lucideIcon('loader', 14)} ${esc(t('common.loading'))}`;
+    try {
+      const { data, error } = await rawAdapter
+        .from('settings').select('value').eq('key', 'schema_version').maybeSingle();
+      if (error || !data) {
+        // RLS is now blocking the read → migration worked → show auth
+        btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.pre_auth_success'))}`;
+        btn.classList.add('migration-check-ok');
+        setTimeout(() => {
+          overlay.remove();
+          showAuthPrompt(rawAdapter, url, key);
+        }, 1200);
+      } else {
+        const ver = data.value || '0.00';
+        if (cmpVer(ver, '1.484') >= 0) {
+          // Version readable and >= 1.484 — unusual but proceed to auth
+          btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.check_success', { ver }))}`;
+          btn.classList.add('migration-check-ok');
+          setTimeout(() => {
+            overlay.remove();
+            showAuthPrompt(rawAdapter, url, key);
+          }, 1200);
+        } else {
+          // Still old
+          btn.innerHTML = `${lucideIcon('alert-triangle', 14)} ${esc(t('schema.check_still_old', { ver }))}`;
+          btn.classList.add('migration-check-fail');
+          setTimeout(() => {
+            btn.classList.remove('migration-check-fail');
+            btn.disabled = false;
+            btn.innerHTML = `${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}`;
+          }, 3000);
+        }
+      }
+    } catch {
+      // Error likely means RLS is active → migration worked
+      btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.pre_auth_success'))}`;
+      btn.classList.add('migration-check-ok');
+      setTimeout(() => {
+        overlay.remove();
+        showAuthPrompt(rawAdapter, url, key);
+      }, 1200);
+    }
+  });
+}
+
 
 function showCompareModal() {
   document.getElementById('compareModal')?.remove();
@@ -2448,15 +3589,15 @@ function showCompareModal() {
   const cross = '<span class="compare-cross"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
 
   const rows = [
-    { key: 'compare.setup', vals: ['compare.setup_drive', 'compare.setup_supa', 'compare.setup_local'] },
-    { key: 'compare.multi_device', vals: [check + ' ' + esc(t('compare.polling')), check + ' ' + esc(t('compare.live')), cross], raw: true },
-    { key: 'compare.offline', vals: [cross, cross, check], raw: true },
-    { key: 'compare.data_location', vals: ['compare.loc_drive', 'compare.loc_supa', 'compare.loc_local'] },
-    { key: 'compare.storage', vals: ['compare.sto_drive', 'compare.sto_supa', 'compare.sto_local'] },
-    { key: 'compare.cost', vals: ['compare.free', 'compare.free', 'compare.free'] },
+    { key: 'compare.setup', vals: ['compare.setup_drive', 'compare.setup_local'] },
+    { key: 'compare.multi_device', vals: [check + ' ' + esc(t('compare.polling')), cross], raw: true },
+    { key: 'compare.offline', vals: [cross, check], raw: true },
+    { key: 'compare.data_location', vals: ['compare.loc_drive', 'compare.loc_local'] },
+    { key: 'compare.storage', vals: ['compare.sto_drive', 'compare.sto_local'] },
+    { key: 'compare.cost', vals: ['compare.free', 'compare.free'] },
   ];
 
-  const backends = ['googledrive', 'supabase', 'local'];
+  const backends = ['googledrive', 'local'];
   const thead = `<tr><th></th>${backends.map(b =>
     `<th class="compare-th-${b}"><span class="compare-th-inner">${LOGOS[b](16)}${esc(LABELS[b])}</span></th>`
   ).join('')}</tr>`;
@@ -2472,7 +3613,7 @@ function showCompareModal() {
       <table class="compare-table">${thead}${tbody}</table>
     </div>
     <p class="compare-footnote">${esc(t('compare.storage_note'))}</p>
-    <button class="compare-close-btn" onclick="closeCompareModal()">${esc(t('schema.close'))}</button>
+    <button class="compare-close-btn" data-action="close-compare-modal">${esc(t('schema.close'))}</button>
   </div>`;
   document.body.appendChild(overlay);
 }
@@ -2501,7 +3642,7 @@ function showSignupOverlay() {
 
   const compareLink = document.createElement('a');
   compareLink.className = 'backend-compare-link';
-  compareLink.href = 'javascript:void(0)';
+  compareLink.href = '#';;
   compareLink.textContent = t('compare.link');
   compareLink.addEventListener('click', showCompareModal);
 
@@ -2637,6 +3778,11 @@ function showSignupOverlay() {
     if (activeMode !== 'googledrive') {
       const url = urlInput.value.trim();
       const key = keyInput.value.trim();
+      // sec: reject service_role even here
+      if (activeMode === 'supabase' && key && (getSupabaseKeyRole(key)==='service_role' || key.startsWith('sb_secret_'))) {
+        showToast(t('login.err_service_role'), 'error');
+        return;
+      }
       if (url) saveStayConnectedCreds(url, key, activeMode);
     }
     // Store chosen mode so the gate can pre-select it
@@ -2655,9 +3801,11 @@ function showSignupOverlay() {
 
   const guideLink = document.createElement('a');
   guideLink.className = 'gate-guide-link';
-  guideLink.href = 'javascript:void(0)';
+  guideLink.href = '#';
+  guideLink.style.display = 'none';
   guideLink.textContent = t('setup.guide_link');
-  guideLink.addEventListener('click', () => {
+  guideLink.addEventListener('click', (e) => {
+    e.preventDefault();
     closeSignupOverlay();
     clearStayConnectedCreds();
     location.hash = '#setup';
@@ -2970,16 +4118,23 @@ window.toggleNvidiaUsageDetail = toggleNvidiaUsageDetail;
 // ── Data Backup & Restore ──
 
 const BACKUP_TABLES = [
-  // parent tables first (import order matters for FK)
+  // category / deck parents first (items FK into these)
+  'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
+  // parent tables
   'projects', 'habits', 'texts', 'lists',
   // child / independent tables
   'todos', 'tasks', 'habit_completions', 'flashcards', 'flashcard_notes',
   'text_line_progress', 'birthdays', 'vestiaire', 'list_items',
   'settings', 'prompts', 'nvidia_usage', 'daily_visits',
+  // sharing: owned groups (creator side) — FK order: groups → members → items
+  'sharing_groups', 'sharing_members', 'sharing_items',
+  // sharing: joined groups (joiner side) + agent access
+  'joined_groups', 'agent_grants',
 ];
 
 async function generateBackupJSON() {
   const backup = { _meta: { version: 1, exported_at: new Date().toISOString(), tables: [] } };
+  if (state.supabaseUrl) backup._meta.source_url = state.supabaseUrl;
   for (const table of BACKUP_TABLES) {
     try {
       backup[table] = await fetchAll(() => state.db.from(table).select('*'));
@@ -2990,7 +4145,7 @@ async function generateBackupJSON() {
 }
 
 async function exportBackup() {
-  const btn = document.querySelector('.settings-data-btn[onclick="exportBackup()"]');
+  const btn = document.querySelector('.settings-data-btn[data-action="export-backup"]');
   if (btn) btn.disabled = true;
   try {
     const backup = await generateBackupJSON();
@@ -3011,7 +4166,6 @@ async function exportBackup() {
 }
 
 const GOOGLE_CLIENT_ID = '883846698493-5v6hfn0vvnq7mn5gua454cgvibbgqt8i.apps.googleusercontent.com';
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 function getGoogleAccessToken() {
   return new Promise((resolve, reject) => {
@@ -3021,7 +4175,7 @@ function getGoogleAccessToken() {
     }
     const client = google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
-      scope: DRIVE_SCOPE,
+      scope: DRIVE_SCOPE_FILE,
       callback: (resp) => {
         if (resp.error) reject(new Error(resp.error));
         else resolve(resp.access_token);
@@ -3079,7 +4233,7 @@ async function getOrCreateDriveFolder(token) {
 }
 
 async function exportToGoogleDrive() {
-  const btn = document.querySelector('.settings-data-btn[onclick="exportToGoogleDrive()"]');
+  const btn = document.querySelector('.settings-data-btn[data-action="export-to-drive"]');
   const label = document.getElementById('settingsDriveExportBtn');
   if (btn) btn.disabled = true;
   if (label) label.textContent = 'Authenticating…';
@@ -3121,7 +4275,20 @@ async function exportToGoogleDrive() {
     // Show link to folder
     const linkEl = document.getElementById('driveBackupLink');
     if (linkEl) {
-      linkEl.innerHTML = `${lucideIcon('external-link', 14, 'var(--accent)')} <a href="https://drive.google.com/drive/folders/${folderId}" target="_blank" rel="noopener">Open ${DRIVE_FOLDER_NAME}</a>`;
+      // Safe DOM — validate folderId (P0 sec-002)
+      const safeFid = /^[\w-]+$/.test(folderId) ? folderId : '';
+      const safeHref = safeFid ? `https://drive.google.com/drive/folders/${safeFid}` : 'https://drive.google.com';
+      linkEl.textContent = '';
+      const iconSpan = document.createElement('span');
+      iconSpan.innerHTML = lucideIcon('external-link', 14, 'var(--accent)');
+      linkEl.appendChild(iconSpan);
+      linkEl.appendChild(document.createTextNode(' '));
+      const a = document.createElement('a');
+      a.href = safeHref;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = `Open ${DRIVE_FOLDER_NAME}`;
+      linkEl.appendChild(a);
       linkEl.style.display = '';
     }
   } catch (e) {
@@ -3145,26 +4312,26 @@ function importBackup() {
   const input = document.getElementById('backupFileInput');
   if (!input) return;
   input.value = '';
-  input.onchange = async () => {
+  input.addEventListener('change', async () => {
     const file = input.files[0];
     if (!file) return;
-    showDeleteConfirm(
+    showConfirmAction(
       t('menu.settings_restore'),
       t('menu.settings_restore_confirm'),
       () => performImport(file),
       null,
       {
         btnText: t('menu.settings_restore') || 'Restore',
-        iconSvg: '<svg class="delete-confirm-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+        iconSvg: '<svg class="confirm-action-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
         btnIconSvg: '<svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
       }
     );
-  };
+  }, { once: true });
   input.click();
 }
 
 async function performImport(file) {
-  const btn = document.querySelector('.settings-data-btn[onclick="importBackup()"]');
+  const btn = document.querySelector('.settings-data-btn[data-action="import-backup"]');
   if (btn) btn.disabled = true;
 
   const progressEl = document.getElementById('importProgress');
@@ -3184,19 +4351,62 @@ async function performImport(file) {
       showToast(t('menu.settings_restore_invalid'));
       return;
     }
+    // ── Snapshot calendar settings BEFORE any table is touched ──
+    // The backup's own calendar keys are meaningless in this account, so we
+    // always re-inject the pre-import values after reseed.
+    const CAL_KEYS = ['gcal_sync_enabled', 'gcal_calendar_id',
+      'gcal_sync_habits', 'gcal_sync_todos', 'gcal_sync_birthdays'];
+    const savedCalSettings = {};
+    if (state.driveMode) {
+      for (const k of CAL_KEYS) {
+        const { data } = await state.db.from('settings').select('value').eq('key', k).single();
+        if (data?.value != null) savedCalSettings[k] = data.value;
+      }
+    }
+
+    // ── Clear existing calendar events BEFORE the delete loop wipes
+    //    gcal_sync records and settings from the in-memory store. ──
+    const syncWasEnabled = savedCalSettings.gcal_sync_enabled === 'true';
+    if (syncWasEnabled && savedCalSettings.gcal_calendar_id) {
+      for (const itemType of ['todo', 'habit', 'birthday']) {
+        try { await deleteTypeEvents(itemType); } catch (_) { /* best effort */ }
+      }
+    }
+
     // Delete in reverse order (children before parents)
     const tables = [...(backup._meta.tables || [])].reverse();
+    const CATEGORY_TABLES = new Set(['todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks']);
+    const PROTECTED_IDS = new Set([
+      '_default_todo_cat', '_shared_todo_cat',
+      '_default_habit_cat', '_shared_habit_cat',
+      '_default_vest_cat', '_shared_vest_cat',
+      '_default_deck', '_shared_deck',
+    ]);
     const totalSteps = tables.length + (backup._meta.tables || []).length;
     let step = 0;
     for (const table of tables) {
       showProgress(t('menu.settings_restore_clearing', table), ++step, totalSteps);
       try {
-        const pk = (table === 'settings' || table === 'prompts') ? 'key' : 'id';
-        await state.db.from(table).delete().neq(pk, '___nonexistent___');
+        const pk = (table === 'settings' || table === 'prompts') ? 'key'
+          : table === 'sharing_items' ? 'item_id'
+          : table === 'sharing_members' ? 'member_id'
+          : 'id';
+        if (CATEGORY_TABLES.has(table)) {
+          // Delete non-protected rows individually — bulk delete would be blocked
+          // by the protect trigger when it hits a protected row (rolls back entire statement)
+          const { data: rows } = await state.db.from(table).select('id,is_protected');
+          for (const row of (rows || [])) {
+            if (row.is_protected) continue;
+            try { await state.db.from(table).delete().eq('id', row.id); } catch {}
+          }
+        } else {
+          await state.db.from(table).delete().neq(pk, '___nonexistent___');
+        }
       } catch (e) { console.warn(`Could not clear ${table}:`, e.message); }
     }
     // Insert in forward order (parents before children)
     const importOrder = backup._meta.tables || [];
+    const newUid = state.authUser?.id || null; // for sharing_groups.auth_owner_id rewrite
     let totalRows = 0;
     for (const table of importOrder) {
       showProgress(t('menu.settings_restore_restoring', table), ++step, totalSteps);
@@ -3204,15 +4414,58 @@ async function performImport(file) {
       if (!rows || !rows.length) continue;
       try {
         for (let i = 0; i < rows.length; i += 100) {
-          const batch = rows.slice(i, i + 100);
+          const batch = rows.slice(i, i + 100)
+            .filter(r => !PROTECTED_IDS.has(r.id))        // skip protected defaults (already exist)
+            .map(r => {
+              const { owner_id, ...rest } = r;            // strip owner_id — trigger stamps new uid
+              // sharing_groups uses auth_owner_id instead of owner_id (no trigger)
+              if (table === 'sharing_groups' && rest.auth_owner_id != null && newUid) {
+                rest.auth_owner_id = newUid;
+              }
+              // sharing_members: rewrite creator's auth_user_id to new uid
+              if (table === 'sharing_members' && rest.role === 'creator' && rest.auth_user_id != null && newUid) {
+                rest.auth_user_id = newUid;
+              }
+              return rest;
+            });
+          if (!batch.length) continue;
           const { error } = await state.db.from(table).insert(batch);
           if (error) { console.warn(`Insert into ${table} batch ${i}:`, error.message); }
         }
         totalRows += rows.length;
       } catch (e) { console.warn(`Failed to restore ${table}:`, e.message); }
     }
+    // Validate shared items: clear stale group refs if sharing is connected
+    let sharedCleaned = 0;
+    if (state.sharing?.isReady()) {
+      showProgress(t('menu.settings_restore_sharing'), step, totalSteps);
+      const validGroupIds = new Set(state.sharing.getAllGroups().map(g => g.id));
+      const sharedTables = ['todos', 'habits', 'list_items'];
+      for (const table of sharedTables) {
+        try {
+          const { data: rows } = await state.db.from(table).select('id,shared_group_id');
+          if (!rows) continue;
+          for (const row of rows) {
+            if (row.shared_group_id && !validGroupIds.has(row.shared_group_id)) {
+              await state.db.from(table).update({ shared_id: null, shared_group_id: null }).eq('id', row.id);
+              sharedCleaned++;
+            }
+          }
+        } catch (e) { console.warn(`Shared cleanup for ${table}:`, e.message); }
+      }
+    }
     hideProgress();
     showToast(t('menu.settings_restore_done', totalRows));
+    if (sharedCleaned > 0) {
+      showToast(t('menu.settings_restore_shared_cleaned', sharedCleaned), 'info');
+    }
+    // Notify owner if sharing groups were migrated to a different Supabase project
+    const hasSharingGroups = backup.sharing_groups && backup.sharing_groups.length > 0;
+    const urlChanged = backup._meta.source_url && state.supabaseUrl
+      && backup._meta.source_url.replace(/\/+$/, '') !== state.supabaseUrl.replace(/\/+$/, '');
+    if (hasSharingGroups && urlChanged) {
+      showToast(t('menu.settings_restore_reshare_hint'), 'info', 8000);
+    }
     // In demo/drive mode, reseed the in-memory adapter instead of reloading
     // (reload would re-create the adapter with default/empty data)
     const inMemAdapter = (state.demoMode && state.demoAdapter) ? state.demoAdapter
@@ -3223,7 +4476,26 @@ async function performImport(file) {
         reseedData[table] = backup[table] || [];
       }
       inMemAdapter.reseed(reseedData);
+
+      // Run pending migrations if the backup's schema is behind the app
+      if (inMemAdapter.runPendingMigrations) {
+        const migrated = await inMemAdapter.runPendingMigrations();
+        if (migrated > 0) {
+          showToast(t('menu.settings_restore_migrated', migrated), 'info');
+        }
+      }
       setDemoCategoriesFromData(reseedData);
+
+      // Re-inject saved calendar settings over whatever the backup had
+      if (state.driveMode && Object.keys(savedCalSettings).length > 0) {
+        const now = new Date().toISOString();
+        for (const [k, v] of Object.entries(savedCalSettings)) {
+          await state.db.from('settings').upsert(
+            { key: k, value: v, updated_at: now },
+            { onConflict: 'key' }
+          );
+        }
+      }
       await loadProjects();
       buildProjectCards();
       initProjectDragDrop();
@@ -3237,6 +4509,11 @@ async function performImport(file) {
       await refreshFlashcards();
       await refreshLists();
       refreshWelcome();
+      // Reconcile calendar AFTER refreshes so state.allHabits / state.allBirthdays
+      // are populated (syncTable reads them from state, not from the DB).
+      if (syncWasEnabled) {
+        await reconcileCalendar();
+      }
       closeSettings();
     } else {
       // Reload to reflect new data
@@ -3332,7 +4609,7 @@ function toggleNvidiaUsageDetail() {
 // ===================================================================
 // currentView is in state
 
-function switchView(view) {
+function switchView(view, skipHash) {
   // Animate header logo on page transition
   const headerLogo = document.querySelector('.header-logo');
   if (headerLogo && view !== state.currentView) {
@@ -3346,8 +4623,10 @@ function switchView(view) {
   state.currentView = view;
   localStorage.setItem(CURRENT_VIEW_KEY, view);
   // Sync URL hash (no reload)
-  const newHash = '#' + view;
-  if (location.hash !== newHash) history.replaceState(null, '', newHash);
+  if (!skipHash) {
+    const newHash = '#' + view;
+    if (location.hash !== newHash) history.replaceState(null, '', newHash);
+  }
   const welcomeView = document.getElementById('welcomeView');
   const projectsView = document.getElementById('projectsView');
   const todosView = document.getElementById('todosView');
@@ -3421,6 +4700,8 @@ function switchView(view) {
   // Scroll active tab into view on mobile (horizontal carousel)
   const activeTab = document.querySelector('.view-tab.active');
   if (activeTab) activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+
+  updateViewFooterStats();
 }
 
 // ===================================================================
@@ -3477,8 +4758,6 @@ function updateViewFooterStats() {
 // ===================================================================
 // LAST UPDATED LABEL
 // ===================================================================
-let _lastUpdatedAt = null;
-let _lastUpdatedTimer = null;
 
 function markLastUpdated() {
   _lastUpdatedAt = Date.now();
@@ -3493,13 +4772,37 @@ function renderLastUpdated() {
   const el = document.getElementById('lastUpdatedLabel');
   if (!el || !_lastUpdatedAt) return;
   const secs = Math.round((Date.now() - _lastUpdatedAt) / 1000);
-  let label;
-  if (secs < 5) label = 'just now';
-  else if (secs < 60) label = `${secs}s ago`;
-  else if (secs < 3600) label = `${Math.floor(secs / 60)}m ago`;
-  else label = `${Math.floor(secs / 3600)}h ago`;
-  el.textContent = `Updated ${label}`;
+  let text;
+  if (secs < 5) text = t('utils.updated_just_now');
+  else if (secs < 60) text = t('utils.updated_s_ago', secs);
+  else if (secs < 3600) text = t('utils.updated_m_ago', Math.floor(secs / 60));
+  else text = t('utils.updated_h_ago', Math.floor(secs / 3600));
+  el.textContent = text;
 }
+
+// ===================================================================
+// STALE-TAB REFRESH — re-fetch data when returning to a hidden tab
+// ===================================================================
+const STALE_TAB_MS = 2 * 60 * 1000; // 2 minutes
+
+const _viewRefreshMap = {
+  welcome:    () => refreshWelcome().then(() => { renderWelcome(); markLastUpdated(); }),
+  projects:   () => refreshAll().then(() => markLastUpdated()),
+  todos:      () => refreshTodos().then(() => { renderTodos(); markLastUpdated(); }),
+  habits:     () => refreshHabits().then(() => { renderHabits(); markLastUpdated(); }),
+  birthdays:  () => refreshBirthdays().then(() => { renderBirthdays(); markLastUpdated(); }),
+  vestiaire:  () => refreshVestiaire().then(() => { renderVestiaire(); markLastUpdated(); }),
+  flashcards: () => refreshFlashcards().then(() => markLastUpdated()),
+  lists:      () => refreshLists().then(() => { renderLists(); markLastUpdated(); }),
+};
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !state.db?.connected) return;
+  const staleSince = _lastUpdatedAt ? Date.now() - _lastUpdatedAt : Infinity;
+  if (staleSince < STALE_TAB_MS) return;
+  const fn = _viewRefreshMap[state.currentView];
+  if (fn) fn();
+});
 
 // ===================================================================
 // SEARCH TOGGLE — collapsible search input
@@ -3515,7 +4818,7 @@ function toggleSearch(btn) {
       if (!input.value.trim()) {
         wrapper.classList.remove('expanded');
         input.value = '';
-        input.dispatchEvent(new Event('input'));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
       }
     });
   }
@@ -3544,17 +4847,311 @@ document.addEventListener('keydown', e => {
 });
 
 window.switchView = switchView;
+
+// ===================================================================
+// DEEP-LINK NAVIGATION
+// ===================================================================
+function navigateToItem(type, id) {
+  const view = DEEP_LINK_TYPE_MAP[type];
+  if (!view) { showToast(t('common.item_not_found'), 'error'); return; }
+
+  if (state.currentView !== view) {
+    switchView(view);
+  }
+  let attempts = 0;
+  const maxAttempts = 3;
+  const tryFind = () => {
+    attempts++;
+    const el = findItemElement(type, id);
+    if (el) {
+      expandParentIfNeeded(type, id, el);
+      highlightItem(el);
+    } else if (attempts < maxAttempts) {
+      setTimeout(tryFind, 150);
+    } else {
+      showToast(t('common.item_not_found'), 'error');
+    }
+  };
+  requestAnimationFrame(() => setTimeout(tryFind, 150));
+}
+
+function findItemElement(type, id) {
+  const eid = CSS.escape(id);
+  const selectors = {
+    todo: `[data-todo-id="${eid}"]`,
+    habit: `[data-habit-id="${eid}"]`,
+    project: `[data-project="${eid}"]`,
+    task: `[data-task-id="${eid}"]`,
+    birthday: `.birthday-card[data-id="${eid}"]`,
+    vest: `[data-vest-id="${eid}"]`,
+    flashcard: `[data-card-id="${eid}"]`,
+    list: `[data-list-id="${eid}"]`,
+    listitem: `[data-item-id="${eid}"]`,
+  };
+  const sel = selectors[type];
+  return sel ? document.querySelector(sel) : null;
+}
+
+function expandParentIfNeeded(type, id, el) {
+  if (type === 'task') {
+    const archivedSection = el.closest('.archived-tasks');
+    if (archivedSection && archivedSection.style.display === 'none') {
+      const toggle = el.closest('.project-card')?.querySelector('.archive-toggle');
+      if (toggle) toggle.click();
+    }
+  }
+  const bucket = el.closest('.bucket-collapsed');
+  if (bucket) {
+    const header = bucket.querySelector('.bucket-header, .project-card-header');
+    if (header) header.click();
+  }
+}
+
+function handleStartupDeepLink() {
+  // Settings deep link on startup
+  if (location.hash === '#settings' || location.hash.startsWith('#settings/')) {
+    const pane = location.hash.split('/')[1] || 'general';
+    openSettings(pane);
+    return;
+  }
+  const deepLink = parseDeepLink(location.hash);
+  if (deepLink) {
+    navigateToItem(deepLink.type, deepLink.id);
+  }
+}
+
+// Delegated click handler for deep links in rendered markdown
+document.addEventListener('click', (e) => {
+  // Explicit deep links rendered by renderMd [text](#type/id)
+  const deepLink = e.target.closest('a.deep-link[data-deep-link]');
+  if (deepLink) {
+    e.preventDefault();
+    const val = deepLink.dataset.deepLink;
+    const parts = val.split('/');
+    if (parts.length === 2) {
+      const [type, id] = parts;
+      history.pushState(null, '', '#' + val);
+      navigateToItem(type, id);
+    }
+    return;
+  }
+  // Full-URL links that point back to this app with a deep-link hash
+  const anyLink = e.target.closest('a[href]');
+  if (anyLink) {
+    try {
+      const url = new URL(anyLink.href, location.href);
+      if (url.origin === location.origin && url.pathname === location.pathname && url.hash) {
+        const parsed = parseDeepLink(url.hash);
+        if (parsed) {
+          e.preventDefault();
+          history.pushState(null, '', url.hash);
+          navigateToItem(parsed.type, parsed.id);
+        }
+      }
+    } catch (_) { /* invalid URL, let browser handle */ }
+  }
+});
+
+window.navigateToItem = navigateToItem;
+
 function clearPageSearch(btn) {
   const input = btn.closest('.search-input-wrap').querySelector('.page-search');
   if (input) {
     input.value = '';
-    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
     input.focus();
   }
 }
 
 window.toggleTheme = toggleTheme;
 window.disconnect = disconnect;
+
+// ── Calendar sync settings ──
+
+async function updateCalSyncUI() {
+  const prefs = await getCalSyncPrefs();
+  const mainRow = document.querySelector('[data-action="toggle-cal-sync"]');
+  const subSettings = document.getElementById('calSyncSubSettings');
+  if (mainRow) mainRow.classList.toggle('checked', prefs.enabled);
+  if (subSettings) subSettings.style.display = prefs.enabled ? '' : 'none';
+  // Sub-toggles
+  const hRow = document.querySelector('[data-action="toggle-cal-sync-habits"]');
+  const tRow = document.querySelector('[data-action="toggle-cal-sync-todos"]');
+  const bRow = document.querySelector('[data-action="toggle-cal-sync-birthdays"]');
+  if (hRow) hRow.classList.toggle('checked', prefs.habits);
+  if (tRow) tRow.classList.toggle('checked', prefs.todos);
+  if (bRow) bRow.classList.toggle('checked', prefs.birthdays);
+  // Show calendar nav button only for Drive and Demo backends
+  const calNavBtn = document.getElementById('settingsNavCalendarBtn');
+  if (calNavBtn) calNavBtn.style.display = (state.demoMode || state.driveMode) ? '' : 'none';
+}
+
+let _calSyncBusy = false;
+
+function _calSyncProgressCb(progressEl, progressText, progressFill, msgKey, doneKey) {
+  return (ev) => {
+    if (!ev) return;
+    if (ev.done) {
+      if (progressText) progressText.textContent = t(`cal_sync.${doneKey}`);
+      if (progressFill) progressFill.style.width = '100%';
+      setTimeout(() => { if (progressEl) progressEl.style.display = 'none'; }, 1500);
+    } else {
+      const label = t(`cal_sync.${ev.type === 'habit' ? 'habits' : ev.type === 'todo' ? 'todos' : 'birthdays'}`);
+      if (progressText) progressText.textContent = t(`cal_sync.${msgKey}`, label);
+      if (progressFill && ev.total > 0) progressFill.style.width = `${Math.round(((ev.index + 0.5) / ev.total) * 100)}%`;
+    }
+  };
+}
+
+async function toggleCalSync() {
+  if (_calSyncBusy) return;
+  _calSyncBusy = true;
+  const row = document.querySelector('[data-action="toggle-cal-sync"]');
+  if (row) row.classList.add('is-pending');
+  const progressEl = document.getElementById('calSyncProgress');
+  const progressText = document.getElementById('calSyncProgressText');
+  const progressFill = document.getElementById('calSyncProgressFill');
+  try {
+    const prefs = await getCalSyncPrefs();
+    if (prefs.enabled) {
+      if (progressEl) progressEl.style.display = '';
+      if (progressFill) progressFill.style.width = '0%';
+      await disableCalSync({
+        onProgress: _calSyncProgressCb(progressEl, progressText, progressFill, 'removing_type', 'remove_complete'),
+      });
+      showToast(t('cal_sync.disabled'), 'success');
+    } else {
+      const calId = await enableCalSync();
+      if (!calId) return;
+      if (progressEl) progressEl.style.display = '';
+      if (progressFill) progressFill.style.width = '0%';
+      await updateCalSyncUI();
+      await reconcileCalendar(
+        _calSyncProgressCb(progressEl, progressText, progressFill, 'syncing_type', 'sync_complete'),
+      );
+      showToast(t('cal_sync.enabled'), 'success');
+    }
+    await updateCalSyncUI();
+  } finally {
+    _calSyncBusy = false;
+    if (row) row.classList.remove('is-pending');
+  }
+}
+
+async function toggleCalSyncSub(subKey) {
+  if (_calSyncBusy) return;
+  _calSyncBusy = true;
+  const row = document.querySelector(`[data-action="toggle-cal-sync-${subKey}"]`);
+  if (row) row.classList.add('is-pending');
+  const progressEl = document.getElementById('calSyncProgress');
+  const progressText = document.getElementById('calSyncProgressText');
+  const progressFill = document.getElementById('calSyncProgressFill');
+  try {
+    const settingKey = `gcal_sync_${subKey}`;
+    const { data } = await state.db.from('settings').select('value').eq('key', settingKey).single();
+    const current = data?.value !== 'false'; // defaults to true
+    const newVal = !current;
+    await state.db.from('settings').upsert(
+      { key: settingKey, value: newVal ? 'true' : 'false', updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
+    await updateCalSyncUI();
+    // subKey is 'habits', 'todos', or 'birthdays' → item type is singular
+    const itemType = subKey.replace(/s$/, ''); // 'habit', 'todo', 'birthday'
+    const label = t(`cal_sync.${subKey}`);
+    const msgKey = newVal ? 'syncing_type' : 'removing_type';
+    const doneKey = newVal ? 'sync_complete' : 'remove_complete';
+    if (progressEl) progressEl.style.display = '';
+    if (progressFill) progressFill.style.width = '40%'; // indeterminate pulse
+    if (progressText) progressText.textContent = t(`cal_sync.${msgKey}`, label);
+    if (!newVal) {
+      await deleteTypeEvents(itemType);
+    } else {
+      await pushCalType(itemType);
+    }
+    if (progressText) progressText.textContent = t(`cal_sync.${doneKey}`);
+    if (progressFill) progressFill.style.width = '100%';
+    setTimeout(() => { if (progressEl) progressEl.style.display = 'none'; }, 1500);
+  } finally {
+    _calSyncBusy = false;
+    if (row) row.classList.remove('is-pending');
+  }
+}
+
+window.toggleCalSync = toggleCalSync;
+window.toggleCalSyncSub = toggleCalSyncSub;
+window.markCategoryRenamed = markCategoryRenamed;
+
+// ── Delete account (Settings > Account > Danger Zone) ──
+
+(function initDeleteAccount() {
+  const btn = document.getElementById('deleteAccountBtn');
+  if (!btn) return;
+  // Hide in demo mode — no account to delete
+  if (state.demoMode) {
+    const pane = document.getElementById('settingsPane-account');
+    if (pane) pane.style.display = 'none';
+    const nav = document.querySelector('[data-pane="account"]');
+    if (nav) nav.style.display = 'none';
+    return;
+  }
+  btn.addEventListener('click', () => {
+    const lang = getLang();
+    const confirmWord = lang === 'fr' ? 'SUPPRIMER' : lang === 'es' ? 'ELIMINAR' : 'DELETE';
+    // Pick backend-specific message
+    const bodyKey = state.driveMode ? 'account.confirm_body_drive'
+      : state.supabaseUrl ? 'account.confirm_body_supabase'
+      : 'account.confirm_body_local';
+    showConfirmAction(
+      t('account.confirm_title'),
+      t(bodyKey),
+      async () => {
+        // Show progress inside the modal
+        const msgEl = document.getElementById('confirmActionMessage');
+        const detailEl = document.getElementById('confirmActionDetail');
+        const iconWrap = document.querySelector('.confirm-action-icon-wrap');
+        if (detailEl) detailEl.style.display = 'none';
+        if (iconWrap) iconWrap.innerHTML = '';
+
+        function setStep(text) {
+          if (msgEl) msgEl.textContent = text;
+        }
+
+        // 1. Calendar cleanup
+        try {
+          const prefs = await getCalSyncPrefs();
+          if (prefs?.enabled) {
+            setStep(t('account.step_calendar'));
+            await disableCalSync({ deleteCalendar: true });
+          }
+        } catch { /* best effort */ }
+
+        // 2. Delete data via adapter
+        setStep(t('account.step_data'));
+        const result = await (db.adapter?.deleteAccount?.() || { ok: false, error: 'Not supported' });
+        if (!result.ok) {
+          showToast(t('account.delete_failed'), 'error');
+          window.location.href = window.location.origin + window.location.pathname;
+          return;
+        }
+
+        // 3. Disconnect — tears down adapter, clears creds, reloads to gate
+        setStep(t('account.step_signout'));
+        await disconnect();
+      },
+      null,
+      {
+        keepOpen: true,
+        btnText: t('account.delete_btn'),
+        iconSvg: lucideIcon('alert-triangle', 32, '#ef4444'),
+        btnIconSvg: lucideIcon('trash-2', 16, '#fff'),
+        confirmWord,
+        confirmPlaceholder: t('account.confirm_placeholder'),
+      }
+    );
+  });
+})();
+
 window.toggleSearch = toggleSearch;
 window.clearPageSearch = clearPageSearch;
 window.dismissSchemaBanner = dismissSchemaBanner;
@@ -3563,6 +5160,8 @@ window.closeMigrationModal = closeMigrationModal;
 window.checkMigrationStatus = checkMigrationStatus;
 window.showCompareModal = showCompareModal;
 window.closeCompareModal = closeCompareModal;
+
+// CSP delegation for main handled in js/delegation.js — no per-module listeners
 
 // --- Environment badge + dev favicon ---
 (function() {

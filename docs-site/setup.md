@@ -18,38 +18,14 @@ The simplest persistent backend — no database, no API keys.
 
 1. Open [delaclaw.com](https://delaclaw.com) or serve `index.html` locally
 2. Select **Drive** in the backend picker and click **Connect with Google**
-3. Sign in with your Google account and grant the `drive.file` scope (lets DeLaClaw access only files it creates)
-4. DeLaClaw creates a `DeLaClaw/` folder in your Google Drive containing a single `delaclaw-data.json` file
+3. Sign in with your Google account and grant the `drive.file` scope (lets DeLaClaw access only files it creates). You may also be offered a `calendar.app.created` permission — this is optional and enables [Google Calendar sync](sync-architecture.md). You can decline it and enable it later from Settings
+4. DeLaClaw creates a `DeLaClaw/` folder in your Google Drive containing one JSON file per table (e.g. `todos.json`, `habits.json`, `settings.json`)
 
-All data loads into memory on connect and writes back to Drive with a 2-second debounce after each mutation. The JSON file is a plain export of all tables — you can download, inspect, or delete it from Drive at any time.
+All data loads into memory on connect and writes back to Drive with a 2-second debounce per table after each mutation. The JSON files are plain exports — you can download, inspect, or delete them from Drive at any time.
 
-## Supabase (cloud PostgreSQL)
+## Supabase (deprecated)
 
-### 1. Create a Supabase project
-
-Sign up at [supabase.com](https://supabase.com) and create a new project. Note your **Project URL** and **anon (public) key** from Settings > API.
-
-### 2. Create the database schema
-
-Open the **SQL Editor** in your Supabase dashboard.
-
-**New installs**: run `sql/supabase_schema.sql`. This is the complete current schema with all migrations folded in. It sets `schema_version` automatically.
-
-**Existing installs**: run any pending migrations in `migrations/` in order (files are named by target version, e.g. `1.099_enable_realtime.sql`). See `migrations/MIGRATION_GUIDE.md` for the full versioning system.
-
-### 3. Connect the app
-
-1. Open [delaclaw.com](https://delaclaw.com) (or serve `index.html` locally)
-2. Select **Supabase** on the login screen
-3. Enter your Project URL and anon key
-4. Optionally check "Stay connected" to persist credentials in the browser
-
-### Notes
-
-- Row Level Security (RLS) is enabled on all tables. The default policies allow all operations with the anon key. For multi-user setups, tighten the policies.
-- The app uses the Supabase JS client v2 loaded from CDN. No server-side code is needed.
-- Real-time subscriptions are enabled: changes from other tabs or devices appear automatically.
-- The app checks DB `schema_version` against the `VERSION` file and shows a banner if migrations are pending.
+> **Supabase backend support has been removed.** Existing users who connect with their Supabase credentials will be offered a one-click migration to Google Drive or a data backup download. The Supabase adapter and client library remain in the codebase temporarily to support this migration path. The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
 
 ## Local mode (Bun + SQLite)
 

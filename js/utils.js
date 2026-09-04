@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
-import { t } from './i18n.js';
-import state from './supabase.js';
+import { t, getLang } from './i18n.js';
+import state, { DEFAULT_CATEGORY_PALETTE } from './state.js';
 import { APP_VERSION } from './version.js';
 
 // ===================================================================
@@ -8,7 +8,49 @@ import { APP_VERSION } from './version.js';
 // ===================================================================
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML.replace(/"/g, '\x26quot;'); }
 function escQ(s) { return esc(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
-function linkify(html) { return html.replace(/https?:\/\/[^\s<&]+/g, url => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`); }
+
+// ── Supabase key role detection (sec: reject service_role / sb_secret_ in localStorage) ──
+function getSupabaseKeyRole(key){
+  if(!key) return null;
+  const k = key.trim();
+  if(k.startsWith('sb_secret_')) return 'service_role';
+  if(k.startsWith('sb_publishable_')) return 'anon';
+  // legacy JWT: eyJ...
+  const parts = k.split('.');
+  if(parts.length===3){
+    try{
+      const b64 = parts[1].replace(/-/g,'+').replace(/_/g,'/');
+      const padded = b64 + '='.repeat((4 - b64.length % 4) % 4);
+      const json = JSON.parse(atob(padded));
+      return json.role || null;
+    }catch{ return null; }
+  }
+  return null;
+}
+
+function isServiceRoleKey(key){
+  const role = getSupabaseKeyRole(key);
+  return role==='service_role' || (key||'').trim().startsWith('sb_secret_');
+}
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
+    return true;
+  }
+  const ak = Object.keys(a), bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  for (const k of ak) {
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+    if (!deepEqual(a[k], b[k])) return false;
+  }
+  return true;
+}
 
 /** Lightweight markdown renderer: escapes HTML first, then applies markdown formatting */
 function renderMd(text) {
@@ -25,6 +67,11 @@ function renderMd(text) {
   // Links [text](url) — supports https://, http://, and www. prefixes
   html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   html = html.replace(/\[([^\]]+)\]\((www\.[^\s)]+)\)/g, '<a href="https://$2" target="_blank" rel="noopener">$1</a>');
+  // Internal deep links [text](#type/id)
+  html = html.replace(/\[([^\]]+)\]\(#((?:todo|habit|project|task|birthday|vest|flashcard|list|listitem)\/[\w-]+)\)/g, (_, text, ref) => {
+    if (!parseDeepLink('#' + ref)) return `[${text}](#${ref})`;
+    return `<a href="#${ref}" class="deep-link" data-deep-link="${ref}">${text}</a>`;
+  });
   // Bare URLs (not already in an <a> tag)
   html = html.replace(/(?<!href="|">)(https?:\/\/[^\s<&]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
   html = html.replace(/(?<!href="|"|\/)(www\.[^\s<&]+)/g, '<a href="https://$1" target="_blank" rel="noopener">$1</a>');
@@ -115,11 +162,11 @@ function buildTable(tableLines) {
   return tableHtml;
 }
 
-function showToast(msg, type = 'info') {
+function showToast(msg, type = 'info', duration = 2500) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = `toast show ${type}`;
-  setTimeout(() => t.className = 'toast', 2500);
+  setTimeout(() => t.className = 'toast', duration);
 }
 
 
@@ -129,23 +176,41 @@ function showToast(msg, type = 'info') {
 // DELETE CONFIRMATION MODAL
 // ===================================================================
 // ===================================================================
-let _deleteConfirmCallback = null;
+let _confirmActionCallback = null;
+let _confirmCancelCallback = null;
+let _confirmActionKeepOpen = false;
+let _confirmActionLocked = false;
 
-function showDeleteConfirm(title, message, onConfirm, detail, opts) {
-  document.getElementById('deleteConfirmTitle').textContent = title;
-  document.getElementById('deleteConfirmMessage').textContent = message;
-  const detailEl = document.getElementById('deleteConfirmDetail');
+function showConfirmAction(title, message, onConfirm, detail, opts) {
+  document.getElementById('confirmActionTitle').textContent = title;
+  document.getElementById('confirmActionMessage').textContent = message;
+  const detailEl = document.getElementById('confirmActionDetail');
   if (detail) {
-    detailEl.textContent = detail;
+    if (opts?.detailHtml) {
+      detailEl.innerHTML = detail;
+    } else {
+      detailEl.textContent = detail;
+    }
     detailEl.style.display = 'block';
   } else {
     detailEl.style.display = 'none';
   }
+  // Toggle checkbox (optional)
+  const toggleWrap = document.getElementById('confirmActionToggle');
+  const toggleInput = document.getElementById('confirmActionToggleInput');
+  const toggleLabel = document.getElementById('confirmActionToggleLabel');
+  if (opts?.toggleLabel) {
+    toggleLabel.textContent = opts.toggleLabel;
+    toggleInput.checked = opts.toggleChecked !== false; // default true
+    toggleWrap.style.display = '';
+  } else {
+    toggleWrap.style.display = 'none';
+  }
   // Custom confirm button text (default: Delete)
-  const btnTextEl = document.getElementById('deleteConfirmBtnText');
+  const btnTextEl = document.getElementById('confirmActionBtnText');
   if (btnTextEl) btnTextEl.textContent = opts?.btnText || 'Delete';
   // Custom icon (swap trash SVG for another Lucide icon)
-  const iconWrap = document.querySelector('.delete-confirm-icon-wrap');
+  const iconWrap = document.querySelector('.confirm-action-icon-wrap');
   if (iconWrap) {
     if (opts?.iconSvg) {
       iconWrap.dataset.originalHtml = iconWrap.innerHTML;
@@ -153,7 +218,7 @@ function showDeleteConfirm(title, message, onConfirm, detail, opts) {
     }
   }
   // Custom button icon (swap trash SVG on the action button)
-  const btnEl = document.getElementById('deleteConfirmBtn');
+  const btnEl = document.getElementById('confirmActionBtn');
   if (btnEl) {
     const btnSvg = btnEl.querySelector('svg');
     if (opts?.btnIconSvg && btnSvg) {
@@ -161,24 +226,75 @@ function showDeleteConfirm(title, message, onConfirm, detail, opts) {
       btnSvg.outerHTML = opts.btnIconSvg;
     }
   }
-  _deleteConfirmCallback = onConfirm;
-  document.getElementById('deleteConfirmModal').classList.add('visible');
+  // Translate Cancel button (allow custom label via opts)
+  const cancelBtn = document.getElementById('confirmActionCancelBtn');
+  if (cancelBtn) cancelBtn.textContent = opts?.cancelLabel || t('common.cancel');
+  // Variant: 'neutral' uses accent color instead of red
+  const modal = document.querySelector('.confirm-action-modal');
+  if (modal) {
+    modal.classList.toggle('confirm-neutral', opts?.variant === 'neutral');
+  }
+  // Confirm word (type "DELETE" to confirm)
+  const confirmWordWrap = document.getElementById('confirmWordWrap');
+  const confirmWordInput = document.getElementById('confirmWordInput');
+  if (opts?.confirmWord && confirmWordWrap && confirmWordInput) {
+    confirmWordInput.value = '';
+    confirmWordInput.placeholder = opts.confirmPlaceholder || `Type ${opts.confirmWord} to confirm`;
+    confirmWordWrap.style.display = '';
+    // Disable confirm button until word matches
+    const btn = document.getElementById('confirmActionBtn');
+    if (btn) btn.disabled = true;
+    confirmWordInput._handler = () => {
+      if (btn) btn.disabled = confirmWordInput.value.trim() !== opts.confirmWord;
+    };
+    confirmWordInput.addEventListener('input', confirmWordInput._handler);
+  } else if (confirmWordWrap) {
+    confirmWordWrap.style.display = 'none';
+  }
+  _confirmActionCallback = onConfirm;
+  _confirmActionKeepOpen = !!opts?.keepOpen;
+  _confirmCancelCallback = opts?.onCancel || null;
+  document.getElementById('confirmActionModal').classList.add('visible');
 }
 
-function closeDeleteConfirm() {
-  document.getElementById('deleteConfirmModal').classList.remove('visible');
-  _deleteConfirmCallback = null;
+function closeConfirmAction() {
+  if (_confirmActionLocked) return; // deletion in progress
+  document.getElementById('confirmActionModal').classList.remove('visible');
+  const cancelCb = _confirmCancelCallback;
+  _confirmActionCallback = null;
+  _confirmCancelCallback = null;
+  _confirmActionKeepOpen = false;
+  if (cancelCb) try { cancelCb(); } catch {}
+  // Reset variant
+  const modal = document.querySelector('.confirm-action-modal');
+  if (modal) modal.classList.remove('confirm-neutral');
+  // Reset toggle
+  const toggleWrap = document.getElementById('confirmActionToggle');
+  if (toggleWrap) toggleWrap.style.display = 'none';
+  // Reset confirm word input
+  const confirmWordWrap = document.getElementById('confirmWordWrap');
+  const confirmWordInput = document.getElementById('confirmWordInput');
+  if (confirmWordWrap) confirmWordWrap.style.display = 'none';
+  if (confirmWordInput) {
+    if (confirmWordInput._handler) {
+      confirmWordInput.removeEventListener('input', confirmWordInput._handler);
+      delete confirmWordInput._handler;
+    }
+    confirmWordInput.value = '';
+  }
+  const confirmBtn = document.getElementById('confirmActionBtn');
+  if (confirmBtn) confirmBtn.disabled = false;
   // Reset custom button text
-  const btnTextEl = document.getElementById('deleteConfirmBtnText');
+  const btnTextEl = document.getElementById('confirmActionBtnText');
   if (btnTextEl) btnTextEl.textContent = 'Delete';
   // Reset custom icon if it was changed
-  const iconWrap = document.querySelector('.delete-confirm-icon-wrap');
+  const iconWrap = document.querySelector('.confirm-action-icon-wrap');
   if (iconWrap && iconWrap.dataset.originalHtml) {
     iconWrap.innerHTML = iconWrap.dataset.originalHtml;
     delete iconWrap.dataset.originalHtml;
   }
   // Reset custom button icon if it was changed
-  const btnEl = document.getElementById('deleteConfirmBtn');
+  const btnEl = document.getElementById('confirmActionBtn');
   if (btnEl && btnEl.dataset.originalBtnSvg) {
     const curSvg = btnEl.querySelector('svg');
     if (curSvg) curSvg.outerHTML = btnEl.dataset.originalBtnSvg;
@@ -186,11 +302,33 @@ function closeDeleteConfirm() {
   }
 }
 
-async function executeDeleteConfirm() {
-  if (_deleteConfirmCallback) {
-    const cb = _deleteConfirmCallback;
-    closeDeleteConfirm();
-    await cb();
+async function executeConfirmAction() {
+  if (_confirmActionCallback) {
+    const cb = _confirmActionCallback;
+    const keepOpen = _confirmActionKeepOpen;
+    const toggleInput = document.getElementById('confirmActionToggleInput');
+    const toggleChecked = toggleInput ? toggleInput.checked : false;
+    _confirmCancelCallback = null; // confirm path — do not fire cancel
+    if (keepOpen) {
+      // Lock modal open for progress display (e.g. account deletion)
+      _confirmActionLocked = true;
+      const btn = document.getElementById('confirmActionBtn');
+      const cancelBtn = document.getElementById('confirmActionCancelBtn');
+      if (btn) btn.style.display = 'none';
+      if (cancelBtn) cancelBtn.style.display = 'none';
+      const wordWrap = document.getElementById('confirmWordWrap');
+      if (wordWrap) wordWrap.style.display = 'none';
+      _confirmActionCallback = null;
+      _confirmActionKeepOpen = false;
+      try {
+        await cb(toggleChecked);
+      } finally {
+        _confirmActionLocked = false;
+      }
+    } else {
+      closeConfirmAction();
+      await cb(toggleChecked);
+    }
   }
 }
 
@@ -202,7 +340,7 @@ document.addEventListener('click', e => {
   if (e.target.id === 'promptEditorModal') closePromptEditor();
   if (e.target.id === 'projectPromptModal') closeProjectPrompt();
   if (e.target.id === 'snoozeModal') closeSnoozeModal();
-  if (e.target.id === 'deleteConfirmModal') closeDeleteConfirm();
+  if (e.target.id === 'confirmActionModal') closeConfirmAction();
   if (e.target.id === 'addCategoryModal') closeAddCategoryModal();
   if (e.target.id === 'addVestiaireModal') closeAddVestiaireModal();
   if (e.target.id === 'editVestiaireModal') closeEditVestiaireModal();
@@ -217,7 +355,7 @@ document.addEventListener('click', e => {
   if (e.target.id === 'editListModal') closeEditListModal();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeAddProjectModal(); closeEditProjectModal(); closeTaskExpandModal(); closeRevisionModal(); closePromptEditor(); closeProjectPrompt(); closeSnoozeModal(); closeDeleteConfirm(); closeAddCategoryModal(); if (window.closeAddVestiaireModal) closeAddVestiaireModal(); if (window.closeEditVestiaireModal) closeEditVestiaireModal(); if (window.closeAddVestiaireCategoryModal) closeAddVestiaireCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); if (window.closeMigrationModal) closeMigrationModal(); if (window.closeCompareModal) closeCompareModal(); }
+  if (e.key === 'Escape') { closeAddProjectModal(); closeEditProjectModal(); closeTaskExpandModal(); closeRevisionModal(); closePromptEditor(); closeProjectPrompt(); closeSnoozeModal(); closeConfirmAction(); closeAddCategoryModal(); if (window.closeAddVestiaireModal) closeAddVestiaireModal(); if (window.closeEditVestiaireModal) closeEditVestiaireModal(); if (window.closeAddVestiaireCategoryModal) closeAddVestiaireCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); if (window.closeMigrationModal) closeMigrationModal(); if (window.closeCompareModal) closeCompareModal(); }
 });
 
 
@@ -227,6 +365,46 @@ document.addEventListener('keydown', e => {
 // FOOTER STATS
 // ===================================================================
 // ===================================================================
+const DB_SIZE_REFRESH_MS = 60 * 1000;
+const _dbSizeByBackend = new Map();
+
+function dbSizeBackendKey() {
+  if (state.demoMode) return 'demo';
+  if (state.driveMode) return 'googledrive';
+  return document.getElementById('username')?.value?.trim() || 'default';
+}
+
+function dbSizeStateForCurrentBackend() {
+  const key = dbSizeBackendKey();
+  if (!_dbSizeByBackend.has(key)) {
+    _dbSizeByBackend.set(key, { text: '—', fetchedAt: 0, unavailable: false, inFlight: null });
+  }
+  return _dbSizeByBackend.get(key);
+}
+
+function isMissingDbSizeRpc(error) {
+  if (!error) return false;
+  const code = String(error.code || '').toUpperCase();
+  const status = error.status || error.statusCode;
+  const msg = String(error.message || error.error || '').toLowerCase();
+  const details = String(error.details || '').toLowerCase();
+  const combined = `${msg} ${details}`;
+  return status === 404
+    || code === 'PGRST202'
+    || code === '42883'
+    || (combined.includes('db_size_mb') && (
+      combined.includes('could not find')
+      || combined.includes('not found')
+      || combined.includes('does not exist')
+      || combined.includes('unknown rpc')
+    ));
+}
+
+function setDbSizeText(text) {
+  const el = document.getElementById('dbSizeMb');
+  if (el) el.textContent = text;
+}
+
 function updateFooterStats(viewCountsGetter) {
   const container = document.getElementById('dbStatsContainer');
   if (!container) return;
@@ -250,6 +428,13 @@ function updateFooterStats(viewCountsGetter) {
     // Supabase / Local: show DB size with limit
     statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} ${t('utils.db')}: <span id="dbSizeMb">—</span> / 500 MB</div>`;
   }
+  // Sharing groups count
+  if (state.sharing) {
+    try {
+      const groupCount = state.sharing.getAllGroups().length;
+      statsHtml += `<div class="db-stat" id="footerGroupCount">${lucideIcon('users', 14)} ${groupCount} group${groupCount !== 1 ? 's' : ''}</div>`;
+    } catch { /* sharing not ready */ }
+  }
   // App + DB version
   const dbVer = state.dbSchemaVersion || '—';
   statsHtml += `<div class="db-stat">${lucideIcon('git-branch', 14)} v${APP_VERSION} · DB v${dbVer}</div>`;
@@ -261,12 +446,37 @@ function updateFooterStats(viewCountsGetter) {
     const projectRef = urlInput.value.replace('https://', '').replace('.supabase.co', '');
     document.getElementById('supabaseDashLink').href = `https://supabase.com/dashboard/project/${projectRef}`;
   }
-  // Fetch DB size via RPC (only relevant for Supabase/Local backends)
+  // Fetch DB size via RPC (only relevant for Supabase/Local backends).
+  // Some Supabase projects do not install the optional db_size_mb() function;
+  // cache that capability miss so realtime footer refreshes do not spam 404s.
   if (state.db.connected && !state.demoMode && !state.driveMode) {
-    state.db.rpc('db_size_mb').then(({ data, error }) => {
-      const el = document.getElementById('dbSizeMb');
-      if (el) el.textContent = (error || data == null) ? '—' : `${data} MB`;
-    });
+    const dbSizeState = dbSizeStateForCurrentBackend();
+    setDbSizeText(dbSizeState.text);
+
+    const stale = Date.now() - dbSizeState.fetchedAt > DB_SIZE_REFRESH_MS;
+    if (!dbSizeState.unavailable && !dbSizeState.inFlight && stale) {
+      dbSizeState.inFlight = state.db.rpc('db_size_mb')
+        .then(({ data, error }) => {
+          const rpcError = error || (data && typeof data === 'object' && data.error ? data : null);
+          if (rpcError) {
+            if (isMissingDbSizeRpc(rpcError)) dbSizeState.unavailable = true;
+            dbSizeState.text = '—';
+          } else {
+            dbSizeState.text = data == null ? '—' : `${data} MB`;
+          }
+          dbSizeState.fetchedAt = Date.now();
+          setDbSizeText(dbSizeState.text);
+        })
+        .catch(error => {
+          if (isMissingDbSizeRpc(error)) dbSizeState.unavailable = true;
+          dbSizeState.text = '—';
+          dbSizeState.fetchedAt = Date.now();
+          setDbSizeText(dbSizeState.text);
+        })
+        .finally(() => {
+          dbSizeState.inFlight = null;
+        });
+    }
   }
   // Estimate data size for Google Drive from in-memory store
   if (state.driveMode && state.driveAdapter && state.driveAdapter._store) {
@@ -295,7 +505,7 @@ function updateTaskListMaxHeight() {
   const app = document.getElementById('app');
   if (!app || !app.classList.contains('active')) return;
   const header = document.querySelector('.app-header');
-  const footer = document.querySelector('.footer-stats');
+  const footer = document.querySelector('.site-footer');
   
   // Calculate occupied height (header + footer + padding)
   const occupiedHeight = (header?.offsetHeight || 0) + 
@@ -325,20 +535,56 @@ function formatRelativeDate(d) {
   if (diffDays === -1) return t('common.yesterday_at', timeStr);
   if (diffDays > 1 && diffDays <= 7) return t('common.in_days', diffDays);
   if (diffDays < -1 && diffDays >= -7) return t('common.days_ago', Math.abs(diffDays));
-  const dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  const dateStr = d.toLocaleDateString(getLang(), { month: 'short', day: 'numeric' });
   return t('common.date_at', dateStr, timeStr);
 }
 
 // ===================================================================
 // TRUNCATE WITH SHOW MORE (shared between projects & todos)
 // ===================================================================
+/** Visible length of text, counting [label](url) as just the label length */
+function visibleLength(str) {
+  return str.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').length;
+}
+
 function truncateWithShowMore(text, maxLen, id, field) {
   if (!text) return '';
-  const firstLine = text.split('\n')[0].slice(0, 120);
-  const renderedFirstLine = renderMd(firstLine + (text.length > firstLine.length ? '…' : ''));
+  const firstLine = text.split('\n')[0];
   const renderedFull = renderMd(text);
-  if (text.length <= 120 && !text.includes('\n')) return renderedFull;
-  return `<span id="meta-${id}-${field}-short">${renderedFirstLine} <button class="show-more-btn" onclick="expandMeta('${id}','${field}')" title="Show more">▼</button></span><span id="meta-${id}-${field}-full" style="display:none;">${renderedFull} <button class="show-more-btn" onclick="collapseMeta('${id}','${field}')" title="Show less">▲</button></span>`;
+  if (visibleLength(firstLine) <= maxLen && !text.includes('\n')) return renderedFull;
+  // Truncate by visible length, keeping markdown links intact
+  let cut = '';
+  let vis = 0;
+  const linkRe = /\[([^\]]*)\]\([^)]*\)/g;
+  let last = 0;
+  let m;
+  while ((m = linkRe.exec(firstLine)) !== null) {
+    // Plain text before this link
+    const plain = firstLine.slice(last, m.index);
+    if (vis + plain.length >= maxLen) {
+      cut += plain.slice(0, maxLen - vis);
+      vis = maxLen;
+      break;
+    }
+    cut += plain;
+    vis += plain.length;
+    // The link — count only the label
+    const label = m[1];
+    if (vis + label.length > maxLen) {
+      cut += plain.length ? '' : label.slice(0, maxLen - vis);
+      vis = maxLen;
+      break;
+    }
+    cut += m[0]; // keep full markdown link
+    vis += label.length;
+    last = m.index + m[0].length;
+  }
+  if (vis < maxLen) {
+    const remaining = firstLine.slice(last);
+    cut += remaining.slice(0, maxLen - vis);
+  }
+  const renderedFirstLine = renderMd(cut + '…');
+  return `<span id="meta-${id}-${field}-short">${renderedFirstLine} <button class="show-more-btn" data-action="expand-meta" data-meta-id="${esc(id)}" data-meta-field="${esc(field)}" title="Show more">▼</button></span><span id="meta-${id}-${field}-full" style="display:none;">${renderedFull} <button class="show-more-btn" data-action="collapse-meta" data-meta-id="${esc(id)}" data-meta-field="${esc(field)}" title="Show less">▲</button></span>`;
 }
 
 function expandMeta(id, field) {
@@ -482,15 +728,265 @@ function isMobileUA() {
   return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 }
 
+// ── Settings accessor factory (DB + localStorage sync) ──────────
+/**
+ * Create a synced accessor for a JSON object stored in the `settings` table
+ * with localStorage fallback. Eliminates the load/save boilerplate duplicated
+ * across todos, habits, lists, vestiaire, and flashcards.
+ *
+ * @param {string} dbKey  Key in the `settings` table
+ * @param {string} lsKey  localStorage key
+ * @returns {{ load: () => Promise<object>, save: (map: object) => Promise<void>, get: () => object }}
+ */
+function createSettingsAccessor(dbKey, lsKey) {
+  let _cache = {};
+
+  async function load() {
+    if (state.db.connected) {
+      try {
+        const { data } = await state.db.from('settings').select('value').eq('key', dbKey);
+        if (data && data.length > 0 && data[0].value) {
+          _cache = JSON.parse(data[0].value);
+          localStorage.setItem(lsKey, data[0].value);
+          return _cache;
+        }
+      } catch (e) { console.warn(`Could not load ${dbKey} from DB:`, e.message); }
+    }
+    try { _cache = JSON.parse(localStorage.getItem(lsKey) || '{}'); } catch { _cache = {}; }
+    return _cache;
+  }
+
+  async function save(map) {
+    _cache = map;
+    const json = JSON.stringify(map);
+    localStorage.setItem(lsKey, json);
+    if (state.db.connected) {
+      try {
+        const { data } = await state.db.from('settings')
+          .update({ value: json, updated_at: new Date().toISOString() })
+          .eq('key', dbKey).select();
+        if (!data || data.length === 0) {
+          await state.db.from('settings')
+            .insert({ key: dbKey, value: json, updated_at: new Date().toISOString() });
+        }
+      } catch (e) { console.warn(`Could not save ${dbKey} to DB:`, e.message); }
+    }
+  }
+
+  function get() { return _cache; }
+
+  return { load, save, get };
+}
+
+// ── Supabase project ref extraction ─────────────────────────────
+function getSupabaseProjectRef(url) {
+  if (!url) return null;
+  const m1 = url.match(/https?:\/\/([a-z0-9]{20,})\.supabase\.co/i);
+  if (m1) return m1[1];
+  const m2 = url.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
+  if (m2) return m2[1];
+  return null;
+}
+
+// ── Shared Supabase Site-URL + magic-link auth steps ────────────
+/**
+ * Build the two-step Site URL confirmation + magic-link email HTML
+ * shared by showAuthPrompt (main.js) and renderSharingPane (sharing-ui.js).
+ *
+ * @param {string} prefix   ID prefix for DOM elements ('auth' | 'sharingAuth')
+ * @param {string} authConfigUrl  Supabase dashboard auth-config URL
+ * @param {object} [opts]
+ * @param {string} [opts.sendAction]  data-action attribute for the send button
+ * @param {boolean} [opts.showStatus] append a status div after the send button
+ * @returns {{ html: string, wireUp: (container: Element) => void }}
+ */
+function buildAuthSteps(prefix, authConfigUrl, opts = {}) {
+  const siteOrigin = location.origin;
+  const sendAttrs = opts.sendAction ? ` data-action="${esc(opts.sendAction)}"` : '';
+  const statusHtml = opts.showStatus ? `\n        <div class="auth-inline-status" id="${prefix}Status" style="display:none"></div>` : '';
+  const errorClass = opts.showStatus ? 'auth-inline-error' : 'auth-error';
+  const html = `
+    <div class="auth-step" id="${prefix}Step1">
+      <div class="auth-step-header">
+        <span class="auth-step-num">1</span>
+        <span>${t('auth.step_site_url')}</span>
+      </div>
+      <p class="auth-step-detail">${t('auth.step_site_url_detail')}</p>
+      <div class="auth-site-url-value">
+        <code id="${prefix}SiteUrlValue">${esc(siteOrigin)}</code>
+        <button class="auth-copy-url-btn" id="${prefix}CopyUrlBtn" title="${t('sharing.copy')}">${lucideIcon('copy', 14)}</button>
+      </div>
+      <a class="auth-config-link" href="${authConfigUrl}" target="_blank" rel="noopener">${lucideIcon('external-link', 14)} ${t('auth.open_supabase_settings')}</a>
+      <label class="auth-toggle-label" id="${prefix}ConfirmLabel">
+        <input type="checkbox" id="${prefix}SiteUrlConfirm">
+        <span>${t('auth.site_url_confirmed')}</span>
+      </label>
+    </div>
+    <div class="auth-step auth-step-locked" id="${prefix}Step2">
+      <div class="auth-step-header">
+        <span class="auth-step-num">2</span>
+        <span>${t('auth.step_magic_link')}</span>
+      </div>
+      <div id="${prefix}Step2Body" style="display:none">
+        <input type="email" id="${prefix}Email" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
+        <div class="${errorClass}" id="${prefix}Error" style="display:none"></div>
+        <button class="auth-send-btn" id="${prefix}SendBtn"${sendAttrs}>${t('auth.send_magic_link')}</button>${statusHtml}
+      </div>
+    </div>`;
+
+  function wireUp(container) {
+    const confirmBox = container.querySelector(`#${prefix}SiteUrlConfirm`);
+    const step2 = container.querySelector(`#${prefix}Step2`);
+    const step2Body = container.querySelector(`#${prefix}Step2Body`);
+    const copyBtn = container.querySelector(`#${prefix}CopyUrlBtn`);
+    const emailEl = container.querySelector(`#${prefix}Email`);
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(siteOrigin).then(() => showToast(t('common.copied'), 'success'));
+      });
+    }
+    if (confirmBox) {
+      confirmBox.addEventListener('change', () => {
+        if (confirmBox.checked) {
+          step2.classList.remove('auth-step-locked');
+          step2Body.style.display = '';
+          if (emailEl) emailEl.focus();
+        } else {
+          step2.classList.add('auth-step-locked');
+          step2Body.style.display = 'none';
+        }
+      });
+    }
+  }
+
+  return { html, wireUp };
+}
+
+/**
+ * Auto-assign palette colors to category/deck rows that have no color.
+ * Called after loading each category table. Persists to DB so it's one-time.
+ * @param {string} table - DB table name (e.g. 'todo_categories')
+ * @param {Map} catMap - the in-memory map of rows (id → row)
+ */
+async function backfillCategoryColors(table, catMap) {
+  const missing = [];
+  for (const row of catMap.values()) {
+    if (!row.color && !row.is_protected) missing.push(row);
+  }
+  if (!missing.length) return;
+  const palette = DEFAULT_CATEGORY_PALETTE;
+  // Assign colors cycling through palette by sort_order position
+  missing.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  const updates = missing.map((row, i) => {
+    const color = palette[i % palette.length];
+    row.color = color;
+    return { id: row.id, color };
+  });
+  // Persist each color to DB (fire-and-forget, already set in memory)
+  for (const u of updates) {
+    state.db.from(table).update({ color: u.color }).eq('id', u.id).then(() => {});
+  }
+}
+
+// ===================================================================
+// DEEP-LINK UTILITIES
+// ===================================================================
+
+/** Map item type prefix to its view name */
+const DEEP_LINK_TYPE_MAP = {
+  todo: 'todos', habit: 'habits', project: 'projects', task: 'projects',
+  birthday: 'birthdays', vest: 'vestiaire', flashcard: 'flashcards',
+  list: 'lists', listitem: 'lists',
+};
+
+/** Parse a deep-link hash like #todo/abc123 → { type, id } or null */
+function parseDeepLink(hash) {
+  if (!hash || !hash.startsWith('#')) return null;
+  const parts = hash.slice(1).split('/');
+  if (parts.length !== 2) return null;
+  const [type, id] = parts;
+  if (!DEEP_LINK_TYPE_MAP[type] || !id) return null;
+  return { type, id };
+}
+
+/** Copy an item's deep link to clipboard and show toast */
+function copyItemLink(type, id, btnEl) {
+  const base = location.origin + location.pathname;
+  const url = base + '#' + type + '/' + id;
+  const animateBtn = () => {
+    if (!btnEl) return;
+    btnEl.classList.remove('copy-link-done');
+    void btnEl.offsetWidth;
+    btnEl.classList.add('copy-link-done');
+    setTimeout(() => btnEl.classList.remove('copy-link-done'), 2000);
+  };
+  navigator.clipboard.writeText(url).then(() => {
+    showToast(t('common.link_copied'), 'success');
+    animateBtn();
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast(t('common.link_copied'), 'success');
+    animateBtn();
+  });
+}
+
+/** Scroll to an item element and apply the highlight animation */
+function highlightItem(el) {
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (!el.getAttribute('tabindex')) el.setAttribute('tabindex', '-1');
+  el.focus({ preventScroll: true });
+  el.classList.remove('deep-link-highlight');
+  void el.offsetWidth;
+  el.classList.add('deep-link-highlight');
+  el.addEventListener('animationend', () => el.classList.remove('deep-link-highlight'), { once: true });
+}
+
+/** Pick the next palette color not yet used by any entry in `catMapOrArray`.
+ *  Accepts a Map (values iterated) or an Array of objects with optional `.color`. */
+function nextPaletteColor(catMapOrArray) {
+  const entries = catMapOrArray instanceof Map ? catMapOrArray.values() : (catMapOrArray || []);
+  const usedColors = new Set();
+  let count = 0;
+  for (const c of entries) { if (c.color) usedColors.add(c.color); count++; }
+  return DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c))
+    || DEFAULT_CATEGORY_PALETTE[count % DEFAULT_CATEGORY_PALETTE.length];
+}
+
+// ── Auto-resize textarea (shared across all quick-add inputs) ──
+function autoResizeTextarea(ta, maxHeight = 120) {
+  ta.style.height = '0';
+  const newHeight = Math.min(ta.scrollHeight, maxHeight);
+  ta.style.height = newHeight + 'px';
+  ta.style.overflowY = ta.scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
+window.autoResizeTextarea = autoResizeTextarea;
+
 export {
-  esc, escQ, linkify, renderMd, showToast, formatRelativeDate,
-  showDeleteConfirm, closeDeleteConfirm, executeDeleteConfirm,
+  esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
+  showConfirmAction, closeConfirmAction, executeConfirmAction,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, fetchAll,
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA,
+  getSupabaseKeyRole, isServiceRoleKey,
+  getSupabaseProjectRef, buildAuthSteps, createSettingsAccessor,
+  backfillCategoryColors, nextPaletteColor,
+  parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,
+  autoResizeTextarea,
 };
 
-window.closeDeleteConfirm = closeDeleteConfirm;
-window.executeDeleteConfirm = executeDeleteConfirm;
+window.closeConfirmAction = closeConfirmAction;
+
+// CSP delegation for utils handled in js/delegation.js — no per-module listeners
+
+window.executeConfirmAction = executeConfirmAction;
 window.expandMeta = expandMeta;
 window.collapseMeta = collapseMeta;
+window.copyItemLink = copyItemLink;

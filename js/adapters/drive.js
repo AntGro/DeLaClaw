@@ -23,7 +23,12 @@ import { createDemoAdapter } from './demo.js';
 import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
 import { t } from '../i18n.js';
 
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+export const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
+export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
+
+export function getDriveScope() {
+  return `${DRIVE_SCOPE_FILE} ${CALENDAR_SCOPE}`;
+}
 const DRIVE_FOLDER_NAME = 'DeLaClaw';
 const DEBOUNCE_MS = 2000;
 const POLL_INTERVAL_MS = 30000;
@@ -35,68 +40,120 @@ const DRIVE_TABLES = [
   'flashcards', 'flashcard_notes', 'texts', 'text_line_progress',
   'birthdays', 'vestiaire', 'lists', 'list_items',
   'settings', 'prompts', 'nvidia_usage', 'daily_visits',
+  'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
+  'gcal_sync',
 ];
 
 // ── Google Identity Services helpers ────────────────────────────
+// sec: token scoped by clientId + dedup pending promise to avoid popup spam
 
 let _cachedToken = null;
+let _cachedClientId = null;
 let _tokenExpiry = 0;
+let _pendingPromise = null;
+let _pendingClientId = null;
 
-const _TOKEN_STORAGE_KEY = 'claw_drive_token';
+const _TOKEN_KEY_PREFIX = 'claw_drive_token:';
 
-function _persistToken(token, expiryMs) {
+function _tokenKey(clientId) {
+  // clientId is public — use as suffix to scope per OAuth client
+  return `${_TOKEN_KEY_PREFIX}${clientId || 'default'}`;
+}
+
+function _persistToken(token, expiryMs, clientId, scopes) {
   try {
-    sessionStorage.setItem(_TOKEN_STORAGE_KEY, JSON.stringify({ token, expiry: expiryMs }));
+    sessionStorage.setItem(_tokenKey(clientId), JSON.stringify({ token, expiry: expiryMs, scopes: scopes || '' }));
   } catch (_) {}
 }
 
-function _loadPersistedToken() {
+function _loadPersistedToken(clientId) {
   try {
-    const raw = sessionStorage.getItem(_TOKEN_STORAGE_KEY);
+    const raw = sessionStorage.getItem(_tokenKey(clientId));
     if (!raw) return null;
-    const { token, expiry } = JSON.parse(raw);
+    const { token, expiry, scopes } = JSON.parse(raw);
     // Still valid with ≥60s margin
-    if (token && expiry && Date.now() < expiry - 60000) return { token, expiry };
+    if (token && expiry && Date.now() < expiry - 60000) return { token, expiry, scopes: scopes || '' };
   } catch (_) {}
   return null;
 }
 
-function clearDriveTokenCache() {
+/** Whether the most recent OAuth grant included calendar.app.created */
+let _calendarScopeGranted = false;
+export function wasCalendarScopeGranted() { return _calendarScopeGranted; }
+
+function clearDriveTokenCache(clientId) {
+  // If clientId given, clear only that scoped entry; otherwise clear all prefixed entries (defense on mode switch)
   _cachedToken = null;
+  _cachedClientId = null;
   _tokenExpiry = 0;
-  try { sessionStorage.removeItem(_TOKEN_STORAGE_KEY); } catch (_) {}
+  _pendingPromise = null;
+  _pendingClientId = null;
+  try {
+    if (clientId) {
+      sessionStorage.removeItem(_tokenKey(clientId));
+    } else {
+      // clear all scoped drive tokens
+      const toRemove = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const k = sessionStorage.key(i);
+        if (k && k.startsWith(_TOKEN_KEY_PREFIX)) toRemove.push(k);
+      }
+      toRemove.forEach(k => sessionStorage.removeItem(k));
+      // legacy unscoped key (pre-1.368)
+      sessionStorage.removeItem('claw_drive_token');
+    }
+  } catch (_) {}
 }
 
 function getGoogleAccessToken(clientId, promptIfNeeded = true) {
-  // 1. In-memory cache (same page lifecycle)
-  if (_cachedToken && Date.now() < _tokenExpiry - 60000) {
+  // 1. In-memory cache — scoped by clientId
+  if (_cachedToken && _cachedClientId === clientId && Date.now() < _tokenExpiry - 60000) {
     return Promise.resolve(_cachedToken);
   }
-  // 2. sessionStorage cache (survives refresh within the ~1h token lifetime)
-  const persisted = _loadPersistedToken();
+  // 2. sessionStorage cache (survives refresh within the ~1h token lifetime) — scoped
+  const persisted = _loadPersistedToken(clientId);
   if (persisted) {
     _cachedToken = persisted.token;
+    _cachedClientId = clientId;
     _tokenExpiry = persisted.expiry;
+    // Restore calendar scope flag from persisted data
+    if (persisted.scopes) {
+      _calendarScopeGranted = persisted.scopes.includes(CALENDAR_SCOPE);
+    }
     return Promise.resolve(_cachedToken);
   }
-  // 3. Fresh OAuth flow
-  return new Promise((resolve, reject) => {
+  // 3. Dedup in-flight request — prevents popup spam on concurrent getToken()
+  if (_pendingPromise && _pendingClientId === clientId) {
+    return _pendingPromise;
+  }
+  // 4. Fresh OAuth flow — single flight
+  _pendingClientId = clientId;
+  _pendingPromise = new Promise((resolve, reject) => {
     if (typeof google === 'undefined' || !google.accounts) {
       reject(new Error('google_not_loaded'));
       return;
     }
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: DRIVE_SCOPE,
+      scope: getDriveScope(),
       callback: (resp) => {
         if (resp.error) {
           reject(new Error(resp.error));
-        } else {
-          _cachedToken = resp.access_token;
-          _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
-          _persistToken(_cachedToken, _tokenExpiry);
-          resolve(resp.access_token);
+          return;
         }
+        // Check granted scopes — Drive is mandatory
+        const granted = resp.scope || '';
+        console.log('[DeLaClaw] initial sign-in granted scopes:', granted);
+        if (!granted.includes(DRIVE_SCOPE_FILE)) {
+          reject(new Error('drive_scope_denied'));
+          return;
+        }
+        _calendarScopeGranted = granted.includes(CALENDAR_SCOPE);
+        _cachedToken = resp.access_token;
+        _cachedClientId = clientId;
+        _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
+        _persistToken(_cachedToken, _tokenExpiry, clientId, granted);
+        resolve(resp.access_token);
       },
       error_callback: (err) => {
         reject(new Error(err.type || 'auth_error'));
@@ -107,7 +164,11 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
     } else {
       client.requestAccessToken({ prompt: '' });
     }
+  }).finally(() => {
+    _pendingPromise = null;
+    _pendingClientId = null;
   });
+  return _pendingPromise;
 }
 
 // ── Drive API helpers ───────────────────────────────────────────
@@ -166,7 +227,7 @@ async function downloadFile(token, fileId) {
 
 /** Upload/update a file with optional ETag for optimistic locking.
  *  Returns { id, etag } on success, throws on 412 (conflict). */
-async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag) {
+async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag, keepalive = false) {
   const json = JSON.stringify(data, null, 2);
   const metadata = { name: fileName, mimeType: 'application/json' };
   if (!fileId) metadata.parents = [folderId];
@@ -188,10 +249,14 @@ async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag) 
   };
   if (ifMatchEtag) headers['If-Match'] = ifMatchEtag;
 
+  // keepalive: true lets beforeunload flushes survive tab close (64KB body limit)
+  const useKeepalive = keepalive && body.length <= 65536;
+
   const resp = await fetch(url, {
     method: fileId ? 'PATCH' : 'POST',
     headers,
     body,
+    ...(useKeepalive ? { keepalive: true } : {}),
   });
 
   if (resp.status === 412) {
@@ -261,6 +326,28 @@ function mergeTable(tableName, local, remote) {
 }
 
 // ── Drive Adapter ───────────────────────────────────────────────
+
+// ── Google Picker API (lazy-loaded for sharing join flow) ────────
+
+let _pickerApiLoaded = false;
+
+async function ensurePickerApi() {
+  if (_pickerApiLoaded) return;
+  // Wait for gapi script to load
+  if (typeof gapi === 'undefined') {
+    await new Promise((resolve, reject) => {
+      let elapsed = 0;
+      const iv = setInterval(() => {
+        if (typeof gapi !== 'undefined') { clearInterval(iv); resolve(); }
+        elapsed += 100;
+        if (elapsed > 10000) { clearInterval(iv); reject(new Error('Google API not loaded')); }
+      }, 100);
+    });
+  }
+  await new Promise((resolve, reject) => {
+    gapi.load('picker', { callback: () => { _pickerApiLoaded = true; resolve(); }, onerror: reject });
+  });
+}
 
 export async function createDriveAdapter(clientId, onStatus, { silent = false } = {}) {
   // onStatus receives: { status, message?, progress?, total? }
@@ -332,16 +419,59 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   // ── Create in-memory adapter seeded with loaded data ──
 
+  const gcalKeysAtInit = (initialData.settings || []).filter(r => r.key?.startsWith('gcal_')).map(r => r.key);
+  console.log('[drive-init] settings loaded from Drive, gcal keys:', gcalKeysAtInit);
+
   const inner = createDemoAdapter(initialData);
 
   // ── Token refresh helper ──
 
+  let _tokenDead = false;
+  let _reauthPending = false;
+
+  function isUserBusy() {
+    // Inline editing, modal open, or flashcard/text practice active
+    return !!(
+      document.querySelector('.task-edit-input, .todo-edit-wrapper, [data-editing="true"]') ||
+      document.querySelector('.modal-overlay[style*="flex"]') ||
+      document.querySelector('.practice-overlay')
+    );
+  }
+
+  async function proactiveReauth() {
+    if (_reauthPending) return;
+    _reauthPending = true;
+    try {
+      const tok = await getGoogleAccessToken(clientId, true);
+      if (tok) _tokenDead = false;
+    } catch {
+      // User dismissed the popup — stay in dead state, retry next flush cycle
+    } finally {
+      _reauthPending = false;
+    }
+  }
+
+  function scheduleReauthWhenFree() {
+    if (!_tokenDead || _reauthPending) return;
+    if (!isUserBusy()) {
+      proactiveReauth();
+    } else {
+      // Check again in 2s until user finishes
+      setTimeout(scheduleReauthWhenFree, 2000);
+    }
+  }
+
   async function getToken() {
     try {
-      return await getGoogleAccessToken(clientId, false);
-    } catch {
-      return _cachedToken;
+      const tok = await getGoogleAccessToken(clientId, false);
+      if (tok) { _tokenDead = false; return tok; }
+    } catch { /* silent refresh failed */ }
+    // Silent refresh failed — token is dead
+    if (!_tokenDead) {
+      _tokenDead = true;
+      scheduleReauthWhenFree();
     }
+    return _cachedToken;
   }
 
   // ── Run pending migrations ──
@@ -352,24 +482,48 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     const total = DRIVE_TABLES.length;
     emit('loading', t('menu.drive_creating_tables'), 0, total);
     const tok = await getToken();
-    if (tok) {
-      for (let i = 0; i < DRIVE_TABLES.length; i++) {
-        const table = DRIVE_TABLES[i];
-        emit('loading', t('menu.drive_creating_table', table), i + 1, total);
-        const result = await uploadFile(tok, folderId, null, `${table}.json`, []);
-        fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
-      }
-    }
+    if (!tok) throw new Error('Drive setup failed: could not obtain auth token');
+    let created = 0;
+    await Promise.all(DRIVE_TABLES.map(async (table) => {
+      const result = await uploadFile(tok, folderId, null, `${table}.json`, []);
+      fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
+      created++;
+      emit('loading', t('menu.drive_creating_progress', created, total, table), created, total);
+    }));
     // Set schema_version to latest — no migrations needed
     if (!inner._store.settings) inner._store.settings = [];
     inner._store.settings.push({ key: 'schema_version', value: latestVersion });
-    // Flush settings with the version stamp
-    const settingsTok = await getToken();
-    if (settingsTok) {
-      const meta = fileMeta.settings || {};
-      const result = await uploadFile(settingsTok, folderId, meta.fileId, 'settings.json', inner._store.settings);
-      fileMeta.settings = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+
+    // Seed protected rows for category tables (fresh install has empty arrays)
+    const now = new Date().toISOString();
+    const catSeed = [
+      ['todo_categories',      '_default_todo_cat',  '_shared_todo_cat'],
+      ['habit_categories',     '_default_habit_cat', '_shared_habit_cat'],
+      ['vestiaire_categories', '_default_vest_cat',  '_shared_vest_cat'],
+      ['flashcard_decks',      '_default_deck',      '_shared_deck'],
+    ];
+    for (const [table, defId, sharedId] of catSeed) {
+      if (!inner._store[table]) inner._store[table] = [];
+      inner._store[table].push(
+        { id: defId,    name: '',           shortname: null, color: null, sort_order: 0,    is_protected: 1, owner_id: null, created_at: now, updated_at: now },
+        { id: sharedId, name: '__shared__', shortname: null, color: null, sort_order: 9999, is_protected: 1, owner_id: null, created_at: now, updated_at: now },
+      );
     }
+    // Flush seeded category tables + settings to Drive (parallel)
+    const seedTok = await getToken();
+    if (!seedTok) throw new Error('Drive setup failed: could not obtain auth token for seed flush');
+    const seedFlushes = catSeed.map(async ([table]) => {
+      const meta = fileMeta[table] || {};
+      const result = await uploadFile(seedTok, folderId, meta.fileId, `${table}.json`, inner._store[table]);
+      fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+    });
+    // Settings flush
+    const settingsMeta = fileMeta.settings || {};
+    seedFlushes.push((async () => {
+      const result = await uploadFile(seedTok, folderId, settingsMeta.fileId, 'settings.json', inner._store.settings);
+      fileMeta.settings = { fileId: result.id || settingsMeta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+    })());
+    await Promise.all(seedFlushes);
   } else {
     // ── Run pending migrations (existing installs only) ──
 
@@ -409,10 +563,26 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         }
 
         // Run each migration, bump schema_version after each success
+        // Progress model: bar reaches 100% only after the last upload completes.
+        // Total units = sum of (1 migration run + N dirty flushes) across all migrations.
+        // We can't know dirty counts ahead of time, so we use a two-level scheme:
+        // outer progress = migration index (shown in message), inner = per-table flush.
+        let completedUnits = 0;
+        // Pessimistic total: 1 (run) + 1 (settings flush) per migration; adjusted per step
+        let totalUnits = toRun.length * 2;
+
         for (let i = 0; i < toRun.length; i++) {
           const version = toRun[i];
-          emit('migrating', t('menu.drive_migrating', version), i + 1, toRun.length);
+          emit('migrating', t('menu.drive_migrating', version), completedUnits, totalUnits);
+
+          // Snapshot tables to detect which ones changed
+          const snapshots = {};
+          for (const table of DRIVE_TABLES) {
+            snapshots[table] = JSON.stringify(inner._store[table] || []);
+          }
+
           await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
+          completedUnits++; // migration function done
 
           // Update schema_version in memory
           const entry = (inner._store.settings || []).find(s => s.key === 'schema_version');
@@ -423,14 +593,35 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             inner._store.settings.push({ key: 'schema_version', value: version });
           }
 
-          // Flush all tables + settings to Drive
+          // Flush only tables that actually changed + settings (for version bump)
+          const dirtyTables = new Set(['settings']);
+          for (const table of DRIVE_TABLES) {
+            if (table === 'settings') continue;
+            if (JSON.stringify(inner._store[table] || []) !== snapshots[table]) {
+              dirtyTables.add(table);
+            }
+          }
+
+          // Adjust totalUnits: replace the pessimistic 1 flush with actual dirty count
+          totalUnits += dirtyTables.size - 1;
+
           const flushTok = await getToken();
           if (flushTok) {
-            for (const table of DRIVE_TABLES) {
+            let flushed = 0;
+            for (const table of dirtyTables) {
               const fileName = `${table}.json`;
               const meta = fileMeta[table] || {};
-              const result = await uploadFile(flushTok, folderId, meta.fileId, fileName, inner._store[table] || []);
+              let result;
+              try {
+                result = await uploadFile(flushTok, folderId, meta.fileId, fileName, inner._store[table] || []);
+              } catch (uploadErr) {
+                console.error(`[DeLaClaw] migration ${version} flush failed for ${table}:`, uploadErr);
+                throw uploadErr;
+              }
               fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+              flushed++;
+              completedUnits++;
+              emit('migrating', t('menu.drive_migrating_sync', version, flushed, dirtyTables.size), completedUnits, totalUnits);
             }
           }
         }
@@ -443,7 +634,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   const flushingTables = new Set();
   const flushPromises = {};
 
-  async function flushTable(table, retries = 0) {
+  async function flushTable(table, retries = 0, keepalive = false) {
     // If a flush is already in progress, wait for it then re-flush
     // to capture any writes that happened during the previous flush.
     while (flushingTables.has(table)) {
@@ -460,7 +651,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         const fileName = `${table}.json`;
 
         try {
-          const result = await uploadFile(tok, folderId, meta.fileId, fileName, localData, meta.etag);
+          const result = await uploadFile(tok, folderId, meta.fileId, fileName, localData, meta.etag, keepalive);
           fileMeta[table] = {
             fileId: result.id || meta.fileId,
             etag: result.etag,
@@ -475,7 +666,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             fileMeta[table] = { ...meta, etag: newEtag };
             flushingTables.delete(table);
             delete flushPromises[table];
-            return flushTable(table, retries + 1);
+            return flushTable(table, retries + 1, keepalive);
           }
           throw err;
         }
@@ -493,10 +684,24 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   function scheduleSave(table) {
     dirtyTables.add(table);
     if (saveTimers[table]) clearTimeout(saveTimers[table]);
-    saveTimers[table] = setTimeout(() => {
-      dirtyTables.delete(table);
+    updateSyncBarState(); // show orange (pending)
+    saveTimers[table] = setTimeout(async () => {
       delete saveTimers[table];
-      flushTable(table);
+      syncStart(); // show blue (uploading)
+      let _err = false;
+      try {
+        await flushTable(table);
+        dirtyTables.delete(table); // only clear dirty after successful flush
+        // Notify listener (e.g. calendar sync) — skip keepalive flushes
+        if (adapter._onTableFlushed) {
+          try { adapter._onTableFlushed(table); } catch (_) {}
+        }
+      } catch (e) {
+        _err = true;
+        console.error(`Drive: debounced flush failed for ${table}`, e);
+        // Re-schedule retry — table stays in dirtyTables, bar will show orange
+        scheduleSave(table);
+      } finally { syncEnd(_err); }
     }, DEBOUNCE_MS);
   }
 
@@ -510,31 +715,47 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       if (!tok) return;
 
       const files = await listFolderFiles(tok, folderId);
+
+      // Collect changed tables, then download in parallel
+      const toFetch = [];
       for (const file of files) {
         const tableName = file.name.replace('.json', '');
         if (!DRIVE_TABLES.includes(tableName)) continue;
         const meta = fileMeta[tableName];
         if (!meta) continue;
-
-        // Skip tables currently being edited locally
         if (dirtyTables.has(tableName) || flushingTables.has(tableName)) continue;
-
         if (meta.modifiedTime && file.modifiedTime > meta.modifiedTime) {
-          const { data, etag } = await downloadFile(tok, file.id);
-          const newData = Array.isArray(data) ? data : [];
-          const oldData = inner._store[tableName] || [];
-
-          // Only update + notify if data actually changed (skip our own writes)
-          if (JSON.stringify(newData) !== JSON.stringify(oldData)) {
-            inner._store[tableName] = newData;
-            fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
-            if (adapter._onExternalChange) adapter._onExternalChange(tableName);
-          } else {
-            // Same data (our own flush reflected back) — update metadata only
-            fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
-          }
+          toFetch.push({ file, tableName });
         }
       }
+
+      if (toFetch.length === 0) return;
+
+      syncStart(); // show blue while downloading external changes
+      let _err = false;
+      try {
+        await Promise.all(toFetch.map(async ({ file, tableName }) => {
+        const { data, etag } = await downloadFile(tok, file.id);
+        const newData = Array.isArray(data) ? data : [];
+        const oldData = inner._store[tableName] || [];
+
+        // Only update + notify if data actually changed (skip our own writes)
+        if (JSON.stringify(newData) !== JSON.stringify(oldData)) {
+          if (tableName === 'settings') {
+            const oldGcal = oldData.filter(r => r.key?.startsWith('gcal_')).map(r => r.key);
+            const newGcal = newData.filter(r => r.key?.startsWith('gcal_')).map(r => r.key);
+            console.log('[drive-poll] settings overwritten, gcal keys: old=%o new=%o', oldGcal, newGcal);
+          }
+          inner._store[tableName] = newData;
+          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+          if (adapter._onExternalChange) adapter._onExternalChange(tableName);
+        } else {
+          // Same data (our own flush reflected back) — update metadata only
+          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+        }
+      }));
+      } catch (e) { _err = true; throw e; }
+      finally { syncEnd(_err); }
     } catch (e) {
       console.warn('Drive: poll failed', e);
     }
@@ -549,33 +770,62 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
 
-  // ── Global sync bar (covers ALL write operations) ──
+  // ── Global sync bar (permanent, 4-state) ──
+  // green = all clear | orange = dirty/debounce pending | blue animated = uploading | red = error
 
   let _syncCount = 0;
   let _syncBar = null;
+  let _syncErrorTimeout = null;
 
   function ensureSyncBar() {
     if (_syncBar) return _syncBar;
     _syncBar = document.createElement('div');
-    _syncBar.className = 'drive-sync-bar';
+    _syncBar.className = 'drive-sync-bar synced';
     document.body.appendChild(_syncBar);
     return _syncBar;
   }
 
-  function syncStart() {
-    if (++_syncCount > 1) return;
+  const SYNC_TITLES = {
+    synced: 'All changes saved to Drive',
+    pending: 'Changes waiting to sync',
+    active: 'Uploading to Drive…',
+    error: 'Sync error — retrying'
+  };
+
+  function updateSyncBarState() {
     const bar = ensureSyncBar();
-    bar.classList.remove('done', 'error');
-    bar.classList.add('active');
+    bar.classList.remove('synced', 'pending', 'active', 'error');
+    if (_syncCount > 0) {
+      bar.classList.add('active');
+      bar.title = SYNC_TITLES.active;
+      if (_syncErrorTimeout) { clearTimeout(_syncErrorTimeout); _syncErrorTimeout = null; }
+    } else if (dirtyTables.size > 0 || Object.keys(saveTimers).length > 0) {
+      bar.classList.add('pending');
+      bar.title = SYNC_TITLES.pending;
+      if (_syncErrorTimeout) { clearTimeout(_syncErrorTimeout); _syncErrorTimeout = null; }
+    } else {
+      bar.classList.add('synced');
+      bar.title = SYNC_TITLES.synced;
+    }
+  }
+
+  function syncStart() {
+    _syncCount++;
+    updateSyncBarState();
   }
 
   function syncEnd(error) {
-    if (--_syncCount > 0) return;
-    _syncCount = 0;
-    if (!_syncBar) return;
-    _syncBar.classList.remove('active');
-    _syncBar.classList.add(error ? 'error' : 'done');
-    setTimeout(() => { if (_syncBar) _syncBar.classList.remove('done', 'error'); }, error ? 2500 : 400);
+    _syncCount = Math.max(0, _syncCount - 1);
+    if (error) {
+      const bar = ensureSyncBar();
+      bar.classList.remove('synced', 'pending', 'active');
+      bar.classList.add('error');
+      bar.title = SYNC_TITLES.error;
+      if (_syncErrorTimeout) clearTimeout(_syncErrorTimeout);
+      _syncErrorTimeout = setTimeout(() => { _syncErrorTimeout = null; updateSyncBarState(); }, 2500);
+    } else {
+      updateSyncBarState();
+    }
   }
 
   // ── Wrapped adapter ──
@@ -583,33 +833,93 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   const adapter = {
     from(table) {
       const builder = inner.from(table);
+      // Ensure insert/upsert always returns data (including auto-generated IDs)
+      // so the dirty-tracking wrapper can extract the item ID from result.data.
+      builder._returnRow = true;
       const origThen = builder.then.bind(builder);
       builder.then = (resolve, reject) => {
         origThen(async (result) => {
           if (builder._method !== 'GET') {
-            // Cancel any pending debounced save — we flush immediately
-            if (saveTimers[table]) {
-              clearTimeout(saveTimers[table]);
-              delete saveTimers[table];
-              dirtyTables.delete(table);
+            scheduleSave(table);
+            // Track dirty item IDs for calendar sync
+            if (adapter._markCalDirty) {
+              let itemId = null;
+              const idFilter = builder._filters?.find(f => f.col === 'id' && f.op === 'eq');
+              if (idFilter) {
+                itemId = idFilter.val;
+              } else {
+                // Try result first (covers auto-generated IDs from insert/upsert)
+                const rows = Array.isArray(result?.data) ? result.data : (result?.data ? [result.data] : []);
+                if (rows.length === 1 && rows[0]?.id) {
+                  itemId = rows[0].id;
+                } else if (builder._body) {
+                  const body = Array.isArray(builder._body) ? builder._body : [builder._body];
+                  if (body.length === 1 && body[0]?.id) itemId = body[0].id;
+                }
+                // Multi-row or no id → null triggers full scan
+              }
+              adapter._markCalDirty(table, itemId);
             }
-            syncStart();
-            let _err = false;
-            try { await flushTable(table); }
-            catch (e) { _err = true; console.error(`Drive: sync flush failed for ${table}`, e); }
-            finally { syncEnd(_err); }
           }
           resolve(result);
         }, reject);
       };
       return builder;
     },
+
     channel() { return inner.channel(); },
     rpc(fn, params) { return inner.rpc(fn, params); },
+
+    async bulkSortOrder(table, updates) {
+      await inner.bulkSortOrder(table, updates);
+      if (updates.length > 0) scheduleSave(table);
+    },
 
     reseed(data) {
       inner.reseed(data);
       for (const table of DRIVE_TABLES) scheduleSave(table);
+    },
+
+    /**
+     * Run any pending Drive migrations on the in-memory store.
+     * Call after reseed() when importing a backup whose schema_version
+     * may be behind the current app version.
+     * Dirty tables are scheduled for save automatically.
+     */
+    async runPendingMigrations() {
+      const pendingMigrations = Object.keys(DRIVE_MIGRATIONS)
+        .sort((a, b) => parseFloat(a) - parseFloat(b));
+      if (!pendingMigrations.length) return 0;
+
+      const settings = inner._store.settings || [];
+      const svEntry = settings.find(s => s.key === 'schema_version');
+      const currentVersion = svEntry ? String(svEntry.value) : '0';
+
+      const toRun = pendingMigrations.filter(v => v > currentVersion);
+      if (!toRun.length) return 0;
+
+      const migrationCtx = {
+        token: await getToken(), folderId, fileMeta, filesByName,
+        getToken, DRIVE_TABLES,
+        uploadFile, downloadFile, deleteFile, listFolderFiles,
+      };
+
+      for (const version of toRun) {
+        await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
+
+        // Bump schema_version in memory
+        const entry = (inner._store.settings || []).find(s => s.key === 'schema_version');
+        if (entry) {
+          entry.value = version;
+        } else {
+          if (!inner._store.settings) inner._store.settings = [];
+          inner._store.settings.push({ key: 'schema_version', value: version });
+        }
+      }
+
+      // Schedule save for all tables — migrations may have touched any of them
+      for (const table of DRIVE_TABLES) scheduleSave(table);
+      return toRun.length;
     },
 
     get _store() { return inner._store; },
@@ -621,23 +931,165 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       }
       const tablesToSave = [...dirtyTables];
       dirtyTables.clear();
-      await Promise.all(tablesToSave.map(t => flushTable(t)));
+      if (tablesToSave.length > 0) {
+        syncStart();
+        let _err = false;
+        try { await Promise.all(tablesToSave.map(t => flushTable(t, 0, true))); }
+        catch (e) { _err = true; }
+        finally { syncEnd(_err); }
+      }
     },
 
     get connected() { return true; },
+    get isFreshInstall() { return isFreshInstall; },
+    get calendarScopeGranted() { return _calendarScopeGranted; },
     get driveFolderId() { return folderId; },
     get driveFileMeta() { return { ...fileMeta }; },
+
+    /** Expose token getter for sharing module. */
+    getToken,
+
+    /** Force a prompted re-auth that includes the Calendar scope.
+     *  Requests only calendar.app.created incrementally;
+     *  include_granted_scopes preserves the existing Drive grant.
+     *  No prompt:'consent' — Google shows consent for the new scope only. */
+    async requestCalendarScope() {
+      _cachedToken = null;
+      _cachedClientId = null;
+      _tokenExpiry = 0;
+      try { sessionStorage.removeItem(_tokenKey(clientId)); } catch {}
+      return new Promise((resolve, reject) => {
+        if (typeof google === 'undefined' || !google.accounts) {
+          reject(new Error('google_not_loaded'));
+          return;
+        }
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: CALENDAR_SCOPE,
+          include_granted_scopes: true,
+          callback: (resp) => {
+            if (resp.error) {
+              reject(new Error(resp.error));
+            } else {
+              const granted = resp.scope || '';
+              console.log('[DeLaClaw] requestCalendarScope granted scopes:', granted);
+              console.log('[DeLaClaw] calendar.app.created present:', granted.includes(CALENDAR_SCOPE));
+              _calendarScopeGranted = granted.includes(CALENDAR_SCOPE);
+              _cachedToken = resp.access_token;
+              _cachedClientId = clientId;
+              _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
+              _persistToken(_cachedToken, _tokenExpiry, clientId, granted);
+              resolve(resp.access_token);
+            }
+          },
+          error_callback: (err) => {
+            reject(new Error(err.type || 'auth_error'));
+          },
+        });
+        client.requestAccessToken();
+      });
+    },
+
+    /** Open Google Picker to select files inside a shared folder.
+     *  Used for drive.file scope: Picker grants per-file access. */
+    async openSharedFolderPicker(folderId) {
+      await ensurePickerApi();
+      const tok = await getToken();
+      const appId = clientId.split('-')[0];
+
+      return new Promise((resolve) => {
+        // Primary view: contents of the shared folder
+        const folderView = new google.picker.DocsView()
+          .setParent(folderId)
+          .setIncludeFolders(false)
+          .setMode(google.picker.DocsViewMode.LIST);
+
+        // Fallback view: "Shared with me" (in case setParent fails)
+        const sharedView = new google.picker.DocsView()
+          .setOwnedByMe(false)
+          .setIncludeFolders(true)
+          .setSelectFolderEnabled(true);
+
+        const picker = new google.picker.PickerBuilder()
+          .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+          .addView(folderView)
+          .addView(sharedView)
+          .setOAuthToken(tok)
+          .setAppId(appId)
+          .setCallback((data) => {
+            if (data.action === google.picker.Action.PICKED) {
+              resolve(data.docs.map(d => ({
+                id: d[google.picker.Document.ID],
+                name: d[google.picker.Document.NAME],
+                mimeType: d[google.picker.Document.MIME_TYPE],
+              })));
+            } else if (data.action === google.picker.Action.CANCEL) {
+              resolve(null);
+            }
+          })
+          .build();
+
+        picker.setVisible(true);
+      });
+    },
 
     // Callback for external change notification
     _onExternalChange: null,
 
+    // Callback after a table flush (e.g. calendar sync)
+    _onTableFlushed: null,
+
     startPolling,
     stopPolling,
+    /** Trigger an immediate poll for external changes (e.g. on tab foreground). */
+    pollNow() { pollForChanges().catch(() => {}); },
 
     destroy() {
       stopPolling();
       for (const t of Object.keys(saveTimers)) clearTimeout(saveTimers[t]);
-      clearDriveTokenCache();
+      clearDriveTokenCache(clientId);
+    },
+
+    /**
+     * Delete the user's DeLaClaw account: trash the Drive folder (and all
+     * files inside it), revoke the OAuth token, and clear local state.
+     * Returns { ok: true } on success or { ok: false, error: string }.
+     */
+    async deleteAccount() {
+      try {
+        const tok = await getToken();
+        if (!tok) return { ok: false, error: 'No valid token — please sign in again' };
+
+        // 1. Delete the DeLaClaw calendar if sync was enabled
+        try {
+          const calRow = store.settings?.find(r => r.key === 'gcal_calendar_id');
+          const calId = calRow?.value;
+          if (calId) {
+            await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}`, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${tok}` },
+            });
+          }
+        } catch { /* best effort */ }
+
+        // 2. Trash the DeLaClaw folder (cascades to all files inside)
+        try {
+          await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trashed: true }),
+          });
+        } catch { /* best effort */ }
+
+        // 3. Revoke the OAuth token
+        try {
+          await fetch(`https://oauth2.googleapis.com/revoke?token=${tok}`, { method: 'POST' });
+        } catch { /* best effort */ }
+
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e.message || 'Unexpected error' };
+      }
     },
   };
 

@@ -397,6 +397,37 @@ export function initHero() {
   render();
   window.addEventListener('scroll',  onScroll, { passive: true });
   window.addEventListener('resize',  onScroll, { passive: true });
+
+  // ── Scroll indicator click → auto-scroll to gate ──
+  const ind = document.getElementById('heroScrollInd');
+  if (ind) {
+    ind.addEventListener('click', () => {
+      const spacer = document.querySelector('.hero-spacer');
+      if (!spacer) return;
+      const target = spacer.offsetTop + spacer.offsetHeight;
+      let autoScrolling = true;
+      const stop = () => { autoScrolling = false; };
+      // User touch/wheel/key cancels auto-scroll
+      window.addEventListener('wheel', stop, { once: true, passive: true });
+      window.addEventListener('touchstart', stop, { once: true, passive: true });
+      window.addEventListener('keydown', stop, { once: true });
+      const start = window.scrollY;
+      const dist = target - start;
+      const duration = 2400;
+      let t0 = null;
+      function step(ts) {
+        if (!autoScrolling) return;
+        if (!t0) t0 = ts;
+        const elapsed = ts - t0;
+        const p = Math.min(elapsed / duration, 1);
+        // Ease in-out cubic
+        const ease = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+        window.scrollTo(0, start + dist * ease);
+        if (p < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    });
+  }
 }
 
 export function destroyHero() {

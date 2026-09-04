@@ -1,19 +1,15 @@
 import { lucideIcon } from './icons.js';
-import state from './supabase.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, balanceGrid, truncateWithShowMore, fetchAll } from './utils.js';
-import { scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
+import state from './state.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, nextPaletteColor, autoResizeTextarea } from './utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
+import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 
 // ===================================================================
 // LISTS — GENERIC USER-CREATED LISTS (bucket-card layout)
 // ===================================================================
 
 let listSearchQuery = '';
-
-// Shortnames
-const LIST_SHORTNAMES_LS_KEY = 'list_shortnames';
-const LIST_SHORTNAMES_DB_KEY = 'list_shortnames';
-let _listShortnames = {};
 
 // Distinct colors for list cards (cycles)
 const LIST_COLORS = [
@@ -31,59 +27,27 @@ const LIST_COLORS = [
 
 function getListColor(list, idx) {
   if (list.color) return list.color;
+  // Stable fallback for legacy lists without a stored color:
+  // hash the id so the color doesn't change when sort order changes.
+  if (list.id) {
+    let h = 0;
+    for (let i = 0; i < list.id.length; i++) h = (h * 31 + list.id.charCodeAt(i)) | 0;
+    return LIST_COLORS[Math.abs(h) % LIST_COLORS.length];
+  }
   return LIST_COLORS[(idx >= 0 ? idx : 0) % LIST_COLORS.length];
 }
-
-// ===================================================================
-// SHORTNAMES
-// ===================================================================
-
-async function loadListShortnames() {
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings').select('key,value').eq('key', LIST_SHORTNAMES_DB_KEY);
-      if (data && data.length && data[0].value) {
-        _listShortnames = JSON.parse(data[0].value);
-        localStorage.setItem(LIST_SHORTNAMES_LS_KEY, data[0].value);
-        return;
-      }
-    } catch (e) { console.warn('Could not load list shortnames from DB:', e.message); }
-  }
-  try { _listShortnames = JSON.parse(localStorage.getItem(LIST_SHORTNAMES_LS_KEY) || '{}'); } catch { _listShortnames = {}; }
-}
-
-async function saveListShortnames() {
-  const json = JSON.stringify(_listShortnames);
-  localStorage.setItem(LIST_SHORTNAMES_LS_KEY, json);
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings')
-        .update({ value: json, updated_at: new Date().toISOString() })
-        .eq('key', LIST_SHORTNAMES_DB_KEY).select();
-      if (!data || data.length === 0) {
-        await state.db.from('settings')
-          .insert({ key: LIST_SHORTNAMES_DB_KEY, value: json, updated_at: new Date().toISOString() });
-      }
-    } catch (e) { console.warn('Could not save list shortnames to DB:', e.message); }
-  }
-}
-
-function getListShortname(listId) { return _listShortnames[listId] || null; }
-
-function setListShortname(listId, shortname) {
-  if (shortname) { _listShortnames[listId] = shortname; }
-  else { delete _listShortnames[listId]; }
-  saveListShortnames();
-}
-
 
 // ===================================================================
 // DATA
 // ===================================================================
 
+let _lastRefreshLists = 0;
 async function refreshLists() {
   if (!state.db.connected) return;
-  await loadListShortnames();
+  // Cooldown: skip if a refresh completed within 500ms (avoids double-fetch
+  // when explicit refresh + realtime-triggered refresh fire back-to-back).
+  const now = Date.now();
+  if (now - _lastRefreshLists < 500) return;
   let lists;
   try {
     lists = await fetchAll(() => state.db
@@ -111,6 +75,43 @@ async function refreshLists() {
   }
   state.allListItems = items || [];
 
+  // Enrich shared list item pointers with live data from Drive
+  if (state.sharing) {
+    const sharedItems = state.sharing.getAllSharedItems().filter(i => i.item_type === 'list_item');
+    const sharedById = new Map(sharedItems.map(i => [i.id, i]));
+
+    for (const item of state.allListItems) {
+      if (!item.shared_id) continue;
+      const sh = sharedById.get(item.shared_id);
+      if (sh) {
+        item.text = sh.payload?.text || sh.payload?.title || '';
+        item.note = sh.payload?.note || null;
+        item.checked = sh.done ? 1 : 0;
+        item._shared = sh;
+      }
+    }
+
+    // Precompute which shared list items the current user created
+    _myCreatedSharedListItemIds.clear();
+    if (typeof state.sharing.getCurrentMember === 'function') {
+      const groupIds = new Set(state.allListItems.filter(i => i.shared_group_id).map(i => i.shared_group_id));
+      const memberIdPerGroup = new Map();
+      const gidArr = [...groupIds];
+      const members = await Promise.all(gidArr.map(gid => Promise.resolve(state.sharing.getCurrentMember(gid))));
+      gidArr.forEach((gid, i) => { if (members[i]?.memberId) memberIdPerGroup.set(gid, members[i].memberId); });
+      for (const item of state.allListItems) {
+        if (!item._shared || !item.shared_group_id) continue;
+        const myId = memberIdPerGroup.get(item.shared_group_id);
+        if (myId && item._shared.created_by === myId) _myCreatedSharedListItemIds.add(item.shared_id);
+      }
+    }
+
+    // Drop shared pointers whose remote data couldn't be resolved
+    state.allListItems = state.allListItems.filter(i => !i.shared_id || i._shared);
+  }
+
+  _lastRefreshLists = Date.now();
+
   if (state.currentView === 'lists') {
     renderLists();
   }
@@ -124,6 +125,7 @@ async function refreshLists() {
 function renderLists() {
   const grid = document.getElementById('listsGrid');
   if (!grid) return;
+  cleanupDragArtifacts();
 
   const lists = state.allLists || [];
   const allItems = state.allListItems || [];
@@ -134,7 +136,7 @@ function renderLists() {
       <div class="empty-icon">${lucideIcon('list', 48, 'var(--muted)')}</div>
       <h3>${t('lists.empty_title')}</h3>
       <p>${t('lists.empty_hint')}</p>
-      <button class="empty-cta" onclick="openAddListModal()">${lucideIcon('plus', 16)} ${t('lists.empty_cta')}</button>
+      <button class="empty-cta" data-action="open-add-list">${lucideIcon('plus', 16)} ${t('lists.empty_cta')}</button>
     </div>`;
     renderListNavButtons([], {});
     return;
@@ -165,11 +167,31 @@ function renderLists() {
   });
 
   // Also filter lists when searching — hide lists with no matching items
-  const visibleLists = listSearchQuery
+  // Always hide the Shared list when it has no items
+  let visibleLists = listSearchQuery
     ? sortedLists.filter(l => (grouped[l.id] || []).length > 0 || l.name.toLowerCase().includes(listSearchQuery.toLowerCase()))
     : sortedLists;
+  visibleLists = visibleLists.filter(l => l.name !== SHARED_LIST_NAME || (grouped[l.id] || []).length > 0);
+  // Shared list always first when visible
+  visibleLists.sort((a, b) => {
+    const aShared = a.name === SHARED_LIST_NAME ? 0 : 1;
+    const bShared = b.name === SHARED_LIST_NAME ? 0 : 1;
+    return aShared - bShared;
+  });
 
   renderListNavButtons(sortedLists, grouped);
+  initListNavBtnReorder();
+
+  // Empty state — also check after filtering out hidden __shared__ list
+  if (visibleLists.length === 0) {
+    grid.innerHTML = `<div class="page-empty-state">
+      <div class="empty-icon">${lucideIcon('list', 48, 'var(--muted)')}</div>
+      <h3>${t('lists.empty_title')}</h3>
+      <p>${t('lists.empty_hint')}</p>
+      <button class="empty-cta" data-action="open-add-list">${lucideIcon('plus', 16)} ${t('lists.empty_cta')}</button>
+    </div>`;
+    return;
+  }
 
   // Sort items within each list: unchecked first by sort_order, checked at bottom
   for (const listId of Object.keys(grouped)) {
@@ -186,9 +208,11 @@ function renderLists() {
   });
 
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   grid.className = 'project-grid';
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(grid, innerScrolls);
 
   // Init hover-delay + drag-drop for each list card
   visibleLists.forEach(list => {
@@ -206,6 +230,9 @@ function renderLists() {
 function renderListCard(list, items, idx) {
   const color = getListColor(list, idx);
   const count = items.length;
+  const isSharedList = list.name === SHARED_LIST_NAME;
+  const displayName = isSharedList ? t('sharing.shared') : list.name;
+  const listIcon = isSharedList ? 'users' : (list.icon || 'list');
 
   let itemsHtml = '';
   if (count === 0 && !listSearchQuery) {
@@ -214,33 +241,47 @@ function renderListCard(list, items, idx) {
     itemsHtml = items.map(item => renderListItem(item)).join('');
   }
 
-  // Quick-add input
-  const quickAddHtml = `<div class="list-quick-add">
-    <input type="text" class="list-quick-input" placeholder="${esc(t('lists.add_item'))}" maxlength="2000"
-      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();quickAddListItem(this,'${escQ(list.id)}');}">
-    <button class="list-quick-add-btn" onclick="quickAddListItem(this.previousElementSibling,'${escQ(list.id)}')" title="${esc(t('lists.add_item'))}">${lucideIcon('plus', 16)}</button>
+  // Quick-add input — not shown for the auto-managed Shared list
+  const quickAddHtml = isSharedList ? '' : `<div class="list-quick-add">
+    <textarea class="list-quick-input" placeholder="${esc(t('lists.add_item'))}" maxlength="2000"
+      data-action="quick-add-input" data-list-id="${esc(list.id)}" rows="1" style="resize:none;overflow:hidden;"></textarea>
+    <button class="list-quick-add-btn" data-action="quick-add-list-item" data-list-id="${esc(list.id)}" title="${esc(t('lists.add_item'))}">${lucideIcon('plus', 16)}</button>
+    ${state.sharing ? `<button class="sharing-share-btn" data-action="share-list-item-from-add" data-list-id="${esc(list.id)}" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
   </div>`;
+
+  const shareableItems = items.filter(i => !i.shared_id);
+  const shareListBtn = (state.sharing && shareableItems.length > 0)
+    ? `<button class="archive-project-btn" data-action="bulk-share-list" data-id="${esc(list.id)}" title="${esc(t('sharing.share_all'))}">
+          ${lucideIcon('share', 14)}
+        </button>`
+    : '';
+
+  const headerActions = isSharedList ? '' : `<div class="project-header-actions" style="opacity:1;">
+        ${shareListBtn}
+        <button class="archive-project-btn" data-action="copy-item-link" data-link-type="list" data-id="${esc(list.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">
+          ${lucideIcon('link', 14)}
+        </button>
+        <button class="archive-project-btn" data-action="open-edit-list" data-id="${esc(list.id)}" title="${t('lists.edit_list')}">
+          ${lucideIcon('pencil', 14)}
+        </button>
+        <button class="todo-cat-delete-btn" data-action="delete-list" data-id="${esc(list.id)}" title="${t('common.delete')}">
+          ${lucideIcon('trash-2', 16)}
+        </button>
+      </div>`;
 
   return `<div class="project-card list-bucket" data-list-id="${esc(list.id)}" style="--cat-color:${color}">
     <div class="project-card-header">
       <div style="display:flex;align-items:center;gap:8px;">
-        <span>${lucideIcon(list.icon || 'list', 18)}</span>
-        <strong style="font-size:1rem;">${esc(list.name)}</strong>
+        <span>${lucideIcon(listIcon, 18)}</span>
+        <strong style="font-size:1rem;">${esc(displayName)}</strong>
         <span style="font-size:0.78rem;opacity:0.75;">(${count})</span>
       </div>
-      <div class="project-header-actions" style="opacity:1;">
-        <button class="archive-project-btn" onclick="openEditListModal('${escQ(list.id)}')" title="${t('lists.edit_list')}">
-          ${lucideIcon('pencil', 14)}
-        </button>
-        <button class="todo-cat-delete-btn" onclick="deleteList('${escQ(list.id)}')" title="${t('common.delete')}">
-          ${lucideIcon('trash-2', 16)}
-        </button>
-      </div>
+      ${headerActions}
     </div>
+    ${quickAddHtml}
     <div class="task-list list-item-list" data-list-id="${esc(list.id)}">
       ${itemsHtml}
     </div>
-    ${quickAddHtml}
   </div>`;
 }
 
@@ -250,19 +291,33 @@ function renderListItem(item) {
     ? lucideIcon('check-square', 16, 'var(--accent)')
     : lucideIcon('square', 16, 'var(--muted)');
   const noteHtml = item.note
-    ? `<div class="list-item-note">${esc(item.note)}</div>`
+    ? `<div class="list-item-note">${renderMd(item.note)}</div>`
     : '';
 
+  // Shared list item badge
+  const isShared = item.shared_id && item.shared_group_id;
+  const hasShareBtn = isShared || (!isShared && !!state.sharing);
+  let sharedHtml = '';
+  if (isShared && state.sharing) {
+    const group = state.sharing.getAllGroups().find(g => g.id === item.shared_group_id);
+    sharedHtml = sharedBadge(group?.name || '', item.shared_group_id);
+  }
+
   return `<div class="bucket-item list-item${checkedCls}" data-item-id="${item.id}">
+    ${sharedHtml}
     <div class="list-item-row">
-      <button class="list-check-btn" onclick="toggleListItemCheck('${escQ(item.id)}')" title="Toggle">${checkIcon}</button>
+      <button class="list-check-btn" data-action="toggle-list-item-check" data-id="${esc(item.id)}" title="Toggle">${checkIcon}</button>
       <div style="flex:1;min-width:0;">
         <span class="list-item-text">${truncateWithShowMore(item.text, 120, item.id, 'listtext')}</span>
         ${noteHtml}
       </div>
-      <div class="list-item-actions">
-        <button onclick="editListItemInlineFull('${escQ(item.id)}')" title="Edit">${lucideIcon('pencil', 14)}</button>
-        <button onclick="deleteListItem('${escQ(item.id)}')" title="Delete">${lucideIcon('trash-2', 14)}</button>
+      <div class="list-item-actions${hasShareBtn ? ' cols-2' : ''}">
+        ${!isShared && state.sharing ? `<button data-action="share-existing-list-item" data-id="${esc(item.id)}" title="${t('sharing.share')}">${lucideIcon('share', 14)}</button>` : ''}
+        ${isShared && _myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="unshare-list-item" data-id="${esc(item.id)}" title="${t('sharing.unshare')}">${lucideIcon('share-off', 14)}</button>` : ''}
+        ${isShared && !_myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="copy-list-item-to-personal" data-id="${esc(item.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon('copy', 14)}</button>` : ''}
+        <button data-action="copy-item-link" data-link-type="listitem" data-id="${esc(item.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
+        <button data-action="edit-list-item-inline" data-id="${esc(item.id)}" title="Edit">${lucideIcon('pencil', 14)}</button>
+        <button data-action="delete-list-item" data-id="${esc(item.id)}" title="Delete">${lucideIcon('trash-2', 14)}</button>
       </div>
     </div>
   </div>`;
@@ -271,12 +326,21 @@ function renderListItem(item) {
 function renderListNavButtons(lists, grouped) {
   const container = document.getElementById('listsNavButtons');
   if (!container) return;
-  container.innerHTML = lists.map((list, idx) => {
+  // Hide shared list from nav when empty
+  const navLists = lists.filter(l => l.name !== SHARED_LIST_NAME || (grouped[l.id] || []).length > 0);
+  // Shared list always first in nav when visible
+  navLists.sort((a, b) => {
+    const aShared = a.name === SHARED_LIST_NAME ? 0 : 1;
+    const bShared = b.name === SHARED_LIST_NAME ? 0 : 1;
+    return aShared - bShared;
+  });
+  container.innerHTML = navLists.map((list, idx) => {
     const count = (grouped[list.id] || []).length;
     const color = getListColor(list, idx);
-    const shortname = getListShortname(list.id);
-    const displayName = shortname || list.name;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" onclick="navigateToList('${escQ(list.id)}')" title="${esc(list.name)} (${count})">${esc(displayName)} (${count})</button>`;
+    const shortname = list.shortname;
+    const isSharedList = list.name === SHARED_LIST_NAME;
+    const displayName = isSharedList ? t('sharing.shared') : (shortname || list.name);
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-list" data-id="${esc(list.id)}" title="${esc(isSharedList ? t('sharing.shared') : list.name)} (${count})">${esc(displayName)} (${count})</button>`;
   }).join('');
 }
 
@@ -284,6 +348,34 @@ function navigateToList(listId) {
   const card = document.querySelector(`.list-bucket[data-list-id="${listId}"]`);
   if (!card) return;
   scrollToAndHighlight(card, 'var(--accent)');
+}
+
+function initListNavBtnReorder() {
+  const skipIds = new Set();
+  const sharedList = (state.allLists || []).find(l => l.name === SHARED_LIST_NAME);
+  if (sharedList) skipIds.add(sharedList.id);
+  initNavBtnReorder('listsNavButtons', {
+    idAttr: 'id',
+    skipIds,
+    async onReorder(orderedIds) {
+      const reorderable = orderedIds.filter(id => {
+        const l = (state.allLists || []).find(ls => ls.id === id);
+        return l && l.name !== SHARED_LIST_NAME;
+      });
+      const updates = [];
+      reorderable.forEach((id, i) => {
+        const l = (state.allLists || []).find(ls => ls.id === id);
+        if (l && Number(l.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+        if (l) l.sort_order = i;
+      });
+      await bulkSortOrder('lists', updates);
+      const grid = document.getElementById('listsGrid');
+      const snapshot = snapshotBuckets(grid);
+      await refreshLists();
+      animateBucketsFromSnapshot(grid, snapshot, 600);
+      showToast(t('toast.reordered'), 'success');
+    },
+  });
 }
 
 
@@ -308,42 +400,71 @@ function initListItemDragDrop(listId, listEl) {
   initItemDragDrop(listEl, {
     itemSelector: '.list-item',
     idAttr: 'itemId',
-    onReorder: async (draggedId, targetId) => {
-      const items = (state.allListItems || []).filter(i => i.list_id === listId).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-      await reorderItems({
-        items,
-        allItems: state.allListItems || [],
-        draggedId,
-        targetId,
-        container: listEl,
-        itemSelector: '.list-item',
-        idAttr: 'itemId',
-        tableName: 'list_items',
-        reinitFn: () => initListItemDragDrop(listId, listEl),
-      });
+    actionsSelector: '.list-item-actions',
+    crossContainerSelector: '.list-item-list',
+    getContainerId: (el) => el.dataset.listId,
+    onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
+      const allItems = state.allListItems || [];
+      const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;
+
+      if (crossMove) {
+        // --- Cross-list move ---
+        const movedItem = allItems.find(x => x.id === draggedId);
+        if (!movedItem) return;
+
+        // Update list_id in memory
+        movedItem.list_id = targetContainerId;
+
+        // Diff target list — dragged item handled in FK update below
+        const targetUpdates = [];
+        let draggedSortOrder = 0;
+        orderedIds.forEach((id, i) => {
+          const it = allItems.find(x => x.id === id);
+          if (!it) return;
+          if (id === draggedId) { draggedSortOrder = i; }
+          else if (Number(it.sort_order ?? 0) !== i) { targetUpdates.push({ id, sort_order: i }); }
+          it.sort_order = i;
+        });
+
+        // Diff source list
+        const sourceItems = allItems
+          .filter(x => x.list_id === sourceContainerId)
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        const sourceUpdates = [];
+        sourceItems.forEach((it, i) => {
+          if (Number(it.sort_order ?? 0) !== i) sourceUpdates.push({ id: it.id, sort_order: i });
+          it.sort_order = i;
+        });
+
+        // DB: write list_id + sort_order for dragged item, then bulk the rest
+        await state.db.from('list_items').update({ list_id: targetContainerId, sort_order: draggedSortOrder }).eq('id', draggedId);
+        await Promise.all([
+          bulkSortOrder('list_items', targetUpdates),
+          bulkSortOrder('list_items', sourceUpdates),
+        ]);
+
+        // Refresh: sharing cleanup if needed
+        if (movedItem.shared_id && movedItem.shared_group_id && state.sharing) {
+          // Shared items keep their sharing data, only list_id is local
+        }
+
+        await refreshLists();
+        showToast(t('toast.moved'), 'success');
+      } else {
+        // --- Same-list reorder ---
+        await reorderItems({
+          orderedIds,
+          allItems,
+          tableName: 'list_items',
+          reinitFn: () => initListItemDragDrop(listId, listEl),
+        });
+      }
     },
   });
 }
 
-async function editListItemInline(id) {
-  const el = document.querySelector(`.list-item[data-item-id="${id}"] .list-item-text`);
-  if (!el) return;
-  const item = (state.allListItems || []).find(x => x.id === id);
-  if (!item) return;
-
-  inlineEditText(el, item.text, {
-    maxLength: 2000,
-    saveFn: async (newText) => {
-      const { error } = await state.db.from('list_items').update({
-        text: newText,
-        updated_at: new Date().toISOString(),
-      }).eq('id', id);
-      if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
-      item.text = newText;
-      showToast(t('toast.updated'), 'success');
-    },
-    refreshFn: renderLists,
-  });
+function editListItemInline(id) {
+  return editListItemInlineFull(id);
 }
 
 function editListItemInlineFull(id) {
@@ -358,35 +479,100 @@ function editListItemInlineFull(id) {
   const extras = document.createElement('div');
   extras.className = 'inline-edit-extras';
 
+  // Note row
   const row = document.createElement('div');
-  row.className = 'inline-edit-row';
+  row.className = 'inline-edit-row inline-edit-row-note';
   const label = document.createElement('label');
   label.className = 'inline-edit-label';
   label.textContent = t('common.notes');
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'inline-edit-input';
+  const input = document.createElement('textarea');
+  input.className = 'task-edit-input';
   input.value = item.note || '';
   input.placeholder = t('lists.note_placeholder');
+  input.rows = 1;
+  input.style.overflow = 'hidden';
+  input.style.resize = 'none';
+  input.style.width = '100%';
+  input.style.boxSizing = 'border-box';
+  input.style.flex = 'none';
+  // Allow Enter to create newlines — stop propagation so extraEl handler doesn't finishEdit
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') e.stopPropagation();
+  });
+  // Auto-size the textarea
+  input.addEventListener('input', () => {
+    input.style.height = '0';
+    input.style.height = input.scrollHeight + 'px';
+  });
   row.appendChild(label);
   row.appendChild(input);
   extras.appendChild(row);
 
+  // List selector row — move item between lists
+  const allLists = state.allLists || [];
+  if (allLists.length > 1) {
+    const listRow = document.createElement('div');
+    listRow.className = 'inline-edit-row';
+    const listLabel = document.createElement('label');
+    listLabel.className = 'inline-edit-label';
+    listLabel.textContent = t('common.list');
+    const listSelect = document.createElement('select');
+    listSelect.className = 'inline-edit-input';
+    allLists
+      .filter(l => l.name !== SHARED_LIST_NAME || l.id === item.list_id)
+      .forEach(l => {
+        const opt = document.createElement('option');
+        opt.value = l.id;
+        opt.textContent = l.name === SHARED_LIST_NAME ? t('sharing.shared') : l.name;
+        if (l.id === item.list_id) opt.selected = true;
+        listSelect.appendChild(opt);
+      });
+    listRow.appendChild(listLabel);
+    listRow.appendChild(listSelect);
+    extras.appendChild(listRow);
+  }
+
+  const listSelect = extras.querySelector('select');
+
   inlineEditText(el, item.text, {
     maxLength: 2000,
     extraEl: extras,
-    collectExtra: () => ({ note: input.value.trim() }),
+    containerEl: el.closest('.list-item'),
+    collectExtra: () => ({
+      note: input.value.trim(),
+      list_id: listSelect ? listSelect.value : item.list_id,
+    }),
     saveFn: async (newText, extra) => {
       const updates = {};
       if (newText !== item.text) updates.text = newText;
       if (extra && (extra.note || '') !== (item.note || '')) updates.note = extra.note || null;
-      if (Object.keys(updates).length > 0) {
-        updates.updated_at = new Date().toISOString();
-        const { error } = await state.db.from('list_items').update(updates).eq('id', id);
-        if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+      if (extra && extra.list_id && extra.list_id !== item.list_id) updates.list_id = extra.list_id;
+      if (Object.keys(updates).length === 0) return;
+
+      // Shared → text & note go to Drive payload
+      if (item.shared_id && item.shared_group_id && state.sharing) {
+        const drivePayload = {};
+        if ('text' in updates) drivePayload.text = updates.text;
+        if ('note' in updates) drivePayload.note = updates.note;
+        if (Object.keys(drivePayload).length > 0) {
+          const currentPayload = item._shared?.payload || {};
+          await state.sharing.updateItem(item.shared_group_id, item.shared_id, { payload: { ...currentPayload, ...drivePayload } });
+        }
+        // list_id is local-only — update pointer directly
+        if ('list_id' in updates) {
+          await state.db.from('list_items').update({ list_id: updates.list_id }).eq('id', id);
+        }
         Object.assign(item, updates);
         showToast(t('toast.updated'), 'success');
+        return;
       }
+
+      // Normal → local DB
+      updates.updated_at = new Date().toISOString();
+      const { error } = await state.db.from('list_items').update(updates).eq('id', id);
+      if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+      Object.assign(item, updates);
+      showToast(t('toast.updated'), 'success');
     },
     refreshFn: renderLists,
   });
@@ -398,58 +584,148 @@ function editListItemInlineFull(id) {
 // ===================================================================
 
 async function quickAddListItem(inputEl, listId) {
-  const text = inputEl.value.trim();
+  // Support delegation: inputEl may be event or element, listId may be in dataset
+  let actualInput = null;
+  let actualListId = listId;
+
+  if (inputEl && inputEl.target) {
+    // Called as event handler wrapper via delegation - resolve
+    const el = inputEl.target.closest ? inputEl.target.closest('[data-action="quick-add-list-item"]') : null;
+    if (el) {
+      actualListId = el.dataset.listId || actualListId;
+      const wrapper = el.closest('.list-quick-add');
+      actualInput = wrapper ? wrapper.querySelector('.list-quick-input') : null;
+    }
+  } else if (typeof inputEl === 'string' && !listId) {
+    // Called as quickAddListItem(listId) from old onkeydown handler - not used anymore
+    actualListId = inputEl;
+    actualInput = null;
+  } else if (inputEl && inputEl.dataset && inputEl.dataset.listId) {
+    // inputEl is actually the input with data-list-id
+    actualInput = inputEl;
+    actualListId = inputEl.dataset.listId || listId;
+  } else {
+    actualInput = inputEl;
+  }
+
+  // If called via button click delegation, actualInput is the input element sibling
+  if (!actualInput && typeof actualListId === 'string') {
+    // fallback: try to find via DOM if we have listId but no input
+    // Will search for quick-input in same list-bucket
+    const card = document.querySelector(`.list-bucket[data-list-id="${actualListId}"]`);
+    if (card) actualInput = card.querySelector('.list-quick-input');
+  }
+
+  // If actualInput is still the button, find its sibling input
+  if (actualInput && actualInput.classList && actualInput.classList.contains('list-quick-add-btn')) {
+    const wrapper = actualInput.closest('.list-quick-add');
+    actualInput = wrapper ? wrapper.querySelector('.list-quick-input') : null;
+  }
+
+  // For quick-add-input Enter handler: actualInput is the input itself
+  if (actualInput && !actualListId) {
+    actualListId = actualInput.dataset.listId || actualInput.getAttribute('data-list-id');
+  }
+
+  const inputToUse = actualInput;
+  if (!inputToUse) return;
+  const text = inputToUse.value.trim();
   if (!text) return;
 
   // Show saving state on the quick-add row
-  const wrapper = inputEl.closest('.list-quick-add');
+  const wrapper = inputToUse.closest('.list-quick-add');
   const btn = wrapper && wrapper.querySelector('.list-quick-add-btn');
   const btnHtml = btn ? btn.innerHTML : '';
   if (btn) btn.innerHTML = `<span class="list-saving-spinner"></span>`;
-  inputEl.disabled = true;
+  inputToUse.disabled = true;
 
-  const items = (state.allListItems || []).filter(i => i.list_id === listId);
+  const items = (state.allListItems || []).filter(i => i.list_id === actualListId);
   const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
 
   const { error } = await state.db.from('list_items').insert({
-    list_id: listId,
+    list_id: actualListId,
     text,
     sort_order: maxOrder + 1,
   });
 
   // Restore input state
-  inputEl.disabled = false;
+  inputToUse.disabled = false;
   if (btn) btn.innerHTML = btnHtml;
 
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
-  inputEl.value = '';
+  inputToUse.value = '';
+  if (inputToUse.tagName === 'TEXTAREA') { inputToUse.style.height = ''; }
   showToast(t('toast.added'), 'success');
   await refreshLists();
 }
 
-async function toggleListItemCheck(id) {
-  const item = (state.allListItems || []).find(x => x.id === id);
-  if (!item) return;
-  const newVal = item.checked ? 0 : 1;
-  const { error } = await state.db.from('list_items').update({
-    checked: newVal,
-    updated_at: new Date().toISOString(),
-  }).eq('id', id);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-  item.checked = newVal;
-  renderLists();
+const _pendingListItemToggles = new Set();
+
+async function toggleListItemCheck(id, btnEl) {
+  if (!id) return;
+  if (_pendingListItemToggles.has(id)) return;
+  _pendingListItemToggles.add(id);
+
+  const safeId = CSS && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\"');
+  const allBtns = document.querySelectorAll(`button[data-action="toggle-list-item-check"][data-id="${safeId}"]`);
+  const targetBtn = btnEl instanceof HTMLElement ? btnEl : (allBtns[0] || null);
+  const toToggle = new Set([...allBtns, ...(targetBtn ? [targetBtn] : [])]);
+  toToggle.forEach(b => { b.disabled = true; b.classList.add('saving', 'is-pending'); b.setAttribute('aria-busy', 'true'); });
+
+  try {
+    const item = (state.allListItems || []).find(x => x.id === id);
+    if (!item) return;
+    const newVal = item.checked ? 0 : 1;
+
+    // Shared → Drive only
+    if (item.shared_id && item.shared_group_id && state.sharing) {
+      try {
+        if (newVal) {
+          await state.sharing.completeItem(item.shared_group_id, item.shared_id);
+        } else {
+          await state.sharing.uncompleteItem(item.shared_group_id, item.shared_id);
+        }
+        item.checked = newVal;
+        renderLists();
+      } catch (e) { showToast(e.message, 'error'); }
+      return;
+    }
+
+    // Normal → local DB
+    const { error } = await state.db.from('list_items').update({
+      checked: newVal,
+      updated_at: new Date().toISOString(),
+    }).eq('id', id);
+    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    item.checked = newVal;
+    renderLists();
+  } finally {
+    _pendingListItemToggles.delete(id);
+    toToggle.forEach(b => { b.disabled = false; b.classList.remove('saving', 'is-pending'); b.removeAttribute('aria-busy'); });
+  }
 }
 
 async function deleteListItem(id) {
   const item = (state.allListItems || []).find(x => x.id === id);
   if (!item) return;
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     `Remove "${item.text}"?`,
     async () => {
+      // Shared → delete from Drive + delete local pointer
+      if (item.shared_id && item.shared_group_id && state.sharing) {
+        try {
+          await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
+        } catch (e) { /* item may already be gone from Drive */ }
+      }
       const { error } = await state.db.from('list_items').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Animate item out before re-rendering
+      const el = document.querySelector(`[data-item-id="${CSS.escape(id)}"]`);
+      await animateItemRemoval(el);
+
       showToast(t('toast.removed'), 'info');
       await refreshLists();
     }
@@ -461,54 +737,80 @@ async function deleteListItem(id) {
 // CRUD — LISTS
 // ===================================================================
 
-function initListModals() {
-  const app = document.getElementById('app');
-
-  // Add List Modal
-  const m1 = document.createElement('div');
-  m1.className = 'modal-overlay';
-  m1.id = 'addListModal';
-  m1.innerHTML = `<div class="modal">
+function addListModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('list', 20)} ${t('lists.add_list')}</h2>
     <label>${t('common.name')}</label>
     <input type="text" id="newListName" placeholder="${t('lists.name_placeholder')}" maxlength="100"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewList();}">
-    <label>${t('lists.color')}</label>
-    <input type="color" id="newListColor" value="#14b8a6">
+      data-action="save-new-list-on-enter">
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>${t('common.shortname')}</label>
+        <input type="text" id="newListShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20"
+          data-action="save-new-list-on-enter">
+      </div>
+      <div class="modal-field">
+        <label>${t('common.color')}</label>
+        <input type="color" id="newListColor">
+      </div>
+    </div>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeAddListModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveNewList()">${t('common.add')}</button>
+      <button class="modal-cancel" data-action="close-add-list">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-new-list">${t('common.add')}</button>
     </div>
   </div>`;
-  app.appendChild(m1);
+}
 
-  // Edit List Modal
-  const m2 = document.createElement('div');
-  m2.className = 'modal-overlay';
-  m2.id = 'editListModal';
-  m2.innerHTML = `<div class="modal">
+function editListModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('lists.edit_list')}</h2>
     <input type="hidden" id="editListId">
     <label>${t('common.name')}</label>
     <input type="text" id="editListName" maxlength="100"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditList();}">
-    <label>Shortname</label>
-    <input type="text" id="editListShortname" maxlength="20" placeholder="e.g. GRC"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditList();}">
-    <label>${t('lists.color')}</label>
-    <input type="color" id="editListColor">
+      data-action="save-edit-list-on-enter">
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>${t('common.shortname')}</label>
+        <input type="text" id="editListShortname" maxlength="20" placeholder="${t('common.shortname_placeholder')}"
+          data-action="save-edit-list-on-enter">
+      </div>
+      <div class="modal-field">
+        <label>${t('common.color')}</label>
+        <input type="color" id="editListColor">
+      </div>
+    </div>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeEditListModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveEditList()">${t('common.save')}</button>
+      <button class="modal-cancel" data-action="close-edit-list">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-list">${t('common.save')}</button>
     </div>
   </div>`;
+}
+
+function initListModals() {
+  const app = document.getElementById('app');
+
+  const m1 = document.createElement('div');
+  m1.className = 'modal-overlay';
+  m1.id = 'addListModal';
+  m1.innerHTML = addListModalHTML();
+  app.appendChild(m1);
+
+  const m2 = document.createElement('div');
+  m2.className = 'modal-overlay';
+  m2.id = 'editListModal';
+  m2.dataset.action = 'close-edit-list';
+  m2.dataset.overlayClose = 'true';
+  m2.innerHTML = editListModalHTML();
   app.appendChild(m2);
 }
 
 function openAddListModal() {
+  const modal = document.getElementById('addListModal');
+  modal.innerHTML = addListModalHTML();
   document.getElementById('newListName').value = '';
-  document.getElementById('newListColor').value = '#14b8a6';
-  document.getElementById('addListModal').classList.add('visible');
+  document.getElementById('newListShortname').value = '';
+  document.getElementById('newListColor').value = nextPaletteColor(state.allLists);
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('newListName').focus(), 100);
 }
 
@@ -518,6 +820,7 @@ function closeAddListModal() {
 
 async function saveNewList() {
   const name = document.getElementById('newListName').value.trim();
+  const shortname = document.getElementById('newListShortname').value.trim();
   const color = document.getElementById('newListColor').value;
 
   if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
@@ -526,6 +829,7 @@ async function saveNewList() {
 
   const { error } = await state.db.from('lists').insert({
     name,
+    shortname: shortname || null,
     color: color || '#14b8a6',
     sort_order: maxOrder + 1,
   });
@@ -539,11 +843,13 @@ async function saveNewList() {
 function openEditListModal(listId) {
   const list = (state.allLists || []).find(l => l.id === listId);
   if (!list) return;
+  const modal = document.getElementById('editListModal');
+  modal.innerHTML = editListModalHTML();
   document.getElementById('editListId').value = listId;
   document.getElementById('editListName').value = list.name || '';
-  document.getElementById('editListShortname').value = getListShortname(listId) || '';
+  document.getElementById('editListShortname').value = list.shortname || '';
   document.getElementById('editListColor').value = list.color || '#14b8a6';
-  document.getElementById('editListModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('editListName').focus(), 100);
 }
 
@@ -559,10 +865,9 @@ async function saveEditList() {
 
   if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
 
-  setListShortname(id, shortname);
-
   const { error } = await state.db.from('lists').update({
     name,
+    shortname: shortname || null,
     color: color || '#14b8a6',
     updated_at: new Date().toISOString(),
   }).eq('id', id);
@@ -576,15 +881,24 @@ async function saveEditList() {
 async function deleteList(listId) {
   const list = (state.allLists || []).find(l => l.id === listId);
   if (!list) return;
-  const itemCount = (state.allListItems || []).filter(i => i.list_id === listId).length;
+  const items = (state.allListItems || []).filter(i => i.list_id === listId);
+  const itemCount = items.length;
   const msg = itemCount > 0
     ? `Delete "${list.name}" and its ${itemCount} item(s)?`
     : `Delete "${list.name}"?`;
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     msg,
     async () => {
-      // Delete items in bulk
+      // Delete shared items from Drive first
+      if (state.sharing) {
+        for (const item of items) {
+          if (item.shared_id && item.shared_group_id) {
+            try { await state.sharing.deleteItem(item.shared_group_id, item.shared_id); } catch { /* ok */ }
+          }
+        }
+      }
+      // Delete items in bulk from local DB
       if (itemCount > 0) await state.db.from('list_items').delete().eq('list_id', listId);
       const { error } = await state.db.from('lists').delete().eq('id', listId);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
@@ -599,7 +913,398 @@ async function deleteList(listId) {
 // EXPORTS
 // ===================================================================
 
-export { refreshLists, renderLists, initListModals };
+// ── Shared List Items — sync pointers ─────────────────────────────
+
+let _syncingListItems = false;
+let _bulkShareInProgress = new Set();
+const _pendingShare = new Set();
+// ── Shared list: auto-created landing list for received shared items ──
+const SHARED_LIST_NAME = '__shared__';
+const _myCreatedSharedListItemIds = new Set(); // shared_ids where current user is creator
+
+async function getOrCreateSharedList(localLists) {
+  // Look for existing shared list (by internal name)
+  let existing = localLists.find(l => l.name === SHARED_LIST_NAME);
+  if (existing) return existing;
+
+  const maxOrder = localLists.reduce((m, l) => Math.max(m, l.sort_order || 0), 0);
+  const { data: created, error } = await state.db.from('lists').insert({
+    name: SHARED_LIST_NAME,
+    color: '#a78bfa',
+    icon: 'users',
+    sort_order: maxOrder + 1,
+  }).select().single();
+
+  if (error) {
+    console.warn('getOrCreateSharedList: failed to create', error);
+    return null;
+  }
+
+  let result = created;
+  if (!result?.id) {
+    // Fallback: query for it
+    const rows = await fetchAll(() => state.db.from('lists').select('id,name,sort_order,color,icon').eq('name', SHARED_LIST_NAME));
+    result = rows?.[0] || null;
+  }
+  if (result) localLists.push(result);
+  return result;
+}
+
+async function syncSharedListItems() {
+  if (_syncingListItems) return;
+  _syncingListItems = true;
+  try {
+    await _doSyncSharedListItems();
+  } finally {
+    _syncingListItems = false;
+  }
+}
+async function _doSyncSharedListItems() {
+  if (!state.sharing || !state.db.connected) return;
+
+  const sharedItems = state.sharing.getAllSharedItems().filter(i => i.item_type === 'list_item');
+  const sharedById = new Map(sharedItems.map(i => [i.id, i]));
+
+  // Get current local pointers
+  let localPointers;
+  try {
+    const res = await fetchAll(() => state.db
+      .from('list_items')
+      .select('id,shared_id,shared_group_id,list_id')
+      .not('shared_id', 'is', null));
+    localPointers = res || [];
+  } catch { localPointers = []; }
+
+  const existingSharedIds = new Set(localPointers.map(p => p.shared_id));
+
+  let localLists = state.allLists || [];
+  if (localLists.length === 0) {
+    try {
+      localLists = await fetchAll(() => state.db
+        .from('lists')
+        .select('id,name,sort_order')
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true }));
+    } catch { localLists = []; }
+  }
+
+  let localItemsForOrder = state.allListItems || [];
+  if (localItemsForOrder.length === 0) {
+    try {
+      localItemsForOrder = await fetchAll(() => state.db
+        .from('list_items')
+        .select('id,list_id,sort_order'));
+    } catch { localItemsForOrder = []; }
+  }
+
+  let needsRefresh = false;
+
+  // Create pointers for new shared items — always land in the "Shared" list
+  for (const sh of sharedItems) {
+    if (existingSharedIds.has(sh.id)) continue;
+
+    let targetList = await getOrCreateSharedList(localLists);
+    if (!targetList) continue;
+
+    // DB check to prevent race duplicates
+    try {
+      const existing = await fetchAll(() => state.db
+        .from('list_items')
+        .select('id')
+        .eq('shared_id', sh.id));
+      if (existing && existing.length > 0) continue;
+    } catch { /* proceed */ }
+
+    const items = localItemsForOrder.filter(i => i.list_id === targetList.id);
+    const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
+
+    await state.db.from('list_items').insert({
+      list_id: targetList.id,
+      text: '',
+      sort_order: maxOrder + 1,
+      shared_id: sh.id,
+      shared_group_id: sh.group_id,
+    });
+    needsRefresh = true;
+  }
+
+  // Remove pointers for deleted shared items
+  for (const ptr of localPointers) {
+    if (!sharedById.has(ptr.shared_id)) {
+      const group = state.sharing?.getAllGroups().find(g => g.id === ptr.shared_group_id);
+      if (group) {
+        // Group exists but item gone from remote → delete local pointer
+        await state.db.from('list_items').delete().eq('id', ptr.id);
+        needsRefresh = true;
+      } else if (state.sharing?.isReady?.()) {
+        // Groups loaded but this one is gone → ask user before clearing
+        try { document.dispatchEvent(new CustomEvent('sharing-orphan-detected', { detail: { groupId: ptr.shared_group_id } })); } catch {}
+      }
+      // else: sharing not loaded yet — skip, will retry on next sync
+    }
+  }
+
+  if (needsRefresh) {
+    await refreshLists();
+  }
+}
+
+async function shareListItemFromAdd(btn, listId) {
+  // Delegation support: btn may be an event, button element, or legacy list id.
+  let actualBtn = btn;
+  let actualListId = listId;
+  if (typeof btn === 'string') {
+    actualListId = btn;
+    const safeListId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(btn) : btn.replace(/"/g, '\\"');
+    actualBtn = document.querySelector(`[data-action="share-list-item-from-add"][data-list-id="${safeListId}"]`);
+  } else if (btn && btn.target) {
+    // event case
+    actualBtn = btn.target.closest ? btn.target.closest('[data-action="share-list-item-from-add"]') : btn.target;
+    actualListId = actualBtn ? actualBtn.dataset.listId : listId;
+  } else if (btn && btn.dataset && btn.dataset.listId) {
+    actualListId = btn.dataset.listId || listId;
+    actualBtn = btn;
+  }
+  const addRow = actualBtn && typeof actualBtn.closest === 'function' ? actualBtn.closest('.list-quick-add') : null;
+  if (!addRow) return;
+  const input = addRow.querySelector('.list-quick-input');
+  const text = input?.value.trim();
+  if (!text) return;
+  const guardKey = `add-${actualListId}`;
+  if (_pendingShare.has(guardKey)) return;
+
+  // Find list name for payload context
+  const listObj = (state.allLists || []).find(l => l.id === actualListId);
+
+  openSharePopover(actualBtn, async (groupId) => {
+    if (_pendingShare.has(guardKey)) return;
+    _pendingShare.add(guardKey);
+    if (actualBtn) { actualBtn.disabled = true; actualBtn.classList.add('is-pending'); actualBtn.setAttribute('aria-busy', 'true'); }
+    try {
+      // Pre-generate UUID for pointer → Drive linkage
+      const presetId = crypto.randomUUID();
+
+      // 1. Insert local pointer FIRST (prevents race with syncSharedListItems)
+      const items = (state.allListItems || []).filter(i => i.list_id === actualListId);
+      const maxOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
+      const { error: ptrErr } = await state.db.from('list_items').insert({
+        list_id: actualListId,
+        text: '',
+        sort_order: maxOrder + 1,
+        shared_id: presetId,
+        shared_group_id: groupId,
+      });
+      if (ptrErr) { showToast(t('toast.failed_to_add') + ': ' + ptrErr.message, 'error'); return; }
+
+      // 2. Write to Drive with the same ID
+      try {
+        await state.sharing.addItem(groupId, {
+          id: presetId,
+          item_type: 'list_item',
+          payload: { text, list_name: listObj?.name || '' },
+        });
+        input.value = '';
+        showToast(t('sharing.shared') + '!', 'success');
+        await refreshLists();
+      } catch (e) {
+        // Drive failed — clean up local pointer
+        await state.db.from('list_items').delete().eq('shared_id', presetId);
+        showToast(e.message, 'error');
+      }
+    } finally {
+      _pendingShare.delete(guardKey);
+      if (actualBtn) { actualBtn.disabled = false; actualBtn.classList.remove('is-pending'); actualBtn.removeAttribute('aria-busy'); }
+    }
+  }, { showAssignees: false });
+}
+window.shareListItemFromAdd = shareListItemFromAdd;
+
+async function shareExistingListItem(id, el) {
+  if (!state.sharing) return;
+  if (_pendingShare.has(id)) return;
+  const item = (state.allListItems || []).find(i => i.id === id);
+  if (!item || item.shared_id) return;
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-list-item"][data-id="${CSS.escape(id)}"]`);
+  if (!btn) return;
+  const listObj = (state.allLists || []).find(l => l.id === item.list_id);
+  openSharePopover(btn, async (groupId) => {
+    if (_pendingShare.has(id)) return;
+    _pendingShare.add(id);
+    if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
+    try {
+      const sharedId = crypto.randomUUID();
+      // 1. Create shared item on the sharing layer
+      await state.sharing.addItem(groupId, {
+        id: sharedId,
+        item_type: 'list_item',
+        payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
+      });
+      // 2. Create local pointer — keep original sort_order so position stays
+      const { error: ptrErr } = await state.db.from('list_items').insert({
+        list_id: item.list_id,
+        text: '',
+        sort_order: item.sort_order || 0,
+        shared_id: sharedId,
+        shared_group_id: groupId,
+      });
+      if (ptrErr) { showToast(t('toast.failed_to_add') + ': ' + ptrErr.message, 'error'); return; }
+      // 3. Delete the personal item
+      await state.db.from('list_items').delete().eq('id', item.id);
+      showToast(t('sharing.shared') + '!', 'success');
+      await refreshLists();
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      _pendingShare.delete(id);
+      if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+    }
+  }, { showAssignees: false });
+}
+window.shareExistingListItem = shareExistingListItem;
+
+// ── Bulk share all personal items in a list ──
+async function bulkShareList(listId, el) {
+  if (!state.sharing) return;
+  if (_bulkShareInProgress.has(listId)) return;
+  const listItems = (state.allListItems || []).filter(i => i.list_id === listId && !i.shared_id);
+  if (!listItems.length) { showToast(t('sharing.share_all_nothing'), 'info'); return; }
+  const listObj = (state.allLists || []).find(l => l.id === listId);
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="bulk-share-list"][data-id="${CSS.escape(listId)}"]`);
+  if (!btn) return;
+  openSharePopover(btn, async (groupId) => {
+    const msg = t('sharing.share_all_confirm', listItems.length);
+    showConfirmAction(
+      t('sharing.share_all'),
+      msg,
+      async () => {
+        if (_bulkShareInProgress.has(listId)) return;
+        _bulkShareInProgress.add(listId);
+        if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
+        try {
+          let shared = 0;
+          for (const item of listItems) {
+            try {
+              const sharedId = crypto.randomUUID();
+              await state.sharing.addItem(groupId, {
+                id: sharedId,
+                item_type: 'list_item',
+                payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
+              });
+              const { error: ptrErr } = await state.db.from('list_items').insert({
+                list_id: listId,
+                text: '',
+                sort_order: item.sort_order ?? 0,
+                shared_id: sharedId,
+                shared_group_id: groupId,
+              });
+              if (ptrErr) continue;
+              await state.db.from('list_items').delete().eq('id', item.id);
+              shared++;
+            } catch (e) { console.error('[DeLaClaw] bulk share list item failed:', e); }
+          }
+          if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+          await refreshLists();
+        } finally {
+          _bulkShareInProgress.delete(listId);
+          if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+        }
+      },
+      null,
+      { variant: 'neutral', btnText: t('sharing.share_all'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }
+    );
+  }, { showAssignees: false });
+}
+window.bulkShareList = bulkShareList;
+
+// ── Unshare list item (creator only): move shared item back to personal ──
+async function unshareListItem(id, el) {
+  if (!state.sharing) return;
+  const item = (state.allListItems || []).find(i => i.id === id);
+  if (!item || !item.shared_id || !item.shared_group_id) return;
+
+  showConfirmAction(
+    t('sharing.unshare'),
+    t('sharing.unshare_confirm'),
+    async () => {
+      const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-list-item"][data-id="${CSS.escape(id)}"]`);
+      if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+      try {
+        // 1. Create personal list item (same list)
+        const { error: insErr } = await state.db.from('list_items').insert({
+          list_id: item.list_id,
+          text: item.text || '',
+          note: item.note || '',
+          checked: item.checked ? 1 : 0,
+          sort_order: item.sort_order || 0,
+        });
+        if (insErr) { showToast(insErr.message, 'error'); return; }
+        // 2. Delete shared item from sharing layer
+        await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
+        // 3. Delete the local pointer
+        await state.db.from('list_items').delete().eq('id', item.id);
+        showToast(t('sharing.unshared'), 'success');
+        await refreshLists();
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+      }
+    },
+    null,
+    { variant: 'neutral', btnText: t('sharing.unshare'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }
+  );
+}
+window.unshareListItem = unshareListItem;
+
+// ── Copy list item to personal (non-creator) ──
+async function copyListItemToPersonal(id, el) {
+  if (!state.sharing) return;
+  const item = (state.allListItems || []).find(i => i.id === id);
+  if (!item || !item.shared_id || !item.shared_group_id) return;
+
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="copy-list-item-to-personal"][data-id="${CSS.escape(id)}"]`);
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  try {
+    // Place copy in the same list as the shared item, unless it's the __shared__ list
+    const itemList = (state.allLists || []).find(l => l.id === item.list_id);
+    let personalList = (itemList && itemList.name !== '__shared__') ? itemList : (state.allLists || []).find(l => l.name !== '__shared__');
+    if (!personalList) {
+      // Auto-create a personal list
+      const maxOrder = (state.allLists || []).reduce((m, l) => Math.max(m, l.sort_order || 0), 0);
+      const { data: newList, error: listErr } = await state.db.from('lists').insert({
+        name: t('lists.default_list_name') || 'My List',
+        sort_order: maxOrder + 1,
+      }).select().single();
+      if (listErr || !newList) { showToast(listErr?.message || 'Failed to create list', 'error'); return; }
+      personalList = newList;
+    }
+    const items = (state.allListItems || []).filter(i => i.list_id === personalList.id);
+    const maxItemOrder = items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
+    const { error: insErr } = await state.db.from('list_items').insert({
+      list_id: personalList.id,
+      text: item.text || '',
+      note: item.note || '',
+      checked: item.checked ? 1 : 0,
+      sort_order: maxItemOrder + 1,
+    });
+    if (insErr) { showToast(insErr.message, 'error'); return; }
+    showToast(t('sharing.copied_to_personal'), 'success');
+    await refreshLists();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+  }
+}
+window.copyListItemToPersonal = copyListItemToPersonal;
+
+document.addEventListener('input', e => {
+  if (e.target.tagName === 'TEXTAREA' && e.target.classList.contains('list-quick-input')) {
+    autoResizeTextarea(e.target);
+  }
+});
+
+export { refreshLists, renderLists, initListModals, syncSharedListItems };
 
 // Window bindings
 window.openAddListModal = openAddListModal;
@@ -613,6 +1318,7 @@ window.navigateToList = navigateToList;
 window.renderLists = renderLists;
 window.quickAddListItem = quickAddListItem;
 window.toggleListItemCheck = toggleListItemCheck;
+window.editListItemInline = editListItemInline;
 window.editListItemInlineFull = editListItemInlineFull;
 window.deleteListItem = deleteListItem;
 window.filterLists = function(e) { listSearchQuery = e.target.value; renderLists(); };

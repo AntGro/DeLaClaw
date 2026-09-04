@@ -6,34 +6,25 @@
 <title>DeLaClaw</title>
 <link rel="icon" type="image/png" href="icons/favicon.png">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Content-Security-Policy: self-hosted vendor + Google Identity exception (Google forbids SRI, see https://developers.google.com/identity/gsi/web/guides/content-security-policy) -->
+<!-- CSP hardened: all inline handlers removed via delegation (Phase 1 index.html 109, Phase 2 js/*.js 254 → 0). Secure hash for importmap restored, unsafe-* removed. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com https://cloudflareinsights.com; frame-src 'self' https://accounts.google.com https://content.google.com https://www.youtube.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<!-- Vendor: self-hosted (was CDN jsdelivr) — supabase @2.110.6 (203KB raw) + three @0.170.0 -->
+<script src="vendor/supabase.js"></script>
+<!-- Google Identity: must stay on CDN per ToS, no SRI per Google docs -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
 <script type="importmap">
 {
   "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    "three": "./vendor/three/build/three.module.js",
+    "three/addons/": "./vendor/three/examples/jsm/"
   }
 }
 </script>
 <link rel="stylesheet" href="style.css">
-<script>
-(function(){var h=location.hostname,d=h.startsWith('dev.')||h.includes('dev.delaclaw')||h==='localhost'||h==='127.0.0.1';var l=document.createElement('link');l.rel='manifest';l.href=d?'manifest-dev.json':'manifest.json';document.head.appendChild(l);})();
-</script>
-<script>
-// Capture Android/Chromium's native install prompt before the app module loads,
-// so the install banner can trigger it on demand. iOS Safari never fires this.
-window.__bipEvent = null;
-window.addEventListener('beforeinstallprompt', function(e){
-  e.preventDefault();
-  window.__bipEvent = e;
-  window.dispatchEvent(new Event('bip-ready'));
-});
-window.addEventListener('appinstalled', function(){
-  window.__bipEvent = null;
-  window.dispatchEvent(new Event('app-installed'));
-});
-</script>
+<script src="js/bootstrap.js"></script>
+<script src="js/delegation.js"></script>
 <meta name="theme-color" content="#08090d">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -58,7 +49,7 @@ window.addEventListener('appinstalled', function(){
   <!-- Panel 1: Title + tagline -->
   <div class="hero-panel hero-name-panel">
     <h2 class="hero-name" id="heroName">DeLaClaw</h2>
-    <p class="hero-tagline" data-fade="0.04,0.12,0.22,0.28">Your personal command center.</p>
+    <p class="hero-tagline" data-i18n="login.hero_tagline" data-fade="0.04,0.12,0.22,0.28">Your personal command center.</p>
   </div>
 
   <!-- Panel 2: Features -->
@@ -68,7 +59,6 @@ window.addEventListener('appinstalled', function(){
       <span data-i18n="hero.todos">TODOs</span>
       <span data-i18n="hero.habits">Habits</span>
       <span data-i18n="hero.flashcards">Flashcards</span>
-      <span data-i18n="hero.wardrobe">Wardrobe</span>
       <span data-i18n="hero.birthdays">Birthdays</span>
       <span data-i18n="hero.lists">Lists</span>
     </div>
@@ -100,17 +90,31 @@ window.addEventListener('appinstalled', function(){
     <div class="logo" id="gateLogo"></div>
     <h1 id="gateTitle">DeLaClaw</h1>
 
-    <form id="loginForm" method="post" action="https://antgro.github.io/command-center/" style="display:none;">
-      <p class="gate-storage-hint" id="gateStorageHint" data-i18n="login.storage_hint">Choose where your data is stored.</p>
-      <a class="backend-compare-link" id="backendCompareLink" href="javascript:void(0)" data-i18n="compare.link">Compare options</a>
+    <form id="loginForm" method="post" action="" style="display:none;">
+      <p class="gate-storage-hint" id="gateStorageHint" data-i18n="login.storage_hint" style="display:none;">Choose where your data is stored.</p>
+      <a class="backend-compare-link" id="backendCompareLink" href="#" data-i18n="compare.link" style="display:none;">Compare options</a>
       <div class="backend-picker" id="backendPicker">
         <button type="button" class="backend-option active" data-mode="googledrive" title="Google Drive"><span class="backend-option-label" data-i18n="login.mode_drive">Drive</span></button>
         <button type="button" class="backend-option" data-mode="supabase" title="Supabase"><span class="backend-option-label" data-i18n="login.mode_supabase">SB</span></button>
-        <button type="button" class="backend-option" data-mode="local" title="Local"><span class="backend-option-label" data-i18n="login.mode_local">Local</span></button>
+        <button type="button" class="backend-option" data-mode="local" title="Local" style="display:none;"><span class="backend-option-label" data-i18n="login.mode_local">Local</span></button>
         <button type="button" class="backend-option" data-mode="demo" title="Demo"><span class="backend-option-label" data-i18n="login.mode_demo">Demo</span></button>
       </div>
       <div class="gate-fields" id="gateFields">
         <p class="hint" id="loginHint">Connect to your Supabase project.</p>
+        <div class="gate-highlights" id="gateHighlights" style="display:none;">
+          <div class="gate-highlight">
+            <img src="icons/brand/googledrive.svg" alt="" width="20" height="20" class="gate-highlight-icon">
+            <span data-i18n="login.highlight_storage">Store your data in your GDrive</span>
+          </div>
+          <div class="gate-highlight">
+            <span data-icon="shield-check" data-size="20" data-color="currentColor" class="gate-highlight-icon"></span>
+            <span data-i18n="login.highlight_privacy">Your personal files are out of reach</span>
+          </div>
+          <div class="gate-highlight">
+            <img src="icons/brand/googlecalendar.svg" alt="" width="20" height="20" class="gate-highlight-icon">
+            <span data-i18n="login.highlight_calendar">Optional sync with Google Calendar</span>
+          </div>
+        </div>
         <label for="username" class="gate-label" id="urlLabel"><a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener" id="urlLabelLink" data-tooltip="Find the URL by connecting to your Supabase project">Project URL</a></label>
         <input type="text" id="username" name="username" placeholder="https://xyz.supabase.co" autocomplete="username">
         <div id="keyField">
@@ -120,7 +124,7 @@ window.addEventListener('appinstalled', function(){
       </div>
       <label class="stay-connected-label">
         <input type="checkbox" id="stayConnected" checked>
-        <span>Stay connected on this device</span>
+        <span data-i18n="login.stay_connected">Stay connected on this device</span>
       </label>
       <button type="submit" class="btn-primary">Connect</button>
       <p class="error" id="loginError"></p>
@@ -134,10 +138,10 @@ window.addEventListener('appinstalled', function(){
     <div id="gateWelcome" style="display:none;">
       <p class="gate-welcome-text" data-i18n="login.welcome_text">Your personal command center. Organize projects, todos, habits, and more — your data stays yours.</p>
       <button type="button" class="btn-primary gate-welcome-demo" id="gateWelcomeDemo" data-i18n="login.welcome_demo">Try the demo</button>
-      <a class="gate-welcome-login" id="gateWelcomeLogin" href="javascript:void(0)" data-i18n="login.welcome_login">I already have an account</a>
+      <a class="gate-welcome-login" id="gateWelcomeLogin" href="#" data-i18n="login.welcome_login">I already have an account / Skip the demo</a>
     </div>
 
-    <a class="gate-guide-link" id="gateGuideLink" href="#setup">New here? Get started</a>
+    <a class="gate-guide-link" id="gateGuideLink" href="#setup" data-i18n="setup.guide_link" style="display:none;">New here? Get started</a>
   </div>
 
   <!-- ===== SETUP GUIDE (replaces gate-box) ===== -->
@@ -145,6 +149,7 @@ window.addEventListener('appinstalled', function(){
     <button class="setup-back" id="setupBack" type="button">&larr; <span id="setupBackLabel">Back to login</span></button>
     <h2 class="setup-title" id="setupTitle">Get Started</h2>
     <p class="setup-subtitle" id="setupSubtitle">Choose how you want to store your data.</p>
+    <a class="backend-compare-link" id="setupCompareLink" href="#" data-i18n="compare.link">Compare options</a>
 
     <div class="setup-paths">
       <button class="setup-path-card" id="setupPathDrive" type="button">
@@ -152,12 +157,9 @@ window.addEventListener('appinstalled', function(){
         <span class="setup-path-name" id="setupDriveName">Google Drive</span>
         <span class="setup-path-desc" id="setupDriveDesc">Sign in with Google. Data stored in your Drive.</span>
       </button>
-      <button class="setup-path-card" id="setupPathCloud" type="button">
-        <span class="setup-path-icon" data-backend-logo="supabase" data-logo-size="22"></span>
-        <span class="setup-path-name" id="setupCloudName">Supabase</span>
-        <span class="setup-path-desc" id="setupCloudDesc">Free, no install, works everywhere.</span>
-      </button>
-      <button class="setup-path-card" id="setupPathLocal" type="button">
+      <!-- Supabase removed from setup guide (deprecated) -->
+      <!-- Local hidden (untested) -->
+      <button class="setup-path-card" id="setupPathLocal" type="button" style="display:none;">
         <span class="setup-path-icon" data-backend-logo="local" data-logo-size="22"></span>
         <span class="setup-path-name" id="setupLocalName">Local</span>
         <span class="setup-path-desc" id="setupLocalDesc">Your machine, your data. For developers.</span>
@@ -181,63 +183,6 @@ window.addEventListener('appinstalled', function(){
         </div>
       </div>
       <button class="setup-done-btn" id="setupDriveDone" type="button">Go to login</button>
-    </div>
-
-    <!-- Cloud steps (Supabase) -->
-    <div class="setup-steps" id="setupCloudSteps" style="display:none;">
-      <div class="setup-progress" id="setupCloudProgress">
-        <div class="setup-progress-step active" data-step="1">1</div>
-        <div class="setup-progress-line"></div>
-        <div class="setup-progress-step" data-step="2">2</div>
-        <div class="setup-progress-line"></div>
-        <div class="setup-progress-step" data-step="3">3</div>
-      </div>
-      <div class="setup-step" data-step="1">
-        <span class="setup-step-num">1</span>
-        <div class="setup-step-body">
-          <h3 id="setupCloud1Title">Create a free Supabase project</h3>
-          <div id="setupCloud1Desc"><ol class="setup-substeps"><li>Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noopener">supabase.com/dashboard</a> and <strong>create a free account</strong> (GitHub or email).</li><li>Once logged in, create an <strong>organization</strong> (any name), then click <strong>New Project</strong> &mdash; pick a name and choose a region.</li></ol></div>
-          <div class="setup-url-input-wrap">
-            <label for="setupProjectUrl" id="setupProjectUrlLabel">Paste your project URL</label>
-            <p class="setup-url-hint" id="setupProjectUrlHint">Copy the URL from your browser's address bar after creating the project.</p>
-            <input type="url" id="setupProjectUrl" class="setup-url-input" placeholder="https://xyz.supabase.co or https://supabase.com/dashboard/project/xyz">
-            <p class="setup-url-error" id="setupProjectUrlError">Please enter a valid Supabase project URL</p>
-          </div>
-        </div>
-      </div>
-      <div class="setup-step" data-step="2">
-        <span class="setup-step-num">2</span>
-        <div class="setup-step-body">
-          <h3 id="setupCloud2Title">Run the database schema</h3>
-          <p id="setupCloud2Desc">In your Supabase dashboard, open the <a href="https://supabase.com/dashboard/project/_/sql" target="_blank" rel="noopener"><strong>SQL Editor</strong></a>, paste the schema below, and click <strong>Run</strong>. If prompted about Row Level Security, choose <strong>Run without RLS</strong> — it is enabled later in the script.</p>
-          <div class="setup-schema-wrap">
-            <button class="setup-schema-toggle" id="setupSchemaToggle" type="button"><span class="chevron">&#9654;</span> <span id="setupSchemaToggleLabel">Show schema</span></button>
-            <div class="setup-schema-box" id="setupSchemaBox">
-              <pre class="setup-schema-sql" id="setupSchemaSql"></pre>
-            </div>
-            <button class="setup-copy-btn" id="setupCopySchema" type="button"><span id="setupCopyLabel">Copy schema</span></button>
-          </div>
-        </div>
-      </div>
-      <div class="setup-step" data-step="3">
-        <span class="setup-step-num">3</span>
-        <div class="setup-step-body">
-          <h3 id="setupCloud3Title">Connect</h3>
-          <p id="setupCloud3Desc">In your Supabase dashboard, go to <a href="https://supabase.com/dashboard/project/_/settings/api-keys" target="_blank" rel="noopener"><strong>Settings &rarr; API Keys</strong></a>. Copy the <strong>anon (public) key</strong> and paste it below.</p>
-          <form id="setupLoginForm" method="post" action="https://antgro.github.io/command-center/">
-            <label for="setupLoginUrl" class="gate-label" id="setupLoginUrlLabel">Project URL</label>
-            <input type="text" id="setupLoginUrl" name="username" placeholder="https://xyz.supabase.co" autocomplete="username">
-            <label for="setupLoginKey" class="gate-label" id="setupLoginKeyLabel"><a target="_blank" rel="noopener" id="setupKeyLabelLink">API Key (anon)</a></label>
-            <input type="password" id="setupLoginKey" name="password" placeholder="eyJhbG..." autocomplete="current-password">
-            <p class="error" id="setupLoginError"></p>
-            <label class="stay-connected-label">
-              <input type="checkbox" id="setupStayConnected" checked>
-              <span id="setupStayConnectedLabel">Stay connected on this device</span>
-            </label>
-            <button type="submit" class="setup-done-btn" id="setupLoginBtn">Connect</button>
-          </form>
-        </div>
-      </div>
     </div>
 
     <!-- Local steps -->
@@ -283,21 +228,35 @@ bun run server.js</pre>
       <button class="setup-done-btn" id="setupLocalDone" type="button">Go to login</button>
     </div>
   </div>
+
+  <!-- Gate footer (identity links only — no stats/backend) -->
+  <footer class="gate-footer">
+    <div class="footer-links">
+      <a href="https://docs.delaclaw.com/#/" target="_blank" rel="noopener" class="footer-link"><span data-icon="book-open" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_docs">Docs</span></a>
+      <span class="footer-sep">·</span>
+      <a href="https://github.com/AntGro/DeLaClaw" target="_blank" rel="noopener" class="footer-link"><span data-icon="github" data-size="13" data-color="currentColor"></span> GitHub</a>
+      <span class="footer-sep">·</span>
+      <a href="https://github.com/AntGro/DeLaClaw/blob/main/LICENSE" target="_blank" rel="noopener" class="footer-link"><span data-icon="scale" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_license">License</span></a>
+      <span class="footer-sep">·</span>
+      <a href="https://docs.delaclaw.com/#/privacy" target="_blank" rel="noopener" class="footer-link"><span data-icon="shield" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_privacy">Privacy</span></a>
+    </div>
+    <div class="footer-copyright">© 2026 DeLaClaw</div>
+  </footer>
 </div>
 
 <!-- ===== APP ===== -->
 <div id="app">
   <header class="app-header">
-    <h1 class="app-title" onclick="switchView('welcome')" style="cursor:pointer;" title="Go to Today"><svg class="storm-logo header-logo" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"></svg><span class="app-title-text">DeLaClaw</span></h1>
+    <h1 class="app-title" data-action="switch-view" data-view="welcome" style="cursor:pointer;" title="Go to Today"><svg class="storm-logo header-logo" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"></svg><span class="app-title-text">DeLaClaw</span></h1>
     <div class="view-switcher">
-      <button class="view-tab" id="tabWelcome" onclick="switchView('welcome')"><span data-icon="home" data-size="18" data-color="currentColor"></span> <span class="tab-label">Today</span></button>
-      <button class="view-tab active" id="tabProjects" onclick="switchView('projects')"><span data-icon="layout-grid" data-size="18" data-color="currentColor"></span> <span class="tab-label">Projects</span></button>
-      <button class="view-tab" id="tabTodos" onclick="switchView('todos')"><span data-icon="list-checks" data-size="18" data-color="currentColor"></span> <span class="tab-label">TODOs</span></button>
-      <button class="view-tab" id="tabHabits" onclick="switchView('habits')"><span data-icon="repeat" data-size="18" data-color="currentColor"></span> <span class="tab-label">Habits</span></button>
-      <button class="view-tab" id="tabBirthdays" onclick="switchView('birthdays')"><span data-icon="cake" data-size="18" data-color="currentColor"></span> <span class="tab-label">Birthdays</span></button>
-      <button class="view-tab" id="tabVestiaire" onclick="switchView('vestiaire')"><span data-icon="shirt" data-size="18" data-color="currentColor"></span> <span class="tab-label">Wardrobe</span></button>
-      <button class="view-tab" id="tabFlashcards" onclick="switchView('flashcards')"><span data-icon="brain" data-size="18" data-color="currentColor"></span> <span class="tab-label">Memory</span></button>
-      <button class="view-tab" id="tabLists" onclick="switchView('lists')"><span data-icon="list" data-size="18" data-color="currentColor"></span> <span class="tab-label">Lists</span></button>
+      <button class="view-tab" id="tabWelcome" data-action="switch-view" data-view="welcome"><span data-icon="home" data-size="18" data-color="currentColor"></span> <span class="tab-label">Today</span></button>
+      <button class="view-tab active" id="tabProjects" data-action="switch-view" data-view="projects"><span data-icon="layout-grid" data-size="18" data-color="currentColor"></span> <span class="tab-label">Projects</span></button>
+      <button class="view-tab" id="tabTodos" data-action="switch-view" data-view="todos"><span data-icon="list-checks" data-size="18" data-color="currentColor"></span> <span class="tab-label">TODOs</span></button>
+      <button class="view-tab" id="tabHabits" data-action="switch-view" data-view="habits"><span data-icon="repeat" data-size="18" data-color="currentColor"></span> <span class="tab-label">Habits</span></button>
+      <button class="view-tab" id="tabBirthdays" data-action="switch-view" data-view="birthdays"><span data-icon="cake" data-size="18" data-color="currentColor"></span> <span class="tab-label">Birthdays</span></button>
+      <button class="view-tab" id="tabVestiaire" data-action="switch-view" data-view="vestiaire"><span data-icon="shirt" data-size="18" data-color="currentColor"></span> <span class="tab-label">Wardrobe</span></button>
+      <button class="view-tab" id="tabFlashcards" data-action="switch-view" data-view="flashcards"><span data-icon="brain" data-size="18" data-color="currentColor"></span> <span class="tab-label">Memory</span></button>
+      <button class="view-tab" id="tabLists" data-action="switch-view" data-view="lists"><span data-icon="list" data-size="18" data-color="currentColor"></span> <span class="tab-label">Lists</span></button>
     </div>
     <div class="header-actions">
       <div class="header-menu" id="headerMenu">
@@ -328,9 +287,9 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="projectFilters">
-          <button class="filter-btn active" data-filter="active" onclick="setProjectFilter('active')">Active</button>
-          <button class="filter-btn" data-filter="all" onclick="setProjectFilter('all')">All</button>
-          <select id="projectSortBy" class="page-sort" onchange="renderProjectGrid()">
+          <button class="filter-btn active" data-filter="active" data-action="set-project-filter" data-filter="active">Active</button>
+          <button class="filter-btn" data-filter="all" data-action="set-project-filter" data-filter="all">All</button>
+          <select id="projectSortBy" class="page-sort" data-action="sort-projects">
             <option value="manual">Manual order</option>
             <option value="name">Name</option>
             <option value="tasks">Task count</option>
@@ -338,12 +297,12 @@ bun run server.js</pre>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn" onclick="openPromptEditor()" title="Edit task-pickup prompt"><span data-icon="file-text" data-size="16"></span></button>
-        <button class="btn" onclick="toggleShowArchived()" id="archiveToggleBtn" title="Toggle archived"><span data-icon="package" data-size="16"></span></button>
-        <button class="btn" onclick="openAddProjectModal()" title="Add project"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-prompt-editor" title="Edit task-pickup prompt"><span data-icon="file-text" data-size="16"></span></button>
+        <button class="btn" data-action="toggle-archived" id="archiveToggleBtn" title="Toggle archived"><span data-icon="package" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-project" title="Add project"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search tasks…" oninput="filterProjects(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search tasks…" data-action="filter-projects"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -362,11 +321,10 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="todoFilters">
-          <button class="filter-btn active" data-filter="pending" onclick="setTodoFilter('pending')">Pending</button>
-          <button class="filter-btn" data-filter="done" onclick="setTodoFilter('done')">Done</button>
-          <button class="filter-btn" data-filter="all" onclick="setTodoFilter('all')">All</button>
-          <button class="filter-btn" data-filter="outdated" onclick="setTodoFilter('outdated')"><span data-icon="hourglass" data-size="14"></span> Outdated</button>
-          <select id="todoSortBy" class="page-sort" onchange="renderTodos()">
+          <button class="filter-btn active" data-filter="pending" data-action="set-todo-filter" data-filter="pending">Pending</button>
+          <button class="filter-btn" data-filter="snoozed" data-action="set-todo-filter" data-filter="snoozed"><span data-icon="moon" data-size="14" data-color="currentColor"></span> Snoozed</button>
+          <button class="filter-btn" data-filter="outdated" data-action="set-todo-filter" data-filter="outdated"><span data-icon="alert-triangle" data-size="14" data-color="currentColor"></span> Outdated</button>
+          <select id="todoSortBy" class="page-sort" data-action="sort-todos">
             <option value="manual">Manual order</option>
             <option value="due">Due date</option>
             <option value="priority">Priority</option>
@@ -375,10 +333,10 @@ bun run server.js</pre>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn" onclick="openAddCategoryModal()" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-category" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search todos…" oninput="filterTodos(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search todos…" data-action="filter-todos"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -393,11 +351,11 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="habitFilters">
-          <button class="filter-btn active" data-filter="all" onclick="setHabitFilter('all')">All</button>
-          <button class="filter-btn" data-filter="overdue" onclick="setHabitFilter('overdue')">Overdue</button>
-          <button class="filter-btn" data-filter="today" onclick="setHabitFilter('today')">Today</button>
-          <button class="filter-btn" data-filter="tomorrow" onclick="setHabitFilter('tomorrow')">Tomorrow</button>
-          <select id="habitSortBy" class="page-sort" onchange="renderHabits()">
+          <button class="filter-btn active" data-filter="all" data-action="set-habit-filter" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="overdue" data-action="set-habit-filter" data-filter="overdue">Overdue</button>
+          <button class="filter-btn" data-filter="today" data-action="set-habit-filter" data-filter="today">Today</button>
+          <button class="filter-btn" data-filter="tomorrow" data-action="set-habit-filter" data-filter="tomorrow">Tomorrow</button>
+          <select id="habitSortBy" class="page-sort" data-action="sort-habits">
             <option value="due">Next due</option>
             <option value="name">Name</option>
             <option value="last-done">Last done</option>
@@ -406,14 +364,14 @@ bun run server.js</pre>
       </div>
       <div class="page-toolbar-right">
         <div class="habit-view-toggle" id="habitViewToggle">
-          <button class="active" data-view="list" onclick="setHabitViewMode('list')"><span data-icon="list" data-size="14"></span></button>
-          <button data-view="calendar" onclick="setHabitViewMode('calendar')"><span data-icon="calendar" data-size="14"></span></button>
+          <button class="active" data-view="list" data-action="set-habit-view-mode" data-view="list"><span data-icon="list" data-size="14"></span></button>
+          <button data-view="calendar" data-action="set-habit-view-mode" data-view="calendar"><span data-icon="calendar" data-size="14"></span></button>
         </div>
-        <button class="btn" onclick="openAddHabitModal()" title="Add habit"><span data-icon="plus" data-size="16"></span></button>
-        <button class="btn" onclick="openAddHabitCategoryModal()" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-habit" title="Add habit"><span data-icon="plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-habit-category" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search habits…" oninput="filterHabits(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search habits…" data-action="filter-habits"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -429,10 +387,10 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="birthdayFilters">
-          <button class="filter-btn active" data-filter="all" onclick="setBirthdayFilter('all')">All</button>
-          <button class="filter-btn" data-filter="upcoming" onclick="setBirthdayFilter('upcoming')">Upcoming</button>
-          <button class="filter-btn" data-filter="this-month" onclick="setBirthdayFilter('this-month')">This Month</button>
-          <select id="birthdaySortBy" class="page-sort" onchange="renderBirthdays()">
+          <button class="filter-btn active" data-filter="all" data-action="set-birthday-filter" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="upcoming" data-action="set-birthday-filter" data-filter="upcoming">Upcoming</button>
+          <button class="filter-btn" data-filter="this-month" data-action="set-birthday-filter" data-filter="this-month">This Month</button>
+          <select id="birthdaySortBy" class="page-sort" data-action="sort-birthdays">
             <option value="upcoming">Next birthday</option>
             <option value="name">Name</option>
             <option value="age">Age</option>
@@ -440,10 +398,10 @@ bun run server.js</pre>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn" onclick="openAddBirthdayModal()" title="Add birthday"><span data-icon="plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-birthday" title="Add birthday"><span data-icon="plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search birthdays…" oninput="filterBirthdays(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search birthdays…" data-action="filter-birthdays"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -458,11 +416,11 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="vestiaireFilters">
-          <button class="filter-btn active" data-filter="all" onclick="setVestiaireFilter('all')">All</button>
-          <button class="filter-btn" data-filter="owned" onclick="setVestiaireFilter('owned')">Owned</button>
-          <button class="filter-btn" data-filter="tried" onclick="setVestiaireFilter('tried')">Tried</button>
-          <button class="filter-btn" data-filter="wishlist" onclick="setVestiaireFilter('wishlist')">Wishlist</button>
-          <select id="vestiaireSortBy" class="page-sort" onchange="renderVestiaire()">
+          <button class="filter-btn active" data-filter="all" data-action="set-vestiaire-filter" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="owned" data-action="set-vestiaire-filter" data-filter="owned">Owned</button>
+          <button class="filter-btn" data-filter="tried" data-action="set-vestiaire-filter" data-filter="tried">Tried</button>
+          <button class="filter-btn" data-filter="wishlist" data-action="set-vestiaire-filter" data-filter="wishlist">Wishlist</button>
+          <select id="vestiaireSortBy" class="page-sort" data-action="sort-vestiaire">
             <option value="manual">Manual order</option>
             <option value="name">Name</option>
             <option value="brand">Brand</option>
@@ -470,11 +428,11 @@ bun run server.js</pre>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn" onclick="openAddVestiaireModal()" title="Add item"><span data-icon="plus" data-size="16"></span></button>
-        <button class="btn" onclick="openAddVestiaireCategoryModal()" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-vestiaire" title="Add item"><span data-icon="plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-vestiaire-category" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search wardrobe…" oninput="filterVestiaire(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search wardrobe…" data-action="filter-vestiaire"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -489,11 +447,11 @@ bun run server.js</pre>
     <div class="page-toolbar">
       <div class="page-toolbar-left">
         <div class="page-filters" id="flashcardFilters">
-          <button class="filter-btn active" data-filter="all" onclick="setFlashcardFilter('all')">All</button>
-          <button class="filter-btn" data-filter="due" onclick="setFlashcardFilter('due')">Due</button>
-          <button class="filter-btn" data-filter="new" onclick="setFlashcardFilter('new')">New</button>
-          <button class="filter-btn" data-filter="mastered" onclick="setFlashcardFilter('mastered')">Mastered</button>
-          <select id="flashcardSortBy" class="page-sort" onchange="renderFlashcards()">
+          <button class="filter-btn active" data-filter="all" data-action="set-flashcard-filter" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="due" data-action="set-flashcard-filter" data-filter="due">Due</button>
+          <button class="filter-btn" data-filter="new" data-action="set-flashcard-filter" data-filter="new">New</button>
+          <button class="filter-btn" data-filter="mastered" data-action="set-flashcard-filter" data-filter="mastered">Mastered</button>
+          <select id="flashcardSortBy" class="page-sort" data-action="sort-flashcards">
             <option value="default">Default</option>
             <option value="strength">Strength</option>
             <option value="last-reviewed">Last reviewed</option>
@@ -501,13 +459,13 @@ bun run server.js</pre>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn btn-labeled" id="flashcardPracticeAllBtn" onclick="startPractice('__all')"><span data-icon="play" data-size="14"></span> <span class="btn-label">Flashcards</span></button>
-        <button class="btn btn-labeled" id="flashcardTextPracticeAllBtn" onclick="startTextPractice('__all')" title="Revise texts"><span data-icon="book-open" data-size="14"></span> <span class="btn-label">Texts</span></button>
-        <button class="btn" onclick="openImportModal()" title="Import"><span data-icon="upload" data-size="16"></span></button>
-        <button class="btn" onclick="openAddFlashDeckModal()" title="New deck"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn btn-labeled" id="flashcardPracticeAllBtn" data-action="start-practice" data-scope="__all"><span data-icon="play" data-size="14"></span> <span class="btn-label">Flashcards</span></button>
+        <button class="btn btn-labeled" id="flashcardTextPracticeAllBtn" data-action="start-text-practice" data-scope="__all" title="Revise texts"><span data-icon="book-open" data-size="14"></span> <span class="btn-label">Texts</span></button>
+        <button class="btn" data-action="open-import" title="Import"><span data-icon="upload" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-flash-deck" title="New deck"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search…" oninput="filterFlashcards(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search…" data-action="filter-flashcards"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -520,17 +478,12 @@ bun run server.js</pre>
   <!-- ===== LISTS VIEW ===== -->
   <div id="listsView" style="display:none;">
     <div class="page-toolbar">
-      <div class="page-toolbar-left">
-        <select id="listsSortBy" class="page-sort" onchange="renderLists()">
-          <option value="manual">Manual order</option>
-          <option value="name">Name</option>
-        </select>
-      </div>
+      <div class="page-toolbar-left"></div>
       <div class="page-toolbar-right">
-        <button class="btn" onclick="openAddListModal()" title="Add list"><span data-icon="folder-plus" data-size="16"></span></button>
+        <button class="btn" data-action="open-add-list" title="Add list"><span data-icon="folder-plus" data-size="16"></span></button>
         <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" onclick="toggleSearch(this)"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search items…" oninput="filterLists(event)"><button class="search-clear-btn" tabindex="-1" onclick="clearPageSearch(this)" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search items…" data-action="filter-lists"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -542,104 +495,33 @@ bun run server.js</pre>
 
   <!-- Snooze Modal is created dynamically by js/todos.js -->
 
-  <!-- Footer Stats -->
-  <div class="footer-stats" id="footerStats">
-    <div class="db-stats" id="dbStatsContainer"></div>
-    <div><span id="lastUpdatedLabel" class="db-stat"></span></div>
-    <div><a href="" id="supabaseDashLink" target="_blank">Supabase Dashboard ↗</a></div>
-    <div class="footer-backend" id="footerBackend"></div>
-    <div class="footer-copyright">© 2026 DeLaClaw</div>
-  </div>
-
-  <!-- Add Project Modal -->
-  <div class="modal-overlay" id="addProjectModal">
-    <div class="modal">
-      <h2><span data-icon="plus" data-size="20"></span> Add Project</h2>
-      <label>ID (slug, no spaces)</label>
-      <input type="text" id="newProjectId" placeholder="my-project">
-      <label>Name</label>
-      <input type="text" id="newProjectName" placeholder="My Project">
-      <label>Short Name (optional, for nav buttons)</label>
-      <input type="text" id="newProjectShortname" placeholder="e.g. CC, Tarot, F2P" maxlength="20">
-      <label>Color</label>
-      <input type="color" id="newProjectColor" value="#646cff">
-      <label>Tech Stack</label>
-      <input type="text" id="newProjectTech" placeholder="e.g. React · Node · Vercel">
-      <label>GitHub URL (optional)</label>
-      <input type="url" id="newProjectGithub" placeholder="https://github.com/...">
-      <label>Live URL (optional)</label>
-      <input type="url" id="newProjectLive" placeholder="https://...">
-      <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeAddProjectModal()">Cancel</button>
-        <button class="modal-save" onclick="saveNewProject()">Create</button>
-      </div>
+  <!-- Footer -->
+  <footer class="site-footer" id="footerStats">
+    <div class="footer-row footer-row-tech">
+      <div class="db-stats" id="dbStatsContainer"></div>
+      <div><span id="lastUpdatedLabel" class="db-stat"></span></div>
+      <div><a href="" id="supabaseDashLink" target="_blank">Supabase Dashboard ↗</a></div>
+      <div class="footer-backend" id="footerBackend"></div>
     </div>
-  </div>
-
-  <!-- Revision Feedback Modal -->
-  <div class="modal-overlay" id="revisionModal">
-    <div class="modal modal-wide revision-modal">
-      <h2><span data-icon="refresh-cw" data-size="20"></span> Request Revision</h2>
-      <p class="modal-hint">Explain what needs to change — Claw will see this when picking up the revision.</p>
-      <textarea id="revisionFeedback" placeholder="What needs to change... (Enter to submit, Shift+Enter for new line)"></textarea>
-      <input type="hidden" id="revisionTaskId">
-      <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeRevisionModal()">Cancel</button>
-        <button class="modal-save" onclick="submitRevision()">Submit Revision</button>
+    <div class="footer-row footer-row-identity">
+      <div class="footer-links">
+        <a href="https://docs.delaclaw.com/#/" target="_blank" rel="noopener" class="footer-link"><span data-icon="book-open" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_docs">Docs</span></a>
+        <span class="footer-sep">·</span>
+        <a href="https://github.com/AntGro/DeLaClaw" target="_blank" rel="noopener" class="footer-link"><span data-icon="github" data-size="13" data-color="currentColor"></span> GitHub</a>
+        <span class="footer-sep">·</span>
+        <a href="https://github.com/AntGro/DeLaClaw/blob/main/LICENSE" target="_blank" rel="noopener" class="footer-link"><span data-icon="scale" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_license">License</span></a>
+        <span class="footer-sep">·</span>
+        <a href="https://docs.delaclaw.com/#/privacy" target="_blank" rel="noopener" class="footer-link"><span data-icon="shield" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_privacy">Privacy</span></a>
       </div>
+      <div class="footer-copyright">© 2026 DeLaClaw</div>
     </div>
-  </div>
+  </footer>
 
-  <!-- Prompt Editor Modal (Global) -->
-  <div class="modal-overlay" id="promptEditorModal">
-    <div class="modal prompt-modal">
-      <h2><span data-icon="file-text" data-size="20"></span> Global Task-Pickup Prompt</h2>
-      <p class="prompt-hint">This prompt applies to all projects when Claw picks up tasks. Use it for general coding rules, style preferences, etc.</p>
-      <textarea id="promptGlobalText" placeholder="e.g. Always create feature branches. Run tests before pushing. Prefer functional style..."></textarea>
-      <div class="modal-actions">
-        <button class="modal-cancel" onclick="closePromptEditor()">Cancel</button>
-        <button class="modal-save" onclick="saveGlobalPrompt()">Save</button>
-      </div>
-    </div>
-  </div>
+  <!-- Add/Edit Project Modals created dynamically by js/projects.js -->
 
-  <!-- Prompt Editor Modal (Per-Project) -->
-  <div class="modal-overlay" id="projectPromptModal">
-    <div class="modal prompt-modal">
-      <h2 id="projectPromptTitle"><span data-icon="file-text" data-size="20"></span> Project Prompt</h2>
-      <p class="prompt-hint">This prompt applies only to tasks in this project. It supplements the global prompt.</p>
-      <textarea id="promptProjectText" placeholder="Rules specific to this project..."></textarea>
-      <input type="hidden" id="promptProjectId">
-      <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeProjectPrompt()">Cancel</button>
-        <button class="modal-save" onclick="saveProjectPrompt()">Save</button>
-      </div>
-    </div>
-  </div>
+  <!-- Revision, Prompt Editor, Project Prompt modals created dynamically by js/projects.js -->
 
-  <!-- Edit Project Modal -->
-  <div class="modal-overlay" id="editProjectModal">
-    <div class="modal">
-      <h2><span data-icon="pencil" data-size="20"></span> Edit Project</h2>
-      <input type="hidden" id="editProjectId">
-      <label>Name</label>
-      <input type="text" id="editProjectName">
-      <label>Short Name (optional, for nav buttons)</label>
-      <input type="text" id="editProjectShortname" maxlength="20">
-      <label>Color</label>
-      <input type="color" id="editProjectColor">
-      <label>Tech Stack</label>
-      <input type="text" id="editProjectTech">
-      <label>GitHub URL</label>
-      <input type="url" id="editProjectGithub" placeholder="https://github.com/...">
-      <label>Live URL</label>
-      <input type="url" id="editProjectLive" placeholder="https://...">
-      <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeEditProjectModal()">Cancel</button>
-        <button class="modal-save" onclick="saveEditProject()">Save</button>
-      </div>
-    </div>
-  </div>
+  <!-- Edit Project Modal created dynamically by js/projects.js -->
 
   <!-- Expanded Task Modal -->
   <div class="modal-overlay" id="taskExpandModal">
@@ -649,35 +531,26 @@ bun run server.js</pre>
   <!-- Add Category Modal is created dynamically by js/todos.js -->
 
   <!-- Delete Confirmation Modal -->
-  <div class="modal-overlay" id="editCategoryModal">
-    <div class="modal">
-      <h2><span data-icon="pencil" data-size="20"></span> Edit Category</h2>
-      <input type="hidden" id="editCategoryOldName">
-      <label>Category Name</label>
-      <input type="text" id="editCategoryName" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditCategory();}">
-      <label>Short Name (for nav buttons)</label>
-      <input type="text" id="editCategoryShortname" maxlength="20" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditCategory();}">
-      <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeEditCategoryModal()">Cancel</button>
-        <button class="modal-save" onclick="saveEditCategory()">Save</button>
+  <div class="modal-overlay" id="confirmActionModal">
+    <div class="modal confirm-action-modal">
+      <div class="confirm-action-icon-wrap">
+        <svg class="confirm-action-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
       </div>
-    </div>
-  </div>
-
-  <!-- Delete Confirmation Modal -->
-  <div class="modal-overlay" id="deleteConfirmModal">
-    <div class="modal delete-confirm-modal">
-      <div class="delete-confirm-icon-wrap">
-        <svg class="delete-confirm-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+      <h2 id="confirmActionTitle">Confirm</h2>
+      <p id="confirmActionMessage" class="confirm-action-msg"></p>
+      <div id="confirmActionDetail" class="confirm-action-detail" style="display:none;"></div>
+      <div id="confirmWordWrap" class="confirm-word-wrap" style="display:none;">
+        <input type="text" id="confirmWordInput" class="confirm-word-input" autocomplete="off" spellcheck="false">
       </div>
-      <h2 id="deleteConfirmTitle">Confirm Delete</h2>
-      <p id="deleteConfirmMessage" class="delete-confirm-msg"></p>
-      <div id="deleteConfirmDetail" class="delete-confirm-detail" style="display:none;"></div>
+      <label id="confirmActionToggle" class="confirm-action-toggle" style="display:none;">
+        <input type="checkbox" id="confirmActionToggleInput" checked>
+        <span id="confirmActionToggleLabel"></span>
+      </label>
       <div class="modal-actions">
-        <button class="modal-cancel" id="deleteConfirmCancelBtn" onclick="closeDeleteConfirm()">Cancel</button>
-        <button class="modal-save delete-confirm-btn" id="deleteConfirmBtn" onclick="executeDeleteConfirm()">
+        <button class="modal-cancel" id="confirmActionCancelBtn" data-action="close-confirm-action">Cancel</button>
+        <button class="modal-save confirm-action-btn" id="confirmActionBtn" data-action="execute-confirm-action">
           <svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-          <span id="deleteConfirmBtnText">Delete</span>
+          <span id="confirmActionBtnText">Delete</span>
         </button>
       </div>
     </div>
@@ -694,27 +567,47 @@ bun run server.js</pre>
   <!-- Edit Habit Category Modal is created dynamically by js/habits.js -->
 
   <!-- Tab Config Modal -->
-  <div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettings()">
+  <div class="modal-overlay" id="settingsModal" data-action="overlay-close-settings">
     <div class="settings-container">
-      <button class="settings-close" onclick="closeSettings()"><span data-icon="x" data-size="18"></span></button>
+      <button class="settings-close" data-action="close-settings"><span data-icon="x" data-size="18"></span></button>
       <div class="settings-sidebar">
         <h2 id="settingsTitle">Settings</h2>
         <nav>
-          <button class="settings-nav-btn active" data-pane="general" onclick="switchSettingsPane('general')">
+          <button class="settings-nav-btn active" data-pane="general" data-action="switch-settings-pane" data-pane="general">
             <span data-icon="settings" data-size="16"></span>
             <span id="settingsNavGeneral">General</span>
           </button>
-          <button class="settings-nav-btn" data-pane="ai" onclick="switchSettingsPane('ai')">
+          <button class="settings-nav-btn" data-pane="ai" data-action="switch-settings-pane" data-pane="ai">
             <span data-icon="sparkles" data-size="16"></span>
             <span id="settingsNavAi">AI</span>
           </button>
-          <button class="settings-nav-btn" data-pane="data" onclick="switchSettingsPane('data')">
+          <button class="settings-nav-btn" data-pane="calendar" data-action="switch-settings-pane" data-pane="calendar" id="settingsNavCalendarBtn" style="display:none">
+            <span data-icon="calendar" data-size="16"></span>
+            <span id="settingsNavCalendar">Calendar</span>
+          </button>
+          <button class="settings-nav-btn" data-pane="data" data-action="switch-settings-pane" data-pane="data">
             <span data-icon="hard-drive" data-size="16"></span>
             <span id="settingsNavData">Data</span>
           </button>
-          <button class="settings-nav-btn" data-pane="stats" onclick="switchSettingsPane('stats')">
+          <button class="settings-nav-btn" data-pane="stats" data-action="switch-settings-pane" data-pane="stats">
             <span data-icon="bar-chart-3" data-size="16"></span>
             <span id="settingsNavStats">Stats</span>
+          </button>
+          <button class="settings-nav-btn" data-pane="sharing" data-action="switch-settings-pane" data-pane="sharing" id="settingsNavSharingBtn" style="display:none">
+            <span data-icon="users" data-size="16"></span>
+            <span id="settingsNavSharing">Sharing</span>
+          </button>
+          <button class="settings-nav-btn" data-pane="calendar" data-action="switch-settings-pane" data-pane="calendar" id="settingsNavCalendarBtn" style="display:none">
+            <span data-icon="calendar" data-size="16"></span>
+            <span data-i18n="cal_sync.nav">Calendar</span>
+          </button>
+          <button class="settings-nav-btn" data-pane="agents" data-action="switch-settings-pane" data-pane="agents" id="settingsNavAgentsBtn">
+            <span data-icon="bot" data-size="16"></span>
+            <span id="settingsNavAgents">Agents</span>
+          </button>
+          <button class="settings-nav-btn" data-pane="account" data-action="switch-settings-pane" data-pane="account">
+            <span data-icon="user" data-size="16"></span>
+            <span id="settingsNavAccountLabel">Account</span>
           </button>
         </nav>
       </div>
@@ -736,7 +629,7 @@ bun run server.js</pre>
           </div>
           <div class="setting-group">
             <div class="setting-group-label" id="settingsDisplayLabel">Display</div>
-            <div class="setting-toggle-row" id="themeToggle" onclick="toggleTheme()">
+            <div class="setting-toggle-row" id="themeToggle" data-action="toggle-theme">
               <span class="setting-toggle-icon"><span data-icon="moon" data-size="16"></span></span>
               <span class="setting-toggle-text" id="settingsThemeLabel">Toggle theme</span>
               <span class="setting-toggle-switch" id="themeSwitch"></span>
@@ -754,10 +647,10 @@ bun run server.js</pre>
               <label for="settingsNvidiaKey" id="settingsNvidiaKeyLabel">API Key</label>
               <div class="settings-api-key-row">
                 <input type="password" id="settingsNvidiaKey" placeholder="nvapi-..." autocomplete="off" spellcheck="false">
-                <button type="button" class="settings-key-btn" id="settingsToggleVis" onclick="toggleNvidiaKeyVisibility()" title="Show/Hide">
+                <button type="button" class="settings-key-btn" id="settingsToggleVis" data-action="toggle-nvidia-key-visibility" title="Show/Hide">
                   <span data-icon="eye" data-size="16"></span>
                 </button>
-                <button type="button" class="settings-key-btn settings-key-save" id="settingsSaveKey" onclick="saveNvidiaKey()">
+                <button type="button" class="settings-key-btn settings-key-save" id="settingsSaveKey" data-action="save-nvidia-key">
                   <span data-icon="check" data-size="16"></span>
                 </button>
               </div>
@@ -765,12 +658,12 @@ bun run server.js</pre>
             </div>
             <div class="setting-item">
               <label for="settingsNvidiaModel" id="settingsNvidiaModelLabel">Model</label>
-              <select id="settingsNvidiaModel" class="settings-select" onchange="handleModelChange()">
+              <select id="settingsNvidiaModel" class="settings-select" data-action="handle-model-change">
                 <option value="meta/llama-3.1-8b-instruct">meta/llama-3.1-8b-instruct</option>
               </select>
               <div id="settingsCustomModelRow" class="settings-api-key-row" style="display:none;margin-top:6px">
                 <input type="text" id="settingsCustomModel" class="settings-select" placeholder="org/model-name" spellcheck="false">
-                <button type="button" class="settings-key-btn settings-key-save" onclick="applyCustomModel()">
+                <button type="button" class="settings-key-btn settings-key-save" data-action="apply-custom-model">
                   <span data-icon="check" data-size="16"></span>
                 </button>
               </div>
@@ -779,7 +672,7 @@ bun run server.js</pre>
               <label id="settingsTestLabel">Test</label>
               <textarea id="settingsTestPrompt" class="settings-textarea" rows="2">What is the capital of France?</textarea>
               <div class="settings-test-actions">
-                <button type="button" class="settings-test-btn" onclick="testNvidiaApi()" id="settingsTestBtn">
+                <button type="button" class="settings-test-btn" data-action="test-nvidia-api" id="settingsTestBtn">
                   <span data-icon="play" data-size="14"></span>
                   <span id="settingsTestBtnLabel">Query</span>
                 </button>
@@ -789,7 +682,7 @@ bun run server.js</pre>
             <div class="setting-item nvidia-usage-section">
               <label id="settingsUsageLabel">Usage (24h)</label>
               <div id="nvidiaUsageStats" class="nvidia-usage-stats"></div>
-              <button type="button" class="settings-usage-toggle" id="nvidiaUsageToggle" onclick="toggleNvidiaUsageDetail()" style="display:none">
+              <button type="button" class="settings-usage-toggle" id="nvidiaUsageToggle" data-action="toggle-nvidia-usage" style="display:none">
                 <span data-icon="chevron-down" data-size="14"></span>
                 <span id="nvidiaUsageToggleLabel">By model</span>
               </button>
@@ -802,12 +695,12 @@ bun run server.js</pre>
           <div class="setting-group">
             <div class="setting-group-label" id="settingsBackupLabel">Backup</div>
             <p class="setting-hint" id="settingsBackupHint">Export all your data as a JSON file. Works with any setup.</p>
-            <button type="button" class="settings-data-btn" onclick="exportBackup()">
+            <button type="button" class="settings-data-btn" data-action="export-backup">
               <span data-icon="download" data-size="16"></span>
               <span id="settingsExportBtn">Export backup</span>
             </button>
-            <button type="button" class="settings-data-btn" onclick="exportToGoogleDrive()">
-              <img class="backend-icon-img" src="https://www.gstatic.com/images/branding/productlogos/drive_2026/v1/web-48dp/logo_drive_2026_color_2x_web_48dp.png" alt="Google Drive" width="16" height="16">
+            <button type="button" class="settings-data-btn" data-action="export-to-drive">
+              <img class="backend-icon-img" src="icons/brand/googledrive.svg" alt="Google Drive" width="16" height="16">
               <span id="settingsDriveExportBtn">Save to Google Drive</span>
             </button>
             <div class="drive-backup-link" id="driveBackupLink" style="display:none"></div>
@@ -815,7 +708,7 @@ bun run server.js</pre>
           <div class="setting-group">
             <div class="setting-group-label" id="settingsRestoreLabel">Restore</div>
             <p class="setting-hint" id="settingsRestoreHint">Import a previously exported backup. This replaces all current data.</p>
-            <button type="button" class="settings-data-btn" onclick="importBackup()">
+            <button type="button" class="settings-data-btn" data-action="import-backup">
               <span data-icon="upload" data-size="16"></span>
               <span id="settingsImportBtn">Import backup</span>
             </button>
@@ -832,26 +725,89 @@ bun run server.js</pre>
             <div id="usageStatsContainer" class="usage-stats-container"></div>
           </div>
         </div>
+        <div class="settings-pane" id="settingsPane-sharing">
+          <h3 id="settingsPaneSharingTitle">Sharing</h3>
+          <div id="sharingPaneContent"></div>
+        </div>
+        <div class="settings-pane" id="settingsPane-calendar">
+          <h3 id="settingsPaneCalendarTitle">Calendar & Notifications</h3>
+          <div class="setting-group" id="settingsCalSyncGroup">
+            <div class="setting-group-label" id="settingsCalSyncLabel">Google Calendar</div>
+            <p class="setting-hint" id="settingsCalSyncHint">Sync due items to a dedicated Google Calendar to get notifications on your phone and desktop.</p>
+            <div class="setting-toggle-row" data-action="toggle-cal-sync">
+              <span class="setting-toggle-icon"><img src="icons/brand/googlecalendar.svg" width="16" height="16" alt="Google Calendar" style="display:block;"></span>
+              <span class="setting-toggle-text" id="settingsCalSyncToggleLabel">Sync to Google Calendar</span>
+              <span class="setting-toggle-switch" id="calSyncSwitch"></span>
+            </div>
+            <div id="calSyncSubSettings" style="display:none">
+              <div class="setting-toggle-row cal-sync-sub" data-action="toggle-cal-sync-habits">
+                <span class="setting-toggle-text" id="settingsCalSyncHabitsLabel">Habits</span>
+                <span class="setting-toggle-switch" id="calSyncHabitsSwitch"></span>
+              </div>
+              <div class="setting-toggle-row cal-sync-sub" data-action="toggle-cal-sync-todos">
+                <span class="setting-toggle-text" id="settingsCalSyncTodosLabel">TODOs</span>
+                <span class="setting-toggle-switch" id="calSyncTodosSwitch"></span>
+              </div>
+              <div class="setting-toggle-row cal-sync-sub" data-action="toggle-cal-sync-birthdays">
+                <span class="setting-toggle-text" id="settingsCalSyncBirthdaysLabel">Birthdays</span>
+                <span class="setting-toggle-switch" id="calSyncBirthdaysSwitch"></span>
+              </div>
+              <div class="cal-sync-progress" id="calSyncProgress" style="display:none;">
+                <p class="cal-sync-progress-text" id="calSyncProgressText"></p>
+                <div class="cal-sync-progress-bar"><div class="cal-sync-progress-fill" id="calSyncProgressFill"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="settings-pane" id="settingsPane-agents">
+          <h3 id="settingsPaneAgentsTitle">Agents</h3>
+          <div id="agentsPaneContent"></div>
+        </div>
+        <div class="settings-pane" id="settingsPane-account">
+          <h3 id="settingsPaneAccountTitle">Account</h3>
+          <div class="setting-group danger-zone">
+            <div class="setting-group-label" id="settingsDangerZoneLabel">Danger Zone</div>
+            <p class="setting-hint" id="settingsDangerZoneHint">Permanently delete your account and all associated data. This action cannot be undone.</p>
+            <button class="settings-data-btn danger-btn" id="deleteAccountBtn">
+              <span data-icon="trash-2" data-size="16" data-color="#fff"></span>
+              <span id="deleteAccountBtnText">Delete Account</span>
+            </button>
+          </div>
+        </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ===== AUTH PROMPT ===== -->
+  <div class="modal-overlay" id="authPromptOverlay" data-action="overlay-close-auth">
+    <div class="modal auth-prompt-modal">
+      <div class="auth-prompt-content" id="authPromptContent"></div>
     </div>
   </div>
 
   <div class="toast" id="toast"></div>
 </div>
 
+<!-- Supabase migration modal (outside #gate for z-index independence) -->
+<div class="modal-overlay" id="sbMigrationOverlay" style="z-index:10001">
+  <div class="modal sb-migration-modal">
+    <div class="sb-migration-content">
+      <div class="auth-icon" id="sbMigrationIcon"></div>
+      <h3 data-i18n="migration.title">Supabase support has been removed</h3>
+      <p class="auth-hint" data-i18n="migration.description">DeLaClaw no longer supports Supabase as a backend. You can download your data as a backup file, or migrate it directly to Google Drive.</p>
+      <p class="auth-hint sb-migration-sharing-warn" id="sbMigrationSharingWarn" style="display:none" data-i18n="migration.sharing_warning">Your Supabase data includes shared groups. Sharing is not available on Google Drive — shared items will be imported as personal items.</p>
+      <div class="sb-migration-actions">
+        <button type="button" class="settings-data-btn" id="sbMigrationDownload" data-i18n="migration.download_backup">Download your data</button>
+        <button type="button" class="settings-data-btn sb-migration-drive-btn" id="sbMigrationDrive" data-i18n="migration.migrate_drive">Migrate to Google Drive</button>
+      </div>
+      <p class="sb-migration-status" id="sbMigrationStatus"></p>
+      <a href="#" class="sb-migration-back" id="sbMigrationBack" data-i18n="migration.back">← Back to login</a>
+    </div>
+  </div>
+</div>
+
 <script type="module" src="js/main.js"></script>
-<script>
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('sw.js').then(function(reg){
-    // Force update check on every page load
-    reg.update();
-  });
-  // Auto-reload when a new service worker takes control (deploy update)
-  let refreshing = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if(!refreshing){ refreshing = true; location.reload(); }
-  });
-}
-</script>
+<script src="js/sw-register.js"></script>
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "1f5bb02456c14318b23069eccbe1104c"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 </html>

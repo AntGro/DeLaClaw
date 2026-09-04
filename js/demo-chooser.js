@@ -4,6 +4,7 @@
 import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
 import { isMobileUA } from './utils.js';
+import { computeNextDue, isStructuredRule, normalizeFrequencyRule } from './habits.js';
 
 // ── Prompt generators (EN / FR / ES) ──────────────────────────────
 
@@ -154,7 +155,7 @@ function normalizeCustomData(data) {
     data.todos = data.todos.map((r, i) => {
       base(r, 'todo', i);
       if (r.done == null) r.done = false;
-      if (!r.priority) r.priority = 'normal';
+      if (!r.priority) r.priority = 'medium';
       if (!r.category) r.category = 'General';
       return r;
     });
@@ -164,7 +165,11 @@ function normalizeCustomData(data) {
     data.habits = data.habits.map((r, i) => {
       base(r, 'habit', i);
       if (r.is_draft == null) r.is_draft = false;
-      if (!r.next_due) r.next_due = today + 'T00:00:00+00:00';
+      if (r.frequency_rule) r.frequency_rule = normalizeFrequencyRule(r.frequency_rule);
+      if (!r.next_due) {
+        const computed = isStructuredRule(r.frequency_rule) ? computeNextDue(r.frequency_rule, null) : null;
+        r.next_due = computed || (today + 'T00:00:00+00:00');
+      }
       if (!r.category) r.category = 'General';
       if (!r.frequency_rule) r.frequency_rule = 'daily';
       return r;

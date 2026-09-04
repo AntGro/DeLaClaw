@@ -5,6 +5,7 @@
 // Dates are relative to the current date so the data always looks fresh.
 // ===================================================================
 
+import { computeNextDue } from './habits.js';
 const _now = new Date();
 const _todayStr = _now.toISOString().slice(0, 10);
 const d = (offset) => {
@@ -61,6 +62,19 @@ function sharedHabitCompletions() {
     // Meal prep — weekly
     { id: 'demo-hc-033', habit_id: 'demo-habit-006', completed_at: d(-14) },
     { id: 'demo-hc-034', habit_id: 'demo-habit-006', completed_at: d(-7) },
+    // Journal — every 2 days
+    { id: 'demo-hc-035', habit_id: 'demo-habit-007', completed_at: d(-6) },
+    { id: 'demo-hc-036', habit_id: 'demo-habit-007', completed_at: d(-4) },
+    { id: 'demo-hc-037', habit_id: 'demo-habit-007', completed_at: d(-2) },
+    // Deep clean — every 2 weeks
+    { id: 'demo-hc-038', habit_id: 'demo-habit-008', completed_at: d(-23) },
+    { id: 'demo-hc-039', habit_id: 'demo-habit-008', completed_at: d(-9) },
+    // Budget review — monthly on the 15th
+    { id: 'demo-hc-040', habit_id: 'demo-habit-009', completed_at: d(-18) },
+    // Quarterly goals — every 3 months first Monday
+    { id: 'demo-hc-041', habit_id: 'demo-habit-010', completed_at: d(-60) },
+    // Dentist — yearly
+    { id: 'demo-hc-042', habit_id: 'demo-habit-011', completed_at: d(-150) },
   ];
 }
 
@@ -91,22 +105,27 @@ function en() {
 
   const todos = [
     { id: 'demo-todo-001', text: 'Buy groceries (avocados, oat milk, spinach)', done: false, priority: 'urgent', category: 'Personal', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
-    { id: 'demo-todo-002', text: 'Schedule dentist appointment', done: false, priority: 'medium', category: 'Health', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
-    { id: 'demo-todo-003', text: 'Renew gym membership', done: false, priority: 'low', category: 'Health', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-todo-002', text: 'Schedule dentist appointment', done: false, priority: 'normal', category: 'Health', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-todo-003', text: 'Renew gym membership', done: false, priority: 'normal', category: 'Health', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-todo-004', text: 'Send birthday card to Mum', done: false, priority: 'high', category: 'Family', sort_order: 3, due_date: dateOnly(3), created_at: d(-1), updated_at: d(-1) },
     { id: 'demo-todo-005', text: 'Review Q2 budget spreadsheet', done: true, priority: 'normal', category: 'Work', sort_order: 4, due_date: dateOnly(5), created_at: d(-7), updated_at: d(-7) },
-    { id: 'demo-todo-006', text: 'Fix leaking kitchen tap', done: false, priority: 'medium', category: 'Home', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
-    { id: 'demo-todo-007', text: 'Return library books', done: true, priority: 'low', category: 'Personal', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
+    { id: 'demo-todo-006', text: 'Fix leaking kitchen tap', done: false, priority: 'normal', category: 'Home', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
+    { id: 'demo-todo-007', text: 'Return library books', done: true, priority: 'normal', category: 'Personal', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-todo-008', text: 'Prepare slides for Monday standup', done: false, priority: 'high', category: 'Work', sort_order: 7, due_date: dateOnly(2), created_at: d(-1), updated_at: d(-1) },
   ];
 
   const habits = [
-    { id: 'demo-habit-001', name: 'Morning run (5 km)', frequency_rule: 'daily', category: 'Fitness', is_draft: false, next_due: dateOnly(0), sort_order: 0, created_at: d(-60), updated_at: d(-1) },
-    { id: 'demo-habit-002', name: 'Read 30 minutes', frequency_rule: 'daily', category: 'Learning', is_draft: false, next_due: dateOnly(0), sort_order: 1, created_at: d(-45), updated_at: d(-1) },
-    { id: 'demo-habit-003', name: 'Meditate', frequency_rule: 'daily', category: 'Wellbeing', is_draft: false, next_due: dateOnly(0), sort_order: 2, created_at: d(-40), updated_at: d(-2) },
-    { id: 'demo-habit-004', name: 'Practice guitar', frequency_rule: '3/week', category: 'Creative', is_draft: false, next_due: dateOnly(1), sort_order: 3, created_at: d(-30), updated_at: d(-3) },
-    { id: 'demo-habit-005', name: 'Water the plants', frequency_rule: '2/week', category: 'Home', is_draft: false, next_due: dateOnly(2), sort_order: 4, created_at: d(-50), updated_at: d(-4) },
-    { id: 'demo-habit-006', name: 'Weekly meal prep', frequency_rule: '1/week', category: 'Health', is_draft: false, next_due: dateOnly(0), sort_order: 5, created_at: d(-35), updated_at: d(-7) },
+    { id: 'demo-habit-001', name: 'Morning run (5 km)', frequency_rule: 'every_N_days:1', category: 'Fitness', is_draft: false, next_due: null, sort_order: 0, created_at: d(-60), updated_at: d(-1) },
+    { id: 'demo-habit-002', name: 'Read 30 minutes', frequency_rule: 'every_N_days:1', category: 'Learning', is_draft: false, next_due: null, sort_order: 1, created_at: d(-45), updated_at: d(-1) },
+    { id: 'demo-habit-003', name: 'Meditate', frequency_rule: 'every_N_days:1', category: 'Wellbeing', is_draft: false, next_due: null, sort_order: 2, created_at: d(-40), updated_at: d(-2) },
+    { id: 'demo-habit-004', name: 'Practice guitar', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Creative', is_draft: false, next_due: null, sort_order: 3, created_at: d(-30), updated_at: d(-3) },
+    { id: 'demo-habit-005', name: 'Water the plants', frequency_rule: 'every_N_weeks:1:Wed,Sat', category: 'Home', is_draft: false, next_due: null, sort_order: 4, created_at: d(-50), updated_at: d(-4) },
+    { id: 'demo-habit-006', name: 'Weekly meal prep', frequency_rule: 'every_N_weeks:1:Sun', category: 'Health', is_draft: false, next_due: null, sort_order: 5, created_at: d(-35), updated_at: d(-7) },
+    { id: 'demo-habit-007', name: 'Journal', frequency_rule: 'every_N_days:2', category: '', is_draft: false, next_due: null, sort_order: 6, created_at: d(-90), updated_at: d(-2) },
+    { id: 'demo-habit-008', name: 'Deep clean bathroom', frequency_rule: 'every_N_weeks:2', category: 'Home', is_draft: false, next_due: null, sort_order: 7, created_at: d(-56), updated_at: d(-9) },
+    { id: 'demo-habit-009', name: 'Budget review', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
+    { id: 'demo-habit-010', name: 'Quarterly goals check-in', frequency_rule: 'every_N_months:3:first:Mon', category: 'Wellbeing', is_draft: false, next_due: null, sort_order: 9, created_at: d(-180), updated_at: d(-60) },
+    { id: 'demo-habit-011', name: 'Dentist appointment', frequency_rule: 'yearly:03-15', category: 'Health', is_draft: false, next_due: null, sort_order: 10, created_at: d(-365), updated_at: d(-150) },
   ];
 
   const habit_completions = sharedHabitCompletions();
@@ -132,6 +151,7 @@ function en() {
   const flashcard_notes = [
     { id: 'demo-fn-001', content: 'Add more capitals from Africa and Asia.', proposal_status: null, proposed_front: null, proposed_back: null, proposed_deck: null, created_at: d(-10) },
     { id: 'demo-fn-002', content: 'Renaissance art flashcards — Michelangelo, Da Vinci, Raphael.', proposal_status: 'pending', proposed_front: 'Who painted the ceiling of the Sistine Chapel?', proposed_back: 'Michelangelo (1508–1512)', proposed_deck: 'History', created_at: d(-4) },
+    { id: 'demo-fn-003', content: 'The Silk Road — trade routes, key cities, cultural exchanges.', proposal_status: 'ready', proposed_front: 'What ancient network of trade routes connected China to the Mediterranean?', proposed_back: 'The Silk Road — active from the 2nd century BC to the 15th century AD, linking East Asia to Europe via Central Asia.', proposed_deck: 'History', created_at: d(-2) },
   ];
 
   const birthdays = [
@@ -153,9 +173,9 @@ function en() {
   ];
 
   const lists = [
-    { id: 'demo-list-001', name: 'Travel Destinations', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
-    { id: 'demo-list-002', name: 'Monthly Expenses to Reimburse', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
-    { id: 'demo-list-003', name: 'Movies to Watch', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-001', name: 'Travel Destinations', shortname: 'Travel', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
+    { id: 'demo-list-002', name: 'Monthly Expenses to Reimburse', shortname: 'Expenses', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
+    { id: 'demo-list-003', name: 'Movies to Watch', shortname: 'Movies', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
   ];
 
   const list_items = [
@@ -201,22 +221,27 @@ function fr() {
 
   const todos = [
     { id: 'demo-todo-001', text: 'Faire les courses (avocat, lait d\'avoine, épinards)', done: false, priority: 'urgent', category: 'Personnel', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
-    { id: 'demo-todo-002', text: 'Prendre rendez-vous chez le dentiste', done: false, priority: 'medium', category: 'Santé', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
-    { id: 'demo-todo-003', text: 'Renouveler l\'abonnement salle de sport', done: false, priority: 'low', category: 'Santé', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-todo-002', text: 'Prendre rendez-vous chez le dentiste', done: false, priority: 'normal', category: 'Santé', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-todo-003', text: 'Renouveler l\'abonnement salle de sport', done: false, priority: 'normal', category: 'Santé', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-todo-004', text: 'Envoyer une carte d\'anniversaire à Maman', done: false, priority: 'high', category: 'Famille', sort_order: 3, due_date: dateOnly(3), created_at: d(-1), updated_at: d(-1) },
     { id: 'demo-todo-005', text: 'Revoir le budget T2 sur le tableur', done: true, priority: 'normal', category: 'Travail', sort_order: 4, due_date: dateOnly(5), created_at: d(-7), updated_at: d(-7) },
-    { id: 'demo-todo-006', text: 'Réparer le robinet de la cuisine', done: false, priority: 'medium', category: 'Maison', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
-    { id: 'demo-todo-007', text: 'Rendre les livres à la bibliothèque', done: true, priority: 'low', category: 'Personnel', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
+    { id: 'demo-todo-006', text: 'Réparer le robinet de la cuisine', done: false, priority: 'normal', category: 'Maison', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
+    { id: 'demo-todo-007', text: 'Rendre les livres à la bibliothèque', done: true, priority: 'normal', category: 'Personnel', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-todo-008', text: 'Préparer les slides pour le standup de lundi', done: false, priority: 'high', category: 'Travail', sort_order: 7, due_date: dateOnly(2), created_at: d(-1), updated_at: d(-1) },
   ];
 
   const habits = [
-    { id: 'demo-habit-001', name: 'Course matinale (5 km)', frequency_rule: 'daily', category: 'Sport', is_draft: false, next_due: dateOnly(0), sort_order: 0, created_at: d(-60), updated_at: d(-1) },
-    { id: 'demo-habit-002', name: 'Lire 30 minutes', frequency_rule: 'daily', category: 'Apprentissage', is_draft: false, next_due: dateOnly(0), sort_order: 1, created_at: d(-45), updated_at: d(-1) },
-    { id: 'demo-habit-003', name: 'Méditer', frequency_rule: 'daily', category: 'Bien-être', is_draft: false, next_due: dateOnly(0), sort_order: 2, created_at: d(-40), updated_at: d(-2) },
-    { id: 'demo-habit-004', name: 'Pratiquer la guitare', frequency_rule: '3/week', category: 'Créativité', is_draft: false, next_due: dateOnly(1), sort_order: 3, created_at: d(-30), updated_at: d(-3) },
-    { id: 'demo-habit-005', name: 'Arroser les plantes', frequency_rule: '2/week', category: 'Maison', is_draft: false, next_due: dateOnly(2), sort_order: 4, created_at: d(-50), updated_at: d(-4) },
-    { id: 'demo-habit-006', name: 'Meal prep du dimanche', frequency_rule: '1/week', category: 'Santé', is_draft: false, next_due: dateOnly(0), sort_order: 5, created_at: d(-35), updated_at: d(-7) },
+    { id: 'demo-habit-001', name: 'Course matinale (5 km)', frequency_rule: 'every_N_days:1', category: 'Sport', is_draft: false, next_due: null, sort_order: 0, created_at: d(-60), updated_at: d(-1) },
+    { id: 'demo-habit-002', name: 'Lire 30 minutes', frequency_rule: 'every_N_days:1', category: 'Apprentissage', is_draft: false, next_due: null, sort_order: 1, created_at: d(-45), updated_at: d(-1) },
+    { id: 'demo-habit-003', name: 'Méditer', frequency_rule: 'every_N_days:1', category: 'Bien-être', is_draft: false, next_due: null, sort_order: 2, created_at: d(-40), updated_at: d(-2) },
+    { id: 'demo-habit-004', name: 'Pratiquer la guitare', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Créativité', is_draft: false, next_due: null, sort_order: 3, created_at: d(-30), updated_at: d(-3) },
+    { id: 'demo-habit-005', name: 'Arroser les plantes', frequency_rule: 'every_N_weeks:1:Wed,Sat', category: 'Maison', is_draft: false, next_due: null, sort_order: 4, created_at: d(-50), updated_at: d(-4) },
+    { id: 'demo-habit-006', name: 'Meal prep du dimanche', frequency_rule: 'every_N_weeks:1:Sun', category: 'Santé', is_draft: false, next_due: null, sort_order: 5, created_at: d(-35), updated_at: d(-7) },
+    { id: 'demo-habit-007', name: 'Journal', frequency_rule: 'every_N_days:2', category: '', is_draft: false, next_due: null, sort_order: 6, created_at: d(-90), updated_at: d(-2) },
+    { id: 'demo-habit-008', name: 'Grand ménage salle de bain', frequency_rule: 'every_N_weeks:2', category: 'Maison', is_draft: false, next_due: null, sort_order: 7, created_at: d(-56), updated_at: d(-9) },
+    { id: 'demo-habit-009', name: 'Revue du budget', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
+    { id: 'demo-habit-010', name: 'Bilan trimestriel des objectifs', frequency_rule: 'every_N_months:3:first:Mon', category: 'Bien-être', is_draft: false, next_due: null, sort_order: 9, created_at: d(-180), updated_at: d(-60) },
+    { id: 'demo-habit-011', name: 'Rendez-vous dentiste', frequency_rule: 'yearly:03-15', category: 'Santé', is_draft: false, next_due: null, sort_order: 10, created_at: d(-365), updated_at: d(-150) },
   ];
 
   const flashcards = [
@@ -237,6 +262,7 @@ function fr() {
   const flashcard_notes = [
     { id: 'demo-fn-001', content: 'Ajouter plus de capitales d\'Afrique et d\'Asie.', proposal_status: null, proposed_front: null, proposed_back: null, proposed_deck: null, created_at: d(-10) },
     { id: 'demo-fn-002', content: 'Flashcards art de la Renaissance — Michel-Ange, Léonard de Vinci, Raphaël.', proposal_status: 'pending', proposed_front: 'Qui a peint le plafond de la chapelle Sixtine ?', proposed_back: 'Michel-Ange (1508–1512)', proposed_deck: 'Histoire', created_at: d(-4) },
+    { id: 'demo-fn-003', content: 'La Route de la Soie — routes commerciales, villes clés, échanges culturels.', proposal_status: 'ready', proposed_front: 'Quel ancien réseau de routes commerciales reliait la Chine à la Méditerranée ?', proposed_back: 'La Route de la Soie — active du IIe siècle av. J.-C. au XVe siècle, reliant l\'Asie de l\'Est à l\'Europe via l\'Asie centrale.', proposed_deck: 'Histoire', created_at: d(-2) },
   ];
 
   const birthdays = [
@@ -258,9 +284,9 @@ function fr() {
   ];
 
   const lists = [
-    { id: 'demo-list-001', name: 'Destinations de voyage', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
-    { id: 'demo-list-002', name: 'Notes de frais du mois', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
-    { id: 'demo-list-003', name: 'Films à voir', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-001', name: 'Destinations de voyage', shortname: 'Voyage', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
+    { id: 'demo-list-002', name: 'Notes de frais du mois', shortname: 'Frais', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
+    { id: 'demo-list-003', name: 'Films à voir', shortname: 'Films', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
   ];
 
   const list_items = [
@@ -307,22 +333,27 @@ function es() {
 
   const todos = [
     { id: 'demo-todo-001', text: 'Comprar víveres (aguacate, leche de avena, espinacas)', done: false, priority: 'urgent', category: 'Personal', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
-    { id: 'demo-todo-002', text: 'Pedir cita con el dentista', done: false, priority: 'medium', category: 'Salud', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
-    { id: 'demo-todo-003', text: 'Renovar membresía del gimnasio', done: false, priority: 'low', category: 'Salud', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-todo-002', text: 'Pedir cita con el dentista', done: false, priority: 'normal', category: 'Salud', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-todo-003', text: 'Renovar membresía del gimnasio', done: false, priority: 'normal', category: 'Salud', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-todo-004', text: 'Enviar tarjeta de cumpleaños a Mamá', done: false, priority: 'high', category: 'Familia', sort_order: 3, due_date: dateOnly(3), created_at: d(-1), updated_at: d(-1) },
     { id: 'demo-todo-005', text: 'Revisar el presupuesto T2 en la hoja de cálculo', done: true, priority: 'normal', category: 'Trabajo', sort_order: 4, due_date: dateOnly(5), created_at: d(-7), updated_at: d(-7) },
-    { id: 'demo-todo-006', text: 'Arreglar el grifo de la cocina', done: false, priority: 'medium', category: 'Hogar', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
-    { id: 'demo-todo-007', text: 'Devolver los libros a la biblioteca', done: true, priority: 'low', category: 'Personal', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
+    { id: 'demo-todo-006', text: 'Arreglar el grifo de la cocina', done: false, priority: 'normal', category: 'Hogar', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
+    { id: 'demo-todo-007', text: 'Devolver los libros a la biblioteca', done: true, priority: 'normal', category: 'Personal', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-todo-008', text: 'Preparar las diapositivas para el standup del lunes', done: false, priority: 'high', category: 'Trabajo', sort_order: 7, due_date: dateOnly(2), created_at: d(-1), updated_at: d(-1) },
   ];
 
   const habits = [
-    { id: 'demo-habit-001', name: 'Carrera matutina (5 km)', frequency_rule: 'daily', category: 'Deporte', is_draft: false, next_due: dateOnly(0), sort_order: 0, created_at: d(-60), updated_at: d(-1) },
-    { id: 'demo-habit-002', name: 'Leer 30 minutos', frequency_rule: 'daily', category: 'Aprendizaje', is_draft: false, next_due: dateOnly(0), sort_order: 1, created_at: d(-45), updated_at: d(-1) },
-    { id: 'demo-habit-003', name: 'Meditar', frequency_rule: 'daily', category: 'Bienestar', is_draft: false, next_due: dateOnly(0), sort_order: 2, created_at: d(-40), updated_at: d(-2) },
-    { id: 'demo-habit-004', name: 'Practicar guitarra', frequency_rule: '3/week', category: 'Creatividad', is_draft: false, next_due: dateOnly(1), sort_order: 3, created_at: d(-30), updated_at: d(-3) },
-    { id: 'demo-habit-005', name: 'Regar las plantas', frequency_rule: '2/week', category: 'Hogar', is_draft: false, next_due: dateOnly(2), sort_order: 4, created_at: d(-50), updated_at: d(-4) },
-    { id: 'demo-habit-006', name: 'Meal prep semanal', frequency_rule: '1/week', category: 'Salud', is_draft: false, next_due: dateOnly(0), sort_order: 5, created_at: d(-35), updated_at: d(-7) },
+    { id: 'demo-habit-001', name: 'Carrera matutina (5 km)', frequency_rule: 'every_N_days:1', category: 'Deporte', is_draft: false, next_due: null, sort_order: 0, created_at: d(-60), updated_at: d(-1) },
+    { id: 'demo-habit-002', name: 'Leer 30 minutos', frequency_rule: 'every_N_days:1', category: 'Aprendizaje', is_draft: false, next_due: null, sort_order: 1, created_at: d(-45), updated_at: d(-1) },
+    { id: 'demo-habit-003', name: 'Meditar', frequency_rule: 'every_N_days:1', category: 'Bienestar', is_draft: false, next_due: null, sort_order: 2, created_at: d(-40), updated_at: d(-2) },
+    { id: 'demo-habit-004', name: 'Practicar guitarra', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Creatividad', is_draft: false, next_due: null, sort_order: 3, created_at: d(-30), updated_at: d(-3) },
+    { id: 'demo-habit-005', name: 'Regar las plantas', frequency_rule: 'every_N_weeks:1:Wed,Sat', category: 'Hogar', is_draft: false, next_due: null, sort_order: 4, created_at: d(-50), updated_at: d(-4) },
+    { id: 'demo-habit-006', name: 'Meal prep semanal', frequency_rule: 'every_N_weeks:1:Sun', category: 'Salud', is_draft: false, next_due: null, sort_order: 5, created_at: d(-35), updated_at: d(-7) },
+    { id: 'demo-habit-007', name: 'Diario', frequency_rule: 'every_N_days:2', category: '', is_draft: false, next_due: null, sort_order: 6, created_at: d(-90), updated_at: d(-2) },
+    { id: 'demo-habit-008', name: 'Limpieza a fondo del baño', frequency_rule: 'every_N_weeks:2', category: 'Hogar', is_draft: false, next_due: null, sort_order: 7, created_at: d(-56), updated_at: d(-9) },
+    { id: 'demo-habit-009', name: 'Revisión del presupuesto', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
+    { id: 'demo-habit-010', name: 'Revisión trimestral de objetivos', frequency_rule: 'every_N_months:3:first:Mon', category: 'Bienestar', is_draft: false, next_due: null, sort_order: 9, created_at: d(-180), updated_at: d(-60) },
+    { id: 'demo-habit-011', name: 'Cita con el dentista', frequency_rule: 'yearly:03-15', category: 'Salud', is_draft: false, next_due: null, sort_order: 10, created_at: d(-365), updated_at: d(-150) },
   ];
 
   const flashcards = [
@@ -343,6 +374,7 @@ function es() {
   const flashcard_notes = [
     { id: 'demo-fn-001', content: 'Añadir más capitales de África y Asia.', proposal_status: null, proposed_front: null, proposed_back: null, proposed_deck: null, created_at: d(-10) },
     { id: 'demo-fn-002', content: 'Flashcards de arte renacentista — Miguel Ángel, Da Vinci, Rafael.', proposal_status: 'pending', proposed_front: '¿Quién pintó el techo de la Capilla Sixtina?', proposed_back: 'Miguel Ángel (1508–1512)', proposed_deck: 'Historia', created_at: d(-4) },
+    { id: 'demo-fn-003', content: 'La Ruta de la Seda — rutas comerciales, ciudades clave, intercambios culturales.', proposal_status: 'ready', proposed_front: '¿Qué antigua red de rutas comerciales conectaba China con el Mediterráneo?', proposed_back: 'La Ruta de la Seda — activa desde el siglo II a.C. hasta el siglo XV, uniendo Asia Oriental con Europa a través de Asia Central.', proposed_deck: 'Historia', created_at: d(-2) },
   ];
 
   const birthdays = [
@@ -364,9 +396,9 @@ function es() {
   ];
 
   const lists = [
-    { id: 'demo-list-001', name: 'Destinos de viaje', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
-    { id: 'demo-list-002', name: 'Gastos a reembolsar', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
-    { id: 'demo-list-003', name: 'Películas por ver', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-001', name: 'Destinos de viaje', shortname: 'Viajes', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
+    { id: 'demo-list-002', name: 'Gastos a reembolsar', shortname: 'Gastos', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
+    { id: 'demo-list-003', name: 'Películas por ver', shortname: 'Pelis', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
   ];
 
   const list_items = [
@@ -389,6 +421,17 @@ function es() {
 export function getDemoData(lang) {
   const gen = lang === 'fr' ? fr : lang === 'es' ? es : en;
   const data = gen();
+
+  // Compute next_due for each habit from completions + frequency_rule
+  if (data.habits && data.habit_completions) {
+    for (const habit of data.habits) {
+      const completions = data.habit_completions
+        .filter(c => c.habit_id === habit.id)
+        .sort((a, b) => b.completed_at.localeCompare(a.completed_at));
+      const lastDone = completions.length > 0 ? completions[0].completed_at.slice(0, 10) : null;
+      habit.next_due = computeNextDue(habit.frequency_rule, lastDone);
+    }
+  }
 
   // Settings — just the language
   data.settings = [{ id: 'demo-settings-1', key: 'lang', value: lang, created_at: d(-1), updated_at: d(-1) }];
@@ -453,5 +496,6 @@ export function getEmptyData() {
     flashcards: [], flashcard_notes: [], birthdays: [], vestiaire: [],
     lists: [], list_items: [],
     settings: [], prompts: [], texts: [], text_line_progress: [], nvidia_usage: [], daily_visits: [],
+    todo_categories: [], habit_categories: [], vestiaire_categories: [], flashcard_decks: [],
   };
 }

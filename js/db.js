@@ -92,6 +92,9 @@ const db = {
   /** Install a backend adapter (supabase, pocketbase, rest …) */
   setAdapter(adapter) { _adapter = adapter; },
 
+  /** The raw backend adapter (for adapter-level operations like deleteAccount) */
+  get adapter() { return _adapter; },
+
   /** True once an adapter has been installed */
   get connected() { return _adapter !== null; },
 
@@ -112,6 +115,16 @@ const db = {
     if (!_adapter?.rpc) throw new Error('db: adapter does not support rpc');
     return _adapter.rpc(fn, params);
   },
+
+  /** Batch-update sort_order — delegates to adapter */
+  async bulkSortOrder(table, updates) {
+    if (!_adapter?.bulkSortOrder) throw new Error('db: adapter does not support bulkSortOrder');
+    return _adapter.bulkSortOrder(table, updates);
+  },
+
+  /** No-op passthrough — batch() was removed from the Drive adapter (v1.729)
+   *  but kept here as a safe fallback so any remaining caller doesn't crash. */
+  async batch(fn) { return fn(); },
 };
 
 export default db;

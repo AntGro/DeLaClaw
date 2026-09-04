@@ -1,124 +1,81 @@
 import { lucideIcon } from './icons.js';
-import state, { TODO_MAX_LEN } from './supabase.js';
-import { esc, escQ, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
-import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
-import { t } from './i18n.js';
+import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
+import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
+import { t, getLang } from './i18n.js';
+import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
 // ===================================================================
 // TODOS — DATA & CRUD (Category Card Layout)
 // ===================================================================
-// ===================================================================
 let allTodos = [];
 let todoFilter = 'pending';
 let todoSearchQuery = '';
-const CATEGORIES_KEY = 'todo_categories';
-const CATEGORY_COLORS_KEY = 'todo_category_colors';
-const DEFAULT_CATEGORY_PALETTE = ['#3b82f6', '#ef4444', '#22c55e', '#eab308', '#8b5cf6', '#ec4899', '#f97316', '#14b8a6', '#6366f1', '#84cc16'];
-const CATEGORY_SHORTNAMES_KEY = 'todo_category_shortnames';
-const GENERAL_CATEGORY_COLOR = '#6c6f7e';
 
-// DB keys for settings table
-const TODO_COLORS_DB_KEY = 'todo_category_colors';
-const TODO_SHORTNAMES_DB_KEY = 'todo_category_shortnames';
-let _todoCategoryColors = {};
-let _todoCategoryShortnames = {};
+// ── Category table state ──
+// Categories live in the todo_categories DB table. Loaded into maps for fast lookup.
+let _todoCatMap = new Map();    // id → row
+let _todoCatByName = new Map(); // name → row (backward compat)
+let _defaultCatId = null;       // protected General row
+let _sharedCatId = null;        // protected __shared__ row
+const _myCreatedSharedIds = new Set(); // shared_ids where current user is creator
 
-function getCategoryColors() { return _todoCategoryColors; }
-
-async function loadTodoCategoryMeta() {
-  // Try DB first, fall back to localStorage
-  if (state.db.connected) {
-    try {
-      const { data: d1 } = await state.db.from('settings').select('key,value').eq('key', TODO_COLORS_DB_KEY);
-      const { data: d2 } = await state.db.from('settings').select('key,value').eq('key', TODO_SHORTNAMES_DB_KEY);
-      const data = [...(d1 || []), ...(d2 || [])];
-      if (data.length) {
-        for (const row of data) {
-          if (row.key === TODO_COLORS_DB_KEY && row.value) {
-            _todoCategoryColors = JSON.parse(row.value);
-            localStorage.setItem(CATEGORY_COLORS_KEY, row.value);
-          }
-          if (row.key === TODO_SHORTNAMES_DB_KEY && row.value) {
-            _todoCategoryShortnames = JSON.parse(row.value);
-            localStorage.setItem(CATEGORY_SHORTNAMES_KEY, row.value);
-          }
-        }
-        return;
-      }
-    } catch (e) { console.warn('Could not load todo category meta from DB:', e.message); }
+async function loadTodoCategories() {
+  const { data, error } = await state.db.from('todo_categories').select('*').order('sort_order', { ascending: true });
+  if (error) { console.warn('loadTodoCategories error:', error); return; }
+  _todoCatMap.clear();
+  _todoCatByName.clear();
+  _defaultCatId = null;
+  _sharedCatId = null;
+  for (const row of (data || [])) {
+    _todoCatMap.set(row.id, row);
+    _todoCatByName.set(row.name, row);
+    if (row.is_protected && row.name === SHARED_CATEGORY) _sharedCatId = row.id;
+    else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultCatId = row.id;
   }
-  try { _todoCategoryColors = JSON.parse(localStorage.getItem(CATEGORY_COLORS_KEY) || '{}'); } catch { _todoCategoryColors = {}; }
-  try { _todoCategoryShortnames = JSON.parse(localStorage.getItem(CATEGORY_SHORTNAMES_KEY) || '{}'); } catch { _todoCategoryShortnames = {}; }
+  await backfillCategoryColors('todo_categories', _todoCatMap);
 }
 
-async function saveCategoryColors(map) {
-  _todoCategoryColors = map;
-  const json = JSON.stringify(map);
-  localStorage.setItem(CATEGORY_COLORS_KEY, json);
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings')
-        .update({ value: json, updated_at: new Date().toISOString() })
-        .eq('key', TODO_COLORS_DB_KEY).select();
-      if (!data || data.length === 0) {
-        await state.db.from('settings')
-          .insert({ key: TODO_COLORS_DB_KEY, value: json, updated_at: new Date().toISOString() });
-      }
-    } catch (e) { console.warn('Could not save todo colors to DB:', e.message); }
-  }
+function getTodoCategories() { return _todoCatMap; }
+
+// ── Category helpers ──
+function getCatColor(catId) { return _todoCatMap.get(catId)?.color || GENERAL_CATEGORY_COLOR; }
+function getCatShortname(catId) { return _todoCatMap.get(catId)?.shortname || null; }
+function getCatName(catId) { return _todoCatMap.get(catId)?.name ?? ''; }
+function getCatDisplayName(catId) {
+  const cat = _todoCatMap.get(catId);
+  if (!cat) return t('common.category_default');
+  if (cat.name === '') return t('common.category_default');
+  if (cat.name === SHARED_CATEGORY) return t('sharing.shared');
+  return cat.name;
+}
+function catIdForTodo(todo) { return todo.category_id || _todoCatByName.get(todo.category ?? '')?.id || _defaultCatId; }
+
+// Backward-compat: accepts name or ID. Used by habits.js and welcome.js.
+function getCategoryColor(nameOrId) {
+  if (_todoCatMap.has(nameOrId)) return _todoCatMap.get(nameOrId).color || GENERAL_CATEGORY_COLOR;
+  const byName = _todoCatByName.get(nameOrId);
+  if (byName) return byName.color || GENERAL_CATEGORY_COLOR;
+  return GENERAL_CATEGORY_COLOR;
 }
 
-function getCategoryColor(catName) {
-  if (!catName) return GENERAL_CATEGORY_COLOR;
-  if (_todoCategoryColors[catName]) return _todoCategoryColors[catName];
-  // Auto-assign a color from the palette
-  const usedColors = new Set(Object.values(_todoCategoryColors));
-  const available = DEFAULT_CATEGORY_PALETTE.find(c => !usedColors.has(c)) || DEFAULT_CATEGORY_PALETTE[Object.keys(_todoCategoryColors).length % DEFAULT_CATEGORY_PALETTE.length];
-  _todoCategoryColors[catName] = available;
-  saveCategoryColors(_todoCategoryColors);
-  return available;
+async function setCategoryColor(nameOrId, color) {
+  const cat = _todoCatMap.get(nameOrId) || _todoCatByName.get(nameOrId);
+  if (!cat) return;
+  await state.db.from('todo_categories').update({ color }).eq('id', cat.id);
+  cat.color = color;
 }
 
-function setCategoryColor(catName, color) {
-  _todoCategoryColors[catName] = color;
-  saveCategoryColors(_todoCategoryColors);
-}
-
-function getCategoryShortnames() { return _todoCategoryShortnames; }
-
-async function saveCategoryShortnames(map) {
-  _todoCategoryShortnames = map;
-  const json = JSON.stringify(map);
-  localStorage.setItem(CATEGORY_SHORTNAMES_KEY, json);
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings')
-        .update({ value: json, updated_at: new Date().toISOString() })
-        .eq('key', TODO_SHORTNAMES_DB_KEY).select();
-      if (!data || data.length === 0) {
-        await state.db.from('settings')
-          .insert({ key: TODO_SHORTNAMES_DB_KEY, value: json, updated_at: new Date().toISOString() });
-      }
-    } catch (e) { console.warn('Could not save todo shortnames to DB:', e.message); }
-  }
-}
-
-function getCategoryShortname(catName) {
-  if (!catName) return null;
-  return _todoCategoryShortnames[catName] || null;
-}
-
-function setCategoryShortname(catName, shortname) {
-  if (shortname) { _todoCategoryShortnames[catName] = shortname; }
-  else { delete _todoCategoryShortnames[catName]; }
-  saveCategoryShortnames(_todoCategoryShortnames);
-}
-
-function openEditCategoryModal(catName) {
-  document.getElementById('editCategoryOldName').value = catName;
-  document.getElementById('editCategoryName').value = catName;
-  document.getElementById('editCategoryShortname').value = getCategoryShortname(catName) || '';
-  document.getElementById('editCategoryModal').classList.add('visible');
+function openEditCategoryModal(catId) {
+  const cat = _todoCatMap.get(catId);
+  if (!cat) return;
+  const modal = document.getElementById('editCategoryModal');
+  modal.innerHTML = editCategoryModalHTML();
+  document.getElementById('editCategoryOldName').value = catId; // store ID, not name
+  document.getElementById('editCategoryName').value = cat.name;
+  document.getElementById('editCategoryShortname').value = cat.shortname || '';
+  document.getElementById('editCategoryColor').value = cat.color || GENERAL_CATEGORY_COLOR;
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('editCategoryName').focus(), 50);
 }
 
@@ -127,36 +84,27 @@ function closeEditCategoryModal() {
 }
 
 async function saveEditCategory() {
-  const oldName = document.getElementById('editCategoryOldName').value;
+  const catId = document.getElementById('editCategoryOldName').value;
+  const cat = _todoCatMap.get(catId);
+  if (!cat) return;
   const newName = document.getElementById('editCategoryName').value.trim();
   const shortname = document.getElementById('editCategoryShortname').value.trim();
-  if (!newName) { showToast(t('toast.name_required'), 'error'); return; }
+  const color = document.getElementById('editCategoryColor').value;
+  if (!newName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
 
-  // Update shortname
-  setCategoryShortname(newName, shortname);
+  // Update the DB row directly — no need to rename strings on items since they reference by ID
+  const oldShortname = cat.shortname;
+  const oldName = cat.name;
+  const updates = { shortname: shortname || null, color };
+  if (!cat.is_protected) updates.name = newName;
+  await state.db.from('todo_categories').update(updates).eq('id', catId);
+  Object.assign(cat, updates);
+  _todoCatByName.clear();
+  for (const row of _todoCatMap.values()) _todoCatByName.set(row.name, row);
 
-  // Rename category if changed
-  if (newName !== oldName) {
-    // Update localStorage categories list
-    const cats = getCategories();
-    const idx = cats.indexOf(oldName);
-    if (idx !== -1) { cats[idx] = newName; saveCategories(cats); }
-
-    // Move old shortname to new name if different
-    if (newName !== oldName) {
-      const oldSn = getCategoryShortname(oldName);
-      if (oldSn && !shortname) setCategoryShortname(newName, oldSn);
-      setCategoryShortname(oldName, ''); // clear old
-    }
-
-    // Update all todos in Supabase
-    const todosToUpdate = allTodos.filter(t => (t.category || 'General') === oldName);
-    if (todosToUpdate.length > 0) {
-      await Promise.all(todosToUpdate.map(t =>
-        state.db.from('todos').update({ category: newName }).eq('id', t.id)
-      ));
-      todosToUpdate.forEach(t => { t.category = newName; });
-    }
+  // Calendar: only resync items if the label used in event summaries changed
+  if (updates.shortname !== oldShortname || updates.name !== oldName) {
+    window.markCategoryRenamed?.('todo_categories');
   }
 
   closeEditCategoryModal();
@@ -164,50 +112,15 @@ async function saveEditCategory() {
   showToast(t('toast.updated'), 'success');
 }
 
-function getCategories() {
-  try {
-    const raw = localStorage.getItem(CATEGORIES_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
 
-function saveCategories(cats) {
-  localStorage.setItem(CATEGORIES_KEY, JSON.stringify(cats));
-}
-
-function syncCategoriesFromTodos() {
-  const known = getCategories();
-  const knownSet = new Set(known.map(c => c.toLowerCase()));
-  const discovered = new Set();
-  allTodos.forEach(t => {
-    if (t.category && !knownSet.has(t.category.toLowerCase())) {
-      discovered.add(t.category);
-    }
-  });
-  if (discovered.size > 0) {
-    saveCategories([...known, ...Array.from(discovered)]);
-  }
-}
-
-// Also migrate old bucket localStorage key if present
-function migrateBucketsToCategories() {
-  const oldKey = 'todo_buckets';
-  const old = localStorage.getItem(oldKey);
-  if (old) {
-    try {
-      const buckets = JSON.parse(old);
-      const existing = getCategories();
-      const existingSet = new Set(existing.map(c => c.toLowerCase()));
-      const newOnes = buckets.filter(b => !existingSet.has(b.toLowerCase()));
-      if (newOnes.length) saveCategories([...existing, ...newOnes]);
-    } catch {}
-    localStorage.removeItem(oldKey);
-  }
-}
-
+let _lastRefreshTodos = 0;
 async function refreshTodos() {
   if (!state.db.connected) return;
-  await loadTodoCategoryMeta();
+  // Cooldown: skip if a refresh completed within 500ms (avoids double-fetch
+  // when explicit refresh + realtime-triggered refresh fire back-to-back).
+  const now = Date.now();
+  if (now - _lastRefreshTodos < 500) return;
+  await loadTodoCategories();
   let data;
   try {
     data = await fetchAll(() => state.db.from('todos').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }));
@@ -217,8 +130,48 @@ async function refreshTodos() {
     return;
   }
   allTodos = data || [];
-  migrateBucketsToCategories();
-  syncCategoriesFromTodos();
+
+  // Enrich shared todo pointers with live data from Drive
+  if (state.sharing) {
+    const sharedItems = state.sharing.getAllSharedItems().filter(i => i.item_type === 'todo');
+    const sharedById = new Map(sharedItems.map(i => [i.id, i]));
+
+    // Collect group IDs and enrich pointers
+    const groupIds = new Set();
+    for (const todo of allTodos) {
+      if (!todo.shared_id) continue;
+      const sh = sharedById.get(todo.shared_id);
+      if (sh) {
+        todo.text = sh.payload?.text || sh.payload?.title || '';
+        todo.priority = sh.payload?.priority || 'normal';
+        todo.done = sh.done ? 1 : 0;
+        todo.due_date = sh.payload?.due_date || null;
+        todo.snooze_until = sh.payload?.snooze_until || null;
+        todo._shared = sh;
+        if (todo.shared_group_id) groupIds.add(todo.shared_group_id);
+      }
+    }
+
+    // Precompute which shared items the current user created (for unshare vs copy-to-personal)
+    _myCreatedSharedIds.clear();
+    if (typeof state.sharing.getCurrentMember === 'function') {
+      const memberIdPerGroup = new Map();
+      const gidArr = [...groupIds];
+      const members = await Promise.all(gidArr.map(gid => Promise.resolve(state.sharing.getCurrentMember(gid))));
+      gidArr.forEach((gid, i) => { if (members[i]?.memberId) memberIdPerGroup.set(gid, members[i].memberId); });
+      for (const todo of allTodos) {
+        if (!todo._shared || !todo.shared_group_id) continue;
+        const myId = memberIdPerGroup.get(todo.shared_group_id);
+        if (myId && todo._shared.created_by === myId) _myCreatedSharedIds.add(todo.shared_id);
+      }
+    }
+
+    // Drop shared pointers whose remote data couldn't be resolved
+    allTodos = allTodos.filter(t => !t.shared_id || t._shared);
+  }
+
+  _lastRefreshTodos = Date.now();
+
   if (state.currentView === 'todos') {
     renderTodos();
   }
@@ -234,19 +187,16 @@ function setTodoFilter(filter) {
   renderTodos();
 }
 
-function getFilteredTodosForCategory(category) {
+function getFilteredTodosForCategory(catId) {
   const now = new Date();
-  let filtered = allTodos.filter(t => {
-    const cat = t.category || '';
-    return cat === category;
-  });
+  let filtered = allTodos.filter(t => catIdForTodo(t) === catId);
 
   // Apply search filter
   if (todoSearchQuery) {
     const q = todoSearchQuery.toLowerCase();
     filtered = filtered.filter(t =>
       (t.text && t.text.toLowerCase().includes(q)) ||
-      ((t.category || '').toLowerCase().includes(q))
+      (getCatDisplayName(catIdForTodo(t)).toLowerCase().includes(q))
     );
   }
 
@@ -254,6 +204,8 @@ function getFilteredTodosForCategory(category) {
     filtered = filtered.filter(t => !t.done && (!t.snooze_until || new Date(t.snooze_until) <= now));
   } else if (todoFilter === 'done') {
     filtered = filtered.filter(t => t.done);
+  } else if (todoFilter === 'snoozed') {
+    filtered = filtered.filter(t => !t.done && t.snooze_until && new Date(t.snooze_until) > now);
   } else if (todoFilter === 'outdated') {
     filtered = filtered.filter(t => isTodoOutdated(t));
   }
@@ -279,86 +231,91 @@ function getFilteredTodosForCategory(category) {
 function renderTodos() {
   const grid = document.getElementById('todoCategoryGrid');
   if (!grid) return;
+  cleanupDragArtifacts();
 
   // Show page-level empty state when user has zero TODOs and no custom categories
-  const categories = getCategories();
-  if (allTodos.length === 0 && categories.length === 0) {
+  const catRows = Array.from(_todoCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
+  if (allTodos.length === 0 && catRows.length <= 1) {
     grid.innerHTML = `<div class="page-empty-state">
       <div class="empty-icon">${lucideIcon('list-checks', 48, 'var(--muted)')}</div>
       <h3>${t('todos.empty_title')}</h3>
       <p>${t('todos.empty_hint')}</p>
-      <button class="empty-cta" onclick="showTodoGeneralCard()">${lucideIcon('plus', 16)} ${t('todos.empty_cta')}</button>
+      <button class="empty-cta" data-action="show-todo-general-card">${lucideIcon('plus', 16)} ${t('todos.empty_cta')}</button>
     </div>`;
     renderCategoryToolbarButtons([]);
     return;
   }
 
-  // Always show General first, then user categories
-  const categoryList = ['', ...categories];
+  // Build category ID list in sort order
+  const categoryIdList = catRows.map(c => c.id);
+
+  // Dynamically include the Shared deck if any received items exist
+  const hasSharedItems = allTodos.some(t => catIdForTodo(t) === _sharedCatId);
+  if (hasSharedItems && _sharedCatId) categoryIdList.unshift(_sharedCatId);
 
   // Render category navigation buttons in toolbar
-  renderCategoryToolbarButtons(categoryList);
+  renderCategoryToolbarButtons(categoryIdList);
+  initTodoNavBtnReorder();
 
   let html = '';
-  for (const cat of categoryList) {
+  for (const catId of categoryIdList) {
     // Skip empty categories when searching
     if (todoSearchQuery) {
-      const matchingItems = getFilteredTodosForCategory(cat);
-      const catName = cat || 'General';
+      const matchingItems = getFilteredTodosForCategory(catId);
+      const catName = getCatDisplayName(catId);
       if (matchingItems.length === 0 && !catName.toLowerCase().includes(todoSearchQuery.toLowerCase())) continue;
     }
-    html += renderCategoryCard(cat);
+    html += renderCategoryCard(catId);
   }
 
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(grid, innerScrolls);
 
   // Init drag-and-drop for each card (individual TODO items)
-  categoryList.forEach(cat => {
-    const catId = categoryToDomId(cat);
-    initTodoDragDropForCard(catId);
-    // Init hover delay for TODO action buttons (same as project tasks)
-    const catCard = document.getElementById(catId);
+  categoryIdList.forEach(catId => {
+    const domId = categoryToDomId(catId);
+    initTodoDragDropForCard(domId);
+    const catCard = document.getElementById(domId);
     if (catCard) {
       const list = catCard.querySelector('.todo-cat-list');
       if (list) initTodoHoverDelay(list);
     }
   });
 
-  // Init drag-and-drop for category cards themselves
-  initCategoryDragDrop();
-
   balanceGrid(grid);
 }
 
-function renderCategoryToolbarButtons(categoryList) {
+function renderCategoryToolbarButtons(categoryIdList) {
   const container = document.getElementById('todoNavButtons');
   if (!container) return;
-  container.innerHTML = categoryList.map(cat => {
-    const name = cat || 'General';
-    const shortname = getCategoryShortname(cat);
-    const displayName = shortname || name;
-    const color = getCategoryColor(cat);
-    return `<button class="category-nav-btn" style="--cat-color:${color}" onclick="navigateToCategory('${escQ(cat)}')" title="Go to ${esc(name)}">${esc(displayName)}</button>`;
+  container.innerHTML = categoryIdList.map(catId => {
+    const cat = _todoCatMap.get(catId);
+    if (!cat) return '';
+    const isShared = cat.name === SHARED_CATEGORY;
+    const name = getCatDisplayName(catId);
+    const shortname = cat.shortname;
+    const displayName = isShared ? t('sharing.shared') : (shortname || name);
+    const color = cat.color || GENERAL_CATEGORY_COLOR;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-category" data-category="${esc(catId)}" title="Go to ${esc(name)}">${esc(displayName)}</button>`;
   }).join('');
 }
 
-function navigateToCategory(category) {
-  const catId = categoryToDomId(category);
-  const card = document.getElementById(catId);
+function navigateToCategory(catId) {
+  const domId = categoryToDomId(catId);
+  const card = document.getElementById(domId);
   if (!card) return;
-  scrollToAndHighlight(card, getCategoryColor(category));
-  // Focus the input for adding a new TODO
+  scrollToAndHighlight(card, getCatColor(catId));
   setTimeout(() => {
     const input = card.querySelector('.todo-cat-input');
     if (input) input.focus();
   }, 400);
 }
 
-function categoryToDomId(cat) {
-  if (!cat) return 'todo-cat-general';
-  return 'todo-cat-' + cat.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+function categoryToDomId(catId) {
+  return 'todo-cat-' + catId;
 }
 
 function updateTodoCharCounter(input) {
@@ -372,25 +329,26 @@ function updateTodoCharCounter(input) {
   counter.className = 'char-counter' + (len > TODO_MAX_LEN * 0.9 ? ' danger' : len > TODO_MAX_LEN * 0.7 ? ' warn' : '');
 }
 
-function renderCategoryCard(category) {
-  const catId = categoryToDomId(category);
-  const catName = category || 'General';
-  const isGeneral = !category;
-  const shortname = getCategoryShortname(category);
-  const allInCat = allTodos.filter(t => (t.category || '') === category);
+function renderCategoryCard(catId) {
+  const cat = _todoCatMap.get(catId);
+  if (!cat) return '';
+  const domId = categoryToDomId(catId);
+  const isSharedDeck = cat.name === SHARED_CATEGORY;
+  const catName = getCatDisplayName(catId);
+  const isGeneral = cat.is_protected && cat.name !== SHARED_CATEGORY;
+  const shortname = cat.shortname;
+  const allInCat = allTodos.filter(t => catIdForTodo(t) === catId);
   const pending = allInCat.filter(t => !t.done).length;
   const doneCount = allInCat.filter(t => t.done).length;
 
   // Split: active items (not done) and done items
-  const activeTodos = getFilteredTodosForCategory(category).filter(t => !t.done);
-  const doneTodos = allInCat.filter(t => t.done);
+  const activeTodos = getFilteredTodosForCategory(catId).filter(t => !t.done);
+  const doneTodos = allInCat.filter(t => t.done)
+    .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
 
-  // If user is explicitly filtering to 'done', show all done; if 'pending', show only active
+  // Show active todos based on filter; done section always available as collapsible
   let displayActive, displayDone;
-  if (todoFilter === 'done') {
-    displayActive = [];
-    displayDone = doneTodos;
-  } else if (todoFilter === 'pending') {
+  if (todoFilter === 'outdated' || todoFilter === 'snoozed') {
     displayActive = activeTodos;
     displayDone = [];
   } else {
@@ -400,30 +358,30 @@ function renderCategoryCard(category) {
 
   const statsText = `${pending} ${t('todos.pending').toLowerCase()}` + (doneCount > 0 ? ` · ${doneCount} ${t('todos.done').toLowerCase()}` : '');
 
-  const deleteBtn = !isGeneral
-    ? `<button class="todo-cat-delete-btn" onclick="deleteCategory('${escQ(category)}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
+  const deleteBtn = (!isGeneral && !isSharedDeck && !cat.is_protected)
+    ? `<button class="todo-cat-delete-btn" data-action="delete-category" data-category="${esc(catId)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
     : '';
 
   const activeEmptyMsg = displayActive.length === 0
     ? `<p class="empty-msg">${todoFilter === 'pending' ? t('todos.all_caught_up') : t('todos.no_items')}</p>`
     : '';
 
-  const escapedCat = escQ(category);
+  const escapedCatId = escQ(catId);
 
-  const catColor = getCategoryColor(category);
+  const catColor = isSharedDeck ? '#a78bfa' : (cat.color || GENERAL_CATEGORY_COLOR);
 
   const catDragHandle = '';
 
   // Done toggle (collapsible, like archived tasks in projects)
   let doneToggle = '';
   if (doneCount > 0 && todoFilter !== 'done') {
-    const deleteAllBtn = `<button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllDoneTodos('${escapedCat}')" title="${t('todos.delete_all_done')}">${lucideIcon("trash-2",16)}</button>`;
+    const deleteAllBtn = `<button class="delete-all-archived-btn" data-action="delete-all-done" data-category="${esc(catId)}" title="${t('todos.delete_all_done')}">${lucideIcon("trash-2",16)}</button>`;
     doneToggle = `
-      <div class="archive-toggle" onclick="toggleDoneTodos('${catId}')" id="done-toggle-${catId}">
-        <span class="arrow" id="done-arrow-${catId}">▶</span> ${t('todos.done')} (${doneCount})
+      <div class="archive-toggle" data-action="toggle-done-todos" data-cat-id="${esc(domId)}" id="done-toggle-${domId}">
+        <span class="arrow" id="done-arrow-${domId}">▶</span> ${t('todos.done')} (${doneCount})
         ${deleteAllBtn}
       </div>
-      <div class="archived-tasks" id="done-list-${catId}">
+      <div class="archived-tasks" id="done-list-${domId}">
         ${doneTodos.map(t => renderTodoItem(t)).join('')}
       </div>`;
   }
@@ -433,30 +391,40 @@ function renderCategoryCard(category) {
     ? (displayDone.length === 0 ? `<p class="empty-msg">${t('todos.no_items')}</p>` : displayDone.map(t2 => renderTodoItem(t2)).join(''))
     : (activeEmptyMsg || displayActive.map(t => renderTodoItem(t)).join(''));
 
-  const shortnameBtn = !isGeneral
-    ? `<button class="todo-cat-shortname-btn" onclick="openEditCategoryModal('${escQ(category)}')" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
+  const shareableCount = allInCat.filter(td => !td.shared_id && !td.done).length;
+  const shareAllBtn = (!isSharedDeck && state.sharing && shareableCount > 0)
+    ? `<button class="todo-cat-shortname-btn" data-action="bulk-share-todo-category" data-category="${esc(catId)}" title="${esc(t('sharing.share_all'))}">${lucideIcon("share",14)}</button>`
     : '';
 
-  return `<div class="project-card" id="${catId}" data-category="${esc(category)}" style="--cat-color:${catColor}">
+  const shortnameBtn = (!isGeneral && !isSharedDeck && !cat.is_protected)
+    ? `<button class="todo-cat-shortname-btn" data-action="open-edit-category-modal" data-category="${esc(catId)}" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
+    : '';
+
+  const headerIcon = isSharedDeck ? `${lucideIcon('users', 16)} ` : '';
+
+  const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
+      <textarea placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(catId)}" data-priority="normal" data-action="add-todo-to-category" rows="1" style="resize:none;overflow:hidden;"></textarea>
+      <button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('circle-off', 16, 'var(--muted)')}</button>
+      <button data-action="add-todo-from-add-row">${lucideIcon('plus', 16)}</button>
+      ${state.sharing ? `<button class="sharing-share-btn" data-action="share-todo-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
+    </div>
+    <div class="char-counter" id="todo-counter-${domId}"></div>`;
+
+  return `<div class="project-card" id="${domId}" data-category="${esc(catId)}" style="--cat-color:${catColor}">
     <div class="todo-cat-header">
       <div class="todo-cat-header-left">
         ${catDragHandle}
         <div class="todo-cat-info">
-          <h3 class="todo-cat-name">${esc(catName)}</h3>
+          <h3 class="todo-cat-name">${headerIcon}${esc(catName)}</h3>
           <span class="todo-cat-stats">${statsText}</span>
         </div>
       </div>
       <div class="todo-cat-header-actions">
-        ${shortnameBtn}${deleteBtn}
+        ${shareAllBtn}${shortnameBtn}${deleteBtn}
       </div>
     </div>
-    <div class="todo-cat-add">
-      <input type="text" placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(category)}" data-priority="medium" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addTodoToCategory(this);}" oninput="updateTodoCharCounter(this)">
-      <button class="todo-add-priority-btn" onclick="openQuickAddPriorityPicker(this,event)" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>
-      <button onclick="addTodoToCategory(this.closest('.todo-cat-add').querySelector('.todo-cat-input'))">${lucideIcon('plus', 16)}</button>
-    </div>
-    <div class="char-counter" id="todo-counter-${catId}"></div>
-    <div class="task-list todo-cat-list" data-category="${esc(category)}">
+    ${addRow}
+    <div class="task-list todo-cat-list" data-category="${esc(catId)}">
       ${mainListContent}
     </div>
     ${doneToggle}
@@ -487,7 +455,7 @@ function renderTodoItem(td) {
   const flagIconName = td.priority === 'urgent' ? 'alert-triangle' : 'flag';
   const flagIcon = flagColor ? lucideIcon(flagIconName, 14, flagColor) : lucideIcon('flag', 14);
   const flagTitle = t('todos.set_priority');
-  const flagBtn = !td.done ? `<button class="todo-flag-btn ${isFlagged ? 'flagged' : ''}" onclick="openPriorityPicker('${td.id}', event)" title="${flagTitle}">${flagIcon}</button>` : '';
+  const flagBtn = !td.done ? `<button class="todo-flag-btn ${isFlagged ? 'flagged' : ''}" data-action="open-priority-picker" data-id="${esc(td.id)}" title="${flagTitle}">${flagIcon}</button>` : '';
 
   let dueDateStr = '';
   if (td.due_date) {
@@ -505,7 +473,7 @@ function renderTodoItem(td) {
 
   let snoozeInfo = '';
   if (isSnoozed) {
-    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon",16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
+    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon",16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
   }
 
   let outdatedInfo = '';
@@ -525,15 +493,29 @@ function renderTodoItem(td) {
     priorityClass
   ].filter(Boolean).join(' ');
 
+  // Shared TODO badge
+  const isShared = td.shared_id && td.shared_group_id;
+  let sharedHtml = '';
+  if (isShared && state.sharing) {
+    const group = state.sharing.getAllGroups().find(g => g.id === td.shared_group_id);
+    sharedHtml = sharedBadge(group?.name || '', td.shared_group_id);
+  }
+
   return `<div class="${classes}" data-todo-id="${td.id}">
+    ${sharedHtml}
     <div class="todo-row">
       ${flagBtn}
       <span class="todo-text">${td.text.length > 150 ? truncateWithShowMore(td.text, 150, td.id, 'todo') : renderMd(td.text)}</span>
+      ${td.done && td.updated_at ? `<span class="todo-completed-date">${new Date(td.updated_at).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })}</span>` : ''}
       <div class="todo-actions">
-        ${!td.done ? `<button onclick="toggleTodo('${td.id}', true)" title="${t('common.done')}">${lucideIcon("circle-check",16)}</button>` : `<button onclick="toggleTodo('${td.id}', false)" title="${t('common.undo')}">${lucideIcon("refresh-cw",16)}</button>`}
-        ${!td.done ? `<button onclick="openSnoozeModal('${td.id}')" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>` : ''}
-        <button onclick="editTodoInline('${td.id}')" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
-        <button onclick="deleteTodo('${td.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
+        ${!td.done ? `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="true" title="${t('common.done')}" class="todo-done-btn">${lucideIcon("circle-check",16)}</button>` : `<button data-todo-id="${esc(td.id)}" data-action="toggle-todo" data-id="${esc(td.id)}" data-done="false" title="${t('common.undo')}" class="todo-undo-btn">${lucideIcon("refresh-cw",16)}</button>`}
+        ${!td.done ? (isSnoozed ? `<button data-action="unsnooze-todo" data-id="${esc(td.id)}" title="${t('todos.unsnooze')}">${lucideIcon("moon-off",16)}</button>` : `<button data-action="open-snooze-modal" data-id="${esc(td.id)}" title="${t('todos.snooze')}">${lucideIcon("moon",16)}</button>`) : ''}
+        ${!isShared && !td.done && state.sharing ? `<button data-action="share-existing-todo" data-id="${esc(td.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
+        ${isShared && !td.done && _myCreatedSharedIds.has(td.shared_id) ? `<button data-action="unshare-todo" data-id="${esc(td.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
+        ${isShared && !td.done && !_myCreatedSharedIds.has(td.shared_id) ? `<button data-action="copy-todo-to-personal" data-id="${esc(td.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
+        <button data-action="copy-item-link" data-link-type="todo" data-id="${esc(td.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link",16)}</button>
+        <button data-action="edit-todo-inline" data-id="${esc(td.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
+        <button data-action="delete-todo" data-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
     </div>
     ${dueDateStr || snoozeInfo || outdatedInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}${outdatedInfo}</div>` : ''}
@@ -548,28 +530,44 @@ const PRIORITY_LEVELS = [
   { key: 'normal', color: null, icon: 'circle-off' },
 ];
 
-function openPriorityPicker(id, event) {
+function openPriorityPicker(id, event, triggerEl) {
   event.stopPropagation();
+  const existing = document.getElementById('priorityPickerPopover');
+  if (existing) { closePriorityPicker(); return; }
   closePriorityPicker();
   const todo = allTodos.find(t => t.id === id);
   if (!todo) return;
-  const btn = event.currentTarget;
+  const btn = triggerEl || (event.currentTarget instanceof HTMLElement && event.currentTarget !== document ? event.currentTarget : event.target?.closest('[data-action="open-priority-picker"]')) || event.target;
+  const itemEl = btn.closest('.todo-item');
   const rect = btn.getBoundingClientRect();
 
   const picker = document.createElement('div');
   picker.className = 'priority-picker';
   picker.id = 'priorityPickerPopover';
 
+  // If inline edit is active, use the pending priority for the active marker
+  const flagBtn = btn.closest('.todo-item')?.querySelector('.todo-flag-btn');
+  const currentPrio = flagBtn?.dataset.pendingPriority || todo.priority || 'normal';
+
   picker.innerHTML = PRIORITY_LEVELS.map(lv => {
-    const isActive = (todo.priority || 'normal') === lv.key;
+    const isActive = currentPrio === lv.key;
     const label = t(`todos.priority_${lv.key}`) || lv.key;
     const dot = lv.color
       ? `<span class="priority-picker-dot" style="background:${lv.color}"></span>`
       : `${lucideIcon('circle-off', 14, 'var(--muted)')}`;
-    return `<div class="priority-picker-option${isActive ? ' active' : ''}" onclick="setTodoPriority('${id}','${lv.key}')">${dot}<span>${label}</span></div>`;
+    return `<div class="priority-picker-option${isActive ? ' active' : ''}" data-action="set-todo-priority" data-id="${esc(id)}" data-priority="${esc(lv.key)}">${dot}<span>${label}</span></div>`;
   }).join('');
 
   document.body.appendChild(picker);
+
+  // If inline edit is active, prevent picker interactions from triggering
+  // the focusout→cancel handler by keeping focus on the edit input.
+  const editWrapper = itemEl?.querySelector('.todo-edit-wrapper');
+  if (editWrapper) {
+    picker.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // keep focus on the edit input
+    });
+  }
 
   // Position below the button, flip up if near bottom
   const ph = picker.offsetHeight;
@@ -583,30 +581,35 @@ function openPriorityPicker(id, event) {
   // Close on outside click (next tick to avoid immediate close)
   setTimeout(() => {
     document.addEventListener('click', closePriorityPicker, { once: true });
+    window.addEventListener('scroll', closePriorityPicker, { once: true, capture: true });
   }, 0);
 }
 
 function closePriorityPicker() {
   const el = document.getElementById('priorityPickerPopover');
   if (el) el.remove();
+  document.removeEventListener('click', closePriorityPicker);
+  window.removeEventListener('scroll', closePriorityPicker, { capture: true });
 }
 
 function updateQuickAddPriorityBtn(btn, level) {
-  const lv = PRIORITY_LEVELS.find(l => l.key === level) || PRIORITY_LEVELS[4];
+  const lv = PRIORITY_LEVELS.find(l => l.key === level) || PRIORITY_LEVELS.find(l => l.key === 'normal');
   const color = lv.color || 'var(--muted)';
-  const iconName = level === 'urgent' ? 'alert-triangle' : 'flag';
+  const iconName = level === 'urgent' ? 'alert-triangle' : (level === 'normal' ? 'circle-off' : 'flag');
   btn.innerHTML = lucideIcon(iconName, 16, color);
   btn.dataset.priority = level;
 }
 
 function openQuickAddPriorityPicker(btn, event) {
   event.stopPropagation();
+  const existing = document.getElementById('priorityPickerPopover');
+  if (existing) { closePriorityPicker(); return; }
   closePriorityPicker();
   _lastQuickAddPrioBtn = btn;
   const rect = btn.getBoundingClientRect();
   const container = btn.closest('.todo-cat-add, .welcome-quick-add');
   const inputEl = container?.querySelector('.todo-cat-input');
-  const currentPriority = inputEl?.dataset.priority || 'medium';
+  const currentPriority = inputEl?.dataset.priority || 'normal';
 
   const picker = document.createElement('div');
   picker.className = 'priority-picker';
@@ -618,7 +621,7 @@ function openQuickAddPriorityPicker(btn, event) {
     const dot = lv.color
       ? `<span class="priority-picker-dot" style="background:${lv.color}"></span>`
       : `${lucideIcon('circle-off', 14, 'var(--muted)')}`;
-    return `<div class="priority-picker-option${isActive ? ' active' : ''}" onclick="setQuickAddPriority(this,'${lv.key}')">${dot}<span>${label}</span></div>`;
+    return `<div class="priority-picker-option${isActive ? ' active' : ''}" data-action="set-quick-add-priority" data-priority="${esc(lv.key)}">${dot}<span>${label}</span></div>`;
   }).join('');
 
   document.body.appendChild(picker);
@@ -630,6 +633,11 @@ function openQuickAddPriorityPicker(btn, event) {
   if (left + picker.offsetWidth > window.innerWidth - 8) left = window.innerWidth - picker.offsetWidth - 8;
   picker.style.top = top + 'px';
   picker.style.left = left + 'px';
+
+  setTimeout(() => {
+    document.addEventListener('click', closePriorityPicker, { once: true });
+    window.addEventListener('scroll', closePriorityPicker, { once: true, capture: true });
+  }, 0);
 }
 
 function setQuickAddPriority(optionEl, level) {
@@ -651,8 +659,44 @@ let _lastQuickAddPrioBtn = null;
 
 async function setTodoPriority(id, level) {
   closePriorityPicker();
-  const { error } = await state.db.from('todos').update({ priority: level }).eq('id', id);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+
+  // If inline edit is active for this TODO, defer the change — save it
+  // visually and let collectExtra pick it up on confirm.
+  const itemEl = document.querySelector(`.todo-item[data-todo-id="${id}"]`);
+  const isEditing = itemEl?.querySelector('.todo-edit-wrapper');
+  if (isEditing) {
+    const flagBtn = itemEl.querySelector('.todo-flag-btn');
+    if (flagBtn) {
+      flagBtn.dataset.pendingPriority = level;
+      // Update flag icon visually
+      const prioColors = { urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6' };
+      const color = prioColors[level] || null;
+      const iconName = level === 'urgent' ? 'alert-triangle' : (level === 'normal' ? 'circle-off' : 'flag');
+      flagBtn.innerHTML = color ? lucideIcon(iconName, 14, color) : lucideIcon('circle-off', 14, 'var(--muted)');
+      flagBtn.classList.toggle('flagged', level && level !== 'normal');
+    }
+    // Refocus the edit textarea so focusout/cancel mechanics stay intact
+    const editInput = isEditing.querySelector('textarea');
+    if (editInput) editInput.focus();
+    return;
+  }
+
+  const todo = allTodos.find(t => t.id === id);
+
+  if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+    // ─── Shared: write only to Drive ───
+    try {
+      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
+      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+        payload: { ...currentPayload, priority: level },
+      });
+    } catch (e) { console.warn('Failed to update shared todo priority on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+  } else {
+    // ─── Normal: write to local DB ───
+    const { error } = await state.db.from('todos').update({ priority: level }).eq('id', id);
+    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+  }
+
   const label = t(`todos.priority_${level}`) || level;
   showToast(label, 'success');
   await refreshTodos();
@@ -662,37 +706,82 @@ async function setTodoPriority(id, level) {
 async function addTodoToCategory(inputEl) {
   const text = inputEl.value.trim();
   if (!text) return;
-  const category = inputEl.dataset.category || '';
-  const priority = inputEl.dataset.priority || 'medium';
+  const catId = inputEl.dataset.category || _defaultCatId;
+  const cat = _todoCatMap.get(catId);
+  const priority = inputEl.dataset.priority || 'normal';
 
-  const pendingTodos = allTodos.filter(t => !t.done && (t.category || '') === category);
+  const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catId);
   const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
 
-  const { error } = await state.db.from('todos').insert({ text, priority, category, sort_order: minOrder });
+  const { error } = await state.db.from('todos').insert({ text, priority, category: cat?.name ?? '', category_id: catId, sort_order: minOrder });
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
   inputEl.value = '';
+  if (inputEl.tagName === 'TEXTAREA') { inputEl.style.height = ''; }
   // Reset priority to medium after adding
-  inputEl.dataset.priority = 'medium';
+  inputEl.dataset.priority = 'normal';
   const prioBtn = inputEl.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.todo-add-priority-btn');
-  if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'medium');
+  if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'normal');
   showToast(t('toast.added'), 'success');
   await refreshTodos();
 }
 
-async function toggleTodo(id, done) {
-  const { error } = await state.db.from('todos').update({ done }).eq('id', id);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-  showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
-  await refreshTodos();
+const _pendingTodoToggles = new Set();
+
+async function toggleTodo(id, done, btnEl) {
+  if (!id) return;
+  if (_pendingTodoToggles.has(id)) return;
+  _pendingTodoToggles.add(id);
+
+  const sel = `button[data-todo-id="${CSS && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\\"')}"]`;
+  const allBtns = document.querySelectorAll(sel);
+  const targetBtn = btnEl instanceof HTMLElement ? btnEl : (allBtns[0] || null);
+  const toToggle = new Set([...allBtns, ...(targetBtn ? [targetBtn] : [])]);
+  toToggle.forEach(b => { b.disabled = true; b.classList.add('saving', 'is-pending'); b.setAttribute('aria-busy', 'true'); });
+
+  try {
+    const todo = allTodos.find(t => t.id === id);
+
+    if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+      try {
+        if (done) {
+          await state.sharing.completeItem(todo.shared_group_id, todo.shared_id);
+        } else {
+          await state.sharing.uncompleteItem(todo.shared_group_id, todo.shared_id);
+        }
+      } catch (e) { console.warn('Failed to toggle shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+    } else {
+      const { error } = await state.db.from('todos').update({ done }).eq('id', id);
+      if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    }
+
+    showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
+    await refreshTodos();
+  } finally {
+    _pendingTodoToggles.delete(id);
+    toToggle.forEach(b => { b.disabled = false; b.classList.remove('saving', 'is-pending'); b.removeAttribute('aria-busy'); });
+  }
 }
 
 async function deleteTodo(id) {
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     'Delete this TODO? This cannot be undone.',
     async () => {
+      const todo = allTodos.find(t => t.id === id);
       const { error } = await state.db.from('todos').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Delete from Drive if shared (removes for all group members)
+      if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+        try {
+          await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
+        } catch (e) { console.warn('Failed to delete shared todo from Drive:', e); }
+      }
+
+      // Animate item out before re-rendering
+      const el = document.querySelector(`[data-todo-id="${CSS.escape(id)}"]`);
+      await animateItemRemoval(el);
+
       showToast(t('toast.deleted'), 'info');
       await refreshTodos();
     }
@@ -706,16 +795,21 @@ function toggleDoneTodos(catId) {
   if (arrow) arrow.classList.toggle('open');
 }
 
-async function deleteAllDoneTodos(category) {
-  const doneTodos = allTodos.filter(t => (t.category || '') === category && t.done);
+async function deleteAllDoneTodos(catId) {
+  const doneTodos = allTodos.filter(t => catIdForTodo(t) === catId && t.done);
   if (!doneTodos.length) return;
-  const catName = category || 'General';
-  showDeleteConfirm(
+  const catName = getCatDisplayName(catId);
+  showConfirmAction(
     t('todos.delete_all_done'),
     `Delete all ${doneTodos.length} completed TODO${doneTodos.length > 1 ? 's' : ''} in "${catName}"? This cannot be undone.`,
     async () => {
       for (const td of doneTodos) {
         await state.db.from('todos').delete().eq('id', td.id);
+        // Delete from Drive if shared
+        if (td.shared_id && td.shared_group_id && state.sharing) {
+          try { await state.sharing.deleteItem(td.shared_group_id, td.shared_id); }
+          catch (e) { console.warn('Failed to delete shared todo from Drive:', e); }
+        }
       }
       showToast(t('toast.deleted'), 'info');
       await refreshTodos();
@@ -730,6 +824,10 @@ async function editTodoInline(id, itemEl) {
   if (!itemEl) return;
   const textEl = itemEl.querySelector('.todo-text');
   if (!textEl || textEl.dataset.editing) return;
+
+  // Clear any stale pending priority from a previous cancelled edit
+  const existingFlag = itemEl.querySelector('.todo-flag-btn');
+  if (existingFlag) delete existingFlag.dataset.pendingPriority;
 
   // Hide action buttons while editing
   const actionsEl = itemEl.querySelector('.todo-actions');
@@ -753,7 +851,7 @@ async function editTodoInline(id, itemEl) {
   clearBtn.className = 'todo-edit-deadline-clear';
   clearBtn.textContent = '✕';
   clearBtn.title = t('common.close');
-  clearBtn.onclick = (e) => { e.stopPropagation(); deadlineInput.value = ''; };
+  clearBtn.addEventListener('click', (e) => { e.stopPropagation(); deadlineInput.value = ''; });
   deadlineRow.appendChild(deadlineLabel);
   deadlineRow.appendChild(deadlineInput);
   deadlineRow.appendChild(clearBtn);
@@ -766,12 +864,18 @@ async function editTodoInline(id, itemEl) {
   catLabel.textContent = t('common.category');
   const catSelect = document.createElement('select');
   catSelect.className = 'inline-edit-input';
-  const cats = ['', ...getCategories()];
-  cats.forEach(c => {
+  const catRows = Array.from(_todoCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
+  // Include Shared in dropdown if the todo is in the shared deck (so user can move it out)
+  const todoCatId = catIdForTodo(todo);
+  if (todoCatId === _sharedCatId) {
+    const sharedCat = _todoCatMap.get(_sharedCatId);
+    if (sharedCat) catRows.unshift(sharedCat);
+  }
+  catRows.forEach(c => {
     const opt = document.createElement('option');
-    opt.value = c;
-    opt.textContent = c || 'General';
-    if (c === (todo.category || '')) opt.selected = true;
+    opt.value = c.id;
+    opt.textContent = c.name === SHARED_CATEGORY ? t('sharing.shared') : (c.name === '' ? t('common.category_default') : c.name);
+    if (c.id === todoCatId) opt.selected = true;
     catSelect.appendChild(opt);
   });
   catRow.appendChild(catLabel);
@@ -786,9 +890,14 @@ async function editTodoInline(id, itemEl) {
   inlineEditText(textEl, todo.text, {
     maxLength: 2000,
     extraEl: extras,
+    containerEl: itemEl,
     collectExtra: () => {
       const newDeadline = deadlineInput.value ? new Date(deadlineInput.value).toISOString() : null;
-      return { due_date: newDeadline, category: catSelect.value };
+      const selectedCatId = catSelect.value;
+      const selectedCat = _todoCatMap.get(selectedCatId);
+      const flagBtn = itemEl.querySelector('.todo-flag-btn');
+      const pendingPriority = flagBtn?.dataset.pendingPriority || null;
+      return { due_date: newDeadline, category_id: selectedCatId, category: selectedCat?.name ?? '', priority: pendingPriority };
     },
     saveFn: async (newText, extra) => {
       const updates = {};
@@ -796,13 +905,42 @@ async function editTodoInline(id, itemEl) {
       if (extra) {
         const oldDeadline = todo.due_date || null;
         if (extra.due_date !== oldDeadline) updates.due_date = extra.due_date;
-        const oldCategory = todo.category || '';
-        if (extra.category !== oldCategory) updates.category = extra.category;
+        const oldCatId = catIdForTodo(todo);
+        if (extra.category_id !== oldCatId) {
+          updates.category_id = extra.category_id;
+          updates.category = extra.category;
+        }
+        if (extra.priority && extra.priority !== (todo.priority || 'normal')) {
+          updates.priority = extra.priority;
+        }
       }
       if (Object.keys(updates).length > 0) {
-        const { error } = await state.db.from('todos').update(updates).eq('id', id);
-        if (error) showToast(t('toast.update_failed'), 'error');
-        else showToast(t('todos.todo_updated'), 'success');
+        if (todo.shared_id && todo.shared_group_id && state.sharing) {
+          // ─── Shared: category to local pointer, text/priority/due_date to Drive ───
+          if (updates.category_id !== undefined) {
+            await state.db.from('todos').update({ category_id: updates.category_id, category: updates.category }).eq('id', id);
+          }
+          try {
+            const driveUpdates = {};
+            if (updates.text) driveUpdates.text = updates.text;
+            if (updates.due_date !== undefined) driveUpdates.due_date = updates.due_date;
+            if (updates.priority) driveUpdates.priority = updates.priority;
+            if (Object.keys(driveUpdates).length > 0) {
+              const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
+              await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+                payload: { ...currentPayload, ...driveUpdates },
+              });
+            }
+          } catch (e) { console.warn('Failed to update shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+          Object.assign(todo, updates);
+          showToast(t('todos.todo_updated'), 'success');
+        } else {
+          // ─── Normal: write all to local DB ───
+          const { error } = await state.db.from('todos').update(updates).eq('id', id);
+          if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+          Object.assign(todo, updates);
+          showToast(t('todos.todo_updated'), 'success');
+        }
       }
     },
     refreshFn: refreshTodos,
@@ -812,25 +950,68 @@ async function editTodoInline(id, itemEl) {
 // ===================================================================
 // CATEGORY MANAGEMENT
 // ===================================================================
+function snoozeModalHTML() {
+  return `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button data-action="snooze-for" data-amount="1" data-unit="h">${t('todos.snooze_1h')}</button><button data-action="snooze-for" data-amount="3" data-unit="h">${t('todos.snooze_3h')}</button><button data-action="snooze-for" data-amount="1" data-unit="d">${t('todos.snooze_1d')}</button><button data-action="snooze-for" data-amount="3" data-unit="d">${t('todos.snooze_3d')}</button><button data-action="snooze-for" data-amount="7" data-unit="d">${t('todos.snooze_1w')}</button><button data-action="snooze-for" data-amount="1" data-unit="M">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">${t('todos.snooze_custom')}</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" data-action="close-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-snooze">${t('todos.snooze')}</button></div></div>`;
+}
+
+function addCategoryModalHTML() {
+  return `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="40" data-action="save-new-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-category">${t('common.add')}</button></div></div>`;
+}
+
+function editCategoryModalHTML() {
+  return `<div class="modal">
+    <h2>${lucideIcon('pencil', 20)} ${t('todos.edit_category')}</h2>
+    <input type="hidden" id="editCategoryOldName">
+    <label>${t('todos.category_name')}</label>
+    <input type="text" id="editCategoryName" maxlength="40" data-action="save-edit-category-on-enter">
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>${t('common.shortname')}</label>
+        <input type="text" id="editCategoryShortname" maxlength="20" data-action="save-edit-category-on-enter">
+      </div>
+      <div class="modal-field">
+        <label>${t('common.color')}</label>
+        <input type="color" id="editCategoryColor">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-edit-category">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-category">${t('common.save')}</button>
+    </div>
+  </div>`;
+}
+
 function initTodoModals() {
   const app = document.getElementById('app');
 
   // Snooze Modal
   const m1 = document.createElement('div');
   m1.className = 'modal-overlay'; m1.id = 'snoozeModal';
-  m1.innerHTML = `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button onclick="snoozeFor(1,'h')">${t('todos.snooze_1h')}</button><button onclick="snoozeFor(3,'h')">${t('todos.snooze_3h')}</button><button onclick="snoozeFor(1,'d')">${t('todos.snooze_1d')}</button><button onclick="snoozeFor(3,'d')">${t('todos.snooze_3d')}</button><button onclick="snoozeFor(7,'d')">${t('todos.snooze_1w')}</button><button onclick="snoozeFor(1,'M')">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">Or pick a date & time:</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" onclick="closeSnoozeModal()">${t('common.cancel')}</button><button class="modal-save" onclick="submitSnooze()">${t('todos.snooze')}</button></div></div>`;
+  m1.innerHTML = snoozeModalHTML();
   app.appendChild(m1);
 
   // Add Category Modal
   const m2 = document.createElement('div');
   m2.className = 'modal-overlay'; m2.id = 'addCategoryModal';
-  m2.innerHTML = `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewCategory();}"><div class="modal-actions"><button class="modal-cancel" onclick="closeAddCategoryModal()">${t('common.cancel')}</button><button class="modal-save" onclick="saveNewCategory()">${t('common.add')}</button></div></div>`;
+  m2.innerHTML = addCategoryModalHTML();
   app.appendChild(m2);
+
+  // Edit Category Modal
+  const m3 = document.createElement('div');
+  m3.className = 'modal-overlay'; m3.id = 'editCategoryModal';
+  m3.dataset.action = 'close-edit-category';
+  m3.dataset.overlayClose = 'true';
+  m3.innerHTML = editCategoryModalHTML();
+  app.appendChild(m3);
 }
 
 function openAddCategoryModal() {
+  const modal = document.getElementById('addCategoryModal');
+  modal.innerHTML = addCategoryModalHTML();
   document.getElementById('newCategoryName').value = '';
-  document.getElementById('addCategoryModal').classList.add('visible');
+  document.getElementById('newCategoryShortname').value = '';
+  document.getElementById('newCategoryColor').value = nextPaletteColor(_todoCatMap);
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('newCategoryName').focus(), 100);
 }
 
@@ -838,43 +1019,55 @@ function closeAddCategoryModal() {
   document.getElementById('addCategoryModal').classList.remove('visible');
 }
 
-function saveNewCategory() {
+async function saveNewCategory() {
   const input = document.getElementById('newCategoryName');
   const name = input.value.trim();
   if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
 
-  const categories = getCategories();
-  if (categories.some(c => c.toLowerCase() === name.toLowerCase())) {
-    showToast(t('toast.name_required'), 'error');
-    return;
+  // Check for duplicates in existing categories
+  for (const cat of _todoCatMap.values()) {
+    if (cat.name.toLowerCase() === name.toLowerCase()) {
+      showToast(t('toast.name_required'), 'error');
+      return;
+    }
   }
 
-  categories.push(name);
-  saveCategories(categories);
+  const shortname = document.getElementById('newCategoryShortname').value.trim() || null;
+  const color = document.getElementById('newCategoryColor').value;
+  const sortOrder = Math.max(0, ...Array.from(_todoCatMap.values()).map(c => c.sort_order || 0)) + 1;
+
+  const { error } = await state.db.from('todo_categories').insert({ name, shortname, color, sort_order: sortOrder });
+  if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
+
   closeAddCategoryModal();
   showToast(t('toast.added'), 'success');
-  renderTodos();
+  await refreshTodos();
 }
 
-async function deleteCategory(name) {
-  const todosInCat = allTodos.filter(t => t.category === name);
+async function deleteCategory(catId) {
+  const cat = _todoCatMap.get(catId);
+  if (!cat || cat.is_protected) return;
+  const todosInCat = allTodos.filter(t => catIdForTodo(t) === catId);
   const msg = todosInCat.length > 0
-    ? `Delete "${name}" and its ${todosInCat.length} TODO(s)?`
-    : `Delete empty category "${name}"?`;
+    ? `Delete "${cat.name}" and its ${todosInCat.length} TODO(s)? This cannot be undone.`
+    : `Delete empty category "${cat.name}"?`;
 
-  showDeleteConfirm(t('common.delete'), msg, async () => {
-    // Delete all todos in this category in bulk
-    if (todosInCat.length) await state.db.from('todos').delete().eq('category', name);
-    const categories = getCategories();
-    const idx = categories.findIndex(c => c === name);
-    if (idx !== -1) {
-      categories.splice(idx, 1);
-      saveCategories(categories);
+  showConfirmAction(t('common.delete'), msg, async () => {
+    // Propagate deletion of shared items to sharing layer before CASCADE removes local rows
+    if (state.sharing) {
+      for (const todo of todosInCat) {
+        if (todo.shared_id && todo.shared_group_id) {
+          try { await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id); }
+          catch (e) { console.warn('Failed to delete shared todo:', e); }
+        }
+      }
     }
-    // Clean up color
-    const colorMap = getCategoryColors();
-    delete colorMap[name];
-    saveCategoryColors(colorMap);
+    // Explicitly delete items so calendar sync (markDirty) fires for each.
+    // SQL CASCADE would handle this on Supabase, but Drive/Demo have no FK enforcement.
+    for (const todo of todosInCat) {
+      await state.db.from('todos').delete().eq('id', todo.id);
+    }
+    await state.db.from('todo_categories').delete().eq('id', catId);
     showToast(t('toast.deleted'), 'info');
     await refreshTodos();
   });
@@ -885,16 +1078,18 @@ async function deleteCategory(name) {
 // SNOOZE MODAL
 // ===================================================================
 function openSnoozeModal(todoId) {
+  const modal = document.getElementById('snoozeModal');
+  modal.innerHTML = snoozeModalHTML();
   document.getElementById('snoozeTaskId').value = todoId;
   document.getElementById('snoozeCustomDate').value = '';
-  document.getElementById('snoozeModal').classList.add('visible');
+  modal.classList.add('visible');
 }
 
 function closeSnoozeModal() {
   document.getElementById('snoozeModal').classList.remove('visible');
 }
 
-function snoozeFor(amount, unit) {
+async function snoozeFor(amount, unit) {
   const now = new Date();
   let target;
   if (unit === 'h') {
@@ -907,23 +1102,69 @@ function snoozeFor(amount, unit) {
     target.setMonth(target.getMonth() + amount);
     target.setHours(9, 0, 0, 0);
   }
-  doSnooze(target);
+  await doSnooze(target);
 }
 
 async function submitSnooze() {
   const customDate = document.getElementById('snoozeCustomDate').value;
   if (!customDate) { showToast(t('toast.content_required'), 'error'); return; }
-  doSnooze(new Date(customDate));
+  await doSnooze(new Date(customDate));
 }
 
 async function doSnooze(snoozeUntil) {
   const taskId = document.getElementById('snoozeTaskId').value;
   if (!taskId) return;
-  const { error } = await state.db.from('todos').update({ snooze_until: snoozeUntil.toISOString() }).eq('id', taskId);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-  closeSnoozeModal();
-  showToast(`${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 'success');
-  await refreshTodos();
+  const todo = allTodos.find(t => t.id === taskId);
+
+  // Disable all snooze buttons while in flight
+  const snoozeBtns = document.querySelectorAll('.snooze-modal button');
+  snoozeBtns.forEach(b => { b.disabled = true; b.classList.add('is-pending'); });
+
+  try {
+    if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+      // ─── Shared: write snooze to Drive payload ───
+      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
+      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+        payload: { ...currentPayload, snooze_until: snoozeUntil.toISOString() },
+      });
+    } else {
+      // ─── Normal: write to local DB ───
+      const { error } = await state.db.from('todos').update({ snooze_until: snoozeUntil.toISOString() }).eq('id', taskId);
+      if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    }
+    closeSnoozeModal();
+    showToast(`${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 'success');
+    await refreshTodos();
+  } catch (e) {
+    console.warn('Failed to snooze todo:', e);
+    showToast(t('toast.update_failed'), 'error');
+  } finally {
+    snoozeBtns.forEach(b => { b.disabled = false; b.classList.remove('is-pending'); });
+  }
+}
+
+async function unsnoozeTodo(id, el) {
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unsnooze-todo"][data-id="${CSS.escape(id)}"]`);
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  try {
+    const todo = allTodos.find(t => t.id === id);
+    if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
+      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+        payload: { ...currentPayload, snooze_until: null },
+      });
+    } else {
+      const { error } = await state.db.from('todos').update({ snooze_until: null }).eq('id', id);
+      if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    }
+    showToast(t('todos.unsnoozed'), 'success');
+    await refreshTodos();
+  } catch (e) {
+    console.warn('Failed to unsnooze todo:', e);
+    showToast(t('toast.update_failed'), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+  }
 }
 
 
@@ -941,141 +1182,84 @@ function initTodoDragDropForCard(catId) {
     itemSelector: '.todo-item:not(.todo-done)',
     excludeSelector: 'button, a, input, textarea, select, .todo-actions',
     idAttr: 'todoId',
-    onReorder: async (draggedId, targetId) => {
-      const catKey = container.dataset.category || '';
-      const filtered = getFilteredTodosForCategory(catKey);
-      await reorderItems({
-        items: filtered,
-        allItems: allTodos,
-        draggedId,
-        targetId,
-        container,
-        itemSelector: '.todo-item',
-        idAttr: 'todoId',
-        tableName: 'todos',
-        reinitFn: () => initTodoDragDropForCard(catId),
-      });
+    actionsSelector: '.todo-actions',
+    crossContainerSelector: '.todo-cat-list:not(.habit-list)',
+    getContainerId: (el) => el.dataset.category,
+    onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
+      const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;
+      if (crossMove) {
+        const movedItem = allTodos.find(x => x.id === draggedId);
+        if (!movedItem) return;
+        movedItem.category_id = targetContainerId;
+        const targetCatName = _todoCatMap.get(targetContainerId)?.name ?? '';
+        movedItem.category = targetCatName;
+        // Diff target list — dragged item always patches (category changed)
+        const targetUpdates = [];
+        let draggedSortOrder = 0;
+        orderedIds.forEach((id, i) => {
+          const it = allTodos.find(x => x.id === id);
+          if (!it) return;
+          if (id === draggedId) { draggedSortOrder = i; }
+          else if (Number(it.sort_order ?? 0) !== i) { targetUpdates.push({ id, sort_order: i }); }
+          it.sort_order = i;
+        });
+        // Diff source list
+        const sourceItems = allTodos
+          .filter(x => catIdForTodo(x) === sourceContainerId && x.id !== draggedId)
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        const sourceUpdates = [];
+        sourceItems.forEach((it, i) => {
+          if (Number(it.sort_order ?? 0) !== i) sourceUpdates.push({ id: it.id, sort_order: i });
+          it.sort_order = i;
+        });
+        await state.db.from('todos').update({ category_id: targetContainerId, category: targetCatName, sort_order: draggedSortOrder }).eq('id', draggedId);
+        await Promise.all([
+          bulkSortOrder('todos', targetUpdates),
+          bulkSortOrder('todos', sourceUpdates),
+        ]);
+        await refreshTodos();
+        showToast(t('toast.moved'), 'success');
+      } else {
+        await reorderItems({
+          orderedIds,
+          allItems: allTodos,
+          tableName: 'todos',
+          reinitFn: () => initTodoDragDropForCard(catId),
+        });
+      }
     },
   });
 }
 
 
 // ===================================================================
-// CATEGORY CARD DRAG & DROP REORDER
+// NAV BUTTON REORDER
 // ===================================================================
-function initCategoryDragDrop() {
-  const grid = document.getElementById('todoCategoryGrid');
-  if (!grid) return;
-  const cards = grid.querySelectorAll('.project-card');
-  let dragState = null;
-
-  cards.forEach(card => {
-    const category = card.dataset.category;
-    // General category (empty string) is not draggable
-    if (category === '' || category === undefined) return;
-    const header = card.querySelector('.todo-cat-header');
-    if (!header) return;
-
-    let pressTimer = null;
-    let startX = 0, startY = 0;
-    let activated = false;
-
-    header.addEventListener('pointerdown', e => {
-      if (e.target.closest('button, a, input, textarea, select, .todo-cat-header-actions')) return;
-      if (dragState) return;
-      startX = e.clientX;
-      startY = e.clientY;
-      activated = false;
-
-      pressTimer = setTimeout(() => {
-        activated = true;
-        const rect = card.getBoundingClientRect();
-        setDragging(true);
-        dragState = { el: card, category, offsetY: e.clientY - rect.top, offsetX: e.clientX - rect.left, clone: null };
-        const clone = card.cloneNode(true);
-        clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;opacity:0.85;z-index:1000;pointer-events:none;box-shadow:0 4px 20px rgba(0,0,0,0.3);border-radius:12px;border:2px solid var(--accent);transition:none;`;
-        document.body.appendChild(clone);
-        dragState.clone = clone;
-        card.classList.add('dragging');
-        header.setPointerCapture(e.pointerId);
-      }, LONG_PRESS_MS);
-    });
-
-    header.addEventListener('pointermove', e => {
-      if (pressTimer && !activated) {
-        if (Math.abs(e.clientX - startX) > DRAG_THRESHOLD || Math.abs(e.clientY - startY) > DRAG_THRESHOLD) {
-          clearTimeout(pressTimer); pressTimer = null;
-        }
-        return;
-      }
-      if (!dragState || dragState.el !== card) return;
-      e.preventDefault();
-      dragState.clone.style.top = (e.clientY - dragState.offsetY) + 'px';
-      dragState.clone.style.left = (e.clientX - dragState.offsetX) + 'px';
-      grid.querySelectorAll('.project-card:not(.dragging)').forEach(el => {
-        el.classList.remove('drag-over');
-        const r = el.getBoundingClientRect();
-        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) el.classList.add('drag-over');
+function initTodoNavBtnReorder() {
+  const skipIds = new Set();
+  if (_sharedCatId) skipIds.add(_sharedCatId);
+  initNavBtnReorder('todoNavButtons', {
+    idAttr: 'category',
+    skipIds,
+    async onReorder(orderedIds) {
+      const reorderable = orderedIds.filter(id => id !== _sharedCatId);
+      const updates = [];
+      reorderable.forEach((id, i) => {
+        const cat = _todoCatMap.get(id);
+        if (cat && Number(cat.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
       });
-    });
-
-    const finishDrag = async () => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      if (!dragState || dragState.el !== card) return;
-      if (dragState.clone) dragState.clone.remove();
-      card.classList.remove('dragging');
-      let targetCategory = null;
-      grid.querySelectorAll('.project-card').forEach(el => {
-        if (el.classList.contains('drag-over')) { targetCategory = el.dataset.category || ''; el.classList.remove('drag-over'); }
-      });
-      const draggedCategory = dragState.category;
-      dragState = null;
-      setDragging(false);
-      if (targetCategory !== null && targetCategory !== draggedCategory && draggedCategory !== '' && targetCategory !== '') {
-        await reorderCategories(draggedCategory, targetCategory);
-      }
-    };
-
-    header.addEventListener('pointerup', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } finishDrag(); });
-    header.addEventListener('pointercancel', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } finishDrag(); });
-    header.addEventListener('lostpointercapture', () => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      if (dragState && dragState.el === card) {
-        if (dragState.clone) dragState.clone.remove();
-        card.classList.remove('dragging');
-        grid.querySelectorAll('.project-card').forEach(el => el.classList.remove('drag-over'));
-        dragState = null;
-        setDragging(false);
-      }
-    });
+      // Optimistic in-memory update
+      reorderable.forEach((id, i) => { const cat = _todoCatMap.get(id); if (cat) cat.sort_order = i; });
+      await bulkSortOrder('todo_categories', updates);
+      await loadTodoCategories();
+      const grid = document.getElementById('todoCategoryGrid');
+      const snapshot = snapshotBuckets(grid);
+      renderTodos();
+      animateBucketsFromSnapshot(grid, snapshot, 600);
+      showToast(t('toast.reordered'), 'success');
+    },
   });
 }
-
-async function reorderCategories(draggedName, targetName) {
-  const grid = document.getElementById('todoCategoryGrid');
-  const categories = getCategories();
-  const draggedIdx = categories.findIndex(c => c === draggedName);
-  const targetIdx = categories.findIndex(c => c === targetName);
-  if (draggedIdx === -1 || targetIdx === -1) return;
-  const [dragged] = categories.splice(draggedIdx, 1);
-  categories.splice(targetIdx, 0, dragged);
-  saveCategories(categories);
-
-  // Move DOM elements instead of full re-render
-  const cards = Array.from(grid.querySelectorAll('.project-card'));
-  // General card (empty category) stays first
-  const generalCard = cards.find(c => (c.dataset.category || '') === '');
-  // Reorder non-general cards to match categories order
-  categories.forEach(catName => {
-    const card = cards.find(c => c.dataset.category === catName);
-    if (card) grid.appendChild(card);
-  });
-
-  initCategoryDragDrop();
-  showToast(t('toast.reordered'), 'success');
-}
-
-
 
 function initTodoHoverDelay(container) {
   initItemHoverDelay(container, {
@@ -1094,7 +1278,331 @@ function initTodoHoverDelay(container) {
 /** Return the in-memory todos array (no DB fetch). */
 function getTodos() { return allTodos; }
 
-export { refreshTodos, renderTodos, getCategoryColor, getCategoryColors, setCategoryColor, loadTodoCategoryMeta, initTodoModals, getTodoCounts, getTodos };
+// ── Shared TODOs — Sync (mirrors shared habit sync) ─────────────
+
+/**
+ * Sync shared TODOs from Drive to local DB.
+ * Called on 'sharing-changed' event (poll detected changes).
+ *
+ * For each group:
+ * - New shared TODO not in local DB → create local todo
+ * - Shared TODO text/done/priority changed → update local todo
+ * - Shared TODO deleted from Drive → delete local todo
+ */
+let _syncingTodos = false;
+let _bulkShareInProgress = new Set();
+const _pendingShare = new Set();
+async function syncSharedTodos() {
+  if (_syncingTodos) return;
+  _syncingTodos = true;
+  try {
+    await _doSyncSharedTodos();
+  } finally {
+    _syncingTodos = false;
+  }
+}
+
+async function _doSyncSharedTodos() {
+  if (!state.sharing || !state.db?.connected) return;
+
+  const allShared = state.sharing.getAllSharedItems().filter(i => i.item_type === 'todo');
+  // Index local shared todos by shared_id from DB, not the in-memory allTodos cache.
+  // Startup sync runs before refreshTodos(), so the cache may still be empty.
+  let localShared = [];
+  try {
+    const rows = await fetchAll(() => state.db.from('todos').select('id,shared_id,shared_group_id'));
+    localShared = (rows || []).filter(t => t.shared_id);
+  } catch (e) {
+    console.warn('syncSharedTodos: failed to load local pointers', e);
+    localShared = (allTodos || []).filter(t => t.shared_id);
+  }
+  const localBySharedId = new Map(localShared.map(t => [t.shared_id, t]));
+
+  // Track which shared_ids still exist on Drive (for deletion detection)
+  const driveSharedIds = new Set(allShared.map(i => i.id));
+
+  let needsRefresh = false;
+
+  // Create pointers for new shared TODOs
+  for (const sh of allShared) {
+    if (!localBySharedId.has(sh.id)) {
+      // Double-check DB to avoid race with shareTodoFromAdd
+      const { data: existing } = await state.db.from('todos').select('id').eq('shared_id', sh.id).limit(1);
+      if (existing?.length) continue;
+      const { error } = await state.db.from('todos').insert({
+        text: '', category: SHARED_CATEGORY, priority: 'normal', done: false,
+        shared_id: sh.id, shared_group_id: sh.group_id,
+      });
+      if (error) { console.warn('syncSharedTodos: failed to create pointer', sh.id, error); continue; }
+      needsRefresh = true;
+    }
+  }
+
+  // ─── Cleanup: local shared todos whose shared_id no longer exists on remote ───
+  for (const local of localShared) {
+    if (!driveSharedIds.has(local.shared_id)) {
+      const group = state.sharing.getAllGroups().find(g => g.id === local.shared_group_id);
+      if (group) {
+        // Group exists but item gone from remote → delete local pointer
+        await state.db.from('todos').delete().eq('id', local.id);
+        needsRefresh = true;
+      } else if (state.sharing.isReady?.()) {
+        // Groups loaded but this one is gone → ask user before clearing
+        try { document.dispatchEvent(new CustomEvent('sharing-orphan-detected', { detail: { groupId: local.shared_group_id } })); } catch {}
+      }
+      // else: sharing not loaded yet — skip, will retry on next sync
+    }
+  }
+
+  if (needsRefresh) {
+    await refreshTodos();
+  }
+}
+
+window.syncSharedTodos = syncSharedTodos;
+
+async function shareTodoFromAdd(btn) {
+  const addRow = btn.closest('.todo-cat-add');
+  if (!addRow) return;
+  const input = addRow.querySelector('.todo-cat-input');
+  const text = input?.value.trim();
+  if (!text) return;
+  const catId = input.dataset.category || _defaultCatId;
+  const cat = _todoCatMap.get(catId);
+  const priority = input.dataset.priority || 'normal';
+  const guardKey = `add-${catId}`;
+  if (_pendingShare.has(guardKey)) return;
+
+  openSharePopover(btn, async (groupId, assignees) => {
+    if (_pendingShare.has(guardKey)) return;
+    _pendingShare.add(guardKey);
+    if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
+    try {
+      const sharedId = crypto.randomUUID();
+      const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catId);
+      const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
+      const { data: localRow, error: localErr } = await state.db.from('todos').insert({
+        text: '', priority: 'normal', done: false,
+        category: cat?.name ?? '', category_id: catId,
+        sort_order: minOrder,
+        shared_id: sharedId,
+        shared_group_id: groupId,
+      }).select().single();
+      if (localErr) { showToast(localErr.message, 'error'); return; }
+
+      try {
+        await state.sharing.addItem(groupId, {
+          id: sharedId,
+          item_type: 'todo',
+          payload: { text, category: cat?.name ?? '', priority },
+          assignees,
+        });
+      } catch (driveErr) {
+        // Clean up local row since Drive write failed
+        if (localRow?.id) await state.db.from('todos').delete().eq('id', localRow.id);
+        throw driveErr;
+      }
+
+      input.value = '';
+      input.dataset.priority = 'low';
+      const prioBtn = addRow.querySelector('.todo-add-priority-btn');
+      if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'normal');
+      showToast(t('sharing.shared') + '!', 'success');
+      await refreshTodos();
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      _pendingShare.delete(guardKey);
+      if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+    }
+  }, { showAssignees: false });
+}
+
+window.shareTodoFromAdd = shareTodoFromAdd;
+
+async function shareExistingTodo(id, el) {
+  if (!state.sharing) return;
+  if (_pendingShare.has(id)) return;
+  const todo = allTodos.find(t => t.id === id);
+  if (!todo || todo.shared_id) return;
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-todo"][data-id="${CSS.escape(id)}"]`);
+  if (!btn) return;
+  openSharePopover(btn, async (groupId) => {
+    if (_pendingShare.has(id)) return;
+    _pendingShare.add(id);
+    if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
+    try {
+      const sharedId = crypto.randomUUID();
+      const cat = _todoCatMap.get(catIdForTodo(todo));
+      // 1. Create shared item on the sharing layer
+      await state.sharing.addItem(groupId, {
+        id: sharedId,
+        item_type: 'todo',
+        payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', snooze_until: todo.snooze_until || null },
+      });
+      // 2. Create local pointer — keep original sort_order so position stays
+      const { error: ptrErr } = await state.db.from('todos').insert({
+        text: '', priority: 'normal', done: false,
+        category: cat?.name ?? '', category_id: catIdForTodo(todo),
+        sort_order: todo.sort_order || 0,
+        shared_id: sharedId,
+        shared_group_id: groupId,
+      });
+      if (ptrErr) { showToast(ptrErr.message, 'error'); return; }
+      // 3. Delete the personal item
+      await state.db.from('todos').delete().eq('id', todo.id);
+      showToast(t('sharing.shared') + '!', 'success');
+      await refreshTodos();
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      _pendingShare.delete(id);
+      if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+    }
+  }, { showAssignees: false });
+}
+window.shareExistingTodo = shareExistingTodo;
+
+// ── Bulk share all personal items in a category ──
+async function bulkShareTodoCategory(catId, el) {
+  if (!state.sharing) return;
+  if (_bulkShareInProgress.has(catId)) return;
+  const items = allTodos.filter(td => catIdForTodo(td) === catId && !td.shared_id && !td.done);
+  if (!items.length) { showToast(t('sharing.share_all_nothing'), 'info'); return; }
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="bulk-share-todo-category"][data-category="${CSS.escape(catId)}"]`);
+  if (!btn) return;
+  openSharePopover(btn, async (groupId) => {
+    const cat = _todoCatMap.get(catId);
+    const msg = t('sharing.share_all_confirm', items.length);
+    showConfirmAction(
+      t('sharing.share_all'),
+      msg,
+      async () => {
+        if (_bulkShareInProgress.has(catId)) return;
+        _bulkShareInProgress.add(catId);
+        if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
+        try {
+          let shared = 0;
+          for (const todo of items) {
+            try {
+              const sharedId = crypto.randomUUID();
+              await state.sharing.addItem(groupId, {
+                id: sharedId,
+                item_type: 'todo',
+                payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', snooze_until: todo.snooze_until || null },
+              });
+              const { error: ptrErr } = await state.db.from('todos').insert({
+                text: '', priority: 'normal', done: false,
+                category: cat?.name ?? '', category_id: catId,
+                sort_order: todo.sort_order ?? 0,
+                shared_id: sharedId,
+                shared_group_id: groupId,
+              });
+              if (ptrErr) continue;
+              await state.db.from('todos').delete().eq('id', todo.id);
+              shared++;
+            } catch (e) { console.error('[DeLaClaw] bulk share todo failed:', e); }
+          }
+          if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+          await refreshTodos();
+        } finally {
+          _bulkShareInProgress.delete(catId);
+          if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+        }
+      },
+      null,
+      { variant: 'neutral', btnText: t('sharing.share_all'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }
+    );
+  }, { showAssignees: false });
+}
+window.bulkShareTodoCategory = bulkShareTodoCategory;
+
+// ── Unshare (creator only): move shared item back to personal ──
+async function unshareTodo(id, el) {
+  if (!state.sharing) return;
+  const todo = allTodos.find(t => t.id === id);
+  if (!todo || !todo.shared_id || !todo.shared_group_id) return;
+
+  showConfirmAction(
+    t('sharing.unshare'),
+    t('sharing.unshare_confirm'),
+    async () => {
+      const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-todo"][data-id="${CSS.escape(id)}"]`);
+      if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+      try {
+        const cat = _todoCatMap.get(catIdForTodo(todo));
+        // 1. Create personal todo (same category, keep text/priority/note)
+        const { error: insErr } = await state.db.from('todos').insert({
+          text: todo.text || '',
+          priority: todo.priority || 'normal',
+          done: todo.done ? 1 : 0,
+          category: cat?.name ?? '',
+          category_id: catIdForTodo(todo),
+          sort_order: todo.sort_order || 0,
+          snooze_until: todo.snooze_until || null,
+        });
+        if (insErr) { showToast(insErr.message, 'error'); return; }
+        // 2. Delete shared item from sharing layer
+        await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
+        // 3. Delete the local pointer
+        await state.db.from('todos').delete().eq('id', todo.id);
+        showToast(t('sharing.unshared'), 'success');
+        await refreshTodos();
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+      }
+    },
+    null,
+    { variant: 'neutral', btnText: t('sharing.unshare'), iconSvg: lucideIcon('share', 28), btnIconSvg: lucideIcon('share', 15, 'currentColor') }
+  );
+}
+window.unshareTodo = unshareTodo;
+
+// ── Copy to personal (non-creator): duplicate shared item as personal ──
+async function copyTodoToPersonal(id, el) {
+  if (!state.sharing) return;
+  const todo = allTodos.find(t => t.id === id);
+  if (!todo || !todo.shared_id || !todo.shared_group_id) return;
+
+  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="copy-todo-to-personal"][data-id="${CSS.escape(id)}"]`);
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  try {
+    // Keep current category unless it's __shared__, then fall back to General
+    const itemCatId = catIdForTodo(todo);
+    const targetCatId = (itemCatId === _sharedCatId) ? _defaultCatId : itemCatId;
+    const targetCatName = _todoCatMap.get(targetCatId)?.name ?? '';
+    const pendingInCat = allTodos.filter(t => !t.done && catIdForTodo(t) === targetCatId);
+    const minOrder = pendingInCat.length > 0 ? Math.min(...pendingInCat.map(t => t.sort_order || 0)) - 1 : 0;
+    const { error: insErr } = await state.db.from('todos').insert({
+      text: todo.text || '',
+      priority: todo.priority || 'normal',
+      done: todo.done ? 1 : 0,
+      category: targetCatName,
+      category_id: targetCatId,
+      sort_order: minOrder,
+      snooze_until: todo.snooze_until || null,
+    });
+    if (insErr) { showToast(insErr.message, 'error'); return; }
+    // Do NOT delete shared item — it stays for other members
+    showToast(t('sharing.copied_to_personal'), 'success');
+    await refreshTodos();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+  }
+}
+window.copyTodoToPersonal = copyTodoToPersonal;
+
+document.addEventListener('input', e => {
+  if (e.target.tagName === 'TEXTAREA' && e.target.classList.contains('todo-cat-input')) {
+    autoResizeTextarea(e.target);
+  }
+});
+
+export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName };
 
 window.setTodoFilter = setTodoFilter;
 window.addTodoToCategory = addTodoToCategory;
@@ -1113,10 +1621,12 @@ window.setQuickAddPriority = setQuickAddPriority;
 window.updateQuickAddPriorityBtn = updateQuickAddPriorityBtn;
 window.setTodoPriority = setTodoPriority;
 window.closePriorityPicker = closePriorityPicker;
+window.PRIORITY_LEVELS = PRIORITY_LEVELS;
 window.openSnoozeModal = openSnoozeModal;
 window.closeSnoozeModal = closeSnoozeModal;
 window.snoozeFor = snoozeFor;
 window.submitSnooze = submitSnooze;
+window.unsnoozeTodo = unsnoozeTodo;
 window.openAddCategoryModal = openAddCategoryModal;
 window.closeAddCategoryModal = closeAddCategoryModal;
 window.saveNewCategory = saveNewCategory;
@@ -1130,18 +1640,19 @@ window.showTodoGeneralCard = function() {
   // Force render the normal view (General card) even when empty, then focus the input
   const grid = document.getElementById('todoCategoryGrid');
   if (!grid) return;
-  const categoryList = [''];
-  grid.innerHTML = renderCategoryCard('');
-  const catId = categoryToDomId('');
-  initTodoDragDropForCard(catId);
-  const catCard = document.getElementById(catId);
+  cleanupDragArtifacts();
+  if (!_defaultCatId) return;
+  grid.innerHTML = renderCategoryCard(_defaultCatId);
+  const domId = categoryToDomId(_defaultCatId);
+  initTodoDragDropForCard(domId);
+  const catCard = document.getElementById(domId);
   if (catCard) {
     const list = catCard.querySelector('.todo-cat-list');
     if (list) initTodoHoverDelay(list);
     const input = catCard.querySelector('.todo-cat-input');
     if (input) setTimeout(() => input.focus(), 100);
   }
-  renderCategoryToolbarButtons(categoryList);
+  renderCategoryToolbarButtons([_defaultCatId]);
   balanceGrid(grid);
 };
 window.filterTodos = function(e) { todoSearchQuery = e.target.value; renderTodos(); };

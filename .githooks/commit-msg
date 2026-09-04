@@ -57,6 +57,24 @@ if [ -z "$CHECKED_LINE" ]; then
   echo "" >&2
   echo "  See COMMIT_CHECKLIST.md for the full reference." >&2
   echo "══════════════════════════════════════════════════" >&2
+  # ── Phase 2: auto-suggest from CODEMAP impact ──
+  REPO_ROOT="$(git rev-parse --show-toplevel)"
+  if [ -f "$REPO_ROOT/scripts/impact.js" ]; then
+    echo "" >&2
+    echo "  ── Auto-detected impact (staged) ──" >&2
+    if command -v node >/dev/null 2>&1; then
+      node "$REPO_ROOT/scripts/impact.js" --staged 2>&1 | sed 's/^/  /' >&2 || true
+      echo "" >&2
+      SUGGESTED=$(node "$REPO_ROOT/scripts/impact.js" --staged --format=checked 2>/dev/null || true)
+      if [ -n "$SUGGESTED" ]; then
+        echo "  Suggested trailer:" >&2
+        echo "  $SUGGESTED" >&2
+      fi
+    elif command -v bun >/dev/null 2>&1; then
+      bun "$REPO_ROOT/scripts/impact.js" --staged 2>&1 | sed 's/^/  /' >&2 || true
+    fi
+    echo "══════════════════════════════════════════════════" >&2
+  fi
   echo "" >&2
   exit 1
 fi
@@ -96,6 +114,23 @@ if [ ${#MISSING[@]} -gt 0 ] || [ ${#UNMARKED[@]} -gt 0 ]; then
   echo "  [~] = diff does NOT touch this area" >&2
   echo "  See COMMIT_CHECKLIST.md for details." >&2
   echo "══════════════════════════════════════════════════" >&2
+  REPO_ROOT="$(git rev-parse --show-toplevel)"
+  if [ -f "$REPO_ROOT/scripts/impact.js" ]; then
+    echo "" >&2
+    echo "  ── Auto-detected impact (staged) ──" >&2
+    if command -v node >/dev/null 2>&1; then
+      node "$REPO_ROOT/scripts/impact.js" --staged 2>&1 | sed 's/^/  /' >&2 || true
+      echo "" >&2
+      SUGGESTED=$(node "$REPO_ROOT/scripts/impact.js" --staged --format=checked 2>/dev/null || true)
+      if [ -n "$SUGGESTED" ]; then
+        echo "  Suggested trailer:" >&2
+        echo "  $SUGGESTED" >&2
+      fi
+    elif command -v bun >/dev/null 2>&1; then
+      bun "$REPO_ROOT/scripts/impact.js" --staged 2>&1 | sed 's/^/  /' >&2 || true
+    fi
+    echo "══════════════════════════════════════════════════" >&2
+  fi
   echo "" >&2
   exit 1
 fi

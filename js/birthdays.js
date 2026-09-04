@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
-import state from './supabase.js';
-import { esc, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
-import { scrollToAndHighlight, initItemHoverDelay, inlineEditText } from './item-utils.js';
+import state from './state.js';
+import { esc, showToast, showConfirmAction, balanceGrid, fetchAll } from './utils.js';
+import { scrollToAndHighlight, initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 
 // ===================================================================
@@ -132,7 +132,7 @@ function renderBirthdays() {
       <div class="empty-icon">${lucideIcon('cake', 48, 'var(--muted)')}</div>
       <h3>${t('birthdays.empty_title')}</h3>
       <p>${t('birthdays.empty_hint')}</p>
-      <button class="empty-cta" onclick="openAddBirthdayModal()">${lucideIcon('plus', 16)} ${t('birthdays.add_first')}</button>
+      <button class="empty-cta" data-action="open-add-birthday">${lucideIcon('plus', 16)} ${t('birthdays.add_first')}</button>
     </div>`;
     document.getElementById('birthdayNavButtons').innerHTML = '';
     return;
@@ -187,7 +187,7 @@ function renderBirthdays() {
   const navContainer = document.getElementById('birthdayNavButtons');
   navContainer.innerHTML = sections.map(s => {
     const display = s.isUpcoming ? t('birthdays.soon') : (s.shortLabel || s.label);
-    return `<button class="category-nav-btn" style="--cat-color:${s.color}" onclick="navigateToBirthdaySection('${s.key}')" title="${s.label}">${display}</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${s.color}" data-action="navigate-to-birthday-section" data-key="${esc(s.key)}" title="${s.label}">${display}</button>`;
   }).join('');
 
   // Render grid
@@ -209,8 +209,10 @@ function renderBirthdays() {
   }
 
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(grid, innerScrolls);
   initBirthdayHoverDelay(grid);
   balanceGrid(grid);
 }
@@ -250,11 +252,11 @@ function renderBirthdayCard(b, isUpcoming) {
 
   const initial = (b.name || '?').charAt(0).toUpperCase();
   const avatarInner = b.avatar_url
-    ? `<img src="${b.avatar_url}" alt="${esc(b.name)}" class="birthday-avatar-img">`
+    ? `<img src="${esc(b.avatar_url)}" alt="${esc(b.name)}" class="birthday-avatar-img">`
     : initial;
 
   return `<div class="bucket-item birthday-card ${days === 0 ? 'birthday-today' : ''} ${isUpcoming ? 'birthday-upcoming' : ''}" data-id="${b.id}">
-    <div class="birthday-avatar" onclick="handleAvatarClick('${b.id}')" title="${t('birthdays.change_photo')}">${avatarInner}</div>
+    <div class="birthday-avatar" data-action="handle-avatar-click" data-id="${esc(b.id)}" title="${t('birthdays.change_photo')}">${avatarInner}</div>
     <div class="birthday-info">
       <div class="birthday-name-row">
         <span class="birthday-name">${esc(b.name)}</span>
@@ -267,8 +269,9 @@ function renderBirthdayCard(b, isUpcoming) {
       </div>
     </div>
     <div class="birthday-actions">
-      <button onclick="openEditBirthdayModal('${b.id}')" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
-      <button onclick="deleteBirthday('${b.id}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+      <button data-action="copy-item-link" data-link-type="birthday" data-id="${esc(b.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 16)}</button>
+      <button data-action="open-edit-birthday" data-id="${esc(b.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
+      <button data-action="delete-birthday" data-id="${esc(b.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
     </div>
   </div>`;
 }
@@ -277,40 +280,31 @@ function renderBirthdayCard(b, isUpcoming) {
 // MODALS — ADD / EDIT
 // ===================================================================
 
-function initBirthdayModals() {
-  const app = document.getElementById('app');
-
-  // Add Birthday Modal
-  const m1 = document.createElement('div');
-  m1.className = 'modal-overlay';
-  m1.id = 'addBirthdayModal';
-  m1.innerHTML = `<div class="modal">
+function addBirthdayModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('cake', 20)} ${t('birthdays.add_birthday')}</h2>
     <label>${t('common.name')}</label>
     <input type="text" id="newBirthdayName" placeholder="${t('birthdays.name_placeholder')}" maxlength="200"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewBirthday();}">
+      data-action="save-new-birthday-on-enter">
     <label>${t('birthdays.birthday_label')}</label>
     <input type="date" id="newBirthdayDate">
     <label>${t('birthdays.note_label')}</label>
     <input type="text" id="newBirthdayNote" placeholder="${t('birthdays.note_placeholder')}" maxlength="500">
     <label>${t('birthdays.upload_photo')}</label>
     <div class="new-birthday-avatar-row">
-      <div class="new-birthday-avatar-preview" id="newBirthdayAvatarPreview" onclick="pickNewBirthdayAvatar()">${lucideIcon('user', 24)}</div>
-      <button type="button" class="btn new-birthday-avatar-btn" onclick="pickNewBirthdayAvatar()">${lucideIcon('upload', 14)} ${t('birthdays.upload_photo')}</button>
-      <button type="button" class="btn new-birthday-avatar-clear" id="newBirthdayAvatarClear" onclick="clearNewBirthdayAvatar()" style="display:none">${lucideIcon('x', 14)}</button>
+      <div class="new-birthday-avatar-preview" id="newBirthdayAvatarPreview" data-action="pick-new-birthday-avatar">${lucideIcon('user', 24)}</div>
+      <button type="button" class="btn new-birthday-avatar-btn" data-action="pick-new-birthday-avatar">${lucideIcon('upload', 14)} ${t('birthdays.upload_photo')}</button>
+      <button type="button" class="btn new-birthday-avatar-clear" id="newBirthdayAvatarClear" data-action="clear-new-birthday-avatar" style="display:none">${lucideIcon('x', 14)}</button>
     </div>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeAddBirthdayModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveNewBirthday()">${t('common.add')}</button>
+      <button class="modal-cancel" data-action="close-add-birthday">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-new-birthday">${t('common.add')}</button>
     </div>
   </div>`;
-  app.appendChild(m1);
+}
 
-  // Edit Birthday Modal
-  const m2 = document.createElement('div');
-  m2.className = 'modal-overlay';
-  m2.id = 'editBirthdayModal';
-  m2.innerHTML = `<div class="modal">
+function editBirthdayModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('birthdays.edit_birthday')}</h2>
     <input type="hidden" id="editBirthdayId">
     <label>${t('common.name')}</label>
@@ -320,10 +314,29 @@ function initBirthdayModals() {
     <label>${t('birthdays.note_label')}</label>
     <input type="text" id="editBirthdayNote" maxlength="500">
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeEditBirthdayModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveEditBirthday()">${t('common.save')}</button>
+      <button class="modal-cancel" data-action="close-edit-birthday">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-birthday">${t('common.save')}</button>
     </div>
   </div>`;
+}
+
+function initBirthdayModals() {
+  const app = document.getElementById('app');
+
+  // Add Birthday Modal
+  const m1 = document.createElement('div');
+  m1.className = 'modal-overlay';
+  m1.id = 'addBirthdayModal';
+  m1.innerHTML = addBirthdayModalHTML();
+  app.appendChild(m1);
+
+  // Edit Birthday Modal
+  const m2 = document.createElement('div');
+  m2.className = 'modal-overlay';
+  m2.id = 'editBirthdayModal';
+  m2.dataset.action = 'close-edit-birthday';
+  m2.dataset.overlayClose = 'true';
+  m2.innerHTML = editBirthdayModalHTML();
   app.appendChild(m2);
 }
 
@@ -337,11 +350,11 @@ function pickNewBirthdayAvatar() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
-  input.onchange = () => {
+  input.addEventListener('change', () => {
     const file = input.files[0];
     if (!file) return;
     showCropModalForNew(file);
-  };
+  });
   input.click();
 }
 
@@ -410,8 +423,8 @@ function showCropModalForNew(file) {
   };
   reader.readAsDataURL(file);
 
-  document.getElementById('avatarCropCancelNew').onclick = () => overlay.remove();
-  document.getElementById('avatarCropSaveNew').onclick = () => {
+  document.getElementById('avatarCropCancelNew').addEventListener('click', () => overlay.remove());
+  document.getElementById("avatarCropSaveNew").addEventListener("click", () => {
     try {
       const size = 384;
       const canvas = document.createElement('canvas');
@@ -427,15 +440,18 @@ function showCropModalForNew(file) {
       const srcS = (ringR * 2) / imgW * img.naturalWidth;
       ctx.drawImage(img, srcX, srcY, srcS, srcS, 0, 0, size, size);
       newBirthdayAvatarDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      // Show preview
+      // Show preview (DOM API — no innerHTML with URL)
       const preview = document.getElementById('newBirthdayAvatarPreview');
-      preview.innerHTML = `<img src="${newBirthdayAvatarDataUrl}" alt="avatar">`;
+      const previewImg = document.createElement('img');
+      previewImg.src = newBirthdayAvatarDataUrl;
+      previewImg.alt = 'avatar';
+      preview.replaceChildren(previewImg);
       document.getElementById('newBirthdayAvatarClear').style.display = '';
       overlay.remove();
     } catch (err) {
       showToast('Crop failed: ' + err.message, 'error');
     }
-  };
+  });
 }
 
 function clearNewBirthdayAvatar() {
@@ -446,11 +462,13 @@ function clearNewBirthdayAvatar() {
 }
 
 function openAddBirthdayModal() {
+  const modal = document.getElementById('addBirthdayModal');
+  modal.innerHTML = addBirthdayModalHTML();
   document.getElementById('newBirthdayName').value = '';
   document.getElementById('newBirthdayDate').value = '';
   document.getElementById('newBirthdayNote').value = '';
   clearNewBirthdayAvatar();
-  document.getElementById('addBirthdayModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('newBirthdayName').focus(), 100);
 }
 
@@ -525,6 +543,7 @@ function editBirthdayInline(id) {
   inlineEditText(nameEl, b.name, {
     maxLength: 200,
     extraEl: extras,
+    containerEl: nameEl.closest('.birthday-card'),
     collectExtra: () => ({
       birthday: dateInput.value,
       note: noteInput.value.trim(),
@@ -541,6 +560,7 @@ function editBirthdayInline(id) {
         updates.updated_at = new Date().toISOString();
         const { error } = await state.db.from('birthdays').update(updates).eq('id', id);
         if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+        Object.assign(b, updates);
         showToast(t('birthdays.birthday_updated'), 'success');
       }
     },
@@ -551,11 +571,13 @@ function editBirthdayInline(id) {
 function openEditBirthdayModal(id) {
   const b = state.allBirthdays.find(x => x.id === id);
   if (!b) return;
+  const modal = document.getElementById('editBirthdayModal');
+  modal.innerHTML = editBirthdayModalHTML();
   document.getElementById('editBirthdayId').value = id;
   document.getElementById('editBirthdayName').value = b.name;
   document.getElementById('editBirthdayDate').value = b.birthday;
   document.getElementById('editBirthdayNote').value = b.note || '';
-  document.getElementById('editBirthdayModal').classList.add('visible');
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('editBirthdayName').focus(), 100);
 }
 
@@ -585,12 +607,17 @@ async function saveEditBirthday() {
 async function deleteBirthday(id) {
   const b = state.allBirthdays.find(x => x.id === id);
   if (!b) return;
-  showDeleteConfirm(
+  showConfirmAction(
     'Delete Birthday',
     `Remove ${b.name}'s birthday?`,
     async () => {
       const { error } = await state.db.from('birthdays').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Animate item out before re-rendering
+      const el = document.querySelector(`.birthday-card[data-id="${CSS.escape(id)}"]`);
+      await animateItemRemoval(el);
+
       showToast(t('birthdays.birthday_removed'), 'info');
       await refreshBirthdays();
     }
@@ -615,11 +642,11 @@ function pickAvatarFile(id) {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
-  input.onchange = () => {
+  input.addEventListener('change', () => {
     const file = input.files[0];
     if (!file) return;
     showCropModal(file, id);
-  };
+  });
   input.click();
 }
 
@@ -720,8 +747,12 @@ function showCropModal(file, id) {
   }, { passive: false });
   container.addEventListener('touchend', e => { if (e.touches.length < 2) pinchDist0 = null; if (e.touches.length === 0) dragging = false; });
 
-  document.getElementById('avatarCropCancel').onclick = () => overlay.remove();
-  document.getElementById('avatarCropSave').onclick = async () => {
+  document.getElementById('avatarCropCancel').addEventListener('click', () => overlay.remove());
+  document.getElementById('avatarCropSave').addEventListener('click', async function() {
+    const btn = this;
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.classList.add('is-pending');
     try {
       const cw = container.clientWidth;
       const canvas = document.createElement('canvas');
@@ -738,12 +769,27 @@ function showCropModal(file, id) {
       const b = state.allBirthdays.find(x => x.id === id);
       if (b) b.avatar_url = dataUrl;
       overlay.remove();
+      // Update the preview overlay if still open
+      const previewOverlay = document.getElementById('avatarPreviewOverlay');
+      if (previewOverlay) {
+        const frame = previewOverlay.querySelector('.avatar-preview-frame');
+        if (frame) frame.innerHTML = `<img src="${esc(dataUrl)}" alt="" class="avatar-preview-img">`;
+        // Show remove button if it wasn't there (was placeholder before)
+        const actions = previewOverlay.querySelector('.avatar-preview-actions');
+        if (actions && !actions.querySelector('.avatar-remove-btn')) {
+          actions.insertAdjacentHTML('beforeend',
+            `<button class="avatar-action-btn avatar-remove-btn" data-action="remove-avatar" data-id="${esc(id)}" title="${t('birthdays.remove_photo')}">${lucideIcon('trash-2', 18)}</button>`);
+        }
+      }
       renderBirthdays();
       showToast(t('birthdays.photo_updated'), 'success');
     } catch (e) {
       showToast(t('toast.failed_to_save'), 'error');
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('is-pending');
     }
-  };
+  });
 
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 }
@@ -758,20 +804,20 @@ function showAvatarPreview(id, url, name) {
   const initial = (name || '?').charAt(0).toUpperCase();
   const hasPhoto = !!url;
   const previewContent = hasPhoto
-    ? `<div class="avatar-preview-frame"><img src="${url}" alt="${esc(name)}" class="avatar-preview-img"></div>`
+    ? `<div class="avatar-preview-frame"><img src="${esc(url)}" alt="${esc(name)}" class="avatar-preview-img"></div>`
     : `<div class="avatar-preview-frame"><div class="avatar-preview-placeholder">${initial}</div></div>`;
   const removeBtn = hasPhoto
-    ? `<button class="avatar-action-btn avatar-remove-btn" onclick="removeAvatar('${id}')" title="${t('birthdays.remove_photo')}">${lucideIcon('trash-2', 18)}</button>`
+    ? `<button class="avatar-action-btn avatar-remove-btn" data-action="remove-avatar" data-id="${esc(id)}" title="${t('birthdays.remove_photo')}">${lucideIcon('trash-2', 18)}</button>`
     : '';
   overlay.innerHTML = `<div class="modal avatar-preview-modal">
     <h2>${esc(name)}</h2>
     ${previewContent}
     <div class="avatar-preview-actions">
-      <button class="avatar-action-btn" onclick="pickAvatarFile('${id}');document.getElementById('avatarPreviewOverlay').remove();" title="${hasPhoto ? t('birthdays.change_photo') : t('birthdays.upload_photo')}">${lucideIcon('upload', 18)}</button>
+      <button class="avatar-action-btn" data-action="pick-avatar-file" data-id="${esc(id)}" title="${hasPhoto ? t('birthdays.change_photo') : t('birthdays.upload_photo')}">${lucideIcon('upload', 18)}</button>
       ${removeBtn}
     </div>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="document.getElementById('avatarPreviewOverlay').remove()">${t('common.close')}</button>
+      <button class="modal-cancel" data-action="close-avatar-preview">${t('common.close')}</button>
     </div>
   </div>`;
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
@@ -805,6 +851,10 @@ window.navigateToBirthdaySection = navigateToBirthdaySection;
 window.filterBirthdays = function(e) { birthdaySearchQuery = e.target.value; renderBirthdays(); };
 window.handleAvatarClick = handleAvatarClick;
 window.pickAvatarFile = pickAvatarFile;
+window.closeAvatarPreviewModal = function() {
+  const overlay = document.getElementById('avatarPreviewOverlay');
+  if (overlay) overlay.remove();
+};
 window.removeAvatar = removeAvatar;
 window.pickNewBirthdayAvatar = pickNewBirthdayAvatar;
 window.clearNewBirthdayAvatar = clearNewBirthdayAvatar;

@@ -1,104 +1,54 @@
 import { lucideIcon } from './icons.js';
-import state from './supabase.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll } from './utils.js';
-import { scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, inlineEditText } from './item-utils.js';
+import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
+import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor } from './utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
 
 // ===================================================================
 // VESTIAIRE — WARDROBE TRACKER (bucket-card layout)
 // ===================================================================
 
-const DEFAULT_CATEGORIES = [];
 let vestSearchQuery = '';
 let vestFilter = 'all';
-const VESTIAIRE_CATEGORIES_KEY = 'claw_cc_vestiaire_categories';
-const VEST_SHORTNAMES_KEY = 'claw_cc_vest_shortnames';
-const VEST_SHORTNAMES_DB_KEY = 'vest_category_shortnames';
-let _vestShortnames = {};
 
-// ── Category shortnames (synced via settings table) ──
-function getVestShortnames() { return _vestShortnames; }
-function getVestShortname(catName) {
-  return _vestShortnames[catName] || '';
-}
+// ── Category table state ──
+// Categories live in the vestiaire_categories DB table. Loaded into maps for fast lookup.
+const SHARED_CATEGORY = SHARED_CAT_CONST;
+let _vestCatMap = new Map();    // id → row
+let _vestCatByName = new Map(); // name → row (backward compat)
+let _defaultVestCatId = null;   // protected default row
+let _sharedVestCatId = null;    // protected __shared__ row
 
-async function loadVestShortnames() {
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings').select('value').eq('key', VEST_SHORTNAMES_DB_KEY);
-      if (data && data.length > 0 && data[0].value) {
-        _vestShortnames = JSON.parse(data[0].value);
-        localStorage.setItem(VEST_SHORTNAMES_KEY, data[0].value);
-        return;
-      }
-    } catch (e) { console.warn('Could not load vest shortnames from DB:', e.message); }
+async function loadVestiaireCategories() {
+  const { data, error } = await state.db.from('vestiaire_categories').select('*').order('sort_order', { ascending: true });
+  if (error) { console.warn('loadVestiaireCategories error:', error); return; }
+  _vestCatMap.clear();
+  _vestCatByName.clear();
+  _defaultVestCatId = null;
+  _sharedVestCatId = null;
+  for (const row of (data || [])) {
+    _vestCatMap.set(row.id, row);
+    _vestCatByName.set(row.name, row);
+    if (row.is_protected && row.name === SHARED_CATEGORY) _sharedVestCatId = row.id;
+    else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultVestCatId = row.id;
   }
-  try { _vestShortnames = JSON.parse(localStorage.getItem(VEST_SHORTNAMES_KEY) || '{}'); } catch { _vestShortnames = {}; }
+  await backfillCategoryColors('vestiaire_categories', _vestCatMap);
 }
 
-async function saveVestShortnames(map) {
-  _vestShortnames = map;
-  const json = JSON.stringify(map);
-  localStorage.setItem(VEST_SHORTNAMES_KEY, json);
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings')
-        .update({ value: json, updated_at: new Date().toISOString() })
-        .eq('key', VEST_SHORTNAMES_DB_KEY).select();
-      if (!data || data.length === 0) {
-        await state.db.from('settings')
-          .insert({ key: VEST_SHORTNAMES_DB_KEY, value: json, updated_at: new Date().toISOString() });
-      }
-    } catch (e) { console.warn('Could not save vest shortnames to DB:', e.message); }
-  }
-}
+function getVestiaireCategories() { return _vestCatMap; }
 
-function setVestShortname(catName, shortname) {
-  if (shortname) _vestShortnames[catName] = shortname; else delete _vestShortnames[catName];
-  saveVestShortnames(_vestShortnames);
+// ── Category helpers ──
+function getVestCatColor(catId) { return _vestCatMap.get(catId)?.color || GENERAL_CATEGORY_COLOR; }
+function getVestCatShortname(catId) { return _vestCatMap.get(catId)?.shortname || ''; }
+function getVestCatName(catId) { return _vestCatMap.get(catId)?.name ?? ''; }
+function getVestCatDisplayName(catId) {
+  const cat = _vestCatMap.get(catId);
+  if (!cat) return t('common.category_default');
+  if (cat.name === '') return t('common.category_default');
+  if (cat.name === SHARED_CATEGORY) return t('sharing.shared');
+  return cat.name;
 }
-function promptVestShortname(catName) {
-  const current = getVestShortname(catName) || '';
-  const result = prompt(`Short name for "${catName}" (leave empty to clear):`, current);
-  if (result === null) return;
-  setVestShortname(catName, result.trim());
-  renderVestiaire();
-}
-
-// Distinct colors per category (cycles if more categories are added)
-const CATEGORY_COLORS = [
-  '#8b5cf6', // purple — Haut
-  '#3b82f6', // blue — Bas
-  '#f59e0b', // amber — Shoes
-  '#10b981', // emerald — Outerwear
-  '#ef4444', // red
-  '#ec4899', // pink
-  '#06b6d4', // cyan
-  '#f97316', // orange
-  '#6366f1', // indigo
-  '#14b8a6', // teal
-];
-
-function getCategoryColor(cat) {
-  const cats = getVestiaireCategories();
-  const idx = cats.indexOf(cat);
-  return CATEGORY_COLORS[(idx >= 0 ? idx : cats.length) % CATEGORY_COLORS.length];
-}
-
-function getVestiaireCategories() {
-  try {
-    const raw = localStorage.getItem(VESTIAIRE_CATEGORIES_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch {}
-  return [...DEFAULT_CATEGORIES];
-}
-
-function saveVestiaireCategories(cats) {
-  localStorage.setItem(VESTIAIRE_CATEGORIES_KEY, JSON.stringify(cats));
-}
+function catIdForVest(item) { return item.category_id || _vestCatByName.get(item.category ?? '')?.id || _defaultVestCatId; }
 
 
 // ===================================================================
@@ -107,7 +57,7 @@ function saveVestiaireCategories(cats) {
 
 async function refreshVestiaire() {
   if (!state.db.connected) return;
-  await loadVestShortnames();
+  await loadVestiaireCategories();
   let data;
   try {
     data = await fetchAll(() => state.db
@@ -121,28 +71,10 @@ async function refreshVestiaire() {
     return;
   }
   state.allVestiaire = data || [];
-  syncCategoriesFromData();
+  // Categories already loaded via loadVestiaireCategories() above
   if (state.currentView === 'vestiaire') {
     renderVestiaire();
   }
-}
-
-function syncCategoriesFromData() {
-  const cats = getVestiaireCategories();
-  const dataCats = [...new Set((state.allVestiaire || []).map(v => v.category).filter(Boolean))];
-  let changed = false;
-  dataCats.forEach(c => {
-    if (!cats.includes(c)) { cats.push(c); changed = true; }
-  });
-  // In demo mode, remove categories that have no items in data
-  if (state.demoMode) {
-    const pruned = cats.filter(c => dataCats.includes(c));
-    if (pruned.length !== cats.length) {
-      saveVestiaireCategories(pruned);
-      return;
-    }
-  }
-  if (changed) saveVestiaireCategories(cats);
 }
 
 
@@ -161,23 +93,19 @@ function setVestiaireFilter(filter) {
 function renderVestiaire() {
   const grid = document.getElementById('vestiaireGrid');
   if (!grid) return;
+  cleanupDragArtifacts();
 
   let items = state.allVestiaire || [];
-  let cats = getVestiaireCategories();
+  const catRows = Array.from(_vestCatMap.values()).sort((a, b) => a.sort_order - b.sort_order);
 
-  // In demo mode, only show categories that have items in data
-  if (state.demoMode) {
-    const dataCats = new Set(items.map(v => v.category).filter(Boolean));
-    cats = cats.filter(c => dataCats.has(c));
-  }
-
-  // Show page-level empty state when no items and no categories
-  if (items.length === 0 && cats.length === 0) {
+  // Show page-level empty state when no items and only protected (default) categories
+  const userCats = catRows.filter(c => !c.is_protected);
+  if (items.length === 0 && userCats.length === 0) {
     grid.innerHTML = `<div class="page-empty-state">
       <div class="empty-icon">${lucideIcon('shirt', 48, 'var(--muted)')}</div>
       <h3>${t('vestiaire.empty_title')}</h3>
       <p>${t('vestiaire.empty_hint')}</p>
-      <button class="empty-cta" onclick="openAddVestiaireCategoryModal()">${lucideIcon('plus', 16)} ${t('vestiaire.empty_cta')}</button>
+      <button class="empty-cta" data-action="open-add-vestiaire-category">${lucideIcon('plus', 16)} ${t('vestiaire.empty_cta')}</button>
     </div>`;
     renderVestiaireNavButtons([], []);
     return;
@@ -202,7 +130,8 @@ function renderVestiaire() {
     );
   }
 
-  renderVestiaireNavButtons(cats, items);
+  renderVestiaireNavButtons(catRows, items);
+  initVestiaireNavBtnReorder();
 
   // Apply sort
   const sortBy = document.getElementById('vestiaireSortBy')?.value || 'manual';
@@ -212,62 +141,72 @@ function renderVestiaire() {
     ? (a, b) => (a.brand || '').localeCompare(b.brand || '')
     : (a, b) => (a.sort_order || 0) - (b.sort_order || 0);
 
-  // Group items by category
+  // Group items by category ID
   const grouped = {};
-  cats.forEach(c => { grouped[c] = []; });
+  catRows.forEach(c => { grouped[c.id] = []; });
   items.forEach(v => {
-    const cat = v.category || 'Autre';
-    if (!grouped[cat]) grouped[cat] = [];
-    grouped[cat].push(v);
+    const cId = catIdForVest(v);
+    if (cId && !grouped[cId]) grouped[cId] = [];
+    if (cId) grouped[cId].push(v);
+    else {
+      // Uncategorized
+      if (!grouped['_autre']) grouped['_autre'] = [];
+      grouped['_autre'].push(v);
+    }
   });
   // Sort within each group
   Object.values(grouped).forEach(arr => arr.sort(sortFn));
 
-  // Render a card per category (skip empty when searching)
+  // Render a card per category (skip empty protected + empty when searching)
   let html = '';
-  cats.forEach(cat => {
-    const catItems = grouped[cat] || [];
-    if (vestSearchQuery && catItems.length === 0 && !cat.toLowerCase().includes(vestSearchQuery.toLowerCase())) return;
-    html += renderCategoryCard(cat, catItems);
+  catRows.forEach(cat => {
+    const catItems = grouped[cat.id] || [];
+    if (cat.is_protected && catItems.length === 0) return;
+    if (vestSearchQuery && catItems.length === 0 && !cat.name.toLowerCase().includes(vestSearchQuery.toLowerCase())) return;
+    html += renderCategoryCard(cat.id, catItems);
   });
 
   // "Autre" for uncategorized
-  if (grouped['Autre'] && grouped['Autre'].length > 0 && !cats.includes('Autre')) {
-    html += renderCategoryCard('Autre', grouped['Autre']);
+  if (grouped['_autre'] && grouped['_autre'].length > 0) {
+    html += renderCategoryCard(null, grouped['_autre']);
   }
 
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   grid.className = 'project-grid';
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(grid, innerScrolls);
 
   // Init hover-delay action buttons & drag-drop for each category card
-  cats.forEach(cat => {
-    const card = grid.querySelector(`.vestiaire-bucket[data-category="${esc(cat)}"]`);
+  catRows.forEach(cat => {
+    const card = grid.querySelector(`.vestiaire-bucket[data-category="${CSS.escape(cat.id)}"]`);
     if (!card) return;
     const list = card.querySelector('.vestiaire-item-list');
     if (list) {
       initVestiaireHoverDelay(list);
-      initVestiaireDragDrop(cat, list);
+      initVestiaireDragDrop(cat.id, list);
     }
   });
-  // Also handle 'Autre' if present
-  const autreCard = grid.querySelector('.vestiaire-bucket[data-category="Autre"]');
+  // Also handle uncategorized if present
+  const autreCard = grid.querySelector('.vestiaire-bucket[data-category="_autre"]');
   if (autreCard) {
     const list = autreCard.querySelector('.vestiaire-item-list');
     if (list) {
       initVestiaireHoverDelay(list);
-      initVestiaireDragDrop('Autre', list);
+      initVestiaireDragDrop('_autre', list);
     }
   }
   balanceGrid(grid);
 }
 
-function renderCategoryCard(cat, items) {
-  const icon = getCategoryIcon(cat);
-  const escapedCat = esc(cat);
+function renderCategoryCard(catId, items) {
+  const cat = catId ? _vestCatMap.get(catId) : null;
+  const catName = catId ? getVestCatDisplayName(catId) : 'Autre';
+  const icon = getCategoryIcon(catName);
+  const escapedCatId = esc(catId || '_autre');
   const count = items.length;
-  const color = getCategoryColor(cat);
+  const color = cat?.color || GENERAL_CATEGORY_COLOR;
 
   let itemsHtml = '';
   if (count === 0) {
@@ -276,24 +215,24 @@ function renderCategoryCard(cat, items) {
     itemsHtml = items.map(v => renderVestiaireItem(v)).join('');
   }
 
-  return `<div class="project-card vestiaire-bucket" data-category="${escapedCat}" style="--cat-color:${color}">
+  return `<div class="project-card vestiaire-bucket" data-category="${escapedCatId}" style="--cat-color:${color}">
     <div class="project-card-header">
       <div style="display:flex;align-items:center;gap:8px;">
         <span>${icon}</span>
-        <strong style="font-size:1rem;">${escapedCat}</strong>
+        <strong style="font-size:1rem;">${esc(catName)}</strong>
         <span style="font-size:0.78rem;opacity:0.75;">(${count})</span>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="todo-cat-shortname-btn" onclick="openEditVestiaireCategoryModal('${escQ(cat)}')" title="${t('vestiaire.edit_category')}">${lucideIcon("pencil",14)}</button>
-        <button class="archive-project-btn" onclick="openAddVestiaireModal('${escapedCat}')" title="${t('vestiaire.add_to_category', escapedCat)}">
+        ${catId ? `<button class="todo-cat-shortname-btn" data-action="open-edit-vestiaire-category" data-category="${escapedCatId}" title="${t('vestiaire.edit_category')}">${lucideIcon("pencil",14)}</button>` : ''}
+        <button class="archive-project-btn" data-action="open-add-vestiaire" data-category="${escapedCatId}" title="${t('vestiaire.add_to_category', esc(catName))}">
           ${lucideIcon('plus', 16)}
         </button>
-        <button class="todo-cat-delete-btn" onclick="deleteVestiaireCategory('${escapedCat}')" title="${t('vestiaire.delete_category')}">
+        ${catId ? `<button class="todo-cat-delete-btn" data-action="delete-vestiaire-category" data-category="${escapedCatId}" title="${t('vestiaire.delete_category')}">
           ${lucideIcon('trash-2', 16)}
-        </button>
+        </button>` : ''}
       </div>
     </div>
-    <div class="task-list vestiaire-item-list" data-category="${escapedCat}">
+    <div class="task-list vestiaire-item-list" data-category="${escapedCatId}">
       ${itemsHtml}
     </div>
   </div>`;
@@ -301,8 +240,8 @@ function renderCategoryCard(cat, items) {
 
 function renderVestiaireItem(v) {
   const brandHtml = v.brand
-    ? `<span class="vest-brand" onclick="editVestiaireBrandInline('${v.id}')" title="${t('vestiaire.click_edit_brand')}">${esc(v.brand)}</span>`
-    : `<span class="vest-brand vest-brand-empty" onclick="editVestiaireBrandInline('${v.id}')" title="${t('vestiaire.click_add_brand')}">${t('vestiaire.add_brand')}</span>`;
+    ? `<span class="vest-brand" data-action="edit-vestiaire-brand-inline" data-id="${esc(v.id)}" title="${t('vestiaire.click_edit_brand')}">${esc(v.brand)}</span>`
+    : `<span class="vest-brand vest-brand-empty" data-action="edit-vestiaire-brand-inline" data-id="${esc(v.id)}" title="${t('vestiaire.click_add_brand')}">${t('vestiaire.add_brand')}</span>`;
   const metaParts = [];
   if (v.size) metaParts.push(`${lucideIcon('ruler', 12)} ${esc(v.size)}`);
   if (v.color) metaParts.push(`${lucideIcon('palette', 12)} ${esc(v.color)}`);
@@ -314,11 +253,11 @@ function renderVestiaireItem(v) {
   // Purchase status badge (click to cycle: none → Tried → Purchased → none)
   let statusBadge = '';
   if (v.purchase_status === 'achete') {
-    statusBadge = `<span class="vest-status-badge vest-status-achete" onclick="cycleVestiaireStatus('${v.id}')" title="${t('vestiaire.cycle_status')}">${t('vestiaire.purchased')}</span>`;
+    statusBadge = `<span class="vest-status-badge vest-status-achete" data-action="cycle-vestiaire-status" data-id="${esc(v.id)}" title="${t('vestiaire.cycle_status')}">${t('vestiaire.purchased')}</span>`;
   } else if (v.purchase_status === 'essaye') {
-    statusBadge = `<span class="vest-status-badge vest-status-essaye" onclick="cycleVestiaireStatus('${v.id}')" title="${t('vestiaire.cycle_status')}">${t('vestiaire.tried')}</span>`;
+    statusBadge = `<span class="vest-status-badge vest-status-essaye" data-action="cycle-vestiaire-status" data-id="${esc(v.id)}" title="${t('vestiaire.cycle_status')}">${t('vestiaire.tried')}</span>`;
   } else {
-    statusBadge = `<span class="vest-status-badge vest-status-none" onclick="cycleVestiaireStatus('${v.id}')" title="${t('vestiaire.set_status')}">○</span>`;
+    statusBadge = `<span class="vest-status-badge vest-status-none" data-action="cycle-vestiaire-status" data-id="${esc(v.id)}" title="${t('vestiaire.set_status')}">○</span>`;
   }
 
   const statusCls = v.purchase_status === 'achete' ? ' vest-purchased' : v.purchase_status === 'essaye' ? ' vest-tried' : '';
@@ -334,30 +273,57 @@ function renderVestiaireItem(v) {
         ${metaHtml}
       </div>
       <div class="vest-actions">
-        <button onclick="editVestiaireInline('${v.id}')" title="${t('vestiaire.edit_name')}">${lucideIcon('pencil', 14)}</button>
-        <button onclick="openEditVestiaireModal('${v.id}')" title="${t('vestiaire.edit_all_fields')}">${lucideIcon('settings', 14)}</button>
-        <button onclick="deleteVestiaire('${v.id}')" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
+        <button data-action="copy-item-link" data-link-type="vest" data-id="${esc(v.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
+        <button data-action="edit-vestiaire-inline" data-id="${esc(v.id)}" title="${t('vestiaire.edit_name')}">${lucideIcon('pencil', 14)}</button>
+        <button data-action="open-edit-vestiaire" data-id="${esc(v.id)}" title="${t('vestiaire.edit_all_fields')}">${lucideIcon('settings', 14)}</button>
+        <button data-action="delete-vestiaire" data-id="${esc(v.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
       </div>
     </div>
   </div>`;
 }
 
-function renderVestiaireNavButtons(cats, items) {
+function renderVestiaireNavButtons(catRows, items) {
   const container = document.getElementById('vestiaireNavButtons');
   if (!container) return;
-  container.innerHTML = cats.map(cat => {
-    const count = items.filter(v => v.category === cat).length;
-    const color = getCategoryColor(cat);
-    const sn = getVestShortname(cat);
-    const display = sn || cat;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" onclick="navigateToVestiaireCat('${escQ(cat)}')" title="${esc(cat)} (${count})">${esc(display)} (${count})</button>`;
+  const visibleCats = catRows.filter(cat => !cat.is_protected || items.some(v => catIdForVest(v) === cat.id));
+  container.innerHTML = visibleCats.map(cat => {
+    const count = items.filter(v => catIdForVest(v) === cat.id).length;
+    const color = cat.color || GENERAL_CATEGORY_COLOR;
+    const sn = cat.shortname || '';
+    const display = sn || cat.name || t('common.category_default');
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-vestiaire-cat" data-category="${esc(cat.id)}" title="${esc(getVestCatDisplayName(cat.id))} (${count})">${esc(display)} (${count})</button>`;
   }).join('');
 }
 
-function navigateToVestiaireCat(cat) {
-  const card = document.querySelector(`.vestiaire-bucket[data-category="${cat}"]`);
+function navigateToVestiaireCat(catId) {
+  const card = document.querySelector(`.vestiaire-bucket[data-category="${CSS.escape(catId)}"]`);
   if (!card) return;
   scrollToAndHighlight(card, 'var(--accent)');
+}
+
+function initVestiaireNavBtnReorder() {
+  const skipIds = new Set();
+  if (_sharedVestCatId) skipIds.add(_sharedVestCatId);
+  initNavBtnReorder('vestiaireNavButtons', {
+    idAttr: 'category',
+    skipIds,
+    async onReorder(orderedIds) {
+      const reorderable = orderedIds.filter(id => id !== _sharedVestCatId);
+      const updates = [];
+      reorderable.forEach((id, i) => {
+        const cat = _vestCatMap.get(id);
+        if (cat && Number(cat.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+        if (cat) cat.sort_order = i;
+      });
+      await bulkSortOrder('vestiaire_categories', updates);
+      await loadVestiaireCategories();
+      const grid = document.getElementById('vestiaireGrid');
+      const snapshot = snapshotBuckets(grid);
+      renderVestiaire();
+      animateBucketsFromSnapshot(grid, snapshot, 600);
+      showToast(t('toast.reordered'), 'success');
+    },
+  });
 }
 
 function getCategoryIcon(cat) {
@@ -397,24 +363,57 @@ function initVestiaireHoverDelay(listEl) {
   });
 }
 
-/** Drag-and-drop reorder within a category card */
-function initVestiaireDragDrop(category, listEl) {
+/** Drag-and-drop reorder within / across category cards */
+function initVestiaireDragDrop(catId, listEl) {
   initItemDragDrop(listEl, {
     itemSelector: '.vestiaire-item',
     idAttr: 'vestId',
-    onReorder: async (draggedId, targetId) => {
-      const items = (state.allVestiaire || []).filter(v => v.category === category).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-      await reorderItems({
-        items,
-        allItems: state.allVestiaire || [],
-        draggedId,
-        targetId,
-        container: listEl,
-        itemSelector: '.vestiaire-item',
-        idAttr: 'vestId',
-        tableName: 'vestiaire',
-        reinitFn: () => initVestiaireDragDrop(category, listEl),
-      });
+    actionsSelector: '.vest-actions',
+    crossContainerSelector: '.vestiaire-item-list',
+    getContainerId: (el) => el.dataset.category,
+    onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
+      const allItems = state.allVestiaire || [];
+      const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;
+      if (crossMove) {
+        const movedItem = allItems.find(x => x.id === draggedId);
+        if (!movedItem) return;
+        movedItem.category_id = targetContainerId;
+        const targetCatName = _vestCatMap.get(targetContainerId)?.name ?? '';
+        movedItem.category = targetCatName;
+        // Diff target list — dragged item handled in FK update below
+        const targetUpdates = [];
+        let draggedSortOrder = 0;
+        orderedIds.forEach((id, i) => {
+          const it = allItems.find(x => x.id === id);
+          if (!it) return;
+          if (id === draggedId) { draggedSortOrder = i; }
+          else if (Number(it.sort_order ?? 0) !== i) { targetUpdates.push({ id, sort_order: i }); }
+          it.sort_order = i;
+        });
+        // Diff source list
+        const sourceItems = allItems
+          .filter(x => catIdForVest(x) === sourceContainerId && x.id !== draggedId)
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        const sourceUpdates = [];
+        sourceItems.forEach((it, i) => {
+          if (Number(it.sort_order ?? 0) !== i) sourceUpdates.push({ id: it.id, sort_order: i });
+          it.sort_order = i;
+        });
+        await state.db.from('vestiaire').update({ category_id: targetContainerId, category: targetCatName, sort_order: draggedSortOrder }).eq('id', draggedId);
+        await Promise.all([
+          bulkSortOrder('vestiaire', targetUpdates),
+          bulkSortOrder('vestiaire', sourceUpdates),
+        ]);
+        await refreshVestiaire();
+        showToast(t('toast.moved'), 'success');
+      } else {
+        await reorderItems({
+          orderedIds,
+          allItems,
+          tableName: 'vestiaire',
+          reinitFn: () => initVestiaireDragDrop(catId, listEl),
+        });
+      }
     },
   });
 }
@@ -428,6 +427,7 @@ async function editVestiaireInline(id) {
 
   inlineEditText(el, v.name, {
     maxLength: 200,
+    containerEl: el.closest('.vestiaire-item'),
     saveFn: async (newName) => {
       const { error } = await state.db.from('vestiaire').update({
         name: newName,
@@ -449,6 +449,7 @@ async function editVestiaireBrandInline(id) {
 
   inlineEditText(el, v.brand || '', {
     maxLength: 200,
+    containerEl: el.closest('.vestiaire-item'),
     saveFn: async (newBrand) => {
       const { error } = await state.db.from('vestiaire').update({
         brand: newBrand || null,
@@ -501,6 +502,7 @@ function editVestiaireInlineFull(id) {
   inlineEditText(nameEl, v.name, {
     maxLength: 200,
     extraEl: extras,
+    containerEl: nameEl.closest('.vestiaire-item'),
     collectExtra: () => ({
       brand: brandInput.value.trim(),
       size: sizeInput.value.trim(),
@@ -553,19 +555,14 @@ async function cycleVestiaireStatus(id) {
 
 
 
-function initVestiaireModals() {
-  const app = document.getElementById('app');
-
-  // Add Item Modal
-  const m1 = document.createElement('div');
-  m1.className = 'modal-overlay';
-  m1.id = 'addVestiaireModal';
-  m1.innerHTML = `<div class="modal">
+function addVestiaireModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('shirt', 20)} ${t('vestiaire.add_item')}</h2>
-    <input type="hidden" id="newVestiaireCategory">
+    <label>${t('common.category')}</label>
+    <select id="newVestiaireCategory"></select>
     <label>${t('common.name')}</label>
     <input type="text" id="newVestiaireName" placeholder="${t('vestiaire.name_placeholder')}" maxlength="200"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewVestiaire();}">
+      data-action="save-new-vestiaire-on-enter">
     <label>${t('vestiaire.brand')}</label>
     <input type="text" id="newVestiaireBrand" placeholder="${t('vestiaire.brand_placeholder')}" maxlength="200">
     <label>${t('vestiaire.size')}</label>
@@ -581,17 +578,14 @@ function initVestiaireModals() {
       <option value="achete">${t('vestiaire.purchased')}</option>
     </select>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeAddVestiaireModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveNewVestiaire()">${t('common.add')}</button>
+      <button class="modal-cancel" data-action="close-add-vestiaire">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-new-vestiaire">${t('common.add')}</button>
     </div>
   </div>`;
-  app.appendChild(m1);
+}
 
-  // Edit Item Modal
-  const m2 = document.createElement('div');
-  m2.className = 'modal-overlay';
-  m2.id = 'editVestiaireModal';
-  m2.innerHTML = `<div class="modal">
+function editVestiaireModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('vestiaire.edit_item')}</h2>
     <input type="hidden" id="editVestiaireId">
     <label>${t('common.name')}</label>
@@ -613,54 +607,96 @@ function initVestiaireModals() {
       <option value="achete">${t('vestiaire.purchased')}</option>
     </select>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeEditVestiaireModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveEditVestiaire()">${t('common.save')}</button>
+      <button class="modal-cancel" data-action="close-edit-vestiaire">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-vestiaire">${t('common.save')}</button>
     </div>
   </div>`;
-  app.appendChild(m2);
+}
 
-  // Add Category Modal
-  const m3 = document.createElement('div');
-  m3.className = 'modal-overlay';
-  m3.id = 'addVestiaireCategoryModal';
-  m3.innerHTML = `<div class="modal">
+function addVestiaireCategoryModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('folder-plus', 20)} ${t('vestiaire.add_category')}</h2>
     <label>${t('common.name')}</label>
     <input type="text" id="newVestiaireCategoryName" placeholder="${t('vestiaire.category_placeholder')}" maxlength="40"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewVestiaireCategory();}">
+      data-action="save-new-vestiaire-category-on-enter">
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>${t('common.shortname')}</label>
+        <input type="text" id="newVestiaireCategoryShortname" placeholder="${t('vestiaire.shortname_placeholder')}" maxlength="20"
+          data-action="save-new-vestiaire-category-on-enter">
+      </div>
+      <div class="modal-field">
+        <label>${t('common.color')}</label>
+        <input type="color" id="newVestiaireCategoryColor">
+      </div>
+    </div>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeAddVestiaireCategoryModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveNewVestiaireCategory()">${t('common.add')}</button>
+      <button class="modal-cancel" data-action="close-add-vestiaire-category">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-new-vestiaire-category">${t('common.add')}</button>
     </div>
   </div>`;
-  app.appendChild(m3);
+}
 
-  // Edit Category Modal
-  const m4 = document.createElement('div');
-  m4.className = 'modal-overlay';
-  m4.id = 'editVestiaireCategoryModal';
-  m4.innerHTML = `<div class="modal">
+function editVestiaireCategoryModalHTML() {
+  return `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('vestiaire.edit_category')}</h2>
     <input type="hidden" id="editVestiaireCategoryOldName">
     <label>${t('common.name')}</label>
     <input type="text" id="editVestiaireCategoryName" maxlength="40"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditVestiaireCategory();}">
-    <label>${t('vestiaire.shortname')}</label>
-    <input type="text" id="editVestiaireCategoryShortname" maxlength="20" placeholder="${t('vestiaire.shortname_placeholder')}"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditVestiaireCategory();}">
+      data-action="save-edit-vestiaire-category-on-enter">
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>${t('common.shortname')}</label>
+        <input type="text" id="editVestiaireCategoryShortname" maxlength="20" placeholder="${t('vestiaire.shortname_placeholder')}"
+          data-action="save-edit-vestiaire-category-on-enter">
+      </div>
+      <div class="modal-field">
+        <label>${t('common.color')}</label>
+        <input type="color" id="editVestiaireCategoryColor">
+      </div>
+    </div>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeEditVestiaireCategoryModal()">${t('common.cancel')}</button>
-      <button class="modal-save" onclick="saveEditVestiaireCategory()">${t('common.save')}</button>
+      <button class="modal-cancel" data-action="close-edit-vestiaire-category">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-vestiaire-category">${t('common.save')}</button>
     </div>
   </div>`;
+}
+
+function initVestiaireModals() {
+  const app = document.getElementById('app');
+
+  const m1 = document.createElement('div');
+  m1.className = 'modal-overlay';
+  m1.id = 'addVestiaireModal';
+  m1.innerHTML = addVestiaireModalHTML();
+  app.appendChild(m1);
+
+  const m2 = document.createElement('div');
+  m2.className = 'modal-overlay';
+  m2.id = 'editVestiaireModal';
+  m2.innerHTML = editVestiaireModalHTML();
+  app.appendChild(m2);
+
+  const m3 = document.createElement('div');
+  m3.className = 'modal-overlay';
+  m3.id = 'addVestiaireCategoryModal';
+  m3.innerHTML = addVestiaireCategoryModalHTML();
+  app.appendChild(m3);
+
+  const m4 = document.createElement('div');
+  m4.className = 'modal-overlay';
+  m4.id = 'editVestiaireCategoryModal';
+  m4.dataset.action = 'close-edit-vestiaire-category';
+  m4.dataset.overlayClose = 'true';
+  m4.innerHTML = editVestiaireCategoryModalHTML();
   app.appendChild(m4);
 }
 
-function populateCategorySelect(selectId, preselect) {
+function populateCategorySelect(selectId, preselectId) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
-  const cats = getVestiaireCategories();
-  sel.innerHTML = cats.map(c => `<option value="${esc(c)}" ${c === preselect ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  const catRows = Array.from(_vestCatMap.values()).sort((a, b) => a.sort_order - b.sort_order);
+  sel.innerHTML = catRows.map(c => `<option value="${esc(c.id)}" ${c.id === preselectId ? 'selected' : ''}>${esc(getVestCatDisplayName(c.id))}</option>`).join('');
 }
 
 
@@ -668,27 +704,33 @@ function populateCategorySelect(selectId, preselect) {
 // CRUD
 // ===================================================================
 
-function openAddVestiaireModal(preselectedCategory) {
+function openAddVestiaireModal(preselectedCatId) {
+  const modal = document.getElementById('addVestiaireModal');
+  modal.innerHTML = addVestiaireModalHTML();
   document.getElementById('newVestiaireName').value = '';
   document.getElementById('newVestiaireBrand').value = '';
   document.getElementById('newVestiaireSize').value = '';
   document.getElementById('newVestiaireColor').value = '';
   document.getElementById('newVestiaireNotes').value = '';
   document.getElementById('newVestiairePurchaseStatus').value = '';
-  document.getElementById('newVestiaireCategory').value = preselectedCategory || getVestiaireCategories()[0] || '';
-  document.getElementById('addVestiaireModal').classList.add('visible');
+  const catRows = Array.from(_vestCatMap.values()).sort((a, b) => a.sort_order - b.sort_order);
+  const firstCatId = preselectedCatId || (catRows[0]?.id || '');
+  populateCategorySelect('newVestiaireCategory', firstCatId);
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('newVestiaireName').focus(), 100);
 }
 
 function closeAddVestiaireModal() {
-  document.getElementById('addVestiaireModal').classList.remove('visible');
+  document.getElementById('addVestiaireModal')?.classList.remove('visible');
 }
 
 async function saveNewVestiaire() {
   const name = document.getElementById('newVestiaireName').value.trim();
   const brand = document.getElementById('newVestiaireBrand').value.trim();
   const size = document.getElementById('newVestiaireSize').value.trim();
-  const category = document.getElementById('newVestiaireCategory').value;
+  const catId = document.getElementById('newVestiaireCategory').value;
+  const catRow = _vestCatMap.get(catId);
+  const catName = catRow?.name || '';
   const color = document.getElementById('newVestiaireColor').value.trim();
   const notes = document.getElementById('newVestiaireNotes').value.trim();
   const purchaseStatus = document.getElementById('newVestiairePurchaseStatus').value;
@@ -696,9 +738,9 @@ async function saveNewVestiaire() {
   if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
 
   // Compute sort_order: place new item at end of its category
-  const catItems = (state.allVestiaire || []).filter(v => v.category === category);
+  const catItems = (state.allVestiaire || []).filter(v => catIdForVest(v) === catId);
   const maxOrder = catItems.reduce((m, v) => Math.max(m, v.sort_order || 0), 0);
-  const row = { name, category, sort_order: maxOrder + 1 };
+  const row = { name, category: catName, category_id: catId, sort_order: maxOrder + 1 };
   if (brand) row.brand = brand;
   if (size) row.size = size;
   if (color) row.color = color;
@@ -716,6 +758,8 @@ async function saveNewVestiaire() {
 function openEditVestiaireModal(id) {
   const v = (state.allVestiaire || []).find(x => x.id === id);
   if (!v) return;
+  const modal = document.getElementById('editVestiaireModal');
+  modal.innerHTML = editVestiaireModalHTML();
   document.getElementById('editVestiaireId').value = id;
   document.getElementById('editVestiaireName').value = v.name || '';
   document.getElementById('editVestiaireBrand').value = v.brand || '';
@@ -723,8 +767,8 @@ function openEditVestiaireModal(id) {
   document.getElementById('editVestiaireColor').value = v.color || '';
   document.getElementById('editVestiaireNotes').value = v.note || '';
   document.getElementById('editVestiairePurchaseStatus').value = v.purchase_status || '';
-  populateCategorySelect('editVestiaireCategory', v.category);
-  document.getElementById('editVestiaireModal').classList.add('visible');
+  populateCategorySelect('editVestiaireCategory', catIdForVest(v));
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('editVestiaireName').focus(), 100);
 }
 
@@ -737,7 +781,9 @@ async function saveEditVestiaire() {
   const name = document.getElementById('editVestiaireName').value.trim();
   const brand = document.getElementById('editVestiaireBrand').value.trim();
   const size = document.getElementById('editVestiaireSize').value.trim();
-  const category = document.getElementById('editVestiaireCategory').value;
+  const catId = document.getElementById('editVestiaireCategory').value;
+  const catRow = _vestCatMap.get(catId);
+  const catName = catRow?.name || '';
   const color = document.getElementById('editVestiaireColor').value.trim();
   const notes = document.getElementById('editVestiaireNotes').value.trim();
   const purchaseStatus = document.getElementById('editVestiairePurchaseStatus').value;
@@ -745,7 +791,7 @@ async function saveEditVestiaire() {
   if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
 
   const { error } = await state.db.from('vestiaire').update({
-    name, brand: brand || null, size: size || null, category,
+    name, brand: brand || null, size: size || null, category: catName, category_id: catId,
     color: color || null, note: notes || null,
     purchase_status: purchaseStatus || null,
     updated_at: new Date().toISOString()
@@ -760,12 +806,17 @@ async function saveEditVestiaire() {
 async function deleteVestiaire(id) {
   const v = (state.allVestiaire || []).find(x => x.id === id);
   if (!v) return;
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     `Remove "${v.name}" from your wardrobe?`,
     async () => {
       const { error } = await state.db.from('vestiaire').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Animate item out before re-rendering
+      const el = document.querySelector(`[data-vest-id="${CSS.escape(id)}"]`);
+      await animateItemRemoval(el);
+
       showToast(t('toast.removed'), 'info');
       await refreshVestiaire();
     }
@@ -778,8 +829,12 @@ async function deleteVestiaire(id) {
 // ===================================================================
 
 function openAddVestiaireCategoryModal() {
+  const modal = document.getElementById('addVestiaireCategoryModal');
+  modal.innerHTML = addVestiaireCategoryModalHTML();
   document.getElementById('newVestiaireCategoryName').value = '';
-  document.getElementById('addVestiaireCategoryModal').classList.add('visible');
+  document.getElementById('newVestiaireCategoryShortname').value = '';
+  document.getElementById('newVestiaireCategoryColor').value = nextPaletteColor(_vestCatMap);
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('newVestiaireCategoryName').focus(), 100);
 }
 
@@ -787,23 +842,35 @@ function closeAddVestiaireCategoryModal() {
   document.getElementById('addVestiaireCategoryModal').classList.remove('visible');
 }
 
-function saveNewVestiaireCategory() {
+async function saveNewVestiaireCategory() {
   const name = document.getElementById('newVestiaireCategoryName').value.trim();
   if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
-  const cats = getVestiaireCategories();
-  if (cats.includes(name)) { showToast(t('toast.failed_to_add'), 'error'); return; }
-  cats.push(name);
-  saveVestiaireCategories(cats);
+  for (const cat of _vestCatMap.values()) {
+    if (cat.name.toLowerCase() === name.toLowerCase()) {
+      showToast(t('toast.failed_to_add'), 'error'); return;
+    }
+  }
+  const shortname = document.getElementById('newVestiaireCategoryShortname').value.trim() || null;
+  const color = document.getElementById('newVestiaireCategoryColor').value;
+  const sortOrder = Math.max(0, ...Array.from(_vestCatMap.values()).map(c => c.sort_order || 0)) + 1;
+  const { error } = await state.db.from('vestiaire_categories').insert({ name, shortname, color, sort_order: sortOrder });
+  if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
+  await loadVestiaireCategories();
   closeAddVestiaireCategoryModal();
   showToast(t('toast.added'), 'success');
   renderVestiaire();
 }
 
-function openEditVestiaireCategoryModal(cat) {
-  document.getElementById('editVestiaireCategoryOldName').value = cat;
-  document.getElementById('editVestiaireCategoryName').value = cat;
-  document.getElementById('editVestiaireCategoryShortname').value = getVestShortname(cat) || '';
-  document.getElementById('editVestiaireCategoryModal').classList.add('visible');
+function openEditVestiaireCategoryModal(catId) {
+  const cat = _vestCatMap.get(catId);
+  if (!cat) return;
+  const modal = document.getElementById('editVestiaireCategoryModal');
+  modal.innerHTML = editVestiaireCategoryModalHTML();
+  document.getElementById('editVestiaireCategoryOldName').value = catId; // store ID
+  document.getElementById('editVestiaireCategoryName').value = cat.name;
+  document.getElementById('editVestiaireCategoryShortname').value = cat.shortname || '';
+  document.getElementById('editVestiaireCategoryColor').value = cat.color || GENERAL_CATEGORY_COLOR;
+  modal.classList.add('visible');
   setTimeout(() => document.getElementById('editVestiaireCategoryName').focus(), 100);
 }
 
@@ -812,58 +879,41 @@ function closeEditVestiaireCategoryModal() {
 }
 
 async function saveEditVestiaireCategory() {
-  const oldName = document.getElementById('editVestiaireCategoryOldName').value;
+  const catId = document.getElementById('editVestiaireCategoryOldName').value;
+  const cat = _vestCatMap.get(catId);
+  if (!cat) return;
   const newName = document.getElementById('editVestiaireCategoryName').value.trim();
   const shortname = document.getElementById('editVestiaireCategoryShortname').value.trim();
+  const color = document.getElementById('editVestiaireCategoryColor').value;
 
   if (!newName) { showToast(t('toast.enter_name'), 'error'); return; }
 
-  // Prevent duplicate category names
-  if (oldName !== newName) {
-    const cats = getVestiaireCategories();
-    if (cats.includes(newName)) { showToast(t('toast.name_taken') || 'Name already taken', 'error'); return; }
-  }
-
-  // Update shortname (move to new key if renamed)
-  if (oldName !== newName) {
-    // Rename category in localStorage list
-    const cats = getVestiaireCategories();
-    const idx = cats.indexOf(oldName);
-    if (idx >= 0) cats[idx] = newName;
-    saveVestiaireCategories(cats);
-
-    // Rename category on all vestiaire items in DB
-    const items = (state.allVestiaire || []).filter(v => v.category === oldName);
-    for (const item of items) {
-      await state.db.from('vestiaire').update({ category: newName, updated_at: new Date().toISOString() }).eq('id', item.id);
-    }
-
-    // Move shortname from old key to new key
-    const oldShortname = getVestShortname(oldName);
-    if (oldShortname) setVestShortname(oldName, '');
-    setVestShortname(newName, shortname);
-  } else {
-    setVestShortname(oldName, shortname);
-  }
+  // Update the DB row directly — items reference by category_id FK
+  const updates = { name: newName, shortname: shortname || null, color };
+  await state.db.from('vestiaire_categories').update(updates).eq('id', catId);
+  Object.assign(cat, updates);
+  _vestCatByName.clear();
+  for (const row of _vestCatMap.values()) _vestCatByName.set(row.name, row);
 
   closeEditVestiaireCategoryModal();
   showToast(t('toast.updated'), 'success');
   await refreshVestiaire();
 }
 
-function deleteVestiaireCategory(cat) {
-  const items = (state.allVestiaire || []).filter(v => v.category === cat);
+async function deleteVestiaireCategory(catId) {
+  const cat = _vestCatMap.get(catId);
+  if (!cat) return;
+  const items = (state.allVestiaire || []).filter(v => catIdForVest(v) === catId);
   const msg = items.length > 0
-    ? t('vestiaire.delete_category_confirm', cat) + ` (${items.length} item${items.length > 1 ? 's' : ''})`
-    : t('vestiaire.delete_category_confirm', cat);
-  showDeleteConfirm(
+    ? t('vestiaire.delete_category_confirm', cat.name) + ` — ${items.length} item${items.length > 1 ? 's' : ''} will be deleted. This cannot be undone.`
+    : t('vestiaire.delete_category_confirm', cat.name);
+  showConfirmAction(
     t('vestiaire.delete_category'),
     msg,
     async () => {
-      // Delete all items in this category in bulk
-      if (items.length) await state.db.from('vestiaire').delete().eq('category', cat);
-      const cats = getVestiaireCategories().filter(c => c !== cat);
-      saveVestiaireCategories(cats);
+      // CASCADE on FK — deleting the category removes all its items
+      const { error } = await state.db.from('vestiaire_categories').delete().eq('id', catId);
+      if (error) { showToast(t('toast.delete_failed') + ': ' + error.message, 'error'); return; }
       showToast(t('toast.removed'), 'info');
       await refreshVestiaire();
     }
@@ -875,7 +925,7 @@ function deleteVestiaireCategory(cat) {
 // EXPORTS
 // ===================================================================
 
-export { refreshVestiaire, renderVestiaire, initVestiaireModals };
+export { refreshVestiaire, renderVestiaire, initVestiaireModals, loadVestiaireCategories, getVestiaireCategories };
 
 // Window bindings
 window.openAddVestiaireModal = openAddVestiaireModal;
@@ -896,7 +946,6 @@ window.editVestiaireInline = editVestiaireInline;
 window.editVestiaireBrandInline = editVestiaireBrandInline;
 window.cycleVestiaireStatus = cycleVestiaireStatus;
 
-window.promptVestShortname = promptVestShortname;
 window.openEditVestiaireCategoryModal = openEditVestiaireCategoryModal;
 window.closeEditVestiaireCategoryModal = closeEditVestiaireCategoryModal;
 window.saveEditVestiaireCategory = saveEditVestiaireCategory;

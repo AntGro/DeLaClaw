@@ -1,6 +1,6 @@
 # DeLaClaw
 
-A personal command center you own. No SaaS lock-in, no frameworks, bring your own backend.
+A personal life OS that runs in the browser. Your data lives in your Google Drive — no account, no server, no SaaS.
 
 [![Tests](https://github.com/AntGro/DeLaClaw/actions/workflows/test.yml/badge.svg)](https://github.com/AntGro/DeLaClaw/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
@@ -12,7 +12,7 @@ A personal command center you own. No SaaS lock-in, no frameworks, bring your ow
 
 ## What it does
 
-DeLaClaw is a single-page productivity dashboard that runs entirely in the browser. It connects to your own database (Supabase, local SQLite, or an in-memory demo) and gives you a unified view of your projects, tasks, habits, flashcards, and more.
+DeLaClaw is a single-page productivity dashboard that runs entirely in the browser. Sign in with Google and your data is stored as JSON files in your own Google Drive — your personal files are never accessed. No API keys, no database, no backend to maintain.
 
 ### Modules
 
@@ -22,21 +22,21 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 | **Projects** | Kanban-style project boards with task statuses, links, and drag-and-drop |
 | **TODOs** | Categorized tasks with 5 priority levels, due dates, snooze, drag-and-drop reordering |
 | **Habits** | Recurring habits with flexible scheduling (structured rules + free text), completion tracking, streaks |
-| **Flashcards** | Spaced repetition (FSRS algorithm) with deck organization, text memorization mode, draft-to-card proposal workflow |
+| **Flashcards** | Spaced repetition (FSRS algorithm) with deck organization and text memorization mode |
 | **Birthdays** | Birthday tracker with countdowns and avatar support |
 | **Wardrobe** | Clothing inventory with brand, size, category, and purchase status tracking |
 | **Lists** | General-purpose checklists with archival support |
 
 ### Capabilities
 
-- **Four backend modes**: Supabase (cloud PostgreSQL), Google Drive (JSON file in your Drive), local REST server (Bun + SQLite), in-memory demo
-- **Offline-first**: IndexedDB cache serves read-only data when the network is down, with automatic recovery
+- **Google Drive storage**: data saved as per-table JSON files in a `DeLaClaw/` folder in your Drive
+- **Google Calendar sync**: optionally mirror habits, TODOs, and birthdays to a dedicated Google Calendar
 - **PWA**: installable on mobile and desktop via service worker with network-first caching
 - **Dark and light themes** with automatic OS preference detection
 - **Internationalization**: English, French, Spanish
 - **Drag-and-drop** reordering across all list views
 - **Keyboard shortcuts** for common actions
-- **Zero frameworks**: vanilla JavaScript with ES modules (~17k lines, no build step)
+- **Zero frameworks**: vanilla JavaScript with ES modules, no build step
 
 ## Screenshots
 
@@ -46,38 +46,18 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 
 ## Quick start
 
-DeLaClaw supports four backend modes. Pick one:
+### Google Drive
+
+1. Open [delaclaw.com](https://delaclaw.com)
+2. Click "Connect with Google"
+3. Sign in with your Google account — DeLaClaw creates a `DeLaClaw/` folder in your Drive with one JSON file per table
+4. All data syncs automatically; no API keys or database setup needed
 
 ### Demo (no setup)
 
 1. Open [delaclaw.com](https://delaclaw.com)
-2. Click "Demo" and choose a dataset
+2. Click "Try the demo" and choose a dataset
 3. All data lives in memory and resets on refresh
-
-### Google Drive
-
-1. Open [delaclaw.com](https://delaclaw.com)
-2. Select "Drive" and click "Connect with Google"
-3. Sign in with your Google account — DeLaClaw creates a `DeLaClaw/` folder in your Drive with a single `delaclaw-data.json` file
-4. All data syncs automatically; no API keys or database setup needed
-
-### Supabase (cloud)
-
-1. Create a [Supabase](https://supabase.com) project
-2. Run the base schema and migrations in the SQL editor (see [Setup Guide](docs-site/setup.md))
-3. Serve `index.html` with any static server, or use [delaclaw.com](https://delaclaw.com)
-4. Select "Supabase", enter your project URL and anon key
-
-### Local (Bun + SQLite)
-
-1. Install [Bun](https://bun.sh)
-2. Run the server:
-   ```bash
-   cd server
-   bun run server.js
-   ```
-3. Open `http://localhost:3000` in a browser
-4. Select "Local" and enter the server URL
 
 See [docs-site/setup.md](docs-site/setup.md) for detailed instructions.
 
@@ -90,14 +70,13 @@ index.html              Shell: login gate, tab navigation, all views
 style.css               All styles (dark + light themes, responsive)
 js/
   main.js               App bootstrap, view switching, settings, footer
-  supabase.js           Centralized state and DB client
+  state.js              Centralized state and constants
   db.js                 Adapter abstraction with Proxy-based activity tracking
+  auth.js               Google authentication flows
   adapters/
-    supabase.js         Supabase PostgREST adapter
-    rest.js             Local Bun+SQLite REST adapter
     demo.js             In-memory adapter with sample data
-    drive.js            Google Drive adapter (in-memory + JSON file persistence)
-    offline-cache.js    IndexedDB caching layer (wraps any adapter)
+    drive.js            Google Drive adapter (in-memory + per-table JSON persistence)
+  calendar-sync.js      Google Calendar sync
   welcome.js            Today dashboard
   projects.js           Project boards and task management
   todos.js              TODO management
@@ -106,26 +85,27 @@ js/
   birthdays.js          Birthday tracker
   vestiaire.js          Wardrobe inventory
   lists.js              Checklists
+  delegation.js         AI agent delegation and task routing
+  agents-ui.js          Agent grants and delegation UI
   i18n.js               Translation strings (en/fr/es)
   icons.js              Lucide icon rendering
   utils.js              Shared utilities
   item-utils.js         Drag-and-drop, inline editing
+  backend-logos.js      Backend brand icons (SVG)
   hero.js               Landing page animations
   logo.js               Logo animation engine
   storm3d.js            Three.js hero effect
+  bootstrap.js          Extracted inline init script (CSP-safe)
+  sw-register.js        Service worker registration (CSP-safe)
   version.js            Auto-generated version constant
   demo-chooser.js       Demo dataset selector
   demo-data.js          Sample data for demo mode
-server/
-  server.js             Bun HTTP server (SQLite backend)
-  schema.sql            SQLite schema (16 tables)
-migrations/             Incremental SQL migrations
 sw.js                   Service worker (network-first + precache)
 ```
 
-The adapter pattern (`db.js`) means the app logic never touches the backend directly. Each adapter exposes the same `.from(table).select()/.insert()/.update()/.delete()` interface. The offline cache wraps any adapter transparently, caching reads in IndexedDB and serving them when the network fails.
+The adapter pattern (`db.js`) means the app logic never touches the storage directly. Each adapter exposes the same `.from(table).select()/.insert()/.update()/.delete()` interface.
 
-16 database tables: `projects`, `tasks`, `todos`, `habits`, `habit_completions`, `flashcards`, `flashcard_notes`, `texts`, `text_line_progress`, `birthdays`, `vestiaire`, `lists`, `list_items`, `settings`, `prompts`, `nvidia_usage`.
+Category/deck foreign keys use CASCADE on delete — deleting a category deletes its items.
 
 See [docs-site/architecture.md](docs-site/architecture.md) for details.
 
@@ -135,7 +115,7 @@ See [docs-site/architecture.md](docs-site/architecture.md) for details.
 node tests/tests.js
 ```
 
-54 tests covering unit logic, adapter compliance, REST server integration, and browser-based end-to-end flows. All tests must pass before pushing to `main`.
+Tests covering unit logic, adapter compliance, and browser-based end-to-end flows. All tests must pass before pushing to `dev`.
 
 ## Contributing
 

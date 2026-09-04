@@ -3,12 +3,13 @@
 // ===================================================================
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
-import state, { ARCHIVED_PROJECTS_KEY } from './supabase.js';
-import { esc, renderMd, showToast, showDeleteConfirm, formatRelativeDate, truncateWithShowMore } from './utils.js';
+import state, { SHARED_CATEGORY } from './state.js';
+import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText } from './item-utils.js';
-import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, refreshHabits } from './habits.js';
-import { getCategoryColor, getTodos, refreshTodos } from './todos.js';
+import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCategories } from './habits.js';
+import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCategories } from './todos.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
+import { sharedBadge } from './sharing-ui.js';
 
 // ── Local data cache ──
 let wTodos = [];
@@ -93,7 +94,7 @@ async function refreshWelcome() {
   wTexts = getTexts();
   wTextProgress = getTextProgress();
   wBirthdays = state.allBirthdays;
-  const archivedIds = (() => { try { return JSON.parse(localStorage.getItem(ARCHIVED_PROJECTS_KEY) || '[]'); } catch { return []; } })();
+  const archivedIds = state.archivedProjectIds || [];
   wProjectCount = state.PROJECTS.filter(p => !archivedIds.includes(p.id)).length;
   wVestiaireCount = state.allVestiaire.length;
 }
@@ -114,31 +115,19 @@ document.addEventListener('habits-changed', () => {
 
 // ── Welcome-specific TODO action handlers ──
 
-async function welcomeToggleTodo(id, done) {
-  const { error } = await state.db.from('todos').update({ done }).eq('id', id);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-  showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
-  await refreshTodos();
-  refreshWelcome();
-  renderWelcome();
+function welcomeToggleTodo(id, done, btnEl) {
+  if (typeof window.toggleTodo === 'function') {
+    return window.toggleTodo(id, done, btnEl);
+  }
 }
 
-async function welcomeDeleteTodo(id) {
-  showDeleteConfirm(
-    t('common.delete'),
-    'Delete this TODO? This cannot be undone.',
-    async () => {
-      const { error } = await state.db.from('todos').delete().eq('id', id);
-      if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
-      showToast(t('toast.deleted'), 'info');
-      await refreshTodos();
-      refreshWelcome();
-      renderWelcome();
-    }
-  );
+function welcomeDeleteTodo(id) {
+  if (typeof window.deleteTodo === 'function') {
+    return window.deleteTodo(id);
+  }
 }
 
-const W_PRIORITY_LEVELS = [
+const W_PRIORITY_LEVELS = window.PRIORITY_LEVELS || [
   { key: 'urgent', color: '#ef4444', icon: 'alert-triangle' },
   { key: 'high', color: '#f97316', icon: 'flag' },
   { key: 'medium', color: '#eab308', icon: 'flag' },
@@ -146,12 +135,14 @@ const W_PRIORITY_LEVELS = [
   { key: 'normal', color: null, icon: 'circle-off' },
 ];
 
-function welcomeOpenPriorityPicker(id, event) {
+function welcomeOpenPriorityPicker(id, event, triggerEl) {
   event.stopPropagation();
+  const existing = document.getElementById('welcomePriorityPickerPopover');
+  if (existing) { welcomeClosePriorityPicker(); return; }
   welcomeClosePriorityPicker();
   const todo = wTodos.find(t => t.id === id);
   if (!todo) return;
-  const btn = event.currentTarget;
+  const btn = triggerEl || (event.currentTarget instanceof HTMLElement && event.currentTarget !== document ? event.currentTarget : event.target?.closest('[data-action="welcome-open-priority-picker"]')) || event.target;
   const rect = btn.getBoundingClientRect();
 
   const picker = document.createElement('div');
@@ -164,7 +155,7 @@ function welcomeOpenPriorityPicker(id, event) {
     const dot = lv.color
       ? `<span class="priority-picker-dot" style="background:${lv.color}"></span>`
       : `${lucideIcon('circle-off', 14, 'var(--muted)')}`;
-    return `<div class="priority-picker-option${isActive ? ' active' : ''}" onclick="welcomeSetPriority('${id}','${lv.key}')">${dot}<span>${label}</span></div>`;
+    return `<div class="priority-picker-option${isActive ? ' active' : ''}" data-action="welcome-set-priority" data-todo-id="${esc(id)}" data-priority="${esc(lv.key)}">${dot}<span>${label}</span></div>`;
   }).join('');
 
   document.body.appendChild(picker);
@@ -185,17 +176,14 @@ function welcomeOpenPriorityPicker(id, event) {
 function welcomeClosePriorityPicker() {
   const el = document.getElementById('welcomePriorityPickerPopover');
   if (el) el.remove();
+  document.removeEventListener('click', welcomeClosePriorityPicker);
 }
 
-async function welcomeSetPriority(id, level) {
+function welcomeSetPriority(id, level) {
   welcomeClosePriorityPicker();
-  const { error } = await state.db.from('todos').update({ priority: level }).eq('id', id);
-  if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-  const label = t(`todos.priority_${level}`) || level;
-  showToast(label, 'success');
-  await refreshTodos();
-  refreshWelcome();
-  renderWelcome();
+  if (typeof window.setTodoPriority === 'function') {
+    return window.setTodoPriority(id, level);
+  }
 }
 
 function welcomeSnooze(id) {
@@ -227,7 +215,7 @@ function renderFocusTodoItem(td) {
   const flagIconName = td.priority === 'urgent' ? 'alert-triangle' : 'flag';
   const flagIcon = flagColor ? lucideIcon(flagIconName, 14, flagColor) : lucideIcon('flag', 14);
   const flagTitle = t('todos.set_priority');
-  const flagBtn = `<button class="todo-flag-btn ${isFlagged ? 'flagged' : ''}" onclick="welcomeOpenPriorityPicker('${td.id}', event)" title="${flagTitle}">${flagIcon}</button>`;
+  const flagBtn = `<button class="todo-flag-btn ${isFlagged ? 'flagged' : ''}" data-action="welcome-open-priority-picker" data-todo-id="${esc(td.id)}" title="${flagTitle}">${flagIcon}</button>`;
 
   let dueDateStr = '';
   if (td.due_date) {
@@ -245,7 +233,7 @@ function renderFocusTodoItem(td) {
 
   let snoozeInfo = '';
   if (isSnoozed) {
-    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon", 16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
+    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon", 16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
   }
 
   const classes = [
@@ -255,15 +243,25 @@ function renderFocusTodoItem(td) {
     isFlagged ? `todo-priority-${td.priority}` : ''
   ].filter(Boolean).join(' ');
 
+  // Shared TODO badge (match TODO page rendering)
+  const isShared = td.shared_id && td.shared_group_id;
+  let sharedHtml = '';
+  if (isShared && state.sharing) {
+    const group = state.sharing.getAllGroups().find(g => g.id === td.shared_group_id);
+    sharedHtml = sharedBadge(group?.name || '', td.shared_group_id);
+  }
+
   return `<div class="${classes}" data-todo-id="${td.id}">
+    ${sharedHtml}
     <div class="todo-row">
       ${flagBtn}
       <span class="todo-text">${td.text.length > 150 ? truncateWithShowMore(td.text, 150, td.id, 'todo') : renderMd(td.text)}</span>
       <div class="todo-actions">
-        <button onclick="welcomeToggleTodo('${td.id}', true)" title="${t('common.done')}">${lucideIcon("circle-check", 16)}</button>
-        <button onclick="welcomeSnooze('${td.id}')" title="${t('todos.snooze')}">${lucideIcon("moon", 16)}</button>
-        <button onclick="window.editTodoInline('${td.id}')" title="${t('common.edit')}">${lucideIcon("pencil", 16)}</button>
-        <button onclick="welcomeDeleteTodo('${td.id}')" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>
+        <button data-action="welcome-toggle-todo" data-todo-id="${esc(td.id)}" data-done="true" title="${t('common.done')}">${lucideIcon("circle-check", 16)}</button>
+        <button data-action="welcome-snooze" data-todo-id="${esc(td.id)}" title="${t('todos.snooze')}">${lucideIcon("moon", 16)}</button>
+        <button data-action="edit-todo-inline" data-todo-id="${esc(td.id)}" title="${t('common.edit')}">${lucideIcon("pencil", 16)}</button>
+        <button data-action="copy-item-link" data-link-type="todo" data-id="${esc(td.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link", 16)}</button>
+        <button data-action="welcome-delete-todo" data-todo-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>
       </div>
     </div>
     ${dueDateStr || snoozeInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}</div>` : ''}
@@ -293,34 +291,16 @@ function initWelcomeFocusHover() {
 // WELCOME — Habit action handlers (mirrors Habits page actions)
 // ===================================================================
 
-async function welcomeMarkHabitDone(habitId) {
-  if (!habitId) return;
-  const habit = (state.allHabits || []).find(c => c.id === habitId);
-  const now = new Date().toISOString();
-  const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: now });
-  if (error) { showToast(t('habits.failed_record'), 'error'); return; }
-  if (habit) await updateHabitNextDue(habitId, habit.frequency_rule, now);
-  showToast(t('habits.habit_done'), 'success');
-  await refreshHabits();
-  refreshWelcome();
-  renderWelcome();
+function welcomeMarkHabitDone(habitId, btnEl) {
+  if (typeof window.markHabitDone === 'function') {
+    return window.markHabitDone(habitId, btnEl);
+  }
 }
 
-async function welcomeDeleteHabit(habitId) {
-  const habit = (state.allHabits || []).find(c => c.id === habitId);
-  if (!habit) return;
-  showDeleteConfirm(
-    t('common.delete'),
-    `Delete "${habit.name}"? All completion history will be lost.`,
-    async () => {
-      const { error } = await state.db.from('habits').delete().eq('id', habitId);
-      if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
-      showToast(t('habits.habit_deleted'), 'info');
-      await refreshHabits();
-      refreshWelcome();
-      renderWelcome();
-    }
-  );
+function welcomeDeleteHabit(habitId) {
+  if (typeof window.deleteHabit === 'function') {
+    return window.deleteHabit(habitId);
+  }
 }
 
 function welcomeOpenHabitHistory(habitId) {
@@ -341,20 +321,29 @@ function renderFocusHabitItem(habit) {
   const dueHtml = formatHabitDue(habit);
 
   const lastDoneStr = lastDone
-    ? `${t('habits.last_done')}: ${lastDone.toLocaleDateString([], { month: 'short', day: 'numeric' })} (${formatHabitRelative(lastDone)})`
-    : 'Never done';
+    ? `${t('habits.last_done')}: ${lastDone.toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })} (${formatHabitRelative(lastDone)})`
+    : t('habits.never_done');
+
+  const isShared = habit.shared_id && habit.shared_group_id;
+  let sharedHtml = '';
+  if (isShared && state.sharing) {
+    const group = state.sharing.getAllGroups().find(g => g.id === habit.shared_group_id);
+    sharedHtml = sharedBadge(group?.name || '', habit.shared_group_id);
+  }
 
   return `<div class="bucket-item habit-item habit-status-${status}" data-habit-id="${habit.id}">
+    ${sharedHtml}
     <div class="habit-row">
       <div class="habit-info">
-        <span class="habit-name">${esc(habit.name)}</span>
+        <span class="habit-name">${renderMd(habit.name)}</span>
         <span class="habit-frequency">${esc(formatFrequency(habit.frequency_rule))}</span>
       </div>
       <div class="habit-actions">
-        <button onclick="welcomeMarkHabitDone('${habit.id}')" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check", 16)}</button>
-        <button onclick="welcomeOpenHabitHistory('${habit.id}')" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list", 16)} ${completionCount}</button>
-        <button onclick="window.editHabitInline('${habit.id}')" title="${t('common.edit')}">${lucideIcon("pencil", 16)}</button>
-        <button onclick="welcomeDeleteHabit('${habit.id}')" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>
+        <button data-habit-id="${esc(habit.id)}" data-action="welcome-mark-habit-done" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check", 16)}</button>
+        <button data-action="welcome-open-habit-history" data-habit-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list", 16)} ${completionCount}</button>
+        <button data-action="edit-habit-inline" data-habit-id="${esc(habit.id)}" title="${t('common.edit')}">${lucideIcon("pencil", 16)}</button>
+        <button data-action="copy-item-link" data-link-type="habit" data-id="${esc(habit.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link", 16)}</button>
+        <button data-action="welcome-delete-habit" data-habit-id="${esc(habit.id)}" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>
       </div>
     </div>
     <div class="habit-meta">
@@ -441,7 +430,7 @@ function renderWelcomeCalendar(allBirthdays, allHabits, todayStart) {
       html += `<span class="welcome-cal-dot birthday" title="${esc(b.name)}"></span>`;
     }
     for (let idx = 0; idx < Math.min(allHabitsOnDay.length, 4); idx++) {
-      const hColor = getCategoryColor(allHabitsOnDay[idx].category || 'General');
+      const hColor = getHabitCategoryColor(catIdForHabit(allHabitsOnDay[idx]));
       html += `<span class="welcome-cal-dot habit" style="background:${hColor}" title="${esc(allHabitsOnDay[idx].name)}"></span>`;
     }
     html += `</div>`;
@@ -556,21 +545,21 @@ function renderWelcome() {
   html += `<div class="welcome-nav-shortcuts">`;
   // TODOs bucket
   const todoPending = wTodos.filter(td => !td.done).length;
-  html += `<button class="category-nav-btn" style="--cat-color:#22c55e" onclick="scrollToWelcomeBucket('welcome-bucket-todos')" title="${esc(t('welcome.focus_todos'))}">${lucideIcon('list-checks', 12, '#22c55e')} ${esc(t('welcome.focus_todos'))}${todoPending > 0 ? ' (' + todoPending + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#22c55e" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-todos" title="${esc(t('welcome.focus_todos'))}">${lucideIcon('list-checks', 12, '#22c55e')} ${esc(t('welcome.focus_todos'))}${todoPending > 0 ? ' (' + todoPending + ')' : ''}</button>`;
   // Habits bucket
   const habitsDueNavCount = wHabits.filter(c => !c.is_draft && c.next_due && startOfDay(new Date(c.next_due)) <= todayStart).length;
-  html += `<button class="category-nav-btn" style="--cat-color:#ec4899" onclick="scrollToWelcomeBucket('welcome-bucket-habits')" title="${esc(t('welcome.habits_due'))}">${lucideIcon('repeat', 12, '#ec4899')} ${esc(t('welcome.habits_due'))}${habitsDueNavCount > 0 ? ' (' + habitsDueNavCount + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#ec4899" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-habits" title="${esc(t('welcome.habits_due'))}">${lucideIcon('repeat', 12, '#ec4899')} ${esc(t('welcome.habits_due'))}${habitsDueNavCount > 0 ? ' (' + habitsDueNavCount + ')' : ''}</button>`;
   // Flashcards bucket
   const fcDueNav = wFlashcards.filter(c => c.last_review && (!c.next_review || new Date(c.next_review) <= now)).length;
   const fcNewNav = wFlashcards.filter(c => !c.last_review).length;
   const fcTotalNav = fcDueNav + fcNewNav;
-  html += `<button class="category-nav-btn" style="--cat-color:#06b6d4" onclick="scrollToWelcomeBucket('welcome-bucket-flashcards')" title="${esc(t('welcome.flashcards'))}">${lucideIcon('brain', 12, '#06b6d4')} ${esc(t('welcome.flashcards'))}${fcTotalNav > 0 ? ' (' + fcTotalNav + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#06b6d4" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-flashcards" title="${esc(t('welcome.flashcards'))}">${lucideIcon('brain', 12, '#06b6d4')} ${esc(t('welcome.flashcards'))}${fcTotalNav > 0 ? ' (' + fcTotalNav + ')' : ''}</button>`;
   // Birthdays bucket
-  html += `<button class="category-nav-btn" style="--cat-color:#f97316" onclick="scrollToWelcomeBucket('welcome-bucket-birthdays')" title="${esc(t('welcome.upcoming_birthdays'))}">${lucideIcon('cake', 12, '#f97316')} ${esc(t('welcome.upcoming_birthdays'))}${upcomingBDs.length > 0 ? ' (' + upcomingBDs.length + ')' : ''}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:#f97316" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-birthdays" title="${esc(t('welcome.upcoming_birthdays'))}">${lucideIcon('cake', 12, '#f97316')} ${esc(t('welcome.upcoming_birthdays'))}${upcomingBDs.length > 0 ? ' (' + upcomingBDs.length + ')' : ''}</button>`;
   // Stats bucket
-  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" onclick="scrollToWelcomeBucket('welcome-bucket-stats')" title="${esc(t('welcome.stats'))}">${lucideIcon('bar-chart-3', 12, 'var(--accent)')} ${esc(t('welcome.stats'))}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-stats" title="${esc(t('welcome.stats'))}">${lucideIcon('bar-chart-3', 12, 'var(--accent)')} ${esc(t('welcome.stats'))}</button>`;
   // Calendar bucket
-  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" onclick="scrollToWelcomeBucket('welcome-bucket-calendar')" title="${esc(t('welcome.coming_up'))}">${lucideIcon('calendar-days', 12, 'var(--accent)')} ${esc(t('welcome.coming_up'))}</button>`;
+  html += `<button class="category-nav-btn" style="--cat-color:var(--accent)" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-calendar" title="${esc(t('welcome.coming_up'))}">${lucideIcon('calendar-days', 12, 'var(--accent)')} ${esc(t('welcome.coming_up'))}</button>`;
   html += `</div>`;
 
   // Focus TODOs + Habits due — side by side
@@ -579,81 +568,88 @@ function renderWelcome() {
   // Focus TODOs section
   html += `<div class="welcome-section" id="welcome-bucket-todos" style="--cat-color:#22c55e">`;
   html += `<div class="welcome-section-header">${lucideIcon('list-checks', 18)} <span>${esc(t('welcome.focus_todos'))}</span></div>`;
+  // Quick-add TODO with category selector — always show all categories
+  const todoCatIds = Array.from(getTodoCategories().values())
+    .filter(c => c.name !== SHARED_CATEGORY)
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map(c => c.id);
+  html += `<div class="welcome-quick-add">`;
+  html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
+  for (const catId of todoCatIds) {
+    const label = getCatDisplayName(catId);
+    html += `<option value="${esc(catId)}">${esc(label)}</option>`;
+  }
+  html += `</select>`;
+  html += `<input type="text" placeholder="${esc(t('todos.add_todo_placeholder'))}" maxlength="2000" class="todo-cat-input" data-category="${esc(todoCatIds[0] || '')}" data-priority="medium" data-action="welcome-quick-add-todo-on-enter">`;
+  html += `<button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>`;
+  html += `<button data-action="welcome-add-todo-from-quick">+</button>`;
+  html += `</div>`;
   if (focusTodos.length === 0) {
     html += `<div class="welcome-empty">${esc(t('welcome.all_clear'))}</div>`;
   } else {
-    // Group todos by category
+    // Group todos by category_id
     const todosByCategory = {};
     for (const td of focusTodos) {
-      const cat = td.category || '';
-      if (!todosByCategory[cat]) todosByCategory[cat] = [];
-      todosByCategory[cat].push(td);
+      const catId = catIdForTodo(td);
+      if (!todosByCategory[catId]) todosByCategory[catId] = [];
+      todosByCategory[catId].push(td);
     }
     html += `<div class="welcome-items welcome-focus-todos">`;
     const catKeys = Object.keys(todosByCategory);
-    for (const cat of catKeys) {
-      const catColor = getCategoryColor(cat);
-      const catName = cat || 'General';
-      if (catKeys.length > 1 || cat) {
+    for (const catId of catKeys) {
+      const catColor = getCategoryColor(catId);
+      const catName = getCatDisplayName(catId);
+      if (catKeys.length > 1 || catName) {
         html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(catName)}</div>`;
       }
-      for (const td of todosByCategory[cat]) {
+      for (const td of todosByCategory[catId]) {
         html += renderFocusTodoItem(td);
       }
     }
     html += `</div>`;
   }
-  // Quick-add TODO with category selector
-  const todoCats = [...new Set(wTodos.map(td => td.category || ''))].sort();
-  if (!todoCats.includes('')) todoCats.unshift('');
-  html += `<div class="welcome-quick-add">`;
-  html += `<select class="welcome-quick-cat-select" onchange="this.nextElementSibling.dataset.category=this.value">`;
-  for (const cat of todoCats) {
-    html += `<option value="${esc(cat)}">${esc(cat || 'General')}</option>`;
-  }
-  html += `</select>`;
-  html += `<input type="text" placeholder="${esc(t('todos.add_todo_placeholder'))}" maxlength="2000" class="todo-cat-input" data-category="${esc(todoCats[0])}" data-priority="medium" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addTodoToCategory(this);}">`;
-  html += `<button class="todo-add-priority-btn" onclick="openQuickAddPriorityPicker(this,event)" title="${esc(t('todos.set_priority'))}">${lucideIcon('flag', 16, '#eab308')}</button>`;
-  html += `<button onclick="addTodoToCategory(this.closest('.welcome-quick-add').querySelector('.todo-cat-input'))">+</button>`;
-  html += `</div>`;
   html += `</div>`;
 
   // Habits due
   html += `<div class="welcome-section" id="welcome-bucket-habits" style="--cat-color:#ec4899">`;
   html += `<div class="welcome-section-header">${lucideIcon('repeat', 18)} <span>${esc(t('welcome.habits_due'))}</span></div>`;
+  // Quick-add Habit (opens modal pre-filled with name + category)
+  const habitCatIds = Array.from(getHabitCategories().values())
+    .filter(c => c.name !== SHARED_CATEGORY)
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map(c => c.id);
+  html += `<div class="welcome-quick-add">`;
+  html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
+  for (const catId of habitCatIds) {
+    const label = getHabitCatDisplayName(catId);
+    html += `<option value="${esc(catId)}">${esc(label)}</option>`;
+  }
+  html += `</select>`;
+  html += `<input type="text" placeholder="${esc(t('habits.quick_add_placeholder'))}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(habitCatIds[0] || '')}" data-action="welcome-quick-add-habit-on-enter">`;
+  html += `<button data-action="welcome-add-habit-from-quick">+</button>`;
+  html += `</div>`;
   if (habitsDue.length === 0) {
     html += `<div class="welcome-empty">${esc(t('welcome.no_habits_due'))}</div>`;
   } else {
-    // Group habits by category
+    // Group habits by category_id
     const habitsByCategory = {};
     for (const ch of habitsDue) {
-      const cat = ch.category || 'General';
-      if (!habitsByCategory[cat]) habitsByCategory[cat] = [];
-      habitsByCategory[cat].push(ch);
+      const catId = catIdForHabit(ch);
+      if (!habitsByCategory[catId]) habitsByCategory[catId] = [];
+      habitsByCategory[catId].push(ch);
     }
     html += `<div class="welcome-items welcome-focus-habits">`;
-    const habitCatKeys = Object.keys(habitsByCategory).sort();
-    for (const cat of habitCatKeys) {
-      const catColor = getCategoryColor(cat);
-      html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(cat)}</div>`;
-      for (const ch of habitsByCategory[cat]) {
+    const habitCatKeys = Object.keys(habitsByCategory);
+    for (const catId of habitCatKeys) {
+      const catColor = getHabitCategoryColor(catId);
+      const catLabel = getHabitCatDisplayName(catId);
+      html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(catLabel)}</div>`;
+      for (const ch of habitsByCategory[catId]) {
         html += renderFocusHabitItem(ch);
       }
     }
     html += `</div>`;
   }
-  // Quick-add Habit (opens modal pre-filled with name + category)
-  const habitCats = [...new Set(wHabits.map(c => c.category || 'General'))].sort();
-  if (!habitCats.includes('General')) habitCats.unshift('General');
-  html += `<div class="welcome-quick-add">`;
-  html += `<select class="welcome-quick-cat-select" onchange="this.nextElementSibling.dataset.category=this.value">`;
-  for (const cat of habitCats) {
-    html += `<option value="${esc(cat)}">${esc(cat)}</option>`;
-  }
-  html += `</select>`;
-  html += `<input type="text" placeholder="${esc(t('habits.quick_add_placeholder'))}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(habitCats[0])}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addHabitFromInput(this);}">`;
-  html += `<button onclick="addHabitFromInput(this.previousElementSibling)">+</button>`;
-  html += `</div>`;
   html += `</div>`;
   html += `</div>`; // close welcome-grid
 
@@ -677,7 +673,7 @@ function renderWelcome() {
       html += `<div class="welcome-flash-detail">${esc(t('welcome.avg_retrievability'))}: ${Math.round(avgR * 100)}%</div>`;
     }
     if (dueCards.length > 0) {
-      html += `<button class="welcome-flash-btn welcome-flash-btn--secondary" onclick="goToPractice()">${lucideIcon('play', 14)} ${esc(t('welcome.continue_practicing'))}</button>`;
+      html += `<button class="welcome-flash-btn welcome-flash-btn--secondary" data-action="go-to-practice">${lucideIcon('play', 14)} ${esc(t('welcome.continue_practicing'))}</button>`;
     }
   } else if (dueCards.length > 0 || newCards.length > 0) {
     // Not practiced today — prompt to review
@@ -692,7 +688,7 @@ function renderWelcome() {
     if (reviewedCards.length > 0) {
       html += `<div class="welcome-flash-detail">${esc(t('welcome.avg_retrievability'))}: ${Math.round(avgR * 100)}%</div>`;
     }
-    html += `<button class="welcome-flash-btn welcome-flash-btn--primary" onclick="goToPractice()">${lucideIcon('play', 14)} ${esc(t('welcome.go_to_flashcards'))}</button>`;
+    html += `<button class="welcome-flash-btn welcome-flash-btn--primary" data-action="go-to-practice">${lucideIcon('play', 14)} ${esc(t('welcome.go_to_flashcards'))}</button>`;
   } else {
     html += `<div class="welcome-empty">${esc(t('welcome.up_to_date'))}</div>`;
     if (reviewedCards.length > 0) {
@@ -713,7 +709,7 @@ function renderWelcome() {
       html += `<div class="welcome-flash-done">${lucideIcon('circle-check', 16, '#22c55e')} ${esc(t('welcome.revised_today', textReviewedToday.length))}</div>`;
       if (textTotalDue > 0) {
         html += `<div class="welcome-flash-detail">${esc(t('welcome.chunks_still_due', textTotalDue))}</div>`;
-        html += `<button class="welcome-flash-btn welcome-flash-btn--secondary" onclick="goToRevise()">${lucideIcon('book-open', 14)} ${esc(t('welcome.continue_revising'))}</button>`;
+        html += `<button class="welcome-flash-btn welcome-flash-btn--secondary" data-action="go-to-revise">${lucideIcon('book-open', 14)} ${esc(t('welcome.continue_revising'))}</button>`;
       }
     } else if (textTotalDue > 0) {
       html += `<div class="welcome-flash-counts">`;
@@ -724,7 +720,7 @@ function renderWelcome() {
         html += `<span class="welcome-flash-new">${esc(t('welcome.new_chunks', textNewChunks.length))}</span>`;
       }
       html += `</div>`;
-      html += `<button class="welcome-flash-btn welcome-flash-btn--primary" onclick="goToRevise()">${lucideIcon('book-open', 14)} ${esc(t('welcome.revise_now'))}</button>`;
+      html += `<button class="welcome-flash-btn welcome-flash-btn--primary" data-action="go-to-revise">${lucideIcon('book-open', 14)} ${esc(t('welcome.revise_now'))}</button>`;
     } else {
       html += `<div class="welcome-flash-done">${lucideIcon('circle-check', 16, '#22c55e')} ${esc(t('welcome.texts_up_to_date'))}</div>`;
     }
@@ -743,7 +739,7 @@ function renderWelcome() {
       const avatarHtml = b.avatar_url
         ? `<img src="${b.avatar_url}" alt="${esc(b.name)}" class="welcome-birthday-avatar-img">`
         : lucideIcon('user', 16);
-      html += `<div class="welcome-item" onclick="switchView('birthdays')">`;
+      html += `<div class="welcome-item" data-action="switch-view" data-view="birthdays">`;
       html += `<div class="welcome-item-main">`;
       html += `<span class="welcome-birthday-avatar${b.daysUntil === 0 ? ' birthday-today-avatar' : ''}">${avatarHtml}</span>`;
       html += `<span class="welcome-item-text">${esc(b.name)}</span>`;
@@ -848,3 +844,6 @@ function scrollToWelcomeBucket(id) {
   }
 }
 window.scrollToWelcomeBucket = scrollToWelcomeBucket;
+
+// CSP delegation for welcome handled in js/delegation.js — no per-module listeners
+

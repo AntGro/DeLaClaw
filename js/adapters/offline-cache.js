@@ -10,7 +10,7 @@
 // backends never cross-contaminate.
 // ===================================================================
 
-import state from '../supabase.js';
+import state from '../state.js';
 
 const EXCLUDE      = new Set(['prompts', 'nvidia_usage']);
 const STRIP        = { birthdays: ['avatar_url'] };
@@ -269,7 +269,15 @@ function showPausedBanner() {
   const link = ref
     ? `https://supabase.com/dashboard/project/${ref}`
     : 'https://supabase.com/dashboard/projects';
-  el.innerHTML = `Can\u2019t reach your database \u2014 it may be paused \xB7 <a href="${link}" target="_blank" rel="noopener">Check on Supabase \u2197</a>`;
+  // Safe DOM: no innerHTML with URL interpolation (P0 sec-002)
+  el.textContent = '';
+  el.appendChild(document.createTextNode(`Can\u2019t reach your database \u2014 it may be paused \xB7 `));
+  const a = document.createElement('a');
+  a.href = link;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = `Check on Supabase \u2197`;
+  el.appendChild(a);
   document.body.prepend(el);
   document.body.classList.add('paused-mode');
   requestAnimationFrame(() => {

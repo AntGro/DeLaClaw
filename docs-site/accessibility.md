@@ -1,6 +1,6 @@
 # Accessibility Audit
 
-Last updated: 2026-06-08
+Last updated: 2026-08-21
 
 ## Summary
 
@@ -45,9 +45,7 @@ Some buttons have `title` attributes (which provides a tooltip but is not reliab
 
 ### 4. Missing alt attributes on images
 
-Two `<img>` elements in the birthday avatar cropping UI lack `alt` attributes:
-- `js/birthdays.js:347` -- `<img class="avatar-crop-img" id="avatarCropImgNew">`
-- `js/birthdays.js:624` -- `<img class="avatar-crop-img" id="avatarCropImg">`
+Two `<img>` elements in the birthday avatar cropping UI lack `alt` attributes (search for `avatar-crop-img` in `js/birthdays.js`).
 
 **Recommendation**: Add `alt="Avatar preview"` or similar.
 

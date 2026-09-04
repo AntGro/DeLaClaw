@@ -6,7 +6,7 @@
 // ===================================================================
 
 export function createRestAdapter(baseUrl) {
-  return {
+  const adapter = {
     from(table) { return new QueryBuilder(baseUrl, table); },
     channel() { return new NoopChannel(); },
     rpc(fn, params) {
@@ -17,7 +17,15 @@ export function createRestAdapter(baseUrl) {
       }).then(r => r.json()).then(data => ({ data, error: null }))
         .catch(error => ({ data: null, error }));
     },
+    /** Batch-update sort_order via individual PATCHes (local latency) */
+    async bulkSortOrder(table, updates) {
+      if (updates.length === 0) return;
+      await Promise.all(
+        updates.map(u => adapter.from(table).update({ sort_order: u.sort_order }).eq('id', u.id))
+      );
+    },
   };
+  return adapter;
 }
 
 // ── Chainable query builder ──

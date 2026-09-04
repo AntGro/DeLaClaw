@@ -1,8 +1,8 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
-import state from './supabase.js';
-import { esc, escQ, showToast, showDeleteConfirm, balanceGrid, fetchAll, isMobileUA } from './utils.js';
-import { scrollToAndHighlight, inlineEditText, initItemHoverDelay } from './item-utils.js';
+import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
+import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
+import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 
 // ===================================================================
@@ -99,87 +99,70 @@ let trSessionActive = false;
 let trSessionDeck = null;
 let trSessionTextId = null;
 
-const DECK_COLORS = [
-  '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b',
-  '#ef4444', '#ec4899', '#06b6d4', '#f97316',
-  '#6366f1', '#14b8a6',
-];
+// ── Deck table state ──
+// Decks live in the flashcard_decks DB table. Loaded into maps for fast lookup.
+const SHARED_CATEGORY = SHARED_CAT_CONST;
+let _deckMap = new Map();     // id → row
+let _deckByName = new Map();  // name → row (backward compat)
+let _defaultDeckId = null;    // protected default row
+let _sharedDeckId = null;     // protected __shared__ row
 
-// ── Shortnames (synced via settings table, localStorage fallback) ──
-const FLASH_SHORTNAMES_KEY = 'claw_flash_shortnames';
-const FLASH_SHORTNAMES_DB_KEY = 'flash_shortnames';
-let _shortnames = {};
-
-function getFlashShortnames() { return _shortnames; }
-
-function getFlashShortname(deckName) {
-  if (!deckName) return '';
-  return _shortnames[deckName] || '';
-}
-
-async function loadFlashShortnames() {
-  // Try DB first
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings').select('value').eq('key', FLASH_SHORTNAMES_DB_KEY);
-      if (data && data.length > 0 && data[0].value) {
-        _shortnames = JSON.parse(data[0].value);
-        localStorage.setItem(FLASH_SHORTNAMES_KEY, data[0].value);
-        return;
-      }
-    } catch (e) { console.warn('Could not load shortnames from DB:', e.message); }
+async function loadFlashcardDecks() {
+  const { data, error } = await state.db.from('flashcard_decks').select('*').order('sort_order', { ascending: true });
+  if (error) { console.warn('loadFlashcardDecks error:', error); return; }
+  _deckMap.clear();
+  _deckByName.clear();
+  _defaultDeckId = null;
+  _sharedDeckId = null;
+  for (const row of (data || [])) {
+    _deckMap.set(row.id, row);
+    _deckByName.set(row.name, row);
+    if (row.is_protected && row.name === SHARED_CATEGORY) _sharedDeckId = row.id;
+    else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultDeckId = row.id;
   }
-  // Fallback to localStorage
-  try { _shortnames = JSON.parse(localStorage.getItem(FLASH_SHORTNAMES_KEY) || '{}'); } catch { _shortnames = {}; }
+  await backfillCategoryColors('flashcard_decks', _deckMap);
 }
 
-async function saveFlashShortnames(map) {
-  _shortnames = map;
-  const json = JSON.stringify(map);
-  localStorage.setItem(FLASH_SHORTNAMES_KEY, json);
-  if (state.db.connected) {
-    try {
-      const { data } = await state.db.from('settings')
-        .update({ value: json, updated_at: new Date().toISOString() })
-        .eq('key', FLASH_SHORTNAMES_DB_KEY)
-        .select();
-      if (!data || data.length === 0) {
-        await state.db.from('settings')
-          .insert({ key: FLASH_SHORTNAMES_DB_KEY, value: json, updated_at: new Date().toISOString() });
-      }
-    } catch (e) { console.warn('Could not save shortnames to DB:', e.message); }
-  }
+function getFlashcardDecks() { return _deckMap; }
+
+// ── Deck helpers ──
+function getDeckColorById(deckId) { return _deckMap.get(deckId)?.color || FLASH_DEFAULT_COLOR; }
+function getDeckShortname(deckId) { return _deckMap.get(deckId)?.shortname || ''; }
+function getDeckName(deckId) { return _deckMap.get(deckId)?.name ?? ''; }
+function getDeckDisplayName(deckId) {
+  const deck = _deckMap.get(deckId);
+  if (!deck) return t('common.category_default');
+  if (deck.name === '') return t('common.category_default');
+  if (deck.name === SHARED_CATEGORY) return t('sharing.shared');
+  return deck.name;
+}
+function deckIdForCard(card) { return card.deck_id || _deckByName.get(card.deck ?? '')?.id || _defaultDeckId; }
+function deckIdForText(text) { return text.deck_id || _deckByName.get(text.deck ?? '')?.id || _defaultDeckId; }
+
+// Backward-compat: accepts name or ID
+const FLASH_DEFAULT_COLOR = '#8b5cf6';
+function getDeckColor(nameOrId) {
+  if (_deckMap.has(nameOrId)) return _deckMap.get(nameOrId).color || FLASH_DEFAULT_COLOR;
+  const byName = _deckByName.get(nameOrId);
+  if (byName) return byName.color || FLASH_DEFAULT_COLOR;
+  return FLASH_DEFAULT_COLOR;
 }
 
-async function setFlashShortname(deckName, shortname) {
-  const map = { ..._shortnames };
-  if (shortname) { map[deckName] = shortname; } else { delete map[deckName]; }
-  await saveFlashShortnames(map);
+function getFlashShortname(nameOrId) {
+  if (_deckMap.has(nameOrId)) return _deckMap.get(nameOrId).shortname || '';
+  const byName = _deckByName.get(nameOrId);
+  if (byName) return byName.shortname || '';
+  return '';
 }
 
-async function promptFlashShortname(deckName) {
-  const current = getFlashShortname(deckName) || '';
-  const result = prompt('Short name for "' + deckName + '" (leave empty to remove):', current);
-  if (result === null) return;
-  await setFlashShortname(deckName, result.trim());
-  refreshFlashcards();
-}
 const DRAFT_COLOR = '#6b7280';
-
-function getDeckColor(deck) {
-  const cardDecks = allCards.map(c => c.deck);
-  const textDecks = allTexts.map(tx => tx.deck);
-  const decks = [...new Set([...cardDecks, ...textDecks])].sort();
-  const idx = decks.indexOf(deck);
-  return DECK_COLORS[(idx >= 0 ? idx : 0) % DECK_COLORS.length];
-}
 
 // ── Data Loading ──
 async function refreshFlashcards() {
   if (!state.db.connected) return;
-  await loadFlashShortnames();
+  await loadFlashcardDecks();
   allCards = await fetchAll(() => state.db.from('flashcards').select('*').order('created_at'));
-  allDrafts = await fetchAll(() => state.db.from('flashcard_notes').select('*').order('created_at', { ascending: false }));
+  allDrafts = await fetchAll(() => state.db.from('flashcard_notes').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: false }));
   try {
     allTexts = await fetchAll(() => state.db.from('texts').select('*').order('created_at'));
     allChunkProgress = await fetchAll(() => state.db.from('text_line_progress').select('*').order('chunk_index'));
@@ -199,13 +182,7 @@ async function refreshFlashcards() {
       }
     }
   }
-  // Prune orphan shortnames (deck was renamed or deleted)
-  const liveDecks = new Set([...allCards.map(c => c.deck), ...allTexts.map(t => t.deck)]);
-  const orphans = Object.keys(_shortnames).filter(k => !liveDecks.has(k));
-  if (orphans.length) {
-    for (const k of orphans) delete _shortnames[k];
-    await saveFlashShortnames(_shortnames);
-  }
+  // Decks already loaded via loadFlashcardDecks() above
   if (state.currentView === 'flashcards') renderFlashcards();
 }
 
@@ -226,21 +203,30 @@ function renderDeckNavButtons() {
   if (!container) return;
   const cardDecks = allCards.map(c => c.deck);
   const textDecks = allTexts.map(t => t.deck);
-  const decks = [...new Set([...cardDecks, ...textDecks])].sort();
+  const deckNames = new Set([...cardDecks, ...textDecks]);
+  // Include all DB decks (even empty ones), but skip __shared__ if empty
+  for (const row of _deckMap.values()) {
+    if (row.name !== undefined && row.name !== SHARED_CATEGORY) deckNames.add(row.name);
+  }
+  // Sort by DB sort_order (fall back to alphabetical for unknown decks)
+  const decks = [...deckNames].sort((a, b) => {
+    const ra = _deckByName.get(a), rb = _deckByName.get(b);
+    return (ra?.sort_order ?? Infinity) - (rb?.sort_order ?? Infinity) || a.localeCompare(b);
+  });
 
   // Draft nav button first
-  let html = `<button class="category-nav-btn" style="--cat-color:${DRAFT_COLOR}" onclick="navigateToFlashDeck('__drafts')">${lucideIcon('file-edit', 14, DRAFT_COLOR)} ${t('flashcards.draft')} (${allDrafts.length})</button>`;
+  let html = `<button class="category-nav-btn" style="--cat-color:${DRAFT_COLOR}" data-action="navigate-to-flash-deck" data-deck="__drafts">${lucideIcon('file-edit', 14, DRAFT_COLOR)} ${t('flashcards.draft')} (${allDrafts.length})</button>`;
 
   html += decks.map(deck => {
     const color = getDeckColor(deck);
     const sn = getFlashShortname(deck);
-    const display = sn || deck;
+    const display = sn || deck || t('common.category_default');
     const type = getDeckType(deck);
     const icon = type === 'text' ? lucideIcon('book-open', 12, color) : lucideIcon('layers', 12, color);
     const count = type === 'text'
       ? allTexts.filter(tx => tx.deck === deck).length
       : allCards.filter(c => c.deck === deck).length;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" onclick="navigateToFlashDeck('${escQ(deck)}')" title="${esc(deck)}">${icon} ${esc(display)} (${count})</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-flash-deck" data-deck="${esc(deck)}" title="${esc(deck || t('common.category_default'))}">${icon} ${esc(display)} (${count})</button>`;
   }).join('');
 
   container.innerHTML = html;
@@ -250,6 +236,34 @@ window.navigateToFlashDeck = function(deck) {
   const el = document.getElementById(deck === '__drafts' ? 'flashDraftsDeck' : `flashDeck-${deck}`);
   scrollToAndHighlight(el, null);
 };
+
+function initFlashDeckNavBtnReorder() {
+  const skipIds = new Set(['__drafts']);
+  if (_sharedDeckId) {
+    const sharedRow = _deckMap.get(_sharedDeckId);
+    if (sharedRow) skipIds.add(sharedRow.name);
+  }
+  initNavBtnReorder('flashcardNavButtons', {
+    idAttr: 'deck',
+    skipIds,
+    async onReorder(orderedNames) {
+      const reorderable = orderedNames.filter(n => n !== SHARED_CATEGORY && n !== '__drafts');
+      const deckRows = reorderable.map(n => _deckByName.get(n)).filter(Boolean);
+      const updates = [];
+      deckRows.forEach((d, i) => {
+        if (Number(d.sort_order ?? 0) !== i) updates.push({ id: d.id, sort_order: i });
+        d.sort_order = i;
+      });
+      await bulkSortOrder('flashcard_decks', updates);
+      await loadFlashcardDecks();
+      const grid = document.getElementById('flashcardGrid');
+      const snapshot = snapshotBuckets(grid);
+      renderFlashcards();
+      animateBucketsFromSnapshot(grid, snapshot, 600);
+      showToast(t('toast.reordered'), 'success');
+    },
+  });
+}
 
 // ── Search State ──
 let searchQuery = '';
@@ -266,6 +280,7 @@ function setFlashcardFilter(filter) {
 
 function renderFlashcards() {
   renderDeckNavButtons();
+  initFlashDeckNavBtnReorder();
   renderAllBuckets();
 }
 
@@ -276,7 +291,15 @@ function renderAllBuckets() {
 
   const cardDecks = allCards.map(c => c.deck);
   const textDecks = allTexts.map(tx => tx.deck);
-  const decks = [...new Set([...cardDecks, ...textDecks])].sort();
+  const deckNames = new Set([...cardDecks, ...textDecks]);
+  // Include all DB decks (even empty ones), but skip __shared__ if empty
+  for (const row of _deckMap.values()) {
+    if (row.name !== undefined && row.name !== SHARED_CATEGORY) deckNames.add(row.name);
+  }
+  const decks = [...deckNames].sort((a, b) => {
+    const ra = _deckByName.get(a), rb = _deckByName.get(b);
+    return (ra?.sort_order ?? Infinity) - (rb?.sort_order ?? Infinity) || a.localeCompare(b);
+  });
   const q = searchQuery.toLowerCase().trim();
 
   // Draft bucket first
@@ -294,9 +317,17 @@ function renderAllBuckets() {
   }
 
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(grid, innerScrolls);
   initFlashcardHoverDelay(grid);
+  // Init draft reorder
+  const draftDeck = document.getElementById('flashDraftsDeck');
+  if (draftDeck) {
+    const draftList = draftDeck.querySelector('.task-list');
+    if (draftList) initDraftDragDrop(draftList);
+  }
   // Bind expand toggles for text items
   grid.querySelectorAll('.tr-expand-toggle').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -330,6 +361,23 @@ function initFlashcardHoverDelay(container) {
   });
 }
 
+function initDraftDragDrop(listEl) {
+  initItemDragDrop(listEl, {
+    itemSelector: '.todo-item[data-draft-id]',
+    excludeSelector: 'button, a, input, textarea, select, .todo-actions, .fc-proposal',
+    idAttr: 'draftId',
+    actionsSelector: '.todo-actions',
+    onReorder: async (orderedIds) => {
+      await reorderItems({
+        orderedIds,
+        allItems: allDrafts,
+        tableName: 'flashcard_notes',
+        reinitFn: () => initDraftDragDrop(listEl),
+      });
+    },
+  });
+}
+
 // ── Draft Bucket ──
 function renderDraftsBucket(q) {
   let drafts = allDrafts;
@@ -352,8 +400,8 @@ function renderDraftsBucket(q) {
       </div>
     </div>
     <div class="add-task">
-      <textarea placeholder="${t('flashcards.draft_placeholder')}" id="draftQuickInput" onkeydown="handleDraftInput(event)" rows="1" style="resize:none;overflow:hidden;"></textarea>
-      <button onclick="quickAddDraft()">${lucideIcon('plus', 16)}</button>
+      <textarea placeholder="${t('flashcards.draft_placeholder')}" id="draftQuickInput" data-action="handle-draft-input" rows="1" style="resize:none;overflow:hidden;"></textarea>
+      <button data-action="quick-add-draft">${lucideIcon('plus', 16)}</button>
     </div>
     <div class="task-list">
       ${drafts.length === 0 ? '<p class="empty-msg">' + t('flashcards.draft_hint') + '</p>' : ''}
@@ -368,24 +416,24 @@ function renderDraftItem(d) {
 
   let proposalHtml = '';
   if (hasProposal) {
-    const suggestedDeck = d.proposed_deck || 'General';
+    const suggestedDeck = d.proposed_deck || '';
     const deckOptions = [...new Set([...allCards.map(c => c.deck), suggestedDeck])].sort().map(dk =>
-      `<option value="${esc(dk)}"${dk === suggestedDeck ? ' selected' : ''}>${esc(dk)}</option>`
+      `<option value="${esc(dk)}"${dk === suggestedDeck ? ' selected' : ''}>${esc(dk || t('common.category_default'))}</option>`
     ).join('');
     proposalHtml = `<div class="fc-proposal">
       <div class="fc-proposal-label">${lucideIcon('sparkles', 14, '#22c55e')} Proposed card:</div>
       <div class="fc-proposal-qa"><strong>Q:</strong> ${esc(d.proposed_front)}</div>
       <div class="fc-proposal-qa"><strong>A:</strong> ${esc(d.proposed_back)}</div>
-      <div class="fc-proposal-deck"><strong>${t('flashcards.deck')}:</strong> <select onchange="updateProposedDeck('${d.id}', this.value)">${deckOptions}</select></div>
+      <div class="fc-proposal-deck"><strong>${t('flashcards.deck')}:</strong> <select data-action="update-proposed-deck" data-id="${esc(d.id)}">${deckOptions}</select></div>
       <div class="fc-proposal-actions">
-        <button class="fc-proposal-accept" onclick="acceptProposal('${d.id}')" title="${t('flashcards.accept')}">${lucideIcon('check', 14, '#fff')} <span class="btn-label">${t('flashcards.accept')}</span></button>
-        <button class="fc-proposal-edit" onclick="editProposal('${d.id}')" title="${t('common.edit')}">${lucideIcon('pencil', 14)} <span class="btn-label">${t('common.edit')}</span></button>
-        <button class="fc-proposal-feedback-btn" onclick="toggleFeedbackInput('${d.id}')" title="${t('flashcards.feedback')}">${lucideIcon('message-square', 14)} <span class="btn-label">${t('flashcards.feedback')}</span></button>
-        <button class="fc-proposal-reject" onclick="rejectProposal('${d.id}')" title="${t('flashcards.reject')}">${lucideIcon('x', 14)} <span class="btn-label">${t('flashcards.reject')}</span></button>
+        <button class="fc-proposal-accept" data-action="accept-proposal" data-id="${esc(d.id)}" title="${t('flashcards.accept')}">${lucideIcon('check', 14, '#fff')} <span class="btn-label">${t('flashcards.accept')}</span></button>
+        <button class="fc-proposal-edit" data-action="edit-proposal" data-id="${esc(d.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 14)} <span class="btn-label">${t('common.edit')}</span></button>
+        <button class="fc-proposal-feedback-btn" data-action="toggle-feedback-input" data-id="${esc(d.id)}" title="${t('flashcards.feedback')}">${lucideIcon('message-square', 14)} <span class="btn-label">${t('flashcards.feedback')}</span></button>
+        <button class="fc-proposal-reject" data-action="reject-proposal" data-id="${esc(d.id)}" title="${t('flashcards.reject')}">${lucideIcon('x', 14)} <span class="btn-label">${t('flashcards.reject')}</span></button>
       </div>
       <div class="fc-feedback-area" id="feedbackArea-${d.id}" style="display:none;">
         <textarea class="fc-feedback-input" id="feedbackInput-${d.id}" placeholder="${t('flashcards.feedback_placeholder')}" rows="2"></textarea>
-        <button class="fc-feedback-submit" onclick="submitFeedback('${d.id}')">${lucideIcon('send', 14, '#fff')} ${t('flashcards.feedback')}</button>
+        <button class="fc-feedback-submit" data-action="submit-feedback" data-id="${esc(d.id)}">${lucideIcon('send', 14, '#fff')} ${t('flashcards.feedback')}</button>
       </div>
     </div>`;
   }
@@ -396,9 +444,9 @@ function renderDraftItem(d) {
       <span class="todo-text" style="cursor:text;">${esc(d.content.length > 120 ? d.content.slice(0, 120) + '…' : d.content)}</span>
       ${isPending ? `<span class="fc-status-badge fc-status-pending">${t('flashcards.generating')}</span>` : ''}
       <div class="todo-actions">
-        ${!hasProposal && !isPending ? `<button onclick="requestProposal('${d.id}')" title="${t('flashcards.propose')}">${lucideIcon('sparkles', 16)}</button>` : ''}
-        <button onclick="startInlineEditDraftById('${d.id}')" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
-        <button onclick="deleteDraft('${d.id}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        ${!hasProposal && !isPending ? `<button data-action="request-proposal" data-id="${esc(d.id)}" title="${t('flashcards.propose')}">${lucideIcon('sparkles', 16)}</button>` : ''}
+        <button data-action="start-inline-edit-draft" data-id="${esc(d.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
+        <button data-action="delete-draft" data-id="${esc(d.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>
     </div>
     ${proposalHtml}
@@ -428,7 +476,6 @@ function renderFlashcardDeck(deck, q) {
   }
 
   if (cards.length === 0 && (q || flashcardFilter !== 'all')) return '';
-  if (cards.length === 0 && !q) return '';
 
   // Apply sort to cards
   const sortBy = document.getElementById('flashcardSortBy')?.value || 'default';
@@ -465,28 +512,28 @@ function renderFlashcardDeck(deck, q) {
   const practiceCount = dueCount + newCount;
   let practiceButton = '';
   if (practiceCount > 0) {
-    practiceButton = `<button class="fc-practice-btn" onclick="startPractice('${escQ(deck)}')" title="${t('flashcards.practice')}">${lucideIcon('play', 14, '#fff')} ${practiceCount}</button>`;
-  } else {
-    practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')} Caught up</span>`;
+    practiceButton = `<button class="fc-practice-btn" data-action="start-practice" data-deck="${esc(deck)}" title="${t('flashcards.practice')}">${lucideIcon('play', 14, '#fff')} ${practiceCount}</button>`;
+  } else if (allDeckCards.length > 0) {
+    practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')}</span>`;
   }
 
   return `<div class="project-card" id="flashDeck-${esc(deck)}" style="--cat-color:${color}">
     <div class="project-card-header">
       <div style="display:flex;align-items:flex-start;gap:6px;">
         <div class="project-info">
-          <strong>${lucideIcon('layers', 14)} ${esc(deck)}</strong>
+          <strong>${lucideIcon('layers', 14)} ${esc(deck || t('common.category_default'))}</strong>
           <span class="tech">${allDeckCards.length} ${t('flashcards.cards')} ${chips.join(' ')}</span>
         </div>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="todo-cat-shortname-btn" onclick="promptFlashShortname('${escQ(deck)}')" title="${getFlashShortname(deck) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
+        ${deck ? `<button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deck)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>` : ''}
         ${practiceButton}
-        <button class="archive-project-btn" onclick="openAddFlashcardModal('${escQ(deck)}')" title="${t('flashcards.add_card')}">${lucideIcon('plus', 16)}</button>
-        <button class="todo-cat-delete-btn" onclick="deleteDeck('${escQ(deck)}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        <button class="archive-project-btn" data-action="open-add-flashcard" data-deck="${esc(deck)}" title="${t('flashcards.add_card')}">${lucideIcon('plus', 16)}</button>
+        ${deck ? `<button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deck)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>` : ''}
       </div>
     </div>
     <div class="task-list">
-      ${cards.map(c => renderFlashcardItem(c, color)).join('')}
+      ${cards.length > 0 ? cards.map(c => renderFlashcardItem(c, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-flashcard" data-deck="${esc(deck)}">${lucideIcon('plus', 16)} ${t('flashcards.add_card')}</button></div>`}
     </div>
   </div>`;
 }
@@ -517,7 +564,6 @@ function renderTextDeck(deck, q) {
   }
 
   if (texts.length === 0 && (q || flashcardFilter !== 'all')) return '';
-  if (texts.length === 0 && !q) return '';
 
   const color = getDeckColor(deck);
   const allDeckTexts = allTexts.filter(tx => tx.deck === deck);
@@ -534,28 +580,28 @@ function renderTextDeck(deck, q) {
   const trPracticeCount = textDueCount + textNewCount;
   let practiceButton = '';
   if (trPracticeCount > 0) {
-    practiceButton = `<button class="fc-practice-btn tr-practice-btn" onclick="startTextPractice('${escQ(deck)}')" title="${t('text_revision.practice')}">${lucideIcon('book-open', 14, '#fff')} ${trPracticeCount}</button>`;
-  } else {
-    practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')} Caught up</span>`;
+    practiceButton = `<button class="fc-practice-btn tr-practice-btn" data-action="start-text-practice" data-deck="${esc(deck)}" title="${t('text_revision.practice')}">${lucideIcon('book-open', 14, '#fff')} ${trPracticeCount}</button>`;
+  } else if (allDeckTexts.length > 0) {
+    practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')}</span>`;
   }
 
   return `<div class="project-card" id="flashDeck-${esc(deck)}" style="--cat-color:${color}">
     <div class="project-card-header">
       <div style="display:flex;align-items:flex-start;gap:6px;">
         <div class="project-info">
-          <strong>${lucideIcon('book-open', 14)} ${esc(deck)}</strong>
+          <strong>${lucideIcon('book-open', 14)} ${esc(deck || t('common.category_default'))}</strong>
           <span class="tech">${allDeckTexts.length} ${t('text_revision.texts')} ${chips.join(' ')}</span>
         </div>
       </div>
       <div class="project-header-actions" style="opacity:1;">
-        <button class="todo-cat-shortname-btn" onclick="promptFlashShortname('${escQ(deck)}')" title="${getFlashShortname(deck) ? 'Edit short name' : 'Set short name'}">${lucideIcon("pencil",14)}</button>
+        ${deck ? `<button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deck)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>` : ''}
         ${practiceButton}
-        <button class="archive-project-btn" onclick="openAddTextModal('${escQ(deck)}')" title="${t('text_revision.add_text')}">${lucideIcon('plus', 16)}</button>
-        <button class="todo-cat-delete-btn" onclick="deleteDeck('${escQ(deck)}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        <button class="archive-project-btn" data-action="open-add-text" data-deck="${esc(deck)}" title="${t('text_revision.add_text')}">${lucideIcon('plus', 16)}</button>
+        ${deck ? `<button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deck)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>` : ''}
       </div>
     </div>
     <div class="task-list">
-      ${texts.map(tx => renderTextItem(tx, color)).join('')}
+      ${texts.length > 0 ? texts.map(tx => renderTextItem(tx, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-text" data-deck="${esc(deck)}">${lucideIcon('plus', 16)} ${t('flashcards.add_text')}</button></div>`}
     </div>
   </div>`;
 }
@@ -595,8 +641,9 @@ function renderFlashcardItem(c, color) {
         ${badge}
       </div>
       <div class="todo-actions">
-        <button onclick="openEditFlashcardModal('${c.id}')" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
-        <button onclick="deleteFlashcard('${c.id}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        <button data-action="copy-item-link" data-link-type="flashcard" data-id="${esc(c.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 16)}</button>
+        <button data-action="open-edit-flashcard" data-id="${esc(c.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
+        <button data-action="delete-flashcard" data-id="${esc(c.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>
     </div>
   </div>`;
@@ -610,14 +657,14 @@ window.filterFlashcards = function(e) {
 // ── Draft CRUD ──
 window.openAddDraftModal = function() {
   closeAllFlashModals();
-  const html = `<div class="modal-overlay" id="addDraftModal" style="display:flex;" onclick="if(event.target===this)closeAddDraftModal()">
+  const html = `<div class="modal-overlay" id="addDraftModal" style="display:flex;" data-action="close-add-draft" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('file-edit', 18, DRAFT_COLOR)} ${t('flashcards.add_draft')}</h2>
       <label>${t('flashcards.what_to_learn')}</label>
       <textarea id="newDraftContent" rows="4" placeholder="${t('flashcards.learn_placeholder')}"></textarea>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeAddDraftModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewDraft()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-add-draft">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-new-draft">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -640,7 +687,12 @@ window.saveNewDraft = async function() {
 
 window.handleDraftInput = function(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); quickAddDraft(); }
+  else { setTimeout(() => autoResizeTextarea(e.target), 0); }
 };
+
+document.addEventListener('input', e => {
+  if (e.target.id === 'draftQuickInput') autoResizeTextarea(e.target);
+});
 
 window.quickAddDraft = async function() {
   const input = document.getElementById('draftQuickInput');
@@ -649,6 +701,7 @@ window.quickAddDraft = async function() {
   if (!content) return;
   if (state.db.connected) await state.db.from('flashcard_notes').insert({ content });
   input.value = '';
+  input.style.height = '';
   await refreshFlashcards();
   showToast(t('flashcards.draft_added'));
 };
@@ -658,9 +711,11 @@ window.startInlineEditDraft = function(id, spanEl) {
   const draft = allDrafts.find(d => d.id === id);
   if (!draft) return;
   inlineEditText(spanEl, draft.content, {
+    containerEl: spanEl.closest('.todo-item, .draft-item'),
     saveFn: async (content) => {
       if (state.db.connected) {
         await state.db.from('flashcard_notes').update({ content }).eq('id', id);
+        draft.content = content;
         showToast(t('flashcards.draft_updated'));
       }
     },
@@ -705,6 +760,7 @@ window.editFlashcardInline = function(id) {
   inlineEditText(spanEl, card.front, {
     multiline: true,
     extraEl: answerRow,
+    containerEl: spanEl.closest('.flashcard-item, .todo-item'),
     collectExtra: () => ({ back: answerInput.value.trim() }),
     saveFn: async (newFront, extra) => {
       const updates = {};
@@ -712,6 +768,7 @@ window.editFlashcardInline = function(id) {
       if (extra && extra.back && extra.back !== card.back) updates.back = extra.back;
       if (Object.keys(updates).length > 0 && state.db.connected) {
         await state.db.from('flashcards').update(updates).eq('id', id);
+        Object.assign(card, updates);
         showToast(t('flashcards.card_updated'));
       }
     },
@@ -722,44 +779,72 @@ window.editFlashcardInline = function(id) {
 window.deleteDraft = function(id) {
   const draft = allDrafts.find(d => d.id === id);
   if (!draft) return;
-  showDeleteConfirm('Delete Draft', 'Are you sure?', async () => {
+  showConfirmAction('Delete Draft', 'Are you sure?', async () => {
     if (state.db.connected) await state.db.from('flashcard_notes').delete().eq('id', id);
+
+    const el = document.querySelector(`[data-draft-id="${CSS.escape(id)}"]`);
+    await animateItemRemoval(el);
+
     await refreshFlashcards();
     showToast(t('flashcards.draft_deleted'));
   });
 };
 
 // ── Proposal Workflow ──
+const _pendingProposal = new Set();
+
+function _setProposalBtns(id, pending) {
+  const card = document.querySelector(`.draft-card[data-draft-id="${CSS?.escape ? CSS.escape(id) : id}"]`)
+             || document.getElementById(`draft-${id}`);
+  if (!card) return;
+  card.querySelectorAll('button[data-action="accept-proposal"], button[data-action="reject-proposal"], button[data-action="request-proposal"]')
+    .forEach(b => { b.disabled = pending; b.classList.toggle('is-pending', pending); });
+}
+
 window.requestProposal = async function(id) {
-  if (!state.db.connected) return;
-  await state.db.from('flashcard_notes').update({ proposal_status: 'pending' }).eq('id', id);
-  const draft = allDrafts.find(d => d.id === id);
-  if (draft) draft.proposal_status = 'pending';
-  renderAllBuckets();
-  showToast(t('flashcards.generating_proposal'));
+  if (!state.db.connected || _pendingProposal.has(id)) return;
+  _pendingProposal.add(id);
+  _setProposalBtns(id, true);
+  try {
+    await state.db.from('flashcard_notes').update({ proposal_status: 'pending' }).eq('id', id);
+    const draft = allDrafts.find(d => d.id === id);
+    if (draft) draft.proposal_status = 'pending';
+    renderAllBuckets();
+    showToast(t('flashcards.generating_proposal'));
+  } finally { _pendingProposal.delete(id); }
 };
 
 window.acceptProposal = async function(id) {
+  if (_pendingProposal.has(id)) return;
   const draft = allDrafts.find(d => d.id === id);
   if (!draft || !draft.proposed_front || !draft.proposed_back) return;
-  const deck = draft.proposed_deck || 'General';
-  if (state.db.connected) {
-    await state.db.from('flashcards').insert({ deck, front: draft.proposed_front, back: draft.proposed_back });
-    await state.db.from('flashcard_notes').delete().eq('id', id);
-  }
-  await refreshFlashcards();
-  showToast(t('flashcards.card_added_to', deck));
+  _pendingProposal.add(id);
+  _setProposalBtns(id, true);
+  try {
+    const deck = draft.proposed_deck || '';
+    const deckId = _deckByName.get(deck)?.id || _defaultDeckId;
+    if (state.db.connected) {
+      await state.db.from('flashcards').insert({ deck, front: draft.proposed_front, back: draft.proposed_back, deck_id: deckId });
+      await state.db.from('flashcard_notes').delete().eq('id', id);
+    }
+    await refreshFlashcards();
+    showToast(t('flashcards.card_added_to', deck));
+  } finally { _pendingProposal.delete(id); }
 };
 
 window.rejectProposal = async function(id) {
-  if (!state.db.connected) return;
-  await state.db.from('flashcard_notes').update({
-    proposal_status: null, proposed_front: null, proposed_back: null
-  }).eq('id', id);
-  const draft = allDrafts.find(d => d.id === id);
-  if (draft) { draft.proposal_status = null; draft.proposed_front = null; draft.proposed_back = null; }
-  renderAllBuckets();
-  showToast(t('flashcards.proposal_rejected'));
+  if (!state.db.connected || _pendingProposal.has(id)) return;
+  _pendingProposal.add(id);
+  _setProposalBtns(id, true);
+  try {
+    await state.db.from('flashcard_notes').update({
+      proposal_status: null, proposed_front: null, proposed_back: null
+    }).eq('id', id);
+    const draft = allDrafts.find(d => d.id === id);
+    if (draft) { draft.proposal_status = null; draft.proposed_front = null; draft.proposed_back = null; }
+    renderAllBuckets();
+    showToast(t('flashcards.proposal_rejected'));
+  } finally { _pendingProposal.delete(id); }
 };
 
 window.toggleFeedbackInput = function(id) {
@@ -801,11 +886,11 @@ window.editProposal = function(id) {
   const draft = allDrafts.find(d => d.id === id);
   if (!draft) return;
   closeAllFlashModals();
-  const currentDeck = draft.proposed_deck || 'General';
+  const currentDeck = draft.proposed_deck || '';
   const deckOptions = [...new Set([...allCards.map(c => c.deck), currentDeck])].sort().map(dk =>
-    `<option value="${esc(dk)}"${dk === currentDeck ? ' selected' : ''}>${esc(dk)}</option>`
+    `<option value="${esc(dk)}"${dk === currentDeck ? ' selected' : ''}>${esc(dk || t('common.category_default'))}</option>`
   ).join('');
-  const html = `<div class="modal-overlay" id="editProposalModal" style="display:flex;" onclick="if(event.target===this)closeEditProposalModal()">
+  const html = `<div class="modal-overlay" id="editProposalModal" style="display:flex;" data-action="close-edit-proposal" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('pencil', 18, '#8b5cf6')} ${t('flashcards.edit_proposal')}</h2>
       <label>${t('flashcards.question')}</label>
@@ -815,8 +900,8 @@ window.editProposal = function(id) {
       <label>${t('flashcards.deck')}</label>
       <select id="editProposalDeck">${deckOptions}</select>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeEditProposalModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveEditedProposal('${draft.id}')">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-edit-proposal">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-edited-proposal" data-id="${esc(draft.id)}">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -853,17 +938,17 @@ window.updateProposedDeck = async function(id, deck) {
 // ── Flashcard CRUD ──
 window.openAddFlashcardModal = function(deck) {
   closeAllFlashModals();
-  const html = `<div class="modal-overlay" id="addFlashcardModal" style="display:flex;" onclick="if(event.target===this)closeAddFlashcardModal()">
+  const html = `<div class="modal-overlay" id="addFlashcardModal" style="display:flex;" data-action="close-add-flashcard" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('plus', 18, '#8b5cf6')} ${t('flashcards.add_card')}</h2>
-      <input type="hidden" id="newFlashDeck" value="${esc(deck || 'General')}">
+      <input type="hidden" id="newFlashDeck" value="${esc(deck ?? '')}">
       <label>${t('flashcards.question')}</label>
       <textarea id="newFlashFront" rows="3" placeholder="${t('flashcards.question_placeholder')}"></textarea>
       <label>${t('flashcards.answer')}</label>
       <textarea id="newFlashBack" rows="3" placeholder="${t('flashcards.answer_placeholder')}"></textarea>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeAddFlashcardModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewFlashcard()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-add-flashcard">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-new-flashcard">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -880,7 +965,8 @@ window.saveNewFlashcard = async function() {
   const front = document.getElementById('newFlashFront').value.trim();
   const back = document.getElementById('newFlashBack').value.trim();
   if (!front || !back) { showToast(t('toast.both_fields_required')); return; }
-  if (state.db.connected) await state.db.from('flashcards').insert({ deck, front, back });
+  const deckId = _deckByName.get(deck)?.id || null;
+  if (state.db.connected) await state.db.from('flashcards').insert({ deck, front, back, deck_id: deckId });
   closeAddFlashcardModal();
   await refreshFlashcards();
   showToast(t('flashcards.card_added'));
@@ -890,9 +976,10 @@ window.openEditFlashcardModal = function(id) {
   const card = allCards.find(c => c.id === id);
   if (!card) return;
   closeAllFlashModals();
-  const decks = [...new Set(allCards.map(c => c.deck))].sort();
-  const deckOptions = decks.map(d => `<option value="${esc(d)}" ${d === card.deck ? 'selected' : ''}>${esc(d)}</option>`).join('');
-  const html = `<div class="modal-overlay" id="editFlashcardModal" style="display:flex;" onclick="if(event.target===this)closeEditFlashcardModal()">
+  const currentDeckId = deckIdForCard(card);
+  const sortedDecks = [..._deckMap.values()].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const deckOptions = sortedDecks.map(d => `<option value="${esc(d.id)}" ${d.id === currentDeckId ? 'selected' : ''}>${esc(d.name || t('common.category_default'))}</option>`).join('');
+  const html = `<div class="modal-overlay" id="editFlashcardModal" style="display:flex;" data-action="close-edit-flashcard" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('pencil', 18, '#f59e0b')} ${t('flashcards.edit_card')}</h2>
       <input type="hidden" id="editFlashId" value="${id}">
@@ -903,8 +990,8 @@ window.openEditFlashcardModal = function(id) {
       <label>${t('flashcards.answer')}</label>
       <textarea id="editFlashBack" rows="3">${esc(card.back)}</textarea>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeEditFlashcardModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveEditFlashcard()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-edit-flashcard">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-edit-flashcard">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -917,11 +1004,13 @@ window.closeEditFlashcardModal = function() {
 
 window.saveEditFlashcard = async function() {
   const id = document.getElementById('editFlashId').value;
-  const deck = document.getElementById('editFlashDeck').value.trim();
+  const deckId = document.getElementById('editFlashDeck').value.trim();
+  const deckRow = _deckMap.get(deckId);
+  const deck = deckRow?.name || deckId;
   const front = document.getElementById('editFlashFront').value.trim();
   const back = document.getElementById('editFlashBack').value.trim();
   if (!front || !back) { showToast(t('toast.both_fields_required')); return; }
-  if (state.db.connected) await state.db.from('flashcards').update({ deck, front, back }).eq('id', id);
+  if (state.db.connected) await state.db.from('flashcards').update({ deck, front, back, deck_id: deckId }).eq('id', id);
   closeEditFlashcardModal();
   await refreshFlashcards();
   showToast(t('flashcards.card_updated'));
@@ -930,8 +1019,12 @@ window.saveEditFlashcard = async function() {
 window.deleteFlashcard = function(id) {
   const card = allCards.find(c => c.id === id);
   if (!card) return;
-  showDeleteConfirm('Delete Flashcard', 'Are you sure?', async () => {
+  showConfirmAction('Delete Flashcard', 'Are you sure?', async () => {
     if (state.db.connected) await state.db.from('flashcards').delete().eq('id', id);
+
+    const el = document.querySelector(`[data-card-id="${CSS.escape(id)}"]`);
+    await animateItemRemoval(el);
+
     await refreshFlashcards();
     showToast(t('flashcards.card_deleted'));
   });
@@ -940,20 +1033,31 @@ window.deleteFlashcard = function(id) {
 // ── New Deck ──
 window.openAddFlashDeckModal = function() {
   closeAllFlashModals();
-  const html = `<div class="modal-overlay" id="addFlashDeckModal" style="display:flex;" onclick="if(event.target===this)closeAddFlashDeckModal()">
+  const defaultColor = nextPaletteColor(_deckMap);
+  const html = `<div class="modal-overlay" id="addFlashDeckModal" style="display:flex;" data-action="close-add-flash-deck" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('brain', 18, '#06b6d4')} ${t('flashcards.new_deck')}</h2>
       <label>${t('flashcards.deck_name')}</label>
       <input type="text" id="newDeckName" placeholder="${t('flashcards.deck_placeholder')}">
+      <div class="modal-row">
+        <div class="modal-field">
+          <label>${t('common.shortname')}</label>
+          <input type="text" id="newDeckShortname" placeholder="${t('flashcards.shortname_placeholder')}" maxlength="20">
+        </div>
+        <div class="modal-field">
+          <label>${t('common.color')}</label>
+          <input type="color" id="newDeckColor" value="${defaultColor}">
+        </div>
+      </div>
       <label>${t('flashcards.deck_type')}</label>
       <div class="deck-type-selector">
-        <button class="deck-type-btn active" id="deckTypeFlashcard" onclick="selectDeckType('flashcard')">${lucideIcon('layers', 14)} ${t('flashcards.type_flashcard')}</button>
-        <button class="deck-type-btn" id="deckTypeText" onclick="selectDeckType('text')">${lucideIcon('book-open', 14)} ${t('flashcards.type_text')}</button>
+        <button class="deck-type-btn active" id="deckTypeFlashcard" data-action="select-deck-type" data-type="flashcard">${lucideIcon('layers', 14)} ${t('flashcards.type_flashcard')}</button>
+        <button class="deck-type-btn" id="deckTypeText" data-action="select-deck-type" data-type="text">${lucideIcon('book-open', 14)} ${t('flashcards.type_text')}</button>
       </div>
       <input type="hidden" id="newDeckType" value="flashcard">
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeAddFlashDeckModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewFlashDeck()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-add-flash-deck">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-new-flash-deck">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -971,30 +1075,45 @@ window.closeAddFlashDeckModal = function() {
   const m = document.getElementById('addFlashDeckModal'); if (m) m.remove();
 };
 
-window.saveNewFlashDeck = function() {
+window.saveNewFlashDeck = async function() {
   const name = document.getElementById('newDeckName').value.trim();
   if (!name) { showToast(t('toast.name_required')); return; }
+
+  // Check for duplicate deck name
+  for (const d of _deckMap.values()) {
+    if (d.name.toLowerCase() === name.toLowerCase()) {
+      showToast(t('toast.name_required'), 'error');
+      return;
+    }
+  }
+
+  // Create the deck row in DB first
+  if (state.db.connected) {
+    const shortname = document.getElementById('newDeckShortname').value.trim() || null;
+    const color = document.getElementById('newDeckColor').value;
+    const sortOrder = Math.max(0, ...Array.from(_deckMap.values()).map(d => d.sort_order || 0)) + 1;
+    await state.db.from('flashcard_decks').insert({ name, shortname, color, sort_order: sortOrder });
+    await loadFlashcardDecks();
+  }
+
   const type = document.getElementById('newDeckType').value;
   closeAddFlashDeckModal();
-  if (type === 'text') {
-    openAddTextModal(name);
-  } else {
-    openAddFlashcardModal(name);
-  }
+  showToast(t('toast.created'), 'success');
+  await refreshFlashcards();
 };
 
 function closeAllFlashModals() {
-  ['addFlashcardModal', 'editFlashcardModal', 'addDraftModal', 'addFlashDeckModal', 'addTextModal', 'editTextModal', 'importFlashModal'].forEach(id => {
+  ['addFlashcardModal', 'editFlashcardModal', 'addDraftModal', 'addFlashDeckModal', 'addTextModal', 'editTextModal', 'editDeckModal', 'importFlashModal'].forEach(id => {
     const m = document.getElementById(id); if (m) m.remove();
   });
 }
 
 // ── Practice Session ──
-function startPractice(deckFilter) {
+function startPractice(deckFilter, anchorEl) {
   const now = new Date();
   let pool = allCards.filter(c => !c.last_review || !c.next_review || new Date(c.next_review) <= now);
   if (deckFilter && deckFilter !== '__all') pool = pool.filter(c => c.deck === deckFilter);
-  if (pool.length === 0) { showAllCaughtUp('cards'); return; }
+  if (pool.length === 0) { showAllCaughtUp('cards', anchorEl); return; }
 
   sessionDeck = deckFilter || null;
 
@@ -1023,6 +1142,7 @@ function startPractice(deckFilter) {
   showNextCard();
 }
 window.startPractice = startPractice;
+
 
 // Generate storm logo watermark SVG for practice overlays
 function practiceHeaderLogo() {
@@ -1078,10 +1198,10 @@ function showNextCard() {
     <div class="practice-header">
       ${practiceHeaderLogo()}
       <div class="practice-progress-bar"><div class="practice-progress-fill" style="width:${pct}%;"></div></div>
-      <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${card.deck}</span></div>
-      <button class="practice-close" onclick="endPractice()">✕</button>
+      <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${card.deck || t('common.category_default')}</span></div>
+      <button class="practice-close" data-action="end-practice">✕</button>
     </div>
-    <div class="practice-card-area" onclick="revealCard()">
+    <div class="practice-card-area" data-action="reveal-card">
       <div class="practice-card" id="practiceCard">
         <div class="practice-card-front">
           <div class="practice-card-label">${t('flashcards.question')}</div>
@@ -1095,10 +1215,10 @@ function showNextCard() {
     </div>
     <div class="practice-hint" id="practiceHint">${t('flashcards.tap_to_reveal')}</div>
     <div class="practice-buttons" id="practiceButtons" style="display:none;">
-      <button class="rating-btn rating-again" onclick="rateCard(1)"><span class="rating-num">1</span> ${t('flashcards.again')}</button>
-      <button class="rating-btn rating-hard" onclick="rateCard(2)"><span class="rating-num">2</span> ${t('flashcards.hard')}</button>
-      <button class="rating-btn rating-good" onclick="rateCard(3)"><span class="rating-num">3</span> ${t('flashcards.good')}</button>
-      <button class="rating-btn rating-easy" onclick="rateCard(4)"><span class="rating-num">4</span> ${t('flashcards.easy')}</button>
+      <button class="rating-btn rating-again" data-action="rate-card" data-rating="1"><span class="rating-num">1</span> ${t('flashcards.again')}</button>
+      <button class="rating-btn rating-hard" data-action="rate-card" data-rating="2"><span class="rating-num">2</span> ${t('flashcards.hard')}</button>
+      <button class="rating-btn rating-good" data-action="rate-card" data-rating="3"><span class="rating-num">3</span> ${t('flashcards.good')}</button>
+      <button class="rating-btn rating-easy" data-action="rate-card" data-rating="4"><span class="rating-num">4</span> ${t('flashcards.easy')}</button>
     </div>`;
   initMarquee();
 }
@@ -1153,7 +1273,7 @@ function showSessionSummary() {
   const hasMore = remainingPool.length > 0;
 
   const continueBtn = hasMore
-    ? `<button class="btn practice-continue-btn" onclick="startPractice('${escQ(sessionDeck || '')}')">${t('flashcards.continue_session')}</button>`
+    ? `<button class="btn practice-continue-btn" data-action="start-practice" data-deck="${esc(sessionDeck || '')}">${t('flashcards.continue_session')}</button>`
     : '';
 
   overlay.innerHTML = `
@@ -1168,29 +1288,45 @@ function showSessionSummary() {
       </div>
       <div class="practice-summary-actions">
         ${continueBtn}
-        <button class="btn practice-done-btn" onclick="endPractice()">${t('common.close')}</button>
+        <button class="btn practice-done-btn" data-action="end-practice">${t('common.close')}</button>
       </div>
     </div>`;
 }
 
 // Show "all caught up" overlay when no cards/texts are due
-function showAllCaughtUp(kind) {
-  showPracticeOverlay();
-  const overlay = document.getElementById('practiceOverlay');
-  if (!overlay) return;
+function showAllCaughtUp(kind, anchorEl) {
   const subtitle = kind === 'texts'
     ? t('text_revision.all_caught_up_texts')
     : t('flashcards.all_caught_up_cards');
-  overlay.innerHTML = `
-    <div class="practice-summary">
-      ${practiceSummaryLogo()}
-      <div class="practice-summary-emoji">${lucideIcon('circle-check', 32, '#22c55e')}</div>
-      <h2>${t('flashcards.all_caught_up')}</h2>
-      <p class="all-caught-up-detail">${subtitle}</p>
-      <div class="practice-summary-actions">
-        <button class="btn practice-done-btn" onclick="endPractice()">${t('common.close')}</button>
-      </div>
-    </div>`;
+  const msg = `${t('flashcards.all_caught_up')} ${subtitle}`;
+
+  // Show as an anchored tooltip near the clicked button
+  if (anchorEl) {
+    // Remove any existing tooltip
+    document.querySelectorAll('.caught-up-tooltip').forEach(el => el.remove());
+    const tip = document.createElement('div');
+    tip.className = 'caught-up-tooltip';
+    tip.textContent = msg;
+    document.body.appendChild(tip);
+    const rect = anchorEl.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    tip.style.top = `${rect.bottom + 8}px`;
+    // Position centered on button, then clamp to 12px from each edge
+    requestAnimationFrame(() => {
+      const tipW = tip.offsetWidth;
+      const center = rect.left + rect.width / 2;
+      let left = center - tipW / 2;
+      left = Math.max(12, Math.min(left, vw - tipW - 12));
+      tip.style.left = `${left}px`;
+    });
+    setTimeout(() => tip.classList.add('caught-up-tooltip-visible'), 10);
+    setTimeout(() => {
+      tip.classList.remove('caught-up-tooltip-visible');
+      setTimeout(() => tip.remove(), 200);
+    }, 2500);
+  } else {
+    showToast(msg, 'success');
+  }
 }
 
 // ===================================================================
@@ -1246,10 +1382,10 @@ function renderTextItem(tx, color) {
         ${progressBar}
       </div>
       <div class="todo-actions">
-        <button onclick="startTextPracticeForText('${tx.id}')" title="${t('text_revision.revise_this')}">${lucideIcon('book-open', 16)}</button>
+        <button data-action="start-text-practice-for-text" data-id="${esc(tx.id)}" title="${t('text_revision.revise_this')}">${lucideIcon('book-open', 16)}</button>
         <button class="tr-expand-toggle" data-text-id="${tx.id}" title="Expand">${lucideIcon('chevron-down', 16)}</button>
-        <button onclick="openEditTextModal('${tx.id}')" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
-        <button onclick="deleteText('${tx.id}')" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
+        <button data-action="open-edit-text" data-id="${esc(tx.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
+        <button data-action="delete-text" data-id="${esc(tx.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>
     </div>
     <div class="tr-text-body" id="trBody-${tx.id}" style="display:none;">
@@ -1280,10 +1416,10 @@ function splitTextIntoChunks(content, linesPerChunk) {
 // ── Add Text Modal ──
 window.openAddTextModal = function(deck) {
   closeAllFlashModals();
-  const html = `<div class="modal-overlay" id="addTextModal" style="display:flex;" onclick="if(event.target===this)closeAddTextModal()">
+  const html = `<div class="modal-overlay" id="addTextModal" style="display:flex;" data-action="close-add-text" data-overlay-close="true">
     <div class="modal modal-wide">
       <h2>${lucideIcon('file-text', 18, '#6366f1')} ${t('text_revision.add_text')}</h2>
-      <input type="hidden" id="newTextDeck" value="${esc(deck || 'General')}">
+      <input type="hidden" id="newTextDeck" value="${esc(deck ?? '')}">
       <label>${t('text_revision.title_label')}</label>
       <input type="text" id="newTextTitle" placeholder="${t('text_revision.title_placeholder')}">
       <label>${t('text_revision.author_label')}</label>
@@ -1301,8 +1437,8 @@ window.openAddTextModal = function(deck) {
         </div>
       </div>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeAddTextModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveNewText()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-add-text">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-new-text">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -1327,9 +1463,11 @@ window.saveNewText = async function() {
 
   if (!state.db.connected) return;
 
+  const deckId = _deckByName.get(deck)?.id || null;
+
   // Insert text
   const { data: inserted } = await state.db.from('texts').insert({
-    deck, title, author, content, lines_per_chunk: linesPerChunk, context_lines: contextLines
+    deck, title, author, content, lines_per_chunk: linesPerChunk, context_lines: contextLines, deck_id: deckId
   }).select('*');
 
   if (!inserted || inserted.length === 0) { showToast(t('toast.failed_to_add')); return; }
@@ -1351,8 +1489,12 @@ window.saveNewText = async function() {
 window.deleteText = function(id) {
   const tx = allTexts.find(t => t.id === id);
   if (!tx) return;
-  showDeleteConfirm(t('text_revision.delete_text'), t('text_revision.delete_confirm'), async () => {
+  showConfirmAction(t('text_revision.delete_text'), t('text_revision.delete_confirm'), async () => {
     if (state.db.connected) await state.db.from('texts').delete().eq('id', id);
+
+    const el = document.querySelector(`[data-text-id="${CSS.escape(id)}"]`);
+    await animateItemRemoval(el);
+
     await refreshFlashcards();
     showToast(t('text_revision.text_deleted'));
   });
@@ -1362,9 +1504,10 @@ window.openEditTextModal = function(id) {
   const tx = allTexts.find(t => t.id === id);
   if (!tx) return;
   closeAllFlashModals();
-  const decks = [...new Set([...allTexts.map(t => t.deck), ...allCards.map(c => c.deck)])].sort();
-  const deckOptions = decks.map(d => `<option value="${esc(d)}" ${d === tx.deck ? 'selected' : ''}>${esc(d)}</option>`).join('');
-  const html = `<div class="modal-overlay" id="editTextModal" style="display:flex;" onclick="if(event.target===this)closeEditTextModal()">
+  const currentDeckId = deckIdForText(tx);
+  const sortedDecks = [..._deckMap.values()].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const deckOptions = sortedDecks.map(d => `<option value="${esc(d.id)}" ${d.id === currentDeckId ? 'selected' : ''}>${esc(d.name || t('common.category_default'))}</option>`).join('');
+  const html = `<div class="modal-overlay" id="editTextModal" style="display:flex;" data-action="close-edit-text" data-overlay-close="true">
     <div class="modal modal-wide">
       <h2>${lucideIcon('pencil', 18, '#f59e0b')} ${t('text_revision.edit_text')}</h2>
       <input type="hidden" id="editTextId" value="${id}">
@@ -1377,8 +1520,8 @@ window.openEditTextModal = function(id) {
       <label>${t('text_revision.content_label')}</label>
       <textarea id="editTextContent" rows="10" style="font-family:monospace;font-size:0.85rem;">${esc(tx.content)}</textarea>
       <div class="modal-actions">
-        <button class="modal-cancel" onclick="closeEditTextModal()">${t('common.cancel')}</button>
-        <button class="modal-save" onclick="saveEditText()">${t('common.save')}</button>
+        <button class="modal-cancel" data-action="close-edit-text">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-edit-text">${t('common.save')}</button>
       </div>
     </div>
   </div>`;
@@ -1391,12 +1534,14 @@ window.closeEditTextModal = function() {
 
 window.saveEditText = async function() {
   const id = document.getElementById('editTextId').value;
-  const deck = document.getElementById('editTextDeck').value.trim();
+  const deckId = document.getElementById('editTextDeck').value.trim();
+  const deckRow = _deckMap.get(deckId);
+  const deck = deckRow?.name || deckId;
   const title = document.getElementById('editTextTitle').value.trim();
   const author = document.getElementById('editTextAuthor').value.trim();
   const content = document.getElementById('editTextContent').value;
   if (!title || !content.trim()) { showToast('Title and content are required'); return; }
-  const updates = { deck, title, author: author || null, content };
+  const updates = { deck, title, author: author || null, content, deck_id: deckId };
   if (state.db.connected) await state.db.from('texts').update(updates).eq('id', id);
   closeEditTextModal();
   await refreshFlashcards();
@@ -1404,7 +1549,7 @@ window.saveEditText = async function() {
 };
 
 // ── Text Practice Session ──
-function startTextPractice(deckFilter) {
+function startTextPractice(deckFilter, anchorEl) {
   const now = new Date();
   let pool = [];
 
@@ -1422,7 +1567,7 @@ function startTextPractice(deckFilter) {
     }
   }
 
-  if (pool.length === 0) { showAllCaughtUp('texts'); return; }
+  if (pool.length === 0) { showAllCaughtUp('texts', anchorEl); return; }
 
   // Pick the single most due chunk (one revision per session)
   // Among chunks with the same priority, pick randomly
@@ -1523,7 +1668,7 @@ function showTextPracticeOverlay(text, chunk) {
       ${practiceHeaderLogo()}
       <div class="practice-progress-bar"><div class="practice-progress-fill" style="width:100%;"></div></div>
       <div class="practice-meta"><span class="practice-meta-text">${esc(text.title)}${authorStr}</span></div>
-      <button class="practice-close" onclick="endTextPractice()">X</button>
+      <button class="practice-close" data-action="end-text-practice">X</button>
     </div>
     <div class="tr-practice-area">
       <div class="tr-context-section">
@@ -1531,11 +1676,11 @@ function showTextPracticeOverlay(text, chunk) {
         ${contextHtml}
       </div>
       <div class="tr-lines-container" id="trLinesContainer">
-        ${chunkLines.map((line, i) => `<div class="tr-line tr-line-masked${i === 0 ? ' tr-line-next' : ''}" data-line-idx="${i}" data-text="${esc(line || '\u00A0')}" onclick="handleLineClick(this)">${'• '.repeat(Math.max(1, Math.ceil((line || ' ').length / 6)))}</div>`).join('')}
+        ${chunkLines.map((line, i) => `<div class="tr-line tr-line-masked${i === 0 ? ' tr-line-next' : ''}" data-line-idx="${i}" data-text="${esc(line || '\u00A0')}" data-action="handle-line-click">${'• '.repeat(Math.max(1, Math.ceil((line || ' ').length / 6)))}</div>`).join('')}
       </div>
       <div class="tr-hint" id="trHint">${t('text_revision.tap_to_reveal')}</div>
       <div class="tr-submit-section" id="trSubmitSection" style="display:none;">
-        <button class="btn practice-done-btn" onclick="submitTextReview('${chunk.id}', ${chunkLines.length})">${t('text_revision.submit')}</button>
+        <button class="btn practice-done-btn" data-action="submit-text-review" data-id="${esc(chunk.id)}" data-lines="${chunkLines.length}">${t('text_revision.submit')}</button>
       </div>
     </div>`;
   initMarquee();
@@ -1641,10 +1786,10 @@ function showTextPracticeSummary(known, total, rating) {
 
   let actionButtons = '';
   if (sameTextMore) {
-    actionButtons += `<button class="btn practice-continue-btn" onclick="continueTextSameText()">${t('text_revision.continue_same_text')}</button>`;
+    actionButtons += `<button class="btn practice-continue-btn" data-action="continue-text-same-text">${t('text_revision.continue_same_text')}</button>`;
   }
   if (anyMore) {
-    actionButtons += `<button class="btn practice-continue-btn practice-continue-alt" onclick="startTextPractice('${escQ(trSessionDeck || '')}')">${t('text_revision.continue_another')}</button>`;
+    actionButtons += `<button class="btn practice-continue-btn practice-continue-alt" data-action="start-text-practice" data-deck="${esc(trSessionDeck || '')}">${t('text_revision.continue_another')}</button>`;
   }
 
   overlay.innerHTML = `
@@ -1659,7 +1804,7 @@ function showTextPracticeSummary(known, total, rating) {
       </div>
       <div class="practice-summary-actions">
         ${actionButtons}
-        <button class="btn practice-done-btn" onclick="endTextPractice()">${t('common.close')}</button>
+        <button class="btn practice-done-btn" data-action="end-text-practice">${t('common.close')}</button>
       </div>
     </div>`;
 }
@@ -1784,6 +1929,15 @@ Output a JSON array. Each element must have:
 - "author": string or null
 - "content": string (the full text, line breaks as \\n)
 
+Example:
+[
+  {
+    "title": "Le Lac",
+    "author": "Alphonse de Lamartine",
+    "content": "Ainsi, toujours poussés vers de nouveaux rivages,\\nDans la nuit éternelle emportés sans retour,\\nNe pourrons-nous jamais sur l'océan des âges\\nJeter l'ancre un seul jour ?"
+  }
+]
+
 Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}`;
   }
 
@@ -1819,6 +1973,12 @@ Paste your flashcards below and I will convert them:`;
 Output a JSON array of objects, each with:
 - "front": string (the question)
 - "back": string (the answer)
+
+Example:
+[
+  { "front": "What is the capital of France?", "back": "Paris" },
+  { "front": "H₂O is the formula for?", "back": "Water" }
+]
 
 Output ONLY valid JSON, no markdown fences, no commentary.${langInstruction}`;
 }
@@ -1859,7 +2019,7 @@ window.openImportModal = async function(presetDeck) {
   }).join('');
 
   const deckOptions = allDecks.map(d =>
-    `<option value="${esc(d)}" ${d === presetDeck ? 'selected' : ''}>${esc(d)}</option>`
+    `<option value="${esc(d)}" ${d === presetDeck ? 'selected' : ''}>${esc(d || t('common.category_default'))}</option>`
   ).join('');
 
   const overlay = document.createElement('div');
@@ -1997,7 +2157,7 @@ window.openImportModal = async function(presetDeck) {
   function selectedType() { return typeSelect.value; }
 
   function updatePrompt() {
-    const deck = selectedDeck() || 'General';
+    const deck = selectedDeck() || t('common.category_default');
     const type = selectedType();
     promptPre.value = buildImportPrompt(importMode, deck, type);
   }
@@ -2252,13 +2412,23 @@ window.openImportModal = async function(presetDeck) {
     confirmBtn.disabled = true;
     confirmBtn.textContent = t('flashcards.import_importing');
 
+    // If deck doesn't exist yet, create the deck row (same as manual creation)
+    let deckId = _deckByName.get(deck)?.id || null;
+    if (!deckId && deck && state.db.connected) {
+      const color = nextPaletteColor(_deckMap);
+      const sortOrder = Math.max(0, ...Array.from(_deckMap.values()).map(d => d.sort_order || 0)) + 1;
+      await state.db.from('flashcard_decks').insert({ name: deck, color, sort_order: sortOrder });
+      await loadFlashcardDecks();
+      deckId = _deckByName.get(deck)?.id || null;
+    }
+
     try {
       if (type === 'text') {
         for (const item of selectedItems) {
           const linesPerChunk = 4;
           const { data: inserted } = await state.db.from('texts').insert({
             deck, title: item.title, author: item.author || null,
-            content: item.content, lines_per_chunk: linesPerChunk, context_lines: 3
+            content: item.content, lines_per_chunk: linesPerChunk, context_lines: 3, deck_id: deckId
           }).select('*');
           if (inserted && inserted.length > 0) {
             const textRow = inserted[0];
@@ -2268,7 +2438,7 @@ window.openImportModal = async function(presetDeck) {
           }
         }
       } else {
-        const rows = selectedItems.map(item => ({ deck, front: item.front, back: item.back }));
+        const rows = selectedItems.map(item => ({ deck, front: item.front, back: item.back, deck_id: deckId }));
         await state.db.from('flashcards').insert(rows);
       }
       overlay.remove();
@@ -2297,34 +2467,104 @@ function getFlashcards() { return allCards; }
 function getTexts() { return allTexts; }
 function getTextProgress() { return allChunkProgress; }
 
-export { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts, getFlashcards, getTexts, getTextProgress };
+export { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts, getFlashcards, getTexts, getTextProgress, loadFlashcardDecks, getFlashcardDecks, getDeckColor };
 window.renderFlashcards = renderFlashcards;
 window.setFlashcardFilter = setFlashcardFilter;
 window.refreshFlashcards = refreshFlashcards;
 
-window.promptFlashShortname = promptFlashShortname;
 
 async function deleteDeck(deck) {
+  const deckRow = _deckByName.get(deck);
   const cards = allCards.filter(c => c.deck === deck);
   const texts = allTexts.filter(tx => tx.deck === deck);
   const drafts = allDrafts.filter(d => d.proposed_deck === deck);
   const total = cards.length + texts.length;
   const msg = total > 0
-    ? `Delete "${deck}" and its ${total} item(s)?`
+    ? `Delete "${deck}" and its ${total} item(s)? This cannot be undone.`
     : `Delete empty deck "${deck}"?`;
 
-  showDeleteConfirm(t('common.delete'), msg, async () => {
-    // Delete flashcards in bulk
-    if (cards.length) await state.db.from('flashcards').delete().eq('deck', deck);
-    // Delete chunk progress for texts in this deck, then texts
-    for (const tx of texts) {
-      await state.db.from('text_line_progress').delete().eq('text_id', tx.id);
-    }
-    if (texts.length) await state.db.from('texts').delete().eq('deck', deck);
-    // Delete drafts targeting this deck
+  showConfirmAction(t('common.delete'), msg, async () => {
+    // Delete drafts targeting this deck (proposed_deck is TEXT, not FK)
     if (drafts.length) await state.db.from('flashcard_notes').delete().eq('proposed_deck', deck);
+    // CASCADE on FK — deleting the deck removes all its flashcards + texts
+    if (deckRow) {
+      await state.db.from('flashcard_decks').delete().eq('id', deckRow.id);
+    } else {
+      // Fallback for items without a deck row (backward compat)
+      if (cards.length) await state.db.from('flashcards').delete().eq('deck', deck);
+      for (const tx of texts) {
+        await state.db.from('text_line_progress').delete().eq('text_id', tx.id);
+      }
+      if (texts.length) await state.db.from('texts').delete().eq('deck', deck);
+    }
     showToast(t('toast.deleted'), 'info');
     await refreshFlashcards();
   });
 }
 window.deleteDeck = deleteDeck;
+
+// ── Edit Deck Modal ──
+function openEditDeckModal(deck) {
+  const deckRow = _deckByName.get(deck);
+  if (!deckRow) return;
+  closeAllFlashModals();
+  const html = `<div class="modal-overlay" id="editDeckModal" style="display:flex;" data-action="close-edit-deck" data-overlay-close="true">
+    <div class="modal">
+      <h2>${lucideIcon('pencil', 18, '#f59e0b')} ${t('flashcards.edit_deck')}</h2>
+      <input type="hidden" id="editDeckId" value="${esc(deckRow.id)}">
+      <label>${t('flashcards.deck_name')}</label>
+      <input type="text" id="editDeckName" value="${esc(deckRow.name)}"${deckRow.is_protected ? ' disabled' : ''}>
+      <div class="modal-row">
+        <div class="modal-field">
+          <label>${t('common.shortname')}</label>
+          <input type="text" id="editDeckShortname" value="${esc(deckRow.shortname || '')}" placeholder="${t('flashcards.shortname_placeholder')}">
+        </div>
+        <div class="modal-field">
+          <label>${t('common.color')}</label>
+          <input type="color" id="editDeckColor" value="${esc(deckRow.color || FLASH_DEFAULT_COLOR)}">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-cancel" data-action="close-edit-deck">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-edit-deck">${t('common.save')}</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  document.getElementById(deckRow.is_protected ? 'editDeckShortname' : 'editDeckName').focus();
+}
+
+window.openEditDeckModal = openEditDeckModal;
+
+window.closeEditDeckModal = function() {
+  const m = document.getElementById('editDeckModal'); if (m) m.remove();
+};
+
+window.saveEditDeck = async function() {
+  const deckId = document.getElementById('editDeckId').value;
+  const deckRow = _deckMap.get(deckId);
+  if (!deckRow) return;
+  const newName = document.getElementById('editDeckName').value.trim();
+  const shortname = document.getElementById('editDeckShortname').value.trim();
+  const color = document.getElementById('editDeckColor').value;
+  if (!newName && !deckRow.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
+
+  const updates = { shortname: shortname || null, color };
+  if (!deckRow.is_protected) updates.name = newName;
+  await state.db.from('flashcard_decks').update(updates).eq('id', deckId);
+
+  // Update items' deck name string if name changed
+  if (!deckRow.is_protected && newName !== deckRow.name) {
+    await state.db.from('flashcards').update({ deck: newName }).eq('deck', deckRow.name);
+    await state.db.from('texts').update({ deck: newName }).eq('deck', deckRow.name);
+  }
+
+  Object.assign(deckRow, updates);
+  if (updates.name) deckRow.name = updates.name;
+  _deckByName.clear();
+  for (const row of _deckMap.values()) _deckByName.set(row.name, row);
+
+  closeEditDeckModal();
+  await refreshFlashcards();
+  showToast(t('toast.updated'), 'success');
+};

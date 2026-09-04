@@ -1,6 +1,7 @@
 // Service Worker for DeLaClaw (PWA)
 // CACHE_VERSION is updated by the pre-commit hook from VERSION file
-const CACHE_VERSION = 'dlc-1.225';
+const CACHE_VERSION = 'dlc-1.937';
+
 
 const PRECACHE_URLS = [
   './',
@@ -15,12 +16,18 @@ const PRECACHE_URLS = [
   'js/adapters/offline-cache.js',
   'js/adapters/rest.js',
   'js/adapters/drive.js',
+  'js/agents-ui.js',
+  'js/auth.js',
+  'js/backend-logos.js',
   'js/birthdays.js',
-  'js/habits.js',
+  'js/calendar-sync.js',
+  'js/crypto-sync.js',
   'js/db.js',
+  'js/delegation.js',
   'js/demo-chooser.js',
   'js/demo-data.js',
   'js/flashcards.js',
+  'js/habits.js',
   'js/hero.js',
   'js/i18n.js',
   'js/icons.js',
@@ -29,12 +36,33 @@ const PRECACHE_URLS = [
   'js/logo.js',
   'js/main.js',
   'js/projects.js',
-  'js/supabase.js',
+  'js/sharing.js',
+  'js/sharing-drive.js',
+  'js/sharing-envelope.js',
+  'js/sharing-interface.js',
+  'js/sharing-supabase.js',
+  'js/sharing-ui.js',
+  'js/state.js',
+  'js/storm3d.js',
   'js/todos.js',
   'js/utils.js',
   'js/version.js',
   'js/vestiaire.js',
   'js/welcome.js',
+  'js/bootstrap.js',
+  'js/sw-register.js',
+  'vendor/supabase.js',
+  'vendor/three/build/three.module.js',
+  'vendor/three/examples/jsm/utils/BufferGeometryUtils.js',
+  'icons/brand/claude.svg',
+  'icons/brand/codex.svg',
+  'icons/brand/cursor.svg',
+  'icons/brand/googledrive.svg',
+  'icons/brand/googlecalendar.svg',
+  'icons/brand/grok.svg',
+  'icons/brand/hermes.svg',
+  'icons/brand/nanoclaw.svg',
+  'icons/brand/openclaw.svg',
 ];
 
 // Install: precache static assets
@@ -65,6 +93,11 @@ self.addEventListener('fetch', (event) => {
 
   // Network-first for Supabase API calls — pass through, don't intercept
   if (url.hostname.includes('supabase.co') || url.hostname.includes('supabase.com')) {
+    return;
+  }
+
+  // Pass through Google API calls (Drive, Calendar, Identity) — never intercept
+  if (url.hostname.includes('googleapis.com') || url.hostname.includes('accounts.google.com')) {
     return;
   }
 

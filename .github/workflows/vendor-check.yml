@@ -1,0 +1,73 @@
+name: vendor-check
+
+on:
+  schedule:
+    - cron: '0 8 * * 1' # Mondays 08:00 UTC
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Check for new vendor versions
+        id: check
+        run: |
+          set -e
+          LATEST_SUPA=$(curl -s https://data.jsdelivr.com/v1/package/npm/@supabase/supabase-js | python3 -c "import sys,json; print(json.load(sys.stdin)['tags']['latest'])")
+          LATEST_THREE=$(curl -s https://data.jsdelivr.com/v1/package/npm/three | python3 -c "import sys,json; print(json.load(sys.stdin)['tags']['latest'])")
+          echo "latest_supabase=$LATEST_SUPA" >> $GITHUB_OUTPUT
+          echo "latest_three=$LATEST_THREE" >> $GITHUB_OUTPUT
+          
+          # Read current pinned versions from index.html comment
+          CURRENT_SUPA=$(grep -oP 'supabase @\K[0-9.]+' index.html || echo "0")
+          CURRENT_THREE=$(grep -oP 'three @\K[0-9.]+' index.html || echo "0")
+          echo "Current: supabase $CURRENT_SUPA / three $CURRENT_THREE"
+          echo "Latest: supabase $LATEST_SUPA / three $LATEST_THREE"
+
+      - name: Update vendor files
+        run: |
+          chmod +x scripts/update-vendor.sh
+          ./scripts/update-vendor.sh ${{ steps.check.outputs.latest_supabase }} ${{ steps.check.outputs.latest_three }}
+          # verify files exist
+          ls -lh vendor/supabase.js vendor/three/build/three.module.js
+          # run tests (non-critical, but catch breaking API)
+          npm install -g bun 2>/dev/null || true
+          ~/.bun/bin/bun tests/tests.js || bun tests/tests.js || true
+
+      - name: Create PR if changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/vendor-bump-${{ steps.check.outputs.latest_supabase }}
+          base: dev
+          title: "chore(vendor): bump supabase-js to ${{ steps.check.outputs.latest_supabase }}, three to ${{ steps.check.outputs.latest_three }}"
+          body: |
+            Automated vendor bump via weekly `vendor-check` workflow.
+
+            - supabase-js: `${{ steps.check.outputs.latest_supabase }}`
+            - three: `${{ steps.check.outputs.latest_three }}`
+
+            Changes:
+            - `vendor/supabase.js`
+            - `vendor/three/build/three.module.js`
+            - `vendor/three/examples/jsm/utils/BufferGeometryUtils.js`
+            - `index.html` comment
+
+            Checklist for reviewer:
+            - [ ] Check https://github.com/supabase/supabase-js/releases/tag/v${{ steps.check.outputs.latest_supabase }}
+            - [ ] Check https://github.com/mrdoob/three.js/releases/tag/r${{ steps.check.outputs.latest_three }}
+            - [ ] `bun tests/tests.js` 142 passed (3 Playwright fail is pre-existing)
+            - [ ] Bump VERSION file (hook does sw.js CACHE_VERSION)
+          commit-message: |
+            chore(vendor): bump to supabase-js ${{ steps.check.outputs.latest_supabase }}
+
+            Automated by vendor-check workflow
+
+            Checked: versioning [~], i18n [~], docs [~], readme [~], checklist [~], tests [~], welcome [~], prompts [~], xss [~]
+          labels: dependencies

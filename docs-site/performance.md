@@ -1,71 +1,49 @@
 # Performance Audit
 
-Last updated: 2026-06-08
+Last updated: 2026-08-21
 
 ## Overview
 
 DeLaClaw is a no-build, no-bundle vanilla JS application. Performance characteristics are unusual compared to framework-based SPAs: there is no tree-shaking, no code splitting, and no minification. The tradeoff is zero build complexity and instant development iteration.
 
-## Bundle size
+## Bundle structure
 
-All files are served as raw, unminified source. Sizes below are uncompressed / gzip-estimated.
+All files are served as raw, unminified source. No build step, no transpilation.
 
-### JavaScript (25 files)
+### JavaScript
 
-| File | Raw | Notes |
+Feature modules live in `js/` and adapters in `js/adapters/`. The largest modules are `main.js` (app bootstrap, settings, login, view switching), `i18n.js` (translation strings for 3 languages), `habits.js`, and `flashcards.js`. Sharing logic is split across several modules (`sharing.js`, `sharing-ui.js`, `sharing-supabase.js`, `sharing-drive.js`, `sharing-interface.js`, `sharing-envelope.js`). Other modules handle individual features (todos, projects, vestiaire, birthdays, lists, welcome), drag-and-drop (`item-utils.js`), utilities, and the landing page (hero, logo, storm3d).
+
+### CSS
+
+A single `style.css` covers both themes (dark and light), all pages, and all responsive breakpoints.
+
+### Vendor libraries (self-hosted)
+
+| Library | Location | Notes |
 |---|---|---|
-| `style.css` | 131 KB (~24 KB gzip) | All styles for both themes |
-| `js/main.js` | 82 KB (~20 KB gzip) | App bootstrap, settings, login, view switching |
-| `js/habits.js` | 78 KB | Habit tracking |
-| `js/flashcards.js` | 72 KB | Flashcard SRS + text memorization |
-| `js/i18n.js` | 61 KB | Translation strings (3 languages) |
-| `js/demo-data.js` | 50 KB | Sample data for demo mode |
-| `js/todos.js` | 43 KB | TODO management |
-| `js/projects.js` | 42 KB | Project boards |
-| `js/welcome.js` | 39 KB | Today dashboard |
-| `js/vestiaire.js` | 33 KB | Wardrobe inventory |
-| `js/birthdays.js` | 33 KB | Birthday tracker |
-| `js/demo-chooser.js` | 24 KB | Demo dataset selector |
-| `js/lists.js` | 22 KB | Checklists |
-| `js/icons.js` | 18 KB | Lucide icon SVG paths |
-| `js/hero.js` | 18 KB | Landing page animations |
-| `js/utils.js` | 15 KB | Shared utilities |
-| `js/item-utils.js` | 14 KB | Drag-and-drop, inline editing |
-| `js/logo.js` | 9 KB | Logo animation |
-| Other adapters/modules | ~46 KB | db.js, supabase.js, rest.js, demo.js, offline-cache.js, storm3d.js, version.js |
+| Supabase JS v2 | `vendor/supabase.js` | Loaded synchronously in `<head>` — render-blocking |
+| Three.js v0.170.0 | `vendor/three/` | Loaded via import map, used only for the hero landing page |
 
-**Total JavaScript**: ~686 KB raw, ~163 KB gzip  
-**Total CSS**: ~131 KB raw, ~24 KB gzip  
-**Total HTML**: ~40 KB raw, ~9 KB gzip
-
-**Grand total (application code)**: ~857 KB raw, ~196 KB gzip
-
-### Static assets
-
-| Asset | Size |
-|---|---|
-| `icons/icon-512.png` | 110 KB |
-| `icons/icon-192.png` | 22 KB |
-| `icons/favicon.png` | 22 KB |
-| `manifest.json` | < 1 KB |
+Both were moved from CDN to self-hosted as part of CSP hardening. See `attributions.md` for versions and licenses.
 
 ### External resources (CDN)
 
-| Resource | Size (approx) | Blocking? |
-|---|---|---|
-| Supabase JS v2 (`@supabase/supabase-js`) | ~115 KB gzip | Yes (loaded via `<script>` in `<head>`) |
-| Three.js v0.170.0 | ~160 KB gzip | No (loaded via import map, used only for hero) |
-| DM Sans font (4 weights) | ~100 KB | Render-blocking (linked in `<head>`) |
+| Resource | Blocking? |
+|---|---|
+| Google Identity Services (`accounts.google.com`) | No (async) |
+| Google API client (`apis.google.com`) | No (loaded on demand) |
+| DM Sans font (Google Fonts) | Render-blocking (`<link>` in `<head>`, uses `display=swap`) |
 
 ## Network requests on initial load
 
-1. `index.html` (40 KB)
-2. `style.css` (131 KB) -- render-blocking
-3. Google Fonts CSS + font files (~100 KB) -- render-blocking
-4. `@supabase/supabase-js` from jsDelivr (~115 KB) -- render-blocking `<script>`
-5. `js/main.js` + all ES module imports (25 files, ~686 KB total) -- deferred (`type="module"`)
-6. `manifest.json` + icons (~155 KB)
-7. Three.js from jsDelivr (~160 KB) -- lazy, only when hero page is shown
+1. `index.html` — render-blocking
+2. `style.css` — render-blocking
+3. Google Fonts CSS + font files — render-blocking (FOUT mitigated by `display=swap`)
+4. `vendor/supabase.js` — render-blocking `<script>` in `<head>`
+5. `js/main.js` + all ES module imports — deferred (`type="module"`)
+6. `manifest.json` + PWA icons
+7. Three.js from `vendor/three/` — lazy, only when the hero landing page is shown
 
 After first load, the service worker serves all assets from cache (network-first strategy with precache fallback).
 
@@ -73,26 +51,26 @@ After first load, the service worker serves all assets from cache (network-first
 
 Three resources block first paint:
 
-1. **`style.css`** -- necessary for styled rendering
-2. **Google Fonts** -- font swap may cause FOUT (flash of unstyled text)
-3. **`@supabase/supabase-js`** -- loaded synchronously in `<head>`
+1. **`style.css`** — necessary for styled rendering.
+2. **Google Fonts** — font swap may cause FOUT (flash of unstyled text).
+3. **`vendor/supabase.js`** — loaded synchronously in `<head>`.
 
 ### Potential improvements (not implemented)
 
-- **Load Supabase JS with `defer` or `async`**: move `<script src="...supabase-js">` to end of body or add `defer`. Requires ensuring the global `window.supabase` is available before the Supabase adapter initializes (the adapter is only created on login, so the timing should work).
-- **Preload font with `font-display: swap`**: Google Fonts already uses `display=swap` in the URL. Could self-host the font to eliminate the DNS lookup.
-- **Lazy-load Three.js**: currently loaded via import map; Three.js is only used for the hero landing page effect. Consider dynamic `import()` so it only loads when the hero is visible. This would save ~160 KB on app load for returning users who skip the hero.
-- **Code splitting (future)**: `demo-data.js` (50 KB) and `demo-chooser.js` (24 KB) are only needed in demo mode. `hero.js` (18 KB), `storm3d.js` (6 KB), and `logo.js` (9 KB) are only needed for the landing page. Dynamic imports could defer these.
-- **Minification**: a simple minification pass would reduce JS by ~40-50%. Not implemented because the project intentionally ships readable source (AGPL philosophy: users can inspect the code they run).
-- **i18n splitting**: `i18n.js` (61 KB) includes all 3 languages. Could load only the active language and lazy-load others on switch.
+- **Load Supabase JS with `defer`**: the Supabase adapter is only created on login, so deferred loading should work without breaking initialization order.
+- **Self-host the font**: DM Sans could be served from `vendor/` to eliminate the Google Fonts DNS lookup and make the app fully self-contained.
+- **Lazy-load Three.js**: Three.js is only used for the hero landing page effect. Returning users who skip the hero don't need it. A dynamic `import()` on hero visibility would avoid loading it entirely for most sessions.
+- **Code splitting**: `demo-data.js` and `demo-chooser.js` are only needed in demo mode. `hero.js`, `storm3d.js`, and `logo.js` are only needed for the landing page. Dynamic imports could defer these.
+- **Minification**: a simple minification pass would reduce JS significantly. Not implemented because the project intentionally ships readable source (AGPL philosophy: users can inspect the code they run).
+- **i18n splitting**: `i18n.js` includes all 3 languages. Could load only the active language and lazy-load others on switch.
 
 ## Runtime performance
 
 - **No virtual DOM**: all renders are full DOM replacements via `.innerHTML`. This is efficient for the current data scale (hundreds of items per table) but would need optimization for thousands.
-- **Sequential data loading**: on login, 8+ sequential `await` calls fetch all tables. Could be parallelized with `Promise.all()` for faster startup.
-- **No debouncing on search**: the `filterProjects(event)` etc. functions fire on every keypress. For large datasets, debouncing would help.
-- **Drag-and-drop**: uses native HTML drag events, which are performant.
+- **Sequential data loading**: on login, projects and settings are loaded sequentially before the first render. Feature-specific data (todos, habits, etc.) is loaded per-view. Could be parallelized with `Promise.all()` for faster startup.
+- **No debouncing on search**: search/filter functions fire on every keypress. For large datasets, debouncing would help.
+- **Drag-and-drop**: uses long-press + pointer events with FLIP animation (not native HTML drag). Native `dragstart` is explicitly prevented. Performant for current list sizes.
 
 ## Conclusion
 
-For a personal productivity tool with moderate data volumes, performance is adequate. The main bottleneck is initial load time due to render-blocking CDN resources (~375 KB gzip before first paint). After the service worker is installed, subsequent loads are near-instant from cache. The no-build philosophy is a deliberate architectural choice that trades bundle optimization for development simplicity and source transparency.
+For a personal productivity tool with moderate data volumes, performance is adequate. The main bottleneck is initial load time due to render-blocking resources (CSS, font, Supabase JS) before first paint. After the service worker is installed, subsequent loads are near-instant from cache. The no-build philosophy is a deliberate architectural choice that trades bundle optimization for development simplicity and source transparency.

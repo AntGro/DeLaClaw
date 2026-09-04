@@ -1,29 +1,40 @@
-import { t } from './i18n.js';
+import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
-import state, { ARCHIVED_PROJECTS_KEY, SHOW_ARCHIVED_KEY, MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './supabase.js';
-import { esc, escQ, linkify, renderMd, showToast, showDeleteConfirm,
-         updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll } from './utils.js';
-import { isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, scrollToAndHighlight, inlineEditText, LONG_PRESS_MS, DRAG_THRESHOLD } from './item-utils.js';
+import state, { MAX_TEXT_LEN, MAX_META_DISPLAY, TODO_MAX_LEN } from './state.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction,
+         updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore, balanceGrid, fetchAll, autoResizeTextarea, nextPaletteColor } from './utils.js';
+import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, LONG_PRESS_MS, DRAG_THRESHOLD, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 
 // ===================================================================
 // state.PROJECTS (loaded from Supabase)
 // ===================================================================
-// (state managed in supabase.js)
+// (state managed in state.js)
 
 // ── Search State ──
 let projectSearchQuery = '';
 let projectFilter = 'active';
 
-function getArchivedProjectIds() {
-  try { return JSON.parse(localStorage.getItem(ARCHIVED_PROJECTS_KEY) || '[]'); } catch { return []; }
+// Fire-and-forget upsert to settings table
+function _persistProjectSetting(key, value) {
+  if (!state.db?.connected) return;
+  state.db.from('settings').upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' }).then(({ error }) => {
+    if (error) console.warn(`Could not save setting ${key}:`, error.message);
+  });
 }
-function saveArchivedProjectIds(ids) { localStorage.setItem(ARCHIVED_PROJECTS_KEY, JSON.stringify(ids)); }
 
-function isShowArchived() { return localStorage.getItem(SHOW_ARCHIVED_KEY) === 'true'; }
+function getArchivedProjectIds() {
+  return state.archivedProjectIds || [];
+}
+function saveArchivedProjectIds(ids) {
+  state.archivedProjectIds = ids;
+  _persistProjectSetting('archived_project_ids', JSON.stringify(ids));
+}
+
+function isShowArchived() { return state.showArchived === true; }
 
 function toggleShowArchived() {
-  const current = isShowArchived();
-  localStorage.setItem(SHOW_ARCHIVED_KEY, String(!current));
+  state.showArchived = !state.showArchived;
+  _persistProjectSetting('show_archived', String(state.showArchived));
   updateArchiveToggleBtn();
   renderArchivedProjects();
   updateArchiveToggleBtn();
@@ -34,7 +45,7 @@ function renderProjectNavButtons(projects) {
   const container = document.getElementById('projectNavButtons');
   if (!container) return;
   container.innerHTML = projects.map(p =>
-    `<button class="category-nav-btn" style="--cat-color:${p.color}" onclick="navigateToProject('${p.id}')" title="Go to ${esc(p.name)}">${esc(p.shortname || p.name)}</button>`
+    `<button class="category-nav-btn" style="--cat-color:${p.color}" data-action="navigate-to-project" data-id="${esc(p.id)}" title="Go to ${esc(p.name)}">${esc(p.shortname || p.name)}</button>`
   ).join('');
 }
 
@@ -44,6 +55,28 @@ function navigateToProject(projectId) {
   const project = state.PROJECTS.find(p => p.id === projectId);
   const color = project ? project.color : 'var(--accent)';
   scrollToAndHighlight(card, color);
+}
+
+function initProjectNavBtnReorder() {
+  initNavBtnReorder('projectNavButtons', {
+    idAttr: 'id',
+    async onReorder(orderedIds) {
+      const updates = [];
+      orderedIds.forEach((id, i) => {
+        const proj = state.PROJECTS.find(p => p.id === id);
+        if (proj && Number(proj.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+        if (proj) proj.sort_order = i;
+      });
+      state.PROJECTS.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      await bulkSortOrder('projects', updates);
+      const grid = document.getElementById('projectGrid');
+      const snapshot = snapshotBuckets(grid);
+      buildProjectCards();
+      renderAllTasks();
+      animateBucketsFromSnapshot(grid, snapshot, 600);
+      showToast(t('toast.reordered'), 'success');
+    },
+  });
 }
 
 function updateArchiveToggleBtn() {
@@ -89,7 +122,7 @@ async function unarchiveProject(id) {
 async function deleteProject(id, name) {
   const taskCount = state.allTasks.filter(t => t.project === id).length;
   const detail = taskCount > 0 ? `This will also delete ${taskCount} task${taskCount > 1 ? 's' : ''} in this project.` : null;
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     `Delete "${name}"? This cannot be undone.`,
     async () => {
@@ -130,18 +163,23 @@ function renderArchivedProjects() {
   list.innerHTML = archivedProjects.map(p => `
     <div class="archived-project-item">
       <span>${esc(p.name)} <span style="color:var(--muted);font-size:0.72rem;">${esc(p.tech || '')}</span></span>
-      <button onclick="unarchiveProject('${p.id}')">Restore</button>
-      <button onclick="deleteProject('${p.id}','${escQ(p.name)}')" style="color:var(--red);">${t('common.delete')}</button>
+      <button data-action="unarchive-project" data-id="${esc(p.id)}">Restore</button>
+      <button data-action="delete-project" data-id="${esc(p.id)}" data-name="${esc(p.name)}" style="color:var(--red);">${t('common.delete')}</button>
     </div>
   `).join('');
   window.scrollTo(0, scrollY);
 }
 
 function copyProjectTitle(e, name) {
-  e.stopPropagation();
-  const text = 'Last project ' + name;
+  if (e && e.stopPropagation) e.stopPropagation();
+  // Support delegation: if name not passed, read from dataset
+  const el = e && e.currentTarget ? e.currentTarget : null;
+  const actionEl = e && e.target ? (e.target.closest && e.target.closest('[data-action="copy-project-title"]')) : null;
+  const resolvedName = name || (actionEl && actionEl.dataset.name) || (el && el.dataset && el.dataset.name) || '';
+  const text = 'Last project ' + resolvedName;
   navigator.clipboard.writeText(text).then(() => {
-    const tooltip = e.currentTarget.querySelector('.copy-tooltip');
+    const tipTarget = actionEl || el || (e && e.currentTarget);
+    const tooltip = tipTarget ? tipTarget.querySelector('.copy-tooltip') : null;
     if (tooltip) { tooltip.classList.add('show'); setTimeout(() => tooltip.classList.remove('show'), 1500); }
   });
 }
@@ -162,6 +200,8 @@ function renderProjectGrid() {
 
 function buildProjectCards() {
   const grid = document.getElementById('projectGrid');
+  if (!grid) return;
+  cleanupDragArtifacts();
   const archivedIds = getArchivedProjectIds();
   let visibleProjects = projectFilter === 'all'
     ? [...state.PROJECTS]
@@ -185,7 +225,7 @@ function buildProjectCards() {
       <div class="empty-icon">${lucideIcon('folder-kanban', 48, 'var(--muted)')}</div>
       <h3>${t('projects.empty_title')}</h3>
       <p>${t('projects.empty_hint')}</p>
-      <button class="empty-cta" onclick="openAddProjectModal()">${lucideIcon('plus', 16)} ${t('projects.empty_cta')}</button>
+      <button class="empty-cta" data-action="open-add-project">${lucideIcon('plus', 16)} ${t('projects.empty_cta')}</button>
     </div>`;
     renderArchivedProjects();
     renderProjectNavButtons([]);
@@ -198,28 +238,29 @@ function buildProjectCards() {
       <div class="project-card-header">
         <div style="display:flex;align-items:flex-start;gap:6px;">
           <div class="project-info">
-            <strong><span class="project-title-copy" onclick="copyProjectTitle(event, '${escQ(p.name)}')">${esc(p.name)}<span class="copy-tooltip">${t('common.copied')}</span></span></strong>
+            <strong><span class="project-title-copy" data-action="copy-project-title" data-name="${esc(p.name)}">${esc(p.name)}<span class="copy-tooltip">${t('common.copied')}</span></span></strong>
             <span class="tech">${esc(p.tech || '')}</span>
           </div>
         </div>
         <div class="project-header-actions">
           ${p.links.map(l => `<a class="project-link" href="${l.url}" target="_blank">${l.label} ↗</a>`).join(' ')}
-          <button class="expand-project-btn" onclick="toggleExpandProject('${p.id}')" title="Expand/collapse project" id="expand-btn-${p.id}">${lucideIcon('maximize-2', 14, 'currentColor')}</button>
-          <button class="prompt-project-btn" onclick="openProjectPrompt('${p.id}')" title="${t('projects.edit_prompt')}">${lucideIcon("file-text",16)}</button>
-          <button class="archive-project-btn" onclick="openEditProjectModal('${p.id}')" title="${t('projects.edit_project')}">${lucideIcon("pencil",16)}</button>
-          <button class="archive-project-btn" onclick="archiveProject('${p.id}')" title="${t('projects.toggle_archived')}">${lucideIcon("package")}</button>
+          <button class="archive-project-btn" data-action="copy-item-link" data-link-type="project" data-id="${esc(p.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link",14)}</button>
+          <button class="expand-project-btn" data-action="toggle-expand-project" data-id="${esc(p.id)}" title="Expand/collapse project" id="expand-btn-${p.id}">${lucideIcon('maximize-2', 14, 'currentColor')}</button>
+          <button class="prompt-project-btn" data-action="open-project-prompt" data-id="${esc(p.id)}" title="${t('projects.edit_prompt')}">${lucideIcon("file-text",16)}</button>
+          <button class="archive-project-btn" data-action="open-edit-project" data-id="${esc(p.id)}" title="${t('projects.edit_project')}">${lucideIcon("pencil",16)}</button>
+          <button class="archive-project-btn" data-action="archive-project" data-id="${esc(p.id)}" title="${t('projects.toggle_archived')}">${lucideIcon("package")}</button>
         </div>
       </div>
-      <div class="task-list" id="tasks-${p.id}"><p class="empty-msg">${t('common.loading')}</p></div>
-      <div class="archive-toggle" onclick="toggleArchivedTasks('${p.id}')" id="archive-toggle-${p.id}" style="display:none;">
+      <div class="task-list" id="tasks-${p.id}" data-project="${p.id}"><p class="empty-msg">${t('common.loading')}</p></div>
+      <div class="archive-toggle" data-action="toggle-archived-tasks" data-id="${esc(p.id)}" id="archive-toggle-${p.id}" style="display:none;">
         <span class="arrow" id="archive-arrow-${p.id}">▶</span> ${t('projects.archived_tasks')} (<span id="archive-count-${p.id}">0</span>)
-        <button class="delete-all-archived-btn" onclick="event.stopPropagation();deleteAllArchivedTasks('${p.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
+        <button class="delete-all-archived-btn" data-action="delete-all-archived-tasks" data-id="${esc(p.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
       <div class="archived-tasks" id="archived-tasks-${p.id}"></div>
       <div class="add-task">
-        <textarea placeholder="${t('projects.add_task_placeholder')}" maxlength="${MAX_TEXT_LEN}" id="input-${p.id}" onkeydown="handleTaskInput(event,'${p.id}')" oninput="updateCharCounter(this)" rows="1" style="resize:none;overflow:hidden;"></textarea>
-        <label class="draft-slider" title="${t('projects.status_draft')}"><input type="checkbox" id="draft-${p.id}" onchange="this.parentElement.classList.toggle('active',this.checked)"><span class="draft-slider-track"><span class="draft-slider-thumb"></span></span><span class="draft-slider-label">${t('projects.status_draft')}</span></label>
-        <button onclick="addTask('${p.id}')">${lucideIcon('plus', 16)}</button>
+        <textarea placeholder="${t('projects.add_task_placeholder')}" maxlength="${MAX_TEXT_LEN}" id="input-${p.id}" data-action="task-input" data-id="${esc(p.id)}" rows="1" style="resize:none;overflow:hidden;"></textarea>
+        <label class="draft-slider" title="${t('projects.status_draft')}"><input type="checkbox" id="draft-${p.id}"><span class="draft-slider-track"><span class="draft-slider-thumb"></span></span><span class="draft-slider-label">${t('projects.status_draft')}</span></label>
+        <button data-action="add-task" data-id="${esc(p.id)}">${lucideIcon('plus', 16)}</button>
       </div>
       <div class="char-counter" id="counter-${p.id}"></div>
     </div>
@@ -227,6 +268,7 @@ function buildProjectCards() {
 
   renderArchivedProjects();
   renderProjectNavButtons(visibleProjects);
+  initProjectNavBtnReorder();
   balanceGrid(grid);
 }
 
@@ -245,7 +287,7 @@ function updateCharCounter(input) {
 // ===================================================================
 // SUPABASE TASK CRUD
 // ===================================================================
-// (state managed in supabase.js)
+// (state managed in state.js)
 
 async function refreshAll() {
   if (!state.db.connected || isDragging) return;
@@ -258,6 +300,7 @@ async function refreshAll() {
 }
 
 function renderAllTasks() {
+  cleanupDragArtifacts();
   const archivedIds = getArchivedProjectIds();
   const visibleProjects = state.PROJECTS.filter(p => !archivedIds.includes(p.id));
 
@@ -296,8 +339,10 @@ function renderAllTasks() {
     const archivedTasks = projectTasks.filter(t => t.status === 'approved');
 
     // Active tasks
+    const prevScroll = container.scrollTop;
     if (!activeTasks.length) { container.innerHTML = '<p class="empty-msg">No tasks yet</p>'; }
     else { container.innerHTML = activeTasks.map(t => renderTask(t)).join(''); initDragDrop(container, p.id); initTaskHoverDelay(container); }
+    container.scrollTop = prevScroll;
 
     // Archived tasks toggle
     const toggleEl = document.getElementById(`archive-toggle-${p.id}`);
@@ -329,7 +374,7 @@ async function deleteAllArchivedTasks(projectId) {
   if (!archivedTasks.length) return;
   const project = state.PROJECTS.find(p => p.id === projectId);
   const name = project ? project.name : projectId;
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     `Delete all ${archivedTasks.length} archived task${archivedTasks.length > 1 ? 's' : ''} in "${name}"? This cannot be undone.`,
     async () => {
@@ -351,23 +396,25 @@ function renderTask(task, isArchived = false) {
 
   let actionBtns = '';
   if (isDraft) {
-    actionBtns += `<button class="promote-btn" onclick="updateTaskStatus('${task.id}','todo')" title="${t('projects.promote_todo')}">▶ ${t('projects.promote_todo')}</button>`;
+    actionBtns += `<button class="promote-btn" data-task-id="${esc(task.id)}" data-action="update-task-status" data-id="${esc(task.id)}" data-status="todo" title="${t('projects.promote_todo')}">▶ ${t('projects.promote_todo')}</button>`;
   }
   if (task.status === 'review') {
-    actionBtns += `<button onclick="updateTaskStatus('${task.id}','approved')" title="${t('projects.status_approved')}">${lucideIcon("circle-check",16)}</button>`;
-    actionBtns += `<button onclick="openRevisionModal('${task.id}')" title="${t('projects.status_revision')}">${lucideIcon("refresh-cw",16)}</button>`;
+    actionBtns += `<button data-task-id="${esc(task.id)}" data-action="update-task-status" data-id="${esc(task.id)}" data-status="approved" title="${t('projects.status_approved')}">${lucideIcon("circle-check",16)}</button>`;
+    actionBtns += `<button data-action="open-revision-modal" data-id="${esc(task.id)}" title="${t('projects.status_revision')}">${lucideIcon("refresh-cw",16)}</button>`;
   }
   if (task.status === 'approved' && isArchived) {
-    actionBtns += `<button onclick="updateTaskStatus('${task.id}','todo')" title="${t('common.reopen')}">${lucideIcon('undo-2', 14)}</button>`;
+    actionBtns += `<button data-task-id="${esc(task.id)}" data-action="update-task-status" data-id="${esc(task.id)}" data-status="todo" title="${t('common.reopen')}">${lucideIcon('undo-2', 14)}</button>`;
   }
-  actionBtns += `<button onclick="promptEditTask('${task.id}')" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>`;
-  actionBtns += `<button onclick="deleteTask('${task.id}')" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`;
+  actionBtns += `<button data-action="copy-item-link" data-link-type="task" data-id="${esc(task.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link",16)}</button>`;
+  actionBtns += `<button data-action="prompt-edit-task" data-id="${esc(task.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>`;
+  actionBtns += `<button data-action="delete-task" data-id="${esc(task.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`;
 
   const draftClass = isDraft ? ' task-draft' : '';
 
   return `<div class="bucket-item task-item${draftClass} task-status-${task.status}" data-task-id="${task.id}">
     <div class="task-row">
       <span class="task-text">${truncateWithShowMore(task.text, 120, task.id, 'text')}</span>
+      ${isArchived && task.updated_at ? `<span class="task-completed-date">${new Date(task.updated_at).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })}</span>` : ''}
       <div class="task-actions">${actionBtns}</div>
     </div>
     ${meta ? `<div class="task-meta">${meta}</div>` : ''}
@@ -404,19 +451,49 @@ function initDragDrop(container, projectId) {
     excludeSelector: 'button, a, input, textarea, select, .task-actions',
     skipInsideSelector: '.archived-tasks',
     idAttr: 'taskId',
-    onReorder: async (draggedId, targetId) => {
-      const projectTasks = state.allTasks.filter(t => t.project === projectId && t.status !== 'approved');
-      await reorderItems({
-        items: projectTasks,
-        allItems: state.allTasks,
-        draggedId,
-        targetId,
-        container,
-        itemSelector: '.task-item',
-        idAttr: 'taskId',
-        tableName: 'tasks',
-        reinitFn: () => initDragDrop(container, projectId),
-      });
+    actionsSelector: '.task-actions',
+    crossContainerSelector: '.task-list[data-project]',
+    getContainerId: (el) => el.dataset.project,
+    onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
+      const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;
+      if (crossMove) {
+        const movedItem = state.allTasks.find(x => x.id === draggedId);
+        if (!movedItem) return;
+        movedItem.project = targetContainerId;
+        // Diff target list — dragged item handled in FK update below
+        const targetUpdates = [];
+        let draggedSortOrder = 0;
+        orderedIds.forEach((id, i) => {
+          const it = state.allTasks.find(x => x.id === id);
+          if (!it) return;
+          if (id === draggedId) { draggedSortOrder = i; }
+          else if (Number(it.sort_order ?? 0) !== i) { targetUpdates.push({ id, sort_order: i }); }
+          it.sort_order = i;
+        });
+        // Diff source list
+        const sourceItems = state.allTasks
+          .filter(x => x.project === sourceContainerId && x.id !== draggedId && x.status !== 'approved')
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        const sourceUpdates = [];
+        sourceItems.forEach((it, i) => {
+          if (Number(it.sort_order ?? 0) !== i) sourceUpdates.push({ id: it.id, sort_order: i });
+          it.sort_order = i;
+        });
+        await state.db.from('tasks').update({ project: targetContainerId, sort_order: draggedSortOrder }).eq('id', draggedId);
+        await Promise.all([
+          bulkSortOrder('tasks', targetUpdates),
+          bulkSortOrder('tasks', sourceUpdates),
+        ]);
+        await refreshAll();
+        showToast(t('toast.moved'), 'success');
+      } else {
+        await reorderItems({
+          orderedIds,
+          allItems: state.allTasks,
+          tableName: 'tasks',
+          reinitFn: () => initDragDrop(container, projectId),
+        });
+      }
     },
   });
 }
@@ -440,10 +517,32 @@ async function addTask(projectId) {
   else { showToast(t('toast.added'), 'success'); await refreshAll(); }
 }
 
-async function updateTaskStatus(id, status) {
-  const { error } = await state.db.from('tasks').update({ status }).eq('id', id);
-  if (error) showToast(t('toast.update_failed'), 'error');
-  else { showToast(t('toast.updated'), 'success'); await refreshAll(); }
+const _pendingTaskStatus = new Set();
+
+async function updateTaskStatus(id, status, btnEl) {
+  if (!id) return;
+  if (_pendingTaskStatus.has(id)) return;
+  _pendingTaskStatus.add(id);
+  const sel = `.task-item[data-task-id="${CSS && CSS.escape ? CSS.escape(id) : id}"] button`;
+  const allBtns = document.querySelectorAll(sel);
+  const targetBtn = btnEl instanceof HTMLElement ? btnEl : document.activeElement;
+  if (targetBtn && targetBtn.tagName === 'BUTTON') {
+    targetBtn.disabled = true;
+    targetBtn.classList.add('saving', 'is-pending');
+    targetBtn.setAttribute('aria-busy', 'true');
+  }
+  try {
+    const { error } = await state.db.from('tasks').update({ status }).eq('id', id);
+    if (error) showToast(t('toast.update_failed'), 'error');
+    else { showToast(t('toast.updated'), 'success'); await refreshAll(); }
+  } finally {
+    _pendingTaskStatus.delete(id);
+    if (targetBtn && targetBtn.tagName === 'BUTTON') {
+      targetBtn.disabled = false;
+      targetBtn.classList.remove('saving', 'is-pending');
+      targetBtn.removeAttribute('aria-busy');
+    }
+  }
 }
 
 async function promptEditTask(id) {
@@ -461,23 +560,30 @@ async function promptEditTask(id) {
 
   inlineEditText(textSpan, originalText, {
     maxLength: MAX_TEXT_LEN,
+    containerEl: taskEl,
     saveFn: async (trimmed) => {
       const { error } = await state.db.from('tasks').update({ text: trimmed }).eq('id', id);
       if (error) showToast(t('toast.update_failed'), 'error');
-      else showToast(t('projects.task_updated'), 'success');
+      else { task.text = trimmed; showToast(t('projects.task_updated'), 'success'); }
     },
     refreshFn: refreshAll,
   });
 }
 
 async function deleteTask(id) {
-  showDeleteConfirm(
+  showConfirmAction(
     t('common.delete'),
     'Delete this task? This cannot be undone.',
     async () => {
       const { error } = await state.db.from('tasks').delete().eq('id', id);
-      if (error) showToast(t('toast.delete_failed'), 'error');
-      else { showToast(t('toast.deleted'), 'success'); await refreshAll(); }
+      if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Animate item out before re-rendering
+      const el = document.querySelector(`[data-task-id="${CSS.escape(id)}"]`);
+      await animateItemRemoval(el);
+
+      showToast(t('toast.deleted'), 'success');
+      await refreshAll();
     }
   );
 }
@@ -487,16 +593,99 @@ async function deleteTask(id) {
 // ADD PROJECT MODAL
 // ===================================================================
 // ===================================================================
+
+function addProjectModalHTML() {
+  return `<div class="modal">
+    <h2>${lucideIcon('plus', 20)} ${t('projects.add_project')}</h2>
+    <label>${t('projects.display_name')}</label>
+    <input type="text" id="newProjectName" placeholder="${t('projects.name_placeholder')}">
+    <label>${t('projects.shortname')} (${t('projects.shortname_hint')})</label>
+    <input type="text" id="newProjectShortname" placeholder="${t('projects.shortname_placeholder')}" maxlength="20">
+    <label>${t('common.color')}</label>
+    <input type="color" id="newProjectColor">
+    <label>${t('projects.stack')}</label>
+    <input type="text" id="newProjectTech" placeholder="${t('projects.tech_placeholder')}">
+    <label>${t('projects.repo_url')} (${t('common.optional')})</label>
+    <input type="url" id="newProjectGithub" placeholder="${t('projects.github_placeholder')}">
+    <label>${t('projects.live_url')} (${t('common.optional')})</label>
+    <input type="url" id="newProjectLive" placeholder="${t('projects.live_placeholder')}">
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-add-project">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-new-project">${t('common.create')}</button>
+    </div>
+  </div>`;
+}
+
+function editProjectModalHTML() {
+  return `<div class="modal">
+    <h2>${lucideIcon('pencil', 20)} ${t('projects.edit_project')}</h2>
+    <input type="hidden" id="editProjectId">
+    <label>${t('projects.display_name')}</label>
+    <input type="text" id="editProjectName">
+    <label>${t('projects.shortname')} (${t('projects.shortname_hint')})</label>
+    <input type="text" id="editProjectShortname" maxlength="20">
+    <label>${t('common.color')}</label>
+    <input type="color" id="editProjectColor">
+    <label>${t('projects.stack')}</label>
+    <input type="text" id="editProjectTech">
+    <label>${t('projects.repo_url')}</label>
+    <input type="url" id="editProjectGithub" placeholder="${t('projects.github_placeholder')}">
+    <label>${t('projects.live_url')}</label>
+    <input type="url" id="editProjectLive" placeholder="${t('projects.live_placeholder')}">
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-edit-project">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-edit-project">${t('common.save')}</button>
+    </div>
+  </div>`;
+}
+
+function initProjectModals() {
+  const app = document.getElementById('app');
+
+  const m1 = document.createElement('div');
+  m1.className = 'modal-overlay';
+  m1.id = 'addProjectModal';
+  m1.innerHTML = addProjectModalHTML();
+  app.appendChild(m1);
+
+  const m2 = document.createElement('div');
+  m2.className = 'modal-overlay';
+  m2.id = 'editProjectModal';
+  m2.dataset.action = 'close-edit-project';
+  m2.dataset.overlayClose = 'true';
+  m2.innerHTML = editProjectModalHTML();
+  app.appendChild(m2);
+
+  const m3 = document.createElement('div');
+  m3.className = 'modal-overlay';
+  m3.id = 'revisionModal';
+  m3.innerHTML = revisionModalHTML();
+  app.appendChild(m3);
+
+  const m4 = document.createElement('div');
+  m4.className = 'modal-overlay';
+  m4.id = 'promptEditorModal';
+  m4.innerHTML = promptEditorModalHTML();
+  app.appendChild(m4);
+
+  const m5 = document.createElement('div');
+  m5.className = 'modal-overlay';
+  m5.id = 'projectPromptModal';
+  m5.innerHTML = projectPromptModalHTML();
+  app.appendChild(m5);
+}
+
 function openAddProjectModal() {
-  document.getElementById('addProjectModal').classList.add('visible');
-  document.getElementById('newProjectId').value = '';
+  const modal = document.getElementById('addProjectModal');
+  modal.innerHTML = addProjectModalHTML();
   document.getElementById('newProjectName').value = '';
   document.getElementById('newProjectShortname').value = '';
-  document.getElementById('newProjectColor').value = '#646cff';
+  document.getElementById('newProjectColor').value = nextPaletteColor(state.PROJECTS);
   document.getElementById('newProjectTech').value = '';
   document.getElementById('newProjectGithub').value = '';
   document.getElementById('newProjectLive').value = '';
-  document.getElementById('newProjectId').focus();
+  modal.classList.add('visible');
+  document.getElementById('newProjectName').focus();
 }
 
 function closeAddProjectModal() {
@@ -509,7 +698,6 @@ document.addEventListener('click', e => {
 });
 
 async function saveNewProject() {
-  const id = document.getElementById('newProjectId').value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
   const name = document.getElementById('newProjectName').value.trim();
   const shortname = document.getElementById('newProjectShortname').value.trim() || null;
   const color = document.getElementById('newProjectColor').value;
@@ -517,8 +705,7 @@ async function saveNewProject() {
   const github = document.getElementById('newProjectGithub').value.trim();
   const live = document.getElementById('newProjectLive').value.trim();
 
-  if (!id || !name) { showToast(t('toast.name_required'), 'error'); return; }
-  if (state.PROJECTS.find(p => p.id === id)) { showToast(t('projects.id_exists'), 'error'); return; }
+  if (!name) { showToast(t('toast.name_required'), 'error'); return; }
 
   const links = [];
   if (github) links.push({ label: 'GitHub', url: github });
@@ -526,7 +713,7 @@ async function saveNewProject() {
 
   const maxOrder = state.PROJECTS.length > 0 ? Math.max(...state.PROJECTS.map(p => p.sort_order || 0)) + 1 : 0;
 
-  const { error } = await state.db.from('projects').insert({ id, name, shortname, color, tech, links, sort_order: maxOrder });
+  const { error } = await state.db.from('projects').insert({ id: crypto.randomUUID(), name, shortname, color, tech, links, sort_order: maxOrder });
   if (error) { showToast(t('toast.failed_to_add') + ': ' + (error.message || ''), 'error'); return; }
 
   closeAddProjectModal();
@@ -542,6 +729,7 @@ async function saveNewProject() {
 // ===================================================================
 function initProjectDragDrop() {
   const grid = document.getElementById('projectGrid');
+  if (!grid) return;
   const cards = grid.querySelectorAll('.project-card');
   let dragState = null;
 
@@ -552,6 +740,42 @@ function initProjectDragDrop() {
     let pressTimer = null;
     let startX = 0, startY = 0;
     let activated = false;
+    let unregisterCleanup = null;
+
+    const unregisterGlobalCleanup = () => {
+      if (unregisterCleanup) {
+        unregisterCleanup();
+        unregisterCleanup = null;
+      }
+    };
+
+    const finishDrag = async ({ complete = true } = {}) => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      unregisterGlobalCleanup();
+      const activeState = dragState && dragState.el === card ? dragState : null;
+      if (!activeState) return;
+
+      if (activeState.clone) activeState.clone.remove();
+      card.classList.remove('dragging');
+      unmarkDragSource(card);
+      let targetId = null;
+      grid.querySelectorAll('.project-card').forEach(el => {
+        if (el.classList.contains('drag-over')) { targetId = el.dataset.project; }
+        el.classList.remove('drag-over');
+      });
+      const draggedId = activeState.id;
+      try {
+        if (activeState.pointerId && header.hasPointerCapture?.(activeState.pointerId)) header.releasePointerCapture(activeState.pointerId);
+      } catch (_) {}
+      dragState = null;
+      setDragging(false);
+      window.getSelection()?.removeAllRanges();
+      if (complete && targetId && targetId !== draggedId) await reorderProjects(draggedId, targetId);
+    };
+
+    const cancelDrag = () => {
+      void finishDrag({ complete: false });
+    };
 
     header.addEventListener('pointerdown', e => {
       if (e.target.closest('button, a, input, textarea, select, .project-header-actions')) return;
@@ -560,30 +784,37 @@ function initProjectDragDrop() {
       startY = e.clientY;
       activated = false;
 
+      unregisterGlobalCleanup();
+      unregisterCleanup = registerDragCleanup(({ complete }) => {
+        void finishDrag({ complete });
+      });
+
       pressTimer = setTimeout(() => {
         activated = true;
         const rect = card.getBoundingClientRect();
         setDragging(true);
         dragState = { el: card, id: card.dataset.project, offsetY: e.clientY - rect.top, offsetX: e.clientX - rect.left, clone: null, pointerId: e.pointerId };
 
-        const clone = card.cloneNode(true);
+        const clone = markDragClone(card.cloneNode(true));
         clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;opacity:0.85;z-index:1000;pointer-events:none;box-shadow:0 4px 20px rgba(0,0,0,0.3);border-radius:12px;border:2px solid var(--accent);transition:none;`;
         document.body.appendChild(clone);
         dragState.clone = clone;
+        markDragSource(card);
         card.classList.add('dragging');
-        header.setPointerCapture(e.pointerId);
+        try { header.setPointerCapture(e.pointerId); } catch (_) {}
       }, LONG_PRESS_MS);
     });
 
     header.addEventListener('pointermove', e => {
       if (pressTimer && !activated) {
         if (Math.abs(e.clientX - startX) > DRAG_THRESHOLD || Math.abs(e.clientY - startY) > DRAG_THRESHOLD) {
-          clearTimeout(pressTimer); pressTimer = null;
+          clearTimeout(pressTimer); pressTimer = null; unregisterGlobalCleanup();
         }
         return;
       }
       if (!dragState || dragState.el !== card) return;
       e.preventDefault();
+      if (!dragState.clone) return;
       dragState.clone.style.top = (e.clientY - dragState.offsetY) + 'px';
       dragState.clone.style.left = (e.clientX - dragState.offsetX) + 'px';
       grid.querySelectorAll('.project-card:not(.dragging)').forEach(el => {
@@ -593,33 +824,9 @@ function initProjectDragDrop() {
       });
     });
 
-    const finishDrag = async () => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      if (!dragState || dragState.el !== card) return;
-      if (dragState.clone) dragState.clone.remove();
-      card.classList.remove('dragging');
-      let targetId = null;
-      grid.querySelectorAll('.project-card').forEach(el => {
-        if (el.classList.contains('drag-over')) { targetId = el.dataset.project; el.classList.remove('drag-over'); }
-      });
-      const draggedId = dragState.id;
-      dragState = null;
-      setDragging(false);
-      if (targetId && targetId !== draggedId) await reorderProjects(draggedId, targetId);
-    };
-
-    header.addEventListener('pointerup', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } finishDrag(); });
-    header.addEventListener('pointercancel', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } finishDrag(); });
-    header.addEventListener('lostpointercapture', () => {
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-      if (dragState && dragState.el === card) {
-        if (dragState.clone) dragState.clone.remove();
-        card.classList.remove('dragging');
-        grid.querySelectorAll('.project-card').forEach(el => el.classList.remove('drag-over'));
-        dragState = null;
-        setDragging(false);
-      }
-    });
+    header.addEventListener('pointerup', () => { void finishDrag({ complete: true }); });
+    header.addEventListener('pointercancel', cancelDrag);
+    header.addEventListener('lostpointercapture', cancelDrag);
   });
 }
 
@@ -632,6 +839,12 @@ async function reorderProjects(draggedId, targetId) {
   if (draggedIdx === -1 || targetIdx === -1) return;
   const [dragged] = visible.splice(draggedIdx, 1);
   visible.splice(targetIdx, 0, dragged);
+
+  // Diff BEFORE updating memory — capture which rows actually changed
+  const updates = [];
+  visible.forEach((p, i) => {
+    if (Number(p.sort_order ?? 0) !== i) updates.push({ id: p.id, sort_order: i });
+  });
 
   // Update sort_order in memory
   visible.forEach((p, i) => { p.sort_order = i; });
@@ -652,10 +865,9 @@ async function reorderProjects(draggedId, targetId) {
   initProjectDragDrop();
   showToast(t('toast.reordered'), 'success');
 
-  // Background Supabase sync
-  Promise.all(visible.map((p, i) =>
-    state.db.from('projects').update({ sort_order: i }).eq('id', p.id)
-  )).catch(e => console.error('Project reorder sync failed:', e));
+  // Background sync
+  bulkSortOrder('projects', updates)
+    .catch(e => console.error('Project reorder sync failed:', e));
 }
 
 
@@ -665,6 +877,8 @@ async function reorderProjects(draggedId, targetId) {
 function openEditProjectModal(id) {
   const p = state.PROJECTS.find(pr => pr.id === id);
   if (!p) return;
+  const modal = document.getElementById('editProjectModal');
+  modal.innerHTML = editProjectModalHTML();
   document.getElementById('editProjectId').value = p.id;
   document.getElementById('editProjectName').value = p.name;
   document.getElementById('editProjectShortname').value = p.shortname || '';
@@ -674,7 +888,7 @@ function openEditProjectModal(id) {
   const live = (p.links || []).find(l => l.label === 'Live' || l.label === 'Play');
   document.getElementById('editProjectGithub').value = github ? github.url : '';
   document.getElementById('editProjectLive').value = live ? live.url : '';
-  document.getElementById('editProjectModal').classList.add('visible');
+  modal.classList.add('visible');
 }
 
 function closeEditProjectModal() {
@@ -745,7 +959,7 @@ function expandTask(id) {
 
   let actions = '';
   if (tk.status === 'review') {
-    actions = `<div style="display:flex;gap:8px;margin-top:12px;"><button class="btn" onclick="updateTaskStatus('${tk.id}','approved');closeTaskExpandModal();">${lucideIcon("circle-check",16)} ${t('projects.status_approved')}</button><button class="btn" onclick="closeTaskExpandModal();openRevisionModal('${tk.id}');">${lucideIcon("refresh-cw",16)} ${t('projects.status_revision')}</button></div>`;
+    actions = `<div style="display:flex;gap:8px;margin-top:12px;"><button class="btn" data-task-id="${esc(tk.id)}" data-action="approve-task-and-close" data-id="${esc(tk.id)}" data-status="approved">${lucideIcon("circle-check",16)} ${t('projects.status_approved')}</button><button class="btn" data-action="close-and-open-revision" data-id="${esc(tk.id)}">${lucideIcon("refresh-cw",16)} ${t('projects.status_revision')}</button></div>`;
   }
 
   content.innerHTML = `
@@ -754,7 +968,7 @@ function expandTask(id) {
     ${meta ? `<div class="task-full-meta">${meta}</div>` : ''}
     <div style="font-size:0.72rem;color:var(--muted);">Created: ${new Date(tk.created_at).toLocaleString()} · Status: ${tk.status}</div>
     ${actions}
-    <div style="margin-top:16px;text-align:right;"><button class="btn" onclick="closeTaskExpandModal()">${t('common.close')}</button></div>
+    <div style="margin-top:16px;text-align:right;"><button class="btn" data-action="close-task-expand">${t('common.close')}</button></div>
   `;
   document.getElementById('taskExpandModal').classList.add('visible');
 }
@@ -767,19 +981,35 @@ function closeTaskExpandModal() {
 // ===================================================================
 // REVISION FEEDBACK MODAL
 // ===================================================================
+
+function revisionModalHTML() {
+  return `<div class="modal modal-wide revision-modal">
+    <h2>${lucideIcon('refresh-cw', 20)} ${t('projects.request_revision')}</h2>
+    <p class="modal-hint">${t('projects.revision_hint')}</p>
+    <textarea id="revisionFeedback" placeholder="${t('projects.revision_placeholder')}"></textarea>
+    <input type="hidden" id="revisionTaskId">
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-revision">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="submit-revision">${t('projects.submit_revision')}</button>
+    </div>
+  </div>`;
+}
+
 function openRevisionModal(taskId) {
+  const modal = document.getElementById('revisionModal');
+  modal.innerHTML = revisionModalHTML();
   document.getElementById('revisionTaskId').value = taskId;
   document.getElementById('revisionFeedback').value = '';
-  document.getElementById('revisionModal').classList.add('visible');
+  modal.classList.add('visible');
   const ta = document.getElementById('revisionFeedback');
   ta.focus();
   // Enter submits, Shift+Enter inserts newline
-  ta.onkeydown = function(e) {
+  ta.addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       submitRevision();
     }
-  };
+  });
 }
 
 function closeRevisionModal() {
@@ -823,11 +1053,38 @@ async function loadPrompts() {
   (data || []).forEach(p => { promptsCache[p.key] = p.text; });
 }
 
+function promptEditorModalHTML() {
+  return `<div class="modal prompt-modal">
+    <h2>${lucideIcon('file-text', 20)} ${t('projects.global_prompt')}</h2>
+    <p class="prompt-hint">${t('projects.global_prompt_hint')}</p>
+    <textarea id="promptGlobalText" placeholder="${t('projects.global_prompt_placeholder')}"></textarea>
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-prompt-editor">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-global-prompt">${t('common.save')}</button>
+    </div>
+  </div>`;
+}
+
+function projectPromptModalHTML() {
+  return `<div class="modal prompt-modal">
+    <h2 id="projectPromptTitle">${lucideIcon('file-text', 20)} ${t('projects.project_prompt')}</h2>
+    <p class="prompt-hint">${t('projects.project_prompt_hint')}</p>
+    <textarea id="promptProjectText" placeholder="${t('projects.project_prompt_placeholder')}"></textarea>
+    <input type="hidden" id="promptProjectId">
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-project-prompt">${t('common.cancel')}</button>
+      <button class="modal-save" data-action="save-project-prompt">${t('common.save')}</button>
+    </div>
+  </div>`;
+}
+
 // Global prompt (header button)
 async function openPromptEditor() {
   await loadPrompts();
+  const modal = document.getElementById('promptEditorModal');
+  modal.innerHTML = promptEditorModalHTML();
   document.getElementById('promptGlobalText').value = promptsCache['global'] || '';
-  document.getElementById('promptEditorModal').classList.add('visible');
+  modal.classList.add('visible');
   document.getElementById('promptGlobalText').focus();
 }
 
@@ -846,11 +1103,13 @@ async function saveGlobalPrompt() {
 // Per-project prompt (card button)
 async function openProjectPrompt(projectId) {
   await loadPrompts();
+  const modal = document.getElementById('projectPromptModal');
+  modal.innerHTML = projectPromptModalHTML();
   const project = state.PROJECTS.find(p => p.id === projectId);
   document.getElementById('projectPromptTitle').innerHTML = `${lucideIcon("file-text",20)} ${esc(project ? project.name : projectId)} — ${t('projects.project_prompt')}`;
   document.getElementById('promptProjectId').value = projectId;
   document.getElementById('promptProjectText').value = promptsCache[projectId] || '';
-  document.getElementById('projectPromptModal').classList.add('visible');
+  modal.classList.add('visible');
   document.getElementById('promptProjectText').focus();
 }
 
@@ -879,9 +1138,11 @@ async function saveProjectPrompt() {
 // ===================================================================
 // ===================================================================
 function handleTaskInput(event, projectId) {
+  // Support delegation: projectId may be in dataset
+  const pid = projectId || (event && event.target && event.target.dataset && event.target.dataset.id) || (event && event.currentTarget && event.currentTarget.dataset && event.currentTarget.dataset.id);
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
-    addTask(projectId);
+    if (pid) addTask(pid);
     return;
   }
   // Shift+Enter: let the browser insert the newline, then auto-resize
@@ -894,13 +1155,6 @@ function handleTaskInput(event, projectId) {
   setTimeout(() => autoResizeTextarea(event.target), 0);
 }
 
-function autoResizeTextarea(ta) {
-  ta.style.height = '0';
-  const newHeight = Math.min(ta.scrollHeight, 120);
-  ta.style.height = newHeight + 'px';
-  ta.style.overflowY = ta.scrollHeight > 120 ? 'auto' : 'hidden';
-}
-
 // Also auto-resize on input (for paste, etc.)
 document.addEventListener('input', e => {
   if (e.target.tagName === 'TEXTAREA' && e.target.id.startsWith('input-')) {
@@ -908,7 +1162,7 @@ document.addEventListener('input', e => {
   }
 });
 export {
-  loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
+  loadProjects, buildProjectCards, initProjectDragDrop, initProjectModals, updateArchiveToggleBtn,
   renderArchivedProjects, refreshAll, renderAllTasks, getArchivedProjectIds, loadPrompts,
 };
 

@@ -197,6 +197,9 @@ input,select,button{font-family:inherit;}
 
 /* Stay Connected Checkbox */
 .stay-connected-label{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.82rem;color:var(--muted);margin:10px 0 4px;justify-content:center;user-select:none;}
+.gate-highlights{display:flex;flex-direction:column;gap:10px;margin:16px 0 8px;align-self:stretch;}
+.gate-highlight{display:flex;align-items:center;gap:10px;font-size:0.88rem;color:var(--text);font-weight:500;text-align:left;}
+.gate-highlight-icon{flex-shrink:0;}
 .stay-connected-label input[type="checkbox"]{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;margin:0;}
 .stay-connected-label span{transition:color 0.2s;}
 .stay-connected-label:hover span{color:var(--text);}
@@ -206,7 +209,7 @@ input,select,button{font-family:inherit;}
 #gateWelcome{text-align:center;}
 .gate-welcome-text{font-size:0.88rem;color:var(--muted);margin:0 0 20px;line-height:1.5;}
 .gate-welcome-demo{width:100%;padding:12px;margin-bottom:12px;}
-.gate-welcome-login{display:inline-block;font-size:0.82rem;color:var(--muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;transition:color 0.2s;}
+.gate-welcome-login{display:inline-block;font-size:0.82rem;color:var(--text);cursor:pointer;text-decoration:underline;text-underline-offset:2px;transition:color 0.2s;}
 .gate-welcome-login:hover{color:var(--text);}
 /* Sign-up overlay (login modal on top of demo) */
 .signup-overlay{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
@@ -715,6 +718,11 @@ body.paused-mode:has(.schema-banner) .schema-banner{top:var(--paused-banner-h,36
 .footer-backend svg{opacity:0.7;}
 .footer-backend a{display:flex;align-items:center;gap:5px;color:var(--muted);text-decoration:none;}
 .footer-backend a:hover{color:var(--link-hover);}.footer-backend a:hover svg{opacity:1;}
+
+/* ===== GATE FOOTER ===== */
+.gate-footer{position:absolute;bottom:0;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 14px;font-size:0.75rem;color:var(--muted);}
+.gate-footer a{color:var(--muted);text-decoration:none;transition:color 0.15s;}
+.gate-footer a:hover{color:var(--link-hover);}
 
 /* ===== REVISION FEEDBACK MODAL ===== */
 .revision-modal textarea{min-height:100px;}

@@ -59,7 +59,6 @@
       <span data-i18n="hero.todos">TODOs</span>
       <span data-i18n="hero.habits">Habits</span>
       <span data-i18n="hero.flashcards">Flashcards</span>
-      <span data-i18n="hero.wardrobe">Wardrobe</span>
       <span data-i18n="hero.birthdays">Birthdays</span>
       <span data-i18n="hero.lists">Lists</span>
     </div>
@@ -92,16 +91,30 @@
     <h1 id="gateTitle">DeLaClaw</h1>
 
     <form id="loginForm" method="post" action="" style="display:none;">
-      <p class="gate-storage-hint" id="gateStorageHint" data-i18n="login.storage_hint">Choose where your data is stored.</p>
-      <a class="backend-compare-link" id="backendCompareLink" href="#" data-i18n="compare.link">Compare options</a>
+      <p class="gate-storage-hint" id="gateStorageHint" data-i18n="login.storage_hint" style="display:none;">Choose where your data is stored.</p>
+      <a class="backend-compare-link" id="backendCompareLink" href="#" data-i18n="compare.link" style="display:none;">Compare options</a>
       <div class="backend-picker" id="backendPicker">
         <button type="button" class="backend-option active" data-mode="googledrive" title="Google Drive"><span class="backend-option-label" data-i18n="login.mode_drive">Drive</span></button>
         <button type="button" class="backend-option" data-mode="supabase" title="Supabase"><span class="backend-option-label" data-i18n="login.mode_supabase">SB</span></button>
-        <button type="button" class="backend-option" data-mode="local" title="Local"><span class="backend-option-label" data-i18n="login.mode_local">Local</span></button>
+        <button type="button" class="backend-option" data-mode="local" title="Local" style="display:none;"><span class="backend-option-label" data-i18n="login.mode_local">Local</span></button>
         <button type="button" class="backend-option" data-mode="demo" title="Demo"><span class="backend-option-label" data-i18n="login.mode_demo">Demo</span></button>
       </div>
       <div class="gate-fields" id="gateFields">
         <p class="hint" id="loginHint">Connect to your Supabase project.</p>
+        <div class="gate-highlights" id="gateHighlights" style="display:none;">
+          <div class="gate-highlight">
+            <img src="icons/brand/googledrive.svg" alt="" width="20" height="20" class="gate-highlight-icon">
+            <span data-i18n="login.highlight_storage">Store your data in your GDrive</span>
+          </div>
+          <div class="gate-highlight">
+            <span data-icon="shield-check" data-size="20" data-color="currentColor" class="gate-highlight-icon"></span>
+            <span data-i18n="login.highlight_privacy">Your personal files are out of reach</span>
+          </div>
+          <div class="gate-highlight">
+            <img src="icons/brand/googlecalendar.svg" alt="" width="20" height="20" class="gate-highlight-icon">
+            <span data-i18n="login.highlight_calendar">Optional sync with Google Calendar</span>
+          </div>
+        </div>
         <label for="username" class="gate-label" id="urlLabel"><a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener" id="urlLabelLink" data-tooltip="Find the URL by connecting to your Supabase project">Project URL</a></label>
         <input type="text" id="username" name="username" placeholder="https://xyz.supabase.co" autocomplete="username">
         <div id="keyField">
@@ -125,10 +138,10 @@
     <div id="gateWelcome" style="display:none;">
       <p class="gate-welcome-text" data-i18n="login.welcome_text">Your personal command center. Organize projects, todos, habits, and more — your data stays yours.</p>
       <button type="button" class="btn-primary gate-welcome-demo" id="gateWelcomeDemo" data-i18n="login.welcome_demo">Try the demo</button>
-      <a class="gate-welcome-login" id="gateWelcomeLogin" href="#" data-i18n="login.welcome_login">I already have an account</a>
+      <a class="gate-welcome-login" id="gateWelcomeLogin" href="#" data-i18n="login.welcome_login">I already have an account / Skip the demo</a>
     </div>
 
-    <a class="gate-guide-link" id="gateGuideLink" href="#setup" data-i18n="setup.guide_link">New here? Get started</a>
+    <a class="gate-guide-link" id="gateGuideLink" href="#setup" data-i18n="setup.guide_link" style="display:none;">New here? Get started</a>
   </div>
 
   <!-- ===== SETUP GUIDE (replaces gate-box) ===== -->
@@ -145,7 +158,8 @@
         <span class="setup-path-desc" id="setupDriveDesc">Sign in with Google. Data stored in your Drive.</span>
       </button>
       <!-- Supabase removed from setup guide (deprecated) -->
-      <button class="setup-path-card" id="setupPathLocal" type="button">
+      <!-- Local hidden (untested) -->
+      <button class="setup-path-card" id="setupPathLocal" type="button" style="display:none;">
         <span class="setup-path-icon" data-backend-logo="local" data-logo-size="22"></span>
         <span class="setup-path-name" id="setupLocalName">Local</span>
         <span class="setup-path-desc" id="setupLocalDesc">Your machine, your data. For developers.</span>
@@ -214,6 +228,20 @@ bun run server.js</pre>
       <button class="setup-done-btn" id="setupLocalDone" type="button">Go to login</button>
     </div>
   </div>
+
+  <!-- Gate footer (identity links only — no stats/backend) -->
+  <footer class="gate-footer">
+    <div class="footer-links">
+      <a href="https://docs.delaclaw.com/#/" target="_blank" rel="noopener" class="footer-link"><span data-icon="book-open" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_docs">Docs</span></a>
+      <span class="footer-sep">·</span>
+      <a href="https://github.com/AntGro/DeLaClaw" target="_blank" rel="noopener" class="footer-link"><span data-icon="github" data-size="13" data-color="currentColor"></span> GitHub</a>
+      <span class="footer-sep">·</span>
+      <a href="https://github.com/AntGro/DeLaClaw/blob/main/LICENSE" target="_blank" rel="noopener" class="footer-link"><span data-icon="scale" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_license">License</span></a>
+      <span class="footer-sep">·</span>
+      <a href="https://docs.delaclaw.com/#/privacy" target="_blank" rel="noopener" class="footer-link"><span data-icon="shield" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_privacy">Privacy</span></a>
+    </div>
+    <div class="footer-copyright">© 2026 DeLaClaw</div>
+  </footer>
 </div>
 
 <!-- ===== APP ===== -->
@@ -482,6 +510,8 @@ bun run server.js</pre>
         <a href="https://github.com/AntGro/DeLaClaw" target="_blank" rel="noopener" class="footer-link"><span data-icon="github" data-size="13" data-color="currentColor"></span> GitHub</a>
         <span class="footer-sep">·</span>
         <a href="https://github.com/AntGro/DeLaClaw/blob/main/LICENSE" target="_blank" rel="noopener" class="footer-link"><span data-icon="scale" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_license">License</span></a>
+        <span class="footer-sep">·</span>
+        <a href="https://docs.delaclaw.com/#/privacy" target="_blank" rel="noopener" class="footer-link"><span data-icon="shield" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_privacy">Privacy</span></a>
       </div>
       <div class="footer-copyright">© 2026 DeLaClaw</div>
     </div>

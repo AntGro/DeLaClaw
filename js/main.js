@@ -309,35 +309,40 @@ function switchBackendMode(mode) {
   const urlLabelLink = document.getElementById('urlLabelLink');
   const keyLabelLink = document.getElementById('keyLabelLink');
   const hintEl = document.getElementById('loginHint');
+  const highlightsEl = document.getElementById('gateHighlights');
   const submitBtn = document.querySelector('#loginForm button[type="submit"]');
 
   // All fields stay in flow (visibility:hidden, not display:none)
   // so .gate-box height is constant across modes.
   if (mode === 'demo') {
-    if (keyField) keyField.style.visibility = 'hidden';
-    if (urlField) urlField.style.visibility = 'hidden';
-    if (urlLabel) urlLabel.style.visibility = 'hidden';
-    if (hintEl) hintEl.textContent = t('login.hint_demo');
+    if (keyField) { keyField.style.display = ''; keyField.style.visibility = 'hidden'; }
+    if (urlField) { urlField.style.display = ''; urlField.style.visibility = 'hidden'; }
+    if (urlLabel) { urlLabel.style.display = ''; urlLabel.style.visibility = 'hidden'; }
+    if (hintEl) { hintEl.style.display = ''; hintEl.textContent = t('login.hint_demo'); }
+    if (highlightsEl) highlightsEl.style.display = 'none';
     if (submitBtn) submitBtn.textContent = t('login.btn_demo');
   } else if (mode === 'googledrive') {
-    if (keyField) keyField.style.visibility = 'hidden';
-    if (urlField) urlField.style.visibility = 'hidden';
-    if (urlLabel) urlLabel.style.visibility = 'hidden';
-    if (hintEl) hintEl.textContent = t('login.hint_googledrive');
+    if (keyField) keyField.style.display = 'none';
+    if (urlField) urlField.style.display = 'none';
+    if (urlLabel) urlLabel.style.display = 'none';
+    if (hintEl) hintEl.style.display = 'none';
+    if (highlightsEl) highlightsEl.style.display = '';
     if (submitBtn) submitBtn.textContent = t('login.btn_googledrive');
   } else if (mode === 'local') {
-    if (keyField) keyField.style.visibility = 'hidden';
-    if (urlField) { urlField.style.visibility = ''; urlField.placeholder = 'http://localhost:3737'; }
-    if (urlLabel) urlLabel.style.visibility = '';
+    if (keyField) { keyField.style.display = ''; keyField.style.visibility = 'hidden'; }
+    if (urlField) { urlField.style.display = ''; urlField.style.visibility = ''; urlField.placeholder = 'http://localhost:3737'; }
+    if (urlLabel) { urlLabel.style.display = ''; urlLabel.style.visibility = ''; }
     if (urlLabelLink) { urlLabelLink.textContent = t('login.url_label_local'); urlLabelLink.removeAttribute('href'); }
-    if (hintEl) hintEl.textContent = t('login.hint_local');
+    if (hintEl) { hintEl.style.display = ''; hintEl.textContent = t('login.hint_local'); }
+    if (highlightsEl) highlightsEl.style.display = 'none';
     if (submitBtn) submitBtn.textContent = t('login.connect');
   } else {
-    if (keyField) keyField.style.visibility = '';
-    if (urlField) { urlField.style.visibility = ''; urlField.placeholder = 'https://xyz.supabase.co'; }
-    if (urlLabel) urlLabel.style.visibility = '';
+    if (keyField) { keyField.style.display = ''; keyField.style.visibility = ''; }
+    if (urlField) { urlField.style.display = ''; urlField.style.visibility = ''; urlField.placeholder = 'https://xyz.supabase.co'; }
+    if (urlLabel) { urlLabel.style.display = ''; urlLabel.style.visibility = ''; }
     if (urlLabelLink) { urlLabelLink.textContent = t('login.url_label'); urlLabelLink.href = 'https://supabase.com/dashboard/projects'; urlLabelLink.dataset.tooltip = t('toast.url_tooltip'); }
-    if (hintEl) hintEl.textContent = t('login.hint_supabase');
+    if (hintEl) { hintEl.style.display = ''; hintEl.textContent = t('login.hint_supabase'); }
+    if (highlightsEl) highlightsEl.style.display = 'none';
     if (submitBtn) submitBtn.textContent = t('login.connect');
   }
 }
@@ -404,7 +409,7 @@ function initGate() {
   if (signupMode) {
     gateWelcome.style.display = 'none';
     document.getElementById('loginForm').style.display = 'flex';
-    document.getElementById('gateGuideLink').style.display = '';
+    document.getElementById('gateGuideLink').style.display = 'none';
   } else {
     gateWelcome.style.display = 'block';
     document.getElementById('loginForm').style.display = 'none';
@@ -419,7 +424,7 @@ function initGate() {
   document.getElementById('gateWelcomeLogin').addEventListener('click', (e) => { e.preventDefault();
     gateWelcome.style.display = 'none';
     document.getElementById('loginForm').style.display = 'flex';
-    document.getElementById('gateGuideLink').style.display = '';
+    document.getElementById('gateGuideLink').style.display = 'none';
   });
   // Update API Key link when project URL changes
   const _urlInput = document.getElementById('username');
@@ -3796,7 +3801,8 @@ function showSignupOverlay() {
 
   const guideLink = document.createElement('a');
   guideLink.className = 'gate-guide-link';
-  guideLink.href = '#';;
+  guideLink.href = '#';
+  guideLink.style.display = 'none';
   guideLink.textContent = t('setup.guide_link');
   guideLink.addEventListener('click', (e) => {
     e.preventDefault();

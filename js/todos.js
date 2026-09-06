@@ -1121,28 +1121,36 @@ async function doSnooze(snoozeUntil) {
   }
 }
 
-async function unsnoozeTodo(id, el) {
-  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unsnooze-todo"][data-id="${CSS.escape(id)}"]`);
-  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
-  try {
-    const todo = allTodos.find(t => t.id === id);
-    if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
-      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-        payload: { ...currentPayload, snooze_until: null },
-      });
-    } else {
-      const { error } = await state.db.from('todos').update({ snooze_until: null }).eq('id', id);
-      if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-    }
-    showToast(t('todos.unsnoozed'), 'success');
-    await refreshTodos();
-  } catch (e) {
-    console.warn('Failed to unsnooze todo:', e);
-    showToast(t('toast.update_failed'), 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
-  }
+function unsnoozeTodo(id, el) {
+  showConfirmAction(
+    t('todos.unsnooze_confirm_title'),
+    t('todos.unsnooze_confirm_msg'),
+    async () => {
+      const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unsnooze-todo"][data-id="${CSS.escape(id)}"]`);
+      if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+      try {
+        const todo = allTodos.find(t => t.id === id);
+        if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+          const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
+          await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+            payload: { ...currentPayload, snooze_until: null },
+          });
+        } else {
+          const { error } = await state.db.from('todos').update({ snooze_until: null }).eq('id', id);
+          if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+        }
+        showToast(t('todos.unsnoozed'), 'success');
+        await refreshTodos();
+      } catch (e) {
+        console.warn('Failed to unsnooze todo:', e);
+        showToast(t('toast.update_failed'), 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+      }
+    },
+    null,
+    { variant: 'neutral', btnText: t('todos.unsnooze'), iconSvg: lucideIcon('moon-off', 28), btnIconSvg: lucideIcon('moon-off', 15, 'currentColor') }
+  );
 }
 
 

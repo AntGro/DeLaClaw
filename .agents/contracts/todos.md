@@ -65,7 +65,7 @@ User jobs:
 ### Snooze
 - `snooze_until` — filters TODO out of pending view until date passes
 - Preset options: 1h, 3h, 1d, 3d, 1w, 1m + custom datetime picker
-- Snoozed items show moon icon with date; unsnooze button (moon-off icon) clears `snooze_until`
+- Snoozed items show moon icon with date; unsnooze button (moon-off icon) opens a confirmation modal before clearing `snooze_until`
 - Changing snooze date requires unsnoozing first, then re-snoozing
 
 ### Quick-Add

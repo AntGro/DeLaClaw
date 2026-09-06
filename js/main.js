@@ -27,7 +27,6 @@ import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
 import { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR } from './state.js';
 import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
-import { SUPABASE_MIGRATIONS } from '../migrations/supabase-migrations.js';
 
 // Last-updated tracking (declared early so renderLastUpdated can be called from updateStaticLabels)
 let _lastUpdatedAt = null;
@@ -1828,7 +1827,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     }
   }
 
-  checkSchemaVersion();
+  dismissSchemaBanner();
   recordDailyVisit();
 
   // Clean up any legacy localStorage ideas (one-time)
@@ -2800,8 +2799,6 @@ function updateStaticLabels() {
   });
   // Re-render footer "Updated" label in the new language
   renderLastUpdated();
-  // Re-render schema banner in new language (if visible)
-  checkSchemaVersion();
 }
 
 // ── Storm Logo Initialization ──
@@ -3299,284 +3296,13 @@ function cmpVer(a, b) {
 }
 
 /** Collect pending migration SQL from dbVer up to LATEST_COMPAT. */
-function getPendingMigrationSQL(dbVer) {
-  const versions = Object.keys(SUPABASE_MIGRATIONS)
-    .filter(v => cmpVer(v, dbVer) > 0 && cmpVer(v, LATEST_COMPAT) <= 0)
-    .sort((a, b) => cmpVer(a, b));
-  if (!versions.length) return null;
-  const sql = versions.map(v => SUPABASE_MIGRATIONS[v]).join('\n\n');
-  return sql + "\n\n-- Refresh PostgREST schema cache so new columns are visible immediately\nNOTIFY pgrst, 'reload schema';";
-}
-
-function checkSchemaVersion() {
-  if (state.demoMode || state.driveMode || !state.db?.connected) {
-    document.getElementById('schema-banner')?.remove();
-    return;
-  }
-  // Supabase with RLS: settings table is auth-gated, so skip until signed in
-  if (!state.demoMode && !state.driveMode && state.supabaseUrl && !state.authUser) {
-    document.getElementById('schema-banner')?.remove();
-    return;
-  }
-  const dbVer = state.dbSchemaVersion || '0.00';
-  if (cmpVer(dbVer, LATEST_COMPAT) >= 0) {
-    dismissSchemaBanner();
-    return;
-  }
-
-  document.getElementById('schema-banner')?.remove();
-  const banner = document.createElement('div');
-  banner.id = 'schema-banner';
-
-  const isCritical = cmpVer(dbVer, LATEST_COMPAT_DEPREC) < 0;
-
-  // Non-critical migration banners: hide on phone (Supabase SQL Editor is not phone-friendly)
-  if (!isCritical && deviceClass() === 'phone') {
-    dismissSchemaBanner();
-    return;
-  }
-
-  banner.className = isCritical ? 'schema-banner schema-banner-critical' : 'schema-banner';
-
-  const icon = lucideIcon(isCritical ? 'alert-octagon' : 'alert-triangle', 16);
-  const label = isCritical
-    ? t('schema.banner_critical', { dbVer, latest: LATEST_COMPAT })
-    : t('schema.banner_warning', { dbVer, latest: LATEST_COMPAT });
-
-  const sql = getPendingMigrationSQL(dbVer);
-  const updateBtn = sql
-    ? `<button data-action="show-migration-modal">${esc(t('schema.how_to_update'))}</button>`
-    : '';
-  banner.innerHTML = `${icon}<span>${label}</span>${updateBtn}<button data-action="dismiss-schema-banner">${esc(t('schema.dismiss'))}</button>`;
-  document.body.prepend(banner);
-  // Measure actual banner height and expose as CSS variable (handles multi-line text on mobile)
-  const updateSchemaH = () => {
-    if (banner.isConnected) document.body.style.setProperty('--schema-banner-h', banner.offsetHeight + 'px');
-  };
-  requestAnimationFrame(updateSchemaH);
-  const ro = new ResizeObserver(updateSchemaH);
-  ro.observe(banner);
-  banner._schemaRO = ro;
-}
-
 /** Render two version strings with differing characters highlighted. */
-function highlightVersionDiff(dbVer, latest) {
-  function mark(ver, other) {
-    let html = 'v';
-    for (let i = 0; i < ver.length; i++) {
-      if (i < other.length && ver[i] === other[i]) {
-        html += esc(ver[i]);
-      } else {
-        html += `<span class="ver-diff">${esc(ver[i])}</span>`;
-      }
-    }
-    return html;
-  }
-  return { db: mark(dbVer, latest), app: mark(latest, dbVer) };
-}
-
-function showMigrationModal() {
-  const dbVer = state.dbSchemaVersion || '0.00';
-  const sql = getPendingMigrationSQL(dbVer);
-  if (!sql) return;
-
-  // Remove existing modal if any
-  document.getElementById('migrationModal')?.remove();
-
-  const overlay = document.createElement('div');
-  overlay.id = 'migrationModal';
-  overlay.className = 'modal-overlay visible';
-  overlay.addEventListener('click', e => { if (e.target === overlay) closeMigrationModal(); });
-
-  const projectRef = state.supabaseUrl?.replace('https://', '').replace('.supabase.co', '') || '_';
-  const sqlEditorUrl = `https://supabase.com/dashboard/project/${projectRef}/sql/new?skip=true`;
-
-  // Build hint with highlighted version diffs
-  const verHL = highlightVersionDiff(dbVer, LATEST_COMPAT);
-  const hintTemplate = t('schema.modal_hint', { dbVer: '{{DB}}', latest: '{{APP}}' });
-  const hintHTML = esc(hintTemplate).replace('{{DB}}', verHL.db).replace('{{APP}}', verHL.app);
-
-  overlay.innerHTML = `<div class="modal migration-modal">
-    <h2>${LOGOS.supabase(18)} ${esc(t('schema.modal_title'))}</h2>
-    <p class="migration-hint">${hintHTML}</p>
-    <ol class="migration-steps">
-      <li>${t('schema.step_1')}
-        <div class="migration-sql-wrap">
-          <div class="migration-sql-header">
-            <span>SQL</span>
-            <button class="migration-copy-btn" id="migrationCopyBtn">${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}</button>
-          </div>
-          <pre class="migration-sql-code" id="migrationSqlCode">${esc(sql)}</pre>
-        </div>
-      </li>
-      <li>${t('schema.step_2', { url: sqlEditorUrl })}</li>
-      <li>${t('schema.step_3')}</li>
-    </ol>
-    <div class="migration-actions">
-      <button class="migration-check-btn" id="migrationCheckBtn" data-action="check-migration-status">${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}</button>
-      <button class="migration-close-btn" data-action="close-migration-modal">${esc(t('schema.close'))}</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-
-  // Wire copy button
-  document.getElementById('migrationCopyBtn').addEventListener('click', async () => {
-    const code = document.getElementById('migrationSqlCode')?.textContent;
-    if (!code) return;
-    try {
-      await navigator.clipboard.writeText(code);
-      const btn = document.getElementById('migrationCopyBtn');
-      btn.innerHTML = `${lucideIcon('check', 14)} ${esc(t('schema.copied'))}`;
-      setTimeout(() => { btn.innerHTML = `${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}`; }, 2000);
-    } catch { showToast(t('schema.copy_fallback')); }
-  });
-}
-
 /** Re-fetch schema_version from DB and report whether migration succeeded. */
-async function checkMigrationStatus() {
-  const btn = document.getElementById('migrationCheckBtn');
-  if (!btn) return;
-  btn.disabled = true;
-  btn.innerHTML = `${lucideIcon('loader', 14)} ${esc(t('common.loading'))}`;
-  try {
-    const { data } = await state.db.from('settings').select('value').eq('key', 'schema_version').single();
-    const newVer = data?.value || '0.00';
-    state.dbSchemaVersion = newVer;
-    if (cmpVer(newVer, LATEST_COMPAT) >= 0) {
-      btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.check_success', { ver: newVer }))}`;
-      btn.classList.add('migration-check-ok');
-      // Dismiss banner after short delay, refresh footer & trigger auth
-      setTimeout(() => {
-        closeMigrationModal();
-        checkSchemaVersion();
-        markLastUpdated();
-        // Mandatory auth since 1.300 — show prompt if not signed in
-        if (getSelectedMode() === 'supabase' && !state.authUser) {
-          showAuthPrompt(state._rawSupabaseAdapter);
-        }
-      }, 1500);
-    } else {
-      btn.innerHTML = `${lucideIcon('alert-triangle', 14)} ${esc(t('schema.check_still_old', { ver: newVer }))}`;
-      btn.classList.add('migration-check-fail');
-      setTimeout(() => {
-        btn.classList.remove('migration-check-fail');
-        btn.disabled = false;
-        btn.innerHTML = `${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}`;
-      }, 3000);
-    }
-  } catch {
-    btn.disabled = false;
-    btn.innerHTML = `${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}`;
-    showToast(t('schema.check_error'), 'error');
-  }
-}
-
-function closeMigrationModal() {
-  document.getElementById('migrationModal')?.remove();
-}
 /**
  * Pre-auth migration modal: shown when schema is readable without auth
  * and < 1.484 (pre-RLS). Forces migration before auth.
  * After migration, RLS blocks the read → we know it worked → show auth.
  */
-function showPreAuthMigrationModal(rawAdapter, url, key, dbVer) {
-  // Compute SQL from detected version up to LATEST_COMPAT
-  const sql = getPendingMigrationSQL(dbVer || '0.00');
-  if (!sql) { showAuthPrompt(rawAdapter, url, key); return; }
-
-  document.getElementById('preAuthMigrationModal')?.remove();
-
-  const overlay = document.createElement('div');
-  overlay.id = 'preAuthMigrationModal';
-  overlay.className = 'modal-overlay visible';
-
-  const projectRef = (url || '').replace('https://', '').replace('.supabase.co', '') || '_';
-  const sqlEditorUrl = `https://supabase.com/dashboard/project/${projectRef}/sql/new?skip=true`;
-
-  overlay.innerHTML = `<div class="modal migration-modal">
-    <h2>${LOGOS.supabase(18)} ${esc(t('schema.modal_title'))}</h2>
-    <p class="migration-hint">${esc(t('schema.pre_auth_hint'))}</p>
-    <ol class="migration-steps">
-      <li>${t('schema.step_1')}
-        <div class="migration-sql-wrap">
-          <div class="migration-sql-header">
-            <span>SQL</span>
-            <button class="migration-copy-btn" id="preAuthMigrationCopyBtn">${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}</button>
-          </div>
-          <pre class="migration-sql-code" id="preAuthMigrationSqlCode">${esc(sql)}</pre>
-        </div>
-      </li>
-      <li>${t('schema.step_2', { url: sqlEditorUrl })}</li>
-      <li>${t('schema.step_3')}</li>
-    </ol>
-    <div class="migration-actions">
-      <button class="migration-check-btn" id="preAuthMigrationCheckBtn">${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-
-  // Wire copy button
-  document.getElementById('preAuthMigrationCopyBtn').addEventListener('click', async () => {
-    const code = document.getElementById('preAuthMigrationSqlCode')?.textContent;
-    if (!code) return;
-    try {
-      await navigator.clipboard.writeText(code);
-      const btn = document.getElementById('preAuthMigrationCopyBtn');
-      btn.innerHTML = `${lucideIcon('check', 14)} ${esc(t('schema.copied'))}`;
-      setTimeout(() => { btn.innerHTML = `${lucideIcon('copy', 14)} ${esc(t('schema.copy'))}`; }, 2000);
-    } catch { showToast(t('schema.copy_fallback')); }
-  });
-
-  // Wire check button: after migration, RLS blocks the read → success
-  document.getElementById('preAuthMigrationCheckBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('preAuthMigrationCheckBtn');
-    btn.disabled = true;
-    btn.innerHTML = `${lucideIcon('loader', 14)} ${esc(t('common.loading'))}`;
-    try {
-      const { data, error } = await rawAdapter
-        .from('settings').select('value').eq('key', 'schema_version').maybeSingle();
-      if (error || !data) {
-        // RLS is now blocking the read → migration worked → show auth
-        btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.pre_auth_success'))}`;
-        btn.classList.add('migration-check-ok');
-        setTimeout(() => {
-          overlay.remove();
-          showAuthPrompt(rawAdapter, url, key);
-        }, 1200);
-      } else {
-        const ver = data.value || '0.00';
-        if (cmpVer(ver, '1.484') >= 0) {
-          // Version readable and >= 1.484 — unusual but proceed to auth
-          btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.check_success', { ver }))}`;
-          btn.classList.add('migration-check-ok');
-          setTimeout(() => {
-            overlay.remove();
-            showAuthPrompt(rawAdapter, url, key);
-          }, 1200);
-        } else {
-          // Still old
-          btn.innerHTML = `${lucideIcon('alert-triangle', 14)} ${esc(t('schema.check_still_old', { ver }))}`;
-          btn.classList.add('migration-check-fail');
-          setTimeout(() => {
-            btn.classList.remove('migration-check-fail');
-            btn.disabled = false;
-            btn.innerHTML = `${lucideIcon('refresh-cw', 14)} ${esc(t('schema.check_migration'))}`;
-          }, 3000);
-        }
-      }
-    } catch {
-      // Error likely means RLS is active → migration worked
-      btn.innerHTML = `${lucideIcon('check-circle', 14)} ${esc(t('schema.pre_auth_success'))}`;
-      btn.classList.add('migration-check-ok');
-      setTimeout(() => {
-        overlay.remove();
-        showAuthPrompt(rawAdapter, url, key);
-      }, 1200);
-    }
-  });
-}
-
-
 function showCompareModal() {
   document.getElementById('compareModal')?.remove();
 
@@ -5155,9 +4881,6 @@ window.markCategoryRenamed = markCategoryRenamed;
 window.toggleSearch = toggleSearch;
 window.clearPageSearch = clearPageSearch;
 window.dismissSchemaBanner = dismissSchemaBanner;
-window.showMigrationModal = showMigrationModal;
-window.closeMigrationModal = closeMigrationModal;
-window.checkMigrationStatus = checkMigrationStatus;
 window.showCompareModal = showCompareModal;
 window.closeCompareModal = closeCompareModal;
 

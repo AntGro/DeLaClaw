@@ -1075,12 +1075,6 @@ test('sharing member identity is memberId-based and agent-safe', () => {
 
   assert(supabase.includes('invited_label') && supabase.includes('getAgentSafeGroup'),
     'sharing-supabase.js must preserve invited_label separately and expose agent-safe serialization');
-
-  const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
-  assert(migration.includes('DROP FUNCTION IF EXISTS verify_join_token(text)'),
-    '1.484 migration must drop verify_join_token before redefining');
-  assert(migration.includes('FUNCTION get_group_members('),
-    '1.484 migration must define get_group_members');
 });
 
 // ===================================================================
@@ -1560,16 +1554,6 @@ async function archiveDeleteIntegrationTest() {
 // ===================================================================
 console.log('\n-- Auth & Sharing (D+E Hybrid)\n');
 
-test('Unified migration SQL file 1.484 exists', () => {
-  const migDir = path.join(__dirname, '..', 'migrations');
-  assert(fs.existsSync(path.join(migDir, '1.484_sharing_ownership_categories.sql')), 'Missing unified migration file');
-});
-
-test('supabase-migrations.js has entry for 1.484', () => {
-  const content = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'supabase-migrations.js'), 'utf-8');
-  assert(content.includes("'1.484':"), 'Missing supabase migration entry for 1.484');
-});
-
 test('local-migrations.js has entries for 1.294 and 1.297', () => {
   const content = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
   assert(content.includes("'1.294':"), 'Missing local migration entry for 1.294');
@@ -1685,38 +1669,6 @@ test('No HTML entities in new JS files (auth.js, sharing-supabase.js)', () => {
       throw new Error(`${name} contains HTML entities: ${entities.join(', ')}`);
     }
   }
-});
-
-test('1.484 migration defines all 8 RPC functions', () => {
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
-  const expected = [
-    'verify_join_token', 'confirm_join', 'get_shared_items',
-    'add_shared_item', 'update_shared_item', 'delete_shared_item',
-    'get_group_members', 'leave_group',
-  ];
-  for (const fn of expected) {
-    assert(sql.includes(`FUNCTION ${fn}(`), `1.484 migration missing function: ${fn}`);
-  }
-});
-
-test('1.484 migration adds owner_id to all personal tables', () => {
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
-  const tables = [
-    'projects', 'tasks', 'todos', 'habits', 'habit_completions',
-    'flashcard_notes', 'birthdays', 'vestiaire', 'lists', 'list_items',
-    'settings', 'prompts',
-  ];
-  for (const t of tables) {
-    assert(sql.includes(`ALTER TABLE ${t} ADD COLUMN`), `1.484 missing ALTER TABLE ${t}`);
-  }
-});
-
-test('1.484 migration enforces owner-or-agent RLS and claim_ownership RPC', () => {
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
-  assert(!sql.includes('CREATE POLICY "owner or unclaimed"'), '1.484 must not CREATE owner or unclaimed');
-  assert(sql.includes('CREATE POLICY "owner or agent"'), '1.484 must create owner or agent policies');
-  assert(sql.includes('set_owner_id()'), '1.484 must include set_owner_id trigger');
-  assert(sql.includes('claim_ownership()'), '1.484 must include claim_ownership function');
 });
 
 test('sql/supabase_schema.sql has owner-or-agent for all personal tables + joined_groups', () => {
@@ -2630,46 +2582,6 @@ async function importFlashcardsIntegrationTest() {
       throw new Error('Failed to regenerate CODEMAP: '+e.message);
     }
   });
-
-  test('supabase-migrations.js freshness: matches generated output from SQL files', () => {
-    const { execSync } = require('child_process');
-    const migFile = path.join(__dirname, '..', 'migrations', 'supabase-migrations.js');
-    const before = fs.readFileSync(migFile, 'utf-8');
-    execSync('node scripts/generate-supabase-migrations.js', { cwd: path.join(__dirname,'..'), stdio: 'pipe' });
-    const after = fs.readFileSync(migFile, 'utf-8');
-    assert(before === after, 'supabase-migrations.js is stale — run: node scripts/generate-supabase-migrations.js');
-  });
-
-  test('supabase_schema.sql covers all structures from latest migration', () => {
-    const schema = fs.readFileSync(path.join(__dirname, '..', 'sql', 'supabase_schema.sql'), 'utf-8');
-    const migDir = path.join(__dirname, '..', 'migrations');
-    const sqlFiles = fs.readdirSync(migDir).filter(f => f.endsWith('.sql')).sort();
-    const latestMig = sqlFiles[sqlFiles.length - 1];
-    const latestVer = latestMig.split('_')[0];
-
-    // Schema version must match latest migration
-    assert(schema.includes("'" + latestVer + "'"), 'supabase_schema.sql schema_version (' + latestVer + ') not found');
-
-    // All tables created by the migration must exist in the base schema
-    const migration = fs.readFileSync(path.join(migDir, latestMig), 'utf-8');
-    const tableMatches = migration.matchAll(/CREATE TABLE IF NOT EXISTS\s+(\w+)/g);
-    for (const m of tableMatches) {
-      assert(schema.includes(m[1]), 'supabase_schema.sql missing table: ' + m[1]);
-    }
-
-    // All functions defined by the migration must exist in the base schema
-    const fnMatches = migration.matchAll(/CREATE OR REPLACE FUNCTION\s+(\w+)/g);
-    for (const m of fnMatches) {
-      assert(schema.includes(m[1]), 'supabase_schema.sql missing function: ' + m[1]);
-    }
-
-    // No stale schema_version inserts (only the latest should remain)
-    const verInserts = [...schema.matchAll(/schema_version.*?(\d+\.\d+)/g)];
-    const versions = verInserts.map(m => m[1]);
-    const stale = versions.filter(v => v !== latestVer);
-    assert(stale.length === 0, 'supabase_schema.sql has stale schema_version inserts: ' + stale.join(', '));
-  });
-
 
   // ===================================================================
   // SHARING: unshare/copy-to-personal guards

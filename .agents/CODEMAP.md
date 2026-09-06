@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-04T22:23:48.881Z from 39 modules (v1.937). Total LOC 32315. Do not hand-edit.
+> Generated 2026-09-06T09:26:29.567Z from 39 modules (v1.938). Total LOC 32035. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,7 +27,7 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 5181 | daily_visits,nvidia_usage,projects,settings | ./migrations/supabase-migrations,agents-ui,backend-logos,birthdays | - | esc:48,guard+pendingSet,window:8 |
+| main | 4904 | daily_visits,nvidia_usage,projects,settings | agents-ui,backend-logos,birthdays,calendar-sync | - | esc:18,guard+pendingSet,window:8 |
 | i18n | 2466 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
 | sharing-supabase | 1635 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,i18n,sharing-envelope,utils | main.js | pendingSet |
 | sharing-drive | 1402 | - | sharing-envelope,utils | main.js,sharing.js | - |
@@ -38,7 +38,7 @@
 | calendar-sync | 694 | birthdays,gcal_sync,habits,settings,todos | habits,i18n,icons,state | main.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 464 | - | habits,i18n,icons,utils | - | - |
-| delegation | 432 | - |  | - | window:1 |
+| delegation | 429 | - |  | - | window:1 |
 | demo | 303 | x |  | drive.js | - |
 | offline-cache | 299 | - | ./state,state.js | main.js | - |
 | crypto-sync | 297 | settings |  | sharing-supabase.js | - |

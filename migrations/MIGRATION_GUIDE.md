@@ -37,22 +37,11 @@ The app checks `schema_version` on Supabase connect and shows:
 
 ### Supabase
 
-The primary migration path. Migration files live in `migrations/` and are named by target version:
+Schema lives in `sql/supabase_schema.sql`. Supabase users apply it once in the SQL Editor.
 
-```
-migrations/1.099_enable_realtime.sql
-migrations/1.102_add_lists.sql
-```
+**New installs:** run `sql/supabase_schema.sql` once — it includes all changes and sets `schema_version` to the latest version.
 
-Each migration ends with:
-```sql
-UPDATE settings SET value = 'X.YYY', updated_at = now()
-WHERE key = 'schema_version';
-```
-
-**New installs:** run `sql/supabase_schema.sql` once — it includes all migrations folded in and sets `schema_version` to the latest version.
-
-**Existing installs:** run pending migration files in order in the Supabase SQL Editor.
+**Existing installs:** create and run the needed `ALTER TABLE` / DDL statements manually in the SQL Editor, then update `schema_version`.
 
 ### Local (Bun + SQLite)
 
@@ -97,15 +86,15 @@ Demo mode is truly schemaless with no migration mechanism — data doesn't persi
 
 ## Writing a Migration
 
-1. Create `migrations/<version>_<description>.sql`
-2. Write the SQL (see template below)
-3. Bump `latest` in `VERSION` to match
-4. If the migration adds required schema, bump `latest_compat` (or `latest_compat_deprec` if breaking)
-5. Update `sql/supabase_schema.sql` to include the change for new installs
-6. Update `server/schema.sql` (SQLite equivalent) if applicable
-7. If the new field is used in app code, ensure it handles `undefined` / missing values for Drive and Demo backends
-8. If adding a new CHECK constraint, update `CHECK_CONSTRAINTS` in `js/adapters/demo.js` (test 31 enforces parity)
-9. If the change is structural (new table, renamed field, table split), add a matching entry in `migrations/drive-migrations.js`
+1. Write the SQL change
+2. Bump `latest` in `VERSION` to match
+3. If the migration adds required schema, bump `latest_compat` (or `latest_compat_deprec` if breaking)
+4. Update `sql/supabase_schema.sql` to include the change for new installs
+5. Update `server/schema.sql` (SQLite equivalent) if applicable
+6. If the new field is used in app code, ensure it handles `undefined` / missing values for Drive and Demo backends
+7. If adding a new CHECK constraint, update `CHECK_CONSTRAINTS` in `js/adapters/demo.js` (test 31 enforces parity)
+8. If the change is structural (new table, renamed field, table split), add a matching entry in `migrations/drive-migrations.js`
+9. Add a matching entry in `migrations/local-migrations.js` for Local backend
 10. Commit — the pre-commit and commit-msg hooks will verify
 
 ### Migration Template

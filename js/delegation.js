@@ -310,10 +310,7 @@
       case 'go-to-revise': callWindow('goToRevise', []); break;
       case 'expand-meta': callWindow('expandMeta', [el.dataset.metaId||el.dataset.id, el.dataset.metaField||el.dataset.field]); break;
       case 'collapse-meta': callWindow('collapseMeta', [el.dataset.metaId||el.dataset.id, el.dataset.metaField||el.dataset.field]); break;
-      case 'show-migration-modal': callWindow('showMigrationModal', []); break;
       case 'dismiss-schema-banner': callWindow('dismissSchemaBanner', []); break;
-      case 'check-migration-status': callWindow('checkMigrationStatus', []); break;
-      case 'close-migration-modal': callWindow('closeMigrationModal', []); break;
       case 'close-compare-modal': callWindow('closeCompareModal', []); break;
       case 'toggle-cal-sync-habits': callWindow('toggleCalSyncSub', ['habits']); break;
       case 'toggle-cal-sync-todos': callWindow('toggleCalSyncSub', ['todos']); break;

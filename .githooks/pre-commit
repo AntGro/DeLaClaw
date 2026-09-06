@@ -93,16 +93,6 @@ sed -i "s/^const CACHE_VERSION = .*/const CACHE_VERSION = 'dlc-${latest}';/" "$R
 
 git add "$VERSION_JS" "$REPO_ROOT/sw.js"
 
-# ── Supabase migrations JS regeneration ────────────────────────
-# Rebuild migrations/supabase-migrations.js from .sql files.
-if [ -f "$REPO_ROOT/scripts/generate-supabase-migrations.js" ]; then
-  if command -v node >/dev/null 2>&1; then
-    node "$REPO_ROOT/scripts/generate-supabase-migrations.js" >/dev/null 2>&1 || true
-  elif command -v bun >/dev/null 2>&1; then
-    bun "$REPO_ROOT/scripts/generate-supabase-migrations.js" >/dev/null 2>&1 || true
-  fi
-  git add "$REPO_ROOT/migrations/supabase-migrations.js" 2>/dev/null || true
-fi
 
 # ── CODEMAP regeneration (AI-native index) ─────────────────────
 # Regenerate .agents/CODEMAP.json + .md from current source.

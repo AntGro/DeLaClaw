@@ -165,7 +165,7 @@ No realtime. Single-user, single-device.
 See `migrations/MIGRATION_GUIDE.md` for the full protocol. Key points:
 
 - **Single version number** shared between app (`VERSION` file) and DB (`settings.schema_version`).
-- **Migration files** named `<version>_<description>.sql` (e.g., `1.099_enable_realtime.sql`).
+- **Local/Drive migrations** in `migrations/local-migrations.js` and `migrations/drive-migrations.js`.
 - **Pre-commit hook** blocks commits without a VERSION bump; auto-generates `js/version.js`.
 
 ### Dev / prod workflow

@@ -5,7 +5,7 @@ import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
-import { initItemHoverDelay, inlineEditText } from './item-utils.js';
+import { initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
 import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCategories } from './habits.js';
 import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCategories } from './todos.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
@@ -804,8 +804,10 @@ function renderWelcome() {
   html += `</div>`;
 
   const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(container);
   container.innerHTML = html;
   window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(container, innerScrolls);
 
   // Init hover delay for focus TODO items (action buttons appear on hover/long-press)
   initWelcomeFocusHover();

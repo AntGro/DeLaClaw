@@ -15,7 +15,7 @@ Today / Welcome aggregation — focus TODOs, due habits, flashcard reviews, text
 ## UI / UX
 - **Reused components:** `.modal`, `.app-header`, `.btn`, toast
 - **Aggregates:** focus TODOs (urgent/high), due-today habits, due flashcard reviews, text reading progress, upcoming birthdays
-- **Scroll stability:** `renderWelcome` preserves `window.scrollY` across re-renders (same pattern as Lists), so marking a habit done or toggling a TODO doesn't jump the page to the top
+- **Scroll stability:** `renderWelcome` preserves `window.scrollY` and each bucket's inner `.welcome-items` scroll across re-renders (same pattern as Lists), so marking a habit done or toggling a TODO doesn't jump the page or the bucket to the top
 
 ## Interaction Guards
 - **Pending set:** welcome uses pendingSet for toggle/snooze (see CODEMAP guards)

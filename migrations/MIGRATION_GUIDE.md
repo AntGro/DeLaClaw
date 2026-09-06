@@ -30,18 +30,9 @@ The app checks `schema_version` on Supabase connect and shows:
 
 | Backend | Schema source | Migration strategy | User action required |
 |---|---|---|---|
-| **Supabase** | `sql/supabase_schema.sql` (Postgres DDL) | Incremental `.sql` files in `migrations/`, run manually in the SQL Editor | Yes — run pending migration files in order |
 | **Local** | `server/schema.sql` (SQLite DDL) | `CREATE TABLE IF NOT EXISTS` on server startup. New columns need manual migration or DB reset | No for new tables. New columns on existing tables: yes |
 | **Google Drive** | Per-table JSON files in Drive | JS migration functions run on connect when `schema_version` is behind. New fields handled gracefully (undefined + defaults) | No — automatic on connect |
 | **Demo** | Schemaless (in-memory) | Same as Drive — new fields are simply absent on old objects | No — automatic |
-
-### Supabase
-
-Schema lives in `sql/supabase_schema.sql`. Supabase users apply it once in the SQL Editor.
-
-**New installs:** run `sql/supabase_schema.sql` once — it includes all changes and sets `schema_version` to the latest version.
-
-**Existing installs:** create and run the needed `ALTER TABLE` / DDL statements manually in the SQL Editor, then update `schema_version`.
 
 ### Local (Bun + SQLite)
 

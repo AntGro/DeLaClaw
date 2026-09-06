@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-06T09:26:29.567Z from 39 modules (v1.938). Total LOC 32035. Do not hand-edit.
+> Generated 2026-09-06T09:40:54.145Z from 39 modules (v1.939). Total LOC 32017. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,7 +27,7 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 4904 | daily_visits,nvidia_usage,projects,settings | agents-ui,backend-logos,birthdays,calendar-sync | - | esc:18,guard+pendingSet,window:8 |
+| main | 4886 | daily_visits,nvidia_usage,projects,settings | agents-ui,backend-logos,birthdays,calendar-sync | - | esc:18,guard+pendingSet,window:8 |
 | i18n | 2466 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
 | sharing-supabase | 1635 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,i18n,sharing-envelope,utils | main.js | pendingSet |
 | sharing-drive | 1402 | - | sharing-envelope,utils | main.js,sharing.js | - |
@@ -57,7 +57,7 @@
 | backend-logos | 26 | - |  | main.js,sharing-ui.js | - |
 | bootstrap | 26 | - |  | - | - |
 | sw-register | 16 | - |  | - | - |
-| version | 5 | - |  | main.js,utils.js | - |
+| version | 5 | - |  | utils.js | - |
 
 ## Tables → used by
 

@@ -26,7 +26,6 @@ import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as app
 import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
 import { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR } from './state.js';
-import { APP_VERSION, LATEST_COMPAT, LATEST_COMPAT_DEPREC } from './version.js';
 
 // Last-updated tracking (declared early so renderLastUpdated can be called from updateStaticLabels)
 let _lastUpdatedAt = null;
@@ -3286,23 +3285,6 @@ async function loadUsageStats() {
   }
 }
 
-/** Compare two version strings "X.Y". Returns -1, 0, or 1. */
-function cmpVer(a, b) {
-  const [aMaj, aMin] = a.split('.').map(Number);
-  const [bMaj, bMin] = b.split('.').map(Number);
-  if (aMaj !== bMaj) return aMaj < bMaj ? -1 : 1;
-  if (aMin !== bMin) return aMin < bMin ? -1 : 1;
-  return 0;
-}
-
-/** Collect pending migration SQL from dbVer up to LATEST_COMPAT. */
-/** Render two version strings with differing characters highlighted. */
-/** Re-fetch schema_version from DB and report whether migration succeeded. */
-/**
- * Pre-auth migration modal: shown when schema is readable without auth
- * and < 1.484 (pre-RLS). Forces migration before auth.
- * After migration, RLS blocks the read → we know it worked → show auth.
- */
 function showCompareModal() {
   document.getElementById('compareModal')?.remove();
 

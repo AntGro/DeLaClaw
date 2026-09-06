@@ -26,6 +26,7 @@ import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as app
 import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
 import { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR } from './state.js';
+import { compareVersions } from '../migrations/version-compare.js';
 
 // Last-updated tracking (declared early so renderLastUpdated can be called from updateStaticLabels)
 let _lastUpdatedAt = null;
@@ -1930,8 +1931,8 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   }
 
   // Supabase sharing init (requires auth + sharing tables ≥ 1.295)
-  const dbVerForSharing = parseFloat(state.dbSchemaVersion || '0');
-  if (mode === 'supabase' && state.authUser && dbVerForSharing >= 1.295) {
+  const dbVerForSharing = state.dbSchemaVersion || '0';
+  if (mode === 'supabase' && state.authUser && compareVersions(dbVerForSharing, '1.295') >= 0) {
     try {
       const { createSharing } = await import('./sharing.js');
       state.sharing = await createSharing('supabase', {

@@ -9,7 +9,7 @@ DeLaClaw uses a **single version number** for both the app and the database sche
 
 ### Format
 
-`X.YYY` — e.g. `1.098`, `1.099`, `2.000`. Minor increments for features/fixes, major bump for breaking schema changes.
+`X.Y.Z` (semantic versioning) — e.g. `1.939.0`, `1.939.1`, `2.0.0`. Patch increments on every commit, minor on features, major on breaking schema changes. Legacy two-part versions (`X.YYY`, e.g. `1.939`) are treated as `X.YYY.0` when compared.
 
 ### Compatibility Fields (VERSION file)
 
@@ -91,12 +91,12 @@ Demo mode is truly schemaless with no migration mechanism — data doesn't persi
 ### Migration Template
 
 ```sql
--- Migration X.YYY: Description
+-- Migration X.Y.Z: Description
 
 -- ... your DDL / DML here ...
 
 -- Bump schema version
-UPDATE settings SET value = 'X.YYY', updated_at = now()
+UPDATE settings SET value = 'X.Y.Z', updated_at = now()
 WHERE key = 'schema_version';
 ```
 

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-06T09:40:54.145Z from 39 modules (v1.939). Total LOC 32017. Do not hand-edit.
+> Generated 2026-09-06T10:17:39.854Z from 39 modules (v1.939.1). Total LOC 32022. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,13 +27,13 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 4886 | daily_visits,nvidia_usage,projects,settings | agents-ui,backend-logos,birthdays,calendar-sync | - | esc:18,guard+pendingSet,window:8 |
+| main | 4887 | daily_visits,nvidia_usage,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:18,guard+pendingSet,window:8 |
 | i18n | 2466 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
 | sharing-supabase | 1635 | habits,joined_groups,list_items,sharing_groups,sharing_items,sharing_members,todos | crypto-sync,i18n,sharing-envelope,utils | main.js | pendingSet |
 | sharing-drive | 1402 | - | sharing-envelope,utils | main.js,sharing.js | - |
-| sharing-ui | 1257 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:41,pendingSet,window:8 |
+| sharing-ui | 1258 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | ./migrations/version-compare,backend-logos,i18n,icons | habits.js,lists.js,main.js,todos.js | esc:41,pendingSet,window:8 |
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
-| drive | 1101 | - | ../migrations/drive-migrations.js,./../migrations/drive-migrations,./i18n,demo | - | pendingSet |
+| drive | 1102 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | utils | 993 | flashcards,settings,x | i18n,icons,state,version | - | esc:9,window:6 |
 | calendar-sync | 694 | birthdays,gcal_sync,habits,settings,todos | habits,i18n,icons,state | main.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |
@@ -42,7 +42,7 @@
 | demo | 303 | x |  | drive.js | - |
 | offline-cache | 299 | - | ./state,state.js | main.js | - |
 | crypto-sync | 297 | settings |  | sharing-supabase.js | - |
-| auth | 264 | auth_email_guard,settings |  | - | - |
+| auth | 266 | auth_email_guard,settings | ./migrations/version-compare,migrations/version-compare.js | - | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
 | agents-ui | 229 | agent_grants | db,i18n,icons,state | main.js | esc:32,window:5 |
 | icons | 210 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |

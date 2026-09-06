@@ -146,7 +146,7 @@ The demo adapter mirrors these constraints in JavaScript.
 2. On success: cache the response and serve it
 3. On failure: serve from the SW precache
 
-The precache (`PRECACHE_URLS`) includes all static assets. The `CACHE_VERSION` string is updated automatically by the pre-commit hook from the `VERSION` file (format: `dlc-X.YYY`).
+The precache (`PRECACHE_URLS`) includes all static assets. The `CACHE_VERSION` string is updated automatically by the pre-commit hook from the `VERSION` file (format: `dlc-X.Y.Z`).
 
 On install, the SW calls `skipWaiting()`. On activate, it purges old caches and calls `clients.claim()`. The page listens for `controllerchange` events and reloads automatically when a new SW takes over.
 

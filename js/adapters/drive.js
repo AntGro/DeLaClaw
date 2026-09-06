@@ -21,6 +21,7 @@
 
 import { createDemoAdapter } from './demo.js';
 import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
+import { compareVersions } from '../../migrations/version-compare.js';
 import { t } from '../i18n.js';
 
 export const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
@@ -478,7 +479,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   if (isFreshInstall) {
     // Fresh install: create all table files on Drive with progress, set schema to latest
-    const latestVersion = Object.keys(DRIVE_MIGRATIONS).sort((a, b) => parseFloat(a) - parseFloat(b)).pop() || '0';
+    const latestVersion = Object.keys(DRIVE_MIGRATIONS).sort(compareVersions).pop() || '0';
     const total = DRIVE_TABLES.length;
     emit('loading', t('menu.drive_creating_tables'), 0, total);
     const tok = await getToken();
@@ -528,14 +529,14 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     // ── Run pending migrations (existing installs only) ──
 
     const pendingMigrations = Object.keys(DRIVE_MIGRATIONS)
-      .sort((a, b) => parseFloat(a) - parseFloat(b));
+      .sort(compareVersions);
 
     if (pendingMigrations.length > 0) {
       const settings = inner._store.settings || [];
       const svEntry = settings.find(s => s.key === 'schema_version');
       const currentVersion = svEntry ? String(svEntry.value) : '0';
 
-      const toRun = pendingMigrations.filter(v => v > currentVersion);
+      const toRun = pendingMigrations.filter(v => compareVersions(v, currentVersion) > 0);
 
       if (toRun.length > 0) {
         emit('migrating', t('menu.drive_backing_up'), 0, toRun.length);
@@ -888,14 +889,14 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
      */
     async runPendingMigrations() {
       const pendingMigrations = Object.keys(DRIVE_MIGRATIONS)
-        .sort((a, b) => parseFloat(a) - parseFloat(b));
+        .sort(compareVersions);
       if (!pendingMigrations.length) return 0;
 
       const settings = inner._store.settings || [];
       const svEntry = settings.find(s => s.key === 'schema_version');
       const currentVersion = svEntry ? String(svEntry.value) : '0';
 
-      const toRun = pendingMigrations.filter(v => v > currentVersion);
+      const toRun = pendingMigrations.filter(v => compareVersions(v, currentVersion) > 0);
       if (!toRun.length) return 0;
 
       const migrationCtx = {

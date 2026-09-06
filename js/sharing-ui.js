@@ -18,6 +18,7 @@
 // ===================================================================
 
 import state, { STAY_CONNECTED_KEY } from './state.js';
+import { compareVersions } from '../migrations/version-compare.js';
 import { t } from './i18n.js';
 import { esc, escQ, showToast, showConfirmAction, getSupabaseProjectRef, buildAuthSteps } from './utils.js';
 import { lucideIcon } from './icons.js';
@@ -100,7 +101,7 @@ export async function renderSharingPane() {
 
   if (!state.sharing) {
     // Supabase without auth: show inline sign-in prompt (only if DB has auth tables)
-    const dbReady = parseFloat(state.dbSchemaVersion || '0') >= 1.294;
+    const dbReady = compareVersions(state.dbSchemaVersion || '0', '1.294') >= 0;
     if (activeMode === 'supabase' && !state.authUser && dbReady) {
       const creds = (() => { try { return JSON.parse(localStorage.getItem(STAY_CONNECTED_KEY) || '{}'); } catch { return {}; } })();
       const projRef = getSupabaseProjectRef(creds.url || '') || null;

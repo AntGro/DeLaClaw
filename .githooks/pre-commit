@@ -25,20 +25,23 @@ if ! git diff --cached --name-only | grep -q '^VERSION$'; then
   exit 1
 fi
 
-# Convert XXX.YYY to integer (XXX * 1000 + YYY) for comparison
+# Convert X.Y.Z to integer (X * 1000000 + Y * 1000 + Z) for comparison.
+# Tolerates legacy two-part versions (missing parts count as 0).
 ver_to_int() {
-  local major minor
+  local major minor patch
   major=$(echo "$1" | cut -d. -f1)
   minor=$(echo "$1" | cut -d. -f2)
-  major=$((10#$major))
-  minor=$((10#$minor))
-  echo $(( major * 1000 + minor ))
+  patch=$(echo "$1" | cut -d. -f3)
+  major=$((10#${major:-0}))
+  minor=$((10#${minor:-0}))
+  patch=$((10#${patch:-0}))
+  echo $(( major * 1000000 + minor * 1000 + patch ))
 }
 
-# Validate format: must be digits.digits
+# Validate format: must be digits.digits.digits
 validate_format() {
-  if ! [[ "$1" =~ ^[0-9]+\.[0-9]+$ ]]; then
-    echo "ERROR: '$2' must be in X.YYY format, got '$1'" >&2
+  if ! [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "ERROR: '$2' must be in X.Y.Z format, got '$1'" >&2
     exit 1
   fi
 }
@@ -69,10 +72,14 @@ if [ "$compat_int" -gt "$lat_int" ]; then
 fi
 
 # Check that latest increased vs the committed version
-prev_latest=$(git show HEAD:VERSION 2>/dev/null | grep '^latest=' | head -1 | cut -d= -f2 || echo "0.000")
-# Handle format transition: if prev doesn't have a dot, treat as 0.000
-if ! [[ "$prev_latest" =~ \. ]]; then
-  prev_latest="0.000"
+prev_latest=$(git show HEAD:VERSION 2>/dev/null | grep '^latest=' | head -1 | cut -d= -f2 || echo "0.0.0")
+# Handle format transition: legacy two-part versions (e.g. 1.939) count as X.YYY.0
+if ! [[ "$prev_latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ "$prev_latest" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    prev_latest="${prev_latest}.0"
+  else
+    prev_latest="0.0.0"
+  fi
 fi
 prev_int=$(ver_to_int "$prev_latest")
 if [ "$lat_int" -le "$prev_int" ]; then

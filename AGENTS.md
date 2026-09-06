@@ -77,7 +77,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 
 - **Target branch**: `dev` (preview at `dev.delaclaw.pages.dev`). `main` only when stable + user-approved. All PRs (including bot) target `dev`.
 - **Hooks**: ALWAYS `git config core.hooksPath .githooks` on fresh clone/subagent. Pre-commit bumps `VERSION` → updates `sw.js` CACHE_VERSION + ` .agents/CODEMAP.json/.md` (via `scripts/generate-codemap.js`) + prints `[impact] Checked: …` hint + blocks emoji. Commit-msg enforces `Checked:` trailer and on failure runs `scripts/impact.js --staged` to show blast radius from CODEMAP dependents and suggested trailer.
-- **VERSION file**: `latest` bumped every commit (X.YYY), `latest_compat` / `latest_compat_deprec` only on schema change. See `COMMIT_CHECKLIST.md`.
+- **VERSION file**: `latest` bumped every commit (X.Y.Z — patch per commit, minor on features, major on breaking schema), `latest_compat` / `latest_compat_deprec` only on schema change. See `COMMIT_CHECKLIST.md`.
 - **Checked trailer**: Format `Checked: versioning [x], i18n [~], docs [~], readme [~], checklist [~], tests [~], welcome [~], prompts [~], xss [x]` — decide each individually, no batch-marking. `[x]` = diff touches area, `[~]` = does not. Bare item = rejected. Lesson v1.145: tests + xss left unmarked by inertia. Use CODEMAP `dependents` to assess `welcome` impact.
 - **Commit style**: `feat|fix|refactor|chore|ci|docs(scope): message`. Include test result (e.g. `N passed`) when relevant.
 

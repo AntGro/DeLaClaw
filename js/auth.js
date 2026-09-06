@@ -1,6 +1,8 @@
 // ===================================================================
 // AUTH MODULE — Supabase email authentication
 // ===================================================================
+
+import { compareVersions } from '../migrations/version-compare.js';
 //
 // D+E hybrid: the project owner (A) authenticates by email to
 // protect personal data. Group members (B) never authenticate — they
@@ -159,13 +161,13 @@ export async function claimOwnership(adapter, userId) {
     'settings', 'prompts',
   ];
   // joined_groups only exists at schema >= 1.297
-  let dbVer = 0;
+  let dbVer = '0';
   try {
     const { data: verRow } = await adapter.from('settings')
       .select('value').eq('key', 'schema_version').maybeSingle();
-    dbVer = parseFloat(verRow?.value || '0');
+    dbVer = verRow?.value || '0';
   } catch { /* settings table may not exist */ }
-  if (dbVer >= 1.297) tables.push('joined_groups');
+  if (compareVersions(dbVer, '1.297') >= 0) tables.push('joined_groups');
 
   for (const table of tables) {
     try {

@@ -2626,6 +2626,61 @@ async function importFlashcardsIntegrationTest() {
 
 
   // ===================================================================
+  // VERSIONING: X.Y.Z comparator + format guards
+  // ===================================================================
+
+  // version-compare.js is a browser ES module; load it by evaluating its
+  // source with the `export` keyword stripped (Node runs this file as CJS).
+  const vcSrc = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'version-compare.js'), 'utf8')
+    .replace(/^export /m, '');
+  const compareVersions = new Function(`${vcSrc}; return compareVersions;`)();
+
+  test('compareVersions orders X.Y.Z correctly (not as floats)', () => {
+    assert(compareVersions('1.939.0', '1.939.1') === -1, 'patch order');
+    assert(compareVersions('1.939.1', '1.939.0') === 1, 'patch order reversed');
+    assert(compareVersions('2.0.0', '1.939.9') === 1, 'major beats high minor');
+    assert(compareVersions('1.10.0', '1.9.0') === 1, '1.10.0 > 1.9.0 (parseFloat would say otherwise)');
+    assert(compareVersions('1.939.1', '1.939.1') === 0, 'equal');
+  });
+
+  test('compareVersions treats legacy X.Y as X.Y.0', () => {
+    assert(compareVersions('1.809', '1.809.0') === 0, 'legacy equals three-part');
+    assert(compareVersions('1.809', '1.809.1') === -1, 'legacy behind patch');
+    assert(compareVersions('1.939', '1.94.0') === 1, '1.939 (legacy) stays newer than 1.94.0 — no reinterpretation');
+    const sorted = ['1.939.1', '1.809', '2.0.0', '1.809.0'].sort(compareVersions);
+    assert(sorted.join(',') === '1.809,1.809.0,1.939.1,2.0.0', `sort order wrong: ${sorted.join(',')}`);
+  });
+
+  test('VERSION file uses X.Y.Z format with correct ordering', () => {
+    const vtxt = fs.readFileSync(path.join(__dirname, '..', 'VERSION'), 'utf8');
+    const get = (k) => vtxt.match(new RegExp(`^${k}=([^\\s]+)`, 'm'))[1];
+    for (const k of ['latest', 'latest_compat', 'latest_compat_deprec']) {
+      assert(/^[0-9]+\.[0-9]+\.[0-9]+$/.test(get(k)), `${k} must be X.Y.Z, got '${get(k)}'`);
+    }
+    const toInt = (v) => v.split('.').reduce((a, n) => a * 1000 + parseInt(n, 10), 0);
+    assert(toInt(get('latest_compat_deprec')) <= toInt(get('latest_compat')), 'deprec <= compat');
+    assert(toInt(get('latest_compat')) <= toInt(get('latest')), 'compat <= latest');
+  });
+
+  test('pre-commit hook enforces X.Y.Z format', () => {
+    const hook = fs.readFileSync(path.join(__dirname, '..', '.githooks', 'pre-commit'), 'utf8');
+    assert(hook.includes('^[0-9]+\\.[0-9]+\\.[0-9]+$'), 'hook must validate X.Y.Z format');
+    assert(!hook.includes('X.YYY format'), 'hook must not reference old X.YYY format');
+  });
+
+  test('no parseFloat/string version comparisons remain in migration paths', () => {
+    const files = ['js/adapters/drive.js', 'server/server.js', 'js/auth.js', 'js/sharing-ui.js', 'js/main.js'];
+    for (const file of files) {
+      const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+      assert(!/parseFloat\([^)]*(?:version|Version|dbVer)/.test(src),
+        `${file}: parseFloat used on a version — use compareVersions`);
+      assert(!/\.filter\(v => v > currentVersion\)/.test(src),
+        `${file}: string version comparison — use compareVersions`);
+    }
+  });
+
+
+  // ===================================================================
   // SUMMARY
   // ===================================================================
   console.log(`\n${'═'.repeat(50)}`);

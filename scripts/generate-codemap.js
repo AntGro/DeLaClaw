@@ -177,10 +177,10 @@ KNOWN_TABLES.forEach(t=>{
 });
 
 // Version
-let version = '0.000';
+let version = '0.0.0';
 try {
   const vtxt = read(VERSION_FILE);
-  const mm = vtxt.match(/^latest=([0-9]+\.[0-9]+)/m);
+  const mm = vtxt.match(/^latest=([0-9]+\.[0-9]+\.[0-9]+)/m);
   if (mm) version = mm[1];
 } catch {}
 

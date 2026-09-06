@@ -2507,8 +2507,7 @@ function updateStaticLabels() {
   const todoFilterMap = { pending: 'todos.pending' };
   document.querySelectorAll('#todoFilters .filter-btn').forEach(btn => {
     const f = btn.dataset.filter;
-    if (f === 'outdated') { const svg = btn.querySelector('svg'); btn.innerHTML = (svg ? svg.outerHTML : '') + ' ' + t('todos.outdated'); }
-    else if (todoFilterMap[f]) btn.textContent = t(todoFilterMap[f]);
+    if (todoFilterMap[f]) btn.textContent = t(todoFilterMap[f]);
   });
   // Todo sort
   const todoSort = document.getElementById('todoSortBy');

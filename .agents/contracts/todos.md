@@ -8,7 +8,7 @@ User jobs:
 - mark DONE / undo without duplicating
 - drag TODOs between categories
 - reorder category nav buttons
-- filter by pending / done / snoozed / outdated
+- filter by pending / done / snoozed
 - find via search
 - snooze with presets or custom date, unsnooze to re-snooze
 - share/unshare TODOs, bulk-share a category, copy shared to personal
@@ -27,7 +27,7 @@ User jobs:
 ## UI / UX
 - **Reused components:** `.page-empty-state`, `.modal`, `.btn`, `.project-card`, `.category-nav-btn`, `.empty-state`, toast
 - **Search:** `filterTodos` / `todoSearchQuery` — filters across TODO text and notes; clear via CSS `:not(:placeholder-shown)`
-- **Filter tabs:** `setTodoFilter` with 4 modes: `pending` (active, not snoozed), `done`, `snoozed`, `outdated` (past due_date)
+- **Filter tabs:** `setTodoFilter` with 3 modes: `pending` (active, not snoozed), `done`, `snoozed`
 - **Category nav:** reorderable via long-press drag (`initNavBtnReorder`), `sort_order` persisted; displays shortname or name with `--cat-color`
 - **Cross-category drag:** `initItemDragDrop` with `crossContainerSelector` — TODOs draggable between categories, updates `category_id` FK and re-numbers `sort_order`
 - **Inline edit:** note field via `inlineEditText`, preserves whitespace
@@ -58,7 +58,7 @@ User jobs:
 - `priority ∈ {urgent, high, medium, low, normal}`
 - `sort_order` monotonic per category
 - `status=done` preserved on reorder
-- `due_date` — optional; outdated filter shows TODOs past due
+- `due_date` — optional; past due_date highlights the item as overdue
 - New TODOs inserted at top of category (min `sort_order - 1`)
 - Delete → trash, not hard delete from UI (adapter handles)
 

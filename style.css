@@ -1201,10 +1201,6 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .todo-due.due-soon{color:var(--yellow);}
 .todo-snoozed{font-size:0.75rem;color:var(--purple);font-style:italic;}
 
-/* Outdated TODO highlight */
-.todo-item.todo-outdated{border-left:3px solid var(--yellow);background:rgba(234,179,8,0.04);}
-.todo-outdated-badge{font-size:0.75rem;color:var(--yellow);font-weight:500;}
-
 /* Flag button */
 .todo-flag-btn{background:none;border:none;cursor:pointer;font-size:0.85rem;padding:2px 4px;opacity:0.45;transition:opacity 0.15s, color 0.15s;flex-shrink:0;position:relative;}
 .todo-flag-btn:hover{opacity:1;}
@@ -1225,7 +1221,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .priority-picker-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
 .priority-picker-option .lucide-icon{flex-shrink:0;}
 
-/* Stat colors for flagged/outdated */
+/* Stat colors for flagged */
 .stat-value.orange{color:var(--orange, #f97316);}
 .stat-value.amber{color:var(--yellow);}
 

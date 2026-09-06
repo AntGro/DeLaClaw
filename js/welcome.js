@@ -803,7 +803,9 @@ function renderWelcome() {
   html += `</div>`;
   html += `</div>`;
 
+  const scrollY = window.scrollY;
   container.innerHTML = html;
+  window.scrollTo(0, scrollY);
 
   // Init hover delay for focus TODO items (action buttons appear on hover/long-press)
   initWelcomeFocusHover();

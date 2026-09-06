@@ -56,6 +56,7 @@ User jobs:
 ### Decks
 - Default decks: Général, Histoire de France, Vocabulaire + user-created decks
 - **Deck FK**: `flashcards.deck_id` and `texts.deck_id` FK → `flashcard_decks(id)`, CASCADE on delete — deleting a deck deletes all its flashcards and texts
+- **Grouping is by FK, not name**: all grouping, filtering, nav, practice pools, and counts use the resolved `deck_id` (`deckIdForCard()` / `deckIdForText()` helpers); the `deck` string is a display/backward-compatibility cache only and never decides grouping. Use `??` (not `||`) when deriving the name from a deck row, since the protected default row has `name=''`
 - Protected default row (`name=''`, `is_protected=1`) cannot be deleted
 - Deck nav order persisted via `sort_order`, reorderable by long-press drag
 - Général deck header color distinct from Drafts color

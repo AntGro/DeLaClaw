@@ -206,8 +206,6 @@ function getFilteredTodosForCategory(catId) {
     filtered = filtered.filter(t => t.done);
   } else if (todoFilter === 'snoozed') {
     filtered = filtered.filter(t => !t.done && t.snooze_until && new Date(t.snooze_until) > now);
-  } else if (todoFilter === 'outdated') {
-    filtered = filtered.filter(t => isTodoOutdated(t));
   }
 
   const sortBy = document.getElementById('todoSortBy')?.value || 'manual';
@@ -348,7 +346,7 @@ function renderCategoryCard(catId) {
 
   // Show active todos based on filter; done section always available as collapsible
   let displayActive, displayDone;
-  if (todoFilter === 'outdated' || todoFilter === 'snoozed') {
+  if (todoFilter === 'snoozed') {
     displayActive = activeTodos;
     displayDone = [];
   } else {
@@ -431,22 +429,10 @@ function renderCategoryCard(catId) {
   </div>`;
 }
 
-const TODO_OUTDATED_DAYS = 7;
-
-function isTodoOutdated(td) {
-  if (td.done) return false;
-  if (!td.due_date) return false;
-  const now = new Date();
-  const ref = new Date(td.updated_at || td.created_at);
-  const diffDays = (now - ref) / (1000 * 60 * 60 * 24);
-  return diffDays >= TODO_OUTDATED_DAYS;
-}
-
 function renderTodoItem(td) {
   const now = new Date();
   const isOverdue = td.due_date && !td.done && new Date(td.due_date) < now;
   const isSnoozed = td.snooze_until && new Date(td.snooze_until) > now;
-  const isOutdated = isTodoOutdated(td);
   const isFlagged = td.priority && td.priority !== 'normal';
 
   // Priority button: opens picker popover
@@ -476,20 +462,12 @@ function renderTodoItem(td) {
     snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon",16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
   }
 
-  let outdatedInfo = '';
-  if (isOutdated && !td.done) {
-    const ref = new Date(td.updated_at || td.created_at);
-    const daysAgo = Math.floor((now - ref) / (1000 * 60 * 60 * 24));
-    outdatedInfo = `<span class="todo-outdated-badge">${t('todos.days_old', daysAgo)}</span>`;
-  }
-
   const priorityClass = isFlagged ? `todo-priority-${td.priority}` : '';
   const classes = [
     'bucket-item',
     'todo-item',
     td.done ? 'todo-done' : '',
     isOverdue ? 'todo-overdue' : '',
-    isOutdated ? 'todo-outdated' : '',
     priorityClass
   ].filter(Boolean).join(' ');
 
@@ -518,7 +496,7 @@ function renderTodoItem(td) {
         <button data-action="delete-todo" data-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
     </div>
-    ${dueDateStr || snoozeInfo || outdatedInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}${outdatedInfo}</div>` : ''}
+    ${dueDateStr || snoozeInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}</div>` : ''}
   </div>`;
 }
 

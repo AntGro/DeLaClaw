@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-07T10:21:54.535Z from 36 modules (v2.0.9). Total LOC 28638. Do not hand-edit.
+> Generated 2026-09-07T23:09:22.170Z from 36 modules (v2.0.14). Total LOC 28215. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,17 +27,17 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 3993 | daily_visits,nvidia_usage,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:20,guard+pendingSet,window:8 |
-| i18n | 2229 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
-| sharing-drive | 1402 | - | sharing-envelope,utils | main.js,sharing.js | - |
-| sharing-ui | 1220 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:38,pendingSet,window:8 |
+| main | 3610 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
+| i18n | 2205 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
+| sharing-drive | 1414 | - | sharing-envelope,utils | main.js,sharing.js | - |
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
+| sharing-ui | 1195 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:37,pendingSet,window:8 |
 | drive | 1102 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | utils | 830 | flashcards,x | i18n,icons,state,version | - | esc:7,window:6 |
 | calendar-sync | 694 | birthdays,gcal_sync,habits,settings,todos | habits,i18n,icons,state | main.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 464 | - | habits,i18n,icons,utils | - | - |
-| delegation | 427 | - |  | - | window:1 |
+| delegation | 421 | - |  | - | window:1 |
 | demo | 303 | x |  | drive.js | - |
 | offline-cache | 281 | - | ./state,state.js | main.js | - |
 | crypto-sync | 265 | settings |  | - | - |
@@ -47,10 +47,10 @@
 | storm3d | 185 | - |  | hero.js | - |
 | rest | 162 | x |  | main.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
-| sharing-interface | 124 | - |  | sharing.js | - |
+| sharing-interface | 129 | - |  | sharing.js | - |
 | sharing | 100 | - | sharing-drive,sharing-interface | - | - |
 | sharing-envelope | 73 | - |  | sharing-drive.js,sharing-ui.js | - |
-| state | 54 | - | db | birthdays.js,calendar-sync.js,flashcards.js,habits.js | window:1 |
+| state | 52 | - | db | birthdays.js,calendar-sync.js,flashcards.js,habits.js | window:1 |
 | bootstrap | 26 | - |  | - | - |
 | backend-logos | 23 | - |  | main.js,sharing-ui.js | - |
 | sw-register | 16 | - |  | - | - |
@@ -69,7 +69,6 @@
 | joined_groups | sharing-ui |
 | list_items | lists, sharing-ui |
 | lists | lists |
-| nvidia_usage | main |
 | projects | db, main, projects |
 | prompts | projects |
 | settings | calendar-sync, crypto-sync, main, projects |

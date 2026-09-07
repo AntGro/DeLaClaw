@@ -1021,6 +1021,42 @@ test('sharing member identity is memberId-based and agent-safe', () => {
     'sharing-drive.js must not write raw invite email into group.json members');
 });
 
+test('sharing departure is unjoin-only (no leaveGroup)', () => {
+  const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const delegation = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+
+  assert(!iface.includes('leaveGroup'),
+    'sharing-interface.js must not expose leaveGroup');
+  assert(!drive.includes('async leaveGroup'),
+    'sharing-drive.js must not implement leaveGroup');
+  assert(!sui.includes('sharingLeaveGroup') && !sui.includes('sharing-leave-group'),
+    'sharing-ui.js must not reference the removed leave path');
+  assert(!delegation.includes('sharing-leave-group'),
+    'delegation.js must not route the removed leave action');
+  assert(sui.includes('sharing-unjoin-group') && drive.includes('async unjoinGroup'),
+    'unjoin must remain the single departure path');
+});
+
+test('sharing members use hashed opaque IDs with a pending-invite join gate', () => {
+  const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+
+  assert(drive.includes('function newMemberId()'),
+    'sharing-drive.js must generate opaque random member IDs');
+  assert(drive.includes('const creatorMemberId = newMemberId();'),
+    'sharing-drive.js must not derive the creator member ID from the email');
+  assert(drive.includes('async function emailHash(email)'),
+    'sharing-drive.js must hash invite emails for matching instead of storing them');
+  assert(drive.includes('No pending invite for this account'),
+    'sharing-drive.js must reject joins without a matching pending invite');
+  assert(drive.includes('await assertCreator(groupId)'),
+    'sharing-drive.js must enforce creator-only invite/remove in the adapter');
+  assert(iface.includes('creator-only') && iface.includes('pending invite'),
+    'sharing-interface.js must document creator-only ops and the pending-invite join requirement');
+});
+
 // ===================================================================
 // 26. Inline edit callbacks use refreshFn (not renderFn) for data refresh
 // ===================================================================

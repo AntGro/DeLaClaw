@@ -90,7 +90,7 @@ User jobs:
 - `syncSharedTodos()` merges shared items by `todo_id`
 
 ## Adapter & Backend
-- Only via `db.from('todos')`, `db.from('todo_categories')` — never `if (backend === 'supabase')`
+- Only via `db.from('todos')`, `db.from('todo_categories')` — never backend-specific branches in views
 - Offline-cache wraps transparently
 
 ## Cross-Feature Edges

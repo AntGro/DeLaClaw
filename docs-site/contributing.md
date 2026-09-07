@@ -99,7 +99,7 @@ Larger features should be discussed in an issue before starting work. This avoid
 File an issue with:
 - Steps to reproduce
 - Expected vs. actual behavior
-- Backend mode (Supabase / local / demo)
+- Backend mode (Drive / local / demo)
 - Browser and OS
 - Screenshots if applicable
 
@@ -122,7 +122,7 @@ All changes land on `dev` first, which auto-deploys to [dev.delaclaw.pages.dev](
 - All tests pass
 - Preview on [dev.delaclaw.pages.dev](https://dev.delaclaw.pages.dev) looks correct
 - `VERSION` has the right `latest`, `latest_compat`, and `latest_compat_deprec`
-- If DB schema changed: migration entries exist for Local (`local-migrations.js`) and Drive (`drive-migrations.js`), and `sql/supabase_schema.sql` is updated. See [MIGRATION_GUIDE.md](/migrations/MIGRATION_GUIDE.md)
+- If DB schema changed: migration entries exist for Local (`local-migrations.js`) and Drive (`drive-migrations.js`), and `server/schema.sql` is updated. See [MIGRATION_GUIDE.md](/migrations/MIGRATION_GUIDE.md)
 - i18n: all new strings present in EN, FR, ES
 - No hardcoded dark-mode colors — all via CSS variables
 - Responsive: tested on mobile viewport (≤ 480px)
@@ -131,7 +131,7 @@ All changes land on `dev` first, which auto-deploys to [dev.delaclaw.pages.dev](
 
 ### Post-release smoke test
 
-- Login with each backend (Supabase, Google Drive, Local, Demo)
+- Login with each backend (Google Drive, Local, Demo)
 - Check the Today page loads
 - Quick-add a TODO and delete it
 - If a migration was included, verify the schema banner appears on old DBs and the migration runs cleanly

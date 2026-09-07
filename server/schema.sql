@@ -212,15 +212,6 @@ CREATE TABLE IF NOT EXISTS prompts (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS nvidia_usage (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-  model TEXT,
-  tokens_in INTEGER,
-  tokens_out INTEGER,
-  owner_id TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS lists (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   name TEXT NOT NULL,
@@ -304,7 +295,7 @@ CREATE INDEX IF NOT EXISTS idx_vestiaire_category_id ON vestiaire(category_id);
 CREATE INDEX IF NOT EXISTS idx_flashcards_deck_id ON flashcards(deck_id);
 CREATE INDEX IF NOT EXISTS idx_texts_deck_id ON texts(deck_id);
 
--- 1.410 agent grants (parity with Supabase)
+-- ── agent grants (external agent API tokens) ──
 CREATE TABLE IF NOT EXISTS agent_grants (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   owner_id TEXT,

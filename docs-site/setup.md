@@ -1,6 +1,6 @@
 # Setup Guide
 
-DeLaClaw supports four backend modes. Each stores data differently but provides the same user experience.
+DeLaClaw supports three backend modes. Each stores data differently but provides the same user experience.
 
 ## Demo mode (no setup)
 
@@ -23,9 +23,9 @@ The simplest persistent backend — no database, no API keys.
 
 All data loads into memory on connect and writes back to Drive with a 2-second debounce per table after each mutation. The JSON files are plain exports — you can download, inspect, or delete them from Drive at any time.
 
-## Supabase (deprecated)
+## Supabase (removed)
 
-> **Supabase backend support has been removed.** Existing users who connect with their Supabase credentials will be offered a one-click migration to Google Drive or a data backup download. The Supabase adapter and client library remain in the codebase temporarily to support this migration path. The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
+> **Supabase backend support has been removed.** The Supabase adapter, client library, and auth module have been deleted from the codebase. The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
 
 ## Local mode (Bun + SQLite)
 

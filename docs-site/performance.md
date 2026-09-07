@@ -12,7 +12,7 @@ All files are served as raw, unminified source. No build step, no transpilation.
 
 ### JavaScript
 
-Feature modules live in `js/` and adapters in `js/adapters/`. The largest modules are `main.js` (app bootstrap, settings, login, view switching), `i18n.js` (translation strings for 3 languages), `habits.js`, and `flashcards.js`. Sharing logic is split across several modules (`sharing.js`, `sharing-ui.js`, `sharing-supabase.js`, `sharing-drive.js`, `sharing-interface.js`, `sharing-envelope.js`). Other modules handle individual features (todos, projects, vestiaire, birthdays, lists, welcome), drag-and-drop (`item-utils.js`), utilities, and the landing page (hero, logo, storm3d).
+Feature modules live in `js/` and adapters in `js/adapters/`. The largest modules are `main.js` (app bootstrap, settings, login, view switching), `i18n.js` (translation strings for 3 languages), `habits.js`, and `flashcards.js`. Sharing logic is split across several modules (`sharing.js`, `sharing-ui.js`, `sharing-drive.js`, `sharing-interface.js`, `sharing-envelope.js`). Other modules handle individual features (todos, projects, vestiaire, birthdays, lists, welcome), drag-and-drop (`item-utils.js`), utilities, and the landing page (hero, logo, storm3d).
 
 ### CSS
 
@@ -22,7 +22,6 @@ A single `style.css` covers both themes (dark and light), all pages, and all res
 
 | Library | Location | Notes |
 |---|---|---|
-| Supabase JS v2 | `vendor/supabase.js` | Loaded synchronously in `<head>` — render-blocking |
 | Three.js v0.170.0 | `vendor/three/` | Loaded via import map, used only for the hero landing page |
 
 Both were moved from CDN to self-hosted as part of CSP hardening. See `attributions.md` for versions and licenses.
@@ -40,24 +39,21 @@ Both were moved from CDN to self-hosted as part of CSP hardening. See `attributi
 1. `index.html` — render-blocking
 2. `style.css` — render-blocking
 3. Google Fonts CSS + font files — render-blocking (FOUT mitigated by `display=swap`)
-4. `vendor/supabase.js` — render-blocking `<script>` in `<head>`
-5. `js/main.js` + all ES module imports — deferred (`type="module"`)
-6. `manifest.json` + PWA icons
-7. Three.js from `vendor/three/` — lazy, only when the hero landing page is shown
+4. `js/main.js` + all ES module imports — deferred (`type="module"`)
+5. `manifest.json` + PWA icons
+6. Three.js from `vendor/three/` — lazy, only when the hero landing page is shown
 
 After first load, the service worker serves all assets from cache (network-first strategy with precache fallback).
 
 ## Render-blocking resources
 
-Three resources block first paint:
+Two resources block first paint:
 
 1. **`style.css`** — necessary for styled rendering.
 2. **Google Fonts** — font swap may cause FOUT (flash of unstyled text).
-3. **`vendor/supabase.js`** — loaded synchronously in `<head>`.
 
 ### Potential improvements (not implemented)
 
-- **Load Supabase JS with `defer`**: the Supabase adapter is only created on login, so deferred loading should work without breaking initialization order.
 - **Self-host the font**: DM Sans could be served from `vendor/` to eliminate the Google Fonts DNS lookup and make the app fully self-contained.
 - **Lazy-load Three.js**: Three.js is only used for the hero landing page effect. Returning users who skip the hero don't need it. A dynamic `import()` on hero visibility would avoid loading it entirely for most sessions.
 - **Code splitting**: `demo-data.js` and `demo-chooser.js` are only needed in demo mode. `hero.js`, `storm3d.js`, and `logo.js` are only needed for the landing page. Dynamic imports could defer these.
@@ -73,4 +69,4 @@ Three resources block first paint:
 
 ## Conclusion
 
-For a personal productivity tool with moderate data volumes, performance is adequate. The main bottleneck is initial load time due to render-blocking resources (CSS, font, Supabase JS) before first paint. After the service worker is installed, subsequent loads are near-instant from cache. The no-build philosophy is a deliberate architectural choice that trades bundle optimization for development simplicity and source transparency.
+For a personal productivity tool with moderate data volumes, performance is adequate. The main bottleneck is initial load time due to render-blocking resources (CSS, fonts) before first paint. After the service worker is installed, subsequent loads are near-instant from cache. The no-build philosophy is a deliberate architectural choice that trades bundle optimization for development simplicity and source transparency.

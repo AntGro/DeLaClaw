@@ -24,7 +24,7 @@ Checked: versioning, i18n, docs [~], readme [~], checklist [~], tests, welcome [
 
 | Tag | What to check |
 |---|---|
-| **versioning** | The `latest` bump is automated by the pre-commit hook — this item is about **compatibility judgment**. Does this commit change the DB schema (new table, new column, renamed field)? If so: should `latest_compat` move (new features won't work on older DBs)? Should `latest_compat_deprec` move (the app will break on older DBs)? Does `supabase_schema.sql` need updating? Does a migration file need to be added? |
+| **versioning** | The `latest` bump is automated by the pre-commit hook — this item is about **compatibility judgment**. Does this commit change the DB schema (new table, new column, renamed field)? If so: should `latest_compat` move (new features won't work on older DBs)? Should `latest_compat_deprec` move (the app will break on older DBs)? Does `server/schema.sql` need updating? Does a migration file need to be added? |
 | **i18n** | All new user-facing strings go through `t()` in `js/i18n.js`. Keys added for all three languages (EN, FR, ES). No hardcoded text in JS/HTML that the user will see. |
 | **docs** | Does this change affect anything documented in `docs-site/`? Setup steps, architecture, privacy implications (new external requests, new data storage), browser support, accessibility, third-party dependencies, or attributions. |
 | **readme** | Does this change affect the `README.md`? New features, changed backend modes, file structure changes, setup steps, feature list, file tree. |

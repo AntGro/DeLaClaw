@@ -101,17 +101,11 @@ export function setSyncSecretBytes(bytes) {
 async function _fetchSettingsRow(adapter, key) {
   if (!adapter) return null;
   try {
-    // Try maybeSingle first (Supabase adapter), fallback to array
+    // All adapters return arrays here — take the first row
     if (adapter.from) {
-      const q = adapter.from('settings').select('value').eq('key', key);
-      if (q.maybeSingle) {
-        const { data } = await q.maybeSingle();
-        return data || null;
-      } else {
-        const { data } = await q;
-        if (Array.isArray(data)) return data[0] || null;
-        return data || null;
-      }
+      const { data } = await adapter.from('settings').select('value').eq('key', key);
+      if (Array.isArray(data)) return data[0] || null;
+      return data || null;
     }
   } catch { /* ignore */ }
   return null;
@@ -200,32 +194,6 @@ export async function getSyncSecretWithSettings(adapter) {
     } catch {}
   }
   return null;
-}
-
-// ── KEK from refresh_token ──────────────────────────────────────
-
-export function getRefreshToken() {
-  // Supabase stores session in localStorage as sb-<ref>-auth-token
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key) continue;
-      if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
-        const raw = localStorage.getItem(key);
-        if (!raw) continue;
-        const parsed = JSON.parse(raw);
-        const token = parsed?.refresh_token || parsed?.currentSession?.refresh_token || null;
-        if (token) return token;
-      }
-    }
-  } catch { /* ignore */ }
-  return null;
-}
-
-export async function getKEK() {
-  const rt = getRefreshToken();
-  if (!rt) return null;
-  return _sha256Bytes(rt); // 32 bytes
 }
 
 // ── Encrypt / Decrypt text with AES-GCM ─────────────────────────

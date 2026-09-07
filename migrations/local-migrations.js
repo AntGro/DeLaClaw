@@ -453,4 +453,27 @@ export const LOCAL_MIGRATIONS = {
     UPDATE habits SET frequency_rule = 'every_N_months:1:' || substr(frequency_rule, 17) WHERE frequency_rule LIKE 'monthly\_weekday:%' ESCAPE '\\';
     UPDATE habits SET frequency_rule = 'every_N_months:1:' || substr(frequency_rule, 9) WHERE frequency_rule LIKE 'monthly:%' AND frequency_rule NOT LIKE 'monthly_%' ESCAPE '\\';
   `,
+
+  '2.0.9': `
+    -- Drop tables for removed features (NVIDIA usage tracking, agent tokens)
+    DROP TABLE IF EXISTS nvidia_usage;
+    DROP TABLE IF EXISTS agent_grants;
+  `,
+
+  '2.0.10': `
+    -- Restore agent_grants (agents settings pane kept; Supabase removed)
+    CREATE TABLE IF NOT EXISTS agent_grants (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      owner_id TEXT,
+      display_name TEXT NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'full',
+      last_used_at TEXT,
+      expires_at TEXT,
+      revoked_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_grants_owner_id ON agent_grants(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON agent_grants(token_hash);
+  `,
 };

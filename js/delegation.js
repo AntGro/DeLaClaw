@@ -30,7 +30,7 @@
     if (el.dataset.overlayClose !== undefined && e.target !== el) {
       if (action && action.indexOf('close-') === 0) return;
     }
-    if ((action === 'overlay-close-settings' || action === 'overlay-close-auth') && e.target !== el) return;
+    if (action === 'overlay-close-settings' && e.target !== el) return;
     if (action === 'close-modal' && el.dataset.modalId) {
       var m = document.getElementById(el.dataset.modalId);
       if (m) m.remove();
@@ -94,14 +94,8 @@
       case 'execute-confirm-action': callWindow('executeConfirmAction', []); break;
       case 'close-settings': callWindow('closeSettings', []); break;
       case 'overlay-close-settings': callWindow('closeSettings', []); break;
-      case 'overlay-close-auth': { var ov = document.getElementById('authPromptOverlay'); if (ov) ov.classList.remove('visible'); } break;
       case 'switch-settings-pane': if (el.dataset.pane) callWindow('switchSettingsPane', [el.dataset.pane]); break;
       case 'toggle-theme': callWindow('toggleTheme', []); break;
-      case 'toggle-nvidia-key-visibility': callWindow('toggleNvidiaKeyVisibility', []); break;
-      case 'save-nvidia-key': callWindow('saveNvidiaKey', []); break;
-      case 'apply-custom-model': callWindow('applyCustomModel', []); break;
-      case 'test-nvidia-api': callWindow('testNvidiaApi', []); break;
-      case 'toggle-nvidia-usage': callWindow('toggleNvidiaUsageDetail', []); break;
       case 'export-backup': callWindow('exportBackup', []); break;
       case 'export-to-drive': callWindow('exportToGoogleDrive', []); break;
       case 'import-backup': callWindow('importBackup', []); break;
@@ -272,7 +266,6 @@
       case 'save-edit-vestiaire': callWindow('saveEditVestiaire', []); break;
       case 'close-edit-vestiaire-category': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditVestiaireCategoryModal', []); break;
       case 'save-edit-vestiaire-category': callWindow('saveEditVestiaireCategory', []); break;
-      case 'send-auth-from-sharing': callWindow('sendAuthFromSharing', []); break;
 
       case 'sharing-copy-code':
       case 'sharing-copy-link': callWindow('sharingCopyCode', [getId(el)||el.dataset.groupId]); break;

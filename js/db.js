@@ -46,7 +46,7 @@ function onEnd(error) {
  * Wrap an adapter query chain in a Proxy so that when the runtime
  * finally awaits it (calls .then()), we track start/end on the logo.
  * Every chained method (.select, .eq, .order …) returns a new proxy
- * so tracking survives across Supabase's multi-object chains.
+ * so tracking survives across query-builder chains that return new objects.
  */
 function tracked(target) {
   let _tracked = false;
@@ -74,7 +74,7 @@ function tracked(target) {
           const next = val.apply(obj, args);
           if (next && typeof next === 'object' && typeof next.then === 'function') {
             // Same object (REST adapter returns `this`) → reuse proxy
-            // New object (Supabase returns new builder) → wrap it
+            // New object (Drive adapter returns new builder) → wrap it
             return next === obj ? proxy : tracked(next);
           }
           return next;
@@ -89,7 +89,7 @@ function tracked(target) {
 // ── Public API ──────────────────────────────────────────────────
 
 const db = {
-  /** Install a backend adapter (supabase, pocketbase, rest …) */
+  /** Install a backend adapter (rest, drive, demo …) */
   setAdapter(adapter) { _adapter = adapter; },
 
   /** The raw backend adapter (for adapter-level operations like deleteAccount) */

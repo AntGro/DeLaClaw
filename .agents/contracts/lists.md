@@ -58,7 +58,7 @@ User jobs:
 - Offline-cache wraps
 
 ## Sharing
-- Supabase `sharing_items` type=`list_item`
+- Drive adapter shared items, type=`list_item`
 - `shareListItemFromAdd` — share from add modal
 - `shareExistingListItem` — share an existing item
 - `bulkShareList` — share all items in a list at once

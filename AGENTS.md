@@ -4,7 +4,7 @@ For any coding agent (Human, Claude, Cursor, Codex) working in this repo. This i
 
 ## 0. Purpose
 
-DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, vanilla JS (ES modules). Own your data: Google Drive | Local Bun+SQLite | Demo. PWA, offline-first via IndexedDB cache, dark/light, i18n (EN/FR/ES). The Supabase adapter remains in the codebase for migration support but is deprecated for new use.
+DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, vanilla JS (ES modules). Own your data: Google Drive | Local Bun+SQLite | Demo. PWA, offline-first via IndexedDB cache, dark/light, i18n (EN/FR/ES). Supabase support has been removed entirely (adapter, client library, auth module, sharing adapter). The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
 
 ## 1. Core Product Principles
 
@@ -38,7 +38,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 **1.5 AI-native dependency index (CODEMAP) + Feature contracts — mandatory for agents**
 - Generated: `.agents/CODEMAP.json` (T2, ~25KB pretty / ~15KB compact) + `.agents/CODEMAP.md` (6KB matrix). Source: `scripts/generate-codemap.js`. Do not hand-edit.
 - Contains per `js/*.js`: `entry`, `loc`, `tables`, `state`, `depends_on`, `dependents` (blast radius), `ui_components` (reusable CSS), `i18n_prefix`, `guards` (`guard`/`pendingSet`), `esc_count`, `window_exposed`.
-- 8 features: `todos`, `habits`, `projects`, `birthdays`, `vestiaire`, `flashcards`, `lists`, `welcome`. Core modules + 3 active adapters (`rest`, `demo`, `drive`) + 2 legacy adapters (`supabase`, `offline-cache` — migration support only). `welcome` aggregates all features. Exact counts live in CODEMAP itself.
+- 8 features: `todos`, `habits`, `projects`, `birthdays`, `vestiaire`, `flashcards`, `lists`, `welcome`. Core modules + 4 adapters (`rest`, `demo`, `drive`, `offline-cache`). `welcome` aggregates all features. Exact counts live in CODEMAP itself.
 - Feature contracts: `.agents/contracts/*.md` — agent-only, NOT in `docs-site`. Captures invariants CODEMAP can't: single source of truth (`isStructuredRule()`), guard patterns, XSS fields, RLS policies, welcome edges, business rules. BEFORE editing a feature, agents MUST read `CODEMAP.json:features[feature]` + `contracts/<feature>.md` if present.
 - Rule: BEFORE editing any `js/*.js`, agents MUST read `.agents/CODEMAP.json` → `features[feature]` and relevant `core` entries. Reuse `depends_on` + `ui_components`, check `dependents` for impact scope, follow `guards` per AGENTS 1.2, verify `esc_count`/`tables` for XSS/schema impact.
 - Freshness: pre-commit auto-regenerates JSON+MD and stages them. `tests/tests.js` will fail if JSON is out-of-date (CODEMAP freshness test). No manual sync.
@@ -62,16 +62,16 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 
 - **XSS**: No `innerHTML` with user data unless escaped. Wrap all user fields (`name`, `text`, `note`, `brand`, etc.) in `esc()` when interpolating into template literals. `renderMd()` and `truncateWithShowMore()` already esc internally, don't double-wrap. `showDeleteConfirm` uses `.textContent` (safe).
 - **Safe DOM for URLs**: TODO/project links with user-provided URLs must use safe allowlist check, not raw `innerHTML`.
-- **CSP hardening (sec-004)**: Vendor JS self-hosted in `vendor/` (`supabase@2.110.6`, `three@0.170.0`). No `cdn.jsdelivr.net` for app code. CSP meta in `index.html`: `default-src 'self'; script-src 'self' 'sha256-...importmap...' accounts.google.com apis.google.com gstatic cloudflareinsights; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes. Cloudflare Web Analytics beacon allowed in both `script-src` (`static.cloudflareinsights.com`) and `connect-src` (`cloudflareinsights.com`).
+- **CSP hardening (sec-004)**: Vendor JS self-hosted in `vendor/` (`three@0.170.0`). No `cdn.jsdelivr.net` for app code. CSP meta in `index.html`: `default-src 'self'; script-src 'self' 'sha256-...importmap...' accounts.google.com apis.google.com gstatic cloudflareinsights; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes. Cloudflare Web Analytics beacon allowed in both `script-src` (`static.cloudflareinsights.com`) and `connect-src` (`cloudflareinsights.com`).
 - **Google Identity exception**: GSI (`accounts.google.com/gsi/client` + `apis.google.com/js/api.js`) must stay CDN per Google ToS, no SRI allowed. Documented exception allowed only via CSP.
 
 ## 4. Backend & Data
 
-- Tables: canonical list lives in `server/schema.sql` (Local SQLite). `sql/supabase_schema.sql` is retained as a legacy reference for Supabase migration support. Personal tables, category/deck tables, and cross-backend tables (`daily_visits`, `joined_groups`, `agent_grants`) exist on all backends.
+- Tables: canonical list lives in `server/schema.sql` (Local SQLite). Personal tables, category/deck tables, and cross-backend tables (`daily_visits`, `joined_groups`) exist on all backends; sharing tables (`sharing_groups`, `sharing_members`, `sharing_items`) are used by the Drive sharing adapter.
 - **Category integrity**: each category/deck table has one protected default row (`name=''`, `is_protected=1`). `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item FKs (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
 - Schema version in `settings` key `schema_version`, migrations in `migrations/`. Check `latest_compat` logic in `VERSION`.
 - Base schema + migrations must be runnable in local SQLite (`server/schema.sql`).
-- Vendor: `scripts/update-vendor.sh [supabase_ver] [three_ver]` updates `vendor/` + `index.html` comment + `docs-site/attributions.md`. Weekly GitHub Action `vendor-check.yml` opens PR to `dev` if new versions.
+- Vendor: `scripts/update-vendor.sh [three_ver]` updates `vendor/` + `index.html` comment + `docs-site/attributions.md`. Weekly GitHub Action `vendor-check.yml` opens PR to `dev` if new versions.
 
 ## 5. Git, Versioning, Commit
 

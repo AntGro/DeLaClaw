@@ -9,29 +9,6 @@ import { APP_VERSION } from './version.js';
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML.replace(/"/g, '\x26quot;'); }
 function escQ(s) { return esc(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
 
-// ── Supabase key role detection (sec: reject service_role / sb_secret_ in localStorage) ──
-function getSupabaseKeyRole(key){
-  if(!key) return null;
-  const k = key.trim();
-  if(k.startsWith('sb_secret_')) return 'service_role';
-  if(k.startsWith('sb_publishable_')) return 'anon';
-  // legacy JWT: eyJ...
-  const parts = k.split('.');
-  if(parts.length===3){
-    try{
-      const b64 = parts[1].replace(/-/g,'+').replace(/_/g,'/');
-      const padded = b64 + '='.repeat((4 - b64.length % 4) % 4);
-      const json = JSON.parse(atob(padded));
-      return json.role || null;
-    }catch{ return null; }
-  }
-  return null;
-}
-
-function isServiceRoleKey(key){
-  const role = getSupabaseKeyRole(key);
-  return role==='service_role' || (key||'').trim().startsWith('sb_secret_');
-}
 function deepEqual(a, b) {
   if (a === b) return true;
   if (a == null || b == null) return false;
@@ -425,7 +402,7 @@ function updateFooterStats(viewCountsGetter) {
     // Google Drive: show estimated data size from in-memory store
     statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} Google Drive · <span id="dbSizeMb">—</span></div>`;
   } else {
-    // Supabase / Local: show DB size with limit
+    // Local: show DB size with limit
     statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} ${t('utils.db')}: <span id="dbSizeMb">—</span> / 500 MB</div>`;
   }
   // Sharing groups count
@@ -440,14 +417,8 @@ function updateFooterStats(viewCountsGetter) {
   statsHtml += `<div class="db-stat">${lucideIcon('git-branch', 14)} v${APP_VERSION} · DB v${dbVer}</div>`;
   container.innerHTML = statsHtml;
 
-  // Set dashboard link using the connected URL
-  const urlInput = document.getElementById('username');
-  if (urlInput && urlInput.value) {
-    const projectRef = urlInput.value.replace('https://', '').replace('.supabase.co', '');
-    document.getElementById('supabaseDashLink').href = `https://supabase.com/dashboard/project/${projectRef}`;
-  }
-  // Fetch DB size via RPC (only relevant for Supabase/Local backends).
-  // Some Supabase projects do not install the optional db_size_mb() function;
+  // Fetch DB size via RPC (only relevant for the Local backend).
+  // Some servers do not install the optional db_size_mb() function;
   // cache that capability miss so realtime footer refreshes do not spam 404s.
   if (state.db.connected && !state.demoMode && !state.driveMode) {
     const dbSizeState = dbSizeStateForCurrentBackend();
@@ -625,15 +596,15 @@ function balanceGrid(gridEl, { min = 400, max = 700, gap = 14 } = {}) {
 }
 
 // ===================================================================
-// fetchAll — paginated read that defeats PostgREST's 1000-row cap
+// fetchAll — paginated read that defeats server-side row caps
 // ===================================================================
-// Supabase's PostgREST layer caps any unpaginated GET at `max-rows`
-// (default 1000). A plain `.from('x').select('*')` therefore silently
-// truncates to the first 1000 rows once a table grows past that — the
-// rows exist in the DB but never reach the client. This pages through
-// with .range() until a short page is returned, so every row loads.
+// Some REST layers cap any unpaginated GET (PostgREST's default is
+// 1000 rows). A plain `.from('x').select('*')` therefore silently
+// truncates to the first rows once a table grows past that — the rows
+// exist in the DB but never reach the client. This pages through with
+// .range() until a short page is returned, so every row loads.
 //
-// Backends differ: the Supabase adapter exposes .range(); the local
+// Backends differ: only adapters that expose .range() page; the local
 // REST, demo, and Drive adapters load whole tables in one shot and
 // have no server-side row cap. So we only page when .range() exists,
 // and otherwise run the query once.
@@ -728,139 +699,7 @@ function isMobileUA() {
   return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 }
 
-// ── Settings accessor factory (DB + localStorage sync) ──────────
-/**
- * Create a synced accessor for a JSON object stored in the `settings` table
- * with localStorage fallback. Eliminates the load/save boilerplate duplicated
- * across todos, habits, lists, vestiaire, and flashcards.
- *
- * @param {string} dbKey  Key in the `settings` table
- * @param {string} lsKey  localStorage key
- * @returns {{ load: () => Promise<object>, save: (map: object) => Promise<void>, get: () => object }}
- */
-function createSettingsAccessor(dbKey, lsKey) {
-  let _cache = {};
 
-  async function load() {
-    if (state.db.connected) {
-      try {
-        const { data } = await state.db.from('settings').select('value').eq('key', dbKey);
-        if (data && data.length > 0 && data[0].value) {
-          _cache = JSON.parse(data[0].value);
-          localStorage.setItem(lsKey, data[0].value);
-          return _cache;
-        }
-      } catch (e) { console.warn(`Could not load ${dbKey} from DB:`, e.message); }
-    }
-    try { _cache = JSON.parse(localStorage.getItem(lsKey) || '{}'); } catch { _cache = {}; }
-    return _cache;
-  }
-
-  async function save(map) {
-    _cache = map;
-    const json = JSON.stringify(map);
-    localStorage.setItem(lsKey, json);
-    if (state.db.connected) {
-      try {
-        const { data } = await state.db.from('settings')
-          .update({ value: json, updated_at: new Date().toISOString() })
-          .eq('key', dbKey).select();
-        if (!data || data.length === 0) {
-          await state.db.from('settings')
-            .insert({ key: dbKey, value: json, updated_at: new Date().toISOString() });
-        }
-      } catch (e) { console.warn(`Could not save ${dbKey} to DB:`, e.message); }
-    }
-  }
-
-  function get() { return _cache; }
-
-  return { load, save, get };
-}
-
-// ── Supabase project ref extraction ─────────────────────────────
-function getSupabaseProjectRef(url) {
-  if (!url) return null;
-  const m1 = url.match(/https?:\/\/([a-z0-9]{20,})\.supabase\.co/i);
-  if (m1) return m1[1];
-  const m2 = url.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
-  if (m2) return m2[1];
-  return null;
-}
-
-// ── Shared Supabase Site-URL + magic-link auth steps ────────────
-/**
- * Build the two-step Site URL confirmation + magic-link email HTML
- * shared by showAuthPrompt (main.js) and renderSharingPane (sharing-ui.js).
- *
- * @param {string} prefix   ID prefix for DOM elements ('auth' | 'sharingAuth')
- * @param {string} authConfigUrl  Supabase dashboard auth-config URL
- * @param {object} [opts]
- * @param {string} [opts.sendAction]  data-action attribute for the send button
- * @param {boolean} [opts.showStatus] append a status div after the send button
- * @returns {{ html: string, wireUp: (container: Element) => void }}
- */
-function buildAuthSteps(prefix, authConfigUrl, opts = {}) {
-  const siteOrigin = location.origin;
-  const sendAttrs = opts.sendAction ? ` data-action="${esc(opts.sendAction)}"` : '';
-  const statusHtml = opts.showStatus ? `\n        <div class="auth-inline-status" id="${prefix}Status" style="display:none"></div>` : '';
-  const errorClass = opts.showStatus ? 'auth-inline-error' : 'auth-error';
-  const html = `
-    <div class="auth-step" id="${prefix}Step1">
-      <div class="auth-step-header">
-        <span class="auth-step-num">1</span>
-        <span>${t('auth.step_site_url')}</span>
-      </div>
-      <p class="auth-step-detail">${t('auth.step_site_url_detail')}</p>
-      <div class="auth-site-url-value">
-        <code id="${prefix}SiteUrlValue">${esc(siteOrigin)}</code>
-        <button class="auth-copy-url-btn" id="${prefix}CopyUrlBtn" title="${t('sharing.copy')}">${lucideIcon('copy', 14)}</button>
-      </div>
-      <a class="auth-config-link" href="${authConfigUrl}" target="_blank" rel="noopener">${lucideIcon('external-link', 14)} ${t('auth.open_supabase_settings')}</a>
-      <label class="auth-toggle-label" id="${prefix}ConfirmLabel">
-        <input type="checkbox" id="${prefix}SiteUrlConfirm">
-        <span>${t('auth.site_url_confirmed')}</span>
-      </label>
-    </div>
-    <div class="auth-step auth-step-locked" id="${prefix}Step2">
-      <div class="auth-step-header">
-        <span class="auth-step-num">2</span>
-        <span>${t('auth.step_magic_link')}</span>
-      </div>
-      <div id="${prefix}Step2Body" style="display:none">
-        <input type="email" id="${prefix}Email" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
-        <div class="${errorClass}" id="${prefix}Error" style="display:none"></div>
-        <button class="auth-send-btn" id="${prefix}SendBtn"${sendAttrs}>${t('auth.send_magic_link')}</button>${statusHtml}
-      </div>
-    </div>`;
-
-  function wireUp(container) {
-    const confirmBox = container.querySelector(`#${prefix}SiteUrlConfirm`);
-    const step2 = container.querySelector(`#${prefix}Step2`);
-    const step2Body = container.querySelector(`#${prefix}Step2Body`);
-    const copyBtn = container.querySelector(`#${prefix}CopyUrlBtn`);
-    const emailEl = container.querySelector(`#${prefix}Email`);
-    if (copyBtn) {
-      copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(siteOrigin).then(() => showToast(t('common.copied'), 'success'));
-      });
-    }
-    if (confirmBox) {
-      confirmBox.addEventListener('change', () => {
-        if (confirmBox.checked) {
-          step2.classList.remove('auth-step-locked');
-          step2Body.style.display = '';
-          if (emailEl) emailEl.focus();
-        } else {
-          step2.classList.add('auth-step-locked');
-          step2Body.style.display = 'none';
-        }
-      });
-    }
-  }
-
-  return { html, wireUp };
-}
 
 /**
  * Auto-assign palette colors to category/deck rows that have no color.
@@ -975,8 +814,6 @@ export {
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, fetchAll,
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA,
-  getSupabaseKeyRole, isServiceRoleKey,
-  getSupabaseProjectRef, buildAuthSteps, createSettingsAccessor,
   backfillCategoryColors, nextPaletteColor,
   parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,
   autoResizeTextarea,

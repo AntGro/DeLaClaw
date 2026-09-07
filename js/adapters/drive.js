@@ -40,9 +40,9 @@ const DRIVE_TABLES = [
   'projects', 'tasks', 'todos', 'habits', 'habit_completions',
   'flashcards', 'flashcard_notes', 'texts', 'text_line_progress',
   'birthdays', 'vestiaire', 'lists', 'list_items',
-  'settings', 'prompts', 'nvidia_usage', 'daily_visits',
+  'settings', 'prompts', 'daily_visits',
   'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
-  'gcal_sync',
+  'gcal_sync', 'agent_grants',
 ];
 
 // ── Google Identity Services helpers ────────────────────────────

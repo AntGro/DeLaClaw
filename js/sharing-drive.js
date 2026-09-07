@@ -286,7 +286,7 @@ async function migrateItemsJson(tok, folderId, entry) {
  * @param {() => Promise<string>} getToken
  * @param {string} personalFolderId
  * @param {Object} [capabilities]  — backend-specific hooks so the UI never
- *   reaches past state.sharing. A future Supabase backend would supply its own
+ *   reaches past state.sharing. Adapters supply their own
  *   implementations (or omit the ones that don't apply).
  * @param {(folderId: string) => Promise<Array|null>} [capabilities.openJoinPicker]
  */

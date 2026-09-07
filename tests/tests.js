@@ -882,50 +882,6 @@ test('editHabitInline updates shared habits through sharing API', () => {
 });
 
 // ===================================================================
-// 25bb. Supabase shared habits use one canonical id and normalized shape
-// ===================================================================
-test('Supabase shared habits use canonical ids and normalize habit payloads', () => {
-  const supabase = jsFiles['sharing-supabase.js'];
-  const addStart = supabase.indexOf('async function addSharedHabit');
-  const addEnd = supabase.indexOf('async function _replaceSharedHabitCompletions', addStart);
-  assert(addStart !== -1 && addEnd !== -1, 'sharing-supabase.js: addSharedHabit block not found');
-  const addFn = supabase.slice(addStart, addEnd);
-
-  assert(addFn.includes('const sharedId = habitData.id || crypto.randomUUID()'),
-    'sharing-supabase.js: addSharedHabit must keep the caller-provided shared habit id or mint a full UUID');
-  assert(addFn.includes('id: sharedId'),
-    'sharing-supabase.js: addSharedHabit must write the same id to sharing_items');
-  assert(addFn.includes('payload: { ...habitPayload, id: sharedId, completions: [] }'),
-    'sharing-supabase.js: addSharedHabit must store habit fields in payload with the canonical id');
-  assert(supabase.includes('const itemId = itemData.id || crypto.randomUUID()'),
-    'sharing-supabase.js: shared item fallback ids must be full UUIDs, not short ids');
-
-  const getStart = supabase.indexOf('function _normalizeSharedHabit');
-  const getEnd = supabase.indexOf('function getAllSharedTodos', getStart);
-  assert(getStart !== -1 && getEnd !== -1, 'sharing-supabase.js: normalized shared habit block not found');
-  const getFn = supabase.slice(getStart, getEnd);
-  assert(getFn.includes('...payload') && getFn.includes('id: item.id') && getFn.includes("item_type: 'habit'"),
-    'sharing-supabase.js: getAllSharedHabits must expose habit payload fields at top level');
-  assert(getFn.includes("i.item_type === 'habit_completion'") && getFn.includes('parent_item_id === item.id'),
-    'sharing-supabase.js: getAllSharedHabits must attach child habit completions');
-  assert(getFn.includes('_payload_id: payload.id || null'),
-    'sharing-supabase.js: normalized habits must expose legacy payload ids for pointer repair');
-
-  const habits = jsFiles['habits.js'];
-  const saveStart = habits.indexOf('async function saveNewHabit');
-  const saveEnd = habits.indexOf('function editHabitInline', saveStart);
-  const saveFn = habits.slice(saveStart, saveEnd);
-  assert(saveFn.includes('shared_id: sharedId') && saveFn.includes('id: sharedId'),
-    'habits.js: local shared habit pointer and shared habit item must use the same id');
-
-  const syncStart = habits.indexOf('async function _doSyncSharedHabits');
-  const syncEnd = habits.indexOf('window.syncSharedHabits', syncStart);
-  const syncFn = habits.slice(syncStart, syncEnd);
-  assert(syncFn.includes('legacySharedId') && syncFn.includes('_payload_id'),
-    'habits.js: syncSharedHabits must repair old Supabase pointers keyed by payload id');
-});
-
-// ===================================================================
 // 25c. List item edit action uses shared-aware inline editor
 // ===================================================================
 test('List item edit action uses shared-aware inline editor', () => {
@@ -1029,16 +985,8 @@ test('Shared list add action passes clicked button element', () => {
 // ===================================================================
 // 25g. Sharing adapters normalize completeItem(doneBy) without nested arrays
 // ===================================================================
-test('Sharing adapters normalize completeItem(doneBy) without nested arrays', () => {
-  const supabase = jsFiles['sharing-supabase.js'];
+test('Sharing adapter normalizes completeItem(doneBy) without nested arrays', () => {
   const drive = jsFiles['sharing-drive.js'];
-
-  assert(supabase.includes('function _normalizeDoneBy(doneBy, groupId = null)'),
-    'sharing-supabase.js: completeItem must use a doneBy normalization helper');
-  assert(supabase.includes('Array.isArray(doneBy)') && supabase.includes('done_by: _normalizeDoneBy(doneBy, groupId)'),
-    'sharing-supabase.js: completeItem must preserve arrays instead of wrapping them');
-  assert(!supabase.includes('done_by: [doneBy || getCurrentUser().email]'),
-    'sharing-supabase.js: completeItem must not wrap doneBy blindly');
 
   const start = drive.indexOf('async completeItem(groupId, itemId, doneBy)');
   const end = drive.indexOf('async uncompleteItem', start);
@@ -1056,7 +1004,6 @@ test('sharing member identity is memberId-based and agent-safe', () => {
   const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
-  const supabase = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
 
   assert(iface.includes('Emails are permission material, not identity'),
     'sharing-interface.js must document the memberId/displayName identity invariant');
@@ -1072,9 +1019,6 @@ test('sharing member identity is memberId-based and agent-safe', () => {
     'sharing-drive.js must treat invite email as permission material only');
   assert(!drive.includes(`email,\n          name: email`),
     'sharing-drive.js must not write raw invite email into group.json members');
-
-  assert(supabase.includes('invited_label') && supabase.includes('getAgentSafeGroup'),
-    'sharing-supabase.js must preserve invited_label separately and expose agent-safe serialization');
 });
 
 // ===================================================================
@@ -1153,7 +1097,6 @@ test('Shared habit last-done edits write to shared completions and can clear lat
 test('Shared habit completions use group member ids, not account emails', () => {
   const habitsJs = jsFiles['habits.js'];
   const drive = jsFiles['sharing-drive.js'];
-  const supabase = jsFiles['sharing-supabase.js'];
   const iface = jsFiles['sharing-interface.js'];
 
   assert(iface.includes('getCurrentMemberId'),
@@ -1172,12 +1115,6 @@ test('Shared habit completions use group member ids, not account emails', () => 
   const driveFn = drive.slice(driveStart, driveEnd);
   assert(driveFn.includes('currentMemberId(groupId)') && !driveFn.includes('ensureUser') && !driveFn.includes('.email'),
     'sharing-drive.js: getCurrentMemberId must return the group member id, not the account email');
-
-  const sbStart = supabase.indexOf('async function getCurrentMemberId');
-  const sbEnd = supabase.indexOf('async function createGroup', sbStart);
-  const sbFn = supabase.slice(sbStart, sbEnd);
-  assert(sbFn.includes('_getItemWriter(groupId)') && sbFn.includes('w.memberId'),
-    'sharing-supabase.js: getCurrentMemberId must return the item writer member id');
 });
 
 // ===================================================================
@@ -1302,12 +1239,11 @@ test('Drag clones are globally tagged and cleaned before drag-enabled re-renders
 });
 
 // ===================================================================
-// 31. CHECK constraint parity across all backends (Supabase ↔ Demo ↔ SQLite)
+// 31. CHECK constraint parity across backends (Demo ↔ SQLite)
 // ===================================================================
 
-test('CHECK constraints match across Supabase, Demo adapter, and SQLite schema', () => {
+test('CHECK constraints match across Demo adapter and SQLite schema', () => {
   const demoSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'adapters', 'demo.js'), 'utf8');
-  const supabaseSrc = fs.readFileSync(path.resolve(__dirname, '..', 'sql', 'supabase_schema.sql'), 'utf8');
   const sqliteSrc = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'schema.sql'), 'utf8');
 
   // --- Helper: extract sorted values from a regex match group ---
@@ -1329,16 +1265,11 @@ test('CHECK constraints match across Supabase, Demo adapter, and SQLite schema',
     demoSrc.match(/tasks:\s*\{\s*status:\s*\[([^\]]+)\]/),
     'Demo CHECK_CONSTRAINTS tasks.status');
 
-  const pgTaskStatus = extractValues(
-    supabaseSrc.match(/tasks_status_check.*?CHECK.*?ARRAY\[([^\]]+)\]/),
-    'Supabase tasks_status_check');
-
   const sqliteTaskStatus = extractValues(
     sqliteSrc.match(/tasks[\s\S]*?status\s+TEXT[^,]*CHECK\s*\(\s*status\s+IN\s*\(([^)]+)\)/i),
     'SQLite tasks.status CHECK');
 
-  assertSameValues(demoTaskStatus, pgTaskStatus, 'Demo tasks.status', 'Supabase tasks.status');
-  assertSameValues(sqliteTaskStatus, pgTaskStatus, 'SQLite tasks.status', 'Supabase tasks.status');
+  assertSameValues(demoTaskStatus, sqliteTaskStatus, 'Demo tasks.status', 'SQLite tasks.status');
 
   // Regression guard: draft must be present
   assert(demoTaskStatus.includes('draft'), 'tasks.status must include "draft" for draft task creation');
@@ -1349,18 +1280,13 @@ test('CHECK constraints match across Supabase, Demo adapter, and SQLite schema',
     demoSrc.match(/todos:\s*\{\s*priority:\s*\[([^\]]+)\]/),
     'Demo CHECK_CONSTRAINTS todos.priority');
 
-  const pgTodoPriority = extractValues(
-    supabaseSrc.match(/todos_priority_check.*?CHECK.*?ARRAY\[([^\]]+)\]/),
-    'Supabase todos_priority_check');
-
   const sqliteTodoPriority = extractValues(
     sqliteSrc.match(/todos[\s\S]*?priority\s+TEXT[^,]*CHECK\s*\(\s*priority\s+IN\s*\(([^)]+)\)/i),
     'SQLite todos.priority CHECK');
 
-  assertSameValues(demoTodoPriority, pgTodoPriority, 'Demo todos.priority', 'Supabase todos.priority');
-  assertSameValues(sqliteTodoPriority, pgTodoPriority, 'SQLite todos.priority', 'Supabase todos.priority');
+  assertSameValues(demoTodoPriority, sqliteTodoPriority, 'Demo todos.priority', 'SQLite todos.priority');
 
-  // ── 3. flashcard_notes.proposal_status (Demo + SQLite only — no Supabase CHECK) ──
+  // ── 3. flashcard_notes.proposal_status (Demo ↔ SQLite) ──
 
   const demoProposalStatus = extractValues(
     demoSrc.match(/flashcard_notes:\s*\{\s*proposal_status:\s*\[([^\]]+)\]/),
@@ -1560,33 +1486,6 @@ test('local-migrations.js has entries for 1.294 and 1.297', () => {
   assert(content.includes("'1.297':"), 'Missing local migration entry for 1.297');
 });
 
-test('auth.js exports initAuth, sendMagicLink, claimOwnership, getAuthUser, signOut, onAuthStateChange', () => {
-  const authJs = fs.readFileSync(path.join(JS_DIR, 'auth.js'), 'utf-8');
-  const expected = ['initAuth', 'sendMagicLink', 'claimOwnership', 'getAuthUser', 'signOut', 'onAuthStateChange'];
-  for (const fn of expected) {
-    assert(authJs.includes(`export ${fn.startsWith('on') ? 'function' : 'async function'} ${fn}`) ||
-           authJs.includes(`export function ${fn}`),
-      `auth.js missing export: ${fn}`);
-  }
-});
-
-test('sharing-supabase.js exports createSupabaseSharing', () => {
-  const content = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
-  assert(content.includes('export async function createSupabaseSharing'),
-    'sharing-supabase.js missing export: createSupabaseSharing');
-});
-
-test('sharing.js factory includes supabase case (not commented out)', () => {
-  const content = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
-  // Must NOT be commented out — look for actual case, not inside // comments
-  const lines = content.split('\n');
-  const hasActiveCase = lines.some(l => {
-    const trimmed = l.trim();
-    return trimmed.startsWith("case 'supabase':") || trimmed.startsWith('case "supabase":');
-  });
-  assert(hasActiveCase, "sharing.js: 'supabase' case is missing or commented out");
-});
-
 test('sw.js JS precache list matches source modules, with demo data explicit', () => {
   const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
   const block = sw.match(/const PRECACHE_URLS = \[([\s\S]*?)\];/);
@@ -1624,30 +1523,6 @@ test('sw.js JS precache list matches source modules, with demo data explicit', (
   assert(stale.length === 0, `sw.js has stale JS precache entries: ${stale.join(', ')}`);
 });
 
-test('auth.js claimOwnership includes joined_groups table', () => {
-  const authJs = fs.readFileSync(path.join(JS_DIR, 'auth.js'), 'utf-8');
-  assert(authJs.includes("'joined_groups'"), 'auth.js claimOwnership missing joined_groups table');
-});
-
-test('sharing-supabase.js references all expected RPC function names', () => {
-  const content = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
-  const rpcNames = [
-    'verify_join_token', 'confirm_join', 'get_shared_items',
-    'add_shared_item', 'update_shared_item', 'delete_shared_item',
-    'get_group_members', 'leave_group',
-  ];
-  for (const rpc of rpcNames) {
-    assert(content.includes(`'${rpc}'`), `sharing-supabase.js missing RPC call: ${rpc}`);
-  }
-});
-
-test('sharing-supabase inviteUser returns a member-scoped invite code', () => {
-  const content = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
-  assert(content.includes('inviteCode'), 'inviteUser should return inviteCode');
-  assert(content.includes('getMemberInviteLink(groupId, token, expiresAt)'), 'inviteUser should build a member-scoped code with expiry');
-  assert(!content.includes("'#join='"), 'sharing-supabase.js must not generate URL hash invite links');
-});
-
 test('Drive sharing invite code encodes folder id in DLC1 envelope', () => {
   const content = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
   assert(content.includes("b: 'googledrive'"), 'sharing-drive.js missing googledrive invite-code envelope');
@@ -1660,8 +1535,8 @@ test('state.js includes authUser property', () => {
   assert(content.includes('authUser'), 'state.js missing authUser property');
 });
 
-test('No HTML entities in new JS files (auth.js, sharing-supabase.js)', () => {
-  const files = ['auth.js', 'sharing-supabase.js'];
+test('No HTML entities in JS files', () => {
+  const files = ['sharing.js', 'sharing-ui.js', 'delegation.js'];
   for (const name of files) {
     const content = fs.readFileSync(path.join(JS_DIR, name), 'utf-8');
     const entities = content.match(/&(quot|amp|lt|gt|apos);/g);
@@ -1669,21 +1544,6 @@ test('No HTML entities in new JS files (auth.js, sharing-supabase.js)', () => {
       throw new Error(`${name} contains HTML entities: ${entities.join(', ')}`);
     }
   }
-});
-
-test('sql/supabase_schema.sql has owner-or-agent for all personal tables + joined_groups', () => {
-  const schema = fs.readFileSync(path.join(__dirname, '../', 'sql', 'supabase_schema.sql'), 'utf-8');
-  assert(!schema.includes('owner or unclaimed'), 'supabase_schema.sql must not contain owner or unclaimed after 1.300');
-  const personal = ['birthdays','flashcard_notes','habit_completions','habits','list_items','lists','projects','prompts','settings','tasks','todos','vestiaire','joined_groups'];
-  let count = 0;
-  for (const t of personal) {
-    const re = new RegExp(`CREATE POLICY "owner or agent"[^;]*ON[^;]*"?${t}"?`, 'i');
-    assert(re.test(schema), `supabase_schema.sql missing "owner or agent" policy for ${t}`);
-    count++;
-  }
-  assert(count === 13, `expected 13 owner-or-agent policies for personal tables, counted ${count}`);
-  assert(schema.includes('trg_set_owner_id'), 'supabase_schema.sql must include trg_set_owner_id triggers');
-  assert(schema.includes('claim_ownership'), 'supabase_schema.sql must include claim_ownership function');
 });
 
 test('sharing uses pasted DLC1 invite codes instead of #join links', () => {
@@ -1725,63 +1585,6 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
 // ── Auth Prompt UI ──
 
-test('index.html has authPromptOverlay modal', () => {
-  assert(indexHtml.includes('id="authPromptOverlay"'), 'authPromptOverlay missing from index.html');
-  assert(indexHtml.includes('id="authPromptContent"'), 'authPromptContent missing from index.html');
-});
-
-test('i18n has auth keys in all 3 languages', () => {
-  const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
-  const requiredKeys = ['sign_in', 'sign_in_hint', 'send_magic_link', 'skip', 'check_inbox', 'sign_out', 'signed_in_as'];
-  // Check EN section (first auth: block)
-  const authBlocks = i18nSrc.split(/\bauth:\s*\{/);
-  assert(authBlocks.length >= 4, `Expected 3 auth blocks (EN/FR/ES), found ${authBlocks.length - 1}`);
-  for (const key of requiredKeys) {
-    // Verify the key appears in at least 3 contexts
-    const re = new RegExp(`\\b${key}\\b.*:`, 'g');
-    const matches = i18nSrc.match(re) || [];
-    assert(matches.length >= 3, `i18n auth.${key} not found in all 3 languages (found ${matches.length})`);
-  }
-});
-
-test('main.js defines showAuthPrompt function', () => {
-  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
-  assert(main.includes('function showAuthPrompt('), 'showAuthPrompt function missing from main.js');
-});
-
-test('main.js stores _rawSupabaseAdapter before wrapping', () => {
-  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
-  assert(main.includes('state._rawSupabaseAdapter = adapter'), '_rawSupabaseAdapter assignment missing');
-});
-
-test('main.js shows auth prompt after initAuth for unauthenticated users', () => {
-  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
-  assert(!main.includes('claw_auth_skipped'), 'claw_auth_skipped must be removed - auth is mandatory since 1.300');
-  assert(main.includes('showAuthPrompt('), 'showAuthPrompt call missing after initAuth');
-  assert(main.includes('sign_in_hint_mandatory'), 'mandatory auth hint missing from showAuthPrompt');
-});
-
-test('sharing-ui.js updateSharingNavVisibility shows for supabase mode', () => {
-  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
-  assert(sui.includes("activeMode === 'supabase'"), 'sharing nav visibility missing supabase mode check');
-});
-
-test('sharing-ui.js renderSharingPane has inline auth prompt for unauthenticated supabase', () => {
-  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
-  assert(sui.includes('auth-inline-prompt'), 'auth-inline-prompt class missing from sharing pane render');
-  // sharingAuth* IDs now generated by buildAuthSteps('sharingAuth', ...) from utils.js
-  assert(sui.includes("buildAuthSteps('sharingAuth'"), 'buildAuthSteps call with sharingAuth prefix missing from sharing pane render');
-});
-
-test('sharing-ui.js renderSharingPane shows signed-in badge for authenticated supabase', () => {
-  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
-  assert(sui.includes('auth-signed-in-badge'), 'auth-signed-in-badge class missing');
-});
-
-test('window.sendAuthFromSharing is exposed', () => {
-  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
-  assert(main.includes('window.sendAuthFromSharing'), 'window.sendAuthFromSharing not exposed');
-});
 
 // (Removed: test for Supabase Site URL in setup guide — Supabase setup steps removed in deprecation)
 
@@ -2443,18 +2246,6 @@ async function importFlashcardsIntegrationTest() {
         `Expected ≥30 interface keys, got ${interfaceKeys.length}`);
     });
 
-    // Check the Supabase adapter return block
-    const sbSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf8');
-    const sbReturn = sbSrc.match(/return \{[\s\S]*?\n  \};/);
-    const sbKeys = sbReturn ? [...sbReturn[0].matchAll(/^\s{4}(\w+)/gm)].map(m => m[1]) : [];
-
-    for (const { key } of interfaceKeys) {
-      test(`supabase adapter exports: ${key}`, () => {
-        assert(sbKeys.includes(key),
-          `sharing-supabase.js return block is missing "${key}"`);
-      });
-    }
-
     // Check the Drive adapter object literal
     const drvSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf8');
     const drvBlock = drvSrc.match(/const sharing = \{[\s\S]*?\n  \};/);
@@ -2476,31 +2267,15 @@ async function importFlashcardsIntegrationTest() {
   // ===================================================================
   console.log('\n-- Security: credential storage\n');
 
-  test('utils.js exports getSupabaseKeyRole and isServiceRoleKey', () => {
-    const u = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'utils.js'), 'utf8');
-    assert(u.includes('getSupabaseKeyRole'), 'utils.js must export getSupabaseKeyRole');
-    assert(u.includes('isServiceRoleKey'), 'utils.js must export isServiceRoleKey');
-    assert(u.includes('sb_secret_'), 'must check sb_secret_ prefix');
-    assert(u.includes('sb_publishable_'), 'must check sb_publishable_ prefix');
-  });
-
-  test('main.js saveStayConnectedCreds strips key for local/demo/drive and rejects service_role', () => {
+  test('main.js saveStayConnectedCreds never persists keys', () => {
     const m = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'main.js'), 'utf8');
-    assert(m.includes("m === 'local'") && m.includes("key = ''"), 'saveStayConnectedCreds must strip key for local');
-    assert(m.includes('getSupabaseKeyRole') && m.includes('service_role'), 'must check service_role in saveStayConnectedCreds');
-  });
-
-  test('main.js doLogin rejects service_role before connect', () => {
-    const m = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'main.js'), 'utf8');
-    const idxCheck = m.indexOf("err_service_role");
-    const idxConnect = m.indexOf("await connect(url, key, mode)");
-    assert(idxCheck !== -1, 'doLogin must reference login.err_service_role');
-    assert(idxCheck < idxConnect, 'service_role check must be before connect()');
+    assert(m.includes("key: ''"), 'saveStayConnectedCreds must never persist keys');
+    assert(!m.includes('getSupabaseKeyRole') && !m.includes('service_role'), 'no Supabase key-role checks remain');
   });
 
   test('state.js STAY_CONNECTED_KEY has security comment', () => {
     const s = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'state.js'), 'utf8');
-    assert(s.includes('anon key is public') || s.includes('RLS is the boundary'), 'state.js must document anon public + RLS');
+    assert(s.includes('Never persist') || s.includes('credentials are never persisted'), 'state.js must document that credentials are never persisted');
   });
 
   test('drive.js token scoped by clientId and dedup pending promise', () => {
@@ -2555,12 +2330,12 @@ async function importFlashcardsIntegrationTest() {
 
   test('CODEMAP core includes adapters and critical modules', () => {
     const j = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '.agents', 'CODEMAP.json'), 'utf-8'));
-    const must = ['main','state','db','utils','i18n','item-utils','auth','sharing'];
+    const must = ['main','state','db','utils','i18n','item-utils','sharing'];
     for (const m of must) {
       assert(j.core[m], `Missing core module in CODEMAP: ${m}`);
     }
     // adapters
-    const adapters = ['supabase','rest','demo','drive','offline-cache'];
+    const adapters = ['rest','demo','drive','offline-cache'];
     for (const a of adapters) {
       assert(j.core[a] || fs.existsSync(path.join(__dirname,'..','js','adapters',`${a}.js`)), `Adapter ${a} should be represented`);
     }
@@ -2669,7 +2444,7 @@ async function importFlashcardsIntegrationTest() {
   });
 
   test('no parseFloat/string version comparisons remain in migration paths', () => {
-    const files = ['js/adapters/drive.js', 'server/server.js', 'js/auth.js', 'js/sharing-ui.js', 'js/main.js'];
+    const files = ['js/adapters/drive.js', 'server/server.js', 'js/sharing-ui.js', 'js/main.js'];
     for (const file of files) {
       const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
       assert(!/parseFloat\([^)]*(?:version|Version|dbVer)/.test(src),

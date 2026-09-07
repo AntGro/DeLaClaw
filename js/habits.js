@@ -1990,7 +1990,7 @@ async function deleteHabitCategory(catId) {
       }
     }
     // Explicitly delete items so calendar sync (markDirty) fires for each.
-    // SQL CASCADE would handle this on Supabase, but Drive/Demo have no FK enforcement.
+    // SQL CASCADE would handle this on SQLite, but Drive/Demo have no FK enforcement.
     for (const habit of habitsInCat) {
       await state.db.from('habits').delete().eq('id', habit.id);
     }

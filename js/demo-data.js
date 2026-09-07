@@ -484,7 +484,6 @@ export function getDemoData(lang) {
     created_at: d(-20), updated_at: d(-2),
   }));
   data.prompts = [];
-  data.nvidia_usage = [];
 
   return data;
 }
@@ -495,7 +494,7 @@ export function getEmptyData() {
     projects: [], tasks: [], todos: [], habits: [], habit_completions: [],
     flashcards: [], flashcard_notes: [], birthdays: [], vestiaire: [],
     lists: [], list_items: [],
-    settings: [], prompts: [], texts: [], text_line_progress: [], nvidia_usage: [], daily_visits: [],
+    settings: [], prompts: [], texts: [], text_line_progress: [], daily_visits: [],
     todo_categories: [], habit_categories: [], vestiaire_categories: [], flashcard_decks: [],
   };
 }

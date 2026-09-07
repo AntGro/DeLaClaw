@@ -12,7 +12,7 @@ DeLaClaw supports three backend adapters. This document is the single source of 
 | **Local** | SQLite (Bun server) | None | None (single-device) | N/A (is local) | ⚠️ Possible via REST |
 | **Demo** | In-memory | None | None | N/A | ❌ |
 
-> **Supabase backend support has been removed.** The Supabase adapter and client library remain in the codebase temporarily to support migration to Google Drive. The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
+> **Supabase backend support has been removed.** The Supabase adapter, client library, and auth module have been deleted from the codebase. The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
 
 ---
 
@@ -65,8 +65,6 @@ Three adapters, two schema definitions:
 - `js/adapters/demo.js` — `CHECK_CONSTRAINTS` object (Demo + Drive)
 
 These **must stay in sync**. The `draft` status bug (v1.105) was caused by the demo adapter missing statuses that existed in the SQL schema.
-
-`sql/supabase_schema.sql` remains in the repo as a legacy reference but is no longer canonical for active backends.
 
 ### Rules
 
@@ -376,10 +374,9 @@ Tables tracked in `BACKUP_TABLES` (import order):
 | `list_items` | Items within lists | `lists.id` |
 | `settings` | App settings (key/value) | — |
 | `prompts` | AI prompts (global + per-project) | — |
-| `nvidia_usage` | LLM API usage tracking | — |
 | `daily_visits` | Daily visit log | — |
 | `sharing_groups` | Shared group definitions | — |
 | `sharing_members` | Group membership | `sharing_groups.id` |
 | `sharing_items` | Shared items (TODOs, habits, list items) | `sharing_groups.id` |
 | `joined_groups` | Groups the user has joined | — |
-| `agent_grants` | AI agent permission grants | — |
+

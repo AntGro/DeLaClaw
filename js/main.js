@@ -5,17 +5,16 @@ import { renderStorm, generateStorm, LOGO_DEFAULTS, animLoading, animLock, animU
 import { LOGOS, LABELS } from './backend-logos.js';
 import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY } from './state.js';
 import db from './db.js';
-import { createSupabaseAdapter } from './adapters/supabase.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
 import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
-import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, getSupabaseKeyRole, getSupabaseProjectRef, buildAuthSteps, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
+import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
 
-const SETTINGS_PANES = ['general', 'ai', 'calendar', 'sharing', 'data', 'stats', 'agents', 'account'];
+const SETTINGS_PANES = ['general', 'calendar', 'sharing', 'data', 'stats', 'account'];
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
 import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
 import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthdays.js';
@@ -23,7 +22,6 @@ import { refreshVestiaire, renderVestiaire, initVestiaireModals } from './vestia
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals, syncSharedListItems } from './lists.js';
 import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
-import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
 import { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR } from './state.js';
 import { compareVersions } from '../migrations/version-compare.js';
@@ -73,12 +71,12 @@ function swapLsScope(newMode) {
     saveLsScope(prev);
     restoreLsScope(newMode);
   } else if (!prev) {
-    // First use ever: existing bare keys belong to 'supabase' (legacy default)
-    if (newMode !== 'supabase') {
-      saveLsScope('supabase');
+    // First use ever: existing bare keys belong to 'googledrive' (legacy default)
+    if (newMode !== 'googledrive') {
+      saveLsScope('googledrive');
       restoreLsScope(newMode);
     } else {
-      localStorage.setItem(ACTIVE_MODE_KEY, 'supabase');
+      localStorage.setItem(ACTIVE_MODE_KEY, 'googledrive');
     }
   }
   // Same mode → nothing to swap, just ensure marker is set
@@ -289,7 +287,7 @@ new MutationObserver(muts => {
 // ===================================================================
 function getSelectedMode() {
   const active = document.querySelector('.backend-option.active');
-  return active ? active.dataset.mode : 'supabase';
+  return active ? active.dataset.mode : 'googledrive';
 }
 
 function switchBackendMode(mode) {
@@ -333,14 +331,6 @@ function switchBackendMode(mode) {
     if (urlLabel) { urlLabel.style.display = ''; urlLabel.style.visibility = ''; }
     if (urlLabelLink) { urlLabelLink.textContent = t('login.url_label_local'); urlLabelLink.removeAttribute('href'); }
     if (hintEl) { hintEl.style.display = ''; hintEl.textContent = t('login.hint_local'); }
-    if (highlightsEl) highlightsEl.style.display = 'none';
-    if (submitBtn) submitBtn.textContent = t('login.connect');
-  } else {
-    if (keyField) { keyField.style.display = ''; keyField.style.visibility = ''; }
-    if (urlField) { urlField.style.display = ''; urlField.style.visibility = ''; urlField.placeholder = 'https://xyz.supabase.co'; }
-    if (urlLabel) { urlLabel.style.display = ''; urlLabel.style.visibility = ''; }
-    if (urlLabelLink) { urlLabelLink.textContent = t('login.url_label'); urlLabelLink.href = 'https://supabase.com/dashboard/projects'; urlLabelLink.dataset.tooltip = t('toast.url_tooltip'); }
-    if (hintEl) { hintEl.style.display = ''; hintEl.textContent = t('login.hint_supabase'); }
     if (highlightsEl) highlightsEl.style.display = 'none';
     if (submitBtn) submitBtn.textContent = t('login.connect');
   }
@@ -425,23 +415,6 @@ function initGate() {
     document.getElementById('loginForm').style.display = 'flex';
     document.getElementById('gateGuideLink').style.display = 'none';
   });
-  // Update API Key link when project URL changes
-  const _urlInput = document.getElementById('username');
-  const _keyLink = document.getElementById('keyLabelLink');
-  if (_urlInput && _keyLink) {
-    const _updateKeyLink = () => {
-      const v = _urlInput.value.trim();
-      const m = v.match(/^https?:\/\/([a-z0-9]+)\.supabase\.co/i) || v.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
-      if (m) {
-        _keyLink.href = `https://supabase.com/dashboard/project/${m[1]}/settings/api-keys`;
-      } else {
-        _keyLink.removeAttribute('href');
-      }
-    };
-    _urlInput.addEventListener('input', _updateKeyLink);
-    _updateKeyLink();
-  }
-  // Try auto-fill from Credential Management API
   // Try auto-fill from Credential Management API
   if (window.PasswordCredential) {
     navigator.credentials.get({ password: true, mediation: 'optional' }).then(cred => {
@@ -472,7 +445,7 @@ async function autoConnect(url, key, mode) {
       const form = document.getElementById('loginForm');
       if (form) form.style.display = 'flex';
       const err = document.getElementById('loginError');
-      renderSchemaMissingError(err, url);
+      renderSchemaMissingError(err);
       // Keep URL/key in form for user to retry after running schema
       const uEl = document.getElementById('username');
       const kEl = document.getElementById('password');
@@ -555,253 +528,6 @@ function showDriveReconnectScreen(url, key) {
   document.body.appendChild(screen);
 }
 
-// ── Auth prompt modal ─────────────────────────────────────────
-
-/**
- * Show magic-link auth prompt after Supabase connect.
- * @param {Object} rawAdapter — unwrapped Supabase adapter (needs .raw.auth)
- * @param {string} url — Supabase project URL
- * @param {string} key — Supabase anon key
- */
-function showAuthPrompt(rawAdapter, url, key) {
-  const overlay = document.getElementById('authPromptOverlay');
-  const content = document.getElementById('authPromptContent');
-  if (!overlay || !content) return;
-
-  // Build Supabase dashboard URL for Site URL config — use direct url param first, fall back to stored creds
-  const creds = (() => { try { return JSON.parse(localStorage.getItem(STAY_CONNECTED_KEY) || '{}'); } catch { return {}; } })();
-  const projRef = getSupabaseProjectRef(url) || getSupabaseProjectRef(creds.url || '') || null;
-  const authConfigUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/url-configuration` : 'https://supabase.com/dashboard/projects';
-
-  // ── Sign-in form state ──
-  function renderForm() {
-    const steps = buildAuthSteps('auth', authConfigUrl);
-    content.innerHTML = `
-      <div class="auth-icon">${lucideIcon('lock', 28)}</div>
-      <h3>${t('auth.sign_in')}</h3>
-      <p class="auth-hint">${t('auth.sign_in_hint_mandatory')}</p>
-      ${steps.html}
-    `;
-    steps.wireUp(content);
-    const emailEl = content.querySelector('#authEmail');
-    const errEl = content.querySelector('#authError');
-    const sendBtn = content.querySelector('#authSendBtn');
-
-    sendBtn.addEventListener('click', async () => {
-      const email = emailEl.value.trim();
-      if (!email || !email.includes('@')) {
-        errEl.textContent = t('auth.error');
-        errEl.style.display = '';
-        return;
-      }
-      sendBtn.disabled = true;
-      sendBtn.textContent = t('auth.sending');
-      errEl.style.display = 'none';
-      try {
-        // ── Email guard: block mismatched email before sending ──
-        const { checkEmailGuard, sendMagicLink } = await import('./auth.js');
-        const { allowed } = await checkEmailGuard(rawAdapter, email);
-        if (!allowed) {
-          errEl.textContent = t('auth.email_mismatch');
-          errEl.style.display = '';
-          sendBtn.disabled = false;
-          sendBtn.textContent = t('auth.send_magic_link');
-          return;
-        }
-        const { error } = await sendMagicLink(rawAdapter, email);
-        if (error) {
-          const isRateLimit = error.status === 429 || (error.message || '').toLowerCase().includes('rate');
-          errEl.textContent = isRateLimit ? t('auth.rate_limit') : t('auth.error');
-          errEl.style.display = '';
-          sendBtn.disabled = false;
-          sendBtn.textContent = t('auth.send_magic_link');
-        } else {
-          renderInbox(email);
-        }
-      } catch {
-        errEl.textContent = t('auth.error');
-        errEl.style.display = '';
-        sendBtn.disabled = false;
-        sendBtn.textContent = t('auth.send_magic_link');
-      }
-    });
-
-    emailEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); sendBtn.click(); }
-    });
-  }
-
-  // ── Check-inbox state ──
-  function renderInbox(email) {
-    const isStandalonePWA = (() => { try { return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; } catch { return false; } })();
-    const pwaAckKey = 'cc-pwa-copy-hint-ack';
-    const pwaAlreadyAcked = (() => { try { return localStorage.getItem(pwaAckKey) === '1'; } catch { return true; } })();
-    const needsPwaAck = isStandalonePWA && !pwaAlreadyAcked;
-
-    content.innerHTML = `
-      <div class="auth-icon">${lucideIcon('mail', 28)}</div>
-      <h3>${t('auth.check_inbox')}</h3>
-      <p class="auth-hint">${t('auth.check_inbox_hint', esc(email))}</p>
-      <div style="margin:14px 0; padding:10px 14px; border:1px solid var(--warning-border, #e6a817); border-radius:10px; background:color-mix(in srgb, var(--warning-border, #e6a817) 10%, var(--bg)); display:flex; gap:10px; align-items:flex-start;">
-        <span style="flex-shrink:0; margin-top:1px; color:var(--warning-border, #e6a817);">${lucideIcon('alert-triangle', 18)}</span>
-        <p style="margin:0; font-size:0.9em; line-height:1.45; color:var(--text);">${t('auth.do_not_click')}</p>
-      </div>
-      <div id="authPwaHint" style="${needsPwaAck ? '' : 'display:none;'} margin:16px 0; padding:12px 14px; border:1px solid var(--accent); border-radius:10px; background:color-mix(in srgb, var(--accent) 8%, var(--bg));">
-        <div style="display:flex; gap:10px; align-items:flex-start;">
-          <div style="margin-top:2px;">${lucideIcon('smartphone', 20)}</div>
-          <div style="flex:1;">
-            <strong style="display:block; margin-bottom:4px; font-size:0.95em;">${t('auth.pwa_copy_title')}</strong>
-            <p style="margin:0 0 10px 0; font-size:0.9em; line-height:1.4; color:var(--text-muted);">${t('auth.pwa_copy_body')}</p>
-            <button id="authPwaAckBtn" class="auth-send-btn" style="width:auto; padding:6px 14px; font-size:0.9em;">${t('auth.pwa_copy_ack')}</button>
-          </div>
-        </div>
-      </div>
-      <div class="auth-otp-box" style="margin:16px 0; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-subtle,#f8f9fa);">
-        <p class="auth-hint" style="font-size:0.9em; margin-bottom:8px;">${t('auth.otp_hint')}</p>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <input type="text" id="authOtpInput" placeholder="${t('auth.otp_placeholder')}" inputmode="text" autocomplete="one-time-code" maxlength="500" style="flex:1; min-width:0; padding:10px 12px; font-size:14px; text-align:left; border:1px solid var(--border); border-radius:6px; overflow:hidden; text-overflow:ellipsis;" ${needsPwaAck ? 'disabled' : ''}>
-          <button class="auth-send-btn" id="authVerifyBtn" style="width:auto; flex:0 0 auto; white-space:nowrap;" ${needsPwaAck ? 'disabled' : ''}>${t('auth.verify_code')}</button>
-        </div>
-        <div class="auth-error" id="authOtpError" style="display:none; margin-top:8px;"></div>
-      </div>
-      <div style="display:flex; gap:8px; margin-top:12px;">
-        <button class="auth-send-btn" id="authResendBtn" style="flex:0 0 auto; width:auto;">${t('auth.resend')}</button>
-        <button class="auth-skip" id="authCloseBtn">${t('auth.close')}</button>
-      </div>
-      <div class="auth-status" id="authResendStatus" style="display:none; margin-top:8px;"></div>
-    `;
-    const resendBtn = content.querySelector('#authResendBtn');
-    const closeBtn = content.querySelector('#authCloseBtn');
-    const statusEl = content.querySelector('#authResendStatus');
-    const otpInput = content.querySelector('#authOtpInput');
-    const verifyBtn = content.querySelector('#authVerifyBtn');
-    const otpErrEl = content.querySelector('#authOtpError');
-
-    async function doVerify() {
-      const code = (otpInput?.value || '').trim();
-      if (!code || code.length < 6) {
-        if (otpErrEl) { otpErrEl.textContent = t('auth.otp_invalid') || 'Paste the confirmation link or token from your email.'; otpErrEl.style.display = ''; }
-        return;
-      }
-      verifyBtn.disabled = true;
-      verifyBtn.textContent = t('auth.verifying') || 'Verifying...';
-      if (otpErrEl) otpErrEl.style.display = 'none';
-      try {
-        const { verifyOtpCode } = await import('./auth.js');
-        const { user, error } = await verifyOtpCode(rawAdapter, email, code);
-        if (error || !user) {
-          const msg = error?.message || '';
-          const isExpired = msg.toLowerCase().includes('expired');
-          otpErrEl.textContent = isExpired ? (t('auth.otp_expired') || 'Link expired — resend a new one.') : (t('auth.otp_invalid') || 'Invalid link or token. Check the email and paste it again.');
-          otpErrEl.style.display = '';
-          verifyBtn.disabled = false;
-          verifyBtn.textContent = t('auth.verify_code') || 'Verify';
-          return;
-        }
-        // Success — close prompt, session will be handled by onAuthStateChange + init logic
-        // Store email guard hash (no-op if already set)
-        try {
-          const { setEmailGuard } = await import('./auth.js');
-          await setEmailGuard(rawAdapter, email);
-        } catch { /* guard table may not exist yet */ }
-        statusEl.textContent = t('auth.verified') || 'Verified! Signing you in...';
-        statusEl.style.display = '';
-        overlay.classList.remove('visible');
-        // Force reload to pick up session (initAuth runs on next connect)
-        window.location.reload();
-      } catch (e) {
-        console.warn('otp verify failed', e);
-        if (otpErrEl) { otpErrEl.textContent = t('auth.error'); otpErrEl.style.display = ''; }
-        verifyBtn.disabled = false;
-        verifyBtn.textContent = t('auth.verify_code') || 'Verify';
-      }
-    }
-
-    verifyBtn.addEventListener('click', doVerify);
-    otpInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doVerify(); });
-    // Auto-focus verification input for PWA users (only if not blocked by PWA ack)
-    if (!needsPwaAck) {
-      setTimeout(() => { try { otpInput.focus(); } catch {} }, 100);
-    }
-
-    const pwaAckBtn = content.querySelector('#authPwaAckBtn');
-    const pwaHint = content.querySelector('#authPwaHint');
-    if (pwaAckBtn) {
-      pwaAckBtn.addEventListener('click', () => {
-        try { localStorage.setItem(pwaAckKey, '1'); } catch {}
-        if (pwaHint) pwaHint.style.display = 'none';
-        verifyBtn.disabled = false;
-        otpInput.disabled = false;
-        setTimeout(() => { try { otpInput.focus(); } catch {} }, 50);
-      });
-    }
-
-    resendBtn.addEventListener('click', async () => {
-      resendBtn.disabled = true;
-      resendBtn.textContent = t('auth.sending');
-      try {
-        const { sendMagicLink } = await import('./auth.js');
-        const { error } = await sendMagicLink(rawAdapter, email);
-        if (error) {
-          const isRateLimit = error.status === 429 || (error.message || '').toLowerCase().includes('rate');
-          statusEl.textContent = isRateLimit ? t('auth.rate_limit') : t('auth.error');
-          statusEl.style.color = 'var(--danger,#e74c3c)';
-        } else {
-          statusEl.textContent = t('auth.sent');
-          statusEl.style.color = '';
-        }
-        statusEl.style.display = '';
-      } catch { /* ignore */ }
-      resendBtn.disabled = false;
-      resendBtn.textContent = t('auth.resend');
-    });
-
-    closeBtn.addEventListener('click', () => {
-      overlay.classList.remove('visible');
-    });
-  }
-
-  renderForm();
-  overlay.style.removeProperty('display');
-  overlay.classList.add('visible');
-}
-
-/** Global entry point for sending auth link from Settings > Sharing pane. */
-async function sendAuthFromSharing() {
-  const emailEl = document.getElementById('sharingAuthEmail');
-  const errEl = document.getElementById('sharingAuthError');
-  const statusEl = document.getElementById('sharingAuthStatus');
-  const btn = document.getElementById('sharingAuthSendBtn');
-  if (!emailEl || !btn) return;
-  const email = emailEl.value.trim();
-  if (!email || !email.includes('@')) {
-    if (errEl) { errEl.textContent = t('auth.error'); errEl.style.display = ''; }
-    return;
-  }
-  btn.disabled = true;
-  btn.textContent = t('auth.sending');
-  if (errEl) errEl.style.display = 'none';
-  try {
-    const { sendMagicLink } = await import('./auth.js');
-    const { error } = await sendMagicLink(state._rawSupabaseAdapter, email);
-    if (error) {
-      const isRateLimit = error.status === 429 || (error.message || '').toLowerCase().includes('rate');
-      if (errEl) { errEl.textContent = isRateLimit ? t('auth.rate_limit') : t('auth.error'); errEl.style.display = ''; }
-      btn.disabled = false;
-      btn.textContent = t('auth.send_magic_link');
-    } else {
-      if (statusEl) { statusEl.textContent = t('auth.check_inbox_hint', esc(email)); statusEl.style.display = ''; }
-      btn.textContent = t('auth.sent');
-      setTimeout(() => { btn.disabled = false; btn.textContent = t('auth.send_magic_link'); }, 5000);
-    }
-  } catch {
-    if (errEl) { errEl.textContent = t('auth.error'); errEl.style.display = ''; }
-    btn.disabled = false;
-    btn.textContent = t('auth.send_magic_link');
-  }
-}
-window.sendAuthFromSharing = sendAuthFromSharing;
-
 
 
 function getStayConnectedCreds() {
@@ -809,36 +535,17 @@ function getStayConnectedCreds() {
     const raw = localStorage.getItem(STAY_CONNECTED_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    // Self-heal: purge if service_role was ever stored (pre-fix data)
-    if (parsed && parsed.key) {
-      const role = getSupabaseKeyRole(parsed.key);
-      if (role === 'service_role' || parsed.key.startsWith('sb_secret_')) {
-        try { localStorage.removeItem(STAY_CONNECTED_KEY); } catch {}
-        return null;
-      }
-    }
     if (parsed && parsed.mode === 'demo') return parsed;
     if (parsed && parsed.mode === 'googledrive') return parsed;
-    if (parsed && parsed.url && (parsed.key || parsed.mode === 'local')) return parsed;
+    if (parsed && parsed.url && parsed.mode === 'local') return parsed;
     return null;
   } catch { return null; }
 }
 
 function saveStayConnectedCreds(url, key, mode) {
-  const m = mode || 'supabase';
-  // Defense in depth: never persist service_role, never persist key for local/demo/drive
-  if (m === 'local' || m === 'demo' || m === 'googledrive') {
-    key = '';
-  }
-  if (key) {
-    const role = getSupabaseKeyRole(key);
-    if (role === 'service_role' || key.startsWith('sb_secret_')) {
-      // Do not persist — caller should have already blocked, but belt-and-braces
-      return;
-    }
-  }
-  // For supabase, strip whitespace; for local/demo/drive key is already ''
-  localStorage.setItem(STAY_CONNECTED_KEY, JSON.stringify({ url, key: key || '', mode: m }));
+  const m = mode || 'googledrive';
+  // Never persist keys — only URL and mode
+  localStorage.setItem(STAY_CONNECTED_KEY, JSON.stringify({ url, key: '', mode: m }));
 }
 
 function clearStayConnectedCreds() {
@@ -852,87 +559,25 @@ async function disconnect() {
     if (state.sharing) { try { state.sharing.destroy(); } catch {} }
     if (state.driveAdapter.destroy) state.driveAdapter.destroy();
   }
-  // Clean up Supabase sharing
-  if (state.sharing && !state.driveMode) {
-    try { state.sharing.destroy(); } catch {}
-  }
-  state.authUser = null;
   clearStayConnectedCreds();
   location.reload();
 }
 
-// Normalize Supabase dashboard URLs to API base URLs
-function normalizeSupabaseUrl(raw) {
-  const dm = raw.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
-  if (dm) return `https://${dm[1]}.supabase.co`;
-  return raw;
-}
 
-
-function renderSchemaMissingError(container, projectUrl) {
+function renderSchemaMissingError(container) {
   if (!container) return;
   container.textContent = '';
   container.style.lineHeight = '1.4';
   container.style.maxWidth = '360px';
 
   const title = document.createElement('div');
-  title.textContent = t('toast.schema_missing') || 'Tables not found — run sql/supabase_schema.sql in Supabase SQL Editor.';
+  title.textContent = t('toast.schema_missing') || 'Tables not found on the server.';
   title.style.fontWeight = '600';
   title.style.marginBottom = '2px';
   container.appendChild(title);
 
-  const actions = document.createElement('div');
-  actions.style.display = 'flex';
-  actions.style.flexWrap = 'wrap';
-  actions.style.gap = '8px';
-  actions.style.marginTop = '10px';
-
-  const ref = getSupabaseProjectRef(projectUrl);
-  const sqlEditorUrl = ref ? `https://supabase.com/dashboard/project/${ref}/sql/new` : 'https://supabase.com/dashboard/projects';
-
-  // Primary: Copy schema (nice UI) — first left to right
-  const copyBtn = document.createElement('button');
-  copyBtn.type = 'button';
-  const copyLabel = t('toast.copy_schema') || t('setup.copy_btn') || 'Copy schema';
-  copyBtn.innerHTML = `${lucideIcon('copy', 14)} ${copyLabel}`;
-  copyBtn.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:0.85rem;font-weight:600;cursor:pointer;line-height:1;box-shadow:0 2px 8px rgba(0,0,0,0.12);transition:all 0.15s;';
-  copyBtn.addEventListener('click', async () => {
-    try {
-      let sql = window._SUPABASE_SCHEMA_CACHED || '';
-      if (!sql) {
-        const r = await fetch('./sql/supabase_schema.sql', { cache: 'no-store' });
-        if (!r.ok) throw new Error('fetch failed ' + r.status);
-        sql = await r.text();
-        window._SUPABASE_SCHEMA_CACHED = sql;
-      }
-      await navigator.clipboard.writeText(sql);
-      copyBtn.innerHTML = `${lucideIcon('check', 14)} ${t('toast.copied') || t('setup.copy_done') || 'Copied!'}`;
-      copyBtn.style.opacity = '0.9';
-      setTimeout(() => {
-        copyBtn.innerHTML = `${lucideIcon('copy', 14)} ${copyLabel}`;
-        copyBtn.style.opacity = '1';
-      }, 2000);
-    } catch {
-      window.open('https://raw.githubusercontent.com/AntGro/DeLaClaw/dev/sql/supabase_schema.sql', '_blank');
-    }
-  });
-  copyBtn.addEventListener('mouseenter', () => { copyBtn.style.transform = 'translateY(-1px)'; copyBtn.style.boxShadow = '0 4px 14px rgba(0,0,0,0.18)'; });
-  copyBtn.addEventListener('mouseleave', () => { copyBtn.style.transform = 'none'; copyBtn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)'; });
-  actions.appendChild(copyBtn);
-
-  // Secondary: Open SQL Editor
-  const openLink = document.createElement('a');
-  openLink.href = sqlEditorUrl;
-  openLink.target = '_blank';
-  openLink.rel = 'noopener';
-  openLink.innerHTML = `${lucideIcon('external-link', 14)} ${t('toast.open_sql_editor') || 'Open SQL Editor'}`;
-  openLink.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);text-decoration:none;font-size:0.85rem;font-weight:600;line-height:1;transition:all 0.15s;';
-  actions.appendChild(openLink);
-
-  container.appendChild(actions);
-
   const hint = document.createElement('div');
-  hint.textContent = t('toast.schema_missing_hint') || 'Paste in SQL Editor → Run, then retry Connect.';
+  hint.textContent = t('toast.schema_missing_hint') || 'Make sure the DeLaClaw server is running with the schema loaded, then retry Connect.';
   hint.style.fontSize = '0.8em';
   hint.style.opacity = '0.75';
   hint.style.marginTop = '8px';
@@ -940,25 +585,12 @@ function renderSchemaMissingError(container, projectUrl) {
 }
 
 async function doLogin() {
-  const url = normalizeSupabaseUrl(document.getElementById('username').value.trim());
+  const url = document.getElementById('username').value.trim();
   const key = document.getElementById('password').value.trim();
   const stayConnected = document.getElementById('stayConnected').checked;
   const err = document.getElementById('loginError');
   const mode = getSelectedMode();
   if (mode !== 'demo' && mode !== 'googledrive' && (!url || (!key && mode !== 'local'))) { err.textContent = t('toast.enter_name'); return; }
-  // sec: reject service_role / sb_secret_ — anon / sb_publishable_ only
-  if (mode === 'supabase' && key) {
-    const role = getSupabaseKeyRole(key);
-    if (role === 'service_role' || key.startsWith('sb_secret_')) {
-      err.textContent = t('login.err_service_role');
-      return;
-    }
-  }
-  // Detect org URL
-  if (/supabase\.com\/dashboard\/org\//i.test(url)) {
-    err.innerHTML = t('toast.org_url_tip');
-    return;
-  }
   err.textContent = t('toast.connecting');
   try {
     const result = await connect(url, key, mode);
@@ -982,20 +614,7 @@ async function doLogin() {
     }
   } catch (e) {
     if (e.message === 'schema_missing') {
-      renderSchemaMissingError(err, url);
-    } else if (e.message === 'project_paused') {
-      // Safe DOM — no innerHTML with URL interpolation (P0 sec-002)
-      const safeUrl = /^https:\/\/supabase\.com\/dashboard\/project\/[a-z0-9]+$/i.test(e.dashboardUrl) ? e.dashboardUrl : 'https://supabase.com/dashboard/projects';
-      err.textContent = '';
-      err.appendChild(document.createTextNode((t('toast.project_paused') ? t('toast.project_paused') + ' ' : 'Database paused — ')));
-      const a = document.createElement('a');
-      a.href = safeUrl;
-      a.target = '_blank';
-      a.rel = 'noopener';
-      a.style.color = 'var(--accent)';
-      a.style.textDecoration = 'underline';
-      a.textContent = 'Check on Supabase ↗';
-      err.appendChild(a);
+      renderSchemaMissingError(err);
     } else if (e.message === 'google_not_loaded') {
       err.textContent = t('login.drive_gis_blocked') || 'Google sign-in is blocked. Disable your ad blocker or allow third-party scripts.';
     } else if (e.message === 'popup_closed_by_user' || e.message === 'access_denied') {
@@ -1063,7 +682,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const guidePanel = document.getElementById('setupGuide');
   const gateBox = document.querySelector('.gate-box');
   const setupBack = document.getElementById('setupBack');
-  const setupCloudDone = document.getElementById('setupCloudDone');
   const setupLocalDone = document.getElementById('setupLocalDone');
   const setupDriveDone = document.getElementById('setupDriveDone');
 
@@ -1082,17 +700,13 @@ document.addEventListener('DOMContentLoaded', () => {
     history.replaceState(null, '', '#login');
   }
   function showSteps(path) {
-    const cloud = document.getElementById('setupCloudSteps');
     const local = document.getElementById('setupLocalSteps');
     const drive = document.getElementById('setupDriveSteps');
-    const cardCloud = document.getElementById('setupPathCloud');
     const cardLocal = document.getElementById('setupPathLocal');
     const cardDrive = document.getElementById('setupPathDrive');
-    [cloud, local, drive].forEach(el => el && (el.style.display = 'none'));
-    [cardCloud, cardLocal, cardDrive].forEach(el => el?.classList.remove('active'));
-    if (path === 'cloud') {
-      cloud.style.display = ''; cardCloud.classList.add('active');
-    } else if (path === 'drive') {
+    [local, drive].forEach(el => el && (el.style.display = 'none'));
+    [cardLocal, cardDrive].forEach(el => el?.classList.remove('active'));
+    if (path === 'drive') {
       drive.style.display = ''; cardDrive.classList.add('active');
     } else {
       local.style.display = ''; cardLocal.classList.add('active');
@@ -1101,46 +715,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (guideLink) guideLink.addEventListener('click', e => { e.preventDefault(); showGuide(); });
   if (setupBack) setupBack.addEventListener('click', hideGuide);
-  if (setupCloudDone) setupCloudDone.addEventListener('click', hideGuide);
   if (setupLocalDone) setupLocalDone.addEventListener('click', hideGuide);
   if (setupDriveDone) setupDriveDone.addEventListener('click', hideGuide);
-  document.getElementById('setupPathCloud')?.addEventListener('click', () => showSteps('cloud'));
   document.getElementById('setupPathLocal')?.addEventListener('click', () => showSteps('local'));
   document.getElementById('setupPathDrive')?.addEventListener('click', () => showSteps('drive'));
   document.getElementById('setupCompareLink')?.addEventListener('click', (e) => { e.preventDefault(); showCompareModal(); });
-
-  // ── Schema copy + toggle ──
-  let SUPABASE_SCHEMA = '';
-  fetch('./sql/supabase_schema.sql').then(r => r.text()).then(sql => {
-    SUPABASE_SCHEMA = sql;
-    const schemaSql = document.getElementById('setupSchemaSql');
-    if (schemaSql) schemaSql.textContent = sql;
-  }).catch(() => {});
-
-  const schemaSql = document.getElementById('setupSchemaSql');
-
-  const schemaToggle = document.getElementById('setupSchemaToggle');
-  const schemaBox = document.getElementById('setupSchemaBox');
-  if (schemaToggle && schemaBox) {
-    schemaToggle.addEventListener('click', () => {
-      const open = schemaBox.classList.toggle('visible');
-      schemaToggle.classList.toggle('open', open);
-    });
-  }
-
-  const copyBtn = document.getElementById('setupCopySchema');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(SUPABASE_SCHEMA);
-        copyBtn.classList.add('copied');
-        const label = document.getElementById('setupCopyLabel');
-        const prev = label ? label.textContent : '';
-        if (label) label.textContent = t('setup.copy_done') || 'Copied!';
-        setTimeout(() => { copyBtn.classList.remove('copied'); if (label) label.textContent = prev; }, 2000);
-      } catch { /* clipboard denied — the pre is still selectable */ }
-    });
-  }
 
   // ── Setup wizard: one step at a time ──
   document.querySelectorAll('.setup-steps').forEach(container => {
@@ -1205,292 +784,15 @@ document.addEventListener('DOMContentLoaded', () => {
     goTo(1);
   });
 
-  // ── Project URL validation + link rewriting ──
-  const _projectUrlInput = document.getElementById('setupProjectUrl');
-  const _projectUrlError = document.getElementById('setupProjectUrlError');
-  const _projectUrlPattern = /^https?:\/\/(?:supabase\.com\/dashboard\/project\/([a-z0-9]+)|([a-z0-9]+)\.supabase\.co)/i;
-  let _projectRef = '';
-
-  function _updateProjectLinks(ref) {
-    _projectRef = ref;
-    const s2 = document.getElementById('setupCloud2Desc');
-    if (s2) { const a = s2.querySelector('a[href*="supabase.com/dashboard/project/"]'); if (a) a.href = 'https://supabase.com/dashboard/project/' + ref + '/sql'; }
-    const s3 = document.getElementById('setupCloud3Desc');
-    if (s3) { const a = s3.querySelector('a[href*="supabase.com/dashboard/project/"]'); if (a) a.href = 'https://supabase.com/dashboard/project/' + ref + '/settings/api-keys'; }
-    const skl = document.getElementById('setupKeyLabelLink');
-    if (skl) {
-      if (ref && ref !== '_') {
-        skl.href = 'https://supabase.com/dashboard/project/' + ref + '/settings/api-keys';
-      } else {
-        skl.removeAttribute('href');
-      }
-    }
-  }
-
-  // Block clicks on step 2/3 dashboard links when no project URL provided
-  function _guardProjectLink(e) {
-    if (!_projectRef || _projectRef === '_') {
-      e.preventDefault();
-      e.stopPropagation();
-      // Show inline warning
-      const step = e.target.closest('.setup-step');
-      if (step) {
-        let warn = step.querySelector('.setup-url-required-msg');
-        if (!warn) {
-          warn = document.createElement('p');
-          warn.className = 'setup-url-required-msg';
-          step.querySelector('.setup-step-body')?.appendChild(warn);
-        }
-        warn.textContent = t('setup.cloud_url_required') || 'Please provide your project URL in Step 1 first.';
-        warn.style.display = '';
-        clearTimeout(warn._hideTimer);
-        warn._hideTimer = setTimeout(() => { warn.style.display = 'none'; }, 4000);
-      }
-    }
-  }
-  document.getElementById('setupCloud2Desc')?.addEventListener('click', e => { if (e.target.closest('a[href*="supabase.com/dashboard/project/"]')) _guardProjectLink(e); });
-  document.getElementById('setupCloud3Desc')?.addEventListener('click', e => { if (e.target.closest('a[href*="supabase.com/dashboard/project/"]')) _guardProjectLink(e); });
-
-  if (_projectUrlInput) {
-    _projectUrlInput.addEventListener('input', () => {
-      const val = _projectUrlInput.value.trim();
-      if (!val) {
-        _projectUrlInput.classList.remove('valid', 'invalid');
-        if (_projectUrlError) { _projectUrlError.classList.remove('visible'); _projectUrlError.textContent = ''; }
-        _updateProjectLinks('_');
-        return;
-      }
-      // Detect org URL and show tip
-      if (/supabase\.com\/dashboard\/org\//i.test(val)) {
-        _projectUrlInput.classList.add('invalid');
-        _projectUrlInput.classList.remove('valid');
-        if (_projectUrlError) {
-          _projectUrlError.innerHTML = t('toast.org_url_tip');
-          _projectUrlError.classList.add('visible');
-        }
-        _updateProjectLinks('_');
-        return;
-      }
-      const m = val.match(_projectUrlPattern);
-      if (m) {
-        _projectUrlInput.classList.add('valid');
-        _projectUrlInput.classList.remove('invalid');
-        if (_projectUrlError) { _projectUrlError.classList.remove('visible'); _projectUrlError.textContent = ''; }
-        _updateProjectLinks(m[1] || m[2]);
-      } else {
-        _projectUrlInput.classList.add('invalid');
-        _projectUrlInput.classList.remove('valid');
-        if (_projectUrlError) {
-          _projectUrlError.textContent = t('toast.invalid_project_url');
-          _projectUrlError.classList.add('visible');
-        }
-        _updateProjectLinks('_');
-      }
-    });
-  }
-
-  // ── Setup login form (step 4) ──
-  const _setupLoginForm = document.getElementById('setupLoginForm');
-  const _setupLoginUrl = document.getElementById('setupLoginUrl');
-  const _setupLoginKey = document.getElementById('setupLoginKey');
-  const _setupLoginError = document.getElementById('setupLoginError');
-
-  // Pre-fill URL from step 1 project URL input
-  if (_projectUrlInput && _setupLoginUrl) {
-    _projectUrlInput.addEventListener('input', () => {
-      const val = _projectUrlInput.value.trim();
-      const m = val.match(_projectUrlPattern);
-      if (m) {
-        _setupLoginUrl.value = 'https://' + (m[1] || m[2]) + '.supabase.co';
-      }
-    });
-  }
-
-  if (_setupLoginForm) {
-    _setupLoginForm.addEventListener('submit', async e => {
-      e.preventDefault();
-      const url = normalizeSupabaseUrl(_setupLoginUrl?.value.trim() || '');
-      const key = _setupLoginKey?.value.trim();
-      if (!url || !key) {
-        if (_setupLoginError) _setupLoginError.textContent = t('toast.enter_name') || 'Please fill in both fields.';
-        return;
-      }
-      // sec: anon only
-      if (key && (getSupabaseKeyRole(key)==='service_role' || key.startsWith('sb_secret_'))) {
-        if (_setupLoginError) _setupLoginError.textContent = t('login.err_service_role');
-        return;
-      }
-      if (_setupLoginError) _setupLoginError.textContent = t('toast.connecting') || 'Connecting…';
-      try {
-        const result = await connect(url, key, 'supabase');
-        if (result === false) { if (_setupLoginError) _setupLoginError.textContent = ''; return; }
-        if (_setupLoginError) _setupLoginError.textContent = '';
-        const setupStay = document.getElementById('setupStayConnected');
-        if (setupStay?.checked) saveStayConnectedCreds(url, key, 'supabase');
-        _setupLoginForm.style.display = 'none';
-        document.body.style.overflow = '';
-        if (window.PasswordCredential) {
-          try { await navigator.credentials.store(new PasswordCredential({ id: url, password: key })); } catch {}
-        }
-      } catch (e) {
-        if (_setupLoginError) {
-          if (e.message === 'schema_missing') {
-            renderSchemaMissingError(_setupLoginError, url);
-          } else if (e.message === 'project_paused') {
-            // Safe DOM — no innerHTML with URL interpolation (P0 sec-002)
-            const safeUrl = /^https:\/\/supabase\.com\/dashboard\/project\/[a-z0-9]+$/i.test(e.dashboardUrl) ? e.dashboardUrl : 'https://supabase.com/dashboard/projects';
-            _setupLoginError.textContent = '';
-            _setupLoginError.appendChild(document.createTextNode((t('toast.project_paused') ? t('toast.project_paused') + ' ' : 'Database paused — ')));
-            const a = document.createElement('a');
-            a.href = safeUrl;
-            a.target = '_blank';
-            a.rel = 'noopener';
-            a.style.color = 'var(--accent)';
-            a.style.textDecoration = 'underline';
-            a.textContent = 'Check on Supabase ↗';
-            _setupLoginError.appendChild(a);
-          } else {
-            _setupLoginError.textContent = t('toast.connection_failed') || 'Connection failed.';
-          }
-        }
-      }
-    });
-  }
-
   // Auto-show guide if URL hash is #setup
   if (window.location.hash === '#setup') showGuide();
 });
 
 // ===================================================================
-// SUPABASE DEPRECATION — MIGRATION MODAL
-// ===================================================================
-let _pendingMigrationBackup = null;
-
-function showSupabaseMigrationModal(backupPromise) {
-  console.log('[migration] showSupabaseMigrationModal called');
-  const overlay = document.getElementById('sbMigrationOverlay');
-  console.log('[migration] overlay element:', overlay);
-  if (!overlay) return;
-
-  // Set Supabase logo as icon
-  const iconEl = document.getElementById('sbMigrationIcon');
-  if (iconEl) iconEl.innerHTML = LOGOS.supabase(36);
-
-  const statusEl = document.getElementById('sbMigrationStatus');
-  const downloadBtn = document.getElementById('sbMigrationDownload');
-  const driveBtn = document.getElementById('sbMigrationDrive');
-  const backBtn = document.getElementById('sbMigrationBack');
-  const warnEl = document.getElementById('sbMigrationSharingWarn');
-
-  // Apply i18n first (textContent replaces everything)
-  overlay.querySelectorAll('[data-i18n]').forEach(el => {
-    const key = el.getAttribute('data-i18n');
-    const val = t(key);
-    if (val && val !== key) el.textContent = val;
-  });
-
-  // Inject icons into buttons after i18n
-  if (downloadBtn && !downloadBtn.querySelector('svg')) {
-    downloadBtn.insertAdjacentHTML('afterbegin', lucideIcon('download', 16));
-  }
-  if (driveBtn && !driveBtn.querySelector('img')) {
-    driveBtn.insertAdjacentHTML('afterbegin', LOGOS.googledrive(16));
-  }
-
-  // Show modal immediately in loading state
-  downloadBtn.disabled = true;
-  driveBtn.disabled = true;
-  if (statusEl) statusEl.textContent = t('migration.preparing');
-  overlay.classList.add('visible');
-  console.log('[migration] overlay.visible added, computed display:', getComputedStyle(overlay).display);
-
-  // Fetch backup data in background, then enable actions
-  let backup = null;
-  backupPromise.then(b => {
-    backup = b;
-    downloadBtn.disabled = false;
-    driveBtn.disabled = false;
-    if (statusEl) statusEl.textContent = '';
-    // Show sharing warning if backup has sharing data
-    const hasSharingData = backup.sharing_groups && backup.sharing_groups.length > 0;
-    if (warnEl) warnEl.style.display = hasSharingData ? '' : 'none';
-  }).catch(e => {
-    console.warn('[DeLaClaw] backup generation failed:', e);
-    if (statusEl) statusEl.textContent = t('migration.error');
-  });
-
-  // Download backup
-  downloadBtn.onclick = () => {
-    if (!backup) return;
-    try {
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const date = new Date().toISOString().slice(0, 10);
-      a.href = blobUrl; a.download = `delaclaw-backup-${date}.json`;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(blobUrl);
-      if (statusEl) statusEl.textContent = t('menu.settings_backup_done') || 'Backup downloaded.';
-    } catch (e) {
-      if (statusEl) statusEl.textContent = t('menu.settings_backup_error') || 'Export failed.';
-    }
-  };
-
-  // Migrate to Google Drive
-  driveBtn.onclick = async () => {
-    if (!backup) return;
-    driveBtn.disabled = true;
-    downloadBtn.disabled = true;
-    if (statusEl) statusEl.textContent = t('migration.migrating');
-
-    try {
-      // Store backup for the Drive connect path to pick up
-      _pendingMigrationBackup = backup;
-
-      // Close the modal
-      overlay.classList.remove('visible');
-
-      // Clear saved Supabase credentials so auto-connect doesn't loop back
-      try { localStorage.removeItem(STAY_CONNECTED_KEY); } catch {}
-
-      // Trigger Drive connect — the Google OAuth popup opens on this user click
-      await connect(null, null, 'googledrive');
-
-      // If we get here, Drive connected successfully and the dashboard loaded.
-      // Save Drive as the "Stay connected" mode
-      saveStayConnectedCreds('', '', 'googledrive');
-
-    } catch (e) {
-      // Drive connect failed — show modal again with error
-      _pendingMigrationBackup = null;
-      overlay.classList.add('visible');
-      driveBtn.disabled = false;
-      downloadBtn.disabled = false;
-      if (statusEl) statusEl.textContent = t('migration.error');
-      console.warn('[DeLaClaw] migration to Drive failed:', e.message);
-    }
-  };
-
-  // Back to login
-  backBtn.onclick = (e) => {
-    e.preventDefault();
-    overlay.classList.remove('visible');
-    // Clear saved Supabase credentials
-    try { localStorage.removeItem(STAY_CONNECTED_KEY); } catch {}
-    // Show login form
-    const form = document.getElementById('loginForm');
-    if (form) form.style.display = 'flex';
-    // Switch mode to googledrive as default
-    switchBackendMode('googledrive');
-  };
-}
-
-// ===================================================================
 // UNLOCK & INIT APP
 // ===================================================================
-async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { silentAuth = false } = {}) {
-  state.supabaseUrl = url;
-  state.supabaseKey = key;
+async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, { silentAuth = false } = {}) {
+  // url/key kept for local REST backend configuration
 
   let initialSharingLoad = Promise.resolve();
   const loadInitialSharing = (label = 'sharing') => {
@@ -1566,40 +868,6 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     state.driveAdapter = adapter;
     state.driveMode = true;
 
-    // ── Supabase → Drive migration: import pending backup ──
-    if (_pendingMigrationBackup) {
-      const backup = _pendingMigrationBackup;
-      _pendingMigrationBackup = null;
-
-      // Filter to Drive-supported tables only
-      const driveTables = new Set([
-        'projects', 'tasks', 'todos', 'habits', 'habit_completions',
-        'flashcards', 'flashcard_notes', 'texts', 'text_line_progress',
-        'birthdays', 'vestiaire', 'lists', 'list_items',
-        'settings', 'prompts', 'nvidia_usage', 'daily_visits',
-        'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
-      ]);
-      const reseedData = {};
-      const sharingFields = ['shared_id', 'shared_group_id', 'owner_id'];
-      let tableCount = 0;
-      for (const table of (backup._meta?.tables || [])) {
-        if (!driveTables.has(table) || !backup[table]) continue;
-        // Strip sharing references and owner_id from items
-        reseedData[table] = backup[table].map(row => {
-          const clean = { ...row };
-          for (const f of sharingFields) delete clean[f];
-          return clean;
-        });
-        tableCount++;
-      }
-      adapter.reseed(reseedData);
-      if (adapter.runPendingMigrations) {
-        await adapter.runPendingMigrations();
-      }
-      // Set category colors from imported data
-      setDemoCategoriesFromData(reseedData);
-      console.log(`[DeLaClaw] migrated ${tableCount} tables from Supabase to Drive`);
-    }
   } else if (mode === 'local') {
     adapter = createRestAdapter(url);
     // Test connection with raw adapter BEFORE wrapping with offline cache
@@ -1619,59 +887,8 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     }
     const scopeRef = url.replace(/^https?:\/\//, '');
     adapter = wrapWithOfflineCache(adapter, `local:${scopeRef}`);
-  } else {
-    adapter = createSupabaseAdapter(url, key);
-    state._rawSupabaseAdapter = adapter; // Keep unwrapped for auth calls
-    // Test connection with raw adapter BEFORE wrapping with offline cache
-    const { error } = await adapter.from('projects').select('id').limit(1);
-    if (error) {
-      console.warn('[DeLaClaw] supabase projects check failed:', error);
-      const msg = String(error.message || '').toLowerCase();
-      const details = String(error.details || '').toLowerCase();
-      const combined = msg + ' ' + details;
-      const status = error.status || error.statusCode;
-      const code = String(error.code || '').toUpperCase();
-      const isSchemaMissing = status === 404 || code === '42P01' || code.startsWith('PGRST') ||
-        combined.includes('does not exist') || combined.includes('schema cache') || combined.includes('could not find') || combined.includes('not found');
-      if (isSchemaMissing) {
-        const e = new Error('schema_missing');
-        e.orig = error;
-        throw e;
-      }
-      const isNetFail = msg.includes('fetch') || msg.includes('network') || msg.includes('cors') || msg.includes('err_failed');
-      if (isNetFail && navigator.onLine) {
-        const ref = url.replace('https://', '').replace('.supabase.co', '');
-        const e = new Error('project_paused');
-        e.dashboardUrl = `https://supabase.com/dashboard/project/${ref}`;
-        throw e;
-      }
-      throw new Error('Connection failed');
-    }
-    const scopeRef = url.replace('https://', '').replace('.supabase.co', '');
-    adapter = wrapWithOfflineCache(adapter, `supabase:${scopeRef}`);
   }
   db.setAdapter(adapter);
-
-  // ── Supabase deprecated: show migration modal instead of loading dashboard ──
-  if (mode === 'supabase') {
-    console.log('[migration] reached deprecation block');
-    // Try transparent auth (existing session / magic link callback)
-    try {
-      console.log('[migration] starting initAuth');
-      const { initAuth, claimOwnership } = await import('./auth.js');
-      const authResult = await initAuth(state._rawSupabaseAdapter);
-      console.log('[migration] initAuth done, user:', authResult.user?.id);
-      state.authUser = authResult.user;
-      if (authResult.user) {
-        await claimOwnership(adapter, authResult.user.id);
-      }
-    } catch (e) { console.warn('[migration] auth init failed:', e); }
-
-    // Show modal immediately; backup loads in background
-    console.log('[migration] calling showSupabaseMigrationModal');
-    showSupabaseMigrationModal(generateBackupJSON());
-    return false;
-  }
 
   // Flush pending Drive saves and stop polling on page close
   if (mode === 'googledrive' && adapter.forceSave) {
@@ -1701,23 +918,13 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
   // Re-render logos now that the app is visible and layout is computed
   initLogos();
 
-  // Set Supabase dashboard link (hide — replaced by footer backend badge)
-  const dashLink = document.getElementById('supabaseDashLink');
-  dashLink.style.display = 'none';
-
   // Footer backend badge — clickable for backends with a meaningful external URL
   const footerBackend = document.getElementById('footerBackend');
   if (footerBackend && LOGOS[mode]) {
     const logo = LOGOS[mode](14);
     const label = LABELS[mode] || mode;
     let href = null;
-    if (mode === 'supabase') {
-      // Validate projectRef: alphanumeric only (from _projectRef regex)
-      const projectRef = url.replace('https://', '').replace('.supabase.co', '');
-      if (/^[a-z0-9]+$/i.test(projectRef)) {
-        href = `https://supabase.com/dashboard/project/${projectRef}`;
-      }
-    } else if (mode === 'googledrive') {
+    if (mode === 'googledrive') {
       const fid = state.driveAdapter?.driveFolderId;
       // Drive folder ID: allowlist alphanumeric + -_ (Google ID format)
       if (fid && /^[\w-]+$/.test(fid)) {
@@ -1728,7 +935,7 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
     }
     // Safe DOM: href set via property, logo is trusted SVG from LOGOS
     footerBackend.textContent = '';
-    if (href && /^https:\/\/(supabase\.com|drive\.google\.com)\//.test(href)) {
+    if (href && /^https:\/\/drive\.google\.com\//.test(href)) {
       const a = document.createElement('a');
       a.href = href;
       a.target = '_blank';
@@ -1928,26 +1135,6 @@ async function connect(url, key, mode = 'supabase', skipDemoChooser = false, { s
       updateSharingNavVisibility();
 
     } catch (e) { console.warn('sharing init:', e); }
-  }
-
-  // Supabase sharing init (requires auth + sharing tables ≥ 1.295)
-  const dbVerForSharing = state.dbSchemaVersion || '0';
-  if (mode === 'supabase' && state.authUser && compareVersions(dbVerForSharing, '1.295') >= 0) {
-    try {
-      const { createSharing } = await import('./sharing.js');
-      state.sharing = await createSharing('supabase', {
-        adapter,
-        getAuthUser: () => state.authUser,
-        supabaseUrl: url,
-        anonKey: key,
-      });
-      loadInitialSharing('supabase sharing');
-      state.sharing.startPolling();
-      state.sharing.onUpdate(() => {
-        document.dispatchEvent(new CustomEvent('sharing-changed'));
-      });
-      updateSharingNavVisibility();
-    } catch (e) { console.warn('supabase sharing init:', e); state._sharingInitError = e; }
   }
 
 
@@ -2568,53 +1755,6 @@ function updateStaticLabels() {
   if (setupTitle) setupTitle.textContent = t('setup.title');
   const setupSubtitle = document.getElementById('setupSubtitle');
   if (setupSubtitle) setupSubtitle.textContent = t('setup.subtitle');
-  const setupCloudName = document.getElementById('setupCloudName');
-  if (setupCloudName) setupCloudName.textContent = t('setup.cloud_name');
-  const setupCloudDesc = document.getElementById('setupCloudDesc');
-  if (setupCloudDesc) setupCloudDesc.textContent = t('setup.cloud_desc');
-  // setupCloudBadge removed — no longer recommending a single backend
-  const setupLocalName = document.getElementById('setupLocalName');
-  if (setupLocalName) setupLocalName.textContent = t('setup.local_name');
-  const setupLocalDesc = document.getElementById('setupLocalDesc');
-  if (setupLocalDesc) setupLocalDesc.textContent = t('setup.local_desc');
-  const setupLocalWarn = document.getElementById('setupLocalWarn');
-  if (setupLocalWarn) setupLocalWarn.textContent = t('setup.local_warn');
-  const setupCloud1T = document.getElementById('setupCloud1Title');
-  if (setupCloud1T) setupCloud1T.textContent = t('setup.cloud_1_title');
-  const setupCloud1D = document.getElementById('setupCloud1Desc');
-  if (setupCloud1D) setupCloud1D.innerHTML = t('setup.cloud_1_desc');
-  const _urlLabel = document.getElementById('setupProjectUrlLabel');
-  if (_urlLabel) _urlLabel.textContent = t('setup.cloud_1_url_label');
-  const _urlHint = document.getElementById('setupProjectUrlHint');
-  if (_urlHint) _urlHint.textContent = t('setup.cloud_1_url_hint');
-  const _urlErr = document.getElementById('setupProjectUrlError');
-  if (_urlErr) _urlErr.textContent = t('setup.cloud_1_url_error');
-  const _urlInp = document.getElementById('setupProjectUrl');
-  if (_urlInp) _urlInp.placeholder = t('setup.cloud_1_url_placeholder');
-  const setupCloud2T = document.getElementById('setupCloud2Title');
-  if (setupCloud2T) setupCloud2T.textContent = t('setup.cloud_2_title');
-  const setupCloud2D = document.getElementById('setupCloud2Desc');
-  if (setupCloud2D) setupCloud2D.innerHTML = t('setup.cloud_2_desc');
-  const setupCloud3T = document.getElementById('setupCloud3Title');
-  if (setupCloud3T) setupCloud3T.textContent = t('setup.cloud_3_title');
-  const setupCloud3D = document.getElementById('setupCloud3Desc');
-  if (setupCloud3D) setupCloud3D.innerHTML = t('setup.cloud_3_desc');
-  // Re-apply project URL links after translation resets innerHTML
-  const _pUrlInp = document.getElementById('setupProjectUrl');
-  if (_pUrlInp && _pUrlInp.value.trim()) {
-    const _m = _pUrlInp.value.trim().match(/^https?:\/\/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
-    const _ref = _m ? _m[1] : '_';
-    if (setupCloud2D) { const a = setupCloud2D.querySelector('a[href*="supabase.com/dashboard/project/"]'); if (a) a.href = 'https://supabase.com/dashboard/project/' + _ref + '/sql'; }
-    if (setupCloud3D) { const a = setupCloud3D.querySelector('a[href*="supabase.com/dashboard/project/"]'); if (a) a.href = 'https://supabase.com/dashboard/project/' + _ref + '/settings/api-keys'; }
-  }
-  const _sUrlLabel = document.getElementById('setupLoginUrlLabel');
-  if (_sUrlLabel) _sUrlLabel.textContent = t('setup.cloud_3_url_label') || 'Project URL';
-  const _sKeyLabel = document.getElementById('setupLoginKeyLabel');
-  if (_sKeyLabel) _sKeyLabel.textContent = t('setup.cloud_3_key_label') || 'API Key (anon)';
-  const _sBtn = document.getElementById('setupLoginBtn');
-  if (_sBtn) _sBtn.textContent = t('setup.cloud_3_btn') || 'Connect';
-  const _sStayLabel = document.getElementById('setupStayConnectedLabel');
-  if (_sStayLabel) _sStayLabel.textContent = t('login.stay_connected') || 'Stay connected';
   const schemaToggleLabel = document.getElementById('setupSchemaToggleLabel');
   if (schemaToggleLabel) schemaToggleLabel.textContent = t('setup.schema_toggle');
   const copyLabel = document.getElementById('setupCopyLabel');
@@ -2645,9 +1785,6 @@ function updateStaticLabels() {
   const setupDrive2D = document.getElementById('setupDrive2Desc');
   if (setupDrive2D) setupDrive2D.innerHTML = t('setup.drive_2_desc');
   document.querySelectorAll('.setup-done-btn:not(#setupLoginBtn)').forEach(btn => btn.textContent = t('setup.done_btn'));
-  // Footer
-  const dashLink = document.getElementById('supabaseDashLink');
-  if (dashLink) dashLink.textContent = t('login.supabase_dashboard') + ' ↗';
   // Header menu labels
   const menuLangLabel = document.getElementById('menuLangLabel');
   if (menuLangLabel) menuLangLabel.textContent = t('menu.language');
@@ -2662,12 +1799,8 @@ function updateStaticLabels() {
   if (settingsTitle) settingsTitle.textContent = t('menu.settings_title');
   const settingsNavGeneral = document.getElementById('settingsNavGeneral');
   if (settingsNavGeneral) settingsNavGeneral.textContent = t('menu.settings_general');
-  const settingsNavAi = document.getElementById('settingsNavAi');
-  if (settingsNavAi) settingsNavAi.textContent = t('menu.settings_ai');
   const settingsPaneGeneralTitle = document.getElementById('settingsPaneGeneralTitle');
   if (settingsPaneGeneralTitle) settingsPaneGeneralTitle.textContent = t('menu.settings_general');
-  const settingsPaneAiTitle = document.getElementById('settingsPaneAiTitle');
-  if (settingsPaneAiTitle) settingsPaneAiTitle.textContent = t('menu.settings_ai');
   const settingsNavCalendar = document.getElementById('settingsNavCalendar');
   if (settingsNavCalendar) settingsNavCalendar.textContent = t('cal_sync.nav');
   const settingsPaneCalendarTitle = document.getElementById('settingsPaneCalendarTitle');
@@ -2699,7 +1832,6 @@ function updateStaticLabels() {
   const settingsPaneStatsTitle = document.getElementById('settingsPaneStatsTitle');
   if (settingsPaneStatsTitle) settingsPaneStatsTitle.textContent = t('menu.settings_stats');
   applySharingI18n();
-  applyAgentsI18n();
   // Account pane i18n
   const settingsNavAccountLabel = document.getElementById('settingsNavAccountLabel');
   if (settingsNavAccountLabel) settingsNavAccountLabel.textContent = t('account.nav');
@@ -2713,20 +1845,6 @@ function updateStaticLabels() {
   if (deleteAccountBtnText) deleteAccountBtnText.textContent = t('account.delete_btn');
   const settingsDisplayLabel = document.getElementById('settingsDisplayLabel');
   if (settingsDisplayLabel) settingsDisplayLabel.textContent = t('menu.settings_display');
-  const settingsNvidiaKeyLabel = document.getElementById('settingsNvidiaKeyLabel');
-  if (settingsNvidiaKeyLabel) settingsNvidiaKeyLabel.textContent = t('menu.settings_nvidia_key');
-  const settingsNvidiaKeyHint = document.getElementById('settingsNvidiaKeyHint');
-  if (settingsNvidiaKeyHint) settingsNvidiaKeyHint.textContent = t('menu.settings_nvidia_key_hint');
-  const settingsNvidiaModelLabel = document.getElementById('settingsNvidiaModelLabel');
-  if (settingsNvidiaModelLabel) settingsNvidiaModelLabel.textContent = t('menu.settings_model');
-  const settingsTestLabel = document.getElementById('settingsTestLabel');
-  if (settingsTestLabel) settingsTestLabel.textContent = t('menu.settings_test');
-  const settingsTestBtnLabel = document.getElementById('settingsTestBtnLabel');
-  if (settingsTestBtnLabel) settingsTestBtnLabel.textContent = t('menu.settings_test_btn');
-  const settingsUsageLabel = document.getElementById('settingsUsageLabel');
-  if (settingsUsageLabel) settingsUsageLabel.textContent = t('menu.settings_usage_label');
-  const nvidiaUsageToggleLabel = document.getElementById('nvidiaUsageToggleLabel');
-  if (nvidiaUsageToggleLabel) nvidiaUsageToggleLabel.textContent = t('menu.settings_usage_by_model');
   // Data pane
   const settingsNavData = document.getElementById('settingsNavData');
   if (settingsNavData) settingsNavData.textContent = t('menu.settings_data');
@@ -3015,15 +2133,6 @@ function openSettings(pane) {
     _tabConfigState[tab.key] = vis[tab.key] !== false;
   });
   renderTabConfigList();
-  // Populate NVIDIA key field
-  const inp = document.getElementById('settingsNvidiaKey');
-  if (inp) {
-    inp.value = state.nvidiaApiKey || '';
-    inp.type = 'password';
-  }
-  // Reset visibility toggle icon
-  const toggleBtn = document.getElementById('settingsToggleVis');
-  if (toggleBtn) toggleBtn.innerHTML = `<span data-icon="eye" data-size="16"></span>`;
   // Reset to first pane (or target pane if specified)
   switchSettingsPane(pane && SETTINGS_PANES.includes(pane) ? pane : 'general');
   // Init theme toggle state
@@ -3059,10 +2168,8 @@ function switchSettingsPane(paneKey) {
   document.querySelectorAll('.settings-pane').forEach(pane => {
     pane.classList.toggle('active', pane.id === `settingsPane-${paneKey}`);
   });
-  if (paneKey === 'ai') { populateNvidiaModels(); loadNvidiaUsage(); }
   if (paneKey === 'stats') { loadUsageStats(); }
   if (paneKey === 'sharing') { renderSharingPane(); }
-  if (paneKey === 'agents') { renderAgentsPane(); }
   // Sync URL hash
   const settingsHash = paneKey === 'general' ? '#settings' : '#settings/' + paneKey;
   if (location.hash !== settingsHash) history.replaceState(null, '', settingsHash);
@@ -3190,8 +2297,6 @@ async function loadSettings() {
     if (error) { console.warn('Settings table not available:', error.message); return; }
     if (data) {
       for (const row of data) {
-        if (row.key === 'nvidia_api_key') state.nvidiaApiKey = row.value || null;
-        if (row.key === 'nvidia_model') state.nvidiaModel = row.value || 'meta/llama-3.1-8b-instruct';
         if (row.key === 'schema_version') state.dbSchemaVersion = row.value || '0.00';
         if (row.key === 'tab_visibility') { try { state.tabVisibility = JSON.parse(row.value); } catch { /* keep null */ } }
         if (row.key === 'tab_order') { try { state.tabOrder = JSON.parse(row.value); } catch { /* keep null */ } }
@@ -3367,7 +2472,6 @@ function showSignupOverlay() {
   picker.className = 'backend-picker';
   const modes = [
     { mode: 'googledrive', label: t('login.mode_drive'), title: 'Google Drive' },
-    { mode: 'supabase', label: t('login.mode_supabase'), title: 'Supabase' },
     { mode: 'local', label: t('login.mode_local'), title: 'Local' },
   ];
   let activeMode = 'googledrive';
@@ -3385,12 +2489,11 @@ function showSignupOverlay() {
   urlLabelLink.target = '_blank';
   urlLabelLink.rel = 'noopener';
   urlLabelLink.textContent = t('login.url_label');
-  urlLabelLink.href = 'https://supabase.com/dashboard/projects';
   urlLabelLink.dataset.tooltip = t('toast.url_tooltip');
   urlLabel.appendChild(urlLabelLink);
   const urlInput = document.createElement('input');
   urlInput.type = 'text';
-  urlInput.placeholder = 'https://xyz.supabase.co';
+  urlInput.placeholder = 'http://localhost:3737';
 
   const keyDiv = document.createElement('div');
   const keyLabel = document.createElement('label');
@@ -3405,18 +2508,6 @@ function showSignupOverlay() {
   keyInput.placeholder = 'eyJhbG...';
   keyDiv.appendChild(keyLabel);
   keyDiv.appendChild(keyInput);
-
-  // Dynamic API key link — same behaviour as the gate login form
-  const updateKeyLink = () => {
-    const v = urlInput.value.trim();
-    const m = v.match(/^https?:\/\/([a-z0-9]+)\.supabase\.co/i) || v.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
-    if (m) {
-      keyLabelLink.href = `https://supabase.com/dashboard/project/${m[1]}/settings/api-keys`;
-    } else {
-      keyLabelLink.removeAttribute('href');
-    }
-  };
-  urlInput.addEventListener('input', updateKeyLink);
 
   fieldsDiv.appendChild(hintP);
   fieldsDiv.appendChild(urlLabel);
@@ -3435,19 +2526,13 @@ function showSignupOverlay() {
       submitBtn.textContent = t('login.btn_googledrive');
     } else {
       fieldsDiv.style.display = '';
-      hintP.textContent = activeMode === 'supabase' ? t('login.hint_supabase') : t('login.hint_local');
-      keyDiv.style.display = activeMode === 'local' ? 'none' : '';
+      hintP.textContent = t('login.hint_local');
+      keyDiv.style.display = 'none';
       submitBtn.textContent = t('login.connect');
-      // Match the gate's label behaviour per mode
-      if (activeMode === 'local') {
-        urlLabelLink.textContent = t('login.url_label_local');
-        urlLabelLink.removeAttribute('href');
-        urlInput.placeholder = 'http://localhost:3737';
-      } else {
-        urlLabelLink.textContent = t('login.url_label');
-        urlLabelLink.href = 'https://supabase.com/dashboard/projects';
-        urlInput.placeholder = 'https://xyz.supabase.co';
-      }
+      // Match the gate's label behaviour for local mode
+      urlLabelLink.textContent = t('login.url_label_local');
+      urlLabelLink.removeAttribute('href');
+      urlInput.placeholder = 'http://localhost:3737';
     }
   }
 
@@ -3482,15 +2567,10 @@ function showSignupOverlay() {
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     clearStayConnectedCreds();
-    // For Supabase/Local, pre-fill creds so the gate auto-connects on reload
-    if (activeMode !== 'googledrive') {
+    // For Local, pre-fill creds so the gate auto-connects on reload
+    if (activeMode === 'local') {
       const url = urlInput.value.trim();
       const key = keyInput.value.trim();
-      // sec: reject service_role even here
-      if (activeMode === 'supabase' && key && (getSupabaseKeyRole(key)==='service_role' || key.startsWith('sb_secret_'))) {
-        showToast(t('login.err_service_role'), 'error');
-        return;
-      }
       if (url) saveStayConnectedCreds(url, key, activeMode);
     }
     // Store chosen mode so the gate can pre-select it
@@ -3544,284 +2624,10 @@ function dismissSchemaBanner() {
   document.body.style.removeProperty('--schema-banner-h');
 }
 
-async function saveNvidiaKey() {
-  const inp = document.getElementById('settingsNvidiaKey');
-  if (!inp) return;
-  const val = inp.value.trim();
-  try {
-    if (val) {
-      // Upsert: try update first, then insert if no rows affected
-      const { data, error: upErr } = await state.db.from('settings')
-        .update({ value: val, updated_at: new Date().toISOString() })
-        .eq('key', 'nvidia_api_key')
-        .select();
-      if (upErr) throw upErr;
-      if (!data || data.length === 0) {
-        const { error: insErr } = await state.db.from('settings')
-          .insert({ key: 'nvidia_api_key', value: val, updated_at: new Date().toISOString() });
-        if (insErr) throw insErr;
-      }
-      state.nvidiaApiKey = val;
-    } else {
-      // Delete the key
-      await state.db.from('settings').delete().eq('key', 'nvidia_api_key');
-      state.nvidiaApiKey = null;
-    }
-    showToast(t('menu.settings_key_saved'));
-  } catch (e) {
-    console.error('Failed to save API key:', e);
-    showToast(t('menu.settings_key_error'));
-  }
-}
-
-function toggleNvidiaKeyVisibility() {
-  const inp = document.getElementById('settingsNvidiaKey');
-  const btn = document.getElementById('settingsToggleVis');
-  if (!inp || !btn) return;
-  const show = inp.type === 'password';
-  inp.type = show ? 'text' : 'password';
-  btn.innerHTML = `<span data-icon="${show ? 'eye-off' : 'eye'}" data-size="16"></span>`;
-  hydrateIcons();
-}
-
-async function saveNvidiaModel() {
-  const sel = document.getElementById('settingsNvidiaModel');
-  if (!sel) return;
-  const val = sel.value;
-  try {
-    const { data } = await state.db.from('settings')
-      .update({ value: val, updated_at: new Date().toISOString() })
-      .eq('key', 'nvidia_model').select();
-    if (!data || data.length === 0) {
-      await state.db.from('settings')
-        .insert({ key: 'nvidia_model', value: val, updated_at: new Date().toISOString() });
-    }
-    state.nvidiaModel = val;
-  } catch (e) { console.error('Failed to save model:', e); }
-}
-
-const NVIDIA_POPULAR_MODELS = [
-  'meta/llama-3.1-8b-instruct',
-  'meta/llama-3.3-70b-instruct',
-  'meta/llama-4-maverick-17b-128e-instruct',
-  'mistralai/mistral-large-2-instruct',
-  'google/gemma-3-27b-it',
-  'deepseek-ai/deepseek-v3.2',
-  'nvidia/llama-3.1-nemotron-70b-instruct',
-];
-
-function renderModelSelect(models, selectedModel) {
-  const sel = document.getElementById('settingsNvidiaModel');
-  if (!sel) return;
-
-  const popular = models.filter(id => NVIDIA_POPULAR_MODELS.includes(id));
-  const others = models.filter(id => !NVIDIA_POPULAR_MODELS.includes(id));
-  const customInList = selectedModel && !models.includes(selectedModel);
-
-  let html = '';
-  if (popular.length) {
-    html += `<optgroup label="Popular">`;
-    html += popular.map(id =>
-      `<option value="${esc(id)}"${id === selectedModel ? ' selected' : ''}>${esc(id)}</option>`
-    ).join('');
-    html += `</optgroup>`;
-  }
-  if (others.length) {
-    html += `<optgroup label="All">`;
-    html += others.map(id =>
-      `<option value="${esc(id)}"${id === selectedModel ? ' selected' : ''}>${esc(id)}</option>`
-    ).join('');
-    html += `</optgroup>`;
-  }
-  if (customInList) {
-    html += `<optgroup label="Custom">`;
-    html += `<option value="${esc(selectedModel)}" selected>${esc(selectedModel)}</option>`;
-    html += `</optgroup>`;
-  }
-  html += `<option value="__custom">${t('menu.settings_model_custom')}</option>`;
-  sel.innerHTML = html;
-}
-
-function populateNvidiaModels() {
-  const sel = document.getElementById('settingsNvidiaModel');
-  if (!sel) return;
-  // Render hardcoded fallback first, then fetch live list
-  renderModelSelect(NVIDIA_POPULAR_MODELS, state.nvidiaModel);
-  fetchNvidiaModelsRpc();
-}
-
-async function fetchNvidiaModelsRpc() {
-  try {
-    const { data, error } = await state.db.rpc('nvidia_list_models');
-    if (error || !data?.data) return;
-    const chatModels = data.data
-      .map(m => m.id)
-      .filter(id => /instruct|chat|-it$/i.test(id) && !/guard|safety|embed|retriever/i.test(id))
-      .sort((a, b) => {
-        const ai = NVIDIA_POPULAR_MODELS.includes(a) ? 0 : 1;
-        const bi = NVIDIA_POPULAR_MODELS.includes(b) ? 0 : 1;
-        return ai - bi || a.localeCompare(b);
-      });
-    if (chatModels.length) renderModelSelect(chatModels, state.nvidiaModel);
-  } catch (e) { console.warn('Could not fetch NVIDIA models:', e.message); }
-}
-
-function handleModelChange() {
-  const sel = document.getElementById('settingsNvidiaModel');
-  const customRow = document.getElementById('settingsCustomModelRow');
-  if (!sel) return;
-  if (sel.value === '__custom') {
-    if (customRow) customRow.style.display = '';
-    document.getElementById('settingsCustomModel')?.focus();
-  } else {
-    if (customRow) customRow.style.display = 'none';
-    saveNvidiaModel();
-  }
-}
-
-function applyCustomModel() {
-  const input = document.getElementById('settingsCustomModel');
-  const val = input?.value?.trim();
-  if (!val) return;
-  state.nvidiaModel = val;
-  // Re-render with custom value selected, then save
-  const sel = document.getElementById('settingsNvidiaModel');
-  const opts = Array.from(sel?.options || []).map(o => o.value).filter(v => v !== '__custom');
-  if (!opts.includes(val)) {
-    renderModelSelect(opts, val);
-  }
-  saveNvidiaModel();
-  const customRow = document.getElementById('settingsCustomModelRow');
-  if (customRow) customRow.style.display = 'none';
-}
-
-let _nvidiaAbort = null;
-
-async function testNvidiaApi() {
-  const apiKey = state.nvidiaApiKey || document.getElementById('settingsNvidiaKey')?.value?.trim();
-  const model = document.getElementById('settingsNvidiaModel')?.value;
-  const prompt = document.getElementById('settingsTestPrompt')?.value?.trim();
-  const resultEl = document.getElementById('settingsTestResult');
-  const btn = document.getElementById('settingsTestBtn');
-  if (!resultEl || !btn) return;
-  if (!apiKey) {
-    resultEl.style.display = 'block';
-    resultEl.className = 'settings-test-result error';
-    resultEl.textContent = t('menu.settings_test_no_key');
-    return;
-  }
-  if (!prompt) return;
-
-  // If already running, abort
-  if (_nvidiaAbort) {
-    _nvidiaAbort.abort();
-    _nvidiaAbort = null;
-    btn.textContent = t('menu.settings_test_btn');
-    btn.disabled = false;
-    resultEl.className = 'settings-test-result error';
-    resultEl.textContent = t('menu.settings_test_cancelled');
-    return;
-  }
-
-  _nvidiaAbort = new AbortController();
-  btn.textContent = t('menu.settings_test_stop');
-  btn.disabled = false;
-  resultEl.style.display = 'block';
-  resultEl.className = 'settings-test-result';
-  resultEl.textContent = '';
-  try {
-    const fetchOpts = (stream) => ({
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${state.supabaseKey}`,
-        'apikey': state.supabaseKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ p_api_key: apiKey, p_model: model, p_prompt: prompt, p_stream: stream }),
-      signal: _nvidiaAbort.signal,
-    });
-
-    let res = await fetch(`${state.supabaseUrl}/functions/v1/nvidia-chat`, fetchOpts(true));
-
-    // SSE streaming
-    if (res.ok && res.headers.get('content-type')?.includes('text/event-stream')) {
-      resultEl.className = 'settings-test-result success';
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let text = '';
-      let streamError = null;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split('\n')) {
-          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-            try {
-              const parsed = JSON.parse(line.slice(6));
-              if (parsed.error) {
-                streamError = parsed.error.message || parsed.error.detail || JSON.stringify(parsed.error);
-                break;
-              }
-              const delta = parsed.choices?.[0]?.delta?.content;
-              if (delta) { text += delta; resultEl.textContent = text; }
-            } catch (_) {}
-          }
-        }
-        if (streamError) break;
-      }
-      if (streamError) {
-        resultEl.className = 'settings-test-result error';
-        resultEl.textContent = streamError;
-      } else if (!text) {
-        resultEl.textContent = '(empty response)';
-      }
-      loadNvidiaUsage();
-      return;
-    }
-
-    // Stream failed (model doesn't support it) — retry without streaming
-    if (!res.ok) {
-      res = await fetch(`${state.supabaseUrl}/functions/v1/nvidia-chat`, fetchOpts(false));
-    }
-
-    // Non-streaming JSON response
-    const data = await res.json();
-    const status = data?.status;
-    const body = data?.body;
-    if (status && status >= 400) {
-      resultEl.className = 'settings-test-result error';
-      resultEl.textContent = body?.detail || body?.error?.message || `HTTP ${status}`;
-    } else {
-      resultEl.className = 'settings-test-result success';
-      resultEl.textContent = body?.choices?.[0]?.message?.content || JSON.stringify(body);
-    }
-    loadNvidiaUsage();
-  } catch (e) {
-    if (e.name === 'AbortError') {
-      resultEl.className = 'settings-test-result error';
-      resultEl.textContent = t('menu.settings_test_cancelled');
-    } else {
-      resultEl.className = 'settings-test-result error';
-      resultEl.textContent = e.message;
-    }
-  } finally {
-    _nvidiaAbort = null;
-    btn.textContent = t('menu.settings_test_btn');
-    btn.disabled = false;
-  }
-}
-
 window.openSettings = openSettings;
 window.closeSettings = closeSettings;
 window.switchSettingsPane = switchSettingsPane;
 window.toggleTabConfigItem = toggleTabConfigItem;
-window.toggleNvidiaKeyVisibility = toggleNvidiaKeyVisibility;
-window.saveNvidiaKey = saveNvidiaKey;
-window.saveNvidiaModel = saveNvidiaModel;
-window.handleModelChange = handleModelChange;
-window.applyCustomModel = applyCustomModel;
-window.testNvidiaApi = testNvidiaApi;
-window.toggleNvidiaUsageDetail = toggleNvidiaUsageDetail;
 
 // ── Data Backup & Restore ──
 
@@ -3833,16 +2639,15 @@ const BACKUP_TABLES = [
   // child / independent tables
   'todos', 'tasks', 'habit_completions', 'flashcards', 'flashcard_notes',
   'text_line_progress', 'birthdays', 'vestiaire', 'list_items',
-  'settings', 'prompts', 'nvidia_usage', 'daily_visits',
+  'settings', 'prompts', 'daily_visits',
   // sharing: owned groups (creator side) — FK order: groups → members → items
   'sharing_groups', 'sharing_members', 'sharing_items',
-  // sharing: joined groups (joiner side) + agent access
-  'joined_groups', 'agent_grants',
+  // sharing: joined groups (joiner side)
+  'joined_groups',
 ];
 
 async function generateBackupJSON() {
   const backup = { _meta: { version: 1, exported_at: new Date().toISOString(), tables: [] } };
-  if (state.supabaseUrl) backup._meta.source_url = state.supabaseUrl;
   for (const table of BACKUP_TABLES) {
     try {
       backup[table] = await fetchAll(() => state.db.from(table).select('*'));
@@ -3896,17 +2701,18 @@ function getGoogleAccessToken() {
 const DRIVE_FOLDER_NAME = 'DeLaClaw Backups';
 
 async function getOrCreateDriveFolder(token) {
-  // Check settings for cached folder ID
+  // Check settings for cached folder ID (all adapters return arrays here)
   if (state.db.connected) {
-    const { data } = await state.db.from('settings').select('value').eq('key', 'drive_backup_folder_id').maybeSingle();
-    if (data && data.value) {
+    const { data } = await state.db.from('settings').select('value').eq('key', 'drive_backup_folder_id');
+    const cached = data && data.length ? data[0].value : null;
+    if (cached) {
       // Verify folder still exists
-      const check = await fetch(`https://www.googleapis.com/drive/v3/files/${data.value}?fields=id,trashed`, {
+      const check = await fetch(`https://www.googleapis.com/drive/v3/files/${cached}?fields=id,trashed`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (check.ok) {
         const f = await check.json();
-        if (!f.trashed) return data.value;
+        if (!f.trashed) return cached;
       }
     }
   }
@@ -3946,7 +2752,12 @@ async function exportToGoogleDrive() {
   if (btn) btn.disabled = true;
   if (label) label.textContent = 'Authenticating…';
   try {
-    const token = await getGoogleAccessToken();
+    // In Drive mode reuse the adapter's token (same drive.file scope, deduped + refreshed).
+    // Other modes get their own standalone token since no Drive session exists.
+    const inDriveMode = localStorage.getItem('claw_cc_active_mode') === 'googledrive';
+    const token = (inDriveMode && state.driveAdapter)
+      ? await state.driveAdapter.getToken()
+      : await getGoogleAccessToken();
     if (label) label.textContent = 'Exporting…';
     const backup = await generateBackupJSON();
     const json = JSON.stringify(backup, null, 2);
@@ -4114,7 +2925,6 @@ async function performImport(file) {
     }
     // Insert in forward order (parents before children)
     const importOrder = backup._meta.tables || [];
-    const newUid = state.authUser?.id || null; // for sharing_groups.auth_owner_id rewrite
     let totalRows = 0;
     for (const table of importOrder) {
       showProgress(t('menu.settings_restore_restoring', table), ++step, totalSteps);
@@ -4126,14 +2936,6 @@ async function performImport(file) {
             .filter(r => !PROTECTED_IDS.has(r.id))        // skip protected defaults (already exist)
             .map(r => {
               const { owner_id, ...rest } = r;            // strip owner_id — trigger stamps new uid
-              // sharing_groups uses auth_owner_id instead of owner_id (no trigger)
-              if (table === 'sharing_groups' && rest.auth_owner_id != null && newUid) {
-                rest.auth_owner_id = newUid;
-              }
-              // sharing_members: rewrite creator's auth_user_id to new uid
-              if (table === 'sharing_members' && rest.role === 'creator' && rest.auth_user_id != null && newUid) {
-                rest.auth_user_id = newUid;
-              }
               return rest;
             });
           if (!batch.length) continue;
@@ -4166,13 +2968,6 @@ async function performImport(file) {
     showToast(t('menu.settings_restore_done', totalRows));
     if (sharedCleaned > 0) {
       showToast(t('menu.settings_restore_shared_cleaned', sharedCleaned), 'info');
-    }
-    // Notify owner if sharing groups were migrated to a different Supabase project
-    const hasSharingGroups = backup.sharing_groups && backup.sharing_groups.length > 0;
-    const urlChanged = backup._meta.source_url && state.supabaseUrl
-      && backup._meta.source_url.replace(/\/+$/, '') !== state.supabaseUrl.replace(/\/+$/, '');
-    if (hasSharingGroups && urlChanged) {
-      showToast(t('menu.settings_restore_reshare_hint'), 'info', 8000);
     }
     // In demo/drive mode, reseed the in-memory adapter instead of reloading
     // (reload would re-create the adapter with default/empty data)
@@ -4239,78 +3034,6 @@ async function performImport(file) {
 window.exportBackup = exportBackup;
 window.importBackup = importBackup;
 
-// ── AI Usage Stats ──
-
-async function loadNvidiaUsage() {
-  const container = document.getElementById('nvidiaUsageStats');
-  const toggleBtn = document.getElementById('nvidiaUsageToggle');
-  const detailEl = document.getElementById('nvidiaUsageDetail');
-  if (!container) return;
-
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data, error } = await state.db.from('nvidia_usage')
-    .select('model,prompt_tokens,completion_tokens,total_tokens,status,created_at')
-    .gte('created_at', since)
-    .order('created_at', { ascending: false });
-
-  if (error || !data || data.length === 0) {
-    container.innerHTML = `<span class="nvidia-usage-empty">${t('menu.settings_usage_empty')}</span>`;
-    if (toggleBtn) toggleBtn.style.display = 'none';
-    if (detailEl) detailEl.style.display = 'none';
-    return;
-  }
-
-  const totals = { requests: data.length, prompt: 0, completion: 0, total: 0 };
-  const byModel = {};
-  for (const row of data) {
-    totals.prompt += row.prompt_tokens || 0;
-    totals.completion += row.completion_tokens || 0;
-    totals.total += row.total_tokens || 0;
-    const m = row.model || 'unknown';
-    if (!byModel[m]) byModel[m] = { requests: 0, prompt: 0, completion: 0, total: 0 };
-    byModel[m].requests++;
-    byModel[m].prompt += row.prompt_tokens || 0;
-    byModel[m].completion += row.completion_tokens || 0;
-    byModel[m].total += row.total_tokens || 0;
-  }
-
-  container.innerHTML = renderUsageRow(totals);
-
-  const models = Object.keys(byModel).sort((a, b) => byModel[b].total - byModel[a].total);
-  if (models.length > 1) {
-    if (toggleBtn) toggleBtn.style.display = '';
-    if (detailEl) {
-      detailEl.innerHTML = models.map(m =>
-        `<div class="nvidia-usage-model"><span class="nvidia-usage-model-name">${esc(m)}</span>${renderUsageRow(byModel[m])}</div>`
-      ).join('');
-    }
-  } else if (models.length === 1) {
-    if (toggleBtn) toggleBtn.style.display = '';
-    if (detailEl) {
-      detailEl.innerHTML = `<div class="nvidia-usage-model"><span class="nvidia-usage-model-name">${esc(models[0])}</span></div>`;
-    }
-  } else {
-    if (toggleBtn) toggleBtn.style.display = 'none';
-  }
-}
-
-function renderUsageRow(s) {
-  return `<div class="nvidia-usage-grid">
-    <div class="nvidia-usage-cell"><span class="nvidia-usage-val">${s.requests}</span><span class="nvidia-usage-lbl">${t('menu.settings_usage_requests')}</span></div>
-    <div class="nvidia-usage-cell"><span class="nvidia-usage-val">${s.prompt.toLocaleString()}</span><span class="nvidia-usage-lbl">${t('menu.settings_usage_prompt')}</span></div>
-    <div class="nvidia-usage-cell"><span class="nvidia-usage-val">${s.completion.toLocaleString()}</span><span class="nvidia-usage-lbl">${t('menu.settings_usage_completion')}</span></div>
-    <div class="nvidia-usage-cell"><span class="nvidia-usage-val">${s.total.toLocaleString()}</span><span class="nvidia-usage-lbl">${t('menu.settings_usage_total')}</span></div>
-  </div>`;
-}
-
-function toggleNvidiaUsageDetail() {
-  const detailEl = document.getElementById('nvidiaUsageDetail');
-  const toggleBtn = document.getElementById('nvidiaUsageToggle');
-  if (!detailEl) return;
-  const open = detailEl.style.display !== 'none';
-  detailEl.style.display = open ? 'none' : '';
-  if (toggleBtn) toggleBtn.classList.toggle('open', !open);
-}
 
 // ===================================================================
 // VIEW SWITCHER (Projects / TODOs / Habits)
@@ -4807,9 +3530,7 @@ window.markCategoryRenamed = markCategoryRenamed;
     const lang = getLang();
     const confirmWord = lang === 'fr' ? 'SUPPRIMER' : lang === 'es' ? 'ELIMINAR' : 'DELETE';
     // Pick backend-specific message
-    const bodyKey = state.driveMode ? 'account.confirm_body_drive'
-      : state.supabaseUrl ? 'account.confirm_body_supabase'
-      : 'account.confirm_body_local';
+    const bodyKey = state.driveMode ? 'account.confirm_body_drive' : 'account.confirm_body_local';
     showConfirmAction(
       t('account.confirm_title'),
       t(bodyKey),

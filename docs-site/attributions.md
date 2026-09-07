@@ -2,16 +2,9 @@
 
 DeLaClaw uses the following third-party software and assets. No npm dependencies are installed at runtime. Most external libraries are self-hosted in `vendor/` for CSP hardening and offline PWA support; only Google Identity must remain on CDN per Google ToS (no SRI allowed).
 
-Vendor versions are checked weekly by the `vendor-check` GitHub Action, which opens a PR to `dev` when new releases are available. Manual updates: `scripts/update-vendor.sh [supabase_ver] [three_ver]`.
+Vendor versions are checked weekly by the `vendor-check` GitHub Action, which opens a PR to `dev` when new releases are available. Manual updates: `scripts/update-vendor.sh [three_ver]`.
 
 ## Libraries
-
-### Supabase JS Client
-- **Package**: `@supabase/supabase-js` v2.110.6
-- **License**: MIT
-- **Source**: https://github.com/supabase/supabase-js
-- **Loaded from**: `vendor/supabase.js` (self-hosted UMD copy, originally `cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.6/dist/umd/supabase.js`)
-- **Purpose**: database client for Supabase backend mode (PostgREST queries, real-time subscriptions)
 
 ### Three.js
 - **Package**: `three` v0.170.0

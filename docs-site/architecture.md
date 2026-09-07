@@ -22,7 +22,7 @@ flowchart TD
     drive --> calsync["js/calendar-sync.js<br/>(optional Google Calendar)"]
 ```
 
-> The Supabase adapter (`adapters/supabase.js`) and its offline-cache wrapper (`adapters/offline-cache.js`) remain in the codebase for migration support but are not part of the active architecture. See the `dev-latest-supabase-support` branch for the pre-deprecation codebase.
+> Supabase support has been removed entirely (adapter, client library, auth module, sharing adapter). The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
 
 ## Adapter pattern
 
@@ -94,7 +94,7 @@ There is no virtual DOM, no reactivity system, and no framework state management
 
 ## Database schema
 
-The canonical table list lives in `server/schema.sql` (SQLite base schema). `sql/supabase_schema.sql` remains as a legacy reference.
+The canonical table list lives in `server/schema.sql` (SQLite base schema).
 
 | Table | Purpose | Key relationships |
 |---|---|---|
@@ -117,10 +117,8 @@ The canonical table list lives in `server/schema.sql` (SQLite base schema). `sql
 | `list_items` | Items within lists | `list_id` -> `lists.id` |
 | `settings` | Key-value store (schema version, preferences) | -- |
 | `prompts` | AI prompt templates | -- |
-| `nvidia_usage` | API token usage tracking | -- |
 | `daily_visits` | Login/visit tracking | -- |
 | `joined_groups` | Groups the user has joined (encrypted tokens) | -- |
-| `agent_grants` | AI agent permission grants | -- |
 | `sharing_groups` | Shared group definitions | -- |
 | `sharing_members` | Group membership | `group_id` -> `sharing_groups.id` |
 | `sharing_items` | Shared items (TODOs, habits, list items) | `group_id` -> `sharing_groups.id` |
@@ -188,16 +186,13 @@ js/
   version.js               Auto-generated version constants
   calendar-sync.js         Google Calendar sync (Drive backend, optional)
   adapters/
-    supabase.js            Supabase PostgREST adapter (legacy, migration support)
     rest.js                Local Bun+SQLite REST adapter
     demo.js                In-memory adapter
     drive.js               Google Drive adapter (in-memory + per-table JSON persistence)
-    offline-cache.js       IndexedDB caching layer (legacy, Supabase-only)
-  auth.js                  Supabase email auth (legacy, migration support)
-  crypto-sync.js           AES-GCM encryption for joined_groups tokens (legacy, Supabase-only)
-  sharing.js               Sharing factory (selects Supabase or Drive adapter)
+    offline-cache.js       IndexedDB caching layer
+  crypto-sync.js           AES-GCM encryption for joined_groups tokens
+  sharing.js               Sharing factory (Drive adapter)
   sharing-interface.js     Sharing adapter interface contract
-  sharing-supabase.js      Supabase sharing adapter (legacy, RPC-based)
   sharing-drive.js         Google Drive sharing adapter (per-table JSON)
   sharing-envelope.js      DLC1 invite-code encode/decode
   sharing-ui.js            Sharing UI: settings pane, share popovers, completion modal
@@ -210,7 +205,6 @@ js/
   birthdays.js             Birthday tracker
   vestiaire.js             Wardrobe inventory
   lists.js                 Checklists
-  agents-ui.js             Agent task board UI
   i18n.js                  Translation strings (en/fr/es)
   icons.js                 Lucide icon rendering + path data
   utils.js                 Shared utilities (escaping, toasts, markdown)

@@ -1,12 +1,12 @@
 // ===================================================================
-// DEMO ADAPTER — fully in-memory, drop-in for Supabase/REST adapters
+// DEMO ADAPTER — fully in-memory, drop-in for REST/Drive adapters
 // ===================================================================
 // All data lives in a plain JS object { tableName: [rows] }.
 // Supports the same chainable API: .from().select().eq().insert() etc.
 // Nothing persists across page refresh.
 // ===================================================================
 
-// CHECK constraints — mirrors Supabase / SQLite schema constraints
+// CHECK constraints — mirrors SQLite schema constraints
 const CHECK_CONSTRAINTS = {
   todos:          { priority: ['urgent', 'high', 'medium', 'low', 'normal'] },
   tasks:          { status: ['draft', 'todo', 'in-progress', 'review', 'approved', 'revision', 'idea', 'idea-shipped', 'idea-plan-requested'] },

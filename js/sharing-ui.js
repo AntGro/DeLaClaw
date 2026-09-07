@@ -17,10 +17,9 @@
 //   - Join via invite code uses Google Picker for drive.file access
 // ===================================================================
 
-import state, { STAY_CONNECTED_KEY } from './state.js';
-import { compareVersions } from '../migrations/version-compare.js';
+import state from './state.js';
 import { t } from './i18n.js';
-import { esc, escQ, showToast, showConfirmAction, getSupabaseProjectRef, buildAuthSteps } from './utils.js';
+import { esc, escQ, showToast, showConfirmAction } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { LOGOS } from './backend-logos.js';
 import { decodeInviteEnvelope } from './sharing-envelope.js';
@@ -50,7 +49,6 @@ function memberLabel(member) {
   return member?.displayName || member?.invitedLabel || member?.name || member?.memberId || 'Member';
 }
 
-/** Extract Supabase project ref from URL (shared logic with main.js) */
 /** Small avatar circle HTML. */
 function avatarDot(member, size = 24) {
   const label = memberLabel(member);
@@ -67,9 +65,9 @@ let _currentUser = null;
 export function updateSharingNavVisibility() {
   const btn = document.getElementById('settingsNavSharingBtn');
   if (!btn) return;
-  // Show sharing nav for Drive users with sharing, Supabase users (even if not yet authenticated), or demo
+  // Show sharing nav for Drive users with sharing, or demo
   const activeMode = localStorage.getItem('claw_cc_active_mode');
-  btn.style.display = (state.sharing || activeMode === 'supabase' || activeMode === 'demo') ? '' : 'none';
+  btn.style.display = (state.sharing || activeMode === 'demo') ? '' : 'none';
 }
 
 /** Render the full sharing settings pane content. */
@@ -100,43 +98,8 @@ export async function renderSharingPane() {
   }
 
   if (!state.sharing) {
-    // Supabase without auth: show inline sign-in prompt (only if DB has auth tables)
-    const dbReady = compareVersions(state.dbSchemaVersion || '0', '1.294') >= 0;
-    if (activeMode === 'supabase' && !state.authUser && dbReady) {
-      const creds = (() => { try { return JSON.parse(localStorage.getItem(STAY_CONNECTED_KEY) || '{}'); } catch { return {}; } })();
-      const projRef = getSupabaseProjectRef(creds.url || '') || null;
-      const authConfigUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/url-configuration` : 'https://supabase.com/dashboard/projects';
-      const steps = buildAuthSteps('sharingAuth', authConfigUrl, { sendAction: 'send-auth-from-sharing', showStatus: true });
-      container.innerHTML = `<div class="auth-inline-prompt">
-        <div class="auth-icon">${lucideIcon('lock', 28)}</div>
-        <h4>${t('auth.sign_in_to_share')}</h4>
-        <p class="auth-inline-hint">${t('auth.sign_in_to_share_hint')}</p>
-        ${steps.html}
-      </div>`;
-      steps.wireUp(container);
-    } else if (activeMode === 'supabase' && state.authUser) {
-      // Authenticated but sharing adapter failed to initialise
-      const errMsg = state._sharingInitError ? esc(String(state._sharingInitError.message || state._sharingInitError)) : '';
-      const dbVer = esc(state.dbSchemaVersion || '?');
-      container.innerHTML = `<div class="auth-inline-prompt">
-        <div class="auth-icon">${lucideIcon('refresh-cw', 28)}</div>
-        <h4>${t('sharing.init_failed')}</h4>
-        <p class="auth-inline-hint">${t('sharing.init_failed_hint')}</p>
-        ${errMsg ? `<p class="setting-hint" style="font-size:0.75rem;opacity:0.6;margin-top:8px">Error: ${errMsg} (DB ${dbVer})</p>` : ''}
-      </div>`;
-    } else {
-      container.innerHTML = `<p class="setting-hint">${t('sharing.no_drive')}</p>`;
-    }
+    container.innerHTML = `<p class="setting-hint">${t('sharing.no_drive')}</p>`;
     return;
-  }
-
-  // Show auth status for authenticated Supabase users
-  let authBadgeHtml = '';
-  if (activeMode === 'supabase' && state.authUser) {
-    const email = esc(state.authUser.email || '');
-    authBadgeHtml = `<div class="setting-group">
-      <div class="auth-signed-in-badge">${lucideIcon('shield-check', 14)} ${t('auth.signed_in_as', email)}</div>
-    </div>`;
   }
 
   // Get current user identity
@@ -144,7 +107,7 @@ export async function renderSharingPane() {
     _currentUser = await state.sharing.getCurrentUser();
   } catch { _currentUser = null; }
 
-  let html = authBadgeHtml;
+  let html = '';
 
   // ── Groups section ──
   const groups = state.sharing.getAllGroups();
@@ -165,7 +128,7 @@ export async function renderSharingPane() {
     const memberStr = memberCount === 1 ? t('sharing.member') : t('sharing.members', memberCount);
     const itemStr = itemCount === 1 ? t('sharing.shared_item') : t('sharing.shared_items', itemCount);
     const inviteCode = isCreator ? state.sharing.getInviteLink(group.id) : null;
-    const invitePlaceholder = group.backendType === 'supabase' ? t('sharing.invite_name_placeholder') : t('sharing.invite_placeholder');
+    const invitePlaceholder = t('sharing.invite_placeholder');
 
     // Group health status
     const healthStatus = state.sharing.getGroupHealthStatus?.(group.id) || 'healthy';
@@ -484,8 +447,7 @@ async function _convertGroupItemsToPersonal(groupId) {
   }
 
   // Build a separate lookup for habits via getAllSharedHabits() which normalizes
-  // name/frequency_rule to top-level (Supabase keeps them inside payload) and
-  // merges completions from child items + legacy payload.
+  // name/frequency_rule to top-level and merges completions from child items + legacy payload.
   const sharedHabitLookup = new Map();
   if (state.sharing?.getAllSharedHabits) {
     for (const sh of state.sharing.getAllSharedHabits()) {
@@ -650,7 +612,7 @@ export async function handleJoinCode(rawCode, opts = {}) {
     return true;
   }
 
-  // For Supabase, also check local group cache by group id before verifying token.
+  // Also check local group cache by group id before verifying token.
   if (env.g) {
     const alreadyJoined = state.sharing.getAllGroups?.()?.find(g => g.id === env.g);
     if (alreadyJoined) {

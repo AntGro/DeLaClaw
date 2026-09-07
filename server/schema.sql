@@ -212,15 +212,6 @@ CREATE TABLE IF NOT EXISTS prompts (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS nvidia_usage (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-  model TEXT,
-  tokens_in INTEGER,
-  tokens_out INTEGER,
-  owner_id TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS lists (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   name TEXT NOT NULL,
@@ -303,21 +294,6 @@ CREATE INDEX IF NOT EXISTS idx_habits_category_id ON habits(category_id);
 CREATE INDEX IF NOT EXISTS idx_vestiaire_category_id ON vestiaire(category_id);
 CREATE INDEX IF NOT EXISTS idx_flashcards_deck_id ON flashcards(deck_id);
 CREATE INDEX IF NOT EXISTS idx_texts_deck_id ON texts(deck_id);
-
--- 1.410 agent grants (parity with Supabase)
-CREATE TABLE IF NOT EXISTS agent_grants (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-  owner_id TEXT,
-  display_name TEXT NOT NULL,
-  token_hash TEXT UNIQUE NOT NULL,
-  scope TEXT NOT NULL DEFAULT 'full',
-  last_used_at TEXT,
-  expires_at TEXT,
-  revoked_at TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_agent_grants_owner_id ON agent_grants(owner_id);
-CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON agent_grants(token_hash);
 
 -- ── Seed protected category rows ──
 INSERT OR IGNORE INTO todo_categories (id, name, is_protected, sort_order) VALUES ('_default_todo_cat', '', 1, 0);

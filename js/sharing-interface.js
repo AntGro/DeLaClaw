@@ -2,7 +2,7 @@
 // SHARING INTERFACE — canonical contract for all sharing adapters
 // ===================================================================
 //
-// Both adapters (Drive, Supabase) MUST conform to this interface.
+// The Drive adapter MUST conform to this interface.
 // The factory in sharing.js validates every adapter at creation time
 // using validateSharingAdapter() — a missing or mistyped method is
 // a hard error, not a silent runtime crash.
@@ -107,7 +107,7 @@ export const SHARING_INTERFACE = {
  * Throws on the first violation — fail loud at init, not at runtime.
  *
  * @param {Object} adapter
- * @param {string} label — 'googledrive' | 'supabase' (for error messages)
+ * @param {string} label — backend label (for error messages)
  */
 export function validateSharingAdapter(adapter, label) {
   for (const [key, kind] of Object.entries(SHARING_INTERFACE)) {

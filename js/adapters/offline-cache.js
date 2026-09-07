@@ -12,7 +12,7 @@
 
 import state from '../state.js';
 
-const EXCLUDE      = new Set(['prompts', 'nvidia_usage']);
+const EXCLUDE      = new Set(['prompts']);
 const STRIP        = { birthdays: ['avatar_url'] };
 const IDB_NAME     = 'dlc-offline';
 const IDB_VERSION  = 1;
@@ -83,7 +83,7 @@ function browserOffline() {
 async function tryCache(scope, table, onOk) {
   const c = await get(scope, table);
   if (c) {
-    // Online but DB unreachable → likely paused project (Supabase shuts down the instance)
+    // Online but DB unreachable → the local server may be down
     if (!browserOffline()) {
       state.pausedMode = true;
       showPausedBanner();
@@ -163,7 +163,7 @@ function cacheProxy(target, table, scope, isSelect) {
                 if (state.offlineMode) hideBanner();
                 if (state.pausedMode) hidePausedBanner();
               }
-              // Project paused (Supabase 540) → show paused banner, try cache
+              // DB unreachable (e.g. local server down) → show banner, try cache
               if (result?.error && isPausedErr(result.error)) {
                 if (!state.pausedMode) showPausedBanner();
                 const hit = await tryCache(scope, table, onOk);
@@ -215,7 +215,7 @@ function cacheProxy(target, table, scope, isSelect) {
  * Wrap an adapter so all .select() results are cached in IndexedDB.
  * New tables are included automatically.
  * @param {object} adapter  — any adapter with .from()
- * @param {string} scopeKey — unique cache scope (e.g. 'supabase:projectref')
+ * @param {string} scopeKey — unique cache scope (e.g. 'local:http://localhost:3737')
  */
 export function wrapWithOfflineCache(adapter, scopeKey) {
   const origFrom = adapter.from.bind(adapter);
@@ -253,31 +253,13 @@ function hideBanner() {
 
 // ── Paused-project banner ───────────────────────────────────────
 
-function _projectRef() {
-  const url = state.supabaseUrl || '';
-  const m = url.match(/^https?:\/\/([a-z0-9]+)\.supabase\.co/i);
-  return m ? m[1] : null;
-}
-
 function showPausedBanner() {
   if (document.getElementById('pausedBanner')) return;
   state.pausedMode = true;
   const el = document.createElement('div');
   el.id = 'pausedBanner';
   el.className = 'paused-banner';
-  const ref = _projectRef();
-  const link = ref
-    ? `https://supabase.com/dashboard/project/${ref}`
-    : 'https://supabase.com/dashboard/projects';
-  // Safe DOM: no innerHTML with URL interpolation (P0 sec-002)
-  el.textContent = '';
-  el.appendChild(document.createTextNode(`Can\u2019t reach your database \u2014 it may be paused \xB7 `));
-  const a = document.createElement('a');
-  a.href = link;
-  a.target = '_blank';
-  a.rel = 'noopener';
-  a.textContent = `Check on Supabase \u2197`;
-  el.appendChild(a);
+  el.textContent = `Can\u2019t reach your database \u2014 check that your local server is running \xB7 `;
   document.body.prepend(el);
   document.body.classList.add('paused-mode');
   requestAnimationFrame(() => {

@@ -1,12 +1,12 @@
 # Settings — Core Contract
 
 ## Purpose
-Cross-cutting app configuration — theme, language, backend picker, AI/NVIDIA config, sharing management, usage stats, agent tokens, data import/export, and category table management.
+Cross-cutting app configuration — theme, language, backend picker, sharing management, usage stats, data import/export, and category table management.
 
 ## Entry & Ownership
-- **Entry:** `js/main.js` (settings pane switching, backup, loadSettings, usage stats) + `js/state.js` (STAY_CONNECTED_KEY) + `js/agents-ui.js` (agents pane) + `js/version.js`
-- **State:** see `CODEMAP.json:core[main,state,agents-ui]` for current loc, esc_count, i18n_count
-- **Tables:** `settings` (key-value: `schema_version`, `nvidia_api_key`, `nvidia_model`, theme, etc.), `prompts`, `daily_visits`, `nvidia_usage`, `agent_grants`, `todo_categories`, `habit_categories`, `vestiaire_categories`, `flashcard_decks`
+- **Entry:** `js/main.js` (settings pane switching, backup, loadSettings, usage stats) + `js/state.js` (STAY_CONNECTED_KEY) + `js/version.js`
+- **State:** see `CODEMAP.json:core[main,state]` for current loc, esc_count, i18n_count
+- **Tables:** `settings` (key-value: `schema_version`, theme, etc.), `prompts`, `daily_visits`, `todo_categories`, `habit_categories`, `vestiaire_categories`, `flashcard_decks`
 
 ## Dependencies
 - **Depends on:** `db`, `i18n`, `icons`, `utils`, `state`, all feature modules (for data loading)
@@ -14,13 +14,11 @@ Cross-cutting app configuration — theme, language, backend picker, AI/NVIDIA c
 
 ## UI / UX
 - **Reused components:** `.settings-nav-btn` with `data-pane`, `.settings-data-btn`, `.setting-group`, `.setting-hint`, `.usage-stats-container`, `.page-empty-state`
-- **Panes:** `['general', 'ai', 'sharing', 'data', 'stats', 'agents']`
+- **Panes:** `['general', 'sharing', 'data', 'stats']`
   - **general** — language picker (EN/FR/ES), theme toggle (dark/light)
-  - **ai** — NVIDIA API key, model selector, usage toggle
-  - **sharing** — auth link sending (`sendAuthFromSharing`), sharing group management
+  - **sharing** — sharing group management
   - **data** — backup export/import, backend connection
-  - **stats** — usage statistics: DB age, visit count, streak via `daily_visits` + `nvidia_usage`
-  - **agents** — API token management for external agents (`agent_grants`)
+  - **stats** — usage statistics: DB age, visit count, streak via `daily_visits`
 - **Hash routing:** `#settings` and `#settings/<pane>` deep-link to specific panes
 
 ## Interaction Guards
@@ -29,18 +27,16 @@ Cross-cutting app configuration — theme, language, backend picker, AI/NVIDIA c
 
 ## Security
 - **XSS:** all category names/shortnames via `esc()` when rendering tabs and bucket headers
-- Backup JSON export must not leak `agent_grants` raw tokens (only hashes), no secrets
-- Backup `_meta` includes `source_url` (Supabase project URL at export time) for migration detection
 
 ## i18n
-- **Prefix:** `menu.` + `settings.` + `auth.` + `agents.` — see CODEMAP core modules for current key counts
+- **Prefix:** `menu.` + `settings.` — see CODEMAP core modules for current key counts
 - Language change must trigger `applyI18n()` for all panes
 
 ## Business Invariants
 
 ### Settings Table
-- Key-value store: `schema_version`, `nvidia_api_key`, `nvidia_model`, archived project IDs, `gcal_sync_enabled`, `gcal_calendar_id`, `gcal_sync_habits`, `gcal_sync_todos`, `gcal_sync_birthdays`
-- `loadSettings()` reads at startup, populates `state.nvidiaApiKey`, `state.nvidiaModel`
+- Key-value store: `schema_version`, archived project IDs, `gcal_sync_enabled`, `gcal_calendar_id`, `gcal_sync_habits`, `gcal_sync_todos`, `gcal_sync_birthdays`
+- `loadSettings()` reads at startup into `state.settings`
 - `schema_version` checked against `VERSION` `latest_compat` / `latest_compat_deprec` for compatibility banners
 
 ### Category Tables
@@ -51,7 +47,7 @@ Cross-cutting app configuration — theme, language, backend picker, AI/NVIDIA c
 - Colors: solid header `var(--cat-color)` + 6% tinted body via `color-mix(in srgb, var(--cat-color) 6%, var(--bg))`
 
 ### Backend Picker
-- Supabase | Local | Demo — segmented pill, mode-aware labels/hints/placeholders
+- Drive | Local | Demo — segmented pill, mode-aware labels/hints/placeholders
 - `#login` hash timing fixed to avoid race
 - `STAY_CONNECTED_KEY` persists connection credentials in localStorage
 
@@ -61,16 +57,16 @@ Cross-cutting app configuration — theme, language, backend picker, AI/NVIDIA c
 
 ### Daily Visits / Stats
 - `daily_visits` table: upsert on each app load for visit tracking
-- Stats pane renders DB age, total visits, streak, NVIDIA usage breakdown
+- Stats pane renders DB age, total visits, streak
 
 ### Backup Export/Import
-- `BACKUP_TABLES` order: category/deck parents → parent tables → child/independent tables → settings/prompts/usage → sharing (groups → members → items) → joined_groups, agent_grants
+- `BACKUP_TABLES` order: category/deck parents → parent tables → child/independent tables → settings/prompts/usage → sharing (groups → members → items) → joined_groups
 - Clear runs in reverse order (children before parents)
 - Export: `_meta` includes version, timestamp, table list, and `source_url`
-- Import: strips `owner_id` from all rows (trigger stamps new UID), rewrites `auth_owner_id` on `sharing_groups` to new `auth.uid()`, runs migrations before applying settings
+- Import: strips `owner_id` from all rows (trigger stamps new UID), runs migrations before applying settings
 
 ## Adapter & Backend
-- `db.from('settings')`, `db.from('prompts')`, `db.from('daily_visits')`, `db.from('nvidia_usage')`, `db.from('agent_grants')`
+- `db.from('settings')`, `db.from('prompts')`, `db.from('daily_visits')`
 - All backends implement settings table
 
 ## Sharing
@@ -92,9 +88,9 @@ Cross-cutting app configuration — theme, language, backend picker, AI/NVIDIA c
 - `bun tests/tests.js`: theme var usage, esc for category names, CODEMAP freshness
 - Manual: switch language → verify no duplicate categories, theme persists after reload
 - Manual: export backup, import on fresh instance, verify all data restored
-- Manual: deep-link `#settings/ai` → verify AI pane opens directly
+- Manual: deep-link `#settings/sharing` → verify sharing pane opens directly
 
 ## References
-- `CODEMAP.json:core[main,state,agents-ui,version]`
-- Tables: `settings`, `prompts`, `daily_visits`, `nvidia_usage`, `agent_grants`
-- Entry: `js/state.js`, `js/main.js:switchSettingsPane()`, `js/agents-ui.js`
+- `CODEMAP.json:core[main,state,version]`
+- Tables: `settings`, `prompts`, `daily_visits`
+- Entry: `js/state.js`, `js/main.js:switchSettingsPane()`

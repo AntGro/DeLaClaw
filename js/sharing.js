@@ -11,7 +11,6 @@
 //
 // Currently supported:
 //   - 'googledrive' → sharing-drive.js (createDriveSharing)
-//   - 'supabase'    → sharing-supabase.js (createSupabaseSharing)
 //   - 'demo'        → read-only stub (UI visible, group creation gated)
 //
 // ===================================================================
@@ -63,7 +62,7 @@ function createDemoSharingStub() {
 /**
  * Create a sharing adapter for the given backend type.
  *
- * @param {'googledrive'|'supabase'} backendType
+ * @param {'googledrive'|'demo'} backendType
  * @param {Object} config — backend-specific configuration
  * @returns {Promise<SharingAdapter>}
  */
@@ -78,17 +77,6 @@ export async function createSharing(backendType, config = {}) {
         config.personalFolderId,
         config.capabilities,
       );
-      break;
-    }
-
-    case 'supabase': {
-      const { createSupabaseSharing } = await import('./sharing-supabase.js');
-      adapter = await createSupabaseSharing(config.adapter, {
-        getAuthUser: config.getAuthUser,
-        supabaseUrl: config.supabaseUrl,
-        anonKey: config.anonKey,
-        capabilities: config.capabilities || {},
-      });
       break;
     }
 

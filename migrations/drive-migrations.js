@@ -246,4 +246,17 @@ export const DRIVE_MIGRATIONS = {
       else if (h.frequency_rule.startsWith('monthly:')) { h.frequency_rule = 'every_N_months:1:' + h.frequency_rule.slice(8); }
     }
   },
+
+  '2.0.9': async (store, ctx) => {
+    // Drop tables for removed features (NVIDIA usage tracking, agent tokens).
+    // No code reads them anymore; delete the in-memory data and the Drive files.
+    delete store.nvidia_usage;
+    delete store.agent_grants;
+    const tok = await ctx.getToken();
+    if (!tok) return;
+    for (const name of ['nvidia_usage.json', 'agent_grants.json']) {
+      const file = ctx.filesByName.get(name);
+      if (file) await ctx.deleteFile(tok, file.id);
+    }
+  },
 };

@@ -453,4 +453,10 @@ export const LOCAL_MIGRATIONS = {
     UPDATE habits SET frequency_rule = 'every_N_months:1:' || substr(frequency_rule, 17) WHERE frequency_rule LIKE 'monthly\_weekday:%' ESCAPE '\\';
     UPDATE habits SET frequency_rule = 'every_N_months:1:' || substr(frequency_rule, 9) WHERE frequency_rule LIKE 'monthly:%' AND frequency_rule NOT LIKE 'monthly_%' ESCAPE '\\';
   `,
+
+  '2.0.9': `
+    -- Drop tables for removed features (NVIDIA usage tracking, agent tokens)
+    DROP TABLE IF EXISTS nvidia_usage;
+    DROP TABLE IF EXISTS agent_grants;
+  `,
 };

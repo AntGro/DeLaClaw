@@ -17,8 +17,6 @@ const state = {
   allListItems: [],
   vestiaireFilter: 'all',
   currentView: 'projects',
-  nvidiaApiKey: null,
-  nvidiaModel: 'meta/llama-3.1-8b-instruct',
   dbSchemaVersion: '0.000',
   offlineMode: false,
   pausedMode: false,
@@ -39,8 +37,8 @@ if (typeof window !== 'undefined') window.__dlc = state;
 export const IDEAS_KEY = 'claw_cc_ideas';
 export const THEME_KEY = 'claw_cc_theme';
 export const CURRENT_VIEW_KEY = 'claw_cc_current_view';
-// Security note: anon key is public by design (PostgREST) — RLS is the boundary.
-// service_role / sb_secret_ must never be stored here (rejected in saveStayConnectedCreds).
+// Security note: credentials are never persisted — only URL and mode are stored.
+// Keys/secrets are held in memory (and cleared on disconnect).
 export const STAY_CONNECTED_KEY = 'claw_cc_stay_connected';
 export const MAX_TEXT_LEN = 5000;
 export const MAX_META_DISPLAY = 500;

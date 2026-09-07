@@ -32,7 +32,7 @@ User jobs:
 
 ## Security
 - **XSS:** see CODEMAP for current esc_count — `name` and section keys wrapped in `esc()`
-- Avatar handling: photos as data URLs / Supabase storage, never innerHTML
+- Avatar handling: photos as data URLs, never innerHTML
 - `showDeleteConfirm` via textContent
 
 ## i18n

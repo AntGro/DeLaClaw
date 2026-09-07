@@ -6,7 +6,7 @@ import { esc, escQ, renderMd, showToast, showConfirmAction,
 import { cleanupDragArtifacts, markDragClone, markDragSource, unmarkDragSource, registerDragCleanup, isDragging, setDragging, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, LONG_PRESS_MS, DRAG_THRESHOLD, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 
 // ===================================================================
-// state.PROJECTS (loaded from Supabase)
+// state.PROJECTS (loaded from the active backend)
 // ===================================================================
 // (state managed in state.js)
 
@@ -285,7 +285,7 @@ function updateCharCounter(input) {
 
 
 // ===================================================================
-// SUPABASE TASK CRUD
+// TASK CRUD
 // ===================================================================
 // (state managed in state.js)
 
@@ -1038,7 +1038,7 @@ async function submitRevision() {
 
 
 // ===================================================================
-// TASK-PICKUP PROMPT EDITOR (Supabase-backed)
+// TASK-PICKUP PROMPT EDITOR
 // ===================================================================
 // ===================================================================
 let promptsCache = {};

@@ -85,8 +85,7 @@ js/
   birthdays.js          Birthday tracker
   vestiaire.js          Wardrobe inventory
   lists.js              Checklists
-  delegation.js         AI agent delegation and task routing
-  agents-ui.js          Agent grants and delegation UI
+  delegation.js         CSP-safe event delegation
   i18n.js               Translation strings (en/fr/es)
   icons.js              Lucide icon rendering
   utils.js              Shared utilities
@@ -131,7 +130,6 @@ DeLaClaw is free software. You can use, modify, and distribute it under the term
 
 - [Lucide](https://lucide.dev) icons (ISC License)
 - [DM Sans](https://fonts.google.com/specimen/DM+Sans) font (Open Font License)
-- [Supabase JS](https://github.com/supabase/supabase-js) client (MIT License)
 - [Three.js](https://threejs.org) for hero animations (MIT License)
 
 See [Attributions](docs-site/attributions.md) for full details.

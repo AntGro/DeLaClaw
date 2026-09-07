@@ -8,9 +8,8 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- Content-Security-Policy: self-hosted vendor + Google Identity exception (Google forbids SRI, see https://developers.google.com/identity/gsi/web/guides/content-security-policy) -->
 <!-- CSP hardened: all inline handlers removed via delegation (Phase 1 index.html 109, Phase 2 js/*.js 254 → 0). Secure hash for importmap restored, unsafe-* removed. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com https://cloudflareinsights.com; frame-src 'self' https://accounts.google.com https://content.google.com https://www.youtube.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
-<!-- Vendor: self-hosted (was CDN jsdelivr) — supabase @2.110.6 (203KB raw) + three @0.170.0 -->
-<script src="vendor/supabase.js"></script>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com https://cloudflareinsights.com; frame-src 'self' https://accounts.google.com https://content.google.com https://www.youtube.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<!-- Vendor: self-hosted (was CDN jsdelivr) — three @0.170.0 -->
 <!-- Google Identity: must stay on CDN per ToS, no SRI per Google docs -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://apis.google.com/js/api.js" async defer></script>
@@ -95,12 +94,11 @@
       <a class="backend-compare-link" id="backendCompareLink" href="#" data-i18n="compare.link" style="display:none;">Compare options</a>
       <div class="backend-picker" id="backendPicker">
         <button type="button" class="backend-option active" data-mode="googledrive" title="Google Drive"><span class="backend-option-label" data-i18n="login.mode_drive">Drive</span></button>
-        <button type="button" class="backend-option" data-mode="supabase" title="Supabase"><span class="backend-option-label" data-i18n="login.mode_supabase">SB</span></button>
         <button type="button" class="backend-option" data-mode="local" title="Local" style="display:none;"><span class="backend-option-label" data-i18n="login.mode_local">Local</span></button>
         <button type="button" class="backend-option" data-mode="demo" title="Demo"><span class="backend-option-label" data-i18n="login.mode_demo">Demo</span></button>
       </div>
       <div class="gate-fields" id="gateFields">
-        <p class="hint" id="loginHint">Connect to your Supabase project.</p>
+        <p class="hint" id="loginHint"></p>
         <div class="gate-highlights" id="gateHighlights" style="display:none;">
           <div class="gate-highlight">
             <img src="icons/brand/googledrive.svg" alt="" width="20" height="20" class="gate-highlight-icon">
@@ -115,8 +113,8 @@
             <span data-i18n="login.highlight_calendar">Optional sync with Google Calendar</span>
           </div>
         </div>
-        <label for="username" class="gate-label" id="urlLabel"><a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener" id="urlLabelLink" data-tooltip="Find the URL by connecting to your Supabase project">Project URL</a></label>
-        <input type="text" id="username" name="username" placeholder="https://xyz.supabase.co" autocomplete="username">
+        <label for="username" class="gate-label" id="urlLabel"><a href="#" target="_blank" rel="noopener" id="urlLabelLink" data-tooltip="">URL</a></label>
+        <input type="text" id="username" name="username" placeholder="" autocomplete="username">
         <div id="keyField">
           <label for="password" class="gate-label" id="keyLabel"><a target="_blank" rel="noopener" id="keyLabelLink">API Key</a></label>
           <input type="password" id="password" name="password" placeholder="eyJhbG..." autocomplete="current-password">
@@ -499,7 +497,6 @@ bun run server.js</pre>
     <div class="footer-row footer-row-tech">
       <div class="db-stats" id="dbStatsContainer"></div>
       <div><span id="lastUpdatedLabel" class="db-stat"></span></div>
-      <div><a href="" id="supabaseDashLink" target="_blank">Supabase Dashboard ↗</a></div>
       <div class="footer-backend" id="footerBackend"></div>
     </div>
     <div class="footer-row footer-row-identity">
@@ -576,10 +573,6 @@ bun run server.js</pre>
             <span data-icon="settings" data-size="16"></span>
             <span id="settingsNavGeneral">General</span>
           </button>
-          <button class="settings-nav-btn" data-pane="ai" data-action="switch-settings-pane" data-pane="ai">
-            <span data-icon="sparkles" data-size="16"></span>
-            <span id="settingsNavAi">AI</span>
-          </button>
           <button class="settings-nav-btn" data-pane="calendar" data-action="switch-settings-pane" data-pane="calendar" id="settingsNavCalendarBtn" style="display:none">
             <span data-icon="calendar" data-size="16"></span>
             <span id="settingsNavCalendar">Calendar</span>
@@ -595,14 +588,6 @@ bun run server.js</pre>
           <button class="settings-nav-btn" data-pane="sharing" data-action="switch-settings-pane" data-pane="sharing" id="settingsNavSharingBtn" style="display:none">
             <span data-icon="users" data-size="16"></span>
             <span id="settingsNavSharing">Sharing</span>
-          </button>
-          <button class="settings-nav-btn" data-pane="calendar" data-action="switch-settings-pane" data-pane="calendar" id="settingsNavCalendarBtn" style="display:none">
-            <span data-icon="calendar" data-size="16"></span>
-            <span data-i18n="cal_sync.nav">Calendar</span>
-          </button>
-          <button class="settings-nav-btn" data-pane="agents" data-action="switch-settings-pane" data-pane="agents" id="settingsNavAgentsBtn">
-            <span data-icon="bot" data-size="16"></span>
-            <span id="settingsNavAgents">Agents</span>
           </button>
           <button class="settings-nav-btn" data-pane="account" data-action="switch-settings-pane" data-pane="account">
             <span data-icon="user" data-size="16"></span>
@@ -634,59 +619,6 @@ bun run server.js</pre>
               <span class="setting-toggle-switch" id="themeSwitch"></span>
             </div>
 
-          </div>
-        </div>
-        <div class="settings-pane" id="settingsPane-ai">
-          <h3 id="settingsPaneAiTitle">AI</h3>
-          <div class="setting-group">
-            <div class="setting-group-label">
-              <svg class="nvidia-logo" viewBox="0 0 164 30" height="14" xmlns="http://www.w3.org/2000/svg"><path d="M96.374,5.707L96.376,25.367L101.928,25.367L101.928,5.707L96.374,5.707ZM52.697,5.681L52.697,25.367L58.3,25.367L58.3,10.086L62.67,10.1C64.107,10.1 65.1,10.445 65.793,11.184C66.672,12.12 67.03,13.628 67.03,16.389L67.03,25.367L72.457,25.367L72.457,14.49C72.457,6.727 67.509,5.68 62.668,5.68L52.698,5.68L52.697,5.681ZM105.314,5.708L105.314,25.367L114.32,25.367C119.118,25.367 120.684,24.569 122.377,22.78C123.575,21.524 124.348,18.766 124.348,15.753C124.348,12.99 123.693,10.525 122.551,8.99C120.494,6.245 117.531,5.708 113.106,5.708L105.314,5.708ZM110.822,9.988L113.209,9.988C116.672,9.988 118.912,11.544 118.912,15.579C118.912,19.616 116.672,21.171 113.209,21.171L110.822,21.171L110.822,9.988ZM88.369,5.708L83.735,21.288L79.295,5.709L73.302,5.708L79.642,25.367L87.645,25.367L94.036,5.708L88.369,5.708ZM126.932,25.367L132.485,25.367L132.485,5.709L126.93,5.708L126.932,25.367ZM142.496,5.715L134.743,25.36L140.218,25.36L141.445,21.888L150.62,21.888L151.781,25.36L157.725,25.36L149.913,5.714L142.496,5.715ZM146.1,9.3L149.464,18.504L142.631,18.504L146.101,9.3L146.1,9.3Z" fill="currentColor"/><path d="M16.889,8.985L16.889,6.28C17.151,6.26 17.417,6.247 17.687,6.238C25.087,6.006 29.942,12.597 29.942,12.597C29.942,12.597 24.698,19.879 19.076,19.879C18.333,19.882 17.594,19.764 16.889,19.529L16.889,11.325C19.769,11.673 20.349,12.945 22.081,15.833L25.933,12.585C25.933,12.585 23.121,8.897 18.381,8.897C17.866,8.897 17.373,8.933 16.889,8.985ZM16.889,0.047L16.889,4.09C17.154,4.069 17.42,4.052 17.687,4.042C27.977,3.696 34.682,12.482 34.682,12.482C34.682,12.482 26.982,21.846 18.959,21.846C18.224,21.846 17.535,21.778 16.889,21.663L16.889,24.161C17.442,24.231 18.015,24.273 18.613,24.273C26.078,24.273 31.477,20.461 36.705,15.948C37.572,16.642 41.121,18.331 41.85,19.071C36.879,23.231 25.295,26.586 18.727,26.586C18.113,26.584 17.5,26.552 16.889,26.49L16.889,30L45.264,30L45.264,0.047L16.889,0.047ZM16.889,19.529L16.889,21.662C9.984,20.432 8.067,13.254 8.067,13.254C8.067,13.254 11.383,9.58 16.889,8.985L16.889,11.325L16.878,11.324C13.988,10.977 11.731,13.677 11.731,13.677C11.731,13.677 12.996,18.221 16.889,19.529ZM4.625,12.943C4.625,12.943 8.717,6.903 16.889,6.28L16.889,4.088C7.838,4.815 0,12.48 0,12.48C0,12.48 4.439,25.313 16.889,26.488L16.889,24.16C7.753,23.011 4.625,12.943 4.625,12.943Z" fill="#76b900"/></svg>
-            </div>
-            <div class="setting-item">
-              <label for="settingsNvidiaKey" id="settingsNvidiaKeyLabel">API Key</label>
-              <div class="settings-api-key-row">
-                <input type="password" id="settingsNvidiaKey" placeholder="nvapi-..." autocomplete="off" spellcheck="false">
-                <button type="button" class="settings-key-btn" id="settingsToggleVis" data-action="toggle-nvidia-key-visibility" title="Show/Hide">
-                  <span data-icon="eye" data-size="16"></span>
-                </button>
-                <button type="button" class="settings-key-btn settings-key-save" id="settingsSaveKey" data-action="save-nvidia-key">
-                  <span data-icon="check" data-size="16"></span>
-                </button>
-              </div>
-              <p class="setting-hint" id="settingsNvidiaKeyHint">Used for AI-powered features. Stored in your database.</p>
-            </div>
-            <div class="setting-item">
-              <label for="settingsNvidiaModel" id="settingsNvidiaModelLabel">Model</label>
-              <select id="settingsNvidiaModel" class="settings-select" data-action="handle-model-change">
-                <option value="meta/llama-3.1-8b-instruct">meta/llama-3.1-8b-instruct</option>
-              </select>
-              <div id="settingsCustomModelRow" class="settings-api-key-row" style="display:none;margin-top:6px">
-                <input type="text" id="settingsCustomModel" class="settings-select" placeholder="org/model-name" spellcheck="false">
-                <button type="button" class="settings-key-btn settings-key-save" data-action="apply-custom-model">
-                  <span data-icon="check" data-size="16"></span>
-                </button>
-              </div>
-            </div>
-            <div class="setting-item nvidia-test-section">
-              <label id="settingsTestLabel">Test</label>
-              <textarea id="settingsTestPrompt" class="settings-textarea" rows="2">What is the capital of France?</textarea>
-              <div class="settings-test-actions">
-                <button type="button" class="settings-test-btn" data-action="test-nvidia-api" id="settingsTestBtn">
-                  <span data-icon="play" data-size="14"></span>
-                  <span id="settingsTestBtnLabel">Query</span>
-                </button>
-              </div>
-              <div id="settingsTestResult" class="settings-test-result" style="display:none"></div>
-            </div>
-            <div class="setting-item nvidia-usage-section">
-              <label id="settingsUsageLabel">Usage (24h)</label>
-              <div id="nvidiaUsageStats" class="nvidia-usage-stats"></div>
-              <button type="button" class="settings-usage-toggle" id="nvidiaUsageToggle" data-action="toggle-nvidia-usage" style="display:none">
-                <span data-icon="chevron-down" data-size="14"></span>
-                <span id="nvidiaUsageToggleLabel">By model</span>
-              </button>
-              <div id="nvidiaUsageDetail" class="nvidia-usage-detail" style="display:none"></div>
-            </div>
           </div>
         </div>
         <div class="settings-pane" id="settingsPane-data">
@@ -758,10 +690,6 @@ bun run server.js</pre>
             </div>
           </div>
         </div>
-        <div class="settings-pane" id="settingsPane-agents">
-          <h3 id="settingsPaneAgentsTitle">Agents</h3>
-          <div id="agentsPaneContent"></div>
-        </div>
         <div class="settings-pane" id="settingsPane-account">
           <h3 id="settingsPaneAccountTitle">Account</h3>
           <div class="setting-group danger-zone">
@@ -777,32 +705,7 @@ bun run server.js</pre>
     </div>
   </div>
 
-  <!-- ===== AUTH PROMPT ===== -->
-  <div class="modal-overlay" id="authPromptOverlay" data-action="overlay-close-auth">
-    <div class="modal auth-prompt-modal">
-      <div class="auth-prompt-content" id="authPromptContent"></div>
-    </div>
-  </div>
-
   <div class="toast" id="toast"></div>
-</div>
-
-<!-- Supabase migration modal (outside #gate for z-index independence) -->
-<div class="modal-overlay" id="sbMigrationOverlay" style="z-index:10001">
-  <div class="modal sb-migration-modal">
-    <div class="sb-migration-content">
-      <div class="auth-icon" id="sbMigrationIcon"></div>
-      <h3 data-i18n="migration.title">Supabase support has been removed</h3>
-      <p class="auth-hint" data-i18n="migration.description">DeLaClaw no longer supports Supabase as a backend. You can download your data as a backup file, or migrate it directly to Google Drive.</p>
-      <p class="auth-hint sb-migration-sharing-warn" id="sbMigrationSharingWarn" style="display:none" data-i18n="migration.sharing_warning">Your Supabase data includes shared groups. Sharing is not available on Google Drive — shared items will be imported as personal items.</p>
-      <div class="sb-migration-actions">
-        <button type="button" class="settings-data-btn" id="sbMigrationDownload" data-i18n="migration.download_backup">Download your data</button>
-        <button type="button" class="settings-data-btn sb-migration-drive-btn" id="sbMigrationDrive" data-i18n="migration.migrate_drive">Migrate to Google Drive</button>
-      </div>
-      <p class="sb-migration-status" id="sbMigrationStatus"></p>
-      <a href="#" class="sb-migration-back" id="sbMigrationBack" data-i18n="migration.back">← Back to login</a>
-    </div>
-  </div>
 </div>
 
 <script type="module" src="js/main.js"></script>

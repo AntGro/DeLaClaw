@@ -343,6 +343,23 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     return v.includes('@') ? v.split('@')[0] : v;
   }
 
+  async function sha256Hex(str) {
+    const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(str)));
+    return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  /** Opaque immutable member ID — random 16 hex chars, not derivable from the email. */
+  function newMemberId() {
+    const bytes = crypto.getRandomValues(new Uint8Array(8));
+    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  /** Deterministic hash of a lowercased email — matches a joiner to their pending invite
+   *  without ever persisting the raw email in group.json. */
+  async function emailHash(email) {
+    return (await sha256Hex(String(email || '').toLowerCase())).slice(0, 16);
+  }
+
   function legacyMemberIdFromEmail(groupId, email) {
     let hash = 0;
     const seed = `${groupId}:${String(email || '').toLowerCase()}`;
@@ -427,9 +444,22 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     const entry = _groups.get(groupId);
     if (!entry) return null;
     if (!entry.group?.members?.length) return null;
-    return entry.group.members.find(m => m.memberId === `drive-user-${user.email.toLowerCase()}`)
+    const eh = await emailHash(user.email);
+    return entry.group.members.find(m => m.emailHash && m.emailHash === eh)
+      // Legacy fallbacks (pre-hashed-ID rows): match old derived IDs or the email hint.
+      || entry.group.members.find(m => m.memberId === `drive-user-${user.email.toLowerCase()}`)
       || entry.group.members.find(m => m.emailHint && m.emailHint === fallbackDisplayName(user.email))
       || null;
+  }
+
+  /** Throw unless the current user is the group's creator. */
+  async function assertCreator(groupId) {
+    const e = _groups.get(groupId);
+    if (!e) throw new Error(`Group ${groupId} not loaded`);
+    const me = await getCurrentMemberInternal(groupId);
+    if (!me || (me.role !== 'creator' && me.memberId !== e.group.created_by)) {
+      throw new Error('Only the group creator can do this');
+    }
   }
 
   function publicMember(member) {
@@ -698,7 +728,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       const groupId = crypto.randomUUID().slice(0, 8);
 
       const subfolder = await driveCreateFolder(tok, `${GROUP_PREFIX}${groupId}`, rootId);
-      const creatorMemberId = `drive-user-${user.email.toLowerCase()}`;
+      const creatorMemberId = newMemberId();
       const group = {
         id: groupId,
         name,
@@ -710,6 +740,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
             role: 'creator',
             status: 'joined',
             displayName: user.name || fallbackDisplayName(user.email),
+            emailHash: await emailHash(user.email),
             joinedAt: new Date().toISOString(),
           },
         ],
@@ -847,29 +878,32 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     // ─── Membership ───
 
-    /** Invite a user. Drive uses the email only for the permission grant; group.json stores permission id + label. */
+    /** Invite a user. Creator-only. Drive uses the email only for the permission grant;
+     *  group.json stores an opaque member id + email hash + label, never the raw email. */
     async inviteUser(groupId, inviteTarget) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
+      await assertCreator(groupId);
       const tok = await token();
       const email = String(inviteTarget || '').trim();
       if (!email) throw new Error('Invite target required');
 
-      // Grant Drive editor access on the subfolder. The returned permission id becomes the member id.
+      // Grant Drive editor access on the subfolder. The email is permission material only.
       const perm = await driveShareWithUser(tok, e.folderId, email, 'writer');
-      const memberId = `drive-perm-${perm.id}`;
+      const memberId = newMemberId();
+      const eh = await emailHash(email);
 
       // Update member list if not already present. Do not persist raw email in group.json.
-      if (!e.group.members.find(m => m.memberId === memberId)) {
+      if (!e.group.members.find(m => m.emailHash === eh)) {
         e.group.members.push({
           memberId,
           role: 'member',
           status: 'pending',
-          displayName: fallbackDisplayName(email),
+          displayName: null,
           invitedLabel: fallbackDisplayName(email),
+          emailHash: eh,
           joinedAt: null,
           drivePermissionId: perm.id,
-          emailHint: fallbackDisplayName(email),
         });
         await saveGroup(groupId);
       }
@@ -878,10 +912,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return { memberId };
     },
 
-    /** Remove a member from a group. Revokes Drive access + updates group.json. */
+    /** Remove a member from a group. Creator-only. Revokes Drive access + updates group.json. */
     async removeUser(groupId, memberId) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
+      await assertCreator(groupId);
       const tok = await token();
       const member = e.group.members.find(m => m.memberId === memberId);
       if (!member) throw new Error('Member not found');
@@ -895,23 +930,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       emit('member-removed', { groupId, memberId });
     },
 
-    /** Leave a group you don't own (removes your own access). */
-    async leaveGroup(groupId) {
-      const user = await ensureUser();
-      const e = _groups.get(groupId);
-      if (!e) return;
-
-      // Remove self from member list
-      const currentMember = await getCurrentMemberInternal(groupId);
-      if (currentMember) e.group.members = e.group.members.filter(m => m.memberId !== currentMember.memberId);
-      await saveGroup(groupId);
-
-      // Note: we can't revoke our own Drive permission via the API easily,
-      // but removing from group.json is sufficient — the polling will stop.
-      _groups.delete(groupId);
-      emit('group-left', { groupId });
-    },
-
+    /** Update your own display name (pseudo) in a group. */
     async updateMyDisplayName(groupId, newName) {
       const e = _groups.get(groupId);
       if (!e) return;
@@ -1262,9 +1281,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     },
 
     /** Join a shared group using explicit file IDs (from Picker or direct access).
+     *  Requires a matching pending invite (by email hash) — Drive access alone is not enough.
      *  @param {string} folderId — the shared subfolder ID
-     *  @param {Object} fileIds — { group: fileId, todos: fileId, habits: fileId, lists: fileId } */
-    async joinWithFileIds(folderId, fileIds) {
+     *  @param {Object} fileIds — { group: fileId, todos: fileId, habits: fileId, lists: fileId }
+     *  @param {Object} [opts] — { displayName } pseudo chosen by the joiner */
+    async joinWithFileIds(folderId, fileIds, opts = {}) {
       const tok = await token();
       const user = await ensureUser();
 
@@ -1286,25 +1307,16 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // Load group data using explicit file IDs
       await loadGroupWithIds(folderId, groupId, fileIds);
 
-      // Mark self as joined in group.json without storing raw email.
+      // Pending-invite gate: only a member with a matching pending invite may join.
       const e = _groups.get(groupId);
       if (e) {
-        const selfId = `drive-user-${user.email.toLowerCase()}`;
-        let member = e.group.members.find(m => m.memberId === selfId);
-        if (!member) member = e.group.members.find(m => m.status === 'pending' && m.emailHint === fallbackDisplayName(user.email));
-        if (member) {
-          member.status = 'joined';
-          member.joinedAt = new Date().toISOString();
-          member.displayName = user.name || fallbackDisplayName(user.email);
-        } else {
-          e.group.members.push({
-            memberId: selfId,
-            role: 'member',
-            status: 'joined',
-            displayName: user.name || fallbackDisplayName(user.email),
-            joinedAt: new Date().toISOString(),
-          });
-        }
+        const eh = await emailHash(user.email);
+        const member = e.group.members.find(m => m.status === 'pending' && m.emailHash === eh);
+        if (!member) throw new Error('No pending invite for this account');
+        member.status = 'joined';
+        member.joinedAt = new Date().toISOString();
+        const pseudo = String(opts?.displayName || '').trim();
+        member.displayName = pseudo || user.name || fallbackDisplayName(user.email);
         await saveGroup(groupId);
       }
 

@@ -147,7 +147,7 @@ export async function renderSharingPane() {
         <div class="sharing-group-actions">
           ${group.folderId ? `<a class="sharing-action-btn sharing-drive-link" href="https://drive.google.com/drive/folders/${encodeURIComponent(group.folderId)}" target="_blank" rel="noopener" title="${t('sharing.open_drive_folder')}">${LOGOS.googledrive(14)} ${t('sharing.open_drive_folder')}</a>` : ''}
           ${inviteCode ? `<button class="sharing-action-btn sharing-copy-link-btn" data-action="sharing-copy-code" data-group-id="${esc(group.id)}" title="${t('sharing.copy_code')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('key', 14)} ${t('sharing.copy_code')}</button>` : ''}
-          ${!isCreator ? (isJoined ? `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-unjoin-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>` : `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-leave-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>`) : ''}
+          ${!isCreator ? `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-unjoin-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>` : ''}
         </div>
       </div>
       <div class="sharing-members">`;
@@ -348,26 +348,6 @@ async function sharingRemoveMember(groupId, memberId) {
         renderSharingPane();
       } catch (e) { showToast(e.message, 'error'); }
     }
-  );
-}
-
-async function sharingLeaveGroup(groupId) {
-  showConfirmAction(
-    t('sharing.leave'),
-    t('sharing.leave_confirm'),
-    async (keepCopies) => {
-      try {
-        if (keepCopies) {
-          await _convertGroupItemsToPersonal(groupId);
-        }
-        await state.sharing.leaveGroup(groupId);
-        showToast(t('sharing.left_group'), 'info');
-        renderSharingPane();
-        document.dispatchEvent(new CustomEvent('sharing-changed'));
-      } catch (e) { showToast(e.message, 'error'); }
-    },
-    null,
-    { toggleLabel: t('sharing.leave_keep_copies') }
   );
 }
 
@@ -643,7 +623,7 @@ export async function handleJoinCode(rawCode, opts = {}) {
   const group = await state.sharing.tryDirectJoin(connectionRef);
   if (group) {
     if (group._pendingJoin) {
-      showJoinConfirmModal(group);
+      showJoinConfirmModal(group, (name) => state.sharing.joinWithFileIds(null, { displayName: name }));
     } else {
       showToast(t('sharing.joined_group', group.name || ''), 'success');
       renderSharingPane();
@@ -712,16 +692,18 @@ async function sharingJoinCodeSubmit() {
   }
 }
 
-function showJoinConfirmModal(group) {
+function showJoinConfirmModal(group, onConfirm) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingJoinConfirmModal';
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   const ownerLine = group._creatorName
     ? `<p class="sharing-join-owner">${lucideIcon('user', 14)} ${t('sharing.join_confirm_owner', esc(group._creatorName))}</p>` : '';
+  const hintLine = group.name
+    ? `<p>${t('sharing.join_confirm_hint', esc(group.name))}</p>` : '';
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('users', 20)} ${t('sharing.join_confirm_title')}</h2>
-    <p>${t('sharing.join_confirm_hint', esc(group.name || ''))}</p>
+    ${hintLine}
     ${ownerLine}
     <input type="text" id="joinDisplayName" class="sharing-invite-input"
       placeholder="${t('sharing.join_confirm_name')}"
@@ -741,13 +723,14 @@ function showJoinConfirmModal(group) {
     if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
     try {
       const displayName = document.getElementById('joinDisplayName')?.value.trim() || '';
-      await state.sharing.joinWithFileIds(null, { displayName });
+      const joined = await onConfirm(displayName);
       overlay.remove();
-      showToast(t('sharing.joined_group', group.name || ''), 'success');
+      document.getElementById('sharingJoinModal')?.remove();
+      showToast(t('sharing.joined_group', joined?.name || group.name || ''), 'success');
       renderSharingPane();
     } catch (e) {
       console.warn('join confirm failed:', e);
-      if (errEl) { errEl.textContent = t('sharing.join_failed'); errEl.style.display = ''; }
+      if (errEl) { errEl.textContent = e.message || t('sharing.join_failed'); errEl.style.display = ''; }
       if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}`; }
     }
   });
@@ -856,10 +839,13 @@ async function sharingOpenJoinPicker(folderId) {
       return;
     }
 
-    const group = await state.sharing.joinWithFileIds(folderId, fileIds);
-    document.getElementById('sharingJoinModal')?.remove();
-    showToast(t('sharing.joined_group', group?.name || ''), 'success');
-    renderSharingPane();
+    // Ask the joiner to choose their pseudo, then join (requires a pending invite).
+    const me = await state.sharing.getCurrentUser().catch(() => null);
+    showJoinConfirmModal(
+      { name: '', _suggestedName: me?.displayName || '' },
+      (name) => state.sharing.joinWithFileIds(folderId, fileIds, { displayName: name }),
+    );
+    if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
   } catch (e) {
     showJoinError(e.message || t('sharing.join_failed'));
     if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
@@ -1196,7 +1182,6 @@ window.sharingCreateGroup = sharingCreateGroup;
 window.sharingCreateGroupSubmit = sharingCreateGroupSubmit;
 window.sharingInvite = sharingInvite;
 window.sharingRemoveMember = sharingRemoveMember;
-window.sharingLeaveGroup = sharingLeaveGroup;
 window.sharingUnjoinGroup = sharingUnjoinGroup;
 window.sharingEditMyName = sharingEditMyName;
 window.sharingDeleteGroup = sharingDeleteGroup;

@@ -1021,6 +1021,29 @@ test('sharing member identity is memberId-based and agent-safe', () => {
     'sharing-drive.js must not write raw invite email into group.json members');
 });
 
+test('sharing create-group modal locks UI and reports file progress', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+
+  assert(drive.includes('async createGroup(name, onProgress)'),
+    'sharing-drive.js createGroup must accept an onProgress callback');
+  assert(drive.includes("onProgress?.({ step: 'itemFiles', done: doneFiles, total: totalFiles })"),
+    'sharing-drive.js must report per-file progress as each upload resolves');
+  assert(sui.includes('sharingCreateGroupCancelBtn') && sui.includes('cancelBtn.disabled = true'),
+    'sharing-ui.js must disable the Cancel button while the group is being created');
+  assert(sui.includes('!overlay.dataset.creating'),
+    'sharing-ui.js must block backdrop dismissal while the group is being created');
+  assert(sui.includes('sharingCreateProgress') && sui.includes('sharingCreateProgressFill'),
+    'sharing-ui.js must render a progress bar in the create-group modal');
+  assert(sui.includes("t('sharing.creating_files', ev.done, ev.total)"),
+    'sharing-ui.js must show the determinate file count during creation');
+  for (const key of ['creating_folder', 'writing_group', 'creating_files']) {
+    assert(i18n.includes(key + ':'),
+      `i18n.js must define the sharing.${key} progress string`);
+  }
+});
+
 test('sharing departure is unjoin-only (no leaveGroup)', () => {
   const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');

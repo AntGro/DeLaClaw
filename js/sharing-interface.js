@@ -45,7 +45,7 @@ export const SHARING_INTERFACE = {
   getCurrentMemberId:       'fn',   // (groupId) => Promise<string|null>
 
   // ── Groups — lifecycle ──────────────────────────────────────
-  createGroup:              'fn',   // (name: string) => Promise<Group>
+  createGroup:              'fn',   // (name: string, onProgress?: (ev: {step, done, total}) => void) => Promise<Group>
   loadAll:                  'fn',   // () => Promise<Group[]>
   deleteGroup:              'fn',   // (groupId) => Promise<void> — creator-only, throws otherwise
 

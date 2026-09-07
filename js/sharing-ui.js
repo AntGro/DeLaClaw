@@ -205,13 +205,17 @@ async function sharingCreateGroup() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingCreateGroupModal';
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('click', e => { if (e.target === overlay && !overlay.dataset.creating) overlay.remove(); });
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('users', 20)} ${t('sharing.create_group')}</h2>
     <label>${t('sharing.group_name')}</label>
     <input type="text" id="sharingNewGroupName" placeholder="${t('sharing.group_name_placeholder')}" maxlength="60" data-action="sharing-create-group-on-enter">
+    <div class="drive-progress" id="sharingCreateProgress" hidden>
+      <p class="drive-progress-text" id="sharingCreateProgressText"></p>
+      <div class="drive-progress-bar"><div class="drive-progress-fill" id="sharingCreateProgressFill"></div></div>
+    </div>
     <div class="modal-actions">
-      <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingCreateGroupModal">${t('common.cancel')}</button>
+      <button class="modal-cancel" id="sharingCreateGroupCancelBtn" data-action="close-modal" data-modal-id="sharingCreateGroupModal">${t('common.cancel')}</button>
       <button class="modal-save" id="sharingCreateGroupBtn" data-action="sharing-create-group-submit">${t('common.create')}</button>
     </div>
   </div>`;
@@ -220,19 +224,46 @@ async function sharingCreateGroup() {
 }
 
 async function sharingCreateGroupSubmit() {
+  const overlay = document.getElementById('sharingCreateGroupModal');
   const input = document.getElementById('sharingNewGroupName');
   const name = input?.value.trim();
-  if (!name) return;
+  if (!name || overlay?.dataset.creating) return;
   const btn = document.getElementById('sharingCreateGroupBtn');
+  const cancelBtn = document.getElementById('sharingCreateGroupCancelBtn');
+  const progressEl = document.getElementById('sharingCreateProgress');
+  const progressText = document.getElementById('sharingCreateProgressText');
+  const progressFill = document.getElementById('sharingCreateProgressFill');
+  // Lock the modal while the group files are being created
+  overlay.dataset.creating = '1';
+  if (input) input.disabled = true;
   if (btn) { btn.disabled = true; btn.classList.add('loading'); btn.textContent = t('sharing.creating_group'); }
+  if (cancelBtn) cancelBtn.disabled = true;
+  if (progressEl) progressEl.hidden = false;
+  const renderProgress = (ev) => {
+    if (!ev) return;
+    if (progressText) {
+      if (ev.step === 'itemFiles' && ev.total > 0) progressText.textContent = t('sharing.creating_files', ev.done, ev.total);
+      else if (ev.step === 'folder') progressText.textContent = t('sharing.creating_folder');
+      else if (ev.step === 'groupFile') progressText.textContent = t('sharing.writing_group');
+    }
+    if (progressFill) {
+      progressFill.style.width = (ev.step === 'itemFiles' && ev.total > 0)
+        ? `${Math.round((ev.done / ev.total) * 100)}%`
+        : '40%';
+    }
+  };
   try {
-    const group = await state.sharing.createGroup(name);
-    document.getElementById('sharingCreateGroupModal')?.remove();
+    const group = await state.sharing.createGroup(name, renderProgress);
+    overlay.remove();
     showToast(t('sharing.group_created'), 'success');
     renderSharingPane();
   } catch (e) {
     showToast(e.message, 'error');
+    delete overlay.dataset.creating;
+    if (input) input.disabled = false;
     if (btn) { btn.disabled = false; btn.classList.remove('loading'); btn.textContent = t('common.create'); }
+    if (cancelBtn) cancelBtn.disabled = false;
+    if (progressEl) progressEl.hidden = true;
   }
 }
 

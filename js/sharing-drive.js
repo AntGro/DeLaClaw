@@ -721,12 +721,18 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     // ─── Groups ───
 
     /** Create a new shared group. Returns the group object. */
-    async createGroup(name) {
+    /**
+     * Create a group folder with group.json, item files and placeholder files.
+     * onProgress (optional) receives { step, done, total } where step is one of
+     * 'folder' | 'groupFile' | 'itemFiles'; itemFiles reports per-file progress.
+     */
+    async createGroup(name, onProgress) {
       const user = await ensureUser();
       const rootId = await ensureRoot();
       const tok = await token();
       const groupId = crypto.randomUUID().slice(0, 8);
 
+      onProgress?.({ step: 'folder', done: 0, total: 0 });
       const subfolder = await driveCreateFolder(tok, `${GROUP_PREFIX}${groupId}`, rootId);
       const creatorMemberId = newMemberId();
       const group = {
@@ -747,15 +753,23 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         created_at: new Date().toISOString(),
       };
 
+      onProgress?.({ step: 'groupFile', done: 0, total: 0 });
       const gRes = await driveUpload(tok, subfolder.id, null, 'group.json', group);
 
-      // Create empty per-type files + reserved extras in parallel
+      // Create empty per-type files + reserved extras in parallel,
+      // reporting per-file progress as each upload resolves.
       const allFiles = [
         ...ITEM_TYPES.map(type => ({ key: type, name: `${type}.json` })),
         ...EXTRA_FILES.map(name => ({ key: name, name: `${name}.json` })),
       ];
+      const totalFiles = allFiles.length;
+      let doneFiles = 0;
       const results = await Promise.all(
-        allFiles.map(f => driveUpload(tok, subfolder.id, null, f.name, []))
+        allFiles.map(f => driveUpload(tok, subfolder.id, null, f.name, []).then(r => {
+          doneFiles++;
+          onProgress?.({ step: 'itemFiles', done: doneFiles, total: totalFiles });
+          return r;
+        }))
       );
 
       const typeMeta = {};

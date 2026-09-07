@@ -65,7 +65,7 @@ const GROUP_PREFIX     = 'DeLaClaw-Shared-';
 const POLL_MS          = 15_000;      // 15s — faster than personal (30s)
 const MAX_RETRIES      = 2;
 const ITEM_TYPES       = ['todos', 'habits', 'lists'];
-const EXTRA_COUNT      = 10;
+const EXTRA_COUNT      = 12;
 const EXTRA_FILES      = Array.from({ length: EXTRA_COUNT }, (_, i) => `extra_${i + 1}`);
 
 // ── Drive API helpers (self-contained, no drive.js dependency) ──

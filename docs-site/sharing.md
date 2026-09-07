@@ -4,46 +4,55 @@ Last updated: 2026-09-07
 
 DeLaClaw lets you share TODOs, habits, and list items with other people through sharing groups. This page explains the architecture, data flow, and security model.
 
+This page describes the **target design** — the 14 design decisions made on 2026-09-07 (recorded in the "DeLaClaw design decisions" space, "Drive sharing" tab). Assumption: sharing is not yet exposed, no groups exist in the wild, so there are no backward-compatibility constraints (greenfield). Implementation is pending.
+
 ## Overview
 
-Sharing is **decentralized**: there is no central DeLaClaw server. One user (the **owner**) hosts the shared data on their own backend, and other users (**members**) connect to it via invite codes. The owner's project is the single source of truth for all group data.
+Sharing is **decentralized**: there is no central DeLaClaw server. One user (the **creator**) hosts the shared data in a folder on their own Google Drive, and other users (**members**) connect to it via invite codes. The creator's folder is the single source of truth for all group data.
 
 ```
 ┌──────────────────────────────────────────────────┐
 │                  Sharing group                   │
 │                                                  │
-│  Owner (A)              Member (B)               │
+│  Creator (A)            Member (B)               │
 │  ┌──────────┐           ┌──────────┐             │
 │  │ Personal │           │ Personal │             │
 │  │  tables  │           │  tables  │             │
-│  │  (RLS)   │           │  (own DB)│             │
+│  │ (Drive)  │           │ (Drive)  │             │
 │  └────┬─────┘           └────┬─────┘             │
 │       │                      │                   │
 │       │  direct file         │  shared folder    │
 │       ▼  read/write          ▼  read/write       │
 │  ┌─────────────────────────────────────────┐     │
-│  │         Owner's Drive folder            │     │
+│  │  DeLaClaw-Shared-{groupId}              │     │
+│  │  (creator's Drive)                      │     │
 │  │                                         │     │
-│  │  shared/<group>/meta.json (definitions) │     │
-│  │  shared/<group>/items.json (shared      │     │
-│  │    TODOs/habits/list items)             │     │
+│  │  group.json — members, creator, name    │     │
+│  │  todos/habits/lists.json — item files   │     │
+│  │    (+ deletion tombstones)              │     │
+│  │  revoked.json — removed member IDs      │     │
+│  │  extra_1..12.json — future placeholders │     │
 │  └─────────────────────────────────────────┘     │
 └──────────────────────────────────────────────────┘
 ```
 
 ## Concepts
 
-**Group** — a named container that the owner creates. Each group has its own members, items, and invite codes.
+**Group** — a named container that the creator creates. Each group has its own members, items, and invite codes.
 
 **Invite code** — an opaque `DLC1.` prefixed string that encodes everything a joiner needs: the backend type, the shared folder ID, the group ID, and an optional expiry. Access control comes from Google Drive folder permissions plus a local trusted-contacts allowlist.
 
-**Local pointer** — when a shared item is displayed on a member's device, a minimal row exists in their local database (e.g. a `todos` row with `shared_id` + `shared_group_id` but empty `text`). The real content comes from the owner's `sharing_items` table at sync time.
+**Local pointer** — when a shared item is displayed on a member's device, a minimal row exists in their local database (e.g. a `todos` row with `shared_id` + `shared_group_id` but empty `text`). The real content comes from the creator's item files at sync time.
 
-**Shared category (`__shared__`)** — items received from others land in a protected `__shared__` category/list on the receiver's side. Items you share yourself stay in their current category.
+**Shared category (`__shared__`)** — items received from others always land in a protected `__shared__` category/list on the receiver's side. Items you share yourself stay in their current category.
+
+**Tombstone** — when a shared item is deleted, a `{id, deleted_at}` tombstone is appended to the item file. The union merge skips tombstoned IDs, so a conflicting concurrent edit cannot resurrect the deleted item. The creator's poll prunes tombstones older than 30 days.
+
+**revoked.json** — a notice file in the shared folder listing removed member IDs. A removed member keeps read-only access to this one file after losing access to everything else, so their client can distinguish "I was removed" from a flaky connection or a deleted group.
 
 ## Backend-agnostic design
 
-All sharing logic goes through an adapter interface (`sharing-interface.js`). Views (`todos.js`, `habits.js`, `lists.js`) never talk directly to a backend — they call `state.sharing.addItem()`, `state.sharing.leaveGroup()`, etc.
+All sharing logic goes through an adapter interface (`sharing-interface.js`). Views (`todos.js`, `habits.js`, `lists.js`) never talk directly to a backend — they call `state.sharing.addItem()`, `state.sharing.unjoinGroup()`, etc.
 
 ```
 ┌──────────────────────────┐
@@ -88,28 +97,31 @@ My Drive/                                      My Drive/
 │                                                  {folderId, groupId, fileIds}
 └── DeLaClaw-Shared/           (shared root)
     └── DeLaClaw-Shared-{groupId}/
-        ├── group.json         ← members, creator, name
-        ├── todos.json         ← item files (one per type)
-        ├── habits.json
+        ├── group.json         ← members (hashed IDs + pseudos), creator, name
+        ├── todos.json         ← item files: {items: [...],
+        ├── habits.json            tombstones: [{id, deleted_at}]}
         ├── lists.json
-        └── extra_1..10.json   ← empty placeholders, pre-authorize
+        ├── revoked.json       ← removed member IDs; read-only
+        │                         for removed members
+        └── extra_1..12.json   ← empty placeholders, pre-authorize
                                   future item types (avoids sending every
                                   member back through the Drive Picker)
 ```
 
 - **Invite code**: `DLC1.<base64url({v:1, b:'googledrive', f:<folderId>})>` — one group-level code, no per-member tokens.
 - **Access control**: Drive folder permissions (writer) plus the trusted-contacts allowlist; `group.json` holds the member list. No RPC layer, no token hashing.
-- **Sync**: every member polls every 15 s, keyed on each file's `modifiedTime`. Concurrent writes use ETags with up to two conflict retries; the merge is last-write-wins by union of item IDs.
-- **Drive scopes**: with `drive.file` scope the joiner grants access through the Google Picker (only the selected files); with full `drive` scope the folder is listed directly.
+- **Member identity**: member IDs are opaque hashes (never raw emails); each member picks a pseudo, the hash stays immutable. The pending invite stores an `emailHash` so the joiner can match their invite without exposing the email.
+- **Sync**: every member polls every 15 s, keyed on each file's `modifiedTime`. Concurrent writes use ETags with up to two conflict retries; the merge is a union of item IDs that honors deletion tombstones.
+- **Drive scopes**: with `drive.file` scope the joiner grants access through the Google Picker (only the selected files, revoked.json included); with full `drive` scope the folder is listed directly.
 
 ### Local pointers and per-member buckets
 
 Shared items do **not** force the same buckets on every member. Each member's personal database holds a **pointer row** per shared item (`shared_id` + `shared_group_id`, with empty `text`/`name`); the live content is overlaid from the group's item files at render time.
 
 - Items **you** share stay in your current category with a shared badge.
-- Items **received** from others land in the protected `__shared__` category — and like any other row, the pointer can then be moved into one of your own categories.
+- Items **received** from others always land in the protected `__shared__` category — and like any other row, the pointer can then be moved into one of your own categories.
 - Ordering (`sort_order`) is per-member and never synced.
-- When a shared item disappears remotely, the next sync deletes the local pointer; when a whole group disappears, a confirmation dialog offers to unlink the pointers or keep retrying.
+- When a shared item disappears remotely, the next sync deletes the local pointer; when a whole group disappears, a confirmation dialog offers to unlink the pointers or keep retrying (it re-prompts until resolved).
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'primaryColor': '#ffffff', 'primaryBorderColor': '#cbd5e1', 'primaryTextColor': '#0f172a', 'lineColor': '#334155'}}}%%
@@ -143,26 +155,27 @@ sequenceDiagram
 
     CA->>CD: findOrCreate DeLaClaw-Shared/
     CA->>SF: create subfolder DeLaClaw-Shared-{id}
-    CA->>SF: upload group.json + item files<br/>(todos/habits/lists.json)<br/>+ 10 empty extra_N.json placeholders
-    CA->>SF: share folder with B@email (writer)
-    CA->>SF: group.json += member drive-perm-{permId}, pending
+    CA->>SF: upload group.json + item files<br/>(todos/habits/lists.json)<br/>+ revoked.json<br/>+ 12 empty extra_N.json placeholders
+    Note over CA,SF: creator-only: inviteUser throws<br/>unless the caller is the creator
+    CA->>SF: share folder with B@email (writer)<br/>+ revoked.json (reader)
+    CA->>SF: group.json += member<br/>{hashId, pending, emailHash, pseudo: null}
     CA-->>JA: DLC1 invite code {b:'googledrive', f:folderId}
     Note over CA,JA: sent out of band — chat, email, …
     JA->>JA: paste code → decode → folderId
-    JA->>SF: Google Picker → select shared files
+    JA->>SF: Google Picker → select shared files<br/>(revoked.json included)
     Note over JA,SF: Picker grants drive.file access<br/>to only the selected files —<br/>placeholders pre-authorize future item types
     JA->>SF: download group.json + item files
-    JA->>SF: write self as joined (drive-user-{email})
+    JA->>SF: match pending row by emailHash<br/>no match → join rejected
+    JA->>SF: pending → joined, set chosen pseudo
     JA->>JD: save DeLaClaw/joined-groups.json
-    Note over JD: pointer only:<br/>{folderId, groupId, fileIds}
+    Note over JD: pointer only:<br/>{folderId, groupId, fileIds}<br/>fileIds include revoked.json
     JA->>JA: startPolling (15s)
     CA->>SF: next poll (≤15s): group.json modified?
     SF-->>CA: changed → re-download
-    CA->>CA: emit group-changed → member list re-renders
-    Note over CA: invitee flips pending → joined<br/>no push, no toast — silent update
+    CA->>CA: toast "B joined" + member list re-renders
 ```
 
-Join awareness is passive: the joiner's write to `group.json` bumps its `modifiedTime`; the creator's next poll (≤ 15 s) re-downloads it and the member list re-renders with the invitee flipped from pending to joined.
+Joining requires two gates: Drive access to the folder (the join must download `group.json`) **and** a matching pending invite (by `emailHash`). Drive access alone is not enough.
 
 #### Create an item (creator and member)
 
@@ -211,12 +224,12 @@ sequenceDiagram
     end
 
     MA->>SF: updateItem — rename<br/>merge changes + updated_at
-    MA->>SF: completeItem — done=true<br/>done_by=[memberId], done_at=now
+    MA->>SF: completeItem — done=true<br/>done_by=[hashId], done_at=now
     MA->>SF: addSharedHabitCompletion —<br/>completions += {completed_at, note}
     OA->>SF: next poll (≤15s): item file modified?
     SF-->>OA: changed → re-download
     OA->>OA: sharing-changed → sync + refresh
-    Note over OA: attribution = stable memberId + timestamp<br/>(done_by / completion entries)
+    Note over OA: attribution = stable hashId + timestamp<br/>(done_by / completion entries)
 ```
 
 #### Delete an item
@@ -237,15 +250,18 @@ sequenceDiagram
     participant OD as Other member's Drive
     end
 
-    MA->>SF: deleteItem — splice from item file<br/>+ ETag-guarded write
+    MA->>SF: deleteItem — splice from item file<br/>+ append {id, deleted_at} tombstone<br/>+ ETag-guarded write
     OA->>SF: next poll (≤15s): item file modified?
     SF-->>OA: changed → re-download
     OA->>OD: syncShared*: shared_id gone remotely →<br/>delete local pointer
     OA->>OA: refresh → item disappears
-    Note over MA,OA: union merge has no tombstones —<br/>a conflicting concurrent edit<br/>can resurrect the deleted item
+    Note over MA,OA: union merge skips tombstoned IDs —<br/>a conflicting concurrent edit<br/>cannot resurrect the deleted item
+    Note over MA,OA: creator's poll prunes tombstones<br/>older than 30 days<br/>(residual risk: a member offline >30 days<br/>with pending edits can still resurrect<br/>via the 412 conflict merge)
 ```
 
-#### Member leaves / unjoins
+#### Member unjoins
+
+`leaveGroup` is removed — `unjoinGroup` is the only leave path.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
@@ -259,28 +275,13 @@ sequenceDiagram
     participant SF as DeLaClaw-Shared-{id}
     end
 
-    rect rgb(240,253,244)
-    Note over MA,SF: leaveGroup — stop syncing, keep the pointer
-    MA->>MA: confirm dialog: keep copies?
-    alt keep copies
-    MA->>MD: pointers → personal items<br/>(__shared__ items → General)
-    end
-    MA->>SF: remove self from group.json, save
-    Note over MA,SF: own Drive permission cannot<br/>be self-revoked via the API
-    MA->>MA: drop group, emit group-left<br/>polling stops
-    Note over MA,MD: joined-groups.json pointer is KEPT —<br/>the group may be reloaded later
-    end
-
-    rect rgb(254,242,242)
-    Note over MA,SF: unjoinGroup — full detach
     MA->>MA: confirm dialog: keep copies?
     alt keep copies
     MA->>MD: pointers → personal items<br/>(__shared__ items → General)
     end
     MA->>SF: best-effort: remove self from group.json
     MA->>MD: delete joined-groups.json entry
-    MA->>MA: drop group, emit group-left
-    end
+    MA->>MA: drop group, emit group-left<br/>polling stops
 ```
 
 #### Creator removes a member
@@ -300,15 +301,28 @@ sequenceDiagram
     participant MD as Member's Drive
     end
 
-    CA->>SF: driveRemovePermission(permId)
+    CA->>CA: verify caller is the creator (else throw)<br/>member UI for invite/remove is hidden from non-creators
+    CA->>SF: reassign removed member's items:<br/>created_by → creator
+    CA->>SF: revoked.json += member hashId
+    CA->>SF: driveRemovePermission(folderPermId)<br/>reader grant on revoked.json remains
+    Note over CA,SF: revocation is not atomic —<br/>permissions are removed one by one
     CA->>SF: group.json −= member row, save
     CA->>CA: emit member-removed
-    MA->>SF: next poll: group.json → 404 (access revoked)
-    Note over MA,SF: 3 consecutive 404s →<br/>purge group + joined-groups.json entry
-    MA->>MA: sharing-orphan-detected → dialog:<br/>unlink pointers or keep retrying
+    MA->>SF: next poll: folder → 404
+    MA->>SF: fetch revoked.json by stored fileId
+    alt own hashId present
+    MA->>MA: explicit "removed" state →<br/>stop polling, purge group + pointer
+    MA->>MA: orphan dialog: unlink pointers<br/>(re-prompts until resolved)
+    else revoked.json also 404
+    MA->>MA: group deleted → purge (see below)
+    else transport error
+    MA->>MA: flaky connection — keep polling
+    end
 ```
 
 #### Creator deletes a group
+
+Deletion goes through a ~30-day grace period so members get an explicit stop-polling signal instead of an abrupt 404.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
@@ -330,19 +344,22 @@ sequenceDiagram
     CA->>CD: pointers → personal items<br/>(__shared__ items → General)
     end
     CA->>CA: verify caller is the creator (else throw)
-    CA->>SF: list permissions → revoke all non-owner
-    CA->>SF: trash DeLaClaw-Shared-{id}<br/>(recoverable, not permanent)
-    CA->>CA: drop group, emit group-deleted
-    MA->>SF: next poll: group.json → 404 ×3 → purge
-    MA->>MA: orphan dialog → unlink pointers or keep retrying
+    CA->>SF: revoked.json += ALL member hashIds
+    CA->>SF: list permissions → revoke all non-owner<br/>(revoked.json reader grants remain)
+    Note over CA,SF: folder is NOT trashed yet —<br/>members must still read revoked.json
+    CA->>CA: record deletedAt in local state<br/>drop group, emit group-deleted
+    MA->>SF: next poll: folder → 404
+    MA->>SF: fetch revoked.json by stored fileId →<br/>own hashId present
+    MA->>MA: explicit "group deleted" →<br/>stop polling, purge group + pointer
+    MA->>MA: orphan dialog → unlink pointers<br/>(re-prompts until resolved)
+    Note over CA,CD: creator app startup: deletedAt > 30 days →<br/>permanently delete DeLaClaw-Shared-{id}
 ```
 
 #### Member deletes their DeLaClaw account connection (deleteAccount)
 
 This is DeLaClaw's Drive-backed `deleteAccount` (trash the personal
 `DeLaClaw/` folder, revoke OAuth), not deletion of the Google account itself —
-that case is an open question (see the “Drive sharing” tab in the design
-decisions space).
+externally deleted Google accounts are handled manually (see below).
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
@@ -356,16 +373,36 @@ sequenceDiagram
     participant SF as DeLaClaw-Shared-{id}
     end
 
-    MA->>MD: deleteAccount: trash personal<br/>DeLaClaw/ folder
-    MA->>MA: revoke OAuth token
-    Note over MD,SF: DeLaClaw-Shared/ lives at Drive root —<br/>it is NOT trashed; groups the member<br/>created survive with a ghost creator
-    Note over SF: no leave/unjoin is performed —<br/>member rows stay in group.json (ghost members)
-    Note over MA,SF: other members get no signal —<br/>the creator must removeUser manually
+    MA->>SF: for each created group:<br/>grace-period deletion (see above)
+    Note over MA,SF: created groups go through the<br/>revoked.json flow so members<br/>get the explicit stop-polling signal
+    MA->>MD: trash personal DeLaClaw/ folder
+    MA->>MA: revoke OAuth token (last)
+    Note over MD,SF: joined groups are left alone —<br/>member rows linger as ghost rows<br/>(no unjoin performed)
+    Note over MA,SF: the 30-day sweep needs the app to run —<br/>if never reopened, shell folders linger;<br/>members still infer deletion<br/>(revoked.json + folder both 404)
 ```
 
-### Open design questions
+#### Externally deleted Google accounts (manual)
 
-Drawing these flows surfaced gaps and undecided behaviors. They are collected as a tab in the **DeLaClaw design decisions** space ("Drive sharing" tab): join notification, deletion tombstones, leave vs unjoin semantics, raw emails in member IDs, open-join admission, ghost creator IDs after removal, creator-only invite/remove enforcement, account-deletion cleanup, externally deleted accounts, placeholder exhaustion, receiver placement, and keep-vs-retry on remote deletion.
+If a member deletes their Google account outside DeLaClaw, their Drive permission dies but their row stays in `group.json` — a ghost member. Detection is manual-only: the creator periodically re-validates Drive permissions against the `group.json` member list (a "check member accounts" action in Settings → Sharing) and removes the ghost rows surfaced by the check. No automatic polling or enforcement.
+
+### Design decisions (decided 2026-09-07)
+
+The flows above surfaced 14 design questions, all decided on 2026-09-07 and recorded in the **DeLaClaw design decisions** space ("Drive sharing" tab). Assumption: sharing is not yet exposed — no groups exist in the wild, so there are no backward-compatibility constraints (greenfield).
+
+1. **Join notification** — the creator's poll shows a toast when a pending invitee flips to joined.
+2. **Deletion tombstones** — item files carry `{id, deleted_at}` tombstones so the union merge cannot resurrect deleted items; the creator prunes tombstones older than 30 days.
+3. **leave vs unjoin** — `leaveGroup` removed; `unjoinGroup` is the only leave path.
+4. **Member IDs** — opaque hashes, never raw emails; members pick a pseudo, the hash stays immutable.
+5. **Join admission** — joining requires a matching pending invite (by `emailHash`); Drive access alone is not enough.
+6. **Removed members' items** — reassigned to the creator (`created_by` rewrite), no ghost creator IDs.
+7. **Creator-only enforcement** — `inviteUser`/`removeUser` throw unless the caller is the creator; the invite/remove UI is hidden from non-creators.
+8. **Account deletion** — joined groups are left alone; created groups are deleted via the grace-period flow.
+9. **Externally deleted accounts** — manual detection only.
+10. **Placeholder exhaustion** — `extra_N.json` raised from 10 to 12 now; behavior at exhaustion deferred.
+11. **Received-item placement** — always `__shared__`.
+12. **Orphan dialog** — re-prompts until the group returns or deletion is accepted.
+13. **revoked.json on member removal** — removed members keep read-only access to a single `revoked.json` notice file.
+14. **Group deletion grace period** — all member IDs written to `revoked.json`, shell folder kept ~30 days, then hard-deleted.
 
 
 ## Module structure
@@ -374,7 +411,7 @@ Drawing these flows surfaced gaps and undecided behaviors. They are collected as
 |---|---|
 | `sharing-interface.js` | Canonical method contract; validated at init |
 | `sharing-envelope.js` | Invite code encode/decode (`DLC1.<base64url>`) |
-| `sharing-drive.js` | Drive adapter (maintenance mode) |
+| `sharing-drive.js` | Drive adapter (implements the target design) |
 | `sharing-ui.js` | Settings pane, share popovers, badges, join flow |
 | `sharing.js` | Factory that picks adapter by backend mode |
 | `crypto-sync.js` | AES-GCM encryption for joined-group credentials |

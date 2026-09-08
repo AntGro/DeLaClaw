@@ -26,6 +26,7 @@ Five modules, layered:
 - **Entry:** `js/sharing-ui.js` (UI), `js/sharing-drive.js` (adapter), `js/sharing.js` (factory)
 - **State:** `state.sharing` (adapter instance or null)
 - **Storage:** shared data lives in the creator's Drive folder `DeLaClaw-Shared-{groupId}/` (`group.json`, item files `todos.json` / `habits.json` / `lists.json` shaped `{items, tombstones}`, `revoked.json`, `extra_1..12.json` placeholders); joined groups tracked in the member's own `DeLaClaw/joined-groups.json` as `{folderId, groupId, fileIds}` (fileIds include `revoked.json`). `sharing-ui` also reads `habit_categories`, `habit_completions`, `habits`, `todo_categories`, `todos`, `list_items` for category assignment and sync rendering
+- **Creation-completion marker:** `createGroup` uploads item files + placeholders first and `group.json` LAST — its presence means creation completed. A missing `group.json` on an owned folder means a partial creation: trashed at load time if the folder is older than `ABANDONED_GROUP_AGE_MS` (15 min, via Drive `createdTime`; recoverable via Drive trash), skipped if younger (may be mid-creation on another device), never trashed for unowned (joined) folders. In-session failures best-effort trash the partial folder before rethrowing. `loadAll` isolates per-folder load failures so one bad folder cannot fail the whole load.
 - **CODEMAP:** `core[sharing-ui]`, `core[sharing-drive]`, `core[sharing]`, `core[sharing-interface]`, `core[sharing-envelope]` — see CODEMAP.json for current stats
 
 ## Dependencies

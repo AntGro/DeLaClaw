@@ -1044,6 +1044,56 @@ test('sharing create-group modal locks UI and reports file progress', () => {
   }
 });
 
+test('sharing partial creation: group.json last, trash on failure, load-time GC', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf-8');
+
+  // 1. group.json is written AFTER the item-file uploads: its presence marks completion
+  const createStart = drive.indexOf('async createGroup(name, onProgress)');
+  const createEnd = drive.indexOf('/** Load all groups', createStart);
+  const createBody = drive.slice(createStart, createEnd);
+  const promiseAllIdx = createBody.indexOf('const results = await Promise.all(');
+  const groupJsonIdx = createBody.indexOf(`driveUpload(tok, subfolder.id, null, 'group.json', group)`);
+  assert(promiseAllIdx !== -1 && groupJsonIdx !== -1 && groupJsonIdx > promiseAllIdx,
+    'createGroup must upload group.json after the item-file Promise.all (presence = completion marker)');
+
+  // 2. In-session cleanup: a failed creation trashes the partial folder, then rethrows
+  assert(createBody.includes('await driveTrashFile(tok, subfolder.id)'),
+    'createGroup must best-effort trash the partial folder on failure');
+  assert(createBody.includes('throw err;'),
+    'createGroup must rethrow after cleanup so the modal shows the error');
+
+  // 3. Load-time GC: abandoned marker-less OWN folders are trashed, young ones skipped,
+  //    unowned (joined) folders are never trashed
+  assert(drive.includes('const ABANDONED_GROUP_AGE_MS = 15 * 60 * 1000;'),
+    'sharing-drive.js must define the abandoned-group age threshold');
+  const loadStart = drive.indexOf('async function loadGroup(folderId, groupId, opts');
+  const loadEnd = drive.indexOf('async function normalizeEntry', loadStart);
+  const loadBody = drive.slice(loadStart, loadEnd);
+  assert(loadBody.includes('if (!gFile && owned)'),
+    'loadGroup must only consider trashing marker-less folders it owns');
+  assert(loadBody.includes('ageMs >= ABANDONED_GROUP_AGE_MS') && loadBody.includes('await driveTrashFile(tok, folderId)'),
+    'loadGroup must trash abandoned marker-less owned folders');
+  assert(loadBody.includes('skipping young folder'),
+    'loadGroup must leave young marker-less folders alone (creation may be in progress elsewhere)');
+
+  // 4. Per-folder error isolation: one bad folder must not fail the whole loadAll
+  const allStart = drive.indexOf('/** Load all groups');
+  const allEnd = drive.indexOf('getAllGroups()', allStart);
+  const allBody = drive.slice(allStart, allEnd);
+  assert(allBody.includes('.catch(err =>'),
+    'loadAll must isolate per-folder load failures so one bad folder cannot break all groups');
+
+  // 5. driveListChildren must return createdTime for the age guard
+  assert(drive.includes('files(id,name,modifiedTime,createdTime)'),
+    'driveListChildren must fetch createdTime for the abandoned-folder age check');
+
+  // 6. CSP must allow the Drive picker iframe (join flow)
+  const frameSrc = html.match(/frame-src ([^;]+);/);
+  assert(frameSrc && frameSrc[1].includes('https://docs.google.com'),
+    'index.html CSP frame-src must allow https://docs.google.com for the Drive join picker');
+});
+
 test('sharing departure is unjoin-only (no leaveGroup)', () => {
   const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');

@@ -67,6 +67,12 @@ const MAX_RETRIES      = 2;
 const ITEM_TYPES       = ['todos', 'habits', 'lists'];
 const EXTRA_COUNT      = 12;
 const EXTRA_FILES      = Array.from({ length: EXTRA_COUNT }, (_, i) => `extra_${i + 1}`);
+// group.json is written LAST during createGroup: its presence marks creation as
+// complete, so a missing group.json on an owned folder means a partial creation.
+// Folders without group.json older than this are treated as abandoned and trashed
+// at load time (recoverable via Drive trash); younger ones may still be mid-creation
+// on another device and are left alone.
+const ABANDONED_GROUP_AGE_MS = 15 * 60 * 1000;
 
 // ── Drive API helpers (self-contained, no drive.js dependency) ──
 
@@ -114,7 +120,7 @@ async function driveListChildren(token, folderId, mime) {
   let q = `'${folderId}' in parents and trashed=false`;
   if (mime) q += ` and mimeType='${mime}'`;
   const res = await driveGet(token,
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=200&orderBy=name`);
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime,createdTime)&pageSize=200&orderBy=name`);
   const { files } = await res.json();
   return files || [];
 }
@@ -170,6 +176,16 @@ async function driveFileMeta(token, fileId) {
   const res = await driveGet(token,
     `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime`);
   return res.json();
+}
+
+/** Move a file or folder to Drive trash (recoverable for ~30 days). */
+async function driveTrashFile(token, fileId) {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+    method: 'PATCH',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ trashed: true }),
+  });
+  if (!res.ok) throw new Error(`Drive trash ${res.status}: ${await res.text()}`);
 }
 
 async function driveShareWithUser(token, fileId, email, role = 'writer') {
@@ -262,11 +278,7 @@ async function migrateItemsJson(tok, folderId, entry) {
     }
 
     // Trash legacy file
-    await fetch(`https://www.googleapis.com/drive/v3/files/${legacyFile.id}`, {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ trashed: true }),
-    });
+    await driveTrashFile(tok, legacyFile.id);
     console.log(`sharing: migrated items.json → per-type files for folder ${folderId}`);
   } catch (err) {
     console.warn('sharing: items.json migration error:', err);
@@ -572,14 +584,36 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   }
 
   /** Load a single group from its Drive subfolder. */
-  async function loadGroup(folderId, groupId) {
+  async function loadGroup(folderId, groupId, opts = {}) {
+    // opts: { createdTime, owned } — owned=true only for folders under the user's
+    // own DeLaClaw-Shared/ root (discovered via listing). Joined groups reference
+    // someone else's folder and must never be trashed here.
+    const { createdTime = null, owned = false } = opts;
     const tok = await token();
 
-    // Find all core files in parallel
+    // Find all core files in parallel. A throw here means the listing itself
+    // failed ("couldn't look properly") — the caller isolates it per folder and
+    // must NOT treat the group as incomplete.
     const [gFile, ...typeFiles] = await Promise.all([
       driveFindFile(tok, folderId, 'group.json'),
       ...ITEM_TYPES.map(type => driveFindFile(tok, folderId, `${type}.json`)),
     ]);
+
+    // group.json is written LAST by createGroup: its absence on an owned folder
+    // means creation never completed.
+    if (!gFile && owned) {
+      const ageMs = createdTime ? Date.now() - Date.parse(createdTime) : Infinity;
+      if (ageMs >= ABANDONED_GROUP_AGE_MS) {
+        // Abandoned partial creation — trash the folder (recoverable on Drive).
+        console.log(`sharing: trashing abandoned partial group folder ${folderId} (${groupId})`);
+        try { await driveTrashFile(tok, folderId); }
+        catch (err) { console.warn('sharing: failed to trash abandoned group folder', folderId, err); }
+      } else {
+        // Creation may still be in progress (possibly on another device) — leave it alone.
+        console.log(`sharing: skipping young folder without group.json ${folderId} (${groupId})`);
+      }
+      return null;
+    }
 
     // Download all found files in parallel
     const downloads = [];
@@ -734,73 +768,88 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       onProgress?.({ step: 'folder', done: 0, total: 0 });
       const subfolder = await driveCreateFolder(tok, `${GROUP_PREFIX}${groupId}`, rootId);
-      const creatorMemberId = newMemberId();
-      const group = {
-        id: groupId,
-        name,
-        backendType: 'googledrive',
-        created_by: creatorMemberId,
-        members: [
-          {
-            memberId: creatorMemberId,
-            role: 'creator',
-            status: 'joined',
-            displayName: user.name || fallbackDisplayName(user.email),
-            emailHash: await emailHash(user.email),
-            joinedAt: new Date().toISOString(),
-          },
-        ],
-        created_at: new Date().toISOString(),
-      };
+      try {
+        const creatorMemberId = newMemberId();
+        const group = {
+          id: groupId,
+          name,
+          backendType: 'googledrive',
+          created_by: creatorMemberId,
+          members: [
+            {
+              memberId: creatorMemberId,
+              role: 'creator',
+              status: 'joined',
+              displayName: user.name || fallbackDisplayName(user.email),
+              emailHash: await emailHash(user.email),
+              joinedAt: new Date().toISOString(),
+            },
+          ],
+          created_at: new Date().toISOString(),
+        };
 
-      onProgress?.({ step: 'groupFile', done: 0, total: 0 });
-      const gRes = await driveUpload(tok, subfolder.id, null, 'group.json', group);
+        // Create empty per-type files + reserved extras in parallel,
+        // reporting per-file progress as each upload resolves.
+        const allFiles = [
+          ...ITEM_TYPES.map(type => ({ key: type, name: `${type}.json` })),
+          ...EXTRA_FILES.map(name => ({ key: name, name: `${name}.json` })),
+        ];
+        const totalFiles = allFiles.length;
+        let doneFiles = 0;
+        const results = await Promise.all(
+          allFiles.map(f => driveUpload(tok, subfolder.id, null, f.name, []).then(r => {
+            doneFiles++;
+            onProgress?.({ step: 'itemFiles', done: doneFiles, total: totalFiles });
+            return r;
+          }))
+        );
 
-      // Create empty per-type files + reserved extras in parallel,
-      // reporting per-file progress as each upload resolves.
-      const allFiles = [
-        ...ITEM_TYPES.map(type => ({ key: type, name: `${type}.json` })),
-        ...EXTRA_FILES.map(name => ({ key: name, name: `${name}.json` })),
-      ];
-      const totalFiles = allFiles.length;
-      let doneFiles = 0;
-      const results = await Promise.all(
-        allFiles.map(f => driveUpload(tok, subfolder.id, null, f.name, []).then(r => {
-          doneFiles++;
-          onProgress?.({ step: 'itemFiles', done: doneFiles, total: totalFiles });
-          return r;
-        }))
-      );
+        // group.json is written LAST: its presence marks the group as fully
+        // created. A missing group.json at load time means a partial creation.
+        onProgress?.({ step: 'groupFile', done: 0, total: 0 });
+        const gRes = await driveUpload(tok, subfolder.id, null, 'group.json', group);
 
-      const typeMeta = {};
-      const typeData = {};
-      for (let i = 0; i < allFiles.length; i++) {
-        const { key } = allFiles[i];
-        const r = results[i];
-        if (ITEM_TYPES.includes(key)) {
-          typeMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
-          typeData[key] = [];
+        const typeMeta = {};
+        const typeData = {};
+        for (let i = 0; i < allFiles.length; i++) {
+          const { key } = allFiles[i];
+          const r = results[i];
+          if (ITEM_TYPES.includes(key)) {
+            typeMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+            typeData[key] = [];
+          }
+          // Extra files are created on Drive but not tracked in memory (unused for now)
         }
-        // Extra files are created on Drive but not tracked in memory (unused for now)
+
+        _groups.set(groupId, {
+          folderId: subfolder.id,
+          group,
+          typeData,
+          typeMeta,
+          gMeta: { fileId: gRes.id, etag: gRes.etag, modifiedTime: gRes.modifiedTime },
+        });
+        _groupNameCache[groupId] = name;
+
+        emit('group-created', { group });
+        return group;
+      } catch (err) {
+        // Best-effort cleanup: trash the partial folder so a failed creation
+        // leaves no debris on Drive. The load-time GC covers the tab-killed case.
+        try { await driveTrashFile(tok, subfolder.id); }
+        catch (cleanupErr) { console.warn('sharing: failed to trash partial group folder', subfolder.id, cleanupErr); }
+        throw err;
       }
-
-      _groups.set(groupId, {
-        folderId: subfolder.id,
-        group,
-        typeData,
-        typeMeta,
-        gMeta: { fileId: gRes.id, etag: gRes.etag, modifiedTime: gRes.modifiedTime },
-      });
-      _groupNameCache[groupId] = name;
-
-      emit('group-created', { group });
-      return group;
     },
 
     /** Load all groups: own + joined (link) + auto-discovered (if full Drive scope). */
     async loadAll() {
       const tok = await token();
       const promises = [];
+      // One bad folder must not take down every other group: isolate per-folder
+      // load failures. A folder whose listing throws is skipped, never trashed.
+      const isolate = (p, label) => promises.push(
+        p.catch(err => { console.warn(`sharing: failed to load ${label}:`, err); return null; })
+      );
 
       // Load joined groups metadata
       await loadJoinedGroups();
@@ -813,7 +862,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         for (const sub of subs) {
           if (!sub.name.startsWith(GROUP_PREFIX)) continue;
           const gid = sub.name.slice(GROUP_PREFIX.length);
-          if (!_groups.has(gid)) promises.push(loadGroup(sub.id, gid));
+          if (!_groups.has(gid)) isolate(
+            loadGroup(sub.id, gid, { createdTime: sub.createdTime, owned: true }),
+            `own group folder ${sub.id} (${gid})`
+          );
         }
       }
 
@@ -821,10 +873,16 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       for (const joined of _joinedGroups) {
         if (_groups.has(joined.groupId)) continue;
         if (joined.fileIds) {
-          promises.push(loadGroupWithIds(joined.folderId, joined.groupId, joined.fileIds));
+          isolate(
+            loadGroupWithIds(joined.folderId, joined.groupId, joined.fileIds),
+            `joined group ${joined.groupId}`
+          );
         } else {
           // Legacy entry without fileIds — try search-based load
-          promises.push(loadGroup(joined.folderId, joined.groupId));
+          isolate(
+            loadGroup(joined.folderId, joined.groupId),
+            `legacy joined group ${joined.groupId}`
+          );
         }
       }
 
@@ -881,11 +939,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       } catch (err) { console.warn('sharing: could not list permissions before delete:', err); }
 
       // Trash the entire subfolder (recoverable on Drive)
-      await fetch(`https://www.googleapis.com/drive/v3/files/${e.folderId}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trashed: true }),
-      });
+      await driveTrashFile(tok, e.folderId);
       _groups.delete(groupId);
       emit('group-deleted', { groupId });
     },

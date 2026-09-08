@@ -155,7 +155,7 @@ sequenceDiagram
 
     CA->>CD: findOrCreate DeLaClaw-Shared/
     CA->>SF: create subfolder DeLaClaw-Shared-{id}
-    CA->>SF: upload group.json + item files<br/>(todos/habits/lists.json)<br/>+ revoked.json<br/>+ 12 empty extra_N.json placeholders
+    CA->>SF: upload item files<br/>(todos/habits/lists.json)<br/>+ revoked.json<br/>+ 12 empty extra_N.json placeholders<br/>then group.json LAST (its presence marks creation complete)
     Note over CA,SF: creator-only: inviteUser throws<br/>unless the caller is the creator
     CA->>SF: share folder with B@email (writer)<br/>+ revoked.json (reader)
     CA->>SF: group.json += member<br/>{hashId, pending, emailHash, pseudo: null}

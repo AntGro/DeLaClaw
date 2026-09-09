@@ -407,6 +407,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       joinedAt,
       drivePermissionId: member.drivePermissionId || member.permissionId || null,
       emailHint: member.emailHint || (legacyEmail ? fallbackDisplayName(legacyEmail) : null),
+      // Preserved so the pending-invite join gate (and re-saves of group.json)
+      // can match a joiner to their invite. Dropping it breaks joining entirely.
+      emailHash: member.emailHash || null,
     };
   }
 

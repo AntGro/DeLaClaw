@@ -1128,6 +1128,11 @@ test('sharing members use hashed opaque IDs with a pending-invite join gate', ()
     'sharing-drive.js must enforce creator-only invite/remove in the adapter');
   assert(iface.includes('creator-only') && iface.includes('pending invite'),
     'sharing-interface.js must document creator-only ops and the pending-invite join requirement');
+  // Regression: normalizeMember once dropped emailHash, so the join gate
+  // (m.emailHash === eh on normalized members) could never match and every
+  // join failed with 'No pending invite for this account'.
+  assert(drive.includes('emailHash: member.emailHash'),
+    'normalizeMember must preserve member.emailHash so the pending-invite join gate can match');
 });
 
 // ===================================================================

@@ -1177,6 +1177,56 @@ test('sharing leave confirmation overrides the Delete default', () => {
     'sharingUnjoinGroup must use the neutral (non-red) confirm variant');
 });
 
+test('sharing unjoin writes a left marker instead of deleting the member row', () => {
+  // Leaving must keep a status:'left' tombstone in group.json so the creator's
+  // poll can revoke the leaver's Drive permission (only the folder owner can).
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const unjoin = drive.slice(drive.indexOf('async unjoinGroup(groupId)'));
+  const unjoinFn = unjoin.slice(0, unjoin.indexOf('},', unjoin.indexOf('emit(')));
+  assert(unjoinFn.includes("self.status = 'left'"),
+    'unjoinGroup must flip the member status to left');
+  assert(unjoinFn.includes('self.leftAt'),
+    'unjoinGroup must stamp leftAt on the member row');
+  assert(!unjoinFn.includes('.filter(m => m.memberId !== currentMember.memberId)'),
+    'unjoinGroup must not delete the member row from group.json');
+  assert(drive.includes('async function revokeLeftMembers(groupId, tok)'),
+    'sharing-drive.js must define the creator-side revokeLeftMembers sweep');
+  assert(drive.includes('driveRemovePermission(tok, e.folderId, permissionId)'),
+    'revokeLeftMembers must revoke the Drive permission for left members');
+  assert(drive.includes("m.role === 'creator' || m.role === 'owner'") || drive.includes("m.role === 'owner'"),
+    'revokeLeftMembers must never revoke the owner/creator permission');
+  assert(drive.includes('isCreatorOf(groupId)') && drive.includes('revokeLeftMembers(groupId, tok)'),
+    'the poll loop must run the revoke-left sweep for creator-owned groups');
+});
+
+test('sharing normalizeMember preserves the left marker', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const norm = drive.slice(drive.indexOf('async function normalizeMember'));
+  assert(norm.includes('leftAt'),
+    'normalizeMember must preserve leftAt so the left marker survives re-saves of group.json');
+});
+
+test('sharing UI never displays left members', () => {
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(sui.includes('function visibleMembers(group)'),
+    'sharing-ui.js must define a visibleMembers helper');
+  assert(sui.includes("filter(m => m.status !== 'left')"),
+    'visibleMembers must exclude status:left tombstones');
+  for (const site of ['visibleMembers(group).length', 'for (const member of visibleMembers(group))',
+      'visibleMembers(group).filter', 'visibleMembers(selectedGroup)']) {
+    assert(sui.includes(site), `member display site must use visibleMembers (${site})`);
+  }
+});
+
+test('sharing re-invite clears a stale left marker for the same email', () => {
+  // Otherwise inviting someone who previously left would find the left row by
+  // emailHash and skip creating the new pending invite.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const invite = drive.slice(drive.indexOf('async inviteUser(groupId, inviteTarget)'));
+  assert(invite.includes("m.emailHash === eh && m.status === 'left'"),
+    'inviteUser must drop a stale left entry for the same emailHash before adding the pending invite');
+});
+
 // ===================================================================
 // 26. Inline edit callbacks use refreshFn (not renderFn) for data refresh
 // ===================================================================

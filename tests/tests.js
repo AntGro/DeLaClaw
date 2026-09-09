@@ -1135,6 +1135,37 @@ test('sharing members use hashed opaque IDs with a pending-invite join gate', ()
     'normalizeMember must preserve member.emailHash so the pending-invite join gate can match');
 });
 
+test('sharing i18n keys used in code exist in every locale', () => {
+  // Regression: t('sharing.name_updated') showed the raw key in English because
+  // the string existed in fr/es but was missing from en. Every sharing.* key
+  // referenced in code must be defined in all three locales.
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  const starts = {};
+  for (const m of i18n.matchAll(/^  (en|fr|es): \{$/gm)) starts[m[1]] = m.index;
+  const order = ['en', 'fr', 'es'];
+  const sharing = {};
+  for (let i = 0; i < order.length; i++) {
+    const slice = i18n.slice(starts[order[i]], i + 1 < order.length ? starts[order[i + 1]] : i18n.length);
+    const s0 = slice.indexOf('    sharing: {');
+    assert(s0 >= 0, `i18n.js must define a sharing section for [${order[i]}]`);
+    const rest = slice.slice(s0);
+    const next = rest.slice('    sharing: {'.length).search(/\n    [a-z_]+: \{/);
+    sharing[order[i]] = next < 0 ? rest : rest.slice(0, '    sharing: {'.length + next);
+  }
+  const used = new Set();
+  for (const f of ['sharing-ui.js', 'sharing-drive.js']) {
+    const src = fs.readFileSync(path.join(JS_DIR, f), 'utf-8');
+    for (const m of src.matchAll(/\bt\(\s*['"]sharing\.([A-Za-z0-9_]+)['"]/g)) used.add(m[1]);
+  }
+  assert(used.size > 0, 'expected to find t(\'sharing.*\') usages in sharing code');
+  for (const key of [...used].sort()) {
+    for (const loc of order) {
+      assert(new RegExp(`^\\s{6}${key}:`, 'm').test(sharing[loc]),
+        `i18n.js [${loc}].sharing must define '${key}:' (used via t('sharing.${key}'))`);
+    }
+  }
+});
+
 // ===================================================================
 // 26. Inline edit callbacks use refreshFn (not renderFn) for data refresh
 // ===================================================================

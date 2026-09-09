@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-09T00:04:26.919Z from 36 modules (v2.0.19). Total LOC 28320. Do not hand-edit.
+> Generated 2026-09-09T00:21:20.584Z from 36 modules (v2.0.20). Total LOC 28322. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -28,7 +28,7 @@
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
 | main | 3610 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
-| i18n | 2208 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
+| i18n | 2210 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
 | sharing-drive | 1485 | - | sharing-envelope,utils | main.js,sharing.js | - |
 | sharing-ui | 1226 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:37,pendingSet,window:8 |
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |

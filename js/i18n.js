@@ -549,6 +549,8 @@ const T = {
       delete_group_has_members: 'This group has {0} other active member(s) who will lose access.',
       remove_member: 'Remove',
       remove_member_confirm: 'Remove {0} from this group?',
+      edit_name: 'Edit name',
+      name_updated: 'Name updated',
       you: 'you',
       creator: 'creator',
       pending: 'pending',

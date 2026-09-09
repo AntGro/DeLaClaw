@@ -278,13 +278,10 @@ async function sharingCreateGroupSubmit() {
 
 /** Show a modal with an invite code (after group creation or member invite). */
 function showInviteCodeModal(name, code, isNewGroup) {
-  const env = decodeInviteEnvelope(code);
-  const isSingleUse = env?.b !== 'googledrive';
   const title = isNewGroup ? t('sharing.group_created') : t('sharing.member_added');
   const hint = isNewGroup
     ? t('sharing.invite_code_hint', name)
     : t('sharing.member_code_hint', name);
-  const warn = `<p class="sharing-warning" style="margin-top:10px;font-size:0.82rem;color:var(--warn,#d97706);background:color-mix(in srgb,var(--warn,#d97706) 12%, transparent);border:1px solid color-mix(in srgb,var(--warn,#d97706) 30%, transparent);border-radius:8px;padding:8px 10px">${lucideIcon('shield-alert', 12)} ${t(isSingleUse ? 'sharing.invite_secret_warn' : 'sharing.invite_drive_warn')}</p>`;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingInviteCodeModal';
@@ -296,7 +293,6 @@ function showInviteCodeModal(name, code, isNewGroup) {
       <input id="sharingInviteCodeInput" class="sharing-code-input" type="text" readonly value="${escQ(code)}" data-action="select-all-on-click">
       <button class="sharing-invite-btn" data-action="sharing-copy-code-value">${lucideIcon('copy', 14)} ${t('sharing.copy')}</button>
     </div>
-    ${warn}
     <div class="modal-actions">
       <button class="modal-save" data-action="close-modal" data-modal-id="sharingInviteCodeModal">${t('common.close')}</button>
     </div>

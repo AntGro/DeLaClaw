@@ -1166,6 +1166,17 @@ test('sharing i18n keys used in code exist in every locale', () => {
   }
 });
 
+test('sharing leave confirmation overrides the Delete default', () => {
+  // Regression: the "Leave this group?" modal showed "Delete" with a trash icon
+  // because showConfirmAction defaults the confirm button to Delete/trash.
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const leaveCall = sui.slice(sui.indexOf('async function sharingUnjoinGroup'));
+  assert(leaveCall.includes("btnText: t('sharing.leave')"),
+    'sharingUnjoinGroup must override the confirm-modal Delete default with the Leave label');
+  assert(leaveCall.includes("variant: 'neutral'"),
+    'sharingUnjoinGroup must use the neutral (non-red) confirm variant');
+});
+
 // ===================================================================
 // 26. Inline edit callbacks use refreshFn (not renderFn) for data refresh
 // ===================================================================

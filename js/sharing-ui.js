@@ -388,7 +388,13 @@ async function sharingUnjoinGroup(groupId) {
       } catch (e) { showToast(e.message, 'error'); }
     },
     null,
-    { toggleLabel: t('sharing.leave_keep_copies') }
+    {
+      toggleLabel: t('sharing.leave_keep_copies'),
+      variant: 'neutral',
+      btnText: t('sharing.leave'),
+      iconSvg: lucideIcon('log-out', 28),
+      btnIconSvg: lucideIcon('log-out', 15, 'currentColor'),
+    }
   );
 }
 

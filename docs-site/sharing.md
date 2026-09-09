@@ -261,7 +261,7 @@ sequenceDiagram
 
 #### Member unjoins
 
-`leaveGroup` is removed — `unjoinGroup` is the only leave path.
+`leaveGroup` is removed — `unjoinGroup` is the only leave path. Leaving flips the member row to `status: 'left'` (kept, not deleted) so the creator's next poll can revoke the Drive permission — only the folder owner can revoke it — before clearing the row. `status: 'left'` rows are never displayed, so the member list always reflects who actually has access. Caveat: if the creator never opens the app again, the Drive permission lingers until they do.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
@@ -274,14 +274,20 @@ sequenceDiagram
     box rgb(255,251,235) Shared — lives in the creator's Drive
     participant SF as DeLaClaw-Shared-{id}
     end
+    box rgb(239,246,255) Creator's Google account
+    participant CA as Creator app
+    end
 
     MA->>MA: confirm dialog: keep copies?
     alt keep copies
     MA->>MD: pointers → personal items<br/>(__shared__ items → General)
     end
-    MA->>SF: best-effort: remove self from group.json
+    MA->>SF: best-effort: flip own row to<br/>status 'left' (+ leftAt)
     MA->>MD: delete joined-groups.json entry
     MA->>MA: drop group, emit group-left<br/>polling stops
+    Note over SF: creator's next poll (≤15s)<br/>sees the 'left' row
+    CA->>SF: revoke leaver's Drive permission<br/>(owner-only operation)
+    CA->>SF: clear the 'left' row<br/>from group.json
 ```
 
 #### Creator removes a member
@@ -391,7 +397,7 @@ The flows above surfaced 14 design questions, all decided on 2026-09-07 and reco
 
 1. **Join notification** — the creator's poll shows a toast when a pending invitee flips to joined.
 2. **Deletion tombstones** — item files carry `{id, deleted_at}` tombstones so the union merge cannot resurrect deleted items; the creator prunes tombstones older than 30 days.
-3. **leave vs unjoin** — `leaveGroup` removed; `unjoinGroup` is the only leave path.
+3. **leave vs unjoin** — `leaveGroup` removed; `unjoinGroup` is the only leave path. Leaving flips the member row to `status: 'left'`; the creator's poll revokes the leaver's Drive permission (owner-only) and clears the row, so leaving actually removes folder access. `left` rows are never displayed.
 4. **Member IDs** — opaque hashes, never raw emails; members pick a pseudo, the hash stays immutable.
 5. **Join admission** — joining requires a matching pending invite (by `emailHash`); Drive access alone is not enough.
 6. **Removed members' items** — reassigned to the creator (`created_by` rewrite), no ghost creator IDs.

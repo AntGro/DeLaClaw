@@ -49,6 +49,15 @@ function memberLabel(member) {
   return member?.displayName || member?.invitedLabel || member?.name || member?.memberId || 'Member';
 }
 
+/**
+ * Members shown in the UI. Entries with status 'left' are tombstones kept in
+ * group.json only so the creator's poll can revoke their Drive access — they
+ * are never displayed (the member list must always reflect who has access).
+ */
+function visibleMembers(group) {
+  return (group?.members || []).filter(m => m.status !== 'left');
+}
+
 /** Small avatar circle HTML. */
 function avatarDot(member, size = 24) {
   const label = memberLabel(member);
@@ -113,7 +122,7 @@ export async function renderSharingPane() {
     try { currentMember = await state.sharing.getCurrentMember(group.id); } catch { currentMember = null; }
     const isCreator = !!currentMember && currentMember.memberId === group.created_by;
     const isJoined = state.sharing.isJoinedViaLink(group.id);
-    const memberCount = group.members?.length || 0;
+    const memberCount = visibleMembers(group).length;
     const itemCount = state.sharing.getItems(group.id).length;
     const memberStr = memberCount === 1 ? t('sharing.member') : t('sharing.members', memberCount);
     const itemStr = itemCount === 1 ? t('sharing.shared_item') : t('sharing.shared_items', itemCount);
@@ -142,7 +151,7 @@ export async function renderSharingPane() {
       </div>
       <div class="sharing-members">`;
 
-    for (const member of (group.members || [])) {
+    for (const member of visibleMembers(group)) {
       const isYou = !!currentMember && member.memberId === currentMember.memberId;
       const canRemove = isCreator && !isYou;
       const hasJoined = member.status === 'joined' || member.role === 'owner' || member.role === 'creator' || !!member.joinedAt || !!member.joined_at;
@@ -907,7 +916,7 @@ function showBadgeTooltip(badge) {
   const tip = document.createElement('div');
   tip.className = 'shared-badge-tooltip';
 
-  const activeMembers = group.members.filter(m => m.status !== 'revoked');
+  const activeMembers = visibleMembers(group).filter(m => m.status !== 'revoked');
   tip.innerHTML = activeMembers.map(m => {
     const label = memberLabel(m);
     return `<div class="shared-badge-tooltip-row">${avatarDot(m, 20)}<span>${esc(label)}</span></div>`;
@@ -1064,7 +1073,7 @@ export function openSharePopover(anchorEl, onShare, opts = {}) {
 
   const renderPopover = () => {
     const selectedGroup = groups.find(g => g.id === selectedGroupId) || groups[0];
-    const members = selectedGroup.members || [];
+    const members = visibleMembers(selectedGroup);
 
     popover.innerHTML = `
       <div class="share-popover-body">

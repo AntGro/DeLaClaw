@@ -405,6 +405,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       displayName,
       invitedLabel,
       joinedAt,
+      // Kept so a 'left' marker written by unjoinGroup survives normalization
+      // until the creator's poll revokes the Drive permission and clears it.
+      leftAt: member.leftAt ?? member.left_at ?? null,
       drivePermissionId: member.drivePermissionId || member.permissionId || null,
       emailHint: member.emailHint || (legacyEmail ? fallbackDisplayName(legacyEmail) : null),
       // Preserved so the pending-invite join gate (and re-saves of group.json)
@@ -474,6 +477,43 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     const me = await getCurrentMemberInternal(groupId);
     if (!me || (me.role !== 'creator' && me.memberId !== e.group.created_by)) {
       throw new Error('Only the group creator can do this');
+    }
+  }
+
+  /** Non-throwing creator check (for poll-time sweeps). */
+  async function isCreatorOf(groupId) {
+    const e = _groups.get(groupId);
+    if (!e) return false;
+    const me = await getCurrentMemberInternal(groupId);
+    return !!me && (me.role === 'creator' || me.memberId === e.group.created_by);
+  }
+
+  // groupIds with a leave-revocation sweep currently in flight (poll re-entry guard).
+  const _revokingLeft = new Set();
+
+  /**
+   * Creator-side sweep: members who left are kept as `status: 'left'` markers in
+   * group.json (never displayed) until the creator's app revokes their Drive
+   * permission — only the folder owner can do that — and clears the entry.
+   */
+  async function revokeLeftMembers(groupId, tok) {
+    const e = _groups.get(groupId);
+    if (!e || _revokingLeft.has(groupId)) return;
+    const leftMembers = (e.group.members || []).filter(m => m.status === 'left');
+    if (!leftMembers.length) return;
+    _revokingLeft.add(groupId);
+    try {
+      for (const m of leftMembers) {
+        if (m.role === 'creator' || m.role === 'owner') continue; // never revoke the owner
+        const permissionId = m.drivePermissionId || (m.memberId || '').replace(/^drive-perm-/, '');
+        if (permissionId) await driveRemovePermission(tok, e.folderId, permissionId).catch(() => {});
+      }
+      const leftIds = new Set(leftMembers.map(m => m.memberId));
+      e.group.members = (e.group.members || []).filter(m => !leftIds.has(m.memberId));
+      await saveGroup(groupId);
+      emit('group-changed', { groupId, group: e.group });
+    } finally {
+      _revokingLeft.delete(groupId);
     }
   }
 
@@ -964,6 +1004,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       const memberId = newMemberId();
       const eh = await emailHash(email);
 
+      // A stale 'left' marker for the same email must not block re-inviting:
+      // drop it so a fresh pending invite is created below.
+      const leftIdx = e.group.members.findIndex(m => m.emailHash === eh && m.status === 'left');
+      if (leftIdx !== -1) e.group.members.splice(leftIdx, 1);
+
       // Update member list if not already present. Do not persist raw email in group.json.
       if (!e.group.members.find(m => m.emailHash === eh)) {
         e.group.members.push({
@@ -1302,6 +1347,12 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
             }
           }
         }
+
+        // Creator-side: process 'left' markers — revoke those members' Drive
+        // access (only the folder owner can) and clear the entries.
+        try {
+          if (await isCreatorOf(groupId)) await revokeLeftMembers(groupId, tok);
+        } catch (err) { console.warn(`sharing poll revoke-left ${groupId}:`, err); }
       }
 
       // Clean up groups whose files are gone (deleted by creator or access revoked)
@@ -1409,16 +1460,20 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     async reconnectGroup() { return null; },
 
     async unjoinGroup(groupId) {
-      // Remove self from remote group.json member list (best-effort)
+      // Mark self as 'left' in remote group.json (best-effort). The entry is kept
+      // — not deleted — so the creator's next poll can revoke this member's Drive
+      // permission (only the folder owner can revoke it) before clearing the entry.
       const e = _groups.get(groupId);
       if (e) {
         try {
           const currentMember = await getCurrentMemberInternal(groupId);
-          if (currentMember) {
-            e.group.members = e.group.members.filter(m => m.memberId !== currentMember.memberId);
+          const self = currentMember && (e.group.members || []).find(m => m.memberId === currentMember.memberId);
+          if (self) {
+            self.status = 'left';
+            self.leftAt = new Date().toISOString();
             await saveGroup(groupId);
           }
-        } catch (err) { console.warn('sharing: unjoin group.json cleanup failed (non-fatal):', err); }
+        } catch (err) { console.warn('sharing: unjoin group.json update failed (non-fatal):', err); }
       }
       _joinedGroups = _joinedGroups.filter(j => j.groupId !== groupId);
       await saveJoinedGroups();

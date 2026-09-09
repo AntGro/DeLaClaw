@@ -70,7 +70,7 @@ No RPC layer — both users read/write the shared folder directly via the Drive 
 - `loadGroup(groupId)` / `saveGroup(groupId)` → read/write `group.json`
 - `saveTypedItems(groupId, type)` → write typed item files (`{items, tombstones}`)
 - `deleteItem` → splices the item from the item file AND appends a `{id, deleted_at}` tombstone; the union merge skips tombstoned IDs; the creator's poll prunes tombstones older than 30 days
-- `unjoinGroup(groupId)` → best-effort self-removal from `group.json` + deletes the local `joined-groups.json` entry (full detach; `leaveGroup` is removed)
+- `unjoinGroup(groupId)` → best-effort flip of own member row to `status: 'left'` (+ `leftAt`) in `group.json` — the row is kept, not deleted — + deletes the local `joined-groups.json` entry (full detach; `leaveGroup` is removed). The creator's poll then revokes the leaver's Drive permission (only the folder owner can revoke it) and clears the row, so leaving actually removes folder access
 - `deleteGroup(groupId)` → creator-only; writes ALL member hashIds to `revoked.json`; revokes all non-owner folder permissions (`revoked.json` readers remain); does NOT trash the folder yet; records `deletedAt` in creator local state. Members hitting folder-404 fetch `revoked.json` by stored fileId: own hashId present → explicit "group deleted", stop polling and purge. Creator app startup sweep permanently deletes folders with `deletedAt` older than 30 days
 - `deleteAccount` → joined groups left alone (ghost rows linger); created groups deleted via the grace-period `deleteGroup` flow above; personal `DeLaClaw/` folder trashed last; OAuth revoked last
 - Removed-member poll states: folder 404 → fetch `revoked.json`: own hashId present = "removed"; `revoked.json` also 404 = "group deleted"; transport error = flaky connection, keep polling
@@ -91,7 +91,7 @@ No RPC layer — both users read/write the shared folder directly via the Drive 
 - **Completion attribution:** completions carry `created_by` (member hashId) for attribution. Personal/non-shared items don't need attribution
 - **Category placement is personal:** `creator_category` is origin metadata only. Local category/deck placement remains personal and must not rewrite `creator_category`
 - **Received items always land in `__shared__`** (pointer movable afterwards); per-member `sort_order` is never synced
-- **Unjoining:** `unjoinGroup` is the only leave path (`leaveGroup` removed) — best-effort self-removal from `group.json` + local `joined-groups.json` entry deleted. Local completions stay
+- **Unjoining:** `unjoinGroup` is the only leave path (`leaveGroup` removed) — best-effort flip of own row to `status: 'left'` (+ `leftAt`) in `group.json`; the row is kept as a tombstone until the creator's poll revokes the leaver's Drive permission and clears it. Local `joined-groups.json` entry deleted; local completions stay. The UI never displays `status: 'left'` rows (`visibleMembers`), so the member list always reflects who actually has access. Re-inviting the same email drops the stale `left` row before creating the new pending invite
 - **Deletion tombstones:** `deleteItem` appends `{id, deleted_at}`; the union merge (including the 412-conflict path) skips tombstoned IDs; creator prunes tombstones older than 30 days. Residual risk: a member offline >30 days with pending edits can still resurrect via the 412 merge
 - **Creator-only mutations:** `inviteUser`/`removeUser`/`deleteGroup` throw unless the caller is the group creator; invite/remove UI is hidden from non-creators
 - **Removed members' items** are reassigned to the creator (`created_by` rewrite) — no ghost creator IDs
@@ -119,6 +119,7 @@ No RPC layer — both users read/write the shared folder directly via the Drive 
 - Remote Drive folder unavailable → joined group items stale until next successful poll
 - Invite token single-use is not enforced server-side — anyone with folder access can read/write; the pending-invite check is the second gate
 - Revocation is not atomic — Drive permissions are removed one by one; `removeUser` must tolerate partial failure
+- Leaving revokes Drive access only when the creator's app next polls (≤15s while running) — if the creator never opens the app again, the permission lingers, because only the folder owner can revoke it
 - Removed members can read the full `revoked.json` ID list (opaque hashIds, not emails)
 - Tombstone pruning after 30 days reopens the resurrection hole for members offline longer with pending edits (accepted residual risk)
 - The 30-day deletion sweep needs the creator's app to run; shell folders linger otherwise (members still infer deletion via the `revoked.json`-unreachable fallback)

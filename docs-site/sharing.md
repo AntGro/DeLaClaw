@@ -1,6 +1,6 @@
 # Sharing
 
-Last updated: 2026-09-07
+Last updated: 2026-09-10
 
 DeLaClaw lets you share TODOs, habits, and list items with other people through sharing groups. This page explains the architecture, data flow, and security model.
 
@@ -10,30 +10,26 @@ This page describes the **target design** — the 14 design decisions made on 20
 
 Sharing is **decentralized**: there is no central DeLaClaw server. One user (the **creator**) hosts the shared data in a folder on their own Google Drive, and other users (**members**) connect to it via invite codes. The creator's folder is the single source of truth for all group data.
 
-```
-┌──────────────────────────────────────────────────┐
-│                  Sharing group                   │
-│                                                  │
-│  Creator (A)            Member (B)               │
-│  ┌──────────┐           ┌──────────┐             │
-│  │ Personal │           │ Personal │             │
-│  │  tables  │           │  tables  │             │
-│  │ (Drive)  │           │ (Drive)  │             │
-│  └────┬─────┘           └────┬─────┘             │
-│       │                      │                   │
-│       │  direct file         │  shared folder    │
-│       ▼  read/write          ▼  read/write       │
-│  ┌─────────────────────────────────────────┐     │
-│  │  DeLaClaw-Shared-{groupId}              │     │
-│  │  (creator's Drive)                      │     │
-│  │                                         │     │
-│  │  group.json — members, creator, name    │     │
-│  │  todos/habits/lists.json — item files   │     │
-│  │    (+ deletion tombstones)              │     │
-│  │  revoked.json — removed member IDs      │     │
-│  │  extra_1..12.json — future placeholders │     │
-│  └─────────────────────────────────────────┘     │
-└──────────────────────────────────────────────────┘
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'primaryColor': '#ffffff', 'primaryBorderColor': '#cbd5e1', 'primaryTextColor': '#0f172a', 'lineColor': '#334155'}}}%%
+flowchart TB
+    subgraph GROUP["Sharing group"]
+        subgraph CREATOR["Creator (A)"]
+            PA["Personal tables<br/>(Drive)"]
+        end
+        subgraph MEMBER["Member (B)"]
+            PB["Personal tables<br/>(Drive)"]
+        end
+        subgraph SHARED["DeLaClaw-Shared-{groupId}<br/>(creator's Drive)"]
+            direction TB
+            GJ["group.json<br/>members, creator, name"]
+            ITEMS["todos/habits/lists.json<br/>item files (+ deletion tombstones)"]
+            REVOKED["revoked.json<br/>removed member IDs"]
+            EXTRA["extra_1..12.json<br/>future placeholders"]
+        end
+        PA -->|"direct file read/write"| SHARED
+        PB -->|"shared folder read/write"| SHARED
+    end
 ```
 
 ## Concepts
@@ -54,23 +50,14 @@ Sharing is **decentralized**: there is no central DeLaClaw server. One user (the
 
 All sharing logic goes through an adapter interface (`sharing-interface.js`). Views (`todos.js`, `habits.js`, `lists.js`) never talk directly to a backend — they call `state.sharing.addItem()`, `state.sharing.unjoinGroup()`, etc.
 
-```
-┌──────────────────────────┐
-│     Feature views        │
-│  todos · habits · lists  │
-└───────────┬──────────────┘
-            │  state.sharing.*
-            ▼
-┌──────────────────────────┐
-│   Sharing interface      │
-│   (canonical contract)   │
-└───────────┬──────────────┘
-            │
-            ▼
-     ┌────────────┐
-     │   Drive    │
-     │  adapter   │
-     └────────────┘
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'primaryColor': '#ffffff', 'primaryBorderColor': '#cbd5e1', 'primaryTextColor': '#0f172a', 'lineColor': '#334155'}}}%%
+flowchart TB
+    VIEWS["Feature views<br/>todos · habits · lists"]
+    SI["Sharing interface<br/>(canonical contract)"]
+    DRIVE["Drive adapter"]
+    VIEWS -->|"state.sharing.*"| SI
+    SI --> DRIVE
 ```
 
 The adapter is validated at init time against the interface contract — a missing method is a hard error, not a silent runtime crash. The Supabase sharing adapter was removed with the Supabase backend; Drive is the only sharing path.
@@ -85,28 +72,24 @@ The Google Drive sharing adapter is the only sharing path. Drive sharing has no 
 
 ### Storage layout
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'primaryColor': '#ffffff', 'primaryBorderColor': '#cbd5e1', 'primaryTextColor': '#0f172a', 'lineColor': '#334155'}}}%%
+flowchart LR
+    subgraph CD["Creator's Drive"]
+        direction TB
+        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · joined-groups.json"]
+        CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · revoked.json<br/>extra_1..12.json"]
+    end
+    subgraph JD["Joiner's Drive"]
+        direction TB
+        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json<br/>joined-groups.json &#9668; <b>pointer only</b><br/>{folderId, groupId, fileIds}"]
+    end
 ```
-Creator's Drive                                Joiner's Drive
-───────────────                                ──────────────
-My Drive/                                      My Drive/
-├── DeLaClaw/                  (personal)      ├── DeLaClaw/                  (personal)
-│   ├── todos.json                             │   ├── todos.json
-│   ├── habits.json                            │   ├── habits.json
-│   ├── lists.json                             │   ├── lists.json
-│   └── joined-groups.json                     │   └── joined-groups.json  ◄── pointer only
-│                                                  {folderId, groupId, fileIds}
-└── DeLaClaw-Shared/           (shared root)
-    └── DeLaClaw-Shared-{groupId}/
-        ├── group.json         ← members (hashed IDs + pseudos), creator, name
-        ├── todos.json         ← item files: {items: [...],
-        ├── habits.json            tombstones: [{id, deleted_at}]}
-        ├── lists.json
-        ├── revoked.json       ← removed member IDs; read-only
-        │                         for removed members
-        └── extra_1..12.json   ← empty placeholders, pre-authorize
-                                  future item types (avoids sending every
-                                  member back through the Drive Picker)
-```
+
+- `group.json` — members (hashed IDs + pseudos), creator, name
+- `todos.json` / `habits.json` / `lists.json` — item files: `{items: [...], tombstones: [{id, deleted_at}]}`
+- `revoked.json` — removed member IDs; read-only for removed members
+- `extra_1..12.json` — empty placeholders, pre-authorize future item types (avoids sending every member back through the Drive Picker)
 
 - **Invite code**: `DLC1.<base64url({v:1, b:'googledrive', f:<folderId>})>` — one group-level code, no per-member tokens.
 - **Access control**: Drive folder permissions (writer) plus the trusted-contacts allowlist; `group.json` holds the member list. No RPC layer, no token hashing.

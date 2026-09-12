@@ -856,10 +856,14 @@ async function sharingOpenJoinPicker(folderId) {
       return;
     }
 
+    // Map picked docs to required file keys. The accepted keys come from the
+    // adapter's required set (never hard-coded) so new required files —
+    // e.g. revoked.json added in phase 3 — are picked up automatically.
+    const requiredKeys = state.sharing.getRequiredGroupFiles();
     const fileIds = {};
     for (const d of docs) {
       const key = d.name.replace('.json', '');
-      if (['group', 'todos', 'habits', 'lists'].includes(key) || /^extra_\d+$/.test(key)) {
+      if (requiredKeys.includes(key)) {
         fileIds[key] = d.id;
       }
     }
@@ -880,11 +884,10 @@ async function sharingOpenJoinPicker(folderId) {
       return;
     }
 
-    // All files (group + item files + placeholders) must be selected: a partial
-    // grant can never half-join — the pending → 'joined' flip is gated on the
-    // full set inside joinWithFileIds.
-    const required = state.sharing.getRequiredGroupFiles();
-    const missing = required.filter(k => !fileIds[k]);
+    // All required files (group + item files + placeholders + revoked.json)
+    // must be selected: a partial grant can never half-join — the pending →
+    // 'joined' flip is gated on the full set inside joinWithFileIds.
+    const missing = requiredKeys.filter(k => !fileIds[k]);
     if (missing.length > 0) {
       const names = missing.map(k => `${k}.json`).join(', ');
       showJoinError(t('sharing.join_missing_files', names));

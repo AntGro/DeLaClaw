@@ -1164,6 +1164,19 @@ test('sharing i18n keys used in code exist in every locale', () => {
   }
 });
 
+test('sharing join picker accepts every required file key', () => {
+  // Regression: revoked.json became the 17th required group file (phase 3)
+  // but the picker's doc→key allowlist in sharing-ui.js still hard-coded
+  // the old 16 keys, so selecting revoked.json was silently dropped and the
+  // join failed with "Missing files: revoked.json".
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(!sui.includes("['group', 'todos', 'habits', 'lists']"),
+    'sharing-ui.js must not hard-code the join picker key allowlist');
+  const pickerFn = sui.slice(sui.indexOf('async function sharingOpenJoinPicker'));
+  assert(pickerFn.includes('getRequiredGroupFiles()'),
+    'sharingOpenJoinPicker must derive accepted keys from getRequiredGroupFiles()');
+});
+
 test('sharing join is disabled without a desktop-like pointer', () => {
   // Joining requires multi-selecting every group file in the Google file
   // picker. The gate is capability-based (fine pointer + hover), not device

@@ -3560,11 +3560,12 @@ window.markCategoryRenamed = markCategoryRenamed;
   btn.addEventListener('click', () => {
     const lang = getLang();
     const confirmWord = lang === 'fr' ? 'SUPPRIMER' : lang === 'es' ? 'ELIMINAR' : 'DELETE';
-    // Pick backend-specific message
+    // Pick backend-specific message; name the actual Drive folder being deleted
     const bodyKey = state.driveMode ? 'account.confirm_body_drive' : 'account.confirm_body_local';
+    const folderName = driveFolderNames(currentHostname()).personal;
     showConfirmAction(
       t('account.confirm_title'),
-      t(bodyKey),
+      t(bodyKey, { folder: folderName }),
       async () => {
         // Show progress inside the modal
         const msgEl = document.getElementById('confirmActionMessage');

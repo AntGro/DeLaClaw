@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-12T22:25:22.977Z from 38 modules (v2.0.41). Total LOC 28742. Do not hand-edit.
+> Generated 2026-09-12T22:26:53.823Z from 38 modules (v2.0.42). Total LOC 28743. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,7 +27,7 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 3638 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
+| main | 3639 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
 | i18n | 2207 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
 | sharing-drive | 1682 | - | drive-folders,sharing-envelope,sharing-file-reconcile,utils | main.js,sharing.js | - |
 | sharing-ui | 1242 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:37,pendingSet,window:8 |

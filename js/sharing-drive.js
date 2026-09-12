@@ -3,6 +3,7 @@
 // ===================================================================
 
 import { deepEqual } from './utils.js';
+import { driveFolderNames, currentHostname } from './drive-folders.js';
 import { encodeInviteEnvelope } from './sharing-envelope.js';
 import {
   createIntentState,
@@ -69,8 +70,10 @@ import {
 //
 // ===================================================================
 
-const SHARED_ROOT_NAME = 'DeLaClaw-Shared';
-const GROUP_PREFIX     = 'DeLaClaw-Shared-';
+// `DeLaClaw-Shared/` on production, `DeLaClawDev-Shared/` everywhere else
+// (see js/drive-folders.js). Group subfolders always live under the shared root.
+const { sharedRoot: SHARED_ROOT_NAME, groupPrefix: GROUP_PREFIX } =
+  driveFolderNames(currentHostname());
 const POLL_MS          = 15_000;      // 15s — faster than personal (30s)
 const MAX_RETRIES      = 2;
 const ITEM_TYPES       = ['todos', 'habits', 'lists'];

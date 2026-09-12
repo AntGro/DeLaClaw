@@ -1,4 +1,5 @@
 import { lucideIcon } from './icons.js';
+import { driveFolderNames, currentHostname } from './drive-folders.js';
 import { initHero, showHero, hideHero, injectGateLogo } from './hero.js';
 import { t, getLang, setLang, nextLang } from './i18n.js';
 import { renderStorm, generateStorm, LOGO_DEFAULTS, animLoading, animLock, animUnlock } from './logo.js';
@@ -2702,7 +2703,8 @@ function getGoogleAccessToken() {
   });
 }
 
-const DRIVE_FOLDER_NAME = 'DeLaClaw Backups';
+// `DeLaClaw Backups/` on production, `DeLaClawDev Backups/` everywhere else.
+const DRIVE_FOLDER_NAME = driveFolderNames(currentHostname()).backups;
 
 async function getOrCreateDriveFolder(token) {
   // Check settings for cached folder ID (all adapters return arrays here)

@@ -99,6 +99,19 @@ These **must stay in sync**. The `draft` status bug (v1.105) was caused by the d
 | **Setup** | Click "Connect with Google" → authorize → folder and data file created automatically | `cd server && bun run server.js`. Enter `http://localhost:3737` in login form | Click "Demo" on login screen, choose a sample dataset or start empty |
 | **Purpose** | Primary persistent backend — no database, no API keys, just a Google account. Optional Calendar sync projects habits, TODOs, and birthdays to a dedicated Google Calendar | Self-hosted option for privacy-conscious users on trusted networks | Try DeLaClaw without any backend. Also serves as the Drive adapter's query engine |
 
+### Drive folder naming — production vs preview builds
+
+The Drive backend derives its folder names from the hostname, so preview builds can
+never read or write production data:
+
+| Host | Personal folder | Backups folder | Shared root |
+|---|---|---|---|
+| `delaclaw.com` (production) | `DeLaClaw/` | `DeLaClaw Backups/` | `DeLaClaw-Shared/` |
+| anything else (`dev.delaclaw.pages.dev`, PR previews, `localhost`) | `DeLaClawDev/` | `DeLaClawDev Backups/` | `DeLaClawDev-Shared/` |
+
+Group subfolders follow the shared root (`DeLaClawDev-Shared-{groupId}` off-production).
+The rule lives in `js/drive-folders.js` — pure functions of the hostname.
+
 ---
 
 ## 4b. Data Flow

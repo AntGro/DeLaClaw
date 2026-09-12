@@ -2054,6 +2054,20 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(!/name = 'DeLaClaw'/.test(src), 'hardcoded calendar name must be gone');
     });
 
+    test('delete-account dialog names the actual Drive folder', () => {
+      const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      const bodies = [...i18n.matchAll(/confirm_body_drive: '([^']*)'/g)].map(m => m[1]);
+      assert(bodies.length === 3, `expected confirm_body_drive in 3 locales, found ${bodies.length}`);
+      for (const b of bodies) {
+        assert(b.includes('{folder}'), 'dialog body must interpolate the folder name');
+        assert(!b.includes('DeLaClaw'), 'dialog body must not hardcode the folder name');
+      }
+      const src = jsFiles['main.js'];
+      assert(/t\(bodyKey, \{ folder: /.test(src), 'must pass the folder name to the dialog');
+      assert(src.includes('driveFolderNames(currentHostname()).personal'),
+        'folder name must be hostname-derived, not hardcoded');
+    });
+
     test('sw.js precaches the folder-name module', () => {
       const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
       assert(sw.includes("'js/drive-folders.js'"), 'sw.js PRECACHE_URLS must list the new module');

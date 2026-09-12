@@ -1990,6 +1990,69 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   }
 
   // ===================================================================
+  // Drive folder names — production vs preview hosts (js/drive-folders.js)
+  // ===================================================================
+  {
+    const { pathToFileURL } = require('url');
+    const folders = await import(pathToFileURL(path.join(JS_DIR, 'drive-folders.js')).href);
+    const { isProdHostname, driveFolderSuffix, driveFolderNames } = folders;
+
+    test('drive folders: production hostnames keep the DeLaClaw names', () => {
+      for (const host of ['delaclaw.com', 'www.delaclaw.com', 'DeLaClaw.COM']) {
+        assert(isProdHostname(host), `${host} must be treated as production`);
+        assert(driveFolderSuffix(host) === '', `${host} must have no suffix`);
+        const n = driveFolderNames(host);
+        assert(n.personal === 'DeLaClaw', 'personal folder');
+        assert(n.backups === 'DeLaClaw Backups', 'backups folder');
+        assert(n.sharedRoot === 'DeLaClaw-Shared', 'shared root');
+        assert(n.groupPrefix === 'DeLaClaw-Shared-', 'group prefix');
+      }
+    });
+
+    test('drive folders: non-production hosts get isolated DeLaClawDev names', () => {
+      for (const host of ['dev.delaclaw.pages.dev', 'localhost', '127.0.0.1', '', 'pr-123.delaclaw.pages.dev']) {
+        const label = host || '(empty)';
+        assert(!isProdHostname(host), `${label} must not be treated as production`);
+        assert(driveFolderSuffix(host) === 'Dev', `${label} must get the Dev suffix`);
+        const n = driveFolderNames(host);
+        assert(n.personal === 'DeLaClawDev', 'personal folder');
+        assert(n.backups === 'DeLaClawDev Backups', 'backups folder');
+        assert(n.sharedRoot === 'DeLaClawDev-Shared', 'shared root');
+        assert(n.groupPrefix === 'DeLaClawDev-Shared-', 'group prefix');
+      }
+    });
+
+    // ── wiring ──
+    test('drive adapter derives the personal folder from the hostname', () => {
+      const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf-8');
+      assert(src.includes("from '../drive-folders.js'"), 'must import the folder-name module');
+      assert(/const DRIVE_FOLDER_NAME = driveFolderNames\(currentHostname\(\)\)\.personal/.test(src),
+        'personal folder must be hostname-derived, not hardcoded');
+      assert(!/const DRIVE_FOLDER_NAME = 'DeLaClaw'/.test(src), 'hardcoded folder name must be gone');
+    });
+
+    test('sharing adapter derives shared root + group prefix from the hostname', () => {
+      const src = jsFiles['sharing-drive.js'];
+      assert(src.includes("from './drive-folders.js'"), 'must import the folder-name module');
+      assert(src.includes('sharedRoot: SHARED_ROOT_NAME') && src.includes('groupPrefix: GROUP_PREFIX'),
+        'shared root and group prefix must be hostname-derived');
+      assert(!/const SHARED_ROOT_NAME = 'DeLaClaw-Shared'/.test(src), 'hardcoded shared root must be gone');
+    });
+
+    test('main.js derives the backup folder from the hostname', () => {
+      const src = jsFiles['main.js'];
+      assert(src.includes("from './drive-folders.js'"), 'must import the folder-name module');
+      assert(/const DRIVE_FOLDER_NAME = driveFolderNames\(currentHostname\(\)\)\.backups/.test(src),
+        'backup folder must be hostname-derived, not hardcoded');
+    });
+
+    test('sw.js precaches the folder-name module', () => {
+      const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
+      assert(sw.includes("'js/drive-folders.js'"), 'sw.js PRECACHE_URLS must list the new module');
+    });
+  }
+
+  // ===================================================================
   // Sharing phase 3 — revoked.json (removed-member notices)
   // ===================================================================
   {

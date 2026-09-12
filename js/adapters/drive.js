@@ -23,6 +23,7 @@ import { createDemoAdapter } from './demo.js';
 import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
 import { compareVersions } from '../../migrations/version-compare.js';
 import { t } from '../i18n.js';
+import { driveFolderNames, currentHostname } from '../drive-folders.js';
 
 export const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
 export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
@@ -30,7 +31,8 @@ export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.app.crea
 export function getDriveScope() {
   return `${DRIVE_SCOPE_FILE} ${CALENDAR_SCOPE}`;
 }
-const DRIVE_FOLDER_NAME = 'DeLaClaw';
+// `DeLaClaw/` on production, `DeLaClawDev/` everywhere else (see js/drive-folders.js).
+const DRIVE_FOLDER_NAME = driveFolderNames(currentHostname()).personal;
 const DEBOUNCE_MS = 2000;
 const POLL_INTERVAL_MS = 30000;
 const MAX_RETRIES = 2;

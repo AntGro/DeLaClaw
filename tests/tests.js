@@ -1164,6 +1164,20 @@ test('sharing i18n keys used in code exist in every locale', () => {
   }
 });
 
+test('sharing join is disabled on touch devices', () => {
+  // Joining requires multi-selecting every group file in the Google file
+  // picker, which touch browsers (phones, tablets) dismiss after a single
+  // tap. The join modal must show a notice instead of the invite-code form.
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(sui.includes('isTouchDevice') && sui.includes("from './utils.js'"),
+    'sharing-ui.js must import isTouchDevice from utils.js');
+  const modalFn = sui.slice(sui.indexOf('function sharingOpenJoinCodeModal'));
+  assert(modalFn.includes('if (isTouchDevice())'),
+    'sharingOpenJoinCodeModal must gate on isTouchDevice()');
+  assert(modalFn.includes("t('sharing.join_not_available_on_touch')"),
+    'sharingOpenJoinCodeModal must show the touch-device notice');
+});
+
 test('sharing leave confirmation overrides the Delete default', () => {
   // Regression: the "Leave this group?" modal showed "Delete" with a trash icon
   // because showConfirmAction defaults the confirm button to Delete/trash.

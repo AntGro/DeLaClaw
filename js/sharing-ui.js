@@ -19,7 +19,7 @@
 
 import state from './state.js';
 import { t } from './i18n.js';
-import { esc, escQ, showToast, showConfirmAction } from './utils.js';
+import { esc, escQ, showToast, showConfirmAction, isTouchDevice } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { LOGOS } from './backend-logos.js';
 import { decodeInviteEnvelope } from './sharing-envelope.js';
@@ -682,6 +682,20 @@ function sharingOpenJoinCodeModal() {
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingJoinCodeModal';
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  // Joining requires multi-selecting every group file in the Google file
+  // picker, which touch browsers (phones, tablets) don't support — the
+  // picker dismisses after a single tap. Show a notice instead of the form.
+  if (isTouchDevice()) {
+    overlay.innerHTML = `<div class="modal">
+    <h2>${lucideIcon('log-in', 20)} ${t('sharing.join_group')}</h2>
+    <p>${t('sharing.join_not_available_on_touch')}</p>
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingJoinCodeModal">${t('common.close')}</button>
+    </div>
+  </div>`;
+    document.getElementById('app').appendChild(overlay);
+    return;
+  }
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('log-in', 20)} ${t('sharing.join_group')}</h2>
     <p>${t('sharing.join_code_hint')}</p>

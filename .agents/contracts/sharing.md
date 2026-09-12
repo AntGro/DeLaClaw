@@ -1,7 +1,9 @@
 # Sharing — Feature Contract
 
 ## Purpose
-Cross-user collaborative sharing via Google Drive. Group creator hosts shared data in a Drive folder; members connect via DLC1 invite codes and read/write the shared folder through the Drive API. Supports shared TODOs, habits (with completions), and list items. Maintenance mode (stale, not actively developed).
+Cross-user collaborative sharing via Google Drive. Group creator hosts shared data in a Drive folder; members connect via DLC1 invite codes and read/write the shared folder through the Drive API. Supports shared TODOs, habits (with completions), and list items. Drive is the only sharing path.
+
+**Target design (decided 2026-09-07, implementation pending):** 14 design decisions recorded in the "DeLaClaw design decisions" space ("Drive sharing" tab). Assumption: sharing is not yet exposed, no groups in the wild, no backward-compatibility constraints (greenfield). `docs-site/sharing.md` describes the target flows; this contract must stay in sync with it.
 
 User jobs:
 - create a sharing group → invite others via DLC1 invite code
@@ -23,23 +25,28 @@ Five modules, layered:
 ## Entry & Ownership
 - **Entry:** `js/sharing-ui.js` (UI), `js/sharing-drive.js` (adapter), `js/sharing.js` (factory)
 - **State:** `state.sharing` (adapter instance or null)
-- **Storage:** shared data lives in the owner's Drive folder under `shared/<groupId>/` (`meta.json`, `items.json`, typed item files); joined groups tracked in `joined_groups` (on each member's own DB). `sharing-ui` also reads `habit_categories`, `habit_completions`, `habits`, `todo_categories`, `todos`, `list_items` for category assignment and sync rendering
+- **Storage:** shared data lives in the creator's Drive folder `DeLaClaw-Shared-{groupId}/` (`group.json`, item files `todos.json` / `habits.json` / `lists.json` as plain JSON arrays of item objects, `revoked.json`, `extra_1..12.json` placeholders); joined groups tracked in the member's own `DeLaClaw/joined-groups.json` as `{folderId, groupId, fileIds}` (fileIds include `revoked.json`). `sharing-ui` also reads `habit_categories`, `habit_completions`, `habits`, `todo_categories`, `todos`, `list_items` for category assignment and sync rendering
+- **Creation-completion marker:** `createGroup` uploads item files + placeholders first and `group.json` LAST — its presence means creation completed. A missing `group.json` on an owned folder means a partial creation: trashed at load time if the folder is older than `ABANDONED_GROUP_AGE_MS` (15 min, via Drive `createdTime`; recoverable via Drive trash), skipped if younger (may be mid-creation on another device), never trashed for unowned (joined) folders. In-session failures best-effort trash the partial folder before rethrowing. `loadAll` isolates per-folder load failures so one bad folder cannot fail the whole load.
 - **CODEMAP:** `core[sharing-ui]`, `core[sharing-drive]`, `core[sharing]`, `core[sharing-interface]`, `core[sharing-envelope]` — see CODEMAP.json for current stats
 
 ## Dependencies
-- **sharing-drive** depends on: `sharing-envelope`, `crypto-sync`, `utils`
+- **sharing-drive** depends on: `sharing-file-reconcile`, `sharing-envelope`, `crypto-sync`, `utils`
+- **sharing-file-reconcile** depends on: nothing (pure, backend-agnostic sync-intent engine used by file-based sharing adapters)
 - **sharing-ui** depends on: `backend-logos`, `i18n`, `icons`, `sharing-envelope`, `state`, `utils`
 - **sharing-ui dependents (blast radius):** `habits.js`, `lists.js`, `main.js`, `todos.js`, `welcome.js`
 
 ## Two Access Paths
-- **Owner (A):** owns the Drive folder → direct file read/write
-- **Member (B):** added as writer on the shared folder via Drive permissions → direct file read/write; must also be in the owner's `trusted-contacts.json` allowlist
+- **Creator (A):** owns the Drive folder → direct file read/write
+- **Member (B):** added as writer on the shared folder via Drive permissions, plus reader on `revoked.json` (survives folder-permission revocation) → direct file read/write; must also be in the creator's `trusted-contacts.json` allowlist
 
 ## Invite Code Flow
 - Format: `DLC1.<base64url(JSON)>` — opaque access code, not encryption
 - Drive payload: `{v:1, b:'googledrive', f, g}` (folderId, groupId)
-- Creator generates invite → shares the group folder with the member's Google account via Drive permissions
-- Joiner decodes invite → opens shared folder via Drive API → joined group tracked in local `joined_groups`
+- Creator generates invite → shares the group folder with the member's Google account via Drive permissions (writer on folder, reader on `revoked.json`) → pending member row `{hashId, status:'pending', emailHash, pseudo:null}` in `group.json`. `inviteUser` throws unless the caller is the creator
+- Joiner decodes invite → Google Picker selects the shared files (`revoked.json` included) → downloads `group.json` → must match a pending row by `emailHash` (no match → join rejected) → flips pending → joined and picks a pseudo → join persisted in local `joined-groups.json` (fileIds include `revoked.json`)
+- **Join is gated on the full file set:** `joinWithFileIds` throws unless the joiner has access to ALL required files (`group.json` + item files + every `extra_N.json` placeholder, via `getRequiredGroupFiles()`); a partial grant (e.g. only `group.json` picked) can never half-join — the direct-join path falls back to the Picker instead
+- Joining requires BOTH Drive access and a matching pending invite; Drive access alone is not enough
+- Creator's next poll (≤15s) detects the pending → joined flip and shows a toast
 
 ## Security
 - **Access control:** Google Drive folder permissions + local `trusted-contacts.json` allowlist
@@ -51,21 +58,24 @@ Five modules, layered:
 - **sharing-ui:** pendingSet per CODEMAP. Share/unshare popovers disable buttons until fulfilled
 
 ## UI Actions
-- **Settings pane:** create group, delete group, invite member, revoke member, leave group, unjoin group, edit own display name, toggle revoked member visibility (`toggleRevokedMembers`)
-- **Join picker:** `sharingOpenJoinPicker` — method picker for joining (paste invite code or open invite link)
+- **Settings pane:** create group, delete group, invite member, revoke member, unjoin group, edit own display name, manual "check member accounts" (re-validate Drive permissions against `group.json` to surface externally deleted Google accounts)
+- **Join picker:** `sharingOpenJoinPicker` — method picker for joining (paste invite code or open invite link); the Picker selection must include `revoked.json`
 - **Share popovers:** `submitSharePopover` — share/unshare items to groups; `sharePopoverOpenSharing` — no-groups hint links to Settings → Sharing
 - **Clipboard:** `sharingCopyCode` / `sharingCopyLink` / `sharingCopyMemberCode` / `sharingCopyMemberLink` — copy invite code or link to clipboard
 - **Completion modal:** `sharingCompleteSubmit` — submit shared habit/todo completions with attribution
 
 ## Drive Adapter Operations
 No RPC layer — both users read/write the shared folder directly via the Drive API:
-- `createGroup(name)` → creates `shared/<groupId>/` with `meta.json`
-- `inviteUser(groupId, email)` → shares folder with the member's Google account (writer role)
-- `removeUser(groupId, memberId)` → removes the Drive permission
-- `loadGroup(groupId)` / `saveGroup(groupId)` → read/write `meta.json`
-- `saveTypedItems(groupId, type)` → write typed item files (`items.json` + per-type files)
-- `leaveGroup(groupId)` → removes local membership
-- `deleteGroup(groupId)` → deletes the shared folder
+- `createGroup(name)` → creates `DeLaClaw-Shared-{groupId}/` with `group.json`, item files, `revoked.json`, 12 `extra_N.json` placeholders
+- `inviteUser(groupId, email)` → creator-only; shares folder with the member's Google account (writer on folder, reader on `revoked.json`); adds pending member row with hashed ID
+- `removeUser(groupId, memberId)` → creator-only; reassigns the member's items' `created_by` to the creator; appends the member hashId to `revoked.json`; revokes the folder Drive permission (the `revoked.json` reader grant remains); removes the member row from `group.json`
+- `loadGroup(groupId)` / `saveGroup(groupId)` → read/write `group.json`
+- `saveTypedItems(groupId, type)` → writes the typed item file (plain JSON array); captures the per-file sync intents its payload represents and acknowledges only those on success (failed writes retain intents; a 412 conflict re-reconciles intent-aware and retries)
+- `deleteItem` → splices the item from memory AND records a pending delete intent (`deletedIds`); the intent-aware merge (`reconcileItems`, including the 412-conflict path) suppresses the stale remote copy until the deletion upload succeeds
+- `unjoinGroup(groupId)` → best-effort flip of own member row to `status: 'left'` (+ `leftAt`) in `group.json` — the row is kept, not deleted — + deletes the local `joined-groups.json` entry (full detach; `leaveGroup` is removed). The creator's poll then revokes the leaver's Drive permission (only the folder owner can revoke it) and clears the row, so leaving actually removes folder access
+- `deleteGroup(groupId)` → creator-only; writes ALL member hashIds to `revoked.json`; revokes all non-owner folder permissions (`revoked.json` readers remain); does NOT trash the folder yet; records `deletedAt` in creator local state. Members hitting folder-404 fetch `revoked.json` by stored fileId: own hashId present → explicit "group deleted", stop polling and purge. Creator app startup sweep permanently deletes folders with `deletedAt` older than 30 days
+- `deleteAccount` → joined groups left alone (ghost rows linger); created groups deleted via the grace-period `deleteGroup` flow above; personal `DeLaClaw/` folder trashed last; OAuth revoked last
+- Removed-member poll states: folder 404 → fetch `revoked.json`: own hashId present = "removed"; `revoked.json` also 404 = "group deleted"; transport error = flaky connection, keep polling
 
 ## i18n
 - **sharing-ui prefix:** `sharing.` — keys for group management, invite flow, badges, completion UI
@@ -80,12 +90,16 @@ No RPC layer — both users read/write the shared folder directly via the Drive 
 - **Share-button visibility:** buttons render when `!!state.sharing`, not when groups exist
 - **No-groups popover:** clicking a share button with no groups opens the same `share-popover` container with a hint message and a link to Settings → Sharing (via `sharePopoverOpenSharing`), instead of silently returning
 - **Collaborative editing:** shared items are collaboratively editable — any group member can update or delete any item in a group they belong to, not just items they created
-- **Completion attribution:** completions carry `created_by` (member_id) for attribution. Personal/non-shared items don't need attribution
+- **Completion attribution:** completions carry `created_by` (member hashId) for attribution. Personal/non-shared items don't need attribution
 - **Category placement is personal:** `creator_category` is origin metadata only. Local category/deck placement remains personal and must not rewrite `creator_category`
-- **Leaving a group:** the local `joined_groups` row is deleted client-side. Local completions stay
-- **Group deletion:** deleting a group deletes the shared Drive folder. Open design question: what happens to local pointers when a group is deleted
+- **Received items always land in `__shared__`** (pointer movable afterwards); per-member `sort_order` is never synced
+- **Unjoining:** `unjoinGroup` is the only leave path (`leaveGroup` removed) — best-effort flip of own row to `status: 'left'` (+ `leftAt`) in `group.json`; the row is kept as a tombstone until the creator's poll revokes the leaver's Drive permission and clears it. Local `joined-groups.json` entry deleted; local completions stay. The UI never displays `status: 'left'` rows (`visibleMembers`), so the member list always reflects who actually has access. Re-inviting the same email drops the stale `left` row before creating the new pending invite
+- **Sync intents (in-memory, per group entry + item file):** `addItem`/`addSharedHabit` record pending creates (`createdIds`), `deleteItem`/`deleteSharedHabit` record pending deletes (`deletedIds`); both sets start empty on every load. `reconcileItems` retains pending creates missing remotely, drops local items missing remotely without a create intent (remote deletion), suppresses remote items with a pending delete intent, accepts other remote items as creations, and resolves both-sides conflicts by newer `updated_at`. Intents are acknowledged per successful upload only for the ids that upload actually carried/omitted and whose intent is unchanged since capture — ids added mid-flight stay pending. Nothing is written to Drive, so there is nothing to prune
+- **Creator-only mutations:** `inviteUser`/`removeUser`/`deleteGroup` throw unless the caller is the group creator; invite/remove UI is hidden from non-creators
+- **Removed members' items** are reassigned to the creator (`created_by` rewrite) — no ghost creator IDs
+- **Group deletion:** grace-period flow via `revoked.json` (see Drive Adapter Operations); orphan dialog re-prompts until the group returns or deletion is accepted
 - **Polling:** joined groups poll every 15s (`POLL_MS`)
-- **Member identity:** `memberId` is an 8-char UUID prefix, stable per group. Display names are group-local and mutable via `update_member_display_name`
+- **Member identity:** `memberId` is an opaque immutable hash (never a raw email); display names are group-local pseudos, mutable via `updateMyDisplayName`. Pending invites carry `emailHash` for join matching
 - **Shared habit `next_due` — write-once, read on refresh:** `next_due` is computed at write time (mark done, edit frequency, edit last-done, etc.) and published to the shared item payload via `updateSharedHabit`. Recipients read `sh.next_due` from shared storage during `refreshHabits()` — no local recomputation. A null `sh.next_due` clears the local pointer's stale value
 
 ## Adapter & Backend
@@ -100,13 +114,17 @@ No RPC layer — both users read/write the shared folder directly via the Drive 
 - **Category FK cascade:** app-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members
 
 ## Backup & Restore
-- **Sharing tables** (`sharing_groups`, `sharing_members`, `sharing_items`, `joined_groups`) included in `BACKUP_TABLES` where present
-- **Joiner-side** (`joined_groups`) also in `BACKUP_TABLES`; `sync_secret` transfers via `settings`
-- **Owner ID rewriting on import:** `owner_id` on `joined_groups` stripped (trigger stamps new UID)
+- **Drive files are the backup surface:** the shared folder (`group.json`, item files, `revoked.json`) lives in the creator's Drive; the member's `DeLaClaw/joined-groups.json` is the joiner-side pointer record
+- **Joiner-side** `joined-groups.json` should be included wherever personal Drive files are backed up; `sync_secret` transfers via `settings`
 
 ## Risks / Gotchas
 - Remote Drive folder unavailable → joined group items stale until next successful poll
-- Invite token single-use is not enforced server-side — anyone with folder access can read/write
+- Invite token single-use is not enforced server-side — anyone with folder access can read/write; the pending-invite check is the second gate
+- Revocation is not atomic — Drive permissions are removed one by one; `removeUser` must tolerate partial failure
+- Leaving revokes Drive access only when the creator's app next polls (≤15s while running) — if the creator never opens the app again, the permission lingers, because only the folder owner can revoke it
+- Removed members can read the full `revoked.json` ID list (opaque hashIds, not emails)
+- Sync intents are in-memory per tab: reloading (or a fresh device) starts with empty intent sets and re-syncs from Drive, so there is no long-lived resurrection state to prune — but a tab that stays alive with unacknowledged intents across a long sleep still guards its own merges
+- The 30-day deletion sweep needs the creator's app to run; shell folders linger otherwise (members still infer deletion via the `revoked.json`-unreachable fallback)
 - Schema mismatch between owner and joiner → migration error messages hint to run pending migrations
 - Credential decryption failure (lost sync secret) → member can't reconnect; must re-join via new invite
 

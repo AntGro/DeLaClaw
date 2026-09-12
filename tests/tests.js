@@ -1021,6 +1021,212 @@ test('sharing member identity is memberId-based and agent-safe', () => {
     'sharing-drive.js must not write raw invite email into group.json members');
 });
 
+test('sharing create-group modal locks UI and reports file progress', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+
+  assert(drive.includes('async createGroup(name, onProgress)'),
+    'sharing-drive.js createGroup must accept an onProgress callback');
+  assert(drive.includes("onProgress?.({ step: 'itemFiles', done: doneFiles, total: totalFiles })"),
+    'sharing-drive.js must report per-file progress as each upload resolves');
+  assert(sui.includes('sharingCreateGroupCancelBtn') && sui.includes('cancelBtn.disabled = true'),
+    'sharing-ui.js must disable the Cancel button while the group is being created');
+  assert(sui.includes('!overlay.dataset.creating'),
+    'sharing-ui.js must block backdrop dismissal while the group is being created');
+  assert(sui.includes('sharingCreateProgress') && sui.includes('sharingCreateProgressFill'),
+    'sharing-ui.js must render a progress bar in the create-group modal');
+  assert(sui.includes("t('sharing.creating_files', ev.done, ev.total)"),
+    'sharing-ui.js must show the determinate file count during creation');
+  for (const key of ['creating_folder', 'writing_group', 'creating_files']) {
+    assert(i18n.includes(key + ':'),
+      `i18n.js must define the sharing.${key} progress string`);
+  }
+});
+
+test('sharing partial creation: group.json last, trash on failure, load-time GC', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf-8');
+
+  // 1. group.json is written AFTER the item-file uploads: its presence marks completion
+  const createStart = drive.indexOf('async createGroup(name, onProgress)');
+  const createEnd = drive.indexOf('/** Load all groups', createStart);
+  const createBody = drive.slice(createStart, createEnd);
+  const promiseAllIdx = createBody.indexOf('const results = await Promise.all(');
+  const groupJsonIdx = createBody.indexOf(`driveUpload(tok, subfolder.id, null, 'group.json', group)`);
+  assert(promiseAllIdx !== -1 && groupJsonIdx !== -1 && groupJsonIdx > promiseAllIdx,
+    'createGroup must upload group.json after the item-file Promise.all (presence = completion marker)');
+
+  // 2. In-session cleanup: a failed creation trashes the partial folder, then rethrows
+  assert(createBody.includes('await driveTrashFile(tok, subfolder.id)'),
+    'createGroup must best-effort trash the partial folder on failure');
+  assert(createBody.includes('throw err;'),
+    'createGroup must rethrow after cleanup so the modal shows the error');
+
+  // 3. Load-time GC: abandoned marker-less OWN folders are trashed, young ones skipped,
+  //    unowned (joined) folders are never trashed
+  assert(drive.includes('const ABANDONED_GROUP_AGE_MS = 15 * 60 * 1000;'),
+    'sharing-drive.js must define the abandoned-group age threshold');
+  const loadStart = drive.indexOf('async function loadGroup(folderId, groupId, opts');
+  const loadEnd = drive.indexOf('async function normalizeEntry', loadStart);
+  const loadBody = drive.slice(loadStart, loadEnd);
+  assert(loadBody.includes('if (!gFile && owned)'),
+    'loadGroup must only consider trashing marker-less folders it owns');
+  assert(loadBody.includes('ageMs >= ABANDONED_GROUP_AGE_MS') && loadBody.includes('await driveTrashFile(tok, folderId)'),
+    'loadGroup must trash abandoned marker-less owned folders');
+  assert(loadBody.includes('skipping young folder'),
+    'loadGroup must leave young marker-less folders alone (creation may be in progress elsewhere)');
+
+  // 4. Per-folder error isolation: one bad folder must not fail the whole loadAll
+  const allStart = drive.indexOf('/** Load all groups');
+  const allEnd = drive.indexOf('getAllGroups()', allStart);
+  const allBody = drive.slice(allStart, allEnd);
+  assert(allBody.includes('.catch(err =>'),
+    'loadAll must isolate per-folder load failures so one bad folder cannot break all groups');
+
+  // 5. driveListChildren must return createdTime for the age guard
+  assert(drive.includes('files(id,name,modifiedTime,createdTime)'),
+    'driveListChildren must fetch createdTime for the abandoned-folder age check');
+
+  // 6. CSP must allow the Drive picker iframe (join flow)
+  const frameSrc = html.match(/frame-src ([^;]+);/);
+  assert(frameSrc && frameSrc[1].includes('https://docs.google.com'),
+    'index.html CSP frame-src must allow https://docs.google.com for the Drive join picker');
+});
+
+test('sharing departure is unjoin-only (no leaveGroup)', () => {
+  const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const delegation = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+
+  assert(!iface.includes('leaveGroup'),
+    'sharing-interface.js must not expose leaveGroup');
+  assert(!drive.includes('async leaveGroup'),
+    'sharing-drive.js must not implement leaveGroup');
+  assert(!sui.includes('sharingLeaveGroup') && !sui.includes('sharing-leave-group'),
+    'sharing-ui.js must not reference the removed leave path');
+  assert(!delegation.includes('sharing-leave-group'),
+    'delegation.js must not route the removed leave action');
+  assert(sui.includes('sharing-unjoin-group') && drive.includes('async unjoinGroup'),
+    'unjoin must remain the single departure path');
+});
+
+test('sharing members use hashed opaque IDs with a pending-invite join gate', () => {
+  const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+
+  assert(drive.includes('function newMemberId()'),
+    'sharing-drive.js must generate opaque random member IDs');
+  assert(drive.includes('const creatorMemberId = newMemberId();'),
+    'sharing-drive.js must not derive the creator member ID from the email');
+  assert(drive.includes('async function emailHash(email)'),
+    'sharing-drive.js must hash invite emails for matching instead of storing them');
+  assert(drive.includes('No pending invite for this account'),
+    'sharing-drive.js must reject joins without a matching pending invite');
+  assert(drive.includes('await assertCreator(groupId)'),
+    'sharing-drive.js must enforce creator-only invite/remove in the adapter');
+  assert(iface.includes('creator-only') && iface.includes('pending invite'),
+    'sharing-interface.js must document creator-only ops and the pending-invite join requirement');
+  // Regression: normalizeMember once dropped emailHash, so the join gate
+  // (m.emailHash === eh on normalized members) could never match and every
+  // join failed with 'No pending invite for this account'.
+  assert(drive.includes('emailHash: member.emailHash'),
+    'normalizeMember must preserve member.emailHash so the pending-invite join gate can match');
+});
+
+test('sharing i18n keys used in code exist in every locale', () => {
+  // Regression: t('sharing.name_updated') showed the raw key in English because
+  // the string existed in fr/es but was missing from en. Every sharing.* key
+  // referenced in code must be defined in all three locales.
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  const starts = {};
+  for (const m of i18n.matchAll(/^  (en|fr|es): \{$/gm)) starts[m[1]] = m.index;
+  const order = ['en', 'fr', 'es'];
+  const sharing = {};
+  for (let i = 0; i < order.length; i++) {
+    const slice = i18n.slice(starts[order[i]], i + 1 < order.length ? starts[order[i + 1]] : i18n.length);
+    const s0 = slice.indexOf('    sharing: {');
+    assert(s0 >= 0, `i18n.js must define a sharing section for [${order[i]}]`);
+    const rest = slice.slice(s0);
+    const next = rest.slice('    sharing: {'.length).search(/\n    [a-z_]+: \{/);
+    sharing[order[i]] = next < 0 ? rest : rest.slice(0, '    sharing: {'.length + next);
+  }
+  const used = new Set();
+  for (const f of ['sharing-ui.js', 'sharing-drive.js']) {
+    const src = fs.readFileSync(path.join(JS_DIR, f), 'utf-8');
+    for (const m of src.matchAll(/\bt\(\s*['"]sharing\.([A-Za-z0-9_]+)['"]/g)) used.add(m[1]);
+  }
+  assert(used.size > 0, 'expected to find t(\'sharing.*\') usages in sharing code');
+  for (const key of [...used].sort()) {
+    for (const loc of order) {
+      assert(new RegExp(`^\\s{6}${key}:`, 'm').test(sharing[loc]),
+        `i18n.js [${loc}].sharing must define '${key}:' (used via t('sharing.${key}'))`);
+    }
+  }
+});
+
+test('sharing leave confirmation overrides the Delete default', () => {
+  // Regression: the "Leave this group?" modal showed "Delete" with a trash icon
+  // because showConfirmAction defaults the confirm button to Delete/trash.
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const leaveCall = sui.slice(sui.indexOf('async function sharingUnjoinGroup'));
+  assert(leaveCall.includes("btnText: t('sharing.leave')"),
+    'sharingUnjoinGroup must override the confirm-modal Delete default with the Leave label');
+  assert(leaveCall.includes("variant: 'neutral'"),
+    'sharingUnjoinGroup must use the neutral (non-red) confirm variant');
+});
+
+test('sharing unjoin writes a left marker instead of deleting the member row', () => {
+  // Leaving must keep a status:'left' tombstone in group.json so the creator's
+  // poll can revoke the leaver's Drive permission (only the folder owner can).
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const unjoin = drive.slice(drive.indexOf('async unjoinGroup(groupId)'));
+  const unjoinFn = unjoin.slice(0, unjoin.indexOf('},', unjoin.indexOf('emit(')));
+  assert(unjoinFn.includes("self.status = 'left'"),
+    'unjoinGroup must flip the member status to left');
+  assert(unjoinFn.includes('self.leftAt'),
+    'unjoinGroup must stamp leftAt on the member row');
+  assert(!unjoinFn.includes('.filter(m => m.memberId !== currentMember.memberId)'),
+    'unjoinGroup must not delete the member row from group.json');
+  assert(drive.includes('async function revokeLeftMembers(groupId, tok)'),
+    'sharing-drive.js must define the creator-side revokeLeftMembers sweep');
+  assert(drive.includes('driveRemovePermission(tok, e.folderId, permissionId)'),
+    'revokeLeftMembers must revoke the Drive permission for left members');
+  assert(drive.includes("m.role === 'creator' || m.role === 'owner'") || drive.includes("m.role === 'owner'"),
+    'revokeLeftMembers must never revoke the owner/creator permission');
+  assert(drive.includes('isCreatorOf(groupId)') && drive.includes('revokeLeftMembers(groupId, tok)'),
+    'the poll loop must run the revoke-left sweep for creator-owned groups');
+});
+
+test('sharing normalizeMember preserves the left marker', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const norm = drive.slice(drive.indexOf('async function normalizeMember'));
+  assert(norm.includes('leftAt'),
+    'normalizeMember must preserve leftAt so the left marker survives re-saves of group.json');
+});
+
+test('sharing UI never displays left members', () => {
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(sui.includes('function visibleMembers(group)'),
+    'sharing-ui.js must define a visibleMembers helper');
+  assert(sui.includes("filter(m => m.status !== 'left')"),
+    'visibleMembers must exclude status:left tombstones');
+  for (const site of ['visibleMembers(group).length', 'for (const member of visibleMembers(group))',
+      'visibleMembers(group).filter', 'visibleMembers(selectedGroup)']) {
+    assert(sui.includes(site), `member display site must use visibleMembers (${site})`);
+  }
+});
+
+test('sharing re-invite clears a stale left marker for the same email', () => {
+  // Otherwise inviting someone who previously left would find the left row by
+  // emailHash and skip creating the new pending invite.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const invite = drive.slice(drive.indexOf('async inviteUser(groupId, inviteTarget)'));
+  assert(invite.includes("m.emailHash === eh && m.status === 'left'"),
+    'inviteUser must drop a stale left entry for the same emailHash before adding the pending invite');
+});
+
 // ===================================================================
 // 26. Inline edit callbacks use refreshFn (not renderFn) for data refresh
 // ===================================================================
@@ -2454,6 +2660,145 @@ async function importFlashcardsIntegrationTest() {
     }
   });
 
+
+  // ===================================================================
+  // Sharing file reconciliation — in-memory deletion intents
+  // (js/sharing-file-reconcile.js, wired in js/sharing-drive.js)
+  // ===================================================================
+  {
+    const { pathToFileURL } = require('url');
+    const reconcile = await import(pathToFileURL(path.join(JS_DIR, 'sharing-file-reconcile.js')).href);
+    const { createIntentState, markCreated, markDeleted, unionItems, reconcileItems, captureIntents, acknowledgeIntents } = reconcile;
+
+    const item = (id, updated_at) => ({ id, updated_at });
+    const ids = arr => arr.map(i => i.id).sort();
+
+    test('reconcile: stale local item missing remotely is dropped without a create intent', () => {
+      const intents = createIntentState();
+      const out = reconcileItems([item('a', '2026-09-12T10:00:00Z')], [], intents);
+      assert(ids(out).length === 0, 'stale local item must be dropped (remote deletion)');
+    });
+
+    test('reconcile: pending local creation missing remotely is retained', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      const out = reconcileItems([item('a', '2026-09-12T10:00:00Z')], [], intents);
+      assert(ids(out).join() === 'a', 'pending creation must survive reconciliation');
+    });
+
+    test('reconcile: pending local deletion suppresses a stale remote item', () => {
+      const intents = createIntentState();
+      markDeleted(intents, 'a');
+      const out = reconcileItems([], [item('a', '2026-09-12T10:00:00Z')], intents);
+      assert(ids(out).length === 0, 'remote copy of a pending delete must be suppressed');
+    });
+
+    test('reconcile: remote-only item without a delete intent is accepted', () => {
+      const intents = createIntentState();
+      const out = reconcileItems([], [item('b', '2026-09-12T10:00:00Z')], intents);
+      assert(ids(out).join() === 'b', 'remote creation must be accepted');
+    });
+
+    test('reconcile: item on both sides resolves by newer updated_at (tie keeps remote)', () => {
+      const intents = createIntentState();
+      const localNewer = reconcileItems(
+        [item('a', '2026-09-12T11:00:00Z')], [item('a', '2026-09-12T10:00:00Z')], intents);
+      assert(localNewer[0].updated_at === '2026-09-12T11:00:00Z', 'newer local wins');
+      const remoteNewer = reconcileItems(
+        [item('a', '2026-09-12T10:00:00Z')], [item('a', '2026-09-12T11:00:00Z')], intents);
+      assert(remoteNewer[0].updated_at === '2026-09-12T11:00:00Z', 'newer remote wins');
+      const tie = reconcileItems(
+        [item('a', '2026-09-12T10:00:00Z')], [item('a', '2026-09-12T10:00:00Z')], intents);
+      assert(tie.length === 1, 'tie keeps a single copy');
+    });
+
+    test('unionItems: pure union for remote-vs-remote snapshots (migration)', () => {
+      const out = unionItems(
+        [item('a', '2026-09-12T10:00:00Z')],
+        [item('b', '2026-09-12T10:00:00Z'), item('a', '2026-09-12T09:00:00Z')]);
+      assert(ids(out).join() === 'a,b', 'union keeps both sides');
+      assert(out.find(i => i.id === 'a').updated_at === '2026-09-12T10:00:00Z', 'newer wins');
+    });
+
+    test('intents: successful upload acknowledges only its captured intents', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      markDeleted(intents, 'b');
+      const captured = captureIntents(intents, [item('a', '2026-09-12T10:00:00Z')]);
+      acknowledgeIntents(intents, captured);
+      assert(!intents.createdIds.has('a'), 'captured create acknowledged');
+      assert(!intents.deletedIds.has('b'), 'captured delete acknowledged');
+    });
+
+    test('intents: id created while an upload is in flight stays pending', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      const captured = captureIntents(intents, [item('a', '2026-09-12T10:00:00Z')]);
+      markCreated(intents, 'b'); // created after the upload started
+      acknowledgeIntents(intents, captured);
+      assert(!intents.createdIds.has('a'), 'in-flight upload acks its own create');
+      assert(intents.createdIds.has('b'), 'later create must stay pending');
+    });
+
+    test('intents: failed upload retains all intents (no acknowledge call)', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      markDeleted(intents, 'b');
+      captureIntents(intents, [item('a', '2026-09-12T10:00:00Z')]);
+      // no acknowledgeIntents — the write failed
+      assert(intents.createdIds.has('a'), 'create intent retained after failure');
+      assert(intents.deletedIds.has('b'), 'delete intent retained after failure');
+    });
+
+    test('intents: delete-then-recreate mid-flight keeps the create intent', () => {
+      const intents = createIntentState();
+      markDeleted(intents, 'a');
+      const captured = captureIntents(intents, []); // payload omits a
+      markCreated(intents, 'a'); // re-created while the delete upload is in flight
+      acknowledgeIntents(intents, captured);
+      assert(intents.createdIds.has('a'), 're-creation must stay pending');
+      assert(!intents.deletedIds.has('a'), 'stale delete must not linger');
+    });
+
+    test('intents: create-then-delete mid-flight keeps the delete intent', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      const captured = captureIntents(intents, [item('a', '2026-09-12T10:00:00Z')]);
+      markDeleted(intents, 'a'); // deleted while the create upload is in flight
+      acknowledgeIntents(intents, captured);
+      assert(intents.deletedIds.has('a'), 'delete must stay pending for the next upload');
+    });
+
+    test('intents: markCreated/markDeleted keep the sets disjoint per id', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      markDeleted(intents, 'a');
+      assert(!intents.createdIds.has('a') && intents.deletedIds.has('a'), 'delete wins');
+      markCreated(intents, 'a');
+      assert(intents.createdIds.has('a') && !intents.deletedIds.has('a'), 're-create wins');
+    });
+
+    // ── wiring in sharing-drive.js ──
+    const drive = jsFiles['sharing-drive.js'];
+    test('sharing-drive wires the backend-agnostic reconcile module', () => {
+      assert(drive.includes("from './sharing-file-reconcile.js'"), 'must import the reconcile module');
+      assert(!/function mergeItems\(/.test(drive), 'local mergeItems must be gone');
+      assert(drive.includes('reconcileItems('), 'must use reconcileItems for local-vs-remote merges');
+      assert(drive.includes('unionItems('), 'must use unionItems for the legacy migration');
+      assert(drive.includes('captureIntents(') && drive.includes('acknowledgeIntents('),
+        'saveTypedItems must capture/acknowledge intents per upload');
+      assert(drive.includes('markCreated(intentStateFor(e, key), item.id)'), 'addItem must mark creates');
+      assert(drive.includes("markCreated(intentStateFor(e, 'habits'), habitData.id)"), 'addSharedHabit must mark creates');
+      assert(drive.includes('markDeleted(intentStateFor(e, type), itemId)'), 'deleteItem must mark deletes');
+      assert(drive.includes("markDeleted(intentStateFor(e, 'habits'), sharedId)"), 'deleteSharedHabit must mark deletes');
+      assert(drive.includes('entry.typeIntents[type] = createIntentState()'), 'entries must init per-type intent state');
+    });
+
+    test('sw.js precaches the new reconcile module', () => {
+      const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
+      assert(sw.includes("'js/sharing-file-reconcile.js'"), 'sw.js PRECACHE_URLS must list the new module');
+    });
+  }
 
   // ===================================================================
   // SUMMARY

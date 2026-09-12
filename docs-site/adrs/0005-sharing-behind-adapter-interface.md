@@ -30,6 +30,14 @@ Sharing is implemented behind a backend adapter interface, not as conditional lo
 
 All mutating views check the sharing abstraction; no backend conditionals in feature code — new behavior is added to the adapter interface instead.
 
+## File-based sync reconciliation (amended 2026-09-12)
+
+For file-based backends (Drive, and future kDrive/Dropbox), item synchronization is not implemented per adapter. The reconciliation logic lives in a backend-agnostic engine (`sharing-file-reconcile.js`, zero dependencies): per group entry and item file, in-memory `createdIds`/`deletedIds` intent sets track local creates/deletes not yet acknowledged by a successful upload. Reconciliation retains pending creates, drops remotely-deleted items, and suppresses stale remote copies of pending deletes; both-sides conflicts resolve by newer `updated_at`. Each upload captures the exact intents its payload represents and acknowledges only those on success, so an id created while an upload is in flight stays pending and failed writes retain intents.
+
+Drive transport specifics — ETags, 412 conflict retries, file discovery, polling — stay in the Drive adapter (`sharing-drive.js`), which calls the engine for every merge.
+
+Consequence: future file-based adapters get correct create/delete propagation for free, but must call `markCreated`/`markDeleted` on every local mutation — otherwise reconciliation silently degrades to last-writer-wins.
+
 ## Consequences
 
 - Positive: views remain backend-agnostic, new backends only need to implement sharing interface

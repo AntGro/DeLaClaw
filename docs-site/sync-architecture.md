@@ -32,6 +32,56 @@ flowchart TD
     MEM -->|"9. _onExternalChange<br/>→ refresh*()"| RENDER
 ```
 
+## Startup / Connect Flow (target design — all phases)
+
+What is fetched when the user connects, in order. Steps marked **planned** belong to
+phases 2–5 and are not implemented yet; everything else is shipped on `dev`.
+The IndexedDB offline cache is not part of this flow — it only applies to
+local-server mode, never to the Drive backend.
+
+```mermaid
+flowchart TD
+    H1["1 · Authenticate"]
+    OAUTH["OAuth sign-in<br/>(Drive scopes)"]
+    H2["2 · Personal data → in-memory"]
+    LISTP["List DeLaClaw/ folder"]
+    DLP["Download per-table JSON files<br/>in parallel"]
+    SEED["Seed in-memory engine"]
+    SWEEP["Startup sweep: permanently delete<br/>group folders with deletedAt older<br/>than 30 days<br/>planned · phase 4"]
+    H3["3 · Sharing → _groups map"]
+    JG["Fetch joined-groups.json from Drive<br/>(personal folder) → join pointers"]
+    LISTG["List DeLaClaw-Shared/ folders"]
+    OWNG["loadGroup() per own folder<br/>parallel · failures isolated"]
+    JOING["loadGroupWithIds() per joined group<br/>parallel · failures isolated"]
+    FILES["Per group: download group.json<br/>+ item files + revoked.json<br/>in parallel"]
+    INTENT["Init in-memory sync intents<br/>createdIds / deletedIds per item file<br/>shipped"]
+    REVOKE{"revoked.json check<br/>planned · phases 3–4"}
+    REMOVED["Notice-only mode:<br/>'removed' vs 'flaky connection'<br/>planned · phase 3"]
+    DELETED["Deletion confirmation dialog<br/>re-prompts until resolved<br/>planned · phase 4"]
+    PURGE["Drop group: remove from memory<br/>+ joined-groups.json entry,<br/>stop polling its files"]
+    NORM["normalizeEntry → _groups map"]
+    H4["4 · Go live"]
+    RENDER["Render UI"]
+    TOAST["Join toast when a pending invite<br/>flips to joined<br/>planned · phase 5"]
+    POLL["Poll every 30s + tab focus"]
+
+    H1 --> OAUTH --> H2 --> LISTP --> DLP --> SEED --> SWEEP --> H3
+    H3 --> LISTG --> OWNG --> FILES
+    H3 --> JG --> JOING --> FILES
+    FILES --> INTENT --> REVOKE
+    REVOKE -->|"own hashId listed"| REMOVED --> NORM
+    REVOKE -->|"all hashIds + deletedAt"| DELETED
+    DELETED -->|"keep"| NORM
+    DELETED -->|"accept deletion"| PURGE
+    REVOKE -->|"clean"| NORM
+    NORM --> H4 --> RENDER --> TOAST --> POLL
+
+    classDef section fill:#1f2937,stroke:#1f2937,color:#fff
+    classDef planned fill:#fff3cd,stroke:#b78a00,stroke-width:2px
+    class H1,H2,H3,H4 section
+    class SWEEP,REVOKE,REMOVED,DELETED,TOAST planned
+```
+
 ## Write Path (User Edits an Item)
 
 ```mermaid

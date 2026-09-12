@@ -12,8 +12,11 @@
 //
 // SharingUser   { memberId?: string, displayName: string, backendUserId?: string }
 //
-// GroupMember   { memberId: string, role: 'creator'|'owner'|'member',
-//                 status: 'pending'|'joined'|'revoked', displayName: string,
+// GroupMember   { memberId: string, /* opaque immutable hash, never a raw email */
+//                 role: 'creator'|'owner'|'member',
+//                 status: 'pending'|'joined'|'revoked',
+//                 displayName: string, /* user-chosen pseudo */
+//                 emailHash?: string, /* pending invites: matches joiner to their invite */
 //                 invitedLabel?: string, joinedAt?: string|null }
 //
 // Group         { id: string, name: string, backendType: string,
@@ -42,20 +45,24 @@ export const SHARING_INTERFACE = {
   getCurrentMemberId:       'fn',   // (groupId) => Promise<string|null>
 
   // ── Groups — lifecycle ──────────────────────────────────────
-  createGroup:              'fn',   // (name: string) => Promise<Group>
+  createGroup:              'fn',   // (name: string, onProgress?: (ev: {step, done, total}) => void) => Promise<Group>
   loadAll:                  'fn',   // () => Promise<Group[]>
-  deleteGroup:              'fn',   // (groupId) => Promise<void>
+  deleteGroup:              'fn',   // (groupId) => Promise<void> — creator-only, throws otherwise
 
   // ── Groups — membership ─────────────────────────────────────
+  // inviteUser/removeUser are creator-only and throw otherwise.
   inviteUser:               'fn',   // (groupId, inviteTargetOrLabel) => Promise<void>
   removeUser:               'fn',   // (groupId, memberId) => Promise<void>
-  leaveGroup:               'fn',   // (groupId) => Promise<void>
+  unjoinGroup:              'fn',   // (groupId) => Promise<void> — the only leave path
 
   // ── Groups — join flow ──────────────────────────────────────
+  // joinWithFileIds requires a matching pending invite (by emailHash) AND the
+  // full required file set (getRequiredGroupFiles); Drive access alone is not
+  // enough, and a partial file grant can never half-join.
   tryDirectJoin:            'fn',   // (connectionRef) => Promise<Group|null>
   joinWithFileIds:          'fn',   // (connectionRef, fileIds) => Promise<Group>
+  getRequiredGroupFiles:    'fn',   // () => string[] — file keys a join must include
   reconnectGroup:           'fn',   // (groupId, newUrl, newAnonKey, token) => Promise<Group>
-  unjoinGroup:              'fn',   // (groupId) => Promise<void>
 
   // ── Groups — queries ────────────────────────────────────────
   getAllGroups:              'fn',   // () => Group[]

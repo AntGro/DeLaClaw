@@ -269,7 +269,6 @@
 
       case 'sharing-copy-code':
       case 'sharing-copy-link': callWindow('sharingCopyCode', [getId(el)||el.dataset.groupId]); break;
-      case 'sharing-leave-group': callWindow('sharingLeaveGroup', [el.dataset.groupId||getId(el)]); break;
       case 'sharing-unjoin-group': callWindow('sharingUnjoinGroup', [el.dataset.groupId||getId(el)]); break;
       case 'sharing-copy-member-code':
       case 'sharing-copy-member-link': callWindow('sharingCopyMemberCode', [el.dataset.groupId, el.dataset.token]); break;

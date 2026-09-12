@@ -1,7 +1,8 @@
 // ===================================================================
 // CALENDAR SYNC — sync habits, todos, birthdays to Google Calendar
 // ===================================================================
-// Creates a dedicated "DeLaClaw" calendar and maps items via the
+// Creates a dedicated "DeLaClaw" calendar ("DeLaClawDev" off-production,
+// via js/drive-folders.js) and maps items via the
 // gcal_sync table. Works with Drive and Demo backends only.
 // Demo mode: table + settings exist but no actual API calls.
 //
@@ -17,6 +18,7 @@ import { showToast, showConfirmAction, closeConfirmAction } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { getTodoCategories } from './todos.js';
 import { getHabitCategories } from './habits.js';
+import { driveFolderSuffix, currentHostname } from './drive-folders.js';
 
 const CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
 
@@ -58,7 +60,7 @@ export async function getCalSyncPrefs() {
 
 // ── Calendar CRUD (API) ─────────────────────────────────────────
 
-async function findOrCreateCalendar(token, name = 'DeLaClaw') {
+async function findOrCreateCalendar(token, name = `DeLaClaw${driveFolderSuffix(currentHostname())}`) {
   // Check if we already have a saved calendar ID
   const savedId = await getSetting('gcal_calendar_id');
   if (savedId) {

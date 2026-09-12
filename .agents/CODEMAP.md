@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-12T21:53:15.062Z from 38 modules (v2.0.40). Total LOC 28740. Do not hand-edit.
+> Generated 2026-09-12T22:25:22.977Z from 38 modules (v2.0.41). Total LOC 28742. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -34,7 +34,7 @@
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
 | drive | 1104 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | utils | 830 | flashcards,x | i18n,icons,state,version | - | esc:7,window:6 |
-| calendar-sync | 694 | birthdays,gcal_sync,habits,settings,todos | habits,i18n,icons,state | main.js | - |
+| calendar-sync | 696 | birthdays,gcal_sync,habits,settings,todos | drive-folders,habits,i18n,icons | main.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 464 | - | habits,i18n,icons,utils | - | - |
 | delegation | 421 | - |  | - | window:1 |
@@ -52,7 +52,7 @@
 | sharing | 100 | - | sharing-drive,sharing-interface | - | - |
 | sharing-envelope | 73 | - |  | sharing-drive.js,sharing-ui.js | - |
 | state | 52 | - | db | birthdays.js,calendar-sync.js,flashcards.js,habits.js | window:1 |
-| drive-folders | 43 | - |  | drive.js,main.js,sharing-drive.js | - |
+| drive-folders | 43 | - |  | calendar-sync.js,drive.js,main.js,sharing-drive.js | - |
 | bootstrap | 26 | - |  | - | - |
 | backend-logos | 23 | - |  | main.js,sharing-ui.js | - |
 | sw-register | 16 | - |  | - | - |

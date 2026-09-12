@@ -206,11 +206,18 @@ A write queue (store pending writes in IndexedDB, replay on reconnect) would mak
 
 ## 7. Cross-Device Sync
 
-No active backend supports cross-device sync. Drive, Local, and Demo are effectively single-device.
+Multi-device sync is supported on the **Drive** backend. The per-table JSON files live in the user's Google Drive, so any number of devices signed into the same Google account read and write the same data. Changes made on one device appear on the others within the 30-second poll interval — under one minute in practice — and an immediate poll also fires when a tab regains focus.
 
 ### Conflict resolution
 
-Drive uses ETag-based optimistic locking for agent-vs-app conflicts (412 → re-read, merge by `updated_at`, retry). For concurrent same-user edits across devices, last write wins.
+When multiple devices are active at the same time:
+
+- **Poll path** — an idle device re-fetches tables whose `modifiedTime` changed on Drive and replaces the whole in-memory table with the remote version (last write wins per table). Locally-dirty tables are skipped until they flush.
+- **Flush path** — if an upload hits an ETag conflict (412), the adapter re-reads the remote table, merges record-by-record with newer `updated_at` winning, and retries the upload.
+
+This is same-account multi-device sync, not a multi-user model: there is no collaboration or per-user attribution. Two devices editing the same table inside the same poll window converge to last-write-wins (per table on poll, per record on flush conflict).
+
+**Local** (Bun server bound to one machine) and **Demo** (ephemeral in-memory) are single-device.
 
 ---
 

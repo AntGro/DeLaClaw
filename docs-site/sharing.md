@@ -162,7 +162,7 @@ sequenceDiagram
 
 Joining requires two gates: Drive access to the folder (the join must download `group.json`) **and** a matching pending invite (by `emailHash`). Drive access alone is not enough.
 
-Joining is desktop-only: the joiner must multi-select every group file in the Google file picker, which touch browsers on phones and tablets dismiss after a single tap. On a touch device the join dialog says so instead of offering the invite-code form.
+Joining is desktop-only: the joiner must multi-select every group file in the Google file picker, which phones and tablets (coarse pointer, no hover) dismiss after a single tap. On such devices the join dialog says so instead of offering the invite-code form. The gate is capability-based (`isDesktopLike()`: fine pointer + hover), so touchscreen laptops are not gated.
 
 #### Create an item (creator and member)
 

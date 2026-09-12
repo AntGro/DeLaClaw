@@ -46,7 +46,7 @@ Five modules, layered:
 - Joiner decodes invite → Google Picker selects the shared files (`revoked.json` included) → downloads `group.json` → must match a pending row by `emailHash` (no match → join rejected) → flips pending → joined and picks a pseudo → join persisted in local `joined-groups.json` (fileIds include `revoked.json`)
 - **Join is gated on the full file set:** `joinWithFileIds` throws unless the joiner has access to ALL required files (`group.json` + item files + every `extra_N.json` placeholder, via `getRequiredGroupFiles()`); a partial grant (e.g. only `group.json` picked) can never half-join — the direct-join path falls back to the Picker instead
 - Joining requires BOTH Drive access and a matching pending invite; Drive access alone is not enough
-- **Join is desktop-only:** the joiner must multi-select every group file in the Google file picker, which touch browsers (phones/tablets) dismiss after a single tap — on touch devices `sharingOpenJoinCodeModal` shows a not-available notice instead of the invite-code form
+- **Join is desktop-only:** the joiner must multi-select every group file in the Google file picker, which phones/tablets (coarse pointer, no hover) dismiss after a single tap — on such devices `sharingOpenJoinCodeModal` shows a not-available notice instead of the invite-code form. The gate is capability-based (`isDesktopLike()`: fine pointer + hover), not UA sniffing, so touchscreen laptops are not gated
 - Creator's next poll (≤15s) detects the pending → joined flip and shows a toast
 
 ## Security

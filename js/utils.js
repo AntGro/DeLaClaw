@@ -702,6 +702,19 @@ function isMobileUA() {
 
 
 /**
+ * True when the device offers a desktop-like pointing environment: a fine
+ * pointer (mouse/trackpad) plus hover. Touchscreen laptops qualify —
+ * what matters is capability, not device identity. Phones and tablets,
+ * where touch is the primary input, return false.
+ * Use this (not isTouchDevice/isMobileUA) when the deciding question is
+ * "can the user comfortably multi-select?", e.g. the Google Picker join.
+ */
+function isDesktopLike() {
+  return window.matchMedia('(pointer: fine)').matches
+    && window.matchMedia('(hover: hover)').matches;
+}
+
+/**
  * Auto-assign palette colors to category/deck rows that have no color.
  * Called after loading each category table. Persists to DB so it's one-time.
  * @param {string} table - DB table name (e.g. 'todo_categories')
@@ -813,7 +826,7 @@ export {
   showConfirmAction, closeConfirmAction, executeConfirmAction,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, fetchAll,
-  isInstalledPWA, deviceClass, isTouchDevice, isMobileUA,
+  isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, isDesktopLike,
   backfillCategoryColors, nextPaletteColor,
   parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,
   autoResizeTextarea,

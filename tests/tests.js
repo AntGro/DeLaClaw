@@ -1164,18 +1164,22 @@ test('sharing i18n keys used in code exist in every locale', () => {
   }
 });
 
-test('sharing join is disabled on touch devices', () => {
+test('sharing join is disabled without a desktop-like pointer', () => {
   // Joining requires multi-selecting every group file in the Google file
-  // picker, which touch browsers (phones, tablets) dismiss after a single
-  // tap. The join modal must show a notice instead of the invite-code form.
+  // picker. The gate is capability-based (fine pointer + hover), not device
+  // identity: phones/tablets can't multi-select, touchscreen laptops can.
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
-  assert(sui.includes('isTouchDevice') && sui.includes("from './utils.js'"),
-    'sharing-ui.js must import isTouchDevice from utils.js');
+  assert(sui.includes('isDesktopLike') && sui.includes("from './utils.js'"),
+    'sharing-ui.js must import isDesktopLike from utils.js');
   const modalFn = sui.slice(sui.indexOf('function sharingOpenJoinCodeModal'));
-  assert(modalFn.includes('if (isTouchDevice())'),
-    'sharingOpenJoinCodeModal must gate on isTouchDevice()');
+  assert(modalFn.includes('if (!isDesktopLike())'),
+    'sharingOpenJoinCodeModal must gate on isDesktopLike()');
   assert(modalFn.includes("t('sharing.join_not_available_on_touch')"),
     'sharingOpenJoinCodeModal must show the touch-device notice');
+  const utils = fs.readFileSync(path.join(JS_DIR, 'utils.js'), 'utf-8');
+  assert(utils.includes('function isDesktopLike()')
+    && utils.includes("'(pointer: fine)'") && utils.includes("'(hover: hover)'"),
+    'utils.js isDesktopLike must check fine pointer + hover (capability, not UA)');
 });
 
 test('sharing leave confirmation overrides the Delete default', () => {

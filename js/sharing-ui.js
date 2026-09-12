@@ -19,7 +19,7 @@
 
 import state from './state.js';
 import { t } from './i18n.js';
-import { esc, escQ, showToast, showConfirmAction, isTouchDevice } from './utils.js';
+import { esc, escQ, showToast, showConfirmAction, isDesktopLike } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { LOGOS } from './backend-logos.js';
 import { decodeInviteEnvelope } from './sharing-envelope.js';
@@ -683,9 +683,11 @@ function sharingOpenJoinCodeModal() {
   overlay.id = 'sharingJoinCodeModal';
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   // Joining requires multi-selecting every group file in the Google file
-  // picker, which touch browsers (phones, tablets) don't support — the
-  // picker dismisses after a single tap. Show a notice instead of the form.
-  if (isTouchDevice()) {
+  // picker. Gate on pointing capability, not device identity: phones and
+  // tablets (coarse pointer, no hover) can't multi-select — the picker
+  // dismisses after a single tap — while touchscreen laptops (fine pointer
+  // + hover) can. Show a notice instead of the form when not desktop-like.
+  if (!isDesktopLike()) {
     overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('log-in', 20)} ${t('sharing.join_group')}</h2>
     <p>${t('sharing.join_not_available_on_touch')}</p>

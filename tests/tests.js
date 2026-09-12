@@ -2046,6 +2046,14 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'backup folder must be hostname-derived, not hardcoded');
     });
 
+    test('calendar sync derives the calendar name from the hostname', () => {
+      const src = jsFiles['calendar-sync.js'];
+      assert(src.includes("from './drive-folders.js'"), 'must import the folder-name module');
+      assert(src.includes('`DeLaClaw${driveFolderSuffix(currentHostname())}`'),
+        'calendar name must be hostname-derived, not hardcoded');
+      assert(!/name = 'DeLaClaw'/.test(src), 'hardcoded calendar name must be gone');
+    });
+
     test('sw.js precaches the folder-name module', () => {
       const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
       assert(sw.includes("'js/drive-folders.js'"), 'sw.js PRECACHE_URLS must list the new module');

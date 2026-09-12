@@ -2116,7 +2116,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     });
 
     test('removal detection is based only on revoked.json (no 404 strikes)', () => {
-      assert(drive.includes('async function checkRemovalViaRevoked'),
+      assert(drive.includes('async checkRemovalViaRevoked(groupId, tok)'),
         'poll must consult revoked.json via checkRemovalViaRevoked');
       assert(!/notFoundStrikes >= 3/.test(drive),
         'consecutive-404 strike logic must be gone');

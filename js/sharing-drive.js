@@ -1365,7 +1365,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      * Detection is based only on this file — no consecutive-failure counting.
      * Returns 'removed' | 'deleted' | null (transient: leave for the next poll).
      */
-    async function checkRemovalViaRevoked(groupId, tok) {
+    async checkRemovalViaRevoked(groupId, tok) {
       const joined = _joinedGroups.find(j => j.groupId === groupId);
       const revokedFileId = joined?.fileIds?.revoked;
       const selfId = joined?.memberId;

@@ -86,6 +86,8 @@ flowchart LR
     end
 ```
 
+_Folder names shown for production (`delaclaw.com`); dev and preview builds use `DeLaClawDev/`, `DeLaClawDev-Shared/`, etc. — see "Drive folder naming" in [Backends](backends.md)._
+
 - `group.json` — members (hashed IDs + pseudos), creator, name
 - `todos.json` / `habits.json` / `lists.json` — item files: plain JSON arrays of item objects
 - `revoked.json` — removed-member entries `{id, removed_at}`; read-only for removed members
@@ -150,7 +152,7 @@ sequenceDiagram
     JA->>SF: download group.json + item files
     JA->>SF: match pending row by emailHash<br/>no match → join rejected
     JA->>SF: pending → joined, set chosen pseudo
-    JA->>JD: save DeLaClaw/joined-groups.json
+    JA->>JD: save DeLaClaw/joined-groups.json<br/>(DeLaClawDev/ on dev builds)
     Note over JD: pointer only:<br/>{folderId, groupId, fileIds}<br/>fileIds include revoked.json
     JA->>JA: startPolling (15s)
     CA->>SF: next poll (≤15s): group.json modified?
@@ -349,7 +351,7 @@ sequenceDiagram
 #### Member deletes their DeLaClaw account connection (deleteAccount)
 
 This is DeLaClaw's Drive-backed `deleteAccount` (trash the personal
-`DeLaClaw/` folder, revoke OAuth), not deletion of the Google account itself —
+`DeLaClaw/` folder (`DeLaClawDev/` on dev and preview builds), revoke OAuth), not deletion of the Google account itself —
 externally deleted Google accounts are handled manually (see below).
 
 ```mermaid

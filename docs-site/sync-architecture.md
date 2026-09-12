@@ -13,11 +13,11 @@ flowchart TD
     end
 
     subgraph Drive["Google Drive"]
-        DJSON["Per-table JSON files<br/>in DeLaClaw/ folder"]
+        DJSON["Per-table JSON files<br/>in DeLaClaw/ folder<br/>(DeLaClawDev/ on dev)"]
     end
 
     subgraph GCal["Google Calendar"]
-        GCAL["DeLaClaw calendar<br/>(events)"]
+        GCAL["DeLaClaw calendar<br/>(DeLaClawDev on dev)<br/>(events)"]
     end
 
     UI -->|"1. Instant write"| MEM
@@ -44,13 +44,13 @@ flowchart TD
     H1["1 · Authenticate"]
     OAUTH["OAuth sign-in<br/>(Drive scopes)"]
     H2["2 · Personal data → in-memory"]
-    LISTP["List DeLaClaw/ folder"]
+    LISTP["List DeLaClaw/ folder<br/>(DeLaClawDev/ on dev)"]
     DLP["Download per-table JSON files<br/>in parallel"]
     SEED["Seed in-memory engine"]
     SWEEP["Startup sweep: permanently delete<br/>group folders with deletedAt older<br/>than 30 days<br/>planned · phase 4"]
     H3["3 · Sharing → _groups map"]
     JG["Fetch joined-groups.json from Drive<br/>(personal folder) → join pointers"]
-    LISTG["List DeLaClaw-Shared/ folders"]
+    LISTG["List DeLaClaw-Shared/ folders<br/>(DeLaClawDev-Shared/ on dev)"]
     OWNG["loadGroup() per own folder<br/>parallel · failures isolated"]
     JOING["loadGroupWithIds() per joined group<br/>parallel · failures isolated"]
     FILES["Per group: download group.json<br/>+ item files + revoked.json<br/>in parallel"]
@@ -132,7 +132,7 @@ sequenceDiagram
     participant MEM as In-Memory Store
     participant UI as UI Refresh
 
-    POLL->>DRIVE: files.list(DeLaClaw/ folder)
+    POLL->>DRIVE: files.list(DeLaClaw/ folder;<br/>DeLaClawDev/ on dev)
     DRIVE-->>POLL: File list with modifiedTime
 
     POLL->>POLL: For each file:<br/>compare modifiedTime

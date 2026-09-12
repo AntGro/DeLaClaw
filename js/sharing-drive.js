@@ -47,7 +47,9 @@ import {
 //       Drive permissions untouched (B still has user-level access
 //       but DeLaClaw no longer loads it)
 //
-// Folder structure (inside the user's Google Drive):
+// Folder structure (inside the user's Google Drive).
+// Production names shown; dev/preview builds use the DeLaClawDev* variants
+// (see js/drive-folders.js):
 //
 //   My Drive/
 //   ├── DeLaClaw/                          ← personal data (existing)

@@ -2056,16 +2056,29 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('delete-account dialog names the actual Drive folder', () => {
       const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
-      const bodies = [...i18n.matchAll(/confirm_body_drive: '([^']*)'/g)].map(m => m[1]);
-      assert(bodies.length === 3, `expected confirm_body_drive in 3 locales, found ${bodies.length}`);
-      for (const b of bodies) {
-        assert(b.includes('{folder}'), 'dialog body must interpolate the folder name');
-        assert(!b.includes('DeLaClaw'), 'dialog body must not hardcode the folder name');
+      const lines = i18n.split('\n').filter(l => l.includes('confirm_body_drive:'));
+      assert(lines.length === 3, `expected confirm_body_drive in 3 locales, found ${lines.length}`);
+      for (const line of lines) {
+        assert(line.includes('{folder}'), 'dialog body must interpolate the folder name');
+        assert(!line.includes('DeLaClaw'), 'dialog body must not hardcode the folder name');
       }
       const src = jsFiles['main.js'];
       assert(/t\(bodyKey, \{ folder: /.test(src), 'must pass the folder name to the dialog');
       assert(src.includes('driveFolderNames(currentHostname()).personal'),
         'folder name must be hostname-derived, not hardcoded');
+    });
+
+    test('setup help names the actual Drive folder', () => {
+      const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      const lines = i18n.split('\n').filter(l => l.includes('drive_1_desc:'));
+      assert(lines.length === 3, `expected drive_1_desc in 3 locales, found ${lines.length}`);
+      for (const line of lines) {
+        assert(line.includes('{folder}'), 'setup description must interpolate the folder name');
+        assert(!line.includes('<code>DeLaClaw/'), 'setup description must not hardcode the folder name');
+      }
+      const src = jsFiles['main.js'];
+      assert(src.includes("t('setup.drive_1_desc', { folder:"),
+        'must pass the folder name to the setup description');
     });
 
     test('sw.js precaches the folder-name module', () => {

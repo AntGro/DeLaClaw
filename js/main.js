@@ -1807,7 +1807,7 @@ function updateStaticLabels() {
   const setupDrive1T = document.getElementById('setupDrive1Title');
   if (setupDrive1T) setupDrive1T.textContent = t('setup.drive_1_title');
   const setupDrive1D = document.getElementById('setupDrive1Desc');
-  if (setupDrive1D) setupDrive1D.innerHTML = t('setup.drive_1_desc');
+  if (setupDrive1D) setupDrive1D.innerHTML = t('setup.drive_1_desc', { folder: driveFolderNames(currentHostname()).personal });
   const setupDrive2T = document.getElementById('setupDrive2Title');
   if (setupDrive2T) setupDrive2T.textContent = t('setup.drive_2_title');
   const setupDrive2D = document.getElementById('setupDrive2Desc');

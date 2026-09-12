@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-12T14:51:12.420Z from 37 modules (v2.0.37). Total LOC 28575. Do not hand-edit.
+> Generated 2026-09-12T15:03:31.102Z from 37 modules (v2.0.38). Total LOC 28658. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,9 +27,9 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 3610 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
-| i18n | 2204 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
-| sharing-drive | 1593 | - | sharing-envelope,sharing-file-reconcile,utils | main.js,sharing.js | - |
+| main | 3611 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
+| i18n | 2207 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
+| sharing-drive | 1672 | - | sharing-envelope,sharing-file-reconcile,utils | main.js,sharing.js | - |
 | sharing-ui | 1242 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:37,pendingSet,window:8 |
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
 | drive | 1102 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |

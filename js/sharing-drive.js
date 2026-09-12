@@ -79,7 +79,7 @@ const EXTRA_FILES      = Array.from({ length: EXTRA_COUNT }, (_, i) => `extra_${
 // The complete file set a group folder must contain. Joining is gated on ALL of
 // these: the pending → 'joined' flip only happens when the joiner has access to
 // every file, so a partial grant (e.g. group.json alone) can never half-join.
-const REQUIRED_GROUP_FILES = ['group', ...ITEM_TYPES, ...EXTRA_FILES];
+const REQUIRED_GROUP_FILES = ['group', ...ITEM_TYPES, ...EXTRA_FILES, 'revoked'];
 // group.json is written LAST during createGroup: its presence marks creation as
 // complete, so a missing group.json on an owned folder means a partial creation.
 // Folders without group.json older than this are treated as abandoned and trashed
@@ -322,6 +322,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   //   typeData: { todos: [], habits: [], lists: [] },
   //   typeMeta: { todos: { fileId, etag, modifiedTime }, ... },
   //   typeIntents: { todos: { createdIds, deletedIds }, ... }, // in-memory sync intents
+  //   revokedMeta: { fileId, etag, modifiedTime }, // revoked.json (removed-member notices)
   //   gMeta: { fileId, etag, modifiedTime },
   //   joinedViaLink: boolean,   // true if joined via invite code
   // }
@@ -465,6 +466,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     for (const type of ITEM_TYPES) {
       if (!entry.typeIntents[type]) entry.typeIntents[type] = createIntentState();
     }
+    // revoked.json metadata: absent for groups created before phase 3.
+    if (!entry.revokedMeta) entry.revokedMeta = {};
     return entry;
   }
 
@@ -631,8 +634,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         typeMeta[type] = {};
       }
     }
+    const revokedMeta = fileIds.revoked ? { fileId: fileIds.revoked } : {};
 
-    const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta, joinedViaLink: true });
+    const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta, revokedMeta, joinedViaLink: true });
     _groups.set(groupId, entry);
     _groupNameCache[groupId] = group.name;
     return entry;
@@ -655,8 +659,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     // Find all core files in parallel. A throw here means the listing itself
     // failed ("couldn't look properly") — the caller isolates it per folder and
     // must NOT treat the group as incomplete.
-    const [gFile, ...typeFiles] = await Promise.all([
+    const [gFile, revokedFile, ...typeFiles] = await Promise.all([
       driveFindFile(tok, folderId, 'group.json'),
+      driveFindFile(tok, folderId, 'revoked.json'),
       ...ITEM_TYPES.map(type => driveFindFile(tok, folderId, `${type}.json`)),
     ]);
 
@@ -681,13 +686,17 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     downloads.push(gFile
       ? driveDownload(tok, gFile.id).then(r => ({ ...r, file: gFile }))
       : Promise.resolve(null));
+    downloads.push(revokedFile
+      ? driveDownload(tok, revokedFile.id).then(r => ({ ...r, file: revokedFile }))
+          .catch(err => { console.warn(`sharing: failed to download revoked.json for ${groupId}:`, err); return null; })
+      : Promise.resolve(null));
     for (let i = 0; i < ITEM_TYPES.length; i++) {
       const file = typeFiles[i];
       downloads.push(file
         ? driveDownload(tok, file.id).then(r => ({ ...r, file })).catch(err => { console.warn(`sharing: failed to download ${ITEM_TYPES[i]}.json for ${groupId}:`, err); return null; })
         : Promise.resolve(null));
     }
-    const [gResult, ...typeResults] = await Promise.all(downloads);
+    const [gResult, revokedResult, ...typeResults] = await Promise.all(downloads);
 
     let group = { id: groupId, name: groupId, created_by: null, members: [], created_at: null };
     let gMeta = {};
@@ -710,7 +719,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       }
     }
 
-    const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta });
+    const revokedMeta = revokedResult
+      ? { fileId: revokedFile.id, etag: revokedResult.etag, modifiedTime: revokedFile.modifiedTime }
+      : {};
+
+    const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta, revokedMeta });
     _groups.set(groupId, entry);
     _groupNameCache[groupId] = group.name;
 
@@ -857,11 +870,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           created_at: new Date().toISOString(),
         };
 
-        // Create empty per-type files + reserved extras in parallel,
-        // reporting per-file progress as each upload resolves.
+        // Create empty per-type files + reserved extras + revoked.json in
+        // parallel, reporting per-file progress as each upload resolves.
+        // revoked.json starts empty: the creator appends {id, removed_at}
+        // entries when removing members (phase 3).
         const allFiles = [
           ...ITEM_TYPES.map(type => ({ key: type, name: `${type}.json` })),
           ...EXTRA_FILES.map(name => ({ key: name, name: `${name}.json` })),
+          { key: 'revoked', name: 'revoked.json' },
         ];
         const totalFiles = allFiles.length;
         let doneFiles = 0;
@@ -880,12 +896,15 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
         const typeMeta = {};
         const typeData = {};
+        let revokedMeta = {};
         for (let i = 0; i < allFiles.length; i++) {
           const { key } = allFiles[i];
           const r = results[i];
           if (ITEM_TYPES.includes(key)) {
             typeMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
             typeData[key] = [];
+          } else if (key === 'revoked') {
+            revokedMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
           }
           // Extra files are created on Drive but not tracked in memory (unused for now)
         }
@@ -899,6 +918,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           typeData,
           typeMeta,
           typeIntents,
+          revokedMeta,
           gMeta: { fileId: gRes.id, etag: gRes.etag, modifiedTime: gRes.modifiedTime },
         });
         _groupNameCache[groupId] = name;
@@ -1031,6 +1051,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       // Grant Drive editor access on the subfolder. The email is permission material only.
       const perm = await driveShareWithUser(tok, e.folderId, email, 'writer');
+      // Grant reader access on revoked.json specifically: if this member is
+      // later removed, the folder grant is revoked but this file-level grant
+      // survives, so their client can read the removal notice.
+      if (e.revokedMeta?.fileId) {
+        await driveShareWithUser(tok, e.revokedMeta.fileId, email, 'reader')
+          .catch(err => console.warn('sharing: failed to grant revoked.json reader', err));
+      }
       const memberId = newMemberId();
       const eh = await emailHash(email);
 
@@ -1058,7 +1085,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return { memberId };
     },
 
-    /** Remove a member from a group. Creator-only. Revokes Drive access + updates group.json. */
+    /** Remove a member from a group. Creator-only. Records the removal in
+     *  revoked.json, revokes Drive access, updates group.json. */
     async removeUser(groupId, memberId) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
@@ -1068,6 +1096,21 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (!member) throw new Error('Member not found');
       if (member.role === 'creator') throw new Error('Cannot remove the creator');
 
+      // 1. Record the removal in revoked.json FIRST — the member must be able
+      // to read it after their folder access is revoked. Aborts the removal
+      // if this write fails, so no one is ever removed without a notice.
+      if (e.revokedMeta?.fileId) {
+        const { data, etag } = await driveDownload(tok, e.revokedMeta.fileId);
+        const removed = Array.isArray(data) ? data : [];
+        if (!removed.some(r => r.id === memberId)) {
+          removed.push({ id: memberId, removed_at: new Date().toISOString() });
+        }
+        const r = await driveUpload(tok, e.folderId, e.revokedMeta.fileId, 'revoked.json', removed, etag);
+        e.revokedMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+      }
+
+      // 2. Revoke folder access. The file-level reader grant on revoked.json
+      // (given at invite time) survives, so the member can read the notice.
       const permissionId = member.drivePermissionId || (member.memberId || '').replace(/^drive-perm-/, '');
       if (permissionId) await driveRemovePermission(tok, e.folderId, permissionId).catch(() => {});
 
@@ -1314,6 +1357,28 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       }
     },
 
+    /**
+     * Consult revoked.json after the group files became unreachable (403/404).
+     * Detection is based only on this file — no consecutive-failure counting.
+     * Returns 'removed' | 'deleted' | null (transient: leave for the next poll).
+     */
+    async function checkRemovalViaRevoked(groupId, tok) {
+      const joined = _joinedGroups.find(j => j.groupId === groupId);
+      const revokedFileId = joined?.fileIds?.revoked;
+      const selfId = joined?.memberId;
+      // No revocation state (e.g. joined before phase 3): nothing to consult.
+      if (!revokedFileId || !selfId) return 'deleted';
+      let data;
+      try {
+        ({ data } = await driveDownload(tok, revokedFileId));
+      } catch (err) {
+        if (err?.code === 404 || err?.status === 404) return 'deleted'; // revoked.json gone too → group deleted
+        return null; // transient failure: try again next poll
+      }
+      const removed = Array.isArray(data) ? data : [];
+      return removed.some(r => r.id === selfId) ? 'removed' : 'deleted';
+    },
+
     async poll() {
       const tok = await token();
       let changed = false;
@@ -1358,7 +1423,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         if (e.gMeta.fileId) {
           try {
             const meta = await driveFileMeta(tok, e.gMeta.fileId);
-            e.notFoundStrikes = 0;  // successful fetch — reset 404 counter
             if (meta.modifiedTime > (e.gMeta.modifiedTime || '')) {
               const { data, etag } = await driveDownload(tok, e.gMeta.fileId);
               const normalizedGroup = data ? await normalizeGroup(data, groupId) : null;
@@ -1371,11 +1435,12 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
               }
             }
           } catch (err) {
-            // 404 = group may have been deleted (folder trashed) or access revoked
-            // Require 3 consecutive 404s before purging (guards against transient Drive hiccups)
-            if (err?.code === 404 || err?.status === 404) {
-              e.notFoundStrikes = (e.notFoundStrikes || 0) + 1;
-              if (e.notFoundStrikes >= 3) staleGroupIds.push(groupId);
+            // Group files unreachable (deleted folder or revoked access):
+            // consult revoked.json — the only signal. 'removed' → we were
+            // kicked; 'deleted' → the group is gone; null → transient.
+            if (err?.code === 404 || err?.status === 404 || err?.code === 403 || err?.status === 403) {
+              const verdict = await checkRemovalViaRevoked(groupId, tok).catch(() => null);
+              if (verdict) staleGroupIds.push({ groupId, verdict });
             } else {
               console.warn(`sharing poll group ${groupId}:`, err);
             }
@@ -1389,17 +1454,18 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         } catch (err) { console.warn(`sharing poll revoke-left ${groupId}:`, err); }
       }
 
-      // Clean up groups whose files are gone (deleted by creator or access revoked)
+      // Clean up groups whose files are gone (group deleted, or we were removed)
       if (staleGroupIds.length) {
-        for (const gid of staleGroupIds) {
+        for (const { groupId: gid, verdict } of staleGroupIds) {
           const groupName = _groups.get(gid)?.group?.name || gid;
           _groups.delete(gid);
-          emit('group-deleted', { groupId: gid });
-          try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName } })); } catch {}
+          emit('group-deleted', { groupId: gid, verdict });
+          try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName, verdict } })); } catch {}
         }
         // Purge from joined-groups.json
+        const gone = new Set(staleGroupIds.map(s => s.groupId));
         const before = _joinedGroups.length;
-        _joinedGroups = _joinedGroups.filter(j => !staleGroupIds.includes(j.groupId));
+        _joinedGroups = _joinedGroups.filter(j => !gone.has(j.groupId));
         if (_joinedGroups.length !== before) saveJoinedGroups().catch(() => {});
         changed = true;
       }
@@ -1427,7 +1493,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         const fileIds = {};
         for (const f of children) {
           const key = f.name.replace('.json', '');
-          if (['group', ...ITEM_TYPES, ...EXTRA_FILES].includes(key)) fileIds[key] = f.id;
+          if (REQUIRED_GROUP_FILES.includes(key)) fileIds[key] = f.id;
         }
         if (!fileIds.group) return null;
         // NOTE: `return await` is load-bearing here — a bare `return` of the
@@ -1480,6 +1546,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       // Pending-invite gate: only a member with a matching pending invite may join.
       const e = _groups.get(groupId);
+      let joinedMemberId = null;
       if (e) {
         const eh = await emailHash(user.email);
         const member = e.group.members.find(m => m.status === 'pending' && m.emailHash === eh);
@@ -1488,11 +1555,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         member.joinedAt = new Date().toISOString();
         const pseudo = String(opts?.displayName || '').trim();
         member.displayName = pseudo || user.name || fallbackDisplayName(user.email);
+        joinedMemberId = member.memberId;
         await saveGroup(groupId);
       }
 
-      // Persist in joined-groups.json
-      const entry = { folderId, groupId, fileIds, joinedAt: new Date().toISOString() };
+      // Persist in joined-groups.json (memberId lets the client match its own
+      // revoked.json entry if this account is later removed from the group).
+      const entry = { folderId, groupId, fileIds, memberId: joinedMemberId, joinedAt: new Date().toISOString() };
       const existing = _joinedGroups.findIndex(j => j.folderId === folderId || j.groupId === groupId);
       if (existing >= 0) _joinedGroups[existing] = entry;
       else _joinedGroups.push(entry);
@@ -1555,8 +1624,18 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return _groups.get(groupId)?.joinedViaLink === true;
     },
 
-    getRevokedMembers(/* groupId */) {
-      return [];  // Drive does hard-delete, no revoked state
+    /** Removed members of a group, from revoked.json: [{ memberId, status: 'revoked', removedAt }]. */
+    async getRevokedMembers(groupId) {
+      const e = _groups.get(groupId);
+      const fileId = e?.revokedMeta?.fileId;
+      if (!fileId) return [];
+      const tok = await token();
+      const { data } = await driveDownload(tok, fileId).catch(() => ({ data: [] }));
+      return (Array.isArray(data) ? data : []).map(r => ({
+        memberId: r.id,
+        status: 'revoked',
+        removedAt: r.removed_at || null,
+      }));
     },
 
     // ─── Backend capabilities (injected, backend-agnostic) ───

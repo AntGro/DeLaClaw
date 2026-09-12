@@ -335,11 +335,9 @@ Options:
 
 - **CHECK constraint parity test.** Verifies `demo.js CHECK_CONSTRAINTS` match the SQL CHECK constraints. Catches drift between adapters.
 
-### Integration tests (Playwright + local Bun server)
+### Removed (2026-09-12)
 
-- **Archive + delete flow:** Creates projects, archives one, deletes it, verifies remaining cards render.
-- **TODO priority flow:** Tests priority levels across the full lifecycle.
-- **Flashcard import flow:** Tests import with existing/new decks, zero-deck edge case.
+The Playwright integration tests (archive + delete flow, TODO priority flow, flashcard import flow, browser smoke test) were removed: the browser-automation tests were never run reliably, so the suite is static analysis only.
 
 ### Missing test coverage
 

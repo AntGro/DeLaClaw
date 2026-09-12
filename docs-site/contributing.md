@@ -56,7 +56,7 @@ DeLaClaw is vanilla JavaScript by design. No frameworks, no build step, no trans
 ### Pull requests
 
 - One logical change per PR.
-- All tests must pass (`node tests/tests.js` -- 76 tests currently).
+- All tests must pass (`node tests/tests.js`).
 - The PR description should explain *what* changed and *why*.
 - Screenshots or before/after comparisons for UI changes.
 
@@ -70,11 +70,10 @@ node tests/tests.js
 
 Tests include:
 - Unit tests for core logic (version parsing, drag-and-drop, utilities)
-- Adapter compliance tests (all four backends implement the same interface)
+- Adapter compliance tests (all backends implement the same interface)
 - REST server integration tests (requires Bun)
-- Browser-based end-to-end tests (requires Playwright -- `npx playwright install chromium`)
 
-All 76 tests must pass. If you add a new feature, add tests for it.
+All tests must pass. If you add a new feature, add tests for it.
 
 ## What contributions are welcome
 

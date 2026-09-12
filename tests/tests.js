@@ -1990,6 +1990,81 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   }
 
   // ===================================================================
+  // Sharing phase 3 — revoked.json (removed-member notices)
+  // ===================================================================
+  {
+    const drive = jsFiles['sharing-drive.js'];
+    const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+    const main = jsFiles['main.js'];
+
+    test('revoked.json is part of the required file set', () => {
+      assert(drive.includes("...EXTRA_FILES, 'revoked']"), 'REQUIRED_GROUP_FILES must include revoked');
+      const m = drive.match(/const REQUIRED_GROUP_FILES = \[(.*?)\];/s);
+      assert(m, 'REQUIRED_GROUP_FILES declaration must be parseable');
+      assert(m[1].includes("'group'") && m[1].includes('ITEM_TYPES') &&
+             m[1].includes('EXTRA_FILES') && m[1].includes("'revoked'"),
+        'required set must be group + item types + extras + revoked (17 files)');
+    });
+
+    test('createGroup creates revoked.json alongside the item files', () => {
+      assert(drive.includes("{ key: 'revoked', name: 'revoked.json' }"),
+        'createGroup must upload revoked.json');
+      assert(drive.includes('revokedMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime }') ||
+             drive.includes("} else if (key === 'revoked')"),
+        'createGroup must track revoked.json metadata');
+    });
+
+    test('inviteUser grants reader access on revoked.json', () => {
+      assert(drive.includes("driveShareWithUser(tok, e.revokedMeta.fileId, email, 'reader')"),
+        'inviteUser must grant the invitee reader access on revoked.json');
+    });
+
+    test('removeUser records the removal in revoked.json before revoking access', () => {
+      const fn = drive.match(/async removeUser\(groupId, memberId\) \{([\s\S]*?)\n    \},/);
+      assert(fn, 'removeUser must exist');
+      const body = fn[1];
+      const writeIdx = body.indexOf('removed.push({ id: memberId, removed_at');
+      const revokeIdx = body.indexOf('await driveRemovePermission(tok, e.folderId, permissionId)');
+      assert(writeIdx !== -1, 'removeUser must append {id, removed_at} to revoked.json');
+      assert(revokeIdx !== -1, 'removeUser must revoke the folder permission');
+      assert(writeIdx < revokeIdx, 'revoked.json write must precede the permission revocation');
+    });
+
+    test('removal detection is based only on revoked.json (no 404 strikes)', () => {
+      assert(drive.includes('async function checkRemovalViaRevoked'),
+        'poll must consult revoked.json via checkRemovalViaRevoked');
+      assert(!/notFoundStrikes >= 3/.test(drive),
+        'consecutive-404 strike logic must be gone');
+      assert(!/notFoundStrikes/.test(drive),
+        'notFoundStrikes must not be referenced anywhere');
+    });
+
+    test('getRevokedMembers reads revoked.json instead of returning a stub', () => {
+      assert(!drive.includes('Drive does hard-delete, no revoked state'),
+        'getRevokedMembers stub must be replaced');
+      assert(/async getRevokedMembers\(groupId\)/.test(drive),
+        'getRevokedMembers must be async and read revoked.json');
+    });
+
+    test("revoked.json verdicts drive distinct 'removed' vs 'deleted' notices", () => {
+      assert(main.includes("verdict === 'deleted' ? 'sharing.group_deleted_remotely' : 'sharing.group_removed_remotely'"),
+        'main.js must pick the notice key from the revoked.json verdict');
+      for (const loc of ['en', 'fr', 'es']) {
+        assert(new RegExp(`^  ${loc}: \\{`, 'm').test(i18nSrc), `i18n.js must define locale ${loc}`);
+      }
+      // group_deleted_remotely must exist in all three locale sharing sections
+      const starts = {};
+      for (const m of i18nSrc.matchAll(/^  (en|fr|es): \{$/gm)) starts[m[1]] = m.index;
+      const order = ['en', 'fr', 'es'];
+      for (let i = 0; i < order.length; i++) {
+        const slice = i18nSrc.slice(starts[order[i]], i + 1 < order.length ? starts[order[i + 1]] : i18nSrc.length);
+        assert(/^\s{6}group_deleted_remotely:/m.test(slice),
+          `i18n.js [${order[i]}].sharing must define 'group_deleted_remotely:'`);
+      }
+    });
+  }
+
+  // ===================================================================
   // SUMMARY
   // ===================================================================
   console.log(`\n${'═'.repeat(50)}`);

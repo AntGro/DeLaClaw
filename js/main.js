@@ -1211,10 +1211,11 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     }
   });
 
-  // Notify user when a group is removed remotely (kicked or group deleted)
+  // Notify user when a group is removed remotely (kicked) or deleted by its creator
   document.addEventListener('sharing-group-removed-remotely', (e) => {
     const name = e.detail?.groupName || '';
-    showToast(t('sharing.group_removed_remotely', name), 'info');
+    const key = e.detail?.verdict === 'deleted' ? 'sharing.group_deleted_remotely' : 'sharing.group_removed_remotely';
+    showToast(t(key, name), 'info');
   });
 
   // Show demo banner if in demo mode

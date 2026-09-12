@@ -24,7 +24,7 @@ flowchart TB
             direction TB
             GJ["group.json<br/>members, creator, name"]
             ITEMS["todos/habits/lists.json<br/>item files (plain JSON arrays)"]
-            REVOKED["revoked.json<br/>removed member IDs"]
+            REVOKED["revoked.json<br/>removed members {id, removed_at}"]
             EXTRA["extra_1..12.json<br/>future placeholders"]
         end
         PA -->|"direct file read/write"| SHARED
@@ -44,7 +44,7 @@ flowchart TB
 
 **Sync intents** — each group entry keeps, per item file, two in-memory sets: locally created IDs not yet acknowledged by a successful upload (`createdIds`) and locally deleted IDs not yet acknowledged (`deletedIds`). Reconciliation consults them: a local item missing remotely is retained only with a pending create intent (otherwise it was deleted remotely and is dropped); a remote item missing locally is suppressed only with a pending delete intent (otherwise it is a remote creation and is accepted). Items present on both sides resolve by newer `updated_at`. Each upload captures the exact intents its payload represents and clears only those on success — an ID created while an upload is in flight stays pending, and failed uploads retain their intents. The logic lives in the backend-agnostic `sharing-file-reconcile.js`, shared by all file-based adapters; nothing is written to Drive, so there is nothing to prune.
 
-**revoked.json** — a notice file in the shared folder listing removed member IDs. A removed member keeps read-only access to this one file after losing access to everything else, so their client can distinguish "I was removed" from a flaky connection or a deleted group.
+**revoked.json** — a notice file in the shared folder listing removed members as `{id, removed_at}` entries. A removed member keeps read-only access to this one file after losing access to everything else, so their client can distinguish "I was removed" from a flaky connection or a deleted group.
 
 ## Backend-agnostic design
 
@@ -88,7 +88,7 @@ flowchart LR
 
 - `group.json` — members (hashed IDs + pseudos), creator, name
 - `todos.json` / `habits.json` / `lists.json` — item files: plain JSON arrays of item objects
-- `revoked.json` — removed member IDs; read-only for removed members
+- `revoked.json` — removed-member entries `{id, removed_at}`; read-only for removed members
 - `extra_1..12.json` — empty placeholders, pre-authorize future item types (avoids sending every member back through the Drive Picker)
 
 - **Invite code**: `DLC1.<base64url({v:1, b:'googledrive', f:<folderId>})>` — one group-level code, no per-member tokens.
@@ -294,7 +294,7 @@ sequenceDiagram
 
     CA->>CA: verify caller is the creator (else throw)<br/>member UI for invite/remove is hidden from non-creators
     CA->>SF: reassign removed member's items:<br/>created_by → creator
-    CA->>SF: revoked.json += member hashId
+    CA->>SF: revoked.json += {id: member hashId,<br/>removed_at: timestamp}
     CA->>SF: driveRemovePermission(folderPermId)<br/>reader grant on revoked.json remains
     Note over CA,SF: revocation is not atomic —<br/>permissions are removed one by one
     CA->>SF: group.json −= member row, save

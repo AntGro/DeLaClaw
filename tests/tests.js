@@ -1164,6 +1164,21 @@ test('sharing i18n keys used in code exist in every locale', () => {
   }
 });
 
+test('sharing tab shows with loading state while init is pending', () => {
+  // The Sharing tab must render alongside the other settings tabs even
+  // before the async Drive sharing init finishes — the pane shows a loading
+  // state and fills in on completion, instead of the tab popping in late.
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const visFn = sui.slice(sui.indexOf('function updateSharingNavVisibility'));
+  assert(visFn.includes("'googledrive'"),
+    'sharing nav must show the tab while Drive sharing init is pending');
+  assert(sui.includes('sharingInitFailed'),
+    'a failed sharing init must hide the tab again');
+  const paneFn = sui.slice(sui.indexOf('async function renderSharingPane'));
+  assert(paneFn.includes("t('common.loading')"),
+    'sharing pane must render a loading state while init is pending');
+});
+
 test('sharing join picker accepts every required file key', () => {
   // Regression: revoked.json became the 17th required group file (phase 3)
   // but the picker's doc→key allowlist in sharing-ui.js still hard-coded

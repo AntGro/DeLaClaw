@@ -74,9 +74,14 @@ let _currentUser = null;
 export function updateSharingNavVisibility() {
   const btn = document.getElementById('settingsNavSharingBtn');
   if (!btn) return;
-  // Show sharing nav for Drive users with sharing, or demo
   const activeMode = localStorage.getItem('claw_cc_active_mode');
-  btn.style.display = (state.sharing || activeMode === 'demo') ? '' : 'none';
+  // Show the tab as soon as the mode is one where sharing will exist — the
+  // pane renders a loading state until the async init finishes, then fills
+  // in. Only hide when sharing can never exist (local mode / init failed),
+  // so the tab no longer pops in late after the other tabs.
+  const willHaveSharing = activeMode === 'demo'
+    || (activeMode === 'googledrive' && !state.sharingInitFailed);
+  btn.style.display = (state.sharing || willHaveSharing) ? '' : 'none';
 }
 
 /** Render the full sharing settings pane content. */
@@ -97,6 +102,13 @@ export async function renderSharingPane() {
   }
 
   if (!state.sharing) {
+    // Drive mode but init still pending (or running): show a loading state —
+    // the pane fills in once init completes. Local mode / failed init keeps
+    // the not-available hint.
+    if (activeMode === 'googledrive' && !state.sharingInitFailed) {
+      container.innerHTML = `<p class="setting-hint">${t('common.loading')}</p>`;
+      return;
+    }
     container.innerHTML = `<p class="setting-hint">${t('sharing.no_drive')}</p>`;
     return;
   }

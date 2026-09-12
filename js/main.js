@@ -1120,6 +1120,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     };
 
     // Wire up Drive sharing module
+    state.sharingInitFailed = false;
     try {
       const { createSharing } = await import('./sharing.js');
       state.sharing = await createSharing('googledrive', {
@@ -1135,8 +1136,12 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
         document.dispatchEvent(new CustomEvent('sharing-changed'));
       });
       updateSharingNavVisibility();
+      // If the user already opened the Sharing pane while init was pending
+      // (loading state), fill it in now.
+      const sharingPane = document.getElementById('settingsPane-sharing');
+      if (sharingPane?.classList.contains('active')) renderSharingPane();
 
-    } catch (e) { console.warn('sharing init:', e); }
+    } catch (e) { console.warn('sharing init:', e); state.sharingInitFailed = true; }
   }
 
 

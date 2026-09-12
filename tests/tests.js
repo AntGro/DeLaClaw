@@ -2125,6 +2125,32 @@ test('share popover is viewport-bound with scrollable group and member lists', (
           `i18n.js [${order[i]}].sharing must define 'group_deleted_remotely:'`);
       }
     });
+
+    test("a 'removed' verdict dispatches sharing-group-purge-items (no dialog)", () => {
+      const m = drive.match(/for \(const \{ groupId: gid, verdict \} of staleGroupIds\) \{([\s\S]*?)\n        \}/);
+      assert(m, 'stale-group cleanup block must exist in poll()');
+      const body = m[1];
+      assert(body.includes("if (verdict === 'removed')"),
+        'cleanup must branch on the removed verdict');
+      const purgeIdx = body.indexOf("'sharing-group-purge-items'");
+      assert(purgeIdx !== -1, 'removed verdict must dispatch sharing-group-purge-items');
+      assert(body.lastIndexOf("if (verdict === 'removed')", purgeIdx) !== -1,
+        'sharing-group-purge-items must be gated on the removed verdict only');
+    });
+
+    test('main.js purges item pointers on sharing-group-purge-items and suppresses the orphan dialog', () => {
+      assert(main.includes("addEventListener('sharing-group-purge-items'"),
+        'main.js must listen for sharing-group-purge-items');
+      const idx = main.indexOf("addEventListener('sharing-group-purge-items'");
+      const slice = main.slice(idx, idx + 1500);
+      for (const table of ['habits', 'todos', 'list_items']) {
+        assert(slice.includes(`'${table}'`), `purge handler must delete pointer rows from ${table}`);
+      }
+      assert(slice.includes('.delete()'), 'purge handler must delete the pointer rows outright');
+      assert(slice.includes('_orphanConfirmed.add(groupId)'),
+        'purge handler must suppress the orphan dialog for the removed group');
+      assert(slice.includes("'sharing-changed'"), 'purge handler must trigger a view refresh');
+    });
   }
 
   // ===================================================================

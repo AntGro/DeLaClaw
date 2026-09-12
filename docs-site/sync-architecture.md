@@ -56,7 +56,7 @@ flowchart TD
     FILES["Per group: download group.json<br/>+ item files + revoked.json<br/>in parallel"]
     INTENT["Init in-memory sync intents<br/>createdIds / deletedIds per item file<br/>shipped"]
     REVOKE{"revoked.json check<br/>shipped · phase 3"}
-    REMOVED["Notice-only mode:<br/>'removed' vs 'flaky connection'<br/>shipped · phase 3"]
+    REMOVED["'removed' → auto-purge group<br/>+ delete item pointers (no dialog)<br/>shipped"]
     DELETED["Deletion confirmation dialog<br/>re-prompts until resolved<br/>planned · phase 4"]
     PURGE["Drop group: remove from memory<br/>+ joined-groups.json entry,<br/>stop polling its files"]
     NORM["normalizeEntry → _groups map"]

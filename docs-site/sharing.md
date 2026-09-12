@@ -302,10 +302,10 @@ sequenceDiagram
     MA->>SF: next poll: folder → 404
     MA->>SF: fetch revoked.json by stored fileId
     alt own hashId present
-    MA->>MA: explicit "removed" state →<br/>stop polling, purge group + pointer
-    MA->>MA: orphan dialog: unlink pointers<br/>(re-prompts until resolved)
+    MA->>MA: explicit "removed" state →<br/>stop polling, purge group + delete item pointers (no dialog — removal is certain)
     else revoked.json also 404
-    MA->>MA: group deleted → purge (see below)
+    MA->>MA: group deleted → purge group (see below)
+    MA->>MA: orphan dialog → unlink pointers<br/>(re-prompts until resolved — may be an infra issue)
     else transport error
     MA->>MA: flaky connection — keep polling
     end
@@ -341,8 +341,8 @@ sequenceDiagram
     CA->>CA: record deletedAt in local state<br/>drop group, emit group-deleted
     MA->>SF: next poll: folder → 404
     MA->>SF: fetch revoked.json by stored fileId →<br/>own hashId present
-    MA->>MA: explicit "group deleted" →<br/>stop polling, purge group + pointer
-    MA->>MA: orphan dialog → unlink pointers<br/>(re-prompts until resolved)
+    MA->>MA: explicit "group deleted" →<br/>stop polling, purge group
+    MA->>MA: orphan dialog → unlink pointers<br/>(re-prompts until resolved — may be an infra issue)
     Note over CA,CD: creator app startup: deletedAt > 30 days →<br/>permanently delete DeLaClaw-Shared-{id}
 ```
 

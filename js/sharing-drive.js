@@ -1463,6 +1463,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           const groupName = _groups.get(gid)?.group?.name || gid;
           _groups.delete(gid);
           emit('group-deleted', { groupId: gid, verdict });
+          if (verdict === 'removed') {
+            // Own memberId found in revoked.json — removal is certain, so purge
+            // local item pointers outright (no dialog). The 'deleted' case keeps
+            // the orphan dialog: an unreachable group may be an infra issue.
+            // Handled in main.js via state.db (the adapter has no db access).
+            try { document.dispatchEvent(new CustomEvent('sharing-group-purge-items', { detail: { groupId: gid } })); } catch {}
+          }
           try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName, verdict } })); } catch {}
         }
         // Purge from joined-groups.json

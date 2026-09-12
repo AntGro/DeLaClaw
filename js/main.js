@@ -1385,6 +1385,31 @@ function _processOrphanQueue() {
 
 
 // ===================================================================
+// PURGE ITEMS OF A REMOVED MEMBER (no dialog — revoked.json is certain)
+// ===================================================================
+// 'sharing-group-purge-items' is dispatched by the sharing adapter when the
+// poll finds our own memberId in revoked.json (verdict 'removed'). Removal is
+// certain, so local item pointers are deleted outright. The orphan dialog is
+// kept only for the 'deleted' verdict, where an unreachable group may be an
+// infra issue rather than a real deletion.
+document.addEventListener('sharing-group-purge-items', async (e) => {
+  const groupId = e.detail?.groupId;
+  if (!groupId || !state.db) return;
+  // Suppress the orphan dialog for this group even if it was already queued
+  _orphanConfirmed.add(groupId);
+  const qi = _orphanQueue.indexOf(groupId);
+  if (qi >= 0) _orphanQueue.splice(qi, 1);
+  delete _orphanCounts[groupId];
+  try {
+    for (const table of ['habits', 'todos', 'list_items']) {
+      await state.db.from(table).delete().eq('shared_group_id', groupId);
+    }
+  } catch (err) { console.warn('sharing purge items:', err); return; }
+  document.dispatchEvent(new CustomEvent('sharing-changed'));
+});
+
+
+// ===================================================================
 // INSTALL BANNER (PWA)
 // ===================================================================
 const INSTALL_DISMISS_KEY = 'claw_cc_install_dismissed';

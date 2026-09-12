@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-12T22:33:11.113Z from 38 modules (v2.0.43). Total LOC 28743. Do not hand-edit.
+> Generated 2026-09-12T22:49:10.741Z from 38 modules (v2.0.44). Total LOC 28746. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -29,10 +29,10 @@
 |--------|-----|--------|---------|------------|-------|
 | main | 3639 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
 | i18n | 2207 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
-| sharing-drive | 1682 | - | drive-folders,sharing-envelope,sharing-file-reconcile,utils | main.js,sharing.js | - |
+| sharing-drive | 1684 | - | drive-folders,sharing-envelope,sharing-file-reconcile,utils | main.js,sharing.js | - |
 | sharing-ui | 1242 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:37,pendingSet,window:8 |
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
-| drive | 1104 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
+| drive | 1105 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | utils | 830 | flashcards,x | i18n,icons,state,version | - | esc:7,window:6 |
 | calendar-sync | 696 | birthdays,gcal_sync,habits,settings,todos | drive-folders,habits,i18n,icons | main.js | - |
 | hero | 473 | - | logo,storm3d | main.js | - |

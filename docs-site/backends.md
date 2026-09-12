@@ -88,7 +88,7 @@ These **must stay in sync**. The `draft` status bug (v1.105) was caused by the d
 |  | **Google Drive** | **Local (Bun + SQLite)** | **Demo** |
 |---|---|---|---|
 | **Adapter** | `drive.js` — wraps the demo adapter with per-table Drive persistence, ETag-based conflict resolution, and polling for external changes | `rest.js` — plain HTTP client with chainable PostgREST-like API | `demo.js` — full in-memory query builder with CHECK constraints |
-| **Architecture** | Stores one JSON file per table in a `DeLaClaw/` Drive folder. Reads/writes hit in-memory store (instant). Debounced per-table write-back flushes to Drive after 2s of inactivity. Polls Drive every 30s for external changes | `server/server.js` — Bun REST server + static file server. SQLite schema applied on startup via `CREATE TABLE IF NOT EXISTS` | Seeded with localized sample data from `demo-data.js` (EN/FR/ES). All operations run against in-memory JS objects. Nothing persists across refresh |
+| **Architecture** | Stores one JSON file per table in a `DeLaClaw/` Drive folder (`DeLaClawDev/` on dev and preview builds). Reads/writes hit in-memory store (instant). Debounced per-table write-back flushes to Drive after 2s of inactivity. Polls Drive every 30s for external changes | `server/server.js` — Bun REST server + static file server. SQLite schema applied on startup via `CREATE TABLE IF NOT EXISTS` | Seeded with localized sample data from `demo-data.js` (EN/FR/ES). All operations run against in-memory JS objects. Nothing persists across refresh |
 | **Auth** | Google OAuth 2.0 via Google Identity Services. Scope: `drive.file` (only files created by the app) + optional `calendar.app.created` (only calendars created by the app, for [Calendar sync](sync-architecture.md)). "Stay connected" triggers silent re-auth on reload (`prompt: ''`); clears credentials on failure | None. ⚠️ Server binds to `0.0.0.0` by default, exposing the API to the local network | None |
 | **Session** | Token in memory. "Stay connected" saves client ID to localStorage | N/A | N/A |
 | **Sync** | Polls Drive every 30s via `files.list` — re-fetches only tables whose `modifiedTime` changed. Skips locally-dirty tables. External change callback available for UI refresh. Immediate poll also fires on tab focus / `visibilitychange` → visible | None. Single-server, single-device | N/A |
@@ -236,7 +236,7 @@ This is same-account multi-device sync, not a multi-user model: there is no coll
 
 ## 8. Agent Integration
 
-The agent interacts with DeLaClaw via the Google Drive API, reading and writing individual per-table JSON files in the `DeLaClaw/` Drive folder.
+The agent interacts with DeLaClaw via the Google Drive API, reading and writing individual per-table JSON files in the `DeLaClaw/` Drive folder (`DeLaClawDev/` on dev and preview builds).
 
 ### Current capabilities
 
@@ -297,7 +297,7 @@ The agent interacts with DeLaClaw via the Google Drive API, reading and writing 
 
 **Export options:**
 - **Download:** Browser download as `.json` file.
-- **Push to Drive:** Available when connected to Drive backend. Saves backup as a separate file in the `DeLaClaw/` folder.
+- **Push to Drive:** Available when connected to Drive backend. Saves a timestamped backup file in the `DeLaClaw Backups/` folder (`DeLaClawDev Backups/` on dev and preview builds).
 
 ### Import
 

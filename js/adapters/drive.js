@@ -1,7 +1,8 @@
 // ===================================================================
 // GOOGLE DRIVE ADAPTER — in-memory runtime, per-table Drive persistence
 // ===================================================================
-// On connect: reads per-table JSON files from a DeLaClaw/ folder.
+// On connect: reads per-table JSON files from the environment's Drive folder
+// (DeLaClaw/ on production, DeLaClawDev/ elsewhere — see js/drive-folders.js).
 // At runtime: all reads/writes hit the in-memory store (instant).
 // On mutation: debounced write-back per table (~2s after last change).
 //
@@ -204,7 +205,7 @@ async function findOrCreateFolder(token) {
   return (await create.json()).id;
 }
 
-/** List all files in the DeLaClaw folder with id, name, modifiedTime */
+/** List all files in the environment's Drive folder with id, name, modifiedTime */
 async function listFolderFiles(token, folderId) {
   const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
   const resp = await fetch(
@@ -1054,7 +1055,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     },
 
     /**
-     * Delete the user's DeLaClaw account: trash the Drive folder (and all
+     * Delete the user's DeLaClaw account: trash the environment's Drive folder (and all
      * files inside it), revoke the OAuth token, and clear local state.
      * Returns { ok: true } on success or { ok: false, error: string }.
      */
@@ -1063,7 +1064,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         const tok = await getToken();
         if (!tok) return { ok: false, error: 'No valid token — please sign in again' };
 
-        // 1. Delete the DeLaClaw calendar if sync was enabled
+        // 1. Delete the synced calendar (DeLaClaw / DeLaClawDev) if sync was enabled
         try {
           const calRow = store.settings?.find(r => r.key === 'gcal_calendar_id');
           const calId = calRow?.value;
@@ -1075,7 +1076,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
           }
         } catch { /* best effort */ }
 
-        // 2. Trash the DeLaClaw folder (cascades to all files inside)
+        // 2. Trash the environment's Drive folder (cascades to all files inside)
         try {
           await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}`, {
             method: 'PATCH',

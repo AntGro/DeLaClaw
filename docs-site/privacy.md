@@ -6,7 +6,7 @@ DeLaClaw is designed so that your data stays yours. This document explains what 
 
 DeLaClaw does not operate a central server. Depending on which backend mode you choose:
 
-- **Google Drive**: your data is stored as JSON files in a `DeLaClaw/` folder in your own Google Drive. Authentication uses Google Identity Services directly in the browser. No data passes through any DeLaClaw server.
+- **Google Drive**: your data is stored as JSON files in a `DeLaClaw/` folder (`DeLaClawDev/` on dev and preview builds) in your own Google Drive. Authentication uses Google Identity Services directly in the browser. No data passes through any DeLaClaw server.
 - **Local (Bun + SQLite)**: your data is stored in a SQLite file on your machine.
 - **Demo**: data exists only in browser memory and is lost when you close or refresh the page.
 
@@ -27,7 +27,7 @@ DeLaClaw offers an optional sharing feature that lets you exchange TODOs, habits
 - You explicitly choose which items to share and with whom by creating sharing groups and inviting members by email.
 - Shared data (group metadata, shared TODOs, habits, and lists) is stored in shared Google Drive folders that all group members can access.
 - A **trusted contacts** system controls whose shared folders your app will load. Only folders from people you have added to your trusted contacts list are accepted; all others are automatically rejected.
-- Your trusted contacts list is stored in your own Google Drive (`DeLaClaw/trusted-contacts.json`) and is not shared with anyone.
+- Your trusted contacts list is stored in your own Google Drive (`DeLaClaw/trusted-contacts.json`, `DeLaClawDev/` on dev and preview builds) and is not shared with anyone.
 
 Sharing is entirely opt-in. If you do not enable sharing, no data is exchanged with other users.
 

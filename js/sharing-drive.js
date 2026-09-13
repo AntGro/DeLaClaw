@@ -371,12 +371,33 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  /** Member ID — deterministic per user: 16 hex chars of SHA-256(lowercased email).
-   *  Stable across invites, so a removed-then-reinvited member keeps the same ID;
-   *  removal entries in revoked.json are disambiguated by timestamp instead.
-   *  The raw email is never persisted in group.json. */
+  /** Canonical form of an email for identity purposes. Always lowercases;
+   *  for Gmail the local part is normalized too: Google ignores dots and
+   *  +tags, and googlemail.com is an alias of gmail.com. Other providers
+   *  treat dots as significant, so their local parts are left untouched —
+   *  stripping dots globally could merge two distinct mailboxes into one ID. */
+  function normalizeEmail(email) {
+    const lower = String(email || '').trim().toLowerCase();
+    const at = lower.lastIndexOf('@');
+    if (at === -1) return lower;
+    let local = lower.slice(0, at);
+    let domain = lower.slice(at + 1);
+    if (domain === 'googlemail.com') domain = 'gmail.com';
+    if (domain === 'gmail.com') {
+      const plus = local.indexOf('+');
+      if (plus !== -1) local = local.slice(0, plus);
+      local = local.replace(/\./g, '');
+    }
+    return `${local}@${domain}`;
+  }
+
+  /** Member ID — deterministic per user: 16 hex chars of SHA-256 of the
+   *  normalized email. Stable across invites, so a removed-then-reinvited
+   *  member keeps the same ID; removal entries in revoked.json are
+   *  disambiguated by timestamp instead. The raw email is never persisted
+   *  in group.json. */
   async function memberIdFromEmail(email) {
-    return (await sha256Hex(String(email || '').toLowerCase())).slice(0, 16);
+    return (await sha256Hex(normalizeEmail(email))).slice(0, 16);
   }
 
   async function currentMemberId(groupId) {

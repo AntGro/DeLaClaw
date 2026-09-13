@@ -1139,6 +1139,24 @@ test('sharing members use stable hashed IDs with a pending-invite join gate', ()
     'checkRemovalViaRevoked must disambiguate removals by timestamp since member IDs are stable');
 });
 
+test('sharing email normalization is Gmail-scoped (dots significant elsewhere)', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const src = drive.match(/function normalizeEmail\(email\) \{[\s\S]*?\n  \}/);
+  assert(src, 'sharing-drive.js must define normalizeEmail');
+  const normalizeEmail = new Function(`${src[0]}; return normalizeEmail;`)();
+
+  // Gmail: dots and +tags are ignored by Google
+  assert(normalizeEmail('John.Doe@Gmail.com') === 'johndoe@gmail.com', 'gmail dots stripped');
+  assert(normalizeEmail('john+tag@gmail.com') === 'john@gmail.com', 'gmail +tag stripped');
+  assert(normalizeEmail('John.Doe@Googlemail.com') === 'johndoe@gmail.com', 'googlemail alias mapped');
+  // Everywhere else dots are significant and must be preserved
+  assert(normalizeEmail('John.Doe@Company.com') === 'john.doe@company.com', 'non-gmail dots kept');
+  assert(normalizeEmail('  JOHN@Example.COM ') === 'john@example.com', 'trimmed and lowercased');
+  // memberIdFromEmail must hash the normalized form
+  assert(drive.includes('sha256Hex(normalizeEmail(email))'),
+    'memberIdFromEmail must hash the normalized email, not the raw input');
+});
+
 test('sharing i18n keys used in code exist in every locale', () => {
   // Regression: t('sharing.name_updated') showed the raw key in English because
   // the string existed in fr/es but was missing from en. Every sharing.* key

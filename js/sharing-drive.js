@@ -1447,7 +1447,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
             // consult revoked.json — the only signal. 'removed' → we were
             // kicked; 'deleted' → the group is gone; null → transient.
             if (err?.code === 404 || err?.status === 404 || err?.code === 403 || err?.status === 403) {
-              const verdict = await checkRemovalViaRevoked(groupId, tok).catch(() => null);
+              const verdict = await this.checkRemovalViaRevoked(groupId, tok).catch(() => null);
               if (verdict) staleGroupIds.push({ groupId, verdict });
             } else {
               console.warn(`sharing poll group ${groupId}:`, err);

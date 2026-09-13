@@ -1164,6 +1164,19 @@ test('sharing i18n keys used in code exist in every locale', () => {
   }
 });
 
+test('sharing async buttons use the standard busy shimmer', () => {
+  // Invite / join / reconnect buttons must use the shared saving/is-pending
+  // shimmer (same as guard() in main.js), not ad-hoc opacity/text swaps, so
+  // it's always clear something is happening.
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(!sui.includes("btn.style.opacity = '0.5'"),
+    'sharing buttons must not use manual opacity instead of the busy shimmer');
+  assert(sui.includes('function setBtnBusy(btn, busy)'),
+    'sharing-ui.js must define the setBtnBusy helper');
+  const uses = (sui.match(/setBtnBusy\(btn, true\)/g) || []).length;
+  assert(uses >= 4, `expected at least 4 setBtnBusy(btn, true) uses, found ${uses}`);
+});
+
 test('sharing tab shows with loading state while init is pending', () => {
   // The Sharing tab must render alongside the other settings tabs even
   // before the async Drive sharing init finishes — the pane shows a loading

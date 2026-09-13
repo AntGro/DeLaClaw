@@ -26,6 +26,21 @@ import { decodeInviteEnvelope } from './sharing-envelope.js';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
+/**
+ * Standard busy styling for async buttons: disable + shimmer sweep via the
+ * shared `saving`/`is-pending` classes + aria-busy. Same visual language as
+ * guard() in main.js — use for every mutating action instead of ad-hoc
+ * opacity/text swaps.
+ */
+function setBtnBusy(btn, busy) {
+  if (!btn) return;
+  btn.disabled = busy;
+  btn.classList.toggle('saving', busy);
+  btn.classList.toggle('is-pending', busy);
+  if (busy) btn.setAttribute('aria-busy', 'true');
+  else btn.removeAttribute('aria-busy');
+}
+
 /** Generate a deterministic color from a stable member id. */
 function memberColor(seed) {
   let hash = 0;
@@ -352,7 +367,7 @@ async function sharingInvite(groupId) {
   if (!name) return;
   const btn = input?.nextElementSibling;
   if (btn?.disabled) return;
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; btn.setAttribute('aria-busy', 'true'); }
+  setBtnBusy(btn, true);
   try {
     const result = await state.sharing.inviteUser(groupId, name);
     input.value = '';
@@ -368,7 +383,7 @@ async function sharingInvite(groupId) {
     }
   } catch (e) {
     showToast(e.message, 'error');
-    if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.removeAttribute('aria-busy'); }
+    setBtnBusy(btn, false);
   }
 }
 
@@ -737,7 +752,7 @@ async function sharingJoinCodeSubmit() {
     return;
   }
   if (btn?.disabled) return;
-  if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
+  if (btn) { setBtnBusy(btn, true); btn.textContent = t('common.loading'); }
   try {
     const ok = await handleJoinCode(code, { errorEl: errEl });
     if (ok) modal?.remove();
@@ -780,7 +795,7 @@ function showJoinConfirmModal(group, onConfirm) {
     const errEl = document.getElementById('joinConfirmError');
     if (errEl) errEl.style.display = 'none';
     if (btn?.disabled) return;
-    if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
+    if (btn) { setBtnBusy(btn, true); btn.textContent = t('common.loading'); }
     try {
       const displayName = document.getElementById('joinDisplayName')?.value.trim() || '';
       const joined = await onConfirm(displayName);
@@ -791,7 +806,7 @@ function showJoinConfirmModal(group, onConfirm) {
     } catch (e) {
       console.warn('join confirm failed:', e);
       if (errEl) { errEl.textContent = e.message || t('sharing.join_failed'); errEl.style.display = ''; }
-      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}`; }
+      if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}`; }
     }
   });
 }
@@ -816,7 +831,7 @@ function showReconnectConfirmModal(group, env) {
     const errEl = document.getElementById('reconnectError');
     if (errEl) errEl.style.display = 'none';
     if (btn?.disabled) return;
-    if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
+    if (btn) { setBtnBusy(btn, true); btn.textContent = t('common.loading'); }
     try {
       await state.sharing.reconnectGroup(env.g, env.u, env.k, env.t);
       overlay.remove();
@@ -825,7 +840,7 @@ function showReconnectConfirmModal(group, env) {
     } catch (e) {
       console.warn('reconnect failed:', e);
       if (errEl) { errEl.textContent = e.message || t('sharing.reconnect_failed'); errEl.style.display = ''; }
-      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('refresh-cw', 16)} ${t('sharing.reconnect_btn')}`; }
+      if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('refresh-cw', 16)} ${t('sharing.reconnect_btn')}`; }
     }
   });
 }
@@ -859,12 +874,12 @@ async function sharingOpenJoinPicker(folderId) {
   const btn = document.getElementById('sharingJoinPickerBtn');
   const errEl = document.getElementById('sharingJoinError');
   if (errEl) errEl.style.display = 'none';
-  if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
+  if (btn) { setBtnBusy(btn, true); btn.textContent = t('common.loading'); }
 
   try {
     const docs = await state.sharing.openJoinPicker(folderId);
     if (!docs) {
-      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
+      if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
       return;
     }
 
@@ -892,7 +907,7 @@ async function sharingOpenJoinPicker(folderId) {
         }
       }
       showJoinError(t('sharing.join_no_files'));
-      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
+      if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
       return;
     }
 
@@ -903,7 +918,7 @@ async function sharingOpenJoinPicker(folderId) {
     if (missing.length > 0) {
       const names = missing.map(k => `${k}.json`).join(', ');
       showJoinError(t('sharing.join_missing_files', names));
-      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
+      if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
       return;
     }
 
@@ -913,10 +928,10 @@ async function sharingOpenJoinPicker(folderId) {
       { name: '', _suggestedName: me?.displayName || '' },
       (name) => state.sharing.joinWithFileIds(folderId, fileIds, { displayName: name }),
     );
-    if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
+    if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
   } catch (e) {
     showJoinError(e.message || t('sharing.join_failed'));
-    if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
+    if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
   }
 }
 
@@ -1216,14 +1231,14 @@ async function sharingCompleteSubmit(groupId, itemId) {
   const doneBy = [...modal.querySelectorAll('.share-popover-check input:checked')].map(cb => cb.value);
   if (!doneBy.length) return;
   const btn = modal.querySelector('.modal-save');
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+  setBtnBusy(btn, true);
   try {
     await state.sharing.completeItem(groupId, itemId, doneBy);
     showToast(t('common.done') + '!', 'success');
     modal.remove();
   } catch (e) {
     showToast(e.message, 'error');
-    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+    setBtnBusy(btn, false);
   }
 }
 

@@ -1013,7 +1013,7 @@ test('sharing member identity is memberId-based and agent-safe', () => {
   assert(sui.includes('state.sharing.getCurrentMember(group.id)'),
     'sharing-ui.js must ask the adapter for current group membership');
 
-  assert(drive.includes('Do not persist raw email in group.json'),
+  assert(drive.includes('The raw email is never persisted in group.json'),
     'sharing-drive.js must treat invite email as permission material only');
   assert(!drive.includes(`email,\n          name: email`),
     'sharing-drive.js must not write raw invite email into group.json members');
@@ -1110,27 +1110,33 @@ test('sharing departure is unjoin-only (no leaveGroup)', () => {
     'unjoin must remain the single departure path');
 });
 
-test('sharing members use hashed opaque IDs with a pending-invite join gate', () => {
+test('sharing members use stable hashed IDs with a pending-invite join gate', () => {
   const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
 
-  assert(drive.includes('function newMemberId()'),
-    'sharing-drive.js must generate opaque random member IDs');
-  assert(drive.includes('const creatorMemberId = newMemberId();'),
-    'sharing-drive.js must not derive the creator member ID from the email');
-  assert(drive.includes('async function emailHash(email)'),
-    'sharing-drive.js must hash invite emails for matching instead of storing them');
+  assert(drive.includes('async function memberIdFromEmail(email)'),
+    'sharing-drive.js must derive the member ID deterministically from the email');
+  assert(!drive.includes('function newMemberId()'),
+    'sharing-drive.js must not mint random member IDs anymore');
+  assert(drive.includes('const creatorMemberId = await memberIdFromEmail(user.email);'),
+    'sharing-drive.js must derive the creator member ID from the email');
+  assert(!drive.includes('emailHash'),
+    'sharing-drive.js must not carry a separate emailHash field anymore');
+  assert(!drive.includes('emailHint'),
+    'sharing-drive.js must not carry the legacy emailHint fallback anymore');
   assert(drive.includes('No pending invite for this account'),
     'sharing-drive.js must reject joins without a matching pending invite');
+  assert(drive.includes('m.status === \'pending\' && m.memberId === selfId'),
+    'sharing-drive.js must match the joiner to their pending invite by stable member ID');
   assert(drive.includes('await assertCreator(groupId)'),
     'sharing-drive.js must enforce creator-only invite/remove in the adapter');
   assert(iface.includes('creator-only') && iface.includes('pending invite'),
     'sharing-interface.js must document creator-only ops and the pending-invite join requirement');
-  // Regression: normalizeMember once dropped emailHash, so the join gate
-  // (m.emailHash === eh on normalized members) could never match and every
-  // join failed with 'No pending invite for this account'.
-  assert(drive.includes('emailHash: member.emailHash'),
-    'normalizeMember must preserve member.emailHash so the pending-invite join gate can match');
+  // Regression: with stable IDs, a stale revoked.json entry must not false-trigger
+  // removal for a removed-then-reinvited member — only removals recorded after
+  // the current join count.
+  assert(drive.includes('r.removed_at > joinedAt'),
+    'checkRemovalViaRevoked must disambiguate removals by timestamp since member IDs are stable');
 });
 
 test('sharing i18n keys used in code exist in every locale', () => {
@@ -1275,13 +1281,18 @@ test('sharing UI never displays left members', () => {
   }
 });
 
-test('sharing re-invite clears a stale left marker for the same email', () => {
-  // Otherwise inviting someone who previously left would find the left row by
-  // emailHash and skip creating the new pending invite.
+test('sharing re-invite revives the existing row for the same email', () => {
+  // Member IDs are stable per email, so re-inviting someone who left (or was
+  // removed) must reset their existing row to a fresh pending invite instead
+  // of minting a duplicate row.
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
   const invite = drive.slice(drive.indexOf('async inviteUser(groupId, inviteTarget)'));
-  assert(invite.includes("m.emailHash === eh && m.status === 'left'"),
-    'inviteUser must drop a stale left entry for the same emailHash before adding the pending invite');
+  assert(invite.includes('const memberId = await memberIdFromEmail(email);'),
+    'inviteUser must derive the member ID deterministically from the invite email');
+  assert(invite.includes('const existing = e.group.members.find(m => m.memberId === memberId);'),
+    'inviteUser must look up the existing member row by stable member ID');
+  assert(invite.includes("existing.status = 'pending'") && invite.includes('existing.leftAt = null'),
+    'inviteUser must revive a stale row (left/removed) back to a pending invite');
 });
 
 // ===================================================================

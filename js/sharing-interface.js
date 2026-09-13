@@ -12,11 +12,12 @@
 //
 // SharingUser   { memberId?: string, displayName: string, backendUserId?: string }
 //
-// GroupMember   { memberId: string, /* opaque immutable hash, never a raw email */
+// GroupMember   { memberId: string, /* deterministic per user: hash of their email, never the raw email.
+//                                  Stable across invites, so removal entries in revoked.json are
+//                                  disambiguated by timestamp (removed_at vs the member's joinedAt). */
 //                 role: 'creator'|'owner'|'member',
 //                 status: 'pending'|'joined'|'revoked',
 //                 displayName: string, /* user-chosen pseudo */
-//                 emailHash?: string, /* pending invites: matches joiner to their invite */
 //                 invitedLabel?: string, joinedAt?: string|null }
 //
 // Group         { id: string, name: string, backendType: string,

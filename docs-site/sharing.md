@@ -95,7 +95,7 @@ _Folder names shown for production (`delaclaw.com`); dev and preview builds use 
 
 - **Invite code**: `DLC1.<base64url({v:1, b:'googledrive', f:<folderId>})>` — one group-level code, no per-member tokens.
 - **Access control**: Drive folder permissions (writer) plus the trusted-contacts allowlist; `group.json` holds the member list. No RPC layer, no token hashing.
-- **Member identity**: member IDs are opaque hashes (never raw emails); each member picks a pseudo, the hash stays immutable. The pending invite stores an `emailHash` so the joiner can match their invite without exposing the email.
+- **Member identity**: the member ID is the SHA-256 hash of the member's lowercased email (never the raw email) — stable per user across invites. Each member picks a pseudo; the ID stays immutable. Because IDs are stable, removal entries in `revoked.json` are disambiguated by timestamp: only a removal recorded after the member's current join counts.
 - **Sync**: every member polls every 15 s, keyed on each file's `modifiedTime`. Concurrent writes use ETags with up to two conflict retries; the merge is intent-aware (`reconcileItems` in `sharing-file-reconcile.js`) — pending local creates are retained, pending local deletes suppress stale remote copies, and only deletions acknowledged by a successful upload propagate.
 - **Drive scopes**: with `drive.file` scope the joiner grants access through the Google Picker (only the selected files, revoked.json included); with full `drive` scope the folder is listed directly.
 
@@ -143,14 +143,14 @@ sequenceDiagram
     CA->>SF: upload item files<br/>(todos/habits/lists.json)<br/>+ revoked.json<br/>+ 12 empty extra_N.json placeholders<br/>then group.json LAST (its presence marks creation complete)
     Note over CA,SF: creator-only: inviteUser throws<br/>unless the caller is the creator
     CA->>SF: share folder with B@email (writer)<br/>+ revoked.json (reader)
-    CA->>SF: group.json += member<br/>{hashId, pending, emailHash, pseudo: null}
+    CA->>SF: group.json += member<br/>{memberId: hash(email), pending, pseudo: null}
     CA-->>JA: DLC1 invite code {b:'googledrive', f:folderId}
     Note over CA,JA: sent out of band — chat, email, …
     JA->>JA: paste code → decode → folderId
     JA->>SF: Google Picker → select shared files<br/>(revoked.json included)
     Note over JA,SF: Picker grants drive.file access<br/>to only the selected files —<br/>placeholders pre-authorize future item types
     JA->>SF: download group.json + item files
-    JA->>SF: match pending row by emailHash<br/>no match → join rejected
+    JA->>SF: match pending row by memberId<br/>no match → join rejected
     JA->>SF: pending → joined, set chosen pseudo
     JA->>JD: save DeLaClaw/joined-groups.json<br/>(DeLaClawDev/ on dev builds)
     Note over JD: pointer only:<br/>{folderId, groupId, fileIds}<br/>fileIds include revoked.json
@@ -160,7 +160,7 @@ sequenceDiagram
     CA->>CA: toast "B joined" + member list re-renders
 ```
 
-Joining requires two gates: Drive access to the folder (the join must download `group.json`) **and** a matching pending invite (by `emailHash`). Drive access alone is not enough.
+Joining requires two gates: Drive access to the folder (the join must download `group.json`) **and** a matching pending invite (by member ID, the hash of the joiner's email). Drive access alone is not enough.
 
 Joining is desktop-only: the joiner must multi-select every group file in the Google file picker, which phones and tablets (coarse pointer, no hover) dismiss after a single tap. On such devices the join dialog says so instead of offering the invite-code form. The gate is capability-based (`isDesktopLike()`: fine pointer + hover), so touchscreen laptops are not gated.
 
@@ -388,7 +388,7 @@ The flows above surfaced 14 design questions, all decided on 2026-09-07 and reco
 2. **Deletion sync intents** — each group entry keeps per-item-file in-memory `createdIds`/`deletedIds` intent sets; reconciliation retains pending creates, drops remotely-deleted items, and suppresses remotely-stale copies of pending deletes. Each upload acknowledges only the intents its payload represented, so an ID created mid-upload stays pending. The logic is backend-agnostic (`sharing-file-reconcile.js`), shared by all file-based adapters.
 3. **leave vs unjoin** — `leaveGroup` removed; `unjoinGroup` is the only leave path. Leaving flips the member row to `status: 'left'`; the creator's poll revokes the leaver's Drive permission (owner-only) and clears the row, so leaving actually removes folder access. `left` rows are never displayed.
 4. **Member IDs** — opaque hashes, never raw emails; members pick a pseudo, the hash stays immutable.
-5. **Join admission** — joining requires a matching pending invite (by `emailHash`); Drive access alone is not enough.
+5. **Join admission** — joining requires a matching pending invite (by member ID, the hash of the joiner's email); Drive access alone is not enough.
 6. **Removed members' items** — reassigned to the creator (`created_by` rewrite), no ghost creator IDs.
 7. **Creator-only enforcement** — `inviteUser`/`removeUser` throw unless the caller is the creator; the invite/remove UI is hidden from non-creators.
 8. **Account deletion** — joined groups are left alone; created groups are deleted via the grace-period flow.

@@ -371,23 +371,12 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  /** Opaque immutable member ID — random 16 hex chars, not derivable from the email. */
-  function newMemberId() {
-    const bytes = crypto.getRandomValues(new Uint8Array(8));
-    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  /** Deterministic hash of a lowercased email — matches a joiner to their pending invite
-   *  without ever persisting the raw email in group.json. */
-  async function emailHash(email) {
+  /** Member ID — deterministic per user: 16 hex chars of SHA-256(lowercased email).
+   *  Stable across invites, so a removed-then-reinvited member keeps the same ID;
+   *  removal entries in revoked.json are disambiguated by timestamp instead.
+   *  The raw email is never persisted in group.json. */
+  async function memberIdFromEmail(email) {
     return (await sha256Hex(String(email || '').toLowerCase())).slice(0, 16);
-  }
-
-  function legacyMemberIdFromEmail(groupId, email) {
-    let hash = 0;
-    const seed = `${groupId}:${String(email || '').toLowerCase()}`;
-    for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
-    return `legacy-${groupId}-${Math.abs(hash).toString(36)}`;
   }
 
   async function currentMemberId(groupId) {
@@ -395,19 +384,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     return member?.memberId || null;
   }
 
-  async function normalizeMember(member = {}, groupId = '') {
-    const user = _user || null;
-    const legacyEmail = member.email || member.emailAddress || '';
-    const isCurrentUser = user?.email && legacyEmail && legacyEmail.toLowerCase() === user.email.toLowerCase();
-    const memberId = member.memberId || member.member_id || member.drivePermissionId || member.permissionId
-      || (isCurrentUser ? `drive-user-${user.email.toLowerCase()}` : null)
-      || (legacyEmail ? legacyMemberIdFromEmail(groupId, legacyEmail) : null)
-      || `legacy-${groupId}-${crypto.randomUUID().slice(0, 8)}`;
-    const joinedAt = member.joinedAt ?? member.joined_at ?? member.added_at ?? null;
+  async function normalizeMember(member = {}) {
+    const memberId = member.memberId || member.member_id || null;
+    const joinedAt = member.joinedAt ?? member.joined_at ?? null;
     const role = member.role === 'owner' ? 'creator' : (member.role || 'member');
     const invitedLabel = member.invitedLabel ?? member.invited_label ?? null;
     const displayName = fallbackDisplayName(
-      member.displayName || member.display_name || member.name || (isCurrentUser ? user?.name : '') || invitedLabel || legacyEmail || memberId,
+      member.displayName || member.display_name || invitedLabel || memberId,
     );
     return {
       memberId,
@@ -420,17 +403,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // until the creator's poll revokes the Drive permission and clears it.
       leftAt: member.leftAt ?? member.left_at ?? null,
       drivePermissionId: member.drivePermissionId || member.permissionId || null,
-      emailHint: member.emailHint || (legacyEmail ? fallbackDisplayName(legacyEmail) : null),
-      // Preserved so the pending-invite join gate (and re-saves of group.json)
-      // can match a joiner to their invite. Dropping it breaks joining entirely.
-      emailHash: member.emailHash || null,
     };
   }
 
   async function normalizeGroup(group, folderId = '') {
     const rawMembers = Array.isArray(group?.members) ? group.members : [];
     const members = [];
-    for (const m of rawMembers) members.push(await normalizeMember(m, group?.id || folderId));
+    for (const m of rawMembers) members.push(await normalizeMember(m));
     const createdBy = typeof group?.created_by === 'string'
       ? group.created_by
       : (group?.created_by?.memberId || members.find(m => m.role === 'creator' || m.role === 'owner')?.memberId || null);
@@ -447,16 +426,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     const rawGroup = entry.group;
     entry.group = await normalizeGroup(rawGroup, entry.folderId);
     const memberIds = new Set(entry.group.members.map(m => m.memberId));
-    const legacyRefMap = new Map();
-    for (const m of (rawGroup.members || [])) {
-      if (m.email) legacyRefMap.set(String(m.email).toLowerCase(), legacyMemberIdFromEmail(rawGroup.id || entry.folderId, m.email));
-    }
-    const normalizeMemberRef = ref => {
-      if (!ref) return null;
-      if (memberIds.has(ref)) return ref;
-      if (String(ref).includes('@')) return legacyRefMap.get(String(ref).toLowerCase()) || legacyMemberIdFromEmail(rawGroup.id || entry.folderId, ref);
-      return memberIds.has(ref) ? ref : null;
-    };
+    const normalizeMemberRef = ref => (ref && memberIds.has(ref) ? ref : null);
     for (const type of ITEM_TYPES) {
       entry.typeData[type] = (entry.typeData[type] || []).map(item => ({
         ...item,
@@ -488,12 +458,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     const entry = _groups.get(groupId);
     if (!entry) return null;
     if (!entry.group?.members?.length) return null;
-    const eh = await emailHash(user.email);
-    return entry.group.members.find(m => m.emailHash && m.emailHash === eh)
-      // Legacy fallbacks (pre-hashed-ID rows): match old derived IDs or the email hint.
-      || entry.group.members.find(m => m.memberId === `drive-user-${user.email.toLowerCase()}`)
-      || entry.group.members.find(m => m.emailHint && m.emailHint === fallbackDisplayName(user.email))
-      || null;
+    if (!user?.email) return null;
+    // Member IDs are deterministic per email, so the current user is found by
+    // direct ID match — no email hash or hint fallbacks needed.
+    const selfId = await memberIdFromEmail(user.email);
+    return entry.group.members.find(m => m.memberId === selfId) || null;
   }
 
   /** Throw unless the current user is the group's creator. */
@@ -856,7 +825,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       onProgress?.({ step: 'folder', done: 0, total: 0 });
       const subfolder = await driveCreateFolder(tok, `${GROUP_PREFIX}${groupId}`, rootId);
       try {
-        const creatorMemberId = newMemberId();
+        const creatorMemberId = await memberIdFromEmail(user.email);
         const group = {
           id: groupId,
           name,
@@ -868,7 +837,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
               role: 'creator',
               status: 'joined',
               displayName: user.name || fallbackDisplayName(user.email),
-              emailHash: await emailHash(user.email),
               joinedAt: new Date().toISOString(),
             },
           ],
@@ -1063,28 +1031,36 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         await driveShareWithUser(tok, e.revokedMeta.fileId, email, 'reader')
           .catch(err => console.warn('sharing: failed to grant revoked.json reader', err));
       }
-      const memberId = newMemberId();
-      const eh = await emailHash(email);
+      // Member IDs are stable per email: the same person always maps to the same
+      // ID, so a re-invite revives their existing row instead of minting a
+      // duplicate. The raw email is never persisted in group.json.
+      const memberId = await memberIdFromEmail(email);
 
-      // A stale 'left' marker for the same email must not block re-inviting:
-      // drop it so a fresh pending invite is created below.
-      const leftIdx = e.group.members.findIndex(m => m.emailHash === eh && m.status === 'left');
-      if (leftIdx !== -1) e.group.members.splice(leftIdx, 1);
-
-      // Update member list if not already present. Do not persist raw email in group.json.
-      if (!e.group.members.find(m => m.emailHash === eh)) {
+      const existing = e.group.members.find(m => m.memberId === memberId);
+      if (existing && existing.role === 'creator') {
+        // Inviting the creator's own address: nothing to change.
+      } else if (existing) {
+        // Re-invite (e.g. after a 'left' marker or a prior removal): reset to
+        // a fresh pending invite on the same stable ID.
+        existing.role = 'member';
+        existing.status = 'pending';
+        existing.leftAt = null;
+        existing.joinedAt = null;
+        existing.displayName = null;
+        existing.invitedLabel = fallbackDisplayName(email);
+        existing.drivePermissionId = perm.id;
+      } else {
         e.group.members.push({
           memberId,
           role: 'member',
           status: 'pending',
           displayName: null,
           invitedLabel: fallbackDisplayName(email),
-          emailHash: eh,
           joinedAt: null,
           drivePermissionId: perm.id,
         });
-        await saveGroup(groupId);
       }
+      await saveGroup(groupId);
 
       emit('member-invited', { groupId, memberId });
       return { memberId };
@@ -1381,7 +1357,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         return null; // transient failure: try again next poll
       }
       const removed = Array.isArray(data) ? data : [];
-      return removed.some(r => r.id === selfId) ? 'removed' : 'deleted';
+      // Member IDs are stable per email, so a removed-then-reinvited member keeps
+      // the same ID: only a removal recorded after the current join counts.
+      // Missing timestamps fall back to the old ID-match behavior (conservative).
+      const joinedAt = joined?.joinedAt || null;
+      const wasRemoved = removed.some(r =>
+        r.id === selfId && (!joinedAt || !r.removed_at || r.removed_at > joinedAt));
+      return wasRemoved ? 'removed' : 'deleted';
     },
 
     async poll() {
@@ -1557,11 +1539,12 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       await loadGroupWithIds(folderId, groupId, fileIds);
 
       // Pending-invite gate: only a member with a matching pending invite may join.
+      // Member IDs are deterministic per email, so the joiner matches their own row directly.
       const e = _groups.get(groupId);
       let joinedMemberId = null;
       if (e) {
-        const eh = await emailHash(user.email);
-        const member = e.group.members.find(m => m.status === 'pending' && m.emailHash === eh);
+        const selfId = await memberIdFromEmail(user.email);
+        const member = e.group.members.find(m => m.status === 'pending' && m.memberId === selfId);
         if (!member) throw new Error('No pending invite for this account');
         member.status = 'joined';
         member.joinedAt = new Date().toISOString();

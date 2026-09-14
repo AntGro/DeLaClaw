@@ -77,7 +77,7 @@ sequenceDiagram
     App->>Page: "Render current view from in-memory data (welcome / todos / …)"
     App->>PF: "Start 30s poll + tab-focus poll (personal tables)"
 
-    Note over App,Page: "Calendar is NOT synced on page load — trusted already in sync, syncs on table flush only"
+    Note over App,Page: "Calendar is NOT synced on page load<br/>trusted already in sync, syncs on table flush only"
 ```
 
 ### 2 · Sharing
@@ -100,7 +100,7 @@ sequenceDiagram
         App->>JOIN: "Download group.json + item files via saved file IDs (revoked.json fileId recorded)"
     end
 
-    Note over App: "One bad folder never takes down the others — load failures are isolated per folder"
+    Note over App: "One bad folder never takes down the others —<br/>load failures are isolated per folder"
 
     App->>App: "Init in-memory sync intents per item file (createdIds / deletedIds)"
     App->>App: "normalizeEntry → _groups map"
@@ -109,10 +109,10 @@ sequenceDiagram
     App->>JOIN: "Poll every 30s (per-group files)"
     App->>Page: "On sharing-changed → re-render sharing UI"
 
-    Note over App,JOIN: "revoked.json is NOT evaluated at startup — only in the poll, when a group's files become unreachable (404/403): 'removed' → silent auto-purge, 'deleted' → confirmation dialog"
+    Note over App,JOIN: "revoked.json is NOT evaluated at startup<br/>only in the poll, when a group's files become unreachable (404/403):<br/>'removed' → silent auto-purge, 'deleted' → confirmation dialog"
 
     rect rgb(255, 243, 205)
-    Note over App,OWN: "Planned · phase 4: startup sweep permanently deletes group folders whose deletedAt is older than 30 days"
+    Note over App,OWN: "Planned · phase 4: startup sweep permanently deletes<br/>group folders whose deletedAt is older than 30 days"
     end
 ```
 ## Write Path (User Edits an Item)

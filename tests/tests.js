@@ -1597,6 +1597,31 @@ test('CHECK constraints match across Demo adapter and SQLite schema', () => {
 // ===================================================================
 console.log('\n-- Auth & Sharing (D+E Hybrid)\n');
 
+// ===================================================================
+// AUTH: no sign-in popup from background tabs + tolerant silent refresh
+// ===================================================================
+test('drive adapter defers prompted re-auth until the tab is visible', () => {
+  const drive = fs.readFileSync(path.join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf-8');
+  const start = drive.indexOf('function scheduleReauthWhenFree()');
+  const end = drive.indexOf('async function getToken()', start);
+  assert(start !== -1 && end !== -1, 'drive.js: scheduleReauthWhenFree block not found');
+  const fn = drive.slice(start, end);
+  assert(fn.includes('document.hidden'),
+    'drive.js: scheduleReauthWhenFree must check document.hidden before firing the sign-in popup');
+  assert(fn.includes("addEventListener('visibilitychange'") && fn.includes('_reauthVisibilityHandler'),
+    'drive.js: background-tab re-auth must defer via a one-shot visibilitychange handler');
+});
+
+test('drive adapter tolerates transient silent-refresh failures before declaring token dead', () => {
+  const drive = fs.readFileSync(path.join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf-8');
+  const start = drive.indexOf('async function getToken()');
+  const end = drive.indexOf('// ── Run pending migrations ──', start);
+  assert(start !== -1 && end !== -1, 'drive.js: getToken block not found');
+  const fn = drive.slice(start, end);
+  assert(fn.includes('_silentFailStreak') && fn.includes('MAX_SILENT_FAILURES'),
+    'drive.js: getToken must count consecutive silent failures before marking the token dead');
+});
+
 test('local-migrations.js has entries for 1.294 and 1.297', () => {
   const content = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
   assert(content.includes("'1.294':"), 'Missing local migration entry for 1.294');

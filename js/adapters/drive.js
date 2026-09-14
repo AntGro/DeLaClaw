@@ -432,6 +432,13 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   let _tokenDead = false;
   let _reauthPending = false;
+  // Consecutive silent-refresh failures — a single transient hiccup (sleep/wake,
+  // network blip) must not declare the token dead and pop a sign-in dialog.
+  let _silentFailStreak = 0;
+  const MAX_SILENT_FAILURES = 3;
+  // One-shot visibilitychange handler that defers the re-auth popup until the tab
+  // is visible again (armed when a background tab hits the dead-token path).
+  let _reauthVisibilityHandler = null;
 
   function isUserBusy() {
     // Inline editing, modal open, or flashcard/text practice active
@@ -457,6 +464,20 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   function scheduleReauthWhenFree() {
     if (!_tokenDead || _reauthPending) return;
+    if (document.hidden) {
+      // Never open a sign-in popup from a background tab — defer the prompted
+      // re-auth until the tab is visible again instead of startling the user.
+      if (!_reauthVisibilityHandler) {
+        _reauthVisibilityHandler = () => {
+          if (document.hidden) return;
+          document.removeEventListener('visibilitychange', _reauthVisibilityHandler);
+          _reauthVisibilityHandler = null;
+          scheduleReauthWhenFree();
+        };
+        document.addEventListener('visibilitychange', _reauthVisibilityHandler);
+      }
+      return;
+    }
     if (!isUserBusy()) {
       proactiveReauth();
     } else {
@@ -468,8 +489,12 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   async function getToken() {
     try {
       const tok = await getGoogleAccessToken(clientId, false);
-      if (tok) { _tokenDead = false; return tok; }
+      if (tok) { _tokenDead = false; _silentFailStreak = 0; return tok; }
     } catch { /* silent refresh failed */ }
+    _silentFailStreak++;
+    // Only declare the token dead after consecutive silent failures — a single
+    // transient failure must not escalate to a prompted sign-in popup.
+    if (_silentFailStreak < MAX_SILENT_FAILURES) return _cachedToken;
     // Silent refresh failed — token is dead
     if (!_tokenDead) {
       _tokenDead = true;
@@ -1051,6 +1076,10 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     destroy() {
       stopPolling();
       for (const t of Object.keys(saveTimers)) clearTimeout(saveTimers[t]);
+      if (_reauthVisibilityHandler) {
+        document.removeEventListener('visibilitychange', _reauthVisibilityHandler);
+        _reauthVisibilityHandler = null;
+      }
       clearDriveTokenCache(clientId);
     },
 

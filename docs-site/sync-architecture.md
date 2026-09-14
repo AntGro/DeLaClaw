@@ -43,6 +43,9 @@ OAuth2 token issuer + file storage maps 1:1 (e.g. KDrive auth + KDrive folders).
 The IndexedDB offline cache is not part of this flow — it only applies to
 local-server mode, never to the Drive backend. The calendar is never read at
 startup either: it is a write-only projection, synced on table flush.
+The two diagrams below are parallel tracks of the same startup: **1** follows
+the personal-data track, **2** the sharing track. `loadAll()` — including the
+`joined-groups.json` download — runs only in the sharing track, exactly once.
 
 ### 1 · Auth + personal data
 

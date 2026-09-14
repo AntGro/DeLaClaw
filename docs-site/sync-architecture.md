@@ -75,7 +75,7 @@ sequenceDiagram
     App->>PF: "List folder files"
     App->>PF: "Download per-table JSON files in parallel (keep ETag + modifiedTime)"
     PF-->>Page: "Progress: loading tables (per-table progress)"
-    App->>App: "Seed in-memory engine with loaded tables"
+    App->>App: "Create in-memory adapter seeded with loaded data"
     App->>Page: "Hide login — show app shell"
     App->>Page: "Render current view from in-memory data (welcome / todos / …)"
     App->>PF: "Start 30s poll + tab-focus poll (personal tables)"

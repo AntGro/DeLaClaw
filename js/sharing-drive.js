@@ -23,8 +23,8 @@ import {
 //      A creates group → A invites B by email (shares folder) →
 //      A sends B invite code → B pastes code →
 //      Google Picker opens → B selects the shared files →
-//      Picker grants drive.file access → B saves file IDs in
-//      DeLaClaw/joined-groups.json → done.
+//      Picker grants drive.file access → B saves the file IDs in the
+//      joined_groups table → done.
 //
 //   2. AUTO-DISCOVERY (full drive scope — opt-in via Settings)
 //      A creates group → A invites B → B has A in trusted contacts →
@@ -43,7 +43,7 @@ import {
 //       B pastes invite code → Picker → selects files → joined
 //
 //   S2: B leaves a joined group
-//       B removes from joined-groups.json → polling stops
+//       B removes the joined_groups row → polling stops
 //       Drive permissions untouched (B still has user-level access
 //       but DeLaClaw no longer loads it)
 //
@@ -53,7 +53,7 @@ import {
 //
 //   My Drive/
 //   ├── DeLaClaw/                          ← personal data (existing)
-//   │   └── joined-groups.json             ← link-joined group refs
+//   │   └── joined_groups.json             ← link-joined group refs (a personal table)
 //   └── DeLaClaw-Shared/                   ← shared root (one per user)
 //       └── DeLaClaw-Shared-{groupId}/     ← per-group subfolder
 //           ├── group.json                 ← metadata + member list
@@ -310,8 +310,12 @@ async function migrateItemsJson(tok, folderId, entry) {
  *   reaches past state.sharing. Adapters supply their own
  *   implementations (or omit the ones that don't apply).
  * @param {(folderId: string) => Promise<Array|null>} [capabilities.openJoinPicker]
+ * @param {Object} [db] — db proxy (js/db.js). Joined-group pointers live in the
+ *   joined_groups personal table; the adapter reads/writes them through db so
+ *   persistence, ETag handling and cross-device polling come from the Drive
+ *   adapter instead of bespoke file code.
  */
-export function createDriveSharing(getToken, personalFolderId, capabilities = {}) {
+export function createDriveSharing(getToken, personalFolderId, capabilities = {}, db = null) {
   let _user   = null;            // { email, name, photo }
   let _rootId  = null;           // DeLaClaw-Shared folder id (own)
   const _groups = new Map();     // groupId → GroupEntry
@@ -333,9 +337,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   // }
 
   // ── Joined groups (code-join, works with drive.file) ──
+  // Pointers live in the joined_groups personal table (id = groupId), seeded
+  // into memory by the Drive adapter at connect. _joinedGroups is a read
+  // cache, refreshed from the table after every mutation and at each poll.
 
-  let _joinedGroups = [];       // [{ folderId, groupId, fileIds: { group, todos, habits, lists }, joinedAt }]
-  let _joinedMeta = {};         // { fileId, etag }
+  let _joinedGroups = [];       // [{ id (=groupId), folderId, groupId, fileIds: { group, todos, habits, lists, revoked }, memberId, joinedAt, updated_at }]
 
   // ── Internals ──
 
@@ -553,42 +559,15 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     };
   }
 
-  /** Load joined groups from DeLaClaw/joined-groups.json. */
-  async function loadJoinedGroups() {
-    const tok = await token();
-    const file = await driveFindFile(tok, personalFolderId, 'joined-groups.json');
-    if (file) {
-      try {
-        const { data, etag } = await driveDownload(tok, file.id);
-        _joinedGroups = Array.isArray(data) ? data : [];
-        _joinedMeta = { fileId: file.id, etag };
-      } catch (err) {
-        console.warn('sharing: failed to load joined groups:', err);
-      }
-    }
-  }
-
-  /** Save joined groups to Drive. */
-  async function saveJoinedGroups() {
-    const tok = await token();
+  /** Re-read joined-group pointers from the joined_groups table. */
+  async function refreshJoinedGroups() {
+    if (!db) return; // no db wired (tests): keep the in-memory copy
     try {
-      const r = await driveUpload(tok, personalFolderId, _joinedMeta.fileId,
-        'joined-groups.json', _joinedGroups, _joinedMeta.etag);
-      _joinedMeta = { fileId: r.id, etag: r.etag };
+      const { data } = await db.from('joined_groups').select('*');
+      _joinedGroups = Array.isArray(data) ? data : [];
     } catch (err) {
-      if (err.code === 412 && _joinedMeta.fileId) {
-        const { data, etag } = await driveDownload(tok, _joinedMeta.fileId);
-        const remote = Array.isArray(data) ? data : [];
-        // Merge: union by folderId
-        const map = new Map(remote.map(j => [j.folderId, j]));
-        for (const j of _joinedGroups) map.set(j.folderId, j);
-        _joinedGroups = Array.from(map.values());
-        const r2 = await driveUpload(tok, personalFolderId, _joinedMeta.fileId,
-          'joined-groups.json', _joinedGroups);
-        _joinedMeta = { fileId: r2.id, etag: r2.etag };
-      } else {
-        throw err;
-      }
+      console.warn('sharing: failed to load joined groups:', err);
+      _joinedGroups = [];
     }
   }
 
@@ -938,8 +917,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         p.catch(err => { console.warn(`sharing: failed to load ${label}:`, err); return null; })
       );
 
-      // Load joined groups metadata
-      await loadJoinedGroups();
+      // Load joined groups metadata (joined_groups personal table, seeded
+      // into memory by the Drive adapter at connect)
+      await refreshJoinedGroups();
 
       // Own groups: list subfolders under DeLaClaw-Shared/
       const rootFolder = await driveFindFolder(tok, SHARED_ROOT_NAME, null);
@@ -1392,6 +1372,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       let changed = false;
       const staleGroupIds = [];  // groups to remove after iteration
 
+      // Re-read joined-group pointers: the Drive adapter's table poll may
+      // have picked up a join/unjoin from another device since the last cycle.
+      await refreshJoinedGroups();
+
       for (const [groupId, e] of _groups) {
         // Poll per-type files
         for (const type of ITEM_TYPES) {
@@ -1477,12 +1461,20 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           }
           try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName, verdict } })); } catch {}
         }
-        // Purge from joined-groups.json
+        // Purge the joined_groups pointers
         const gone = new Set(staleGroupIds.map(s => s.groupId));
-        const before = _joinedGroups.length;
-        _joinedGroups = _joinedGroups.filter(j => !gone.has(j.groupId));
-        if (_joinedGroups.length !== before) saveJoinedGroups().catch(() => {});
-        changed = true;
+        if (gone.size) {
+          if (db) {
+            for (const gid of gone) {
+              const { error } = await db.from('joined_groups').delete().eq('id', gid);
+              if (error) console.warn('sharing: purge pointer delete failed:', error.message);
+            }
+            await refreshJoinedGroups();
+          } else {
+            _joinedGroups = _joinedGroups.filter(j => !gone.has(j.groupId));
+          }
+          changed = true;
+        }
       }
 
       return changed;
@@ -1575,13 +1567,22 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         await saveGroup(groupId);
       }
 
-      // Persist in joined-groups.json (memberId lets the client match its own
-      // revoked.json entry if this account is later removed from the group).
-      const entry = { folderId, groupId, fileIds, memberId: joinedMemberId, joinedAt: new Date().toISOString() };
-      const existing = _joinedGroups.findIndex(j => j.folderId === folderId || j.groupId === groupId);
-      if (existing >= 0) _joinedGroups[existing] = entry;
-      else _joinedGroups.push(entry);
-      await saveJoinedGroups();
+      // Persist the pointer in the joined_groups table (memberId lets the
+      // client match its own revoked.json entry if this account is later
+      // removed from the group). id = groupId: the Drive adapter's 412
+      // merge is keyed on id with newer updated_at winning, which preserves
+      // the old union-by-folderId conflict behavior across devices.
+      const now = new Date().toISOString();
+      const entry = { id: groupId, folderId, groupId, fileIds, memberId: joinedMemberId, joinedAt: now, updated_at: now };
+      if (db) {
+        const { error } = await db.from('joined_groups').upsert(entry, { onConflict: 'id' });
+        if (error) throw new Error(`join: failed to persist joined group: ${error.message}`);
+        await refreshJoinedGroups();
+      } else {
+        const existing = _joinedGroups.findIndex(j => j.folderId === folderId || j.groupId === groupId);
+        if (existing >= 0) _joinedGroups[existing] = entry;
+        else _joinedGroups.push(entry);
+      }
 
       const group = _groups.get(groupId)?.group;
       emit('group-joined', { groupId, group });
@@ -1589,7 +1590,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return group;
     },
 
-    /** Leave a joined group (removes from joined-groups.json + group.json). */
+    /** Leave a joined group (removes the joined_groups row + group.json). */
     // reconnectGroup is Supabase-only (remote URL migration); no-op for Drive
     async reconnectGroup() { return null; },
 
@@ -1609,8 +1610,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           }
         } catch (err) { console.warn('sharing: unjoin group.json update failed (non-fatal):', err); }
       }
-      _joinedGroups = _joinedGroups.filter(j => j.groupId !== groupId);
-      await saveJoinedGroups();
+      if (db) {
+        const { error } = await db.from('joined_groups').delete().eq('id', groupId);
+        if (error) console.warn('sharing: unjoin pointer delete failed:', error.message);
+        await refreshJoinedGroups();
+      } else {
+        _joinedGroups = _joinedGroups.filter(j => j.groupId !== groupId);
+      }
       _groups.delete(groupId);
       emit('group-left', { groupId });
     },
@@ -1673,7 +1679,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       this.stopPolling();
       _groups.clear();
       _joinedGroups = [];
-      _joinedMeta = {};
       _user = null;
       _rootId = null;
       _listeners = [];

@@ -1129,6 +1129,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
         capabilities: {
           openJoinPicker: (folderId) => state.driveAdapter.openSharedFolderPicker(folderId),
         },
+        db: state.db,
       });
       loadInitialSharing('sharing');
       state.sharing.startPolling();

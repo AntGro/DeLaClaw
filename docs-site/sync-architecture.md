@@ -44,8 +44,9 @@ The IndexedDB offline cache is not part of this flow — it only applies to
 local-server mode, never to the Drive backend. The calendar is never read at
 startup either: it is a write-only projection, synced on table flush.
 The two diagrams below are parallel tracks of the same startup: **1** follows
-the personal-data track, **2** the sharing track. `loadAll()` — including the
-`joined-groups.json` download — runs only in the sharing track, exactly once.
+the personal-data track (which loads the `joined_groups` table alongside the
+other personal tables), **2** the sharing track. `loadAll()` reads the
+already-loaded pointers and runs only in the sharing track, exactly once.
 
 ### 1 · Auth + personal data
 
@@ -62,19 +63,61 @@ sequenceDiagram
     App->>LS: "Check sessionStorage for a cached access token"
 
     alt Token cached and still valid (~1h)
+        rect rgb(232, 245, 233)
         LS-->>App: "Reuse cached token — no network auth"
+        end
     else No token or expired
         App->>Page: "Progress: signing in…"
         App->>Auth: "OAuth token request (consent popup if needed)"
-        Auth-->>App: "Access token (~1h lifetime)"
-        App->>LS: "Cache token in sessionStorage"
+        alt Token granted
+            rect rgb(232, 245, 233)
+            Auth-->>App: "Access token (~1h lifetime)"
+            App->>LS: "Cache token in sessionStorage"
+            end
+        else Sign-in refused or blocked
+            rect rgb(253, 237, 236)
+            Auth-->>App: "Error (popup closed, access denied,<br/>Drive scope denied, pop-up or script blocked)"
+            App->>Page: "Login screen stays — specific error message<br/>(sign-in cancelled, Drive access needed, pop-up blocked…)<br/>Flow ends here — retry by clicking connect again"
+            end
+        end
     end
 
     App->>Page: "Progress: connecting…"
     App->>PF: "Find-or-create DeLaClaw/ (DeLaClawDev/ on dev)"
+    rect rgb(253, 237, 236)
+    opt Creation or listing fails
+        PF-->>App: "Error"
+        App->>Page: "Login screen — generic connection error<br/>Retry re-runs find-or-create: a folder created by a timed-out request<br/>is found and reused, so no duplicate folder<br/>Flow ends here — back to the login screen"
+    end
+    end
     App->>PF: "List folder files"
-    App->>PF: "Download per-table JSON files in parallel (keep ETag + modifiedTime)"
-    PF-->>Page: "Progress: loading tables (per-table progress)"
+
+    alt Existing install (table files found)
+        App->>PF: "Download per-table JSON files in parallel (keep ETag + modifiedTime)"
+        rect rgb(253, 237, 236)
+        opt A download fails
+            PF-->>App: "Error"
+            App->>Page: "Login screen — generic connection error<br/>All-or-nothing: one failed table aborts the whole load<br/>(a missing file is not a failure — that table just starts empty)<br/>Flow ends here — back to the login screen"
+        end
+        end
+        PF-->>Page: "Progress: loading tables (per-table progress)"
+        App->>App: "Run pending migrations (full backup taken first)"
+        rect rgb(253, 237, 236)
+        opt A migration fails
+            PF-->>App: "Error"
+            App->>Page: "Login screen — generic connection error<br/>Backup was already taken before migrations started<br/>Retry re-runs only the migrations not yet applied<br/>Flow ends here — back to the login screen"
+        end
+        end
+    else Fresh install (no table files)
+        App->>PF: "Create one JSON file per table in parallel + seed default categories"
+        rect rgb(253, 237, 236)
+        opt A file creation fails
+            PF-->>App: "Error"
+            App->>Page: "Login screen — generic connection error<br/>Retry loads the files that do exist, missing tables start empty<br/>and are created on first write<br/>Flow ends here — back to the login screen"
+        end
+        end
+    end
+
     App->>App: "Create in-memory adapter seeded with loaded data"
     App->>Page: "Hide login — show app shell"
     App->>Page: "Render current view from in-memory data (welcome / todos / …)"
@@ -94,7 +137,7 @@ sequenceDiagram
     participant JOIN as "Joined group folders"
 
     App->>Page: "Sharing nav appears immediately with loading state (before load finishes)"
-    App->>PF: "Download joined-groups.json → join pointers (folderId + fileIds)"
+    App->>App: "Read joined_groups pointers (already loaded with personal tables)"
     App->>OWN: "Find DeLaClaw-Shared/ root, list dlc-group-* subfolders"
 
     par Per owned folder
@@ -108,8 +151,8 @@ sequenceDiagram
     App->>App: "Init in-memory sync intents per item file (createdIds / deletedIds)"
     App->>App: "normalizeEntry → _groups map"
     App->>Page: "Render sharing pane (fills in if already open)"
-    App->>OWN: "Poll every 30s (per-group files)"
-    App->>JOIN: "Poll every 30s (per-group files)"
+    App->>OWN: "Poll every 15s (per-group files)"
+    App->>JOIN: "Poll every 15s (per-group files)"
     App->>Page: "On sharing-changed → re-render sharing UI"
 
     Note over App,JOIN: "revoked.json is NOT evaluated at startup<br/>only in the poll, when a group's files become unreachable (404/403):<br/>'removed' → silent auto-purge, 'deleted' → confirmation dialog"

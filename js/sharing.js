@@ -76,6 +76,7 @@ export async function createSharing(backendType, config = {}) {
         config.getToken,
         config.personalFolderId,
         config.capabilities,
+        config.db,
       );
       break;
     }

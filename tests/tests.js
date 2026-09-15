@@ -1157,6 +1157,38 @@ test('sharing email normalization is Gmail-scoped (dots significant elsewhere)',
     'memberIdFromEmail must hash the normalized email, not the raw input');
 });
 
+test('joined_groups is a Drive personal table, not a bespoke sharing file', () => {
+  // Regression: joined_groups used to be a standalone joined-groups.json file
+  // managed by bespoke download/upload code in sharing-drive.js, which meant
+  // (a) it was never in the per-table startup download, (b) Drive backups via
+  // db.from('joined_groups') silently backed up an empty table, and (c) the
+  // sharing adapter needed Drive-specific file IO for it. It is now a normal
+  // DRIVE_TABLES entry; the sharing adapter reads/writes it through db.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  const tablesMatch = driveAdapter.match(/const DRIVE_TABLES = \[([\s\S]*?)\];/);
+  assert(tablesMatch, 'drive.js must define DRIVE_TABLES');
+  assert(tablesMatch[1].includes("'joined_groups'"),
+    'DRIVE_TABLES must include joined_groups so it loads with the other personal tables');
+
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  assert(!drive.includes('loadJoinedGroups') && !drive.includes('saveJoinedGroups') && !drive.includes('_joinedMeta'),
+    'sharing-drive.js must not keep bespoke joined-groups file IO (loadJoinedGroups/saveJoinedGroups/_joinedMeta)');
+  assert(drive.includes("db.from('joined_groups')"),
+    'sharing-drive.js must read/write joined-group pointers through db.from(\'joined_groups\')');
+  assert(drive.includes(".upsert(entry, { onConflict: 'id' })"),
+    'join must upsert the pointer keyed on id (= groupId) so the Drive 412 merge stays a union');
+  assert(drive.includes('createDriveSharing(getToken, personalFolderId, capabilities = {}, db = null)'),
+    'createDriveSharing must accept the db proxy as a 4th parameter');
+
+  const factory = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+  assert(factory.includes('config.db,'),
+    'sharing.js factory must pass config.db through to createDriveSharing');
+  const main = jsFiles['main.js'];
+  const sharingCfg = main.slice(main.indexOf("createSharing('googledrive'"));
+  assert(sharingCfg.includes('db: state.db,'),
+    'main.js must wire state.db into the googledrive sharing config');
+});
+
 test('sharing i18n keys used in code exist in every locale', () => {
   // Regression: t('sharing.name_updated') showed the raw key in English because
   // the string existed in fr/es but was missing from en. Every sharing.* key

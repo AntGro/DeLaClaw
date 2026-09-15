@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-14T23:43:58.922Z from 38 modules (v2.0.59). Total LOC 28847. Do not hand-edit.
+> Generated 2026-09-15T23:59:13.143Z from 38 modules (v2.0.63). Total LOC 28854. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,9 +27,9 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 3644 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
+| main | 3645 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
 | i18n | 2210 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
-| sharing-drive | 1688 | - | drive-folders,sharing-envelope,sharing-file-reconcile,utils | main.js,sharing.js | - |
+| sharing-drive | 1693 | joined_groups | drive-folders,sharing-envelope,sharing-file-reconcile,utils | main.js,sharing.js | - |
 | sharing-ui | 1288 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:37,guard+pendingSet,window:8 |
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
 | drive | 1134 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
@@ -49,7 +49,7 @@
 | sharing-file-reconcile | 133 | - |  | sharing-drive.js | - |
 | sharing-interface | 132 | - |  | sharing.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
-| sharing | 100 | - | sharing-drive,sharing-interface | - | - |
+| sharing | 101 | - | sharing-drive,sharing-interface | - | - |
 | sharing-envelope | 73 | - |  | sharing-drive.js,sharing-ui.js | - |
 | state | 52 | - | db | birthdays.js,calendar-sync.js,flashcards.js,habits.js | window:1 |
 | drive-folders | 43 | - |  | calendar-sync.js,drive.js,main.js,sharing-drive.js | - |
@@ -68,7 +68,7 @@
 | flashcards | flashcards, utils |
 | habit_completions | habits, sharing-ui |
 | habits | calendar-sync, habits, sharing-ui |
-| joined_groups | sharing-ui |
+| joined_groups | sharing-drive, sharing-ui |
 | list_items | lists, sharing-ui |
 | lists | lists |
 | projects | db, main, projects |

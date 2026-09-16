@@ -110,6 +110,11 @@ A[Function: process()]
 A["Function: process()"]
 ```
 
+**Exception — `;` in sequence diagrams:** Mermaid v10's sequence-diagram grammar
+rejects `;` in message and note text **even inside double quotes** (verified
+against Mermaid 10.9.8: `Note over A,B: "hello; world"` is a parse error).
+In `sequenceDiagram` blocks, never use `;` — rewrite with `,`, `—`, or `.`.
+
 Alternative: HTML entities (`&#58;` for `:`, `&#40;` / `&#41;` for parens, `&#91;` / `&#93;` for brackets).
 
 ### 3. Subgraph syntax

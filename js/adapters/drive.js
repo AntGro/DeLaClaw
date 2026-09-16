@@ -23,6 +23,7 @@
 import { createDemoAdapter } from './demo.js';
 import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
 import { compareVersions } from '../../migrations/version-compare.js';
+import { parseBackupVersion, newestBackupVersion, decideBackupAction } from './drive-backup-policy.js';
 import { t } from '../i18n.js';
 import { driveFolderNames, currentHostname } from '../drive-folders.js';
 
@@ -45,7 +46,7 @@ const DRIVE_TABLES = [
   'birthdays', 'vestiaire', 'lists', 'list_items',
   'settings', 'prompts', 'daily_visits',
   'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
-  'gcal_sync', 'agent_grants',
+  'gcal_sync', 'agent_grants', 'joined_groups',
 ];
 
 // ── Google Identity Services helpers ────────────────────────────
@@ -506,22 +507,25 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   // ── Run pending migrations ──
 
   if (isFreshInstall) {
-    // Fresh install: create all table files on Drive with progress, set schema to latest
+    // Fresh install: create all table files on Drive with progress, set schema to latest.
+    // settings.json is the completion marker: it is written last, only after every other
+    // table file was created and the category tables were seeded. A partial failure therefore
+    // never leaves a "setup complete" stamp behind — the retry takes the normal load path
+    // with no schema_version, runs the pending migrations, and the category migration
+    // re-seeds the protected rows.
     const latestVersion = Object.keys(DRIVE_MIGRATIONS).sort(compareVersions).pop() || '0';
-    const total = DRIVE_TABLES.length;
+    const tablesToCreate = DRIVE_TABLES.filter(t => t !== 'settings');
+    const total = tablesToCreate.length + 1; // + settings.json, written last
     emit('loading', t('menu.drive_creating_tables'), 0, total);
     const tok = await getToken();
     if (!tok) throw new Error('Drive setup failed: could not obtain auth token');
     let created = 0;
-    await Promise.all(DRIVE_TABLES.map(async (table) => {
+    await Promise.all(tablesToCreate.map(async (table) => {
       const result = await uploadFile(tok, folderId, null, `${table}.json`, []);
       fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
       created++;
       emit('loading', t('menu.drive_creating_progress', created, total, table), created, total);
     }));
-    // Set schema_version to latest — no migrations needed
-    if (!inner._store.settings) inner._store.settings = [];
-    inner._store.settings.push({ key: 'schema_version', value: latestVersion });
 
     // Seed protected rows for category tables (fresh install has empty arrays)
     const now = new Date().toISOString();
@@ -538,21 +542,22 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         { id: sharedId, name: '__shared__', shortname: null, color: null, sort_order: 9999, is_protected: 1, owner_id: null, created_at: now, updated_at: now },
       );
     }
-    // Flush seeded category tables + settings to Drive (parallel)
+    // Flush seeded category tables to Drive (parallel) — still before settings.json exists
     const seedTok = await getToken();
     if (!seedTok) throw new Error('Drive setup failed: could not obtain auth token for seed flush');
-    const seedFlushes = catSeed.map(async ([table]) => {
+    await Promise.all(catSeed.map(async ([table]) => {
       const meta = fileMeta[table] || {};
       const result = await uploadFile(seedTok, folderId, meta.fileId, `${table}.json`, inner._store[table]);
       fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
-    });
-    // Settings flush
-    const settingsMeta = fileMeta.settings || {};
-    seedFlushes.push((async () => {
-      const result = await uploadFile(seedTok, folderId, settingsMeta.fileId, 'settings.json', inner._store.settings);
-      fileMeta.settings = { fileId: result.id || settingsMeta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
-    })());
-    await Promise.all(seedFlushes);
+    }));
+    // Set schema_version to latest — no migrations needed — and write settings.json last,
+    // in a single upload, so it only ever exists once setup fully succeeded.
+    if (!inner._store.settings) inner._store.settings = [];
+    inner._store.settings.push({ key: 'schema_version', value: latestVersion });
+    const settingsResult = await uploadFile(seedTok, folderId, null, 'settings.json', inner._store.settings);
+    fileMeta.settings = { fileId: settingsResult.id, etag: settingsResult.etag, modifiedTime: new Date().toISOString() };
+    created++;
+    emit('loading', t('menu.drive_creating_progress', created, total, 'settings'), created, total);
   } else {
     // ── Run pending migrations (existing installs only) ──
 
@@ -564,11 +569,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       const svEntry = settings.find(s => s.key === 'schema_version');
       const currentVersion = svEntry ? String(svEntry.value) : '0';
 
-      const toRun = pendingMigrations.filter(v => compareVersions(v, currentVersion) > 0);
+      let toRun = pendingMigrations.filter(v => compareVersions(v, currentVersion) > 0);
 
       if (toRun.length > 0) {
-        emit('migrating', t('menu.drive_backing_up'), 0, toRun.length);
-
         // Context object for migrations that need Drive API access
         const migrationCtx = {
           token, folderId, fileMeta, filesByName,
@@ -576,29 +579,93 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
           uploadFile, downloadFile, deleteFile, listFolderFiles,
         };
 
-        // Save a full backup before any migration runs
-        const backupData = {};
-        for (const table of DRIVE_TABLES) {
-          backupData[table] = JSON.parse(JSON.stringify(inner._store[table] || []));
-        }
-        backupData._meta = {
-          backup_of: currentVersion,
-          created_at: new Date().toISOString(),
-          reason: `pre-migration (${toRun.length} pending: ${toRun.join(', ')})`,
-        };
+        // ── Pre-migration backup policy (see js/adapters/drive-backup-policy.js) ──
+        // A lingering backup-v{B}.json means "a migration batch from B failed":
+        // restore the tables from it and re-run from B. Otherwise snapshot the
+        // current tables. The backup is deleted after the batch succeeds, so it
+        // never accumulates.
         const tok = await getToken();
-        if (tok) {
-          await uploadFile(tok, folderId, null, `backup-v${currentVersion}.json`, backupData);
+        if (!tok) throw new Error('Drive migration failed: could not obtain auth token');
+        // settings.json is written once, at the end of the batch, so the
+        // schema_version on Drive moves exactly once per batch: a backup whose
+        // version equals the current version always means "its batch did not
+        // complete". No batch-target tracking needed.
+        const backupVersion = newestBackupVersion(filesByName.keys());
+        const action = decideBackupAction(backupVersion, currentVersion);
+        let backupName = null;
+        let backupId = null;
+        if (action === 'restore') {
+          // A previous batch from this backup's version did not complete:
+          // overwrite every table file in place from the backup — never
+          // delete-then-restore, or a failed restore would leave zero table
+          // files and the next connect would take the fresh-install branch.
+          backupName = `backup-v${backupVersion}.json`;
+          const found = filesByName.get(backupName);
+          backupId = found.id;
+          emit('migrating', t('menu.drive_restoring_backup'), 0, toRun.length);
+          // A successful download is exactly the bytes that were written: the
+          // backup was validated before upload and Drive revisions are atomic.
+          const backupData = (await downloadFile(tok, found.id)).data;
+          for (const table of DRIVE_TABLES) {
+            inner._store[table] = Array.isArray(backupData[table]) ? backupData[table] : [];
+          }
+          const restoreTok = await getToken();
+          if (!restoreTok) throw new Error('Drive migration failed: could not obtain auth token for restore');
+          await Promise.all(DRIVE_TABLES.map(async (table) => {
+            const meta = fileMeta[table] || {};
+            const result = await uploadFile(restoreTok, folderId, meta.fileId || null, `${table}.json`, inner._store[table]);
+            fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+          }));
+          // Drop any other (older) backups; the restored one is deleted on success.
+          for (const [name, f] of filesByName) {
+            if (name !== backupName && parseBackupVersion(name) !== null) {
+              try { await deleteFile(tok, f.id); } catch (e) { console.warn('[DeLaClaw] could not delete stale backup', name, e); }
+              filesByName.delete(name);
+            }
+          }
+          // Re-run the batch from the backup's version on clean state.
+          toRun = pendingMigrations.filter(v => compareVersions(v, backupVersion) > 0);
+        } else {
+          // 'snapshot' (no backup) or 'stale' (its batch completed): drop any
+          // backups, then snapshot the current tables.
+          for (const [name, f] of filesByName) {
+            if (parseBackupVersion(name) !== null) {
+              try { await deleteFile(tok, f.id); } catch (e) { console.warn('[DeLaClaw] could not delete stale backup', name, e); }
+              filesByName.delete(name);
+            }
+          }
+          // Build-time validation: JSON.stringify either succeeds completely
+          // or throws before any network call, and the upload below either
+          // lands as one atomic revision or fails — Drive never exposes a
+          // half-written file.
+          const backupData = {};
+          for (const table of DRIVE_TABLES) {
+            const rows = inner._store[table] || [];
+            if (!Array.isArray(rows)) throw new Error(`Drive backup failed: table ${table} is not an array`);
+            backupData[table] = JSON.parse(JSON.stringify(rows));
+          }
+          backupName = `backup-v${currentVersion}.json`;
+          backupData._meta = {
+            backup_of: currentVersion,
+            created_at: new Date().toISOString(),
+            reason: `pre-migration (${toRun.length} pending: ${toRun.join(', ')})`,
+          };
+          emit('migrating', t('menu.drive_backing_up'), 0, toRun.length);
+          const created = await uploadFile(tok, folderId, null, backupName, backupData);
+          backupId = created.id;
+          filesByName.set(backupName, { id: created.id, name: backupName });
         }
 
-        // Run each migration, bump schema_version after each success
+        // Run each migration, then write settings.json once at the end.
+        // Each migration flushes only its changed tables (settings.json is NOT
+        // written per migration): the schema_version on Drive moves exactly
+        // once per batch, from the pre-batch version to the final one. So a
+        // backup whose version equals the current schema_version always means
+        // "its batch did not complete" — no batch-target tracking needed.
         // Progress model: bar reaches 100% only after the last upload completes.
-        // Total units = sum of (1 migration run + N dirty flushes) across all migrations.
-        // We can't know dirty counts ahead of time, so we use a two-level scheme:
-        // outer progress = migration index (shown in message), inner = per-table flush.
         let completedUnits = 0;
-        // Pessimistic total: 1 (run) + 1 (settings flush) per migration; adjusted per step
-        let totalUnits = toRun.length * 2;
+        // Pessimistic total: 1 (run) + 1 (flush) per migration + 1 (settings write); adjusted per step
+        let totalUnits = toRun.length * 2 + 1;
 
         for (let i = 0; i < toRun.length; i++) {
           const version = toRun[i];
@@ -613,7 +680,8 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
           await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
           completedUnits++; // migration function done
 
-          // Update schema_version in memory
+          // Update schema_version in memory (the Drive write is deferred to
+          // the end of the batch)
           const entry = (inner._store.settings || []).find(s => s.key === 'schema_version');
           if (entry) {
             entry.value = version;
@@ -622,8 +690,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             inner._store.settings.push({ key: 'schema_version', value: version });
           }
 
-          // Flush only tables that actually changed + settings (for version bump)
-          const dirtyTables = new Set(['settings']);
+          // Flush only tables that actually changed (settings.json excluded:
+          // written once, after the loop).
+          const dirtyTables = new Set();
           for (const table of DRIVE_TABLES) {
             if (table === 'settings') continue;
             if (JSON.stringify(inner._store[table] || []) !== snapshots[table]) {
@@ -653,6 +722,37 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
               emit('migrating', t('menu.drive_migrating_sync', version, flushed, dirtyTables.size), completedUnits, totalUnits);
             }
           }
+        }
+
+        // Write settings.json once, at the end of the batch, with the final
+        // schema_version. This is the batch's completion marker: it only lands
+        // on Drive after every migration's tables were uploaded. A failure
+        // before this point leaves the pre-batch version behind, and the retry
+        // restores the pre-migration backup and re-runs the batch from clean
+        // state. Always written, even if no migration touched the settings
+        // table (a pure version-bump migration changes nothing else).
+        {
+          const settingsTok = await getToken();
+          if (!settingsTok) throw new Error('Drive migration failed: could not obtain auth token for settings write');
+          const settingsMeta = fileMeta.settings || {};
+          const settingsResult = await uploadFile(settingsTok, folderId, settingsMeta.fileId, 'settings.json', inner._store.settings || []);
+          fileMeta.settings = { fileId: settingsResult.id || settingsMeta.fileId, etag: settingsResult.etag, modifiedTime: new Date().toISOString() };
+          completedUnits++;
+          emit('migrating', t('menu.drive_migrating', toRun[toRun.length - 1]), completedUnits, totalUnits);
+        }
+
+        // Batch complete: delete the pre-migration backup. A lingering backup
+        // always means "a migration failed and will be retried from clean
+        // state" — never a historical archive. (If this delete crashes, the
+        // next connect sees a stale backup — version older than settings —
+        // and removes it before snapshotting fresh.)
+        if (backupId) {
+          try {
+            await deleteFile(tok, backupId);
+          } catch (e) {
+            console.warn('[DeLaClaw] could not delete pre-migration backup', backupName, e);
+          }
+          filesByName.delete(backupName);
         }
       }
     }

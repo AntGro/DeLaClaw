@@ -34,54 +34,174 @@ flowchart TD
 
 ## Startup / Connect Flow (target design — all phases)
 
-What is fetched when the user connects, in order. Steps marked **planned** belong to
-phases 2–5 and are not implemented yet; everything else is shipped on `dev`.
+What is fetched when the user connects, in order, drawn as columns so you can see
+*where* each step reads from — including the **Page** column, which shows what is
+rendered and when. Steps marked **planned** belong to phases 2–5 and are
+not implemented yet; everything else is shipped on `dev`.
+Names below are the Google implementation, but the shape is backend-agnostic: any
+OAuth2 token issuer + file storage maps 1:1 (e.g. KDrive auth + KDrive folders).
 The IndexedDB offline cache is not part of this flow — it only applies to
-local-server mode, never to the Drive backend.
+local-server mode, never to the Drive backend. The calendar is never read at
+startup either: it is a write-only projection, synced on table flush.
+The two diagrams below are parallel tracks of the same startup: **1** follows
+the personal-data track (which loads the `joined_groups` table alongside the
+other personal tables), **2** the sharing track. `loadAll()` reads the
+already-loaded pointers and runs only in the sharing track, exactly once.
+
+### 1 · Auth + personal data
 
 ```mermaid
-flowchart TD
-    H1["1 · Authenticate"]
-    OAUTH["OAuth sign-in<br/>(Drive scopes)"]
-    H2["2 · Personal data → in-memory"]
-    LISTP["List DeLaClaw/ folder<br/>(DeLaClawDev/ on dev)"]
-    DLP["Download per-table JSON files<br/>in parallel"]
-    SEED["Seed in-memory engine"]
-    SWEEP["Startup sweep: permanently delete<br/>group folders with deletedAt older<br/>than 30 days<br/>planned · phase 4"]
-    H3["3 · Sharing → _groups map"]
-    JG["Fetch joined-groups.json from Drive<br/>(personal folder) → join pointers"]
-    LISTG["List DeLaClaw-Shared/ folders<br/>(DeLaClawDev-Shared/ on dev)"]
-    OWNG["loadGroup() per own folder<br/>parallel · failures isolated"]
-    JOING["loadGroupWithIds() per joined group<br/>parallel · failures isolated"]
-    FILES["Per group: download group.json<br/>+ item files + revoked.json<br/>in parallel"]
-    INTENT["Init in-memory sync intents<br/>createdIds / deletedIds per item file<br/>shipped"]
-    REVOKE{"revoked.json check<br/>shipped · phase 3"}
-    REMOVED["'removed' → auto-purge group<br/>+ delete item pointers (no dialog)<br/>shipped"]
-    DELETED["Deletion confirmation dialog<br/>re-prompts until resolved<br/>planned · phase 4"]
-    PURGE["Drop group: remove from memory<br/>+ joined-groups.json entry,<br/>stop polling its files"]
-    NORM["normalizeEntry → _groups map"]
-    H4["4 · Go live"]
-    RENDER["Render UI"]
-    TOAST["Join toast when a pending invite<br/>flips to joined<br/>planned · phase 5"]
-    POLL["Poll every 30s + tab focus"]
+sequenceDiagram
+    participant App as "App (in-memory)"
+    participant Page as "Page (rendered)"
+    participant LS as "Local storage (browser)"
+    participant Auth as "Auth server (token issuer)"
+    participant PF as "Personal folder (DeLaClaw/)"
 
-    H1 --> OAUTH --> H2 --> LISTP --> DLP --> SEED --> SWEEP --> H3
-    H3 --> LISTG --> OWNG --> FILES
-    H3 --> JG --> JOING --> FILES
-    FILES --> INTENT --> REVOKE
-    REVOKE -->|"own hashId listed"| REMOVED --> NORM
-    REVOKE -->|"all hashIds + deletedAt"| DELETED
-    DELETED -->|"keep"| NORM
-    DELETED -->|"accept deletion"| PURGE
-    REVOKE -->|"clean"| NORM
-    NORM --> H4 --> RENDER --> TOAST --> POLL
+    App->>Page: "Show login screen + progress bar"
+    App->>LS: "Read active backend mode, last view, scoped prefs"
+    App->>LS: "Check sessionStorage for a cached access token"
 
-    classDef section fill:#1f2937,stroke:#1f2937,color:#fff
-    classDef planned fill:#fff3cd,stroke:#b78a00,stroke-width:2px
-    class H1,H2,H3,H4 section
-    class SWEEP,REVOKE,REMOVED,DELETED,TOAST planned
+    alt Token cached and still valid (~1h)
+        rect rgb(232, 245, 233)
+        LS-->>App: "Reuse cached token — no network auth"
+        end
+    else No token or expired
+        App->>Page: "Progress: signing in…"
+        App->>Auth: "OAuth token request (consent popup if needed)"
+        alt Token granted
+            rect rgb(232, 245, 233)
+            Auth-->>App: "Access token (~1h lifetime)"
+            App->>LS: "Cache token in sessionStorage"
+            end
+        else Sign-in refused or blocked
+            rect rgb(253, 237, 236)
+            Auth-->>App: "Error (popup closed, access denied,<br/>Drive scope denied, pop-up or script blocked)"
+            App->>Page: "Login screen stays — specific error message<br/>(sign-in cancelled, Drive access needed, pop-up blocked…)<br/>Flow ends here — retry by clicking connect again"
+            end
+        end
+    end
+
+    App->>Page: "Progress: connecting…"
+    App->>PF: "Find-or-create DeLaClaw/ (DeLaClawDev/ on dev)"
+    rect rgb(253, 237, 236)
+    opt Creation or listing fails
+        PF-->>App: "Error"
+        App->>Page: "Login screen — generic connection error<br/>Retry re-runs find-or-create: a folder created by a timed-out request<br/>is found and reused, so no duplicate folder<br/>Flow ends here — back to the login screen"
+    end
+    end
+    App->>PF: "List folder files"
+
+    alt Existing install — or retry after a failed fresh install — (table files found)
+        App->>PF: "Download per-table JSON files in parallel (keep ETag + modifiedTime)"
+        rect rgb(253, 237, 236)
+        opt A download fails
+            PF-->>App: "Error"
+            App->>Page: "Login screen — generic connection error<br/>All-or-nothing: one failed table aborts the whole load<br/>(a missing file is not a failure — that table just starts empty)<br/>Flow ends here — back to the login screen"
+        end
+        end
+        PF-->>Page: "Progress: loading tables (per-table progress)"
+        App->>App: "Read schema_version from settings.json"
+        alt settings.json missing → version 0
+            App->>App: "Every migration is pending"
+        else schema_version older than latest
+            App->>App: "Only migrations newer than schema_version are pending"
+        else schema_version is latest
+            App->>App: "Nothing pending — skip to adapter creation"
+        end
+        opt At least one migration is pending
+            App->>App: "Look for backup-v*.json files from a previous attempt"
+            alt A backup-v{B}.json exists for the current schema_version<br/>(a previous batch did not complete — settings.json is written once, at the end of the batch)
+                App->>PF: "Overwrite every table file in place from the backup<br/>(never delete-then-restore)"
+                rect rgb(253, 237, 236)
+                opt The restore fails
+                    PF-->>App: "Error"
+                    App->>Page: "Login screen — generic connection error<br/>State on Drive: the backup is intact (nothing is ever deleted before success)<br/>Retry re-enters as an Existing install (branch above) → restores from the backup again<br/>Flow ends here — back to the login screen"
+                end
+                end
+                App->>App: "Re-run the batch from the backup's version on the clean restored state"
+            else No backup — or its batch completed (stale)
+                App->>PF: "Delete stale backups — upload full backup of the pre-migration Drive state<br/>(backup-v{currentVersion}.json)"
+                rect rgb(253, 237, 236)
+                opt The backup upload fails
+                    PF-->>App: "Error"
+                    App->>Page: "Login screen — generic connection error<br/>State on Drive: unchanged — the backup is the first write, nothing migrated yet<br/>Retry re-enters as an Existing install (branch above)<br/>Flow ends here — back to the login screen"
+                end
+                end
+            end
+            loop For each pending migration, oldest first
+                App->>App: "Apply the migration to the in-memory store,<br/>bump schema_version in memory"
+                App->>PF: "Upload the changed table files (settings.json is NOT written per migration)"
+                rect rgb(253, 237, 236)
+                opt A migration upload fails
+                    PF-->>App: "Error"
+                    App->>Page: "Login screen — generic connection error<br/>State on Drive: the pre-migration backup is retained —<br/>settings.json still carries the pre-batch schema_version (it is written once, at the end)<br/>Retry re-enters as an Existing install (branch above) → restores the tables<br/>from the backup and re-runs the batch from the backup's version<br/>Flow ends here — back to the login screen"
+                end
+                end
+            end
+            App->>PF: "Write settings.json once with the final schema_version — the batch completion marker"
+            App->>PF: "Delete the backup — the batch succeeded"
+        end
+    else Fresh install (no table files)
+        App->>PF: "(1) Create one JSON file per table in parallel (all except settings.json) —<br/>seed the category tables in memory with the protected default rows<br/>and flush them to Drive"
+        rect rgb(253, 237, 236)
+        opt Step 1 fails
+            PF-->>App: "Error"
+            App->>Page: "Login screen — generic connection error<br/>State on Drive: some table files exist, settings.json does NOT exist,<br/>no schema_version stamp anywhere<br/>Retry re-enters as an Existing install (branch above)<br/>Flow ends here — back to the login screen"
+        end
+        end
+        App->>PF: "(2) Write settings.json with schema_version=latest — the completion marker"
+        rect rgb(253, 237, 236)
+        opt Step 2 fails
+            PF-->>App: "Error"
+            App->>Page: "Login screen — generic connection error<br/>State on Drive: ALL table files exist, category tables already hold<br/>the seeded protected rows, only settings.json is missing<br/>Retry re-enters as an Existing install (branch above)<br/>Flow ends here — back to the login screen"
+        end
+        end
+    end
+
+    App->>App: "Create in-memory adapter seeded with loaded data"
+    App->>Page: "Hide login — show app shell"
+    App->>Page: "Render current view from in-memory data (welcome / todos / …)"
+    App->>PF: "Start 30s poll + tab-focus poll (personal tables)"
+
+    Note over App,Page: "Calendar is NOT synced on page load<br/>trusted already in sync, syncs on table flush only"
 ```
 
+### 2 · Sharing
+
+```mermaid
+sequenceDiagram
+    participant App as "App (in-memory)"
+    participant Page as "Page (rendered)"
+    participant PF as "Personal folder (DeLaClaw/)"
+    participant OWN as "Owned shared folders (DeLaClaw-Shared/)"
+    participant JOIN as "Joined group folders"
+
+    App->>Page: "Sharing nav appears immediately with loading state (before load finishes)"
+    App->>App: "Read joined_groups pointers (already loaded with personal tables)"
+    App->>OWN: "Find DeLaClaw-Shared/ root, list dlc-group-* subfolders"
+
+    par Per owned folder
+        App->>OWN: "Download group.json + revoked.json + todos/habits/lists.json in parallel"
+    and Per joined pointer
+        App->>JOIN: "Download group.json + item files via saved file IDs (revoked.json fileId recorded)"
+    end
+
+    Note over App: "One bad folder never takes down the others —<br/>load failures are isolated per folder"
+
+    App->>App: "Init in-memory sync intents per item file (createdIds / deletedIds)"
+    App->>App: "normalizeEntry → _groups map"
+    App->>Page: "Render sharing pane (fills in if already open)"
+    App->>OWN: "Poll every 15s (per-group files)"
+    App->>JOIN: "Poll every 15s (per-group files)"
+    App->>Page: "On sharing-changed → re-render sharing UI"
+
+    Note over App,JOIN: "revoked.json is NOT evaluated at startup<br/>only in the poll, when a group's files become unreachable (404/403):<br/>'removed' → silent auto-purge, 'deleted' → confirmation dialog"
+
+    rect rgb(255, 243, 205)
+    Note over App,OWN: "Planned · phase 4: startup sweep permanently deletes<br/>group folders whose deletedAt is older than 30 days"
+    end
+```
 ## Write Path (User Edits an Item)
 
 ```mermaid
@@ -132,7 +252,7 @@ sequenceDiagram
     participant MEM as In-Memory Store
     participant UI as UI Refresh
 
-    POLL->>DRIVE: files.list(DeLaClaw/ folder;<br/>DeLaClawDev/ on dev)
+    POLL->>DRIVE: "files.list(DeLaClaw/ folder — DeLaClawDev/ on dev)"
     DRIVE-->>POLL: File list with modifiedTime
 
     POLL->>POLL: For each file:<br/>compare modifiedTime

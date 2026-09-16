@@ -68,7 +68,7 @@ The Supabase sharing adapter (`sharing-supabase.js`) was removed together with t
 
 ## Drive ↔ Drive
 
-The Google Drive sharing adapter is the only sharing path. Drive sharing has no server: the shared state is a folder in the **creator's** Google Drive, and every member reads and writes the same files through the Drive API. The joiner's own Drive only ever holds a pointer (`joined-groups.json`) with the shared folder's file IDs. Access control is enforced by Drive folder permissions plus a local trusted-contacts allowlist.
+The Google Drive sharing adapter is the only sharing path. Drive sharing has no server: the shared state is a folder in the **creator's** Google Drive, and every member reads and writes the same files through the Drive API. The joiner's own Drive only ever holds pointers (the `joined_groups` personal table) with the shared folders' file IDs. Access control is enforced by Drive folder permissions plus a local trusted-contacts allowlist.
 
 ### Storage layout
 
@@ -77,12 +77,12 @@ The Google Drive sharing adapter is the only sharing path. Drive sharing has no 
 flowchart LR
     subgraph CD["Creator's Drive"]
         direction TB
-        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · joined-groups.json"]
+        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · joined_groups.json"]
         CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · revoked.json<br/>extra_1..12.json"]
     end
     subgraph JD["Joiner's Drive"]
         direction TB
-        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json<br/>joined-groups.json &#9668; <b>pointer only</b><br/>{folderId, groupId, fileIds}"]
+        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json<br/>joined_groups.json &#9668; <b>pointers only</b><br/>{folderId, groupId, fileIds}"]
     end
 ```
 
@@ -152,7 +152,7 @@ sequenceDiagram
     JA->>SF: download group.json + item files
     JA->>SF: match pending row by memberId<br/>no match → join rejected
     JA->>SF: pending → joined, set chosen pseudo
-    JA->>JD: save DeLaClaw/joined-groups.json<br/>(DeLaClawDev/ on dev builds)
+    JA->>JD: upsert joined_groups row<br/>(joined_groups.json; DeLaClawDev/ on dev builds)
     Note over JD: pointer only:<br/>{folderId, groupId, fileIds}<br/>fileIds include revoked.json
     JA->>JA: startPolling (15s)
     CA->>SF: next poll (≤15s): group.json modified?
@@ -272,7 +272,7 @@ sequenceDiagram
     MA->>MD: pointers → personal items<br/>(__shared__ items → General)
     end
     MA->>SF: best-effort: flip own row to<br/>status 'left' (+ leftAt)
-    MA->>MD: delete joined-groups.json entry
+    MA->>MD: delete joined_groups row
     MA->>MA: drop group, emit group-left<br/>polling stops
     Note over SF: creator's next poll (≤15s)<br/>sees the 'left' row
     CA->>SF: revoke leaver's Drive permission<br/>(owner-only operation)

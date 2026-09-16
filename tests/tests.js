@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
 
 const JS_DIR = path.join(__dirname, '..', 'js');
 const STYLE_FILE = path.join(__dirname, '..', 'style.css');
@@ -1157,6 +1158,123 @@ test('sharing email normalization is Gmail-scoped (dots significant elsewhere)',
     'memberIdFromEmail must hash the normalized email, not the raw input');
 });
 
+test('joined_groups is a Drive personal table, not a bespoke sharing file', () => {
+  // Regression: joined_groups used to be a standalone joined-groups.json file
+  // managed by bespoke download/upload code in sharing-drive.js, which meant
+  // (a) it was never in the per-table startup download, (b) Drive backups via
+  // db.from('joined_groups') silently backed up an empty table, and (c) the
+  // sharing adapter needed Drive-specific file IO for it. It is now a normal
+  // DRIVE_TABLES entry; the sharing adapter reads/writes it through db.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  const tablesMatch = driveAdapter.match(/const DRIVE_TABLES = \[([\s\S]*?)\];/);
+  assert(tablesMatch, 'drive.js must define DRIVE_TABLES');
+  assert(tablesMatch[1].includes("'joined_groups'"),
+    'DRIVE_TABLES must include joined_groups so it loads with the other personal tables');
+
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  assert(!drive.includes('loadJoinedGroups') && !drive.includes('saveJoinedGroups') && !drive.includes('_joinedMeta'),
+    'sharing-drive.js must not keep bespoke joined-groups file IO (loadJoinedGroups/saveJoinedGroups/_joinedMeta)');
+  assert(drive.includes("db.from('joined_groups')"),
+    'sharing-drive.js must read/write joined-group pointers through db.from(\'joined_groups\')');
+  assert(drive.includes(".upsert(entry, { onConflict: 'id' })"),
+    'join must upsert the pointer keyed on id (= groupId) so the Drive 412 merge stays a union');
+  assert(drive.includes('createDriveSharing(getToken, personalFolderId, capabilities = {}, db = null)'),
+    'createDriveSharing must accept the db proxy as a 4th parameter');
+
+  const factory = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+  assert(factory.includes('config.db,'),
+    'sharing.js factory must pass config.db through to createDriveSharing');
+  const main = jsFiles['main.js'];
+  const sharingCfg = main.slice(main.indexOf("createSharing('googledrive'"));
+  assert(sharingCfg.includes('db: state.db,'),
+    'main.js must wire state.db into the googledrive sharing config');
+});
+
+test('fresh install writes settings.json last, as the completion marker', () => {
+  // Regression: the fresh-install branch used to create settings.json (empty) in the
+  // same parallel batch as every other table file, then flush schema_version into it.
+  // A partial failure could leave settings.json stamped with schema_version=latest while
+  // a category table file was missing — the retry then skipped both the fresh-install
+  // seeding and the migrations, leaving the category table without its protected
+  // (_default_*, __shared__) rows. settings.json must be written last, only after every
+  // other table file was created and seeded, so a partial failure always leaves the
+  // retry with no schema_version and the pending migrations re-seed the protected rows.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  const freshStart = driveAdapter.indexOf('if (isFreshInstall)');
+  assert(freshStart !== -1, 'drive.js must have a fresh-install branch');
+  const freshBlock = driveAdapter.slice(freshStart, driveAdapter.indexOf('} else {', freshStart));
+
+  const batchIdx = freshBlock.indexOf("filter(t => t !== 'settings')");
+  assert(batchIdx !== -1,
+    'fresh install must create all table files except settings.json in the first batch');
+  const seedFlushIdx = freshBlock.indexOf('Flush seeded category tables to Drive');
+  assert(seedFlushIdx > batchIdx,
+    'fresh install must flush the seeded category tables before settings.json exists');
+  const settingsWriteIdx = freshBlock.indexOf("uploadFile(seedTok, folderId, null, 'settings.json'");
+  assert(settingsWriteIdx > seedFlushIdx,
+    'fresh install must write settings.json (with schema_version) last, in a single upload');
+});
+
+test('migration runner uses the backup policy module', () => {
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  assert(driveAdapter.includes("from './drive-backup-policy.js'"),
+    'drive.js must import the pre-migration backup policy module');
+  assert(driveAdapter.includes('decideBackupAction('),
+    'drive.js must decide restore/snapshot/stale via decideBackupAction');
+});
+
+test('migration runner deletes the pre-migration backup after the batch succeeds', () => {
+  // A lingering backup always means "a migration failed and will be retried
+  // from clean state" — never a historical archive.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  assert(driveAdapter.includes('deleteFile(tok, backupId)'),
+    'drive.js must delete the backup file after the migration batch completes');
+});
+
+test('migration restore overwrites table files in place (never delete-then-restore)', () => {
+  // Deleting table files first would leave a window with zero table files, in
+  // which the next connect would take the fresh-install branch and stamp empty
+  // tables as latest.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  const restoreIdx = driveAdapter.indexOf('drive_restoring_backup');
+  assert(restoreIdx !== -1, 'drive.js must have a restore path');
+  const restoreBlock = driveAdapter.slice(restoreIdx, restoreIdx + 2000);
+  assert(restoreBlock.includes('uploadFile(restoreTok, folderId, meta.fileId'),
+    'restore must overwrite each table file in place via its existing fileId');
+});
+
+test('migration runner writes settings.json once, at the end of the batch', () => {
+  // The schema_version on Drive must move exactly once per batch: it is the
+  // batch's completion marker, written only after every migration's tables
+  // were uploaded. settings.json is therefore NOT flushed per migration.
+  // A failure before the final write leaves the pre-batch version behind,
+  // so a backup whose version equals the current version always means
+  // "its batch did not complete" — no batch-target tracking needed.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  assert(!driveAdapter.includes("dirtyTables.add('settings')"),
+    'settings.json must not be flushed per migration');
+  assert(driveAdapter.includes('uploadFile(settingsTok'),
+    'settings.json must be written once after the migration loop');
+});
+
+test('no migration touches the schema_version settings entry', () => {
+  // The backup/restore policy depends on the schema_version on Drive moving
+  // exactly once per batch (written by the runner at the end). A migration
+  // that read or wrote the version stamp independently would silently break
+  // that invariant, so the contract forbids it (see drive-migrations.js
+  // header, rule 5) and this test enforces it.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+  // Strip comments so the contract's own documentation doesn't trip the check
+  // (this file contains no '//' inside strings, so naive stripping is safe).
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map(line => { const i = line.indexOf('//'); return i === -1 ? line : line.slice(0, i); })
+    .join('\n');
+  assert(!/schema_version/.test(code),
+    'a migration references schema_version in code — the runner owns the version stamp');
+});
+
 test('sharing i18n keys used in code exist in every locale', () => {
   // Regression: t('sharing.name_updated') showed the raw key in English because
   // the string existed in fr/es but was missing from en. Every sharing.* key
@@ -2300,6 +2418,38 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(slice.includes("'sharing-changed'"), 'purge handler must trigger a view refresh');
     });
   }
+
+  // ===================================================================
+  // DRIVE BACKUP POLICY (runtime)
+  // ===================================================================
+  console.log('\n--- Drive Backup Policy\n');
+
+  const policyUrl = pathToFileURL(path.join(JS_DIR, 'adapters', 'drive-backup-policy.js')).href;
+  const { parseBackupVersion, newestBackupVersion, decideBackupAction } = await import(policyUrl);
+
+  test('backup policy: filename parsing', () => {
+    assert(parseBackupVersion('backup-v1.131.json') === '1.131', 'parses version from backup filename');
+    assert(parseBackupVersion('backup-v2.0.10.json') === '2.0.10', 'parses three-part version');
+    assert(parseBackupVersion('todos.json') === null, 'non-backup file → null');
+    assert(parseBackupVersion('backup-v1.131.json.bak') === null, 'suffix after .json → null');
+    assert(newestBackupVersion(['todos.json', 'backup-v1.131.json', 'backup-v2.0.10.json', 'backup-v1.9.json']) === '2.0.10',
+      'newest backup wins by version comparison, not string order');
+    assert(newestBackupVersion(['todos.json']) === null, 'no backups → null');
+  });
+
+  test('backup policy: decision table', () => {
+    // settings.json is written once, at the end of the batch, so the version
+    // on Drive moves exactly once per batch: backup version == current
+    // version ⟺ the batch did not complete.
+    assert(decideBackupAction(null, '1.131') === 'snapshot', 'no backup → snapshot current tables');
+    assert(decideBackupAction('1.131', '1.131') === 'restore', 'backup for current version → restore and re-run');
+    assert(decideBackupAction('1.130', '1.131') === 'stale', 'older backup → its batch completed, delete it');
+    assert(decideBackupAction('1.132', '1.131') === 'stale', 'newer backup → stale, delete it');
+    // Partial multi-migration batch: settings.json is only written at the
+    // end, so a mid-batch failure always leaves the backup version behind.
+    assert(decideBackupAction('1.0', '1.0') === 'restore',
+      'partial batch (settings never advanced past the backup) → restore from backup version');
+  });
 
   // ===================================================================
   // SUMMARY

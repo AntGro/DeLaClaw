@@ -16,8 +16,13 @@
 // Drive files themselves (like the legacy format conversion below).
 //
 // After each migration:
-//   1. schema_version is bumped in the in-memory settings
-//   2. All tables are flushed to Drive (the runner handles this)
+//   1. schema_version is bumped in the in-memory settings (never by the
+//      migration itself — see rule 5 below)
+//   2. Changed tables are flushed to Drive (the runner handles this);
+//      settings.json is written ONCE, at the end of the batch, carrying the
+//      final schema_version. It is the batch's completion marker: the
+//      pre-migration backup/restore policy depends on the version on Drive
+//      moving exactly once per batch.
 //
 // Before any migration runs, a full backup is saved to Drive as
 // backup-v{currentVersion}.json.
@@ -27,6 +32,10 @@
 //   2. Modify `store` in place for data transforms
 //   3. Use `ctx` for file-level operations if needed
 //   4. Return nothing — the runner handles persistence
+//   5. NEVER touch the `schema_version` settings entry (read or write), and
+//      never upload settings.json with a bumped version: the runner owns the
+//      version stamp. A migration that moved it independently would silently
+//      break the backup/restore invariant above.
 //
 // Example (data transform only):
 //   '1.150': async (store) => {

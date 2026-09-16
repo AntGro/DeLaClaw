@@ -1189,6 +1189,31 @@ test('joined_groups is a Drive personal table, not a bespoke sharing file', () =
     'main.js must wire state.db into the googledrive sharing config');
 });
 
+test('fresh install writes settings.json last, as the completion marker', () => {
+  // Regression: the fresh-install branch used to create settings.json (empty) in the
+  // same parallel batch as every other table file, then flush schema_version into it.
+  // A partial failure could leave settings.json stamped with schema_version=latest while
+  // a category table file was missing — the retry then skipped both the fresh-install
+  // seeding and the migrations, leaving the category table without its protected
+  // (_default_*, __shared__) rows. settings.json must be written last, only after every
+  // other table file was created and seeded, so a partial failure always leaves the
+  // retry with no schema_version and the pending migrations re-seed the protected rows.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  const freshStart = driveAdapter.indexOf('if (isFreshInstall)');
+  assert(freshStart !== -1, 'drive.js must have a fresh-install branch');
+  const freshBlock = driveAdapter.slice(freshStart, driveAdapter.indexOf('} else {', freshStart));
+
+  const batchIdx = freshBlock.indexOf("filter(t => t !== 'settings')");
+  assert(batchIdx !== -1,
+    'fresh install must create all table files except settings.json in the first batch');
+  const seedFlushIdx = freshBlock.indexOf('Flush seeded category tables to Drive');
+  assert(seedFlushIdx > batchIdx,
+    'fresh install must flush the seeded category tables before settings.json exists');
+  const settingsWriteIdx = freshBlock.indexOf("uploadFile(seedTok, folderId, null, 'settings.json'");
+  assert(settingsWriteIdx > seedFlushIdx,
+    'fresh install must write settings.json (with schema_version) last, in a single upload');
+});
+
 test('sharing i18n keys used in code exist in every locale', () => {
   // Regression: t('sharing.name_updated') showed the raw key in English because
   // the string existed in fr/es but was missing from en. Every sharing.* key

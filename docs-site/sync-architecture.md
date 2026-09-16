@@ -109,11 +109,11 @@ sequenceDiagram
         end
         end
     else Fresh install (no table files)
-        App->>PF: "Create one JSON file per table in parallel + seed default categories"
+        App->>PF: "Create one JSON file per table in parallel + seed default categories<br/>settings.json written last, as the completion marker"
         rect rgb(253, 237, 236)
         opt A file creation fails
             PF-->>App: "Error"
-            App->>Page: "Login screen — generic connection error<br/>Retry loads the files that do exist, missing tables start empty<br/>and are created on first write<br/>Flow ends here — back to the login screen"
+            App->>Page: "Login screen — generic connection error<br/>No settings.json means no 'setup complete' stamp:<br/>retry loads what exists and runs migrations,<br/>which re-seed the protected category rows<br/>Flow ends here — back to the login screen"
         end
         end
     end

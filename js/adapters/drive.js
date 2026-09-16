@@ -506,22 +506,25 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   // ── Run pending migrations ──
 
   if (isFreshInstall) {
-    // Fresh install: create all table files on Drive with progress, set schema to latest
+    // Fresh install: create all table files on Drive with progress, set schema to latest.
+    // settings.json is the completion marker: it is written last, only after every other
+    // table file was created and the category tables were seeded. A partial failure therefore
+    // never leaves a "setup complete" stamp behind — the retry takes the normal load path
+    // with no schema_version, runs the pending migrations, and the category migration
+    // re-seeds the protected rows.
     const latestVersion = Object.keys(DRIVE_MIGRATIONS).sort(compareVersions).pop() || '0';
-    const total = DRIVE_TABLES.length;
+    const tablesToCreate = DRIVE_TABLES.filter(t => t !== 'settings');
+    const total = tablesToCreate.length + 1; // + settings.json, written last
     emit('loading', t('menu.drive_creating_tables'), 0, total);
     const tok = await getToken();
     if (!tok) throw new Error('Drive setup failed: could not obtain auth token');
     let created = 0;
-    await Promise.all(DRIVE_TABLES.map(async (table) => {
+    await Promise.all(tablesToCreate.map(async (table) => {
       const result = await uploadFile(tok, folderId, null, `${table}.json`, []);
       fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
       created++;
       emit('loading', t('menu.drive_creating_progress', created, total, table), created, total);
     }));
-    // Set schema_version to latest — no migrations needed
-    if (!inner._store.settings) inner._store.settings = [];
-    inner._store.settings.push({ key: 'schema_version', value: latestVersion });
 
     // Seed protected rows for category tables (fresh install has empty arrays)
     const now = new Date().toISOString();
@@ -538,21 +541,22 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         { id: sharedId, name: '__shared__', shortname: null, color: null, sort_order: 9999, is_protected: 1, owner_id: null, created_at: now, updated_at: now },
       );
     }
-    // Flush seeded category tables + settings to Drive (parallel)
+    // Flush seeded category tables to Drive (parallel) — still before settings.json exists
     const seedTok = await getToken();
     if (!seedTok) throw new Error('Drive setup failed: could not obtain auth token for seed flush');
-    const seedFlushes = catSeed.map(async ([table]) => {
+    await Promise.all(catSeed.map(async ([table]) => {
       const meta = fileMeta[table] || {};
       const result = await uploadFile(seedTok, folderId, meta.fileId, `${table}.json`, inner._store[table]);
       fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
-    });
-    // Settings flush
-    const settingsMeta = fileMeta.settings || {};
-    seedFlushes.push((async () => {
-      const result = await uploadFile(seedTok, folderId, settingsMeta.fileId, 'settings.json', inner._store.settings);
-      fileMeta.settings = { fileId: result.id || settingsMeta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
-    })());
-    await Promise.all(seedFlushes);
+    }));
+    // Set schema_version to latest — no migrations needed — and write settings.json last,
+    // in a single upload, so it only ever exists once setup fully succeeded.
+    if (!inner._store.settings) inner._store.settings = [];
+    inner._store.settings.push({ key: 'schema_version', value: latestVersion });
+    const settingsResult = await uploadFile(seedTok, folderId, null, 'settings.json', inner._store.settings);
+    fileMeta.settings = { fileId: settingsResult.id, etag: settingsResult.etag, modifiedTime: new Date().toISOString() };
+    created++;
+    emit('loading', t('menu.drive_creating_progress', created, total, 'settings'), created, total);
   } else {
     // ── Run pending migrations (existing installs only) ──
 

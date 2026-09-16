@@ -109,11 +109,18 @@ sequenceDiagram
         end
         end
     else Fresh install (no table files)
-        App->>PF: "Create one JSON file per table in parallel + seed default categories<br/>settings.json written last, as the completion marker"
+        App->>PF: "(1) Create one JSON file per table in parallel — all except settings.json —<br/>then flush the seeded default categories"
         rect rgb(253, 237, 236)
-        opt A file creation fails
+        opt Step 1 fails
             PF-->>App: "Error"
-            App->>Page: "Login screen — generic connection error<br/>No settings.json means no 'setup complete' stamp:<br/>retry loads what exists and runs migrations,<br/>which re-seed the protected category rows<br/>Flow ends here — back to the login screen"
+            App->>Page: "Login screen — generic connection error<br/>State on Drive: some table files exist, settings.json does NOT exist,<br/>no schema_version stamp anywhere<br/>Retry: normal load (files exist, so not fresh install) → missing tables start empty →<br/>no schema_version means version 0 → all migrations run →<br/>the category migration re-seeds the protected rows,<br/>and the migration flushes write the missing table files + settings.json<br/>Flow ends here — back to the login screen"
+        end
+        end
+        App->>PF: "(2) Write settings.json with schema_version=latest — the completion marker"
+        rect rgb(253, 237, 236)
+        opt Step 2 fails
+            PF-->>App: "Error"
+            App->>Page: "Login screen — generic connection error<br/>State on Drive: ALL table files exist, category tables already hold<br/>the seeded protected rows, only settings.json is missing<br/>Retry: normal load → all tables load, settings is empty → version 0 →<br/>all migrations run (the category migration is a no-op — rows already present) →<br/>the migration flushes write settings.json with the schema version<br/>Flow ends here — back to the login screen"
         end
         end
     end

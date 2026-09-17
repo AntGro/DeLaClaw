@@ -259,18 +259,18 @@ sequenceDiagram
         else group.json found
             App->>OWN: "Download group.json + revoked.json + todos/habits/lists.json in parallel"
             rect rgb(253, 237, 236)
-            opt A single file download fails
-                OWN-->>App: "Error for that file only"
-                App->>App: "Degraded, not fatal — the failed file loads as absent:<br/>item file → empty items for that type (the poll re-discovers the file and fills them in)<br/>revoked.json → no revocation state to consult<br/>group.json → stub group (folder ID as name, empty members)<br/>The group still loads — nothing else is affected"
+            opt Any required file (group.json, revoked.json, todos/habits/lists.json) fails to download
+                OWN-->>App: "Error for that file"
+                App->>App: "Group skipped this cycle — never partially loaded<br/>(a half-loaded group could show items as missing, and the user might recreate them,<br/>then the real file loads and there are duplicates)<br/>Retried on the next page load — the 15s poll does not re-attempt it<br/>Other groups are unaffected"
             end
             end
         end
     and Per joined pointer
-        App->>JOIN: "Download group.json + item files via saved file IDs<br/>(revoked.json is NOT downloaded — only its fileId is recorded for the poll)"
+        App->>JOIN: "Download group.json + item files via saved file IDs<br/>(revoked.json content is NOT downloaded — only its fileId is recorded.<br/>the content is only ever read at poll time, if the folder goes 403/404)"
         rect rgb(253, 237, 236)
-        opt A single file download fails
-            JOIN-->>App: "Error for that file only"
-            App->>App: "Degraded, not fatal — the failed file loads as absent:<br/>item file → empty items for that type (stays empty until the next page load —<br/>the poll can't search for files under the joined scope)<br/>group.json → stub group (folder ID as name, empty members).<br/>the poll can't re-check it either (no group.json fileId was recorded),<br/>so it stays a stub until the next page load re-downloads it"
+        opt Any required file (group.json, todos/habits/lists.json) fails to download
+            JOIN-->>App: "Error for that file"
+            App->>App: "Group skipped this cycle — never partially loaded<br/>(same duplicate risk as an owned folder)<br/>Retried on the next page load — the 15s poll does not re-attempt it"
         end
         end
     end

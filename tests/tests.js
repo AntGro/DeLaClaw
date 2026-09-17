@@ -1093,6 +1093,45 @@ test('sharing partial creation: group.json last, trash on failure, load-time GC'
     'index.html CSP frame-src must allow https://docs.google.com for the Drive join picker');
 });
 
+test('sharing group load is all-or-nothing: a failed file download skips the whole group', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+
+  // loadGroupWithIds (joined path): every required-file download must throw on
+  // failure — never degrade to a partially-loaded group (a half-loaded group
+  // could show the user's items as missing, inviting recreates that become
+  // duplicates once the real file loads).
+  const idsStart = drive.indexOf('async function loadGroupWithIds(folderId, groupId, fileIds)');
+  const idsEnd = drive.indexOf('/** Map item_type to the per-type file key. */', idsStart);
+  const idsBody = drive.slice(idsStart, idsEnd);
+  assert(!idsBody.includes('return null'),
+    'loadGroupWithIds must not degrade failed downloads to null (partial group)');
+  assert(idsBody.includes('throw new Error(`sharing: failed to download group.json for joined group'),
+    'loadGroupWithIds must throw a labeled error when the group.json download fails');
+  assert(idsBody.includes('throw new Error(`sharing: failed to download ${type}.json for joined group'),
+    'loadGroupWithIds must throw a labeled error when an item-file download fails');
+
+  // loadGroup (owned path): revoked.json and item-file downloads must throw too.
+  // (group.json already threw: its download has no catch handler.)
+  const loadStart = drive.indexOf('async function loadGroup(folderId, groupId, opts');
+  const dlStart = drive.indexOf('const downloads = [];', loadStart);
+  const dlEnd = drive.indexOf('const [gResult, revokedResult', loadStart);
+  const dlBody = drive.slice(dlStart, dlEnd);
+  assert(!dlBody.includes('return null'),
+    'loadGroup must not degrade failed revoked/item downloads to null (partial group)');
+  assert(dlBody.includes('throw new Error(`sharing: failed to download revoked.json for group'),
+    'loadGroup must throw a labeled error when the revoked.json download fails');
+  assert(dlBody.includes('throw new Error(`sharing: failed to download ${ITEM_TYPES[i]}.json for group'),
+    'loadGroup must throw a labeled error when an item-file download fails');
+
+  // loadAll must still isolate the (now throwing) per-folder failures so one
+  // bad folder cannot break the other groups.
+  const allStart = drive.indexOf('/** Load all groups');
+  const allEnd = drive.indexOf('getAllGroups()', allStart);
+  const allBody = drive.slice(allStart, allEnd);
+  assert(allBody.includes('.catch(err =>'),
+    'loadAll must isolate per-folder load failures so one bad folder cannot break all groups');
+});
+
 test('sharing departure is unjoin-only (no leaveGroup)', () => {
   const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');

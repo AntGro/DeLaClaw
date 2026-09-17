@@ -575,14 +575,19 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   async function loadGroupWithIds(folderId, groupId, fileIds) {
     const tok = await token();
 
-    // Download group.json + all type files in parallel
+    // Download group.json + all type files in parallel. A failed download
+    // aborts the whole group load — groups are never partially loaded (see
+    // loadGroup). loadAll() isolates the failure per folder; the group is
+    // retried on the next page load. revoked.json is NOT downloaded here:
+    // its content is only evaluated at poll time (removed-vs-deleted), so
+    // only the fileId is recorded.
     const downloads = [
       fileIds.group
-        ? driveDownload(tok, fileIds.group).catch(err => { console.warn(`sharing: failed to download group.json for joined group ${groupId}:`, err); return null; })
+        ? driveDownload(tok, fileIds.group).catch(err => { throw new Error(`sharing: failed to download group.json for joined group ${groupId}: ${err?.message || err}`); })
         : Promise.resolve(null),
       ...ITEM_TYPES.map(type =>
         fileIds[type]
-          ? driveDownload(tok, fileIds[type]).catch(err => { console.warn(`sharing: failed to download ${type}.json for joined group ${groupId}:`, err); return null; })
+          ? driveDownload(tok, fileIds[type]).catch(err => { throw new Error(`sharing: failed to download ${type}.json for joined group ${groupId}: ${err?.message || err}`); })
           : Promise.resolve(null)
       ),
     ];
@@ -604,6 +609,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         typeData[type] = Array.isArray(r.data) ? r.data : [];
         typeMeta[type] = { fileId: fileIds[type], etag: r.etag };
       } else {
+        // File absent (not failed — a failed download throws above).
         typeData[type] = [];
         typeMeta[type] = {};
       }
@@ -655,19 +661,24 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return null;
     }
 
-    // Download all found files in parallel
+    // Download all found files in parallel. A failed download aborts the
+    // whole group load — groups are never partially loaded (a half-loaded
+    // group could show the user's items as missing, inviting recreates that
+    // become duplicates once the real file loads). loadAll() isolates the
+    // failure per folder; the group is retried on the next page load.
     const downloads = [];
     downloads.push(gFile
       ? driveDownload(tok, gFile.id).then(r => ({ ...r, file: gFile }))
       : Promise.resolve(null));
     downloads.push(revokedFile
       ? driveDownload(tok, revokedFile.id).then(r => ({ ...r, file: revokedFile }))
-          .catch(err => { console.warn(`sharing: failed to download revoked.json for ${groupId}:`, err); return null; })
+          .catch(err => { throw new Error(`sharing: failed to download revoked.json for group ${groupId}: ${err?.message || err}`); })
       : Promise.resolve(null));
     for (let i = 0; i < ITEM_TYPES.length; i++) {
       const file = typeFiles[i];
       downloads.push(file
-        ? driveDownload(tok, file.id).then(r => ({ ...r, file })).catch(err => { console.warn(`sharing: failed to download ${ITEM_TYPES[i]}.json for ${groupId}:`, err); return null; })
+        ? driveDownload(tok, file.id).then(r => ({ ...r, file }))
+            .catch(err => { throw new Error(`sharing: failed to download ${ITEM_TYPES[i]}.json for group ${groupId}: ${err?.message || err}`); })
         : Promise.resolve(null));
     }
     const [gResult, revokedResult, ...typeResults] = await Promise.all(downloads);
@@ -688,6 +699,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         typeData[type] = Array.isArray(r.data) ? r.data : [];
         typeMeta[type] = { fileId: r.file.id, etag: r.etag, modifiedTime: r.file.modifiedTime };
       } else {
+        // File absent (not failed — a failed download throws above).
         typeData[type] = [];
         typeMeta[type] = {};
       }

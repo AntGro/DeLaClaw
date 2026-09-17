@@ -161,6 +161,18 @@ async function driveDownload(token, fileId) {
   return { data: await res.json(), etag: res.headers.get('ETag') };
 }
 
+/**
+ * Wrap a file-download failure with file context, preserving the Drive
+ * status code so callers can distinguish access loss (403/404) from
+ * transient failures.
+ */
+function downloadError(what, err) {
+  const e = new Error(`sharing: failed to download ${what}: ${err?.message || err}`);
+  if (err?.code != null) e.code = err.code;
+  else if (err?.status != null) e.code = err.status;
+  return e;
+}
+
 async function driveUpload(token, folderId, fileId, fileName, data, etag) {
   const json = JSON.stringify(data, null, 2);
   const boundary = '---dlc-sharing';
@@ -583,11 +595,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     // only the fileId is recorded.
     const downloads = [
       fileIds.group
-        ? driveDownload(tok, fileIds.group).catch(err => { throw new Error(`sharing: failed to download group.json for joined group ${groupId}: ${err?.message || err}`); })
+        ? driveDownload(tok, fileIds.group).catch(err => { throw downloadError(`group.json for joined group ${groupId}`, err); })
         : Promise.resolve(null),
       ...ITEM_TYPES.map(type =>
         fileIds[type]
-          ? driveDownload(tok, fileIds[type]).catch(err => { throw new Error(`sharing: failed to download ${type}.json for joined group ${groupId}: ${err?.message || err}`); })
+          ? driveDownload(tok, fileIds[type]).catch(err => { throw downloadError(`${type}.json for joined group ${groupId}`, err); })
           : Promise.resolve(null)
       ),
     ];
@@ -672,13 +684,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       : Promise.resolve(null));
     downloads.push(revokedFile
       ? driveDownload(tok, revokedFile.id).then(r => ({ ...r, file: revokedFile }))
-          .catch(err => { throw new Error(`sharing: failed to download revoked.json for group ${groupId}: ${err?.message || err}`); })
+          .catch(err => { throw downloadError(`revoked.json for group ${groupId}`, err); })
       : Promise.resolve(null));
     for (let i = 0; i < ITEM_TYPES.length; i++) {
       const file = typeFiles[i];
       downloads.push(file
         ? driveDownload(tok, file.id).then(r => ({ ...r, file }))
-            .catch(err => { throw new Error(`sharing: failed to download ${ITEM_TYPES[i]}.json for group ${groupId}: ${err?.message || err}`); })
+            .catch(err => { throw downloadError(`${ITEM_TYPES[i]}.json for group ${groupId}`, err); })
         : Promise.resolve(null));
     }
     const [gResult, revokedResult, ...typeResults] = await Promise.all(downloads);
@@ -948,21 +960,29 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         }
       }
 
-      // Joined groups (link-join): load using saved file IDs
+      // Joined groups (link-join): load using saved file IDs (or search for
+      // legacy pointers). A 403/404 here means our access is gone (removed
+      // from the group, or the group was deleted): consult revoked.json
+      // immediately — the poll only covers loaded groups, so a skipped group
+      // would otherwise never get its removed/deleted verdict.
+      const loadJoined = (joined) => {
+        const p = joined.fileIds
+          ? loadGroupWithIds(joined.folderId, joined.groupId, joined.fileIds)
+          : loadGroup(joined.folderId, joined.groupId); // pointer without fileIds: search-based load
+        return p.catch(async err => {
+          if (err?.code === 403 || err?.code === 404) {
+            const verdict = await this.checkRemovalViaRevoked(joined.groupId, tok).catch(() => null);
+            if (verdict) {
+              await this.handleStaleGroup(joined.groupId, verdict);
+              return null;
+            }
+          }
+          throw err;
+        });
+      };
       for (const joined of _joinedGroups) {
         if (_groups.has(joined.groupId)) continue;
-        if (joined.fileIds) {
-          isolate(
-            loadGroupWithIds(joined.folderId, joined.groupId, joined.fileIds),
-            `joined group ${joined.groupId}`
-          );
-        } else {
-          // Legacy entry without fileIds — try search-based load
-          isolate(
-            loadGroup(joined.folderId, joined.groupId),
-            `legacy joined group ${joined.groupId}`
-          );
-        }
+        isolate(loadJoined(joined), `joined group ${joined.groupId}`);
       }
 
       await Promise.all(promises);
@@ -1461,35 +1481,40 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // Clean up groups whose files are gone (group deleted, or we were removed)
       if (staleGroupIds.length) {
         for (const { groupId: gid, verdict } of staleGroupIds) {
-          const groupName = _groups.get(gid)?.group?.name || gid;
-          _groups.delete(gid);
-          emit('group-deleted', { groupId: gid, verdict });
-          if (verdict === 'removed') {
-            // Own memberId found in revoked.json — removal is certain, so purge
-            // local item pointers outright (no dialog). The 'deleted' case keeps
-            // the orphan dialog: an unreachable group may be an infra issue.
-            // Handled in main.js via state.db (the adapter has no db access).
-            try { document.dispatchEvent(new CustomEvent('sharing-group-purge-items', { detail: { groupId: gid } })); } catch {}
-          }
-          try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName, verdict } })); } catch {}
+          await this.handleStaleGroup(gid, verdict);
         }
-        // Purge the joined_groups pointers
-        const gone = new Set(staleGroupIds.map(s => s.groupId));
-        if (gone.size) {
-          if (db) {
-            for (const gid of gone) {
-              const { error } = await db.from('joined_groups').delete().eq('id', gid);
-              if (error) console.warn('sharing: purge pointer delete failed:', error.message);
-            }
-            await refreshJoinedGroups();
-          } else {
-            _joinedGroups = _joinedGroups.filter(j => !gone.has(j.groupId));
-          }
-          changed = true;
-        }
+        changed = true;
       }
 
       return changed;
+    },
+
+    /**
+     * Apply a removed/deleted verdict for a group: drop it from memory,
+     * notify the app, and purge the joined_groups pointer. Shared by the poll
+     * and by loadAll — a joined group that fails to load with 403/404 never
+     * reaches the poll, so it gets its verdict at startup instead.
+     */
+    async handleStaleGroup(groupId, verdict) {
+      const groupName = _groups.get(groupId)?.group?.name || _groupNameCache[groupId] || groupId;
+      _groups.delete(groupId);
+      emit('group-deleted', { groupId, verdict });
+      if (verdict === 'removed') {
+        // Own memberId found in revoked.json — removal is certain, so purge
+        // local item pointers outright (no dialog). The 'deleted' case keeps
+        // the orphan dialog: an unreachable group may be an infra issue.
+        // Handled in main.js via state.db (the adapter has no db access).
+        try { document.dispatchEvent(new CustomEvent('sharing-group-purge-items', { detail: { groupId } })); } catch {}
+      }
+      try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName, verdict } })); } catch {}
+      // Purge the joined_groups pointer
+      if (db) {
+        const { error } = await db.from('joined_groups').delete().eq('id', groupId);
+        if (error) console.warn('sharing: purge pointer delete failed:', error.message);
+        await refreshJoinedGroups();
+      } else {
+        _joinedGroups = _joinedGroups.filter(j => j.groupId !== groupId);
+      }
     },
 
     // ─── Events ───

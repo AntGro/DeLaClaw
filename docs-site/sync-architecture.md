@@ -266,9 +266,12 @@ sequenceDiagram
             end
         end
     and Per joined pointer
-        App->>JOIN: "Download group.json + item files via saved file IDs<br/>(revoked.json content is NOT downloaded — only its fileId is recorded.<br/>the content is only ever read at poll time, if the folder goes 403/404)"
+        App->>JOIN: "Download group.json + todos/habits/lists.json via saved file IDs<br/>(revoked.json content is NOT downloaded here — only its fileId is recorded)"
         rect rgb(253, 237, 236)
-        opt Any required file (group.json, todos/habits/lists.json) fails to download
+        opt Download fails with 403/404 (our access is gone)
+            App->>JOIN: "revoked.json IS read now — the file-level read grant survives folder revocation<br/>'removed' → pointer purged silently (same as the poll verdict)<br/>'deleted' → pointer purged + group-deleted notice<br/>revoked.json unreadable → treated as transient (see below)"
+        end
+        opt Download fails otherwise (transient)
             JOIN-->>App: "Error for that file"
             App->>App: "Group skipped this cycle — never partially loaded<br/>(same duplicate risk as an owned folder)<br/>Retried on the next page load — the 15s poll does not re-attempt it"
         end
@@ -282,7 +285,7 @@ sequenceDiagram
     App->>JOIN: "Poll every 15s (per-group files)"
     App->>Page: "On sharing-changed → re-render sharing UI"
 
-    Note over App,JOIN: "revoked.json is NOT evaluated at startup<br/>only in the poll, when a group's files become unreachable (404/403):<br/>'removed' → silent auto-purge, 'deleted' → confirmation dialog"
+    Note over App,JOIN: "revoked.json is read at startup when a joined download fails with 403/404<br/>(access gone — the file-level read grant survives), and in the poll<br/>when a loaded group's files become unreachable:<br/>'removed' → silent auto-purge, 'deleted' → group-deleted notice"
 
     rect rgb(255, 243, 205)
     Note over App,OWN: "Planned · phase 4: startup sweep permanently deletes<br/>group folders whose deletedAt is older than 30 days"

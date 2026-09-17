@@ -1096,6 +1096,13 @@ test('sharing partial creation: group.json last, trash on failure, load-time GC'
 test('sharing group load is all-or-nothing: a failed file download skips the whole group', () => {
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
 
+  // Labeled download errors preserve the Drive status code, so callers can
+  // distinguish access loss (403/404) from transient failures.
+  assert(drive.includes('function downloadError(what, err)'),
+    'sharing-drive.js must define the downloadError helper');
+  assert(drive.includes('if (err?.code != null) e.code = err.code;'),
+    'downloadError must preserve the Drive status code on the wrapped error');
+
   // loadGroupWithIds (joined path): every required-file download must throw on
   // failure — never degrade to a partially-loaded group (a half-loaded group
   // could show the user's items as missing, inviting recreates that become
@@ -1105,9 +1112,9 @@ test('sharing group load is all-or-nothing: a failed file download skips the who
   const idsBody = drive.slice(idsStart, idsEnd);
   assert(!idsBody.includes('return null'),
     'loadGroupWithIds must not degrade failed downloads to null (partial group)');
-  assert(idsBody.includes('throw new Error(`sharing: failed to download group.json for joined group'),
+  assert(idsBody.includes('throw downloadError(`group.json for joined group ${groupId}`, err)'),
     'loadGroupWithIds must throw a labeled error when the group.json download fails');
-  assert(idsBody.includes('throw new Error(`sharing: failed to download ${type}.json for joined group'),
+  assert(idsBody.includes('throw downloadError(`${type}.json for joined group ${groupId}`, err)'),
     'loadGroupWithIds must throw a labeled error when an item-file download fails');
 
   // loadGroup (owned path): revoked.json and item-file downloads must throw too.
@@ -1118,16 +1125,33 @@ test('sharing group load is all-or-nothing: a failed file download skips the who
   const dlBody = drive.slice(dlStart, dlEnd);
   assert(!dlBody.includes('return null'),
     'loadGroup must not degrade failed revoked/item downloads to null (partial group)');
-  assert(dlBody.includes('throw new Error(`sharing: failed to download revoked.json for group'),
+  assert(dlBody.includes('throw downloadError(`revoked.json for group ${groupId}`, err)'),
     'loadGroup must throw a labeled error when the revoked.json download fails');
-  assert(dlBody.includes('throw new Error(`sharing: failed to download ${ITEM_TYPES[i]}.json for group'),
+  assert(dlBody.includes('throw downloadError(`${ITEM_TYPES[i]}.json for group ${groupId}`, err)'),
     'loadGroup must throw a labeled error when an item-file download fails');
 
-  // loadAll must still isolate the (now throwing) per-folder failures so one
-  // bad folder cannot break the other groups.
+  // loadAll: a joined load that fails with 403/404 (access gone — removed or
+  // group deleted) must consult revoked.json immediately and apply the
+  // verdict, because the poll only covers loaded groups.
   const allStart = drive.indexOf('/** Load all groups');
   const allEnd = drive.indexOf('getAllGroups()', allStart);
   const allBody = drive.slice(allStart, allEnd);
+  assert(allBody.includes('if (err?.code === 403 || err?.code === 404)'),
+    'loadAll must detect access loss (403/404) on joined group loads');
+  assert(allBody.includes('checkRemovalViaRevoked(joined.groupId, tok)'),
+    'loadAll must consult revoked.json when a joined load fails with 403/404');
+  assert(allBody.includes('handleStaleGroup(joined.groupId, verdict)'),
+    'loadAll must apply the removed/deleted verdict for the failed joined group');
+
+  // handleStaleGroup: shared verdict handling (poll + loadAll) — drops the
+  // group, notifies the app, purges the joined_groups pointer.
+  assert(drive.includes('async handleStaleGroup(groupId, verdict)'),
+    'sharing-drive.js must define handleStaleGroup');
+  assert(drive.includes("db.from('joined_groups').delete().eq('id', groupId)"),
+    'handleStaleGroup must purge the joined_groups pointer');
+
+  // loadAll must still isolate the (now throwing) per-folder failures so one
+  // bad folder cannot break the other groups.
   assert(allBody.includes('.catch(err =>'),
     'loadAll must isolate per-folder load failures so one bad folder cannot break all groups');
 });
@@ -2432,8 +2456,8 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     });
 
     test("a 'removed' verdict dispatches sharing-group-purge-items (no dialog)", () => {
-      const m = drive.match(/for \(const \{ groupId: gid, verdict \} of staleGroupIds\) \{([\s\S]*?)\n        \}/);
-      assert(m, 'stale-group cleanup block must exist in poll()');
+      const m = drive.match(/async handleStaleGroup\(groupId, verdict\) \{([\s\S]*?)\n    \},/);
+      assert(m, 'handleStaleGroup must exist');
       const body = m[1];
       assert(body.includes("if (verdict === 'removed')"),
         'cleanup must branch on the removed verdict');

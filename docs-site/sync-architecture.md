@@ -255,7 +255,7 @@ sequenceDiagram
         end
         end
         alt group.json missing on an owned folder (partial creation)
-            App->>App: "Older than the abandoned threshold → folder trashed (recoverable on Drive)<br/>Younger → left alone (creation may still be in progress on another device)"
+            App->>App: "Older than 15 minutes → folder trashed (recoverable on Drive)<br/>Younger → left alone (creation may still be in progress on another device)"
         else group.json found
             App->>OWN: "Download group.json + revoked.json + todos/habits/lists.json in parallel"
             rect rgb(253, 237, 236)

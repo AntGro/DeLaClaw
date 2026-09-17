@@ -43,12 +43,13 @@ OAuth2 token issuer + file storage maps 1:1 (e.g. KDrive auth + KDrive folders).
 The IndexedDB offline cache is not part of this flow — it only applies to
 local-server mode, never to the Drive backend. The calendar is never read at
 startup either: it is a write-only projection, synced on table flush.
-The two diagrams below are parallel tracks of the same startup: **1** follows
-the personal-data track (which loads the `joined_groups` table alongside the
-other personal tables), **2** the sharing track. `loadAll()` reads the
-already-loaded pointers and runs only in the sharing track, exactly once.
+**1** covers auth, **2** covers what happens at login right after auth (the
+personal-data track, which loads the `joined_groups` table alongside the other
+personal tables), and **3** covers the sharing startup track, which runs in
+parallel with **2**. `loadAll()` reads the already-loaded pointers and runs
+only in the sharing track, exactly once.
 
-### 1 · Auth + personal data
+### 1 · Auth
 
 ```mermaid
 sequenceDiagram
@@ -56,7 +57,6 @@ sequenceDiagram
     participant Page as "Page (rendered)"
     participant LS as "Local storage (browser)"
     participant Auth as "Auth server (token issuer)"
-    participant PF as "Personal folder (DeLaClaw/)"
 
     App->>Page: "Show login screen + progress bar"
     App->>LS: "Read active backend mode, last view, scoped prefs"
@@ -81,6 +81,64 @@ sequenceDiagram
             end
         end
     end
+```
+
+### 2 · At login — right after auth
+
+Once the app holds a valid access token, login runs. In order:
+
+1. **Find-or-create the personal folder** (`DeLaClaw/`, `DeLaClawDev/` on dev).
+   On failure the login screen shows a generic connection error; retrying
+   re-runs find-or-create, so a folder created by a timed-out request is found
+   and reused — never duplicated.
+2. **List the folder's files.** This decides the branch: **existing install**
+   (table files found — a retry after a failed fresh install lands here too)
+   or **fresh install** (no table files at all).
+3. **Existing install: download every per-table JSON file in parallel**,
+   keeping each file's ETag and modifiedTime. A missing file is not a failure —
+   that table simply starts empty. One failed download aborts the whole load
+   (all-or-nothing) and returns to the login screen.
+4. **Read `schema_version` from settings.json** (missing → version 0). If any
+   migration is pending, the backup policy runs before the first one:
+   - **A `backup-v{B}.json` exists for the current version** — a previous batch
+     did not complete. The app downloads the backup, **replaces the in-memory
+     tables with the backup's content**, then overwrites every table file in
+     place from it (a table file missing from the folder is *created* from the
+     backup, not overwritten). The restore is authoritative — no ETag
+     preconditions — because the on-Drive state is known-bad partial-batch
+     data and the backup is the source of truth. The batch then re-runs from
+     the backup's version on this clean state. If the restore itself fails, the
+     backup is untouched (nothing is ever deleted before success) and the retry
+     restores again.
+   - **No backup, or a stale one** — delete any stale backups, snapshot the
+     current tables as `backup-v{currentVersion}.json`, then migrate. If the
+     snapshot upload fails, nothing on Drive has changed yet.
+5. **Run each pending migration, oldest first**: apply it to the in-memory
+   store, bump `schema_version` in memory, upload the changed table files.
+   `settings.json` is *not* written per migration. If an upload fails, the
+   backup is retained and `settings.json` still carries the pre-batch version,
+   so the retry restores from the backup and re-runs the whole batch.
+6. **Write `settings.json` once** with the final `schema_version` — the batch
+   completion marker — then **delete the backup**. A backup left on Drive always
+   means "a batch did not complete".
+7. **Fresh install: create one JSON file per table in parallel** (all except
+   `settings.json`), seeding the category tables with their protected default
+   rows — then **write `settings.json` last** with `schema_version=latest` as
+   the completion marker. If the table creation fails midway, the retry lands
+   in the existing-install branch with no `schema_version` (version 0), so it
+   snapshots and runs all migrations — including the one that re-seeds the
+   protected category rows.
+8. **Create the in-memory adapter** seeded with the loaded data, hide the login
+   screen, show the app shell, and render the current view from memory.
+9. **Start the 30s poll and the tab-focus poll** over the personal tables. The
+   calendar is never read at startup — it is a write-only projection, synced
+   on table flush only.
+
+```mermaid
+sequenceDiagram
+    participant App as "App (in-memory)"
+    participant Page as "Page (rendered)"
+    participant PF as "Personal folder (DeLaClaw/)"
 
     App->>Page: "Progress: connecting…"
     App->>PF: "Find-or-create DeLaClaw/ (DeLaClawDev/ on dev)"
@@ -167,7 +225,7 @@ sequenceDiagram
     Note over App,Page: "Calendar is NOT synced on page load<br/>trusted already in sync, syncs on table flush only"
 ```
 
-### 2 · Sharing
+### 3 · Sharing startup
 
 ```mermaid
 sequenceDiagram

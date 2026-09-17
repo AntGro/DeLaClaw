@@ -239,13 +239,44 @@ sequenceDiagram
     App->>App: "Read joined_groups pointers (already loaded with personal tables)"
     App->>OWN: "Find DeLaClaw-Shared/ root, list dlc-group-* subfolders"
 
-    par Per owned folder
-        App->>OWN: "Download group.json + revoked.json + todos/habits/lists.json in parallel"
-    and Per joined pointer
-        App->>JOIN: "Download group.json + item files via saved file IDs (revoked.json fileId recorded)"
+    rect rgb(253, 237, 236)
+    opt The root find or the folder listing fails
+        OWN-->>App: "Error"
+        App->>App: "Error is logged — the app keeps running<br/>Owned groups simply don't load this time<br/>They reappear on the next page load (the listing re-runs)"
+    end
     end
 
-    Note over App: "One bad folder never takes down the others —<br/>load failures are isolated per folder"
+    par Per owned folder
+        App->>OWN: "Find group.json + revoked.json + todos/habits/lists.json in parallel"
+        rect rgb(253, 237, 236)
+        opt The file listing itself fails
+            OWN-->>App: "Error"
+            App->>App: "Group skipped this cycle — never treated as incomplete,<br/>never trashed (the folder couldn't be looked at properly)<br/>Retried on the next page load"
+        end
+        end
+        alt group.json missing on an owned folder (partial creation)
+            App->>App: "Older than the abandoned threshold → folder trashed (recoverable on Drive)<br/>Younger → left alone (creation may still be in progress on another device)"
+        else group.json found
+            App->>OWN: "Download group.json + revoked.json + todos/habits/lists.json in parallel"
+            rect rgb(253, 237, 236)
+            opt A single file download fails
+                OWN-->>App: "Error for that file only"
+                App->>App: "Degraded, not fatal — the failed file loads as absent:<br/>item file → empty items for that type (the poll re-discovers the file and fills them in)<br/>revoked.json → no revocation state, same as groups created before phase 3<br/>group.json → stub group (folder ID as name, empty members)<br/>The group still loads — nothing else is affected"
+            end
+            end
+        end
+    and Per joined pointer
+        App->>JOIN: "Download group.json + item files via saved file IDs<br/>(revoked.json is NOT downloaded — only its fileId is recorded for the poll)"
+        rect rgb(253, 237, 236)
+        opt A single file download fails
+            JOIN-->>App: "Error for that file only"
+            App->>App: "Degraded, not fatal — the failed file loads as absent:<br/>item file → empty items for that type (stays empty until the next page load —<br/>the poll can't search for files under the joined scope)<br/>group.json → stub group (folder ID as name, empty members).<br/>the poll can't re-check it either (no group.json fileId was recorded),<br/>so it stays a stub until the next page load re-downloads it"
+        end
+        end
+        opt Pointer has no saved file IDs (legacy)
+            App->>JOIN: "Find + download the files as for an owned folder"
+        end
+    end
 
     App->>App: "Init in-memory sync intents per item file (createdIds / deletedIds)"
     App->>App: "normalizeEntry → _groups map"

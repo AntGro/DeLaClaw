@@ -261,7 +261,7 @@ sequenceDiagram
             rect rgb(253, 237, 236)
             opt A single file download fails
                 OWN-->>App: "Error for that file only"
-                App->>App: "Degraded, not fatal — the failed file loads as absent:<br/>item file → empty items for that type (the poll re-discovers the file and fills them in)<br/>revoked.json → no revocation state, same as groups created before phase 3<br/>group.json → stub group (folder ID as name, empty members)<br/>The group still loads — nothing else is affected"
+                App->>App: "Degraded, not fatal — the failed file loads as absent:<br/>item file → empty items for that type (the poll re-discovers the file and fills them in)<br/>revoked.json → no revocation state to consult<br/>group.json → stub group (folder ID as name, empty members)<br/>The group still loads — nothing else is affected"
             end
             end
         end
@@ -272,9 +272,6 @@ sequenceDiagram
             JOIN-->>App: "Error for that file only"
             App->>App: "Degraded, not fatal — the failed file loads as absent:<br/>item file → empty items for that type (stays empty until the next page load —<br/>the poll can't search for files under the joined scope)<br/>group.json → stub group (folder ID as name, empty members).<br/>the poll can't re-check it either (no group.json fileId was recorded),<br/>so it stays a stub until the next page load re-downloads it"
         end
-        end
-        opt Pointer has no saved file IDs (legacy)
-            App->>JOIN: "Find + download the files as for an owned folder"
         end
     end
 

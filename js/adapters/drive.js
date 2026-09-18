@@ -110,6 +110,28 @@ function clearDriveTokenCache(clientId) {
   } catch (_) {}
 }
 
+// Shared waiter, resolved when the tab is visible AND focused. Holds off
+// silent token refreshes — GIS always opens a popup window, stealing focus.
+let _tabUsableWaiter = null;
+
+function _waitUntilTabUsable() {
+  if (_tabUsableWaiter) return _tabUsableWaiter;
+  _tabUsableWaiter = new Promise((resolve) => {
+    const onUsable = () => {
+      if (document.hidden || !document.hasFocus()) return;
+      document.removeEventListener('visibilitychange', onUsable);
+      window.removeEventListener('focus', onUsable);
+      _tabUsableWaiter = null;
+      resolve();
+    };
+    document.addEventListener('visibilitychange', onUsable);
+    window.addEventListener('focus', onUsable);
+    // In case the tab became usable between the check and arming the listeners
+    onUsable();
+  });
+  return _tabUsableWaiter;
+}
+
 function getGoogleAccessToken(clientId, promptIfNeeded = true) {
   // 1. In-memory cache — scoped by clientId
   if (_cachedToken && _cachedClientId === clientId && Date.now() < _tokenExpiry - 60000) {
@@ -131,7 +153,15 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
   if (_pendingPromise && _pendingClientId === clientId) {
     return _pendingPromise;
   }
-  // 4. Fresh OAuth flow — single flight
+  // 4. Fresh OAuth flow — single flight. Never start it from a hidden/
+  // unfocused tab (GIS always opens a popup window): wait until usable.
+  if (!promptIfNeeded && (document.hidden || !document.hasFocus())) {
+    console.log('[DeLaClaw] token refresh due but this tab is not active — holding the auth popup until you return. hidden:', document.hidden, 'hasFocus:', document.hasFocus());
+    return _waitUntilTabUsable().then(() => {
+      console.log('[DeLaClaw] tab active again — retrying deferred token refresh');
+      return getGoogleAccessToken(clientId, promptIfNeeded);
+    });
+  }
   _pendingClientId = clientId;
   _pendingPromise = new Promise((resolve, reject) => {
     if (typeof google === 'undefined' || !google.accounts) {
@@ -148,7 +178,7 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
         }
         // Check granted scopes — Drive is mandatory
         const granted = resp.scope || '';
-        console.log('[DeLaClaw] initial sign-in granted scopes:', granted);
+        console.log('[DeLaClaw] initial sign-in granted scopes:', new Date().toISOString(), granted);
         if (!granted.includes(DRIVE_SCOPE_FILE)) {
           reject(new Error('drive_scope_denied'));
           return;
@@ -167,6 +197,8 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
     if (promptIfNeeded) {
       client.requestAccessToken();
     } else {
+      // '' shows consent UI at once if needed; background popups are
+      // prevented by the tab-usability gate above, not by this parameter.
       client.requestAccessToken({ prompt: '' });
     }
   }).finally(() => {
@@ -437,9 +469,16 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   // network blip) must not declare the token dead and pop a sign-in dialog.
   let _silentFailStreak = 0;
   const MAX_SILENT_FAILURES = 3;
-  // One-shot visibilitychange handler that defers the re-auth popup until the tab
-  // is visible again (armed when a background tab hits the dead-token path).
+  // One-shot visibility/focus handler that defers the re-auth popup until the
+  // tab is visible AND focused again (armed when a background/unfocused tab
+  // hits the dead-token path). document.hidden alone is not enough: a tab
+  // that is active in a window behind another window still counts as
+  // "visible", so the popup would steal focus from what the user is doing.
   let _reauthVisibilityHandler = null;
+
+  function tabIsUsable() {
+    return !document.hidden && document.hasFocus();
+  }
 
   function isUserBusy() {
     // Inline editing, modal open, or flashcard/text practice active
@@ -465,17 +504,22 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   function scheduleReauthWhenFree() {
     if (!_tokenDead || _reauthPending) return;
-    if (document.hidden) {
-      // Never open a sign-in popup from a background tab — defer the prompted
-      // re-auth until the tab is visible again instead of startling the user.
+    console.log('[DeLaClaw] reauth visibility check — hidden:', document.hidden, 'hasFocus:', document.hasFocus());
+    if (!tabIsUsable()) {
+      // Never open a sign-in popup from a background or unfocused tab — defer
+      // the prompted re-auth until the user is back on this tab instead of
+      // startling them. Listens for both visibilitychange and focus: switching
+      // back to an already-visible window fires focus, not visibilitychange.
       if (!_reauthVisibilityHandler) {
         _reauthVisibilityHandler = () => {
-          if (document.hidden) return;
+          if (!tabIsUsable()) return;
           document.removeEventListener('visibilitychange', _reauthVisibilityHandler);
+          window.removeEventListener('focus', _reauthVisibilityHandler);
           _reauthVisibilityHandler = null;
           scheduleReauthWhenFree();
         };
         document.addEventListener('visibilitychange', _reauthVisibilityHandler);
+        window.addEventListener('focus', _reauthVisibilityHandler);
       }
       return;
     }
@@ -839,6 +883,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   let pollTimer = null;
 
   async function pollForChanges() {
+    // Skip while a token refresh is deferred: avoids a wake-up herd of
+    // duplicate Drive requests.
+    if (_tabUsableWaiter) return;
     try {
       const tok = await getToken();
       if (!tok) return;
@@ -1178,6 +1225,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       for (const t of Object.keys(saveTimers)) clearTimeout(saveTimers[t]);
       if (_reauthVisibilityHandler) {
         document.removeEventListener('visibilitychange', _reauthVisibilityHandler);
+        window.removeEventListener('focus', _reauthVisibilityHandler);
         _reauthVisibilityHandler = null;
       }
       clearDriveTokenCache(clientId);

@@ -269,7 +269,15 @@ sequenceDiagram
         App->>JOIN: "Download group.json + todos/habits/lists.json via saved file IDs<br/>(revoked.json content is NOT downloaded here — only its fileId is recorded)"
         rect rgb(253, 237, 236)
         opt Download fails with 403/404 (our access is gone)
-            App->>JOIN: "revoked.json IS read now — the file-level read grant survives folder revocation<br/>'removed' → pointer purged silently (same as the poll verdict)<br/>'deleted' → pointer purged + group-deleted notice<br/>revoked.json unreadable → treated as transient (see below)"
+            App->>JOIN: "Read revoked.json via its saved fileId<br/>(the file-level read grant survives folder revocation)"
+            alt own member ID found in revoked.json
+                App->>App: "Verdict 'removed' → pointer purged silently<br/>+ local item pointers purged (no dialog)"
+            else no entry — or revoked.json itself gone (404)
+                App->>App: "Verdict 'deleted' → pointer purged + group-deleted notice"
+            end
+            opt revoked.json unreadable (transient)
+                App->>App: "No verdict → group skipped this cycle,<br/>retried on the next page load"
+            end
         end
         opt Download fails otherwise (transient)
             JOIN-->>App: "Error for that file"

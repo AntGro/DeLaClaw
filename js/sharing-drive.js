@@ -353,7 +353,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   // into memory by the Drive adapter at connect. _joinedGroups is a read
   // cache, refreshed from the table after every mutation and at each poll.
 
-  let _joinedGroups = [];       // [{ id (=groupId), folderId, groupId, fileIds: { group, todos, habits, lists, revoked }, memberId, joinedAt, updated_at }]
+  let _joinedGroups = [];       // [{ id (=groupId), folderId, groupId, fileIds: { group, todos, habits, lists, extra_1..extra_12, revoked }, memberId, joinedAt, updated_at }]
 
   // ── Internals ──
 
@@ -1554,7 +1554,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     /** Join a shared group using explicit file IDs (from Picker or direct access).
      *  Requires a matching pending invite (by email hash) — Drive access alone is not enough.
      *  @param {string} folderId — the shared subfolder ID
-     *  @param {Object} fileIds — { group: fileId, todos: fileId, habits: fileId, lists: fileId }
+     *  @param {Object} fileIds — Drive file IDs keyed by every getRequiredGroupFiles() entry (group, todos, habits, lists, the 12 extra_* placeholders, revoked)
      *  @param {Object} [opts] — { displayName } pseudo chosen by the joiner */
     async joinWithFileIds(folderId, fileIds, opts = {}) {
       // Gate the join on the full file set: flipping to 'joined' with only a

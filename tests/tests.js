@@ -2284,6 +2284,101 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   }
 
   // ===================================================================
+  // Drive personal-table sync intents (js/adapters/drive.js)
+  // Bridges the sharing-file-reconcile engine to personal tables so a
+  // deletion on one device is not resurrected by another device's stale
+  // in-memory copy on poll or on the 412 merge.
+  // ===================================================================
+  {
+    const { pathToFileURL } = require('url');
+    const demo = await import(pathToFileURL(path.join(JS_DIR, 'adapters/demo.js')).href);
+    const { createDemoAdapter } = demo;
+
+    // The demo builder executes synchronously on .then — no async needed.
+    const exec = (builder) => {
+      let out, err;
+      builder.then(r => { out = r; }, e => { err = e; });
+      if (err) throw err;
+      return out;
+    };
+
+    test('demo: _doDelete echoes deleted rows when _returnRow is set', () => {
+      const db = createDemoAdapter({});
+      exec(db.from('todos').insert({ id: 'a', text: 'x' }));
+      exec(db.from('todos').insert({ id: 'b', text: 'y' }));
+      const del = db.from('todos').delete().eq('id', 'a');
+      del._returnRow = true;
+      const res = exec(del);
+      assert(Array.isArray(res.data) && res.data.length === 1 && res.data[0].id === 'a',
+        'deleted row must be echoed so the caller can name the intent');
+      const remaining = exec(db.from('todos').select('*'));
+      assert(remaining.data.length === 1 && remaining.data[0].id === 'b',
+        'only the filtered row must be deleted');
+    });
+
+    test('demo: _doDelete echoes every row on a bulk delete with _returnRow', () => {
+      const db = createDemoAdapter({});
+      exec(db.from('todos').insert({ id: 'a', text: 'x', done: true }));
+      exec(db.from('todos').insert({ id: 'b', text: 'y', done: true }));
+      exec(db.from('todos').insert({ id: 'c', text: 'z', done: false }));
+      const del = db.from('todos').delete().eq('done', true);
+      del._returnRow = true;
+      const res = exec(del);
+      const ids = res.data.map(r => r.id).sort().join(',');
+      assert(ids === 'a,b', 'bulk delete must echo all deleted ids, got: ' + ids);
+    });
+
+    test('demo: _doDelete keeps { data: null } without _returnRow (demo mode unchanged)', () => {
+      const db = createDemoAdapter({});
+      exec(db.from('todos').insert({ id: 'a', text: 'x' }));
+      const res = exec(db.from('todos').delete().eq('id', 'a'));
+      assert(res.data === null, 'default delete contract must stay { data: null }');
+    });
+
+    // ── wiring in js/adapters/drive.js (source-level, like the other drive tests) ──
+    const driveAdapterSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+
+    test('drive: personal tables import the sync-intent engine', () => {
+      assert(driveAdapterSrc.includes("from '../sharing-file-reconcile.js'"),
+        'drive.js must import the backend-agnostic reconcile module');
+      assert(driveAdapterSrc.includes('INTENT_TABLES'), 'must define the intent-covered table set');
+      assert(driveAdapterSrc.includes('KEY_VALUE_TABLES.has(t)'),
+        'settings/prompts must be excluded from intent tables (id-keyed only)');
+    });
+
+    test('drive: from() marks create/delete intents on mutation', () => {
+      assert(driveAdapterSrc.includes('markDriveMutationIntents(table, builder, result, beforeIds)'),
+        'from() wrapper must mark mutation intents');
+      assert(driveAdapterSrc.includes("markCreated(intents, row.id)"),
+        'inserts/upserts must mark created ids');
+      assert(driveAdapterSrc.includes("markDeleted(intents, row.id)"),
+        'deletes must mark deleted ids from the echoed rows');
+    });
+
+    test('drive: flush captures/acknowledges intents and reconciles on 412', () => {
+      assert(driveAdapterSrc.includes('captureIntents(intents, localData)') &&
+             driveAdapterSrc.includes('acknowledgeIntents(intents, captured)'),
+        'flushTable must capture per upload and acknowledge only on success');
+      assert(driveAdapterSrc.includes('reconcileItems(localData, Array.isArray(remoteData) ? remoteData : [], intents)'),
+        '412 path must reconcile with intents instead of the blind union merge');
+      assert(driveAdapterSrc.includes('mergeTable(table, localData, Array.isArray(remoteData) ? remoteData : [])'),
+        'key-value tables must keep their key-based merge on 412');
+    });
+
+    test('drive: poll reconciles with intents instead of overwriting', () => {
+      assert(driveAdapterSrc.includes('reconcileItems(oldData, newData, intentStateFor(tableName))'),
+        'pollForChanges must reconcile the download against in-memory state with intents');
+      assert(!/inner\._store\[tableName\] = newData;/.test(driveAdapterSrc),
+        'the blind poll overwrite must be gone');
+    });
+
+    test('drive: backup restore resets sync intents', () => {
+      assert(driveAdapterSrc.includes('tableIntents[table] = createIntentState()'),
+        'restore must drop stale intents (local == remote by construction)');
+    });
+  }
+
+  // ===================================================================
   // Drive folder names — production vs preview hosts (js/drive-folders.js)
   // ===================================================================
   {

@@ -279,8 +279,15 @@ class DemoQueryBuilder {
   _doDelete(rows) {
     const matching = this._filtered(rows);
     const ids = new Set(matching.map(r => r.id));
-    const before = rows.length;
     this._store[this._table] = rows.filter(r => !ids.has(r.id));
+    // Honor _returnRow (set by the Drive adapter) so callers can name the
+    // deleted ids — e.g. to record sync intents. Demo mode never sets it,
+    // so the default { data: null } behavior is unchanged there.
+    if (this._returnRow) {
+      const deleted = matching.map(r => ({ ...r }));
+      if (this._singleRow) return { data: deleted[0] || null, error: null };
+      return { data: deleted, error: null };
+    }
     return { data: null, error: null };
   }
 

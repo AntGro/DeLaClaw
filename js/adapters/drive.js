@@ -93,6 +93,7 @@ function clearDriveTokenCache(clientId) {
   _tokenExpiry = 0;
   _pendingPromise = null;
   _pendingClientId = null;
+  _waiterGeneration++;
   try {
     if (clientId) {
       sessionStorage.removeItem(_tokenKey(clientId));
@@ -113,6 +114,9 @@ function clearDriveTokenCache(clientId) {
 // Shared waiter, resolved when the tab is visible AND focused. Holds off
 // silent token refreshes — GIS always opens a popup window, stealing focus.
 let _tabUsableWaiter = null;
+// Bumped whenever the token state is torn down (adapter destroy): waiters
+// armed before the bump must not restart OAuth when they wake.
+let _waiterGeneration = 0;
 
 function _waitUntilTabUsable() {
   if (_tabUsableWaiter) return _tabUsableWaiter;
@@ -156,8 +160,10 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
   // 4. Fresh OAuth flow — single flight. Never start it from a hidden/
   // unfocused tab (GIS always opens a popup window): wait until usable.
   if (!promptIfNeeded && (document.hidden || !document.hasFocus())) {
+    const generation = _waiterGeneration;
     console.log('[DeLaClaw] token refresh due but this tab is not active — holding the auth popup until you return. hidden:', document.hidden, 'hasFocus:', document.hasFocus());
     return _waitUntilTabUsable().then(() => {
+      if (generation !== _waiterGeneration) throw new Error('drive_adapter_destroyed');
       console.log('[DeLaClaw] tab active again — retrying deferred token refresh');
       return getGoogleAccessToken(clientId, promptIfNeeded);
     });
@@ -535,7 +541,12 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     try {
       const tok = await getGoogleAccessToken(clientId, false);
       if (tok) { _tokenDead = false; _silentFailStreak = 0; return tok; }
-    } catch { /* silent refresh failed */ }
+    } catch (err) {
+      // Adapter destroyed while a refresh was deferred: stay dead quietly,
+      // without feeding the silent-failure streak or triggering re-auth.
+      if (err && err.message === 'drive_adapter_destroyed') return null;
+      /* silent refresh failed */
+    }
     _silentFailStreak++;
     // Only declare the token dead after consecutive silent failures — a single
     // transient failure must not escalate to a prompted sign-in popup.

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-18T18:33:39.613Z from 39 modules (v2.1.18). Total LOC 29120. Do not hand-edit.
+> Generated 2026-09-18T18:57:30.692Z from 39 modules (v2.2.0). Total LOC 29204. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -30,7 +30,7 @@
 | main | 3645 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
 | i18n | 2213 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
 | sharing-drive | 1730 | joined_groups | drive-folders,sharing-envelope,sharing-file-reconcile,utils | main.js,sharing.js | - |
-| drive | 1293 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
+| drive | 1370 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | sharing-ui | 1288 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:37,guard+pendingSet,window:8 |
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
 | utils | 843 | flashcards,x | i18n,icons,state,version | - | esc:7,window:6 |
@@ -38,7 +38,7 @@
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 464 | - | habits,i18n,icons,utils | - | - |
 | delegation | 421 | - |  | - | window:1 |
-| demo | 303 | x |  | drive.js | - |
+| demo | 310 | x |  | drive.js | - |
 | offline-cache | 281 | - | ./state,state.js | main.js | - |
 | crypto-sync | 265 | settings |  | - | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
@@ -46,7 +46,7 @@
 | agents-ui | 200 | agent_grants | db,i18n,icons,utils | main.js | esc:29,window:5 |
 | storm3d | 185 | - |  | hero.js | - |
 | rest | 162 | x |  | main.js | - |
-| sharing-file-reconcile | 133 | - |  | sharing-drive.js | - |
+| sharing-file-reconcile | 133 | - |  | drive.js,sharing-drive.js | - |
 | sharing-interface | 132 | - |  | sharing.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
 | sharing | 101 | - | sharing-drive,sharing-interface | - | - |

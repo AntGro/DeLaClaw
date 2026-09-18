@@ -7,11 +7,15 @@
 // On mutation: debounced write-back per table (~2s after last change).
 //
 // Concurrency: uses Drive ETags for optimistic locking. On conflict
-// (412 Precondition Failed), re-reads the table, merges by id
-// (newer updated_at wins), and retries the write.
+// (412 Precondition Failed), re-reads the table and reconciles with
+// in-memory sync intents (createdIds/deletedIds — js/sharing-file-reconcile.js):
+// a row absent remotely is a remote deletion unless this tab created it and
+// hasn't uploaded it yet. Key-value tables (settings, prompts) keep their
+// key-based merge (newer updated_at wins).
 //
 // Change detection: polls Drive every POLL_INTERVAL_MS for modified
-// files and re-fetches only changed tables.
+// files and re-fetches only changed tables, reconciling (not overwriting)
+// against the in-memory store with the same intent engine.
 //
 // Migration: legacy single-file → per-table conversion and subsequent
 // schema migrations are handled by migrations/drive-migrations.js.
@@ -21,6 +25,7 @@
 // ===================================================================
 
 import { createDemoAdapter } from './demo.js';
+import { createIntentState, markCreated, markDeleted, reconcileItems, captureIntents, acknowledgeIntents } from '../sharing-file-reconcile.js';
 import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
 import { compareVersions } from '../../migrations/version-compare.js';
 import { parseBackupVersion, newestBackupVersion, decideBackupAction } from './drive-backup-policy.js';
@@ -411,6 +416,46 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   const dirtyTables = new Set();
   const saveTimers = {};
 
+  // ── Per-table sync intents (createdIds/deletedIds) ──
+  // Same engine as shared group files (js/sharing-file-reconcile.js): deletion
+  // is only absence in a file backend, so a plain overwrite/union cannot tell
+  // "deleted on another device" apart from "not yet seen". Intents disambiguate:
+  // a row this tab created but hasn't uploaded is retained; a row this tab
+  // deleted but hasn't uploaded suppresses the stale remote copy. Captured per
+  // upload, acknowledged only on success. Key-value tables (settings, prompts)
+  // keep their key-based merge — intents are id-keyed only.
+  const tableIntents = {}; // { tableName: { createdIds: Set, deletedIds: Set } }
+  const intentStateFor = (table) => {
+    if (!tableIntents[table]) tableIntents[table] = createIntentState();
+    return tableIntents[table];
+  };
+  const INTENT_TABLES = new Set(DRIVE_TABLES.filter(t => !KEY_VALUE_TABLES.has(t)));
+
+  /** Record create/delete intents for one local mutation (id-keyed tables only). */
+  function markDriveMutationIntents(table, builder, result, beforeIds) {
+    const intents = intentStateFor(table);
+    const rows = Array.isArray(result?.data) ? result.data : (result?.data ? [result.data] : []);
+    if (builder._method === 'POST') {
+      for (const row of rows) if (row?.id) markCreated(intents, row.id);
+    } else if (builder._method === 'PUT') {
+      // Upsert: only ids that did not exist before this mutation are creations;
+      // rows that already existed are updates (no presence change).
+      for (const row of rows) {
+        if (row?.id && beforeIds && !beforeIds.has(row.id)) markCreated(intents, row.id);
+      }
+    } else if (builder._method === 'DELETE') {
+      if (rows.length > 0) {
+        for (const row of rows) if (row?.id) markDeleted(intents, row.id);
+      } else {
+        // No rows echoed back: fall back to the id filter when the delete
+        // named exactly one row (e.g. .delete().eq('id', x)).
+        const idFilter = builder._filters?.find(f => f.col === 'id' && f.op === 'eq');
+        if (idFilter?.val != null) markDeleted(intents, idFilter.val);
+      }
+    }
+    // PATCH (update): no presence change — no intent.
+  }
+
   // ── Load: list files, read data from whatever format exists ──
 
   const existingFiles = await listFolderFiles(token, folderId);
@@ -671,6 +716,11 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             const result = await uploadFile(restoreTok, folderId, meta.fileId || null, `${table}.json`, inner._store[table]);
             fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
           }));
+          // Local and remote are identical by construction now: any sync intents
+          // pending from before the restore are definitionally stale — drop them.
+          for (const table of DRIVE_TABLES) {
+            if (INTENT_TABLES.has(table)) tableIntents[table] = createIntentState();
+          }
           // Drop any other (older) backups; the restored one is deleted on success.
           for (const [name, f] of filesByName) {
             if (name !== backupName && parseBackupVersion(name) !== null) {
@@ -833,6 +883,12 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         const localData = inner._store[table] || [];
         const meta = fileMeta[table] || {};
         const fileName = `${table}.json`;
+        const useIntents = INTENT_TABLES.has(table);
+        const intents = useIntents ? intentStateFor(table) : null;
+        // Capture exactly which intents this upload represents. Only a success
+        // acknowledges them — a mutation made while the request is in flight
+        // stays pending (same contract as shared group files).
+        const captured = useIntents ? captureIntents(intents, localData) : null;
 
         try {
           const result = await uploadFile(tok, folderId, meta.fileId, fileName, localData, meta.etag, keepalive);
@@ -841,12 +897,18 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             etag: result.etag,
             modifiedTime: new Date().toISOString(),
           };
+          if (useIntents) acknowledgeIntents(intents, captured);
         } catch (err) {
           if (err.code === 412 && retries < MAX_RETRIES) {
             console.warn(`Drive: ETag conflict on ${table}, merging (attempt ${retries + 1})`);
             const { data: remoteData, etag: newEtag } = await downloadFile(tok, meta.fileId);
-            const merged = mergeTable(table, localData, Array.isArray(remoteData) ? remoteData : []);
-            inner._store[table] = merged;
+            // Intent-aware reconciliation (not a blind union): a row present
+            // locally but absent remotely is a remote deletion — unless this
+            // tab created it and hasn't uploaded it yet. Key-value tables keep
+            // their key-based merge.
+            inner._store[table] = useIntents
+              ? reconcileItems(localData, Array.isArray(remoteData) ? remoteData : [], intents)
+              : mergeTable(table, localData, Array.isArray(remoteData) ? remoteData : []);
             fileMeta[table] = { ...meta, etag: newEtag };
             flushingTables.delete(table);
             delete flushPromises[table];
@@ -926,14 +988,23 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         const newData = Array.isArray(data) ? data : [];
         const oldData = inner._store[tableName] || [];
 
+        // Intent-aware reconciliation instead of a blind overwrite: a row
+        // present in memory but absent on Drive is a remote deletion — unless
+        // this tab created it and hasn't uploaded it yet (createdIds). A row
+        // this tab deleted but hasn't uploaded suppresses the stale remote
+        // copy instead of resurrecting it.
+        const reconciled = INTENT_TABLES.has(tableName)
+          ? reconcileItems(oldData, newData, intentStateFor(tableName))
+          : newData;
+
         // Only update + notify if data actually changed (skip our own writes)
-        if (JSON.stringify(newData) !== JSON.stringify(oldData)) {
+        if (JSON.stringify(reconciled) !== JSON.stringify(oldData)) {
           if (tableName === 'settings') {
             const oldGcal = oldData.filter(r => r.key?.startsWith('gcal_')).map(r => r.key);
             const newGcal = newData.filter(r => r.key?.startsWith('gcal_')).map(r => r.key);
             console.log('[drive-poll] settings overwritten, gcal keys: old=%o new=%o', oldGcal, newGcal);
           }
-          inner._store[tableName] = newData;
+          inner._store[tableName] = reconciled;
           fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
           if (adapter._onExternalChange) adapter._onExternalChange(tableName);
         } else {
@@ -1020,14 +1091,20 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   const adapter = {
     from(table) {
       const builder = inner.from(table);
-      // Ensure insert/upsert always returns data (including auto-generated IDs)
-      // so the dirty-tracking wrapper can extract the item ID from result.data.
+      // Ensure insert/upsert/delete always returns data (including auto-generated IDs)
+      // so the dirty-tracking wrapper can extract item IDs from result.data.
       builder._returnRow = true;
       const origThen = builder.then.bind(builder);
       builder.then = (resolve, reject) => {
+        // Snapshot pre-mutation ids so upserts can tell created rows from updated ones.
+        const beforeIds = (builder._method === 'PUT' && INTENT_TABLES.has(table))
+          ? new Set((inner._store[table] || []).map(r => r.id))
+          : null;
         origThen(async (result) => {
           if (builder._method !== 'GET') {
             scheduleSave(table);
+            // Sync intents feeding the poll + 412 reconciliation below.
+            if (INTENT_TABLES.has(table)) markDriveMutationIntents(table, builder, result, beforeIds);
             // Track dirty item IDs for calendar sync
             if (adapter._markCalDirty) {
               let itemId = null;

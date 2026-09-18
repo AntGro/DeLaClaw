@@ -448,7 +448,8 @@ The sync bar reflects the current state of Drive persistence:
 
 - **Tab close / visibility hidden** → `forceSave()` fires with `keepalive: true` (skipped if payload > 64 KB)
 - **Flush failure** → table stays in `dirtyTables`, `scheduleSave` retries automatically
-- **ETag conflict (412)** → Drive adapter re-reads, merges by `updated_at` (newer wins per row), retries
+- **ETag conflict (412)** → Drive adapter re-reads and reconciles with in-memory sync intents (`createdIds`/`deletedIds`): a row absent remotely is a remote deletion unless this tab created it and hasn't uploaded it yet; present on both sides → newer `updated_at` wins. Key-value tables (`settings`, `prompts`) keep the key-based merge. Then retries
+- **Poll reconciles, doesn't overwrite** → a downloaded table is reconciled against the in-memory store with the same intent engine, so a deletion on another device propagates instead of being resurrected by a stale local copy
 - **Poll skips dirty tables** → prevents overwriting local edits that haven't flushed yet
 - **`isEditing()` guard** → external changes don't refresh UI while user is inline-editing
 - **Calendar sync disabled** → `syncTable` returns early if `prefs.enabled` is false; `_onTableFlushed` still fires but sync is a no-op

@@ -67,7 +67,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 
 ## 4. Backend & Data
 
-- Tables: canonical list lives in `server/schema.sql` (Local SQLite). Personal tables, category/deck tables, and cross-backend tables (`daily_visits`, `joined_groups`) exist on all backends; sharing tables (`sharing_groups`, `sharing_members`, `sharing_items`) are used by the Drive sharing adapter.
+- Tables: canonical list lives in `server/schema.sql` (Local SQLite). Personal tables, category/deck tables, and cross-backend tables (`daily_visits`, `groups`) exist on all backends; sharing tables (`sharing_groups`, `sharing_members`, `sharing_items`) are used by the Drive sharing adapter.
 - **Category integrity**: each category/deck table has one protected default row (`name=''`, `is_protected=1`). `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item FKs (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
 - Schema version in `settings` key `schema_version`, migrations in `migrations/`. Check `latest_compat` logic in `VERSION`.
 - Base schema + migrations must be runnable in local SQLite (`server/schema.sql`).

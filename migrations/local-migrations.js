@@ -66,26 +66,6 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE settings ADD COLUMN owner_id TEXT;
     ALTER TABLE prompts ADD COLUMN owner_id TEXT;
   `,
-  '1.297': `
-    CREATE TABLE IF NOT EXISTS joined_groups (
-      group_id TEXT PRIMARY KEY,
-      member_id TEXT NOT NULL,
-      token TEXT NOT NULL,
-      display_name TEXT,
-      group_name TEXT,
-      remote_backend_type TEXT NOT NULL,
-      remote_url TEXT,
-      remote_anon_key TEXT,
-      owner_id TEXT,
-      joined_at TEXT DEFAULT (datetime('now'))
-    );
-  `,
-  '1.301': `
-    ALTER TABLE joined_groups ADD COLUMN token_ciphertext TEXT;
-    ALTER TABLE joined_groups ADD COLUMN token_iv TEXT;
-    ALTER TABLE joined_groups ADD COLUMN remote_anon_key_ciphertext TEXT;
-    ALTER TABLE joined_groups ADD COLUMN remote_anon_key_iv TEXT;
-  `,
   '1.393': `
     CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_owner_id ON tasks(owner_id);
@@ -99,18 +79,12 @@ export const LOCAL_MIGRATIONS = {
     CREATE INDEX IF NOT EXISTS idx_list_items_owner_id ON list_items(owner_id);
     CREATE INDEX IF NOT EXISTS idx_prompts_owner_id ON prompts(owner_id);
     CREATE INDEX IF NOT EXISTS idx_settings_owner_id ON settings(owner_id);
-    CREATE INDEX IF NOT EXISTS idx_joined_groups_owner_id ON joined_groups(owner_id);
     CREATE INDEX IF NOT EXISTS idx_todos_shared_id ON todos(shared_id);
     CREATE INDEX IF NOT EXISTS idx_todos_shared_group_id ON todos(shared_group_id);
     CREATE INDEX IF NOT EXISTS idx_habits_shared_id ON habits(shared_id);
     CREATE INDEX IF NOT EXISTS idx_habits_shared_group_id ON habits(shared_group_id);
     CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON list_items(shared_id);
     CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_group_id);
-  `,
-  '1.396': `
-    -- 1.396: drop plaintext fallback for joined_groups (assume >=1.301, ciphertext exists)
-    UPDATE joined_groups SET token = NULL, remote_anon_key = NULL WHERE token_ciphertext IS NOT NULL;
-    DELETE FROM joined_groups WHERE owner_id IS NULL;
   `,
   '1.398': `
     -- 1.398: owner-only for previously open tables

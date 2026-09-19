@@ -51,7 +51,7 @@ const DRIVE_TABLES = [
   'birthdays', 'vestiaire', 'lists', 'list_items',
   'settings', 'prompts', 'daily_visits',
   'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
-  'gcal_sync', 'agent_grants', 'joined_groups',
+  'gcal_sync', 'agent_grants', 'groups',
 ];
 
 // ── Google Identity Services helpers ────────────────────────────

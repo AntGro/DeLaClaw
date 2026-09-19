@@ -11,7 +11,7 @@ const T = {
     // ── Common ──
     common: {
       save: 'Save', cancel: 'Cancel', delete: 'Delete', add: 'Add', edit: 'Edit',
-      close: 'Close', create: 'Create', name: 'Name', note: 'Note', notes: 'Notes', category: 'Category', list: 'List',
+      close: 'Close', ok: 'OK', create: 'Create', name: 'Name', note: 'Note', notes: 'Notes', category: 'Category', list: 'List',
       search: 'Search', optional: 'optional', done: 'Done', undo: 'Undo', rename: 'Rename',
       update: 'Update', activate: 'Activate', confirm: 'Confirm', reopen: 'Reopen',
       copied: 'Copied!', loading: 'Loading…', all: 'All', category_default: 'General',
@@ -585,6 +585,9 @@ const T = {
       group_deleted: 'Group deleted',
       group_removed_remotely: 'You were removed from \u201c{0}\u201d',
       group_deleted_remotely: 'Group \u201c{0}\u201d was deleted',
+      group_deleted_title: 'Group deleted',
+      group_deleted_check_folder: 'If this looks wrong, double-check by trying to open the group folder in Google Drive:',
+      group_skipped: 'Skipped \u2014 couldn\u2019t load files',
       orphan_detected_title: 'Group no longer reachable',
       orphan_detected_message: 'The group \u201c{0}\u201d can\u2019t be found. If it was deleted, you can unlink its items so they become personal again.',
       orphan_unlink: 'Unlink items',
@@ -743,7 +746,7 @@ const T = {
   fr: {
     common: {
       save: 'Enregistrer', cancel: 'Annuler', delete: 'Supprimer', add: 'Ajouter', edit: 'Modifier',
-      close: 'Fermer', create: 'Créer', name: 'Nom', note: 'Note', notes: 'Notes', category: 'Catégorie', list: 'Liste',
+      close: 'Fermer', ok: 'OK', create: 'Créer', name: 'Nom', note: 'Note', notes: 'Notes', category: 'Catégorie', list: 'Liste',
       search: 'Rechercher', optional: 'optionnel', done: 'Fait', undo: 'Annuler', rename: 'Renommer',
       update: 'Mettre à jour', activate: 'Activer', confirm: 'Confirmer', reopen: 'Rouvrir',
       copied: 'Copié !', loading: 'Chargement…', all: 'Tous', category_default: 'Général',
@@ -1298,6 +1301,9 @@ const T = {
       group_deleted: 'Groupe supprim\u00e9',
       group_removed_remotely: 'Vous avez \u00e9t\u00e9 retir\u00e9 de \u00ab\u202f{0}\u202f\u00bb',
       group_deleted_remotely: 'Le groupe \u00ab\u202f{0}\u202f\u00bb a \u00e9t\u00e9 supprim\u00e9',
+      group_deleted_title: 'Groupe supprim\u00e9',
+      group_deleted_check_folder: 'Si cela vous semble anormal, v\u00e9rifiez en ouvrant le dossier du groupe dans Google Drive :',
+      group_skipped: 'Ignor\u00e9 \u2014 fichiers non charg\u00e9s',
       orphan_detected_title: 'Groupe inaccessible',
       orphan_detected_message: 'Le groupe \u00ab\u202f{0}\u202f\u00bb est introuvable. S\u2019il a \u00e9t\u00e9 supprim\u00e9, vous pouvez d\u00e9lier ses \u00e9l\u00e9ments pour qu\u2019ils redeviennent personnels.',
       orphan_unlink: 'D\u00e9lier les \u00e9l\u00e9ments',
@@ -1456,7 +1462,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
   es: {
     common: {
       save: 'Guardar', cancel: 'Cancelar', delete: 'Eliminar', add: 'Añadir', edit: 'Editar',
-      close: 'Cerrar', create: 'Crear', name: 'Nombre', note: 'Nota', notes: 'Notas', category: 'Categoría', list: 'Lista',
+      close: 'Cerrar', ok: 'Aceptar', create: 'Crear', name: 'Nombre', note: 'Nota', notes: 'Notas', category: 'Categoría', list: 'Lista',
       search: 'Buscar', optional: 'opcional', done: 'Hecho', undo: 'Deshacer', rename: 'Renombrar',
       update: 'Actualizar', activate: 'Activar', confirm: 'Confirmar', reopen: 'Reabrir',
       copied: '¡Copiado!', loading: 'Cargando…', all: 'Todos', category_default: 'General',
@@ -2011,6 +2017,9 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       group_deleted: 'Grupo eliminado',
       group_removed_remotely: 'Has sido eliminado de \u201c{0}\u201d',
       group_deleted_remotely: 'El grupo \u201c{0}\u201d fue eliminado',
+      group_deleted_title: 'Grupo eliminado',
+      group_deleted_check_folder: 'Si esto le parece un error, compru\u00e9belo abriendo la carpeta del grupo en Google Drive:',
+      group_skipped: 'Omitido \u2014 no se pudieron cargar los archivos',
       orphan_detected_title: 'Grupo inaccesible',
       orphan_detected_message: 'El grupo \u201c{0}\u201d no se encuentra. Si fue eliminado, puedes desvincular sus elementos para que vuelvan a ser personales.',
       orphan_unlink: 'Desvincular elementos',

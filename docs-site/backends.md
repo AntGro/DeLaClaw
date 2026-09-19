@@ -396,5 +396,5 @@ Tables tracked in `BACKUP_TABLES` (import order):
 | `sharing_groups` | Shared group definitions | — |
 | `sharing_members` | Group membership | `sharing_groups.id` |
 | `sharing_items` | Shared items (TODOs, habits, list items) | `sharing_groups.id` |
-| `joined_groups` | Groups the user has joined | — |
+| `groups` | Joined-group pointers + created-group name records | — |
 

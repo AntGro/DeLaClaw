@@ -68,7 +68,7 @@ The Supabase sharing adapter (`sharing-supabase.js`) was removed together with t
 
 ## Drive ↔ Drive
 
-The Google Drive sharing adapter is the only sharing path. Drive sharing has no server: the shared state is a folder in the **creator's** Google Drive, and every member reads and writes the same files through the Drive API. The joiner's own Drive only ever holds pointers (the `joined_groups` personal table) with the shared folders' file IDs. Access control is enforced by Drive folder permissions plus a local trusted-contacts allowlist.
+The Google Drive sharing adapter is the only sharing path. Drive sharing has no server: the shared state is a folder in the **creator's** Google Drive, and every member reads and writes the same files through the Drive API. The joiner's own Drive only ever holds pointers (the `groups` personal table) with the shared folders' file IDs, plus one name-only record per group the joiner created themselves. Access control is enforced by Drive folder permissions plus a local trusted-contacts allowlist.
 
 ### Storage layout
 
@@ -77,12 +77,12 @@ The Google Drive sharing adapter is the only sharing path. Drive sharing has no 
 flowchart LR
     subgraph CD["Creator's Drive"]
         direction TB
-        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · joined_groups.json"]
+        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · groups.json"]
         CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · revoked.json<br/>extra_1..12.json"]
     end
     subgraph JD["Joiner's Drive"]
         direction TB
-        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json<br/>joined_groups.json &#9668; <b>pointers only</b><br/>{folderId, groupId, fileIds}"]
+        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json<br/>groups.json &#9668; <b>pointers + own-group names</b><br/>{folderId, groupId, fileIds} · {id, name}"]
     end
 ```
 
@@ -141,6 +141,7 @@ sequenceDiagram
     CA->>CD: findOrCreate DeLaClaw-Shared/
     CA->>SF: create subfolder DeLaClaw-Shared-{id}
     CA->>SF: upload item files<br/>(todos/habits/lists.json)<br/>+ revoked.json<br/>+ 12 empty extra_N.json placeholders<br/>then group.json LAST (its presence marks creation complete)
+    CA->>CD: upsert groups row<br/>(kind 'created', id + name only)<br/>written only after group.json lands —<br/>own groups are discovered from these rows
     Note over CA,SF: creator-only: inviteUser throws<br/>unless the caller is the creator
     CA->>SF: share folder with B@email (writer)<br/>+ revoked.json (reader)
     CA->>SF: group.json += member<br/>{memberId: hash(email), pending, pseudo: null}
@@ -152,7 +153,7 @@ sequenceDiagram
     JA->>SF: download group.json + item files
     JA->>SF: match pending row by memberId<br/>no match → join rejected
     JA->>SF: pending → joined, set chosen pseudo
-    JA->>JD: upsert joined_groups row<br/>(joined_groups.json; DeLaClawDev/ on dev builds)
+    JA->>JD: upsert groups row<br/>(groups.json; DeLaClawDev/ on dev builds)
     Note over JD: pointer only:<br/>{folderId, groupId, fileIds}<br/>fileIds include revoked.json
     JA->>JA: startPolling (15s)
     CA->>SF: next poll (≤15s): group.json modified?
@@ -272,7 +273,7 @@ sequenceDiagram
     MA->>MD: pointers → personal items<br/>(__shared__ items → General)
     end
     MA->>SF: best-effort: flip own row to<br/>status 'left' (+ leftAt)
-    MA->>MD: delete joined_groups row
+    MA->>MD: delete groups row
     MA->>MA: drop group, emit group-left<br/>polling stops
     Note over SF: creator's next poll (≤15s)<br/>sees the 'left' row
     CA->>SF: revoke leaver's Drive permission<br/>(owner-only operation)
@@ -409,7 +410,6 @@ The flows above surfaced 14 design questions, all decided on 2026-09-07 and reco
 | `sharing-drive.js` | Drive adapter (implements the target design) |
 | `sharing-ui.js` | Settings pane, share popovers, badges, join flow |
 | `sharing.js` | Factory that picks adapter by backend mode |
-| `crypto-sync.js` | AES-GCM encryption for joined-group credentials |
 
 ## Related
 

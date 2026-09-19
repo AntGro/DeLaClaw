@@ -44,7 +44,7 @@ The IndexedDB offline cache is not part of this flow — it only applies to
 local-server mode, never to the Drive backend. The calendar is never read at
 startup either: it is a write-only projection, synced on table flush.
 **1** covers auth, **2** covers what happens at login right after auth (the
-personal-data track, which loads the `joined_groups` table alongside the other
+personal-data track, which loads the `groups` table alongside the other
 personal tables), and **3** covers the sharing startup track, which runs in
 parallel with **2**. `loadAll()` reads the already-loaded pointers and runs
 only in the sharing track, exactly once.
@@ -236,17 +236,20 @@ sequenceDiagram
     participant JOIN as "Joined group folders"
 
     App->>Page: "Sharing nav appears immediately with loading state (before load finishes)"
-    App->>App: "Read joined_groups pointers (already loaded with personal tables)"
-    App->>OWN: "Find DeLaClaw-Shared/ root, list dlc-group-* subfolders"
+    App->>App: "Read groups-table rows (already loaded with personal tables)"
+    App->>OWN: "Per kind 'created' row:<br/>find the DeLaClaw-Shared-{groupId} folder by name"
 
     rect rgb(253, 237, 236)
-    opt The root find or the folder listing fails
+    opt The folder name search fails
         OWN-->>App: "Error"
-        App->>App: "Error is logged — the app keeps running<br/>Owned groups simply don't load this time<br/>They reappear on the next page load (the listing re-runs)"
+        App->>App: "Error is logged — the app keeps running<br/>Group skipped with a chip this cycle<br/>Retried on the next page load (the 15s poll does not re-attempt it)"
+    end
+    opt Folder not found (trashed or renamed on Drive)
+        App->>App: "Skipped chip with the stored row name<br/>The row stays until the group is deleted"
     end
     end
 
-    par Per owned folder
+    par Per found owned folder
         App->>OWN: "Find group.json + revoked.json + todos/habits/lists.json in parallel"
         rect rgb(253, 237, 236)
         opt The file listing itself fails
@@ -254,14 +257,14 @@ sequenceDiagram
             App->>App: "Group skipped this cycle — never treated as incomplete,<br/>never trashed (the folder couldn't be looked at properly)<br/>Retried on the next page load"
         end
         end
-        alt group.json missing on an owned folder (partial creation)
-            App->>App: "Older than 15 minutes → folder trashed (recoverable on Drive)<br/>Younger → left alone (creation may still be in progress on another device)"
+        alt group.json missing on an owned folder (files deleted on Drive)
+            App->>App: "Skipped chip with the stored name —<br/>the user's own group is never silently dropped"
         else group.json found
             App->>OWN: "Download group.json + revoked.json + todos/habits/lists.json in parallel"
             rect rgb(253, 237, 236)
             opt Any required file (group.json, revoked.json, todos/habits/lists.json) fails to download
                 OWN-->>App: "Error for that file"
-                App->>App: "Group skipped this cycle — never partially loaded<br/>(a half-loaded group could show items as missing, and the user might recreate them,<br/>then the real file loads and there are duplicates)<br/>Retried on the next page load — the 15s poll does not re-attempt it<br/>Other groups are unaffected"
+                App->>App: "Group skipped this cycle — never partially loaded<br/>(a half-loaded group could show items as missing, and the user might recreate them,<br/>then the real file loads and there are duplicates)<br/>Shown with a 'skipped' chip in the Sharing pane<br/>Retried on the next page load — the 15s poll does not re-attempt it<br/>Other groups are unaffected"
             end
             end
         end
@@ -273,15 +276,15 @@ sequenceDiagram
             alt own member ID found in revoked.json
                 App->>App: "Verdict 'removed' → pointer purged silently<br/>+ local item pointers purged (no dialog)"
             else no entry — or revoked.json itself gone (404)
-                App->>App: "Verdict 'deleted' → pointer purged + group-deleted notice"
+                App->>App: "Verdict 'deleted' → pointer purged + group-deleted dialog<br/>(with a Drive folder link to double-check)"
             end
             opt revoked.json unreadable (transient)
-                App->>App: "No verdict → group skipped this cycle,<br/>retried on the next page load"
+                App->>App: "No verdict → group skipped this cycle,<br/>chip in the Sharing pane, retried on the next page load"
             end
         end
         opt Download fails otherwise (transient)
             JOIN-->>App: "Error for that file"
-            App->>App: "Group skipped this cycle — never partially loaded<br/>(same duplicate risk as an owned folder)<br/>Retried on the next page load — the 15s poll does not re-attempt it"
+            App->>App: "Group skipped this cycle — never partially loaded<br/>(same duplicate risk as an owned folder)<br/>Shown with a 'skipped' chip in the Sharing pane<br/>Retried on the next page load — the 15s poll does not re-attempt it"
         end
         end
     end
@@ -293,7 +296,7 @@ sequenceDiagram
     App->>JOIN: "Poll every 15s (per-group files)"
     App->>Page: "On sharing-changed → re-render sharing UI"
 
-    Note over App,JOIN: "revoked.json is read at startup when a joined download fails with 403/404<br/>(access gone — the file-level read grant survives), and in the poll<br/>when a loaded group's files become unreachable:<br/>'removed' → silent auto-purge, 'deleted' → group-deleted notice"
+    Note over App,JOIN: "revoked.json is read at startup when a joined download fails with 403/404<br/>(access gone — the file-level read grant survives), and in the poll<br/>when a loaded group's files become unreachable:<br/>'removed' → silent auto-purge, 'deleted' → group-deleted dialog (Drive folder link)"
 
     rect rgb(255, 243, 205)
     Note over App,OWN: "Planned · phase 4: startup sweep permanently deletes<br/>group folders whose deletedAt is older than 30 days"

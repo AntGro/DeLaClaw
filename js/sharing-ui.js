@@ -226,6 +226,21 @@ export async function renderSharingPane() {
     </div>`;
   }
 
+  // ── Skipped groups (transient load failure this session) ──
+  // These groups are not loaded — a required file failed to download and no
+  // removed/deleted verdict was reached. Shown with a chip instead of being
+  // silently dropped; retried on the next page load.
+  const skippedGroups = state.sharing.getSkippedGroups?.() || [];
+  for (const skipped of skippedGroups) {
+    html += `<div class="sharing-group-card">
+      <div class="sharing-group-header">
+        <div class="sharing-group-info">
+          <h4>${esc(skipped.name)}<span class="sharing-group-skipped-stamp">${lucideIcon('alert-triangle', 14, 'currentColor')} ${t('sharing.group_skipped')}</span></h4>
+        </div>
+      </div>
+    </div>`;
+  }
+
   html += `</div>
     <div class="sharing-bottom-actions">
       <button class="sharing-action-btn" data-action="sharing-create-group">${lucideIcon('plus', 14)} ${t('sharing.create_group')}</button>
@@ -655,27 +670,9 @@ export async function handleJoinCode(rawCode, opts = {}) {
   if (env.g) {
     const alreadyJoined = state.sharing.getAllGroups?.()?.find(g => g.id === env.g);
     if (alreadyJoined) {
-      // Check if the invite URL differs from the stored remote — owner may have migrated
-      if (env.u && state.sharing.reconnectGroup) {
-        const { data: jgRow } = await state.db.from('joined_groups').select('remote_url').eq('group_id', env.g).limit(1);
-        const storedUrl = jgRow?.[0]?.remote_url?.replace(/\/+$/, '');
-        if (storedUrl && storedUrl !== env.u?.replace(/\/+$/, '')) {
-          showReconnectConfirmModal(alreadyJoined, env);
-          return true;
-        }
-      }
       showToast(t('sharing.already_joined', alreadyJoined.name || ''), 'info');
       renderSharingPane();
       return true;
-    }
-    // Group not loaded (remote unreachable?) but exists in joined_groups — check for reconnect
-    if (env.u && state.sharing.reconnectGroup) {
-      const { data: jgRow } = await state.db.from('joined_groups').select('remote_url,group_name').eq('group_id', env.g).limit(1);
-      if (jgRow?.[0] && jgRow[0].remote_url?.replace(/\/+$/, '') !== env.u?.replace(/\/+$/, '')) {
-        const stubGroup = { id: env.g, name: jgRow[0].group_name || env.g };
-        showReconnectConfirmModal(stubGroup, env);
-        return true;
-      }
     }
   }
 
@@ -807,40 +804,6 @@ function showJoinConfirmModal(group, onConfirm) {
       console.warn('join confirm failed:', e);
       if (errEl) { errEl.textContent = e.message || t('sharing.join_failed'); errEl.style.display = ''; }
       if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}`; }
-    }
-  });
-}
-
-function showReconnectConfirmModal(group, env) {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay visible';
-  overlay.id = 'sharingReconnectModal';
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-  overlay.innerHTML = `<div class="modal">
-    <h2>${lucideIcon('refresh-cw', 20)} ${t('sharing.reconnect_title')}</h2>
-    <p>${t('sharing.reconnect_hint', esc(group.name || ''))}</p>
-    <div id="reconnectError" class="sharing-join-error" style="display:none"></div>
-    <div class="modal-actions">
-      <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingReconnectModal">${t('common.cancel')}</button>
-      <button class="modal-save" id="reconnectConfirmBtn">${lucideIcon('refresh-cw', 16)} ${t('sharing.reconnect_btn')}</button>
-    </div>
-  </div>`;
-  document.getElementById('app').appendChild(overlay);
-  document.getElementById('reconnectConfirmBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('reconnectConfirmBtn');
-    const errEl = document.getElementById('reconnectError');
-    if (errEl) errEl.style.display = 'none';
-    if (btn?.disabled) return;
-    if (btn) { setBtnBusy(btn, true); btn.textContent = t('common.loading'); }
-    try {
-      await state.sharing.reconnectGroup(env.g, env.u, env.k, env.t);
-      overlay.remove();
-      showToast(t('sharing.reconnected', group.name || ''), 'success');
-      renderSharingPane();
-    } catch (e) {
-      console.warn('reconnect failed:', e);
-      if (errEl) { errEl.textContent = e.message || t('sharing.reconnect_failed'); errEl.style.display = ''; }
-      if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('refresh-cw', 16)} ${t('sharing.reconnect_btn')}`; }
     }
   });
 }

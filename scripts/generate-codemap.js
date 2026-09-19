@@ -31,7 +31,7 @@ const KNOWN_TABLES = [
   'projects','tasks','todos','habits','habit_completions','flashcards',
   'flashcard_notes','texts','text_line_progress','birthdays','vestiaire',
   'lists','list_items','settings','prompts','nvidia_usage',
-  'sharing_groups','sharing_members','sharing_items','joined_groups','daily_visits'
+  'sharing_groups','sharing_members','sharing_items','groups','daily_visits'
 ];
 
 const FEATURE_NAMES = ['todos','habits','projects','birthdays','vestiaire','flashcards','lists','welcome'];

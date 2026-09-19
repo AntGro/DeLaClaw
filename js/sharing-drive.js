@@ -24,7 +24,7 @@ import {
 //      A sends B invite code → B pastes code →
 //      Google Picker opens → B selects the shared files →
 //      Picker grants drive.file access → B saves the file IDs in the
-//      joined_groups table → done.
+//      groups table → done.
 //
 //   2. AUTO-DISCOVERY (full drive scope — opt-in via Settings)
 //      A creates group → A invites B → B has A in trusted contacts →
@@ -43,7 +43,7 @@ import {
 //       B pastes invite code → Picker → selects files → joined
 //
 //   S2: B leaves a joined group
-//       B removes the joined_groups row → polling stops
+//       B removes the groups-table row → polling stops
 //       Drive permissions untouched (B still has user-level access
 //       but DeLaClaw no longer loads it)
 //
@@ -53,7 +53,7 @@ import {
 //
 //   My Drive/
 //   ├── DeLaClaw/                          ← personal data (existing)
-//   │   └── joined_groups.json             ← link-joined group refs (a personal table)
+//   │   └── groups.json                    ← joined pointers + created-group names (a personal table)
 //   └── DeLaClaw-Shared/                   ← shared root (one per user)
 //       └── DeLaClaw-Shared-{groupId}/     ← per-group subfolder
 //           ├── group.json                 ← metadata + member list
@@ -86,11 +86,8 @@ const EXTRA_FILES      = Array.from({ length: EXTRA_COUNT }, (_, i) => `extra_${
 // every file, so a partial grant (e.g. group.json alone) can never half-join.
 const REQUIRED_GROUP_FILES = ['group', ...ITEM_TYPES, ...EXTRA_FILES, 'revoked'];
 // group.json is written LAST during createGroup: its presence marks creation as
-// complete, so a missing group.json on an owned folder means a partial creation.
-// Folders without group.json older than this are treated as abandoned and trashed
-// at load time (recoverable via Drive trash); younger ones may still be mid-creation
-// on another device and are left alone.
-const ABANDONED_GROUP_AGE_MS = 15 * 60 * 1000;
+// complete. The created row in the groups table is only written afterwards,
+// so a row always points at a fully created group.
 
 // ── Drive API helpers (self-contained, no drive.js dependency) ──
 
@@ -138,7 +135,7 @@ async function driveListChildren(token, folderId, mime) {
   let q = `'${folderId}' in parents and trashed=false`;
   if (mime) q += ` and mimeType='${mime}'`;
   const res = await driveGet(token,
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime,createdTime)&pageSize=200&orderBy=name`);
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=200&orderBy=name`);
   const { files } = await res.json();
   return files || [];
 }
@@ -322,8 +319,8 @@ async function migrateItemsJson(tok, folderId, entry) {
  *   reaches past state.sharing. Adapters supply their own
  *   implementations (or omit the ones that don't apply).
  * @param {(folderId: string) => Promise<Array|null>} [capabilities.openJoinPicker]
- * @param {Object} [db] — db proxy (js/db.js). Joined-group pointers live in the
- *   joined_groups personal table; the adapter reads/writes them through db so
+ * @param {Object} [db] — db proxy (js/db.js). Group rows live in the
+ *   groups personal table; the adapter reads/writes them through db so
  *   persistence, ETag handling and cross-device polling come from the Drive
  *   adapter instead of bespoke file code.
  */
@@ -331,7 +328,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   let _user   = null;            // { email, name, photo }
   let _rootId  = null;           // DeLaClaw-Shared folder id (own)
   const _groups = new Map();     // groupId → GroupEntry
-  const _groupNameCache = {};    // groupId → name (survives group deletion)
+
   let _loaded = false;           // true after loadAll() completes
   let _pollTimer = null;
   let _listeners = [];
@@ -348,12 +345,31 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   //   joinedViaLink: boolean,   // true if joined via invite code
   // }
 
-  // ── Joined groups (code-join, works with drive.file) ──
-  // Pointers live in the joined_groups personal table (id = groupId), seeded
-  // into memory by the Drive adapter at connect. _joinedGroups is a read
-  // cache, refreshed from the table after every mutation and at each poll.
+  // ── Groups table (joined + created) ──
+  // Rows live in the groups personal table (id = groupId), seeded into
+  // memory by the Drive adapter at connect. _groupRows is a read cache,
+  // refreshed from the table after every mutation and at each poll.
+  // Joined rows (kind 'joined') are pointers to another user's shared folder:
+  //   { id (=groupId), kind: 'joined', folderId, groupId, name, fileIds: { group, todos, habits, lists, extra_1..extra_12, revoked }, memberId, joinedAt, updated_at }
+  // Created rows (kind 'created') record groups this user created: the group
+  // itself is discovered by scanning Drive, the row only stores { id (=groupId),
+  // kind: 'created', groupId, name } so skipped/deleted notices can name it
+  // even when its Drive folder is unreachable.
+  let _groupRows = [];
 
-  let _joinedGroups = [];       // [{ id (=groupId), folderId, groupId, fileIds: { group, todos, habits, lists, extra_1..extra_12, revoked }, memberId, joinedAt, updated_at }]
+  /** Rows for groups joined via invite code (kind !== 'created'). */
+  const _joinedRows = () => _groupRows.filter(r => r.kind !== 'created');
+
+  /** Name stored in the groups table for a groupId (joined pointer or created
+   *  record), or null. Names groups whose Drive folder is unreachable. */
+  const _storedGroupName = (groupId) =>
+    _groupRows.find(r => r.id === groupId || r.groupId === groupId)?.name || null;
+
+  // Groups whose load failed transiently in the current loadAll() run
+  // (a required file failed to download, no removed/deleted verdict).
+  // groupId → { name }. Rebuilt on every loadAll; the Sharing pane renders
+  // them with a "skipped" chip. A group that loads fine never lands here.
+  const _skippedGroups = new Map();
 
   // ── Internals ──
 
@@ -571,15 +587,15 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     };
   }
 
-  /** Re-read joined-group pointers from the joined_groups table. */
-  async function refreshJoinedGroups() {
+  /** Re-read group rows from the groups table. */
+  async function refreshGroupRows() {
     if (!db) return; // no db wired (tests): keep the in-memory copy
     try {
-      const { data } = await db.from('joined_groups').select('*');
-      _joinedGroups = Array.isArray(data) ? data : [];
+      const { data } = await db.from('groups').select('*');
+      _groupRows = Array.isArray(data) ? data : [];
     } catch (err) {
-      console.warn('sharing: failed to load joined groups:', err);
-      _joinedGroups = [];
+      console.warn('sharing: failed to load groups table:', err);
+      _groupRows = [];
     }
   }
 
@@ -630,7 +646,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta, revokedMeta, joinedViaLink: true });
     _groups.set(groupId, entry);
-    _groupNameCache[groupId] = group.name;
     return entry;
   }
 
@@ -642,10 +657,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
   /** Load a single group from its Drive subfolder. */
   async function loadGroup(folderId, groupId, opts = {}) {
-    // opts: { createdTime, owned } — owned=true only for folders under the user's
-    // own DeLaClaw-Shared/ root (discovered via listing). Joined groups reference
-    // someone else's folder and must never be trashed here.
-    const { createdTime = null, owned = false } = opts;
+    // opts: { owned } — owned=true only for the user's own groups (kind
+    // 'created' rows in the groups table). Joined groups reference someone
+    // else's folder and must never be trashed here.
+    const { owned = false } = opts;
     const tok = await token();
 
     // Find all core files in parallel. A throw here means the listing itself
@@ -657,20 +672,12 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       ...ITEM_TYPES.map(type => driveFindFile(tok, folderId, `${type}.json`)),
     ]);
 
-    // group.json is written LAST by createGroup: its absence on an owned folder
-    // means creation never completed.
+    // The created row is only written after group.json lands, so its absence
+    // on an owned folder means the folder's files were deleted on Drive
+    // (or the folder was swapped): surface the skipped notice via a throw
+    // instead of silently dropping the user's own group.
     if (!gFile && owned) {
-      const ageMs = createdTime ? Date.now() - Date.parse(createdTime) : Infinity;
-      if (ageMs >= ABANDONED_GROUP_AGE_MS) {
-        // Abandoned partial creation — trash the folder (recoverable on Drive).
-        console.log(`sharing: trashing abandoned partial group folder ${folderId} (${groupId})`);
-        try { await driveTrashFile(tok, folderId); }
-        catch (err) { console.warn('sharing: failed to trash abandoned group folder', folderId, err); }
-      } else {
-        // Creation may still be in progress (possibly on another device) — leave it alone.
-        console.log(`sharing: skipping young folder without group.json ${folderId} (${groupId})`);
-      }
-      return null;
+      throw downloadError(`group.json for own group ${groupId}`, new Error('not found'));
     }
 
     // Download all found files in parallel. A failed download aborts the
@@ -723,7 +730,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta, revokedMeta });
     _groups.set(groupId, entry);
-    _groupNameCache[groupId] = group.name;
 
     // Migrate legacy items.json if present
     await migrateItemsJson(tok, folderId, entry);
@@ -918,13 +924,34 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           revokedMeta,
           gMeta: { fileId: gRes.id, etag: gRes.etag, modifiedTime: gRes.modifiedTime },
         });
-        _groupNameCache[groupId] = name;
+        // Record the created group in the groups table (kind 'created'):
+        // loadAll discovers own groups from these rows (each folder is found
+        // by its deterministic DeLaClaw-Shared-{groupId} name). The row is
+        // written only after group.json lands, so a row always points at a
+        // fully created group; the stored name lets skipped/deleted notices
+        // name the group even when its Drive folder is unreachable.
+        const createdRow = {
+          id: groupId, kind: 'created', groupId, name,
+          createdAt: new Date().toISOString(), updated_at: new Date().toISOString(),
+        };
+        if (db) {
+          const { error } = await db.from('groups').upsert(createdRow, { onConflict: 'id' });
+          if (error) console.warn('sharing: failed to record created group:', error.message);
+          else await refreshGroupRows();
+        } else {
+          const ix = _groupRows.findIndex(r => r.id === groupId);
+          if (ix >= 0) _groupRows[ix] = createdRow;
+          else _groupRows.push(createdRow);
+        }
 
         emit('group-created', { group });
         return group;
       } catch (err) {
         // Best-effort cleanup: trash the partial folder so a failed creation
-        // leaves no debris on Drive. The load-time GC covers the tab-killed case.
+        // leaves no debris on Drive. A tab killed mid-creation (before this
+        // runs) may leave a small orphan folder — accepted: no row is ever
+        // written for it, so the app never sees it, and it holds at most a
+        // few small JSON files.
         try { await driveTrashFile(tok, subfolder.id); }
         catch (cleanupErr) { console.warn('sharing: failed to trash partial group folder', subfolder.id, cleanupErr); }
         throw err;
@@ -935,29 +962,49 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     async loadAll() {
       const tok = await token();
       const promises = [];
+      // Skipped marks are rebuilt every run: a group that loads fine this
+      // time must not keep a stale chip from a previous failure.
+      _skippedGroups.clear();
       // One bad folder must not take down every other group: isolate per-folder
       // load failures. A folder whose listing throws is skipped, never trashed.
-      const isolate = (p, label) => promises.push(
-        p.catch(err => { console.warn(`sharing: failed to load ${label}:`, err); return null; })
+      // A skipped group is recorded so the UI can show it with a chip instead
+      // of silently dropping it; it is retried on the next page load. The
+      // name stored in the groups table (if any) names the group directly.
+      const isolate = (p, label, groupId, name) => promises.push(
+        p.catch(err => {
+          console.warn(`sharing: failed to load ${label}:`, err);
+          if (groupId) _skippedGroups.set(groupId, { name: name || _storedGroupName(groupId) || groupId });
+          return null;
+        })
       );
 
-      // Load joined groups metadata (joined_groups personal table, seeded
+      // Load the groups table (joined pointers + created records, seeded
       // into memory by the Drive adapter at connect)
-      await refreshJoinedGroups();
+      await refreshGroupRows();
 
-      // Own groups: list subfolders under DeLaClaw-Shared/
-      const rootFolder = await driveFindFolder(tok, SHARED_ROOT_NAME, null);
-      if (rootFolder) {
-        _rootId = rootFolder.id;
-        const subs = await driveListChildren(tok, rootFolder.id, 'application/vnd.google-apps.folder');
-        for (const sub of subs) {
-          if (!sub.name.startsWith(GROUP_PREFIX)) continue;
-          const gid = sub.name.slice(GROUP_PREFIX.length);
-          if (!_groups.has(gid)) isolate(
-            loadGroup(sub.id, gid, { createdTime: sub.createdTime, owned: true }),
-            `own group folder ${sub.id} (${gid})`
-          );
-        }
+      // Own groups: the groups table (kind 'created' rows) is the source of
+      // truth — no DeLaClaw-Shared/ folder scan. Each folder is found by its
+      // deterministic name DeLaClaw-Shared-{groupId} (one name search per
+      // group). A missing folder (trashed or renamed on Drive) surfaces the
+      // skipped chip with the stored name instead of silently dropping the
+      // group; the row stays until the group is deleted.
+      for (const row of _groupRows) {
+        if (row.kind !== 'created') continue;
+        const gid = row.groupId;
+        if (!gid || _groups.has(gid)) continue;
+        const name = row.name || _storedGroupName(gid) || gid;
+        isolate(
+          driveFindFolder(tok, GROUP_PREFIX + gid, null).then(folder => {
+            if (!folder) {
+              _skippedGroups.set(gid, { name });
+              return null;
+            }
+            return loadGroup(folder.id, gid, { owned: true });
+          }),
+          `own group folder (${gid})`,
+          gid,
+          name
+        );
       }
 
       // Joined groups (link-join): load using saved file IDs (or search for
@@ -980,9 +1027,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           throw err;
         });
       };
-      for (const joined of _joinedGroups) {
+      for (const joined of _joinedRows()) {
         if (_groups.has(joined.groupId)) continue;
-        isolate(loadJoined(joined), `joined group ${joined.groupId}`);
+        isolate(loadJoined(joined), `joined group ${joined.groupId}`, joined.groupId, joined.name);
       }
 
       await Promise.all(promises);
@@ -994,6 +1041,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return Array.from(_groups.values()).map(e => publicGroup(e));
     },
 
+    /** Groups whose load failed transiently in the last loadAll() run.
+     *  [{ groupId, name }]. Rendered by the Sharing pane with a "skipped"
+     *  chip; retried on the next page load. */
+    getSkippedGroups() {
+      return [..._skippedGroups.entries()].map(([groupId, s]) => ({ groupId, name: s.name }));
+    },
+
     getGroup(groupId) {
       const e = _groups.get(groupId);
       return e ? publicGroup(e) : null;
@@ -1001,7 +1055,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     getGroupName(groupId) {
       const e = _groups.get(groupId);
-      return e?.group?.name || _groupNameCache[groupId] || '';
+      return e?.group?.name || _storedGroupName(groupId) || '';
     },
 
     async getCurrentMember(groupId) {
@@ -1040,6 +1094,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // Trash the entire subfolder (recoverable on Drive)
       await driveTrashFile(tok, e.folderId);
       _groups.delete(groupId);
+      // Drop the created-group row from the groups table
+      if (db) {
+        const { error } = await db.from('groups').delete().eq('id', groupId);
+        if (error) console.warn('sharing: failed to remove created-group row:', error.message);
+        else await refreshGroupRows();
+      } else {
+        _groupRows = _groupRows.filter(r => r.id !== groupId);
+      }
       emit('group-deleted', { groupId });
     },
 
@@ -1377,7 +1439,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      * Returns 'removed' | 'deleted' | null (transient: leave for the next poll).
      */
     async checkRemovalViaRevoked(groupId, tok) {
-      const joined = _joinedGroups.find(j => j.groupId === groupId);
+      const joined = _joinedRows().find(j => j.groupId === groupId);
       const revokedFileId = joined?.fileIds?.revoked;
       const selfId = joined?.memberId;
       // No revocation state (e.g. joined before phase 3): nothing to consult.
@@ -1404,9 +1466,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       let changed = false;
       const staleGroupIds = [];  // groups to remove after iteration
 
-      // Re-read joined-group pointers: the Drive adapter's table poll may
-      // have picked up a join/unjoin from another device since the last cycle.
-      await refreshJoinedGroups();
+      // Re-read group rows: the Drive adapter's table poll may have picked
+      // up a join/unjoin/group-creation from another device since the last cycle.
+      await refreshGroupRows();
 
       for (const [groupId, e] of _groups) {
         // Poll per-type files
@@ -1491,13 +1553,20 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     /**
      * Apply a removed/deleted verdict for a group: drop it from memory,
-     * notify the app, and purge the joined_groups pointer. Shared by the poll
+     * notify the app, and purge the groups-table row. Shared by the poll
      * and by loadAll — a joined group that fails to load with 403/404 never
      * reaches the poll, so it gets its verdict at startup instead.
      */
     async handleStaleGroup(groupId, verdict) {
-      const groupName = _groups.get(groupId)?.group?.name || _groupNameCache[groupId] || groupId;
+      const row = _groupRows.find(r => r.groupId === groupId);
+      // Live group data first, then the name stored in the groups table
+      // row (survives an unreachable folder).
+      const groupName = _groups.get(groupId)?.group?.name || row?.name || groupId;
+      // Capture the folder ID before purging: the 'deleted' notice links to
+      // the Drive folder so the user can double-check it is really gone.
+      const folderId = row?.folderId || _groups.get(groupId)?.folderId || null;
       _groups.delete(groupId);
+      _skippedGroups.delete(groupId); // a verdict beats a transient skip mark
       emit('group-deleted', { groupId, verdict });
       if (verdict === 'removed') {
         // Own memberId found in revoked.json — removal is certain, so purge
@@ -1506,14 +1575,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         // Handled in main.js via state.db (the adapter has no db access).
         try { document.dispatchEvent(new CustomEvent('sharing-group-purge-items', { detail: { groupId } })); } catch {}
       }
-      try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName, verdict } })); } catch {}
-      // Purge the joined_groups pointer
+      try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName, verdict, folderId } })); } catch {}
+      // Purge the groups-table row
       if (db) {
-        const { error } = await db.from('joined_groups').delete().eq('id', groupId);
-        if (error) console.warn('sharing: purge pointer delete failed:', error.message);
-        await refreshJoinedGroups();
+        const { error } = await db.from('groups').delete().eq('id', groupId);
+        if (error) console.warn('sharing: purge groups-row delete failed:', error.message);
+        await refreshGroupRows();
       } else {
-        _joinedGroups = _joinedGroups.filter(j => j.groupId !== groupId);
+        _groupRows = _groupRows.filter(r => r.groupId !== groupId);
       }
     },
 
@@ -1604,21 +1673,23 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         await saveGroup(groupId);
       }
 
-      // Persist the pointer in the joined_groups table (memberId lets the
+      // Persist the pointer in the groups table (memberId lets the
       // client match its own revoked.json entry if this account is later
       // removed from the group). id = groupId: the Drive adapter's 412
       // merge is keyed on id with newer updated_at winning, which preserves
       // the old union-by-folderId conflict behavior across devices.
       const now = new Date().toISOString();
-      const entry = { id: groupId, folderId, groupId, fileIds, memberId: joinedMemberId, joinedAt: now, updated_at: now };
+      // name is stored in the pointer so the deleted/skipped notices can name
+      // the group even when its Drive folder is unreachable (no group.json).
+      const entry = { id: groupId, kind: 'joined', folderId, groupId, name: groupData?.name || null, fileIds, memberId: joinedMemberId, joinedAt: now, updated_at: now };
       if (db) {
-        const { error } = await db.from('joined_groups').upsert(entry, { onConflict: 'id' });
+        const { error } = await db.from('groups').upsert(entry, { onConflict: 'id' });
         if (error) throw new Error(`join: failed to persist joined group: ${error.message}`);
-        await refreshJoinedGroups();
+        await refreshGroupRows();
       } else {
-        const existing = _joinedGroups.findIndex(j => j.folderId === folderId || j.groupId === groupId);
-        if (existing >= 0) _joinedGroups[existing] = entry;
-        else _joinedGroups.push(entry);
+        const existing = _groupRows.findIndex(j => j.folderId === folderId || j.groupId === groupId);
+        if (existing >= 0) _groupRows[existing] = entry;
+        else _groupRows.push(entry);
       }
 
       const group = _groups.get(groupId)?.group;
@@ -1627,7 +1698,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return group;
     },
 
-    /** Leave a joined group (removes the joined_groups row + group.json). */
+    /** Leave a joined group (removes the groups-table row + group.json). */
     // reconnectGroup is Supabase-only (remote URL migration); no-op for Drive
     async reconnectGroup() { return null; },
 
@@ -1648,11 +1719,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         } catch (err) { console.warn('sharing: unjoin group.json update failed (non-fatal):', err); }
       }
       if (db) {
-        const { error } = await db.from('joined_groups').delete().eq('id', groupId);
-        if (error) console.warn('sharing: unjoin pointer delete failed:', error.message);
-        await refreshJoinedGroups();
+        const { error } = await db.from('groups').delete().eq('id', groupId);
+        if (error) console.warn('sharing: unjoin groups-row delete failed:', error.message);
+        await refreshGroupRows();
       } else {
-        _joinedGroups = _joinedGroups.filter(j => j.groupId !== groupId);
+        _groupRows = _groupRows.filter(r => r.groupId !== groupId);
       }
       _groups.delete(groupId);
       emit('group-left', { groupId });
@@ -1715,7 +1786,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     destroy() {
       this.stopPolling();
       _groups.clear();
-      _joinedGroups = [];
+      _groupRows = [];
       _user = null;
       _rootId = null;
       _listeners = [];

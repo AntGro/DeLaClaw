@@ -1062,30 +1062,49 @@ test('sharing partial creation: group.json last, trash on failure, load-time GC'
   assert(createBody.includes('throw err;'),
     'createGroup must rethrow after cleanup so the modal shows the error');
 
-  // 3. Load-time GC: abandoned marker-less OWN folders are trashed, young ones skipped,
-  //    unowned (joined) folders are never trashed
-  assert(drive.includes('const ABANDONED_GROUP_AGE_MS = 15 * 60 * 1000;'),
-    'sharing-drive.js must define the abandoned-group age threshold');
+  // 3. Own-group discovery is purely row-based: loadAll reads the kind
+  //    'created' rows and finds each folder by its deterministic
+  //    DeLaClaw-Shared-{groupId} name — no DeLaClaw-Shared/ folder scan,
+  //    no abandoned-folder GC, no 15-minute grace.
+  assert(!drive.includes('ABANDONED_GROUP_AGE_MS'),
+    'sharing-drive.js must not define the abandoned-group age threshold anymore');
   const loadStart = drive.indexOf('async function loadGroup(folderId, groupId, opts');
   const loadEnd = drive.indexOf('async function normalizeEntry', loadStart);
   const loadBody = drive.slice(loadStart, loadEnd);
+  assert(!loadBody.includes('ageMs'),
+    'loadGroup must not compute a folder age anymore');
+  assert(!loadBody.includes('driveTrashFile(tok, folderId)'),
+    'loadGroup must never trash folders at load time anymore');
+  // A created row is only written after group.json lands, so a missing
+  // group.json on an owned folder means the folder's files were deleted on
+  // Drive: throw so the skipped notice names the group instead of silently
+  // dropping it.
   assert(loadBody.includes('if (!gFile && owned)'),
-    'loadGroup must only consider trashing marker-less folders it owns');
-  assert(loadBody.includes('ageMs >= ABANDONED_GROUP_AGE_MS') && loadBody.includes('await driveTrashFile(tok, folderId)'),
-    'loadGroup must trash abandoned marker-less owned folders');
-  assert(loadBody.includes('skipping young folder'),
-    'loadGroup must leave young marker-less folders alone (creation may be in progress elsewhere)');
+    'loadGroup must treat a missing group.json on an owned folder as broken');
+  assert(loadBody.includes('throw downloadError(`group.json for own group'),
+    'loadGroup must throw (skipped notice) when an owned folder lacks group.json');
 
-  // 4. Per-folder error isolation: one bad folder must not fail the whole loadAll
+  // 3b. loadAll discovers own groups from the groups table, not from a
+  //     DeLaClaw-Shared/ folder scan
   const allStart = drive.indexOf('/** Load all groups');
   const allEnd = drive.indexOf('getAllGroups()', allStart);
   const allBody = drive.slice(allStart, allEnd);
+  assert(allBody.includes("driveFindFolder(tok, GROUP_PREFIX + gid, null)"),
+    'loadAll must find each own-group folder by its deterministic DeLaClaw-Shared-{groupId} name');
+  assert(allBody.includes("row.kind !== 'created'"),
+    'loadAll must iterate the kind created rows of the groups table for own groups');
+  assert(!allBody.includes('driveListChildren(tok, rootFolder.id'),
+    'loadAll must not scan the DeLaClaw-Shared/ root folder for own groups');
+  assert(allBody.includes('_skippedGroups.set(gid, { name })'),
+    'loadAll must surface the skipped chip with the stored name when an own-group folder is missing on Drive');
+
+  // 4. Per-folder error isolation: one bad folder must not fail the whole loadAll
   assert(allBody.includes('.catch(err =>'),
     'loadAll must isolate per-folder load failures so one bad folder cannot break all groups');
 
-  // 5. driveListChildren must return createdTime for the age guard
-  assert(drive.includes('files(id,name,modifiedTime,createdTime)'),
-    'driveListChildren must fetch createdTime for the abandoned-folder age check');
+  // 5. No createdTime plumbing remains (the age guard is gone)
+  assert(!drive.includes('createdTime'),
+    'sharing-drive.js must not reference createdTime anymore');
 
   // 6. CSP must allow the Drive picker iframe (join flow)
   const frameSrc = html.match(/frame-src ([^;]+);/);
@@ -1144,16 +1163,127 @@ test('sharing group load is all-or-nothing: a failed file download skips the who
     'loadAll must apply the removed/deleted verdict for the failed joined group');
 
   // handleStaleGroup: shared verdict handling (poll + loadAll) — drops the
-  // group, notifies the app, purges the joined_groups pointer.
+  // group, notifies the app, purges the groups-table row.
   assert(drive.includes('async handleStaleGroup(groupId, verdict)'),
     'sharing-drive.js must define handleStaleGroup');
-  assert(drive.includes("db.from('joined_groups').delete().eq('id', groupId)"),
-    'handleStaleGroup must purge the joined_groups pointer');
+  assert(drive.includes("db.from('groups').delete().eq('id', groupId)"),
+    'handleStaleGroup must purge the groups-table row');
 
   // loadAll must still isolate the (now throwing) per-folder failures so one
   // bad folder cannot break the other groups.
   assert(allBody.includes('.catch(err =>'),
     'loadAll must isolate per-folder load failures so one bad folder cannot break all groups');
+});
+
+test('group-deleted notice is a dialog with a Drive folder link; skipped groups get a chip', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  const css = fs.readFileSync(STYLE_FILE, 'utf-8');
+  const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+
+  // handleStaleGroup looks up the groups-table row before purging and passes
+  // the folderId with the removed-remotely event so the notice can link to
+  // the Drive folder.
+  assert(drive.includes('const row = _groupRows.find(r => r.groupId === groupId);'),
+    'handleStaleGroup must look up the groups-table row before purging');
+  assert(drive.includes('row?.folderId'),
+    'handleStaleGroup must capture the folderId before purging the row');
+  assert(drive.includes('{ detail: { groupName, verdict, folderId } }'),
+    'sharing-group-removed-remotely must carry the folderId');
+
+  // main.js: 'deleted' verdict → notice dialog with Drive link; 'removed' stays a toast.
+  assert(main.includes("verdict === 'deleted'"),
+    'main.js must branch the removed-remotely notice on the deleted verdict');
+  assert(main.includes('showGroupDeletedNotice(groupName, folderId)'),
+    'main.js must show the group-deleted dialog for the deleted verdict');
+  assert(main.includes('drive.google.com/drive/folders/'),
+    'group-deleted dialog must link to the Drive folder');
+  assert(main.includes('LOGOS.googledrive(16)'),
+    'group-deleted dialog must show the Google Drive icon next to the link');
+
+  // loadAll: transient per-folder failures are recorded as skipped groups.
+  assert(drive.includes('_skippedGroups.clear()'),
+    'loadAll must rebuild the skipped set on every run');
+  assert(drive.includes('_skippedGroups.set(groupId, { name:'),
+    'loadAll must record a failed group load as skipped');
+  assert(drive.includes('getSkippedGroups()'),
+    'sharing-drive.js must expose getSkippedGroups()');
+  assert(drive.includes('_skippedGroups.delete(groupId)'),
+    'handleStaleGroup must clear a stale skip mark when a verdict is applied');
+
+  // sharing-ui: skipped groups render with a chip in the Sharing pane.
+  assert(sui.includes('getSkippedGroups?.()'),
+    'renderSharingPane must read the skipped groups');
+  assert(sui.includes('sharing-group-skipped-stamp'),
+    'renderSharingPane must render skipped groups with a chip');
+  assert(css.includes('.sharing-group-skipped-stamp'),
+    'style.css must define the skipped chip');
+
+  // i18n: new keys in all three locales.
+  const starts = {};
+  for (const m of i18nSrc.matchAll(/^  (en|fr|es): \{$/gm)) starts[m[1]] = m.index;
+  const order = ['en', 'fr', 'es'];
+  for (const key of ['group_deleted_title', 'group_deleted_check_folder', 'group_skipped']) {
+    for (let i = 0; i < order.length; i++) {
+      const slice = i18nSrc.slice(starts[order[i]], i + 1 < order.length ? starts[order[i + 1]] : i18nSrc.length);
+      assert(new RegExp(`^\\s{6}${key}:`, 'm').test(slice),
+        `i18n.js [${order[i]}].sharing must define '${key}:'`);
+    }
+  }
+  assert(i18nSrc.includes("ok: 'OK'") && i18nSrc.includes("ok: 'Aceptar'"),
+    "i18n.js must define common 'ok' in all locales");
+});
+
+test('groups table stores group names for unreachable-folder notices (joined + created)', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+
+  // The groups table holds both joined pointers (kind 'joined') and created-
+  // group records (kind 'created', id + name only) so notices can name a
+  // group even when its Drive folder is unreachable.
+  assert(drive.includes("kind: 'joined'"),
+    'joinWithFileIds must tag the pointer row with kind joined');
+  assert(drive.includes('name: groupData?.name || null'),
+    'joinWithFileIds must store the group name in the pointer row');
+  assert(drive.includes("kind: 'created'"),
+    'createGroup must record the created group with kind created');
+  assert(drive.includes("db.from('groups').upsert(createdRow, { onConflict: 'id' })"),
+    'createGroup must persist the created-group row in the groups table');
+  assert(drive.includes('for (const joined of _joinedRows())'),
+    'loadAll must load only joined rows (kind !== created), never created records');
+
+  // Name resolution order: live group data, then the stored groups-table row.
+  assert(drive.includes('const _storedGroupName = (groupId) =>'),
+    'sharing-drive.js must define _storedGroupName');
+  assert(drive.includes('row?.name || groupId'),
+    'handleStaleGroup must fall back to the stored groups-table row name');
+  assert(drive.includes('_storedGroupName(gid)'),
+    'loadAll must name a skipped own group from its created record');
+  assert(drive.includes('joined.groupId, joined.name)'),
+    'loadAll must pass the stored pointer name to the skip marking');
+
+  // deleteGroup removes the created record; unjoinGroup removes the pointer.
+  assert(drive.includes("// Drop the created-group row from the groups table"),
+    'deleteGroup must drop the created-group row');
+});
+
+test('no localStorage group-name cache: names come from the groups table', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const adapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+
+  // The localStorage cache is gone — the groups table (synced personal data)
+  // is the single source of stored group names.
+  assert(!drive.includes('GROUP_NAME_CACHE_KEY'),
+    'sharing-drive.js must not define a localStorage key for group names');
+  assert(!drive.includes('cacheGroupName'),
+    'sharing-drive.js must not define or call cacheGroupName');
+  assert(!drive.includes('localStorage'),
+    'sharing-drive.js must not touch localStorage for group names');
+
+  // All group state (joined pointers + created-group records) lives in the
+  // groups table.
+  assert(adapter.includes("'groups',"),
+    'DRIVE_TABLES must list the groups table');
 });
 
 test('sharing departure is unjoin-only (no leaveGroup)', () => {
@@ -1221,24 +1351,22 @@ test('sharing email normalization is Gmail-scoped (dots significant elsewhere)',
     'memberIdFromEmail must hash the normalized email, not the raw input');
 });
 
-test('joined_groups is a Drive personal table, not a bespoke sharing file', () => {
-  // Regression: joined_groups used to be a standalone joined-groups.json file
-  // managed by bespoke download/upload code in sharing-drive.js, which meant
-  // (a) it was never in the per-table startup download, (b) Drive backups via
-  // db.from('joined_groups') silently backed up an empty table, and (c) the
-  // sharing adapter needed Drive-specific file IO for it. It is now a normal
-  // DRIVE_TABLES entry; the sharing adapter reads/writes it through db.
+test('groups is a Drive personal table, not a bespoke sharing file', () => {
+  // The groups table must load with the other personal tables at startup
+  // and be read/written through db — never via bespoke download/upload code
+  // in sharing-drive.js, which would skip the per-table startup download
+  // and silently back up an empty table.
   const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
   const tablesMatch = driveAdapter.match(/const DRIVE_TABLES = \[([\s\S]*?)\];/);
   assert(tablesMatch, 'drive.js must define DRIVE_TABLES');
-  assert(tablesMatch[1].includes("'joined_groups'"),
-    'DRIVE_TABLES must include joined_groups so it loads with the other personal tables');
+  assert(tablesMatch[1].includes("'groups'"),
+    'DRIVE_TABLES must include groups so it loads with the other personal tables');
 
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
   assert(!drive.includes('loadJoinedGroups') && !drive.includes('saveJoinedGroups') && !drive.includes('_joinedMeta'),
-    'sharing-drive.js must not keep bespoke joined-groups file IO (loadJoinedGroups/saveJoinedGroups/_joinedMeta)');
-  assert(drive.includes("db.from('joined_groups')"),
-    'sharing-drive.js must read/write joined-group pointers through db.from(\'joined_groups\')');
+    'sharing-drive.js must not keep bespoke groups file IO (loadJoinedGroups/saveJoinedGroups/_joinedMeta)');
+  assert(drive.includes("db.from('groups')"),
+    'sharing-drive.js must read/write group rows through db.from(\'groups\')');
   assert(drive.includes(".upsert(entry, { onConflict: 'id' })"),
     'join must upsert the pointer keyed on id (= groupId) so the Drive 412 merge stays a union');
   assert(drive.includes('createDriveSharing(getToken, personalFolderId, capabilities = {}, db = null)'),
@@ -1803,10 +1931,9 @@ test('drive adapter tolerates transient silent-refresh failures before declaring
     'drive.js: getToken must count consecutive silent failures before marking the token dead');
 });
 
-test('local-migrations.js has entries for 1.294 and 1.297', () => {
+test('local-migrations.js has entry for 1.294', () => {
   const content = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
   assert(content.includes("'1.294':"), 'Missing local migration entry for 1.294');
-  assert(content.includes("'1.297':"), 'Missing local migration entry for 1.297');
 });
 
 test('sw.js JS precache list matches source modules, with demo data explicit', () => {
@@ -2534,8 +2661,14 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     });
 
     test("revoked.json verdicts drive distinct 'removed' vs 'deleted' notices", () => {
-      assert(main.includes("verdict === 'deleted' ? 'sharing.group_deleted_remotely' : 'sharing.group_removed_remotely'"),
-        'main.js must pick the notice key from the revoked.json verdict');
+      // 'deleted' verdict → notice dialog with Drive folder link;
+      // 'removed' verdict → plain toast (removal is certain, purge is silent).
+      assert(main.includes("verdict === 'deleted'"),
+        'main.js must branch the removed-remotely notice on the deleted verdict');
+      assert(main.includes('showGroupDeletedNotice(groupName, folderId)'),
+        'main.js must show the group-deleted dialog for the deleted verdict');
+      assert(main.includes("t('sharing.group_removed_remotely', groupName)"),
+        'main.js must keep the removed toast for the removed verdict');
       for (const loc of ['en', 'fr', 'es']) {
         assert(new RegExp(`^  ${loc}: \\{`, 'm').test(i18nSrc), `i18n.js must define locale ${loc}`);
       }

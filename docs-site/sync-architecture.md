@@ -97,7 +97,9 @@ Once the app holds a valid access token, login runs. In order:
 3. **Existing install: download every per-table JSON file in parallel**,
    keeping each file's ETag and modifiedTime. A missing file is not a failure —
    that table simply starts empty. One failed download aborts the whole load
-   (all-or-nothing) and returns to the login screen.
+   (all-or-nothing) and returns to the login screen. The in-memory store is
+   created here, seeded with the downloaded tables — the migrations below
+   mutate it in place.
 4. **Read `schema_version` from settings.json** (missing → version 0). If any
    migration is pending, the backup policy runs before the first one:
    - **A `backup-v{B}.json` exists for the current version** — a previous batch
@@ -121,24 +123,30 @@ Once the app holds a valid access token, login runs. In order:
 6. **Write `settings.json` once** with the final `schema_version` — the batch
    completion marker — then **delete the backup**. A backup left on Drive always
    means "a batch did not complete".
-7. **Fresh install: create one JSON file per table in parallel** (all except
-   `settings.json`), seeding the category tables with their protected default
-   rows — then **write `settings.json` last** with `schema_version=latest` as
+7. **Fresh install: create the empty in-memory store, then create one JSON file
+   per table in parallel** (all except `settings.json`), seeding the category
+   tables with their protected default rows — then **write `settings.json` last** with `schema_version=latest` as
    the completion marker. If the table creation fails midway, the retry lands
    in the existing-install branch with no `schema_version` (version 0), so it
    snapshots and runs all migrations — including the one that re-seeds the
    protected category rows.
-8. **Create the in-memory adapter** seeded with the loaded data, hide the login
-   screen, show the app shell, and render the current view from memory.
+8. **Hide the login screen, show the app shell, and render the current view
+   from memory.**
 9. **Start the 30s poll and the tab-focus poll** over the personal tables. The
    calendar is never read at startup — it is a write-only projection, synced
    on table flush only.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
 sequenceDiagram
-    participant App as "App (in-memory)"
-    participant Page as "Page (rendered)"
-    participant PF as "Personal folder (DeLaClaw/)"
+    autonumber
+    box rgb(239,246,255) Browser tab
+    participant App as "App<br/>(in-memory)"
+    participant Page as "Page<br/>(rendered)"
+    end
+    box rgb(255,251,235) Google Drive
+    participant PF as "Personal folder<br/>(DeLaClaw/)"
+    end
 
     App->>Page: "Progress: connecting…"
     App->>PF: "Find-or-create DeLaClaw/ (DeLaClawDev/ on dev)"
@@ -158,7 +166,8 @@ sequenceDiagram
             App->>Page: "Login screen — generic connection error<br/>All-or-nothing: one failed table aborts the whole load<br/>(a missing file is not a failure — that table just starts empty)<br/>Flow ends here — back to the login screen"
         end
         end
-        PF-->>Page: "Progress: loading tables (per-table progress)"
+        App->>Page: "Progress: loading tables (per-table progress)"
+        App->>App: "Create in-memory store seeded with the downloaded tables"
         App->>App: "Read schema_version from settings.json"
         alt settings.json missing → version 0
             App->>App: "Every migration is pending"
@@ -201,6 +210,7 @@ sequenceDiagram
             App->>PF: "Delete the backup — the batch succeeded"
         end
     else Fresh install (no table files)
+        App->>App: "Create empty in-memory store"
         App->>PF: "(1) Create one JSON file per table in parallel (all except settings.json) —<br/>seed the category tables in memory with the protected default rows<br/>and flush them to Drive"
         rect rgb(253, 237, 236)
         opt Step 1 fails
@@ -217,7 +227,6 @@ sequenceDiagram
         end
     end
 
-    App->>App: "Create in-memory adapter seeded with loaded data"
     App->>Page: "Hide login — show app shell"
     App->>Page: "Render current view from in-memory data (welcome / todos / …)"
     App->>PF: "Start 30s poll + tab-focus poll (personal tables)"

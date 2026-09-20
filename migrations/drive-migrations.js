@@ -52,30 +52,7 @@
 //   },
 // ===================================================================
 
-const LEGACY_FILE_NAME = 'delaclaw-data.json';
-
 export const DRIVE_MIGRATIONS = {
-  // Convert legacy single-file format to per-table files.
-  // The adapter has already loaded data into memory from whatever
-  // format it found; this migration creates the per-table Drive files
-  // and deletes the legacy blob.
-  '1.132': async (store, ctx) => {
-    const legacyFile = ctx.filesByName.get(LEGACY_FILE_NAME);
-    if (!legacyFile) return; // Already per-table or fresh install
-
-    const tok = await ctx.getToken();
-    if (!tok) throw new Error('No token for legacy migration');
-
-    // Create per-table files from the in-memory store
-    for (const table of ctx.DRIVE_TABLES) {
-      const fileName = `${table}.json`;
-      const result = await ctx.uploadFile(tok, ctx.folderId, null, fileName, store[table] || []);
-      ctx.fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
-    }
-
-    // Delete legacy file
-    await ctx.deleteFile(tok, legacyFile.id);
-  },
   // 1.393: indexes for owner_id / shared_id — perf only for Postgres/SQLite, no-op for Drive (in-memory)
   // Drive has no seq scans: whole tables are loaded into memory. Bump version only.
   '1.393': async (_store) => {},

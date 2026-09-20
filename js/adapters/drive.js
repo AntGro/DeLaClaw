@@ -463,9 +463,8 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   let initialData = {};
 
-  // Check for per-table files first, fall back to legacy single-file
+  // Check for per-table files
   const hasPerTableFiles = DRIVE_TABLES.some(t => filesByName.has(`${t}.json`));
-  const legacyFile = filesByName.get('delaclaw-data.json');
 
   if (hasPerTableFiles) {
     // Normal load: read each per-table file in parallel
@@ -487,14 +486,6 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       }
     });
     await Promise.all(readPromises);
-  } else if (legacyFile) {
-    // Legacy format: read single file, populate initialData from it
-    emit('migrating', t('menu.drive_upgrading'));
-    const { data: legacyData } = await downloadFile(token, legacyFile.id);
-    for (const table of DRIVE_TABLES) {
-      initialData[table] = legacyData[table] || [];
-      fileMeta[table] = { fileId: null, etag: null, modifiedTime: null };
-    }
   } else {
     // Fresh install: no files at all
     for (const table of DRIVE_TABLES) {
@@ -503,7 +494,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     }
   }
 
-  const isFreshInstall = !hasPerTableFiles && !legacyFile;
+  const isFreshInstall = !hasPerTableFiles;
 
   // ── Create in-memory adapter seeded with loaded data ──
 

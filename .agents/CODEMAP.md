@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-18T18:57:30.692Z from 39 modules (v2.2.0). Total LOC 29204. Do not hand-edit.
+> Generated 2026-09-20T16:38:34.890Z from 38 modules (v2.7.18). Total LOC 29182. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -23,15 +23,15 @@
 | vestiaire | 953 | vestiaire,vestiaire_categories | allVestiaire,currentView,db,js | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | - | 22 | 54 |
 | welcome | 854 | - | PROJECTS,allBirthdays,allHabitCompletions,allHabits,allVestiaire,archivedProjectIds,currentView,db | flashcards,habits,i18n,icons,item-utils,sharing-ui,state,todos,utils | main.js | modal,app-header,btn | pendingSet | 79 | 44 |
 
-## Core modules (31)
+## Core modules (30)
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 3645 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
-| i18n | 2213 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
-| sharing-drive | 1730 | joined_groups | drive-folders,sharing-envelope,sharing-file-reconcile,utils | main.js,sharing.js | - |
+| main | 3681 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:9,guard+pendingSet,window:8 |
+| i18n | 2231 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
+| sharing-drive | 1901 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
 | drive | 1370 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
-| sharing-ui | 1288 | habit_categories,habit_completions,habits,joined_groups,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:37,guard+pendingSet,window:8 |
+| sharing-ui | 1251 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:37,guard+pendingSet,window:8 |
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
 | utils | 843 | flashcards,x | i18n,icons,state,version | - | esc:7,window:6 |
 | calendar-sync | 696 | birthdays,gcal_sync,habits,settings,todos | drive-folders,habits,i18n,icons | main.js | - |
@@ -40,13 +40,12 @@
 | delegation | 421 | - |  | - | window:1 |
 | demo | 310 | x |  | drive.js | - |
 | offline-cache | 281 | - | ./state,state.js | main.js | - |
-| crypto-sync | 265 | settings |  | - | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
 | icons | 210 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
 | agents-ui | 200 | agent_grants | db,i18n,icons,utils | main.js | esc:29,window:5 |
+| sharing-file-reconcile | 188 | - |  | drive.js,sharing-drive.js | - |
 | storm3d | 185 | - |  | hero.js | - |
 | rest | 162 | x |  | main.js | - |
-| sharing-file-reconcile | 133 | - |  | drive.js,sharing-drive.js | - |
 | sharing-interface | 132 | - |  | sharing.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
 | sharing | 101 | - | sharing-drive,sharing-interface | - | - |
@@ -67,14 +66,14 @@
 | daily_visits | main |
 | flashcard_notes | flashcards |
 | flashcards | flashcards, utils |
+| groups | sharing-drive |
 | habit_completions | habits, sharing-ui |
 | habits | calendar-sync, habits, sharing-ui |
-| joined_groups | sharing-drive, sharing-ui |
 | list_items | lists, sharing-ui |
 | lists | lists |
 | projects | db, main, projects |
 | prompts | projects |
-| settings | calendar-sync, crypto-sync, main, projects |
+| settings | calendar-sync, main, projects |
 | tasks | projects |
 | text_line_progress | flashcards |
 | texts | flashcards |

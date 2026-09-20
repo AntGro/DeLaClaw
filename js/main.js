@@ -1133,8 +1133,12 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       });
       loadInitialSharing('sharing');
       state.sharing.startPolling();
-      state.sharing.onUpdate(() => {
+      state.sharing.onUpdate((event, detail) => {
         document.dispatchEvent(new CustomEvent('sharing-changed'));
+        if (event === 'member-joined' && detail?.member) {
+          const name = detail.member.displayName || '';
+          showToast(t('sharing.member_joined', name, detail.group?.name || ''), 'success');
+        }
       });
       updateSharingNavVisibility();
       // If the user already opened the Sharing pane while init was pending
@@ -1220,10 +1224,42 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
 
   // Notify user when a group is removed remotely (kicked) or deleted by its creator
   document.addEventListener('sharing-group-removed-remotely', (e) => {
-    const name = e.detail?.groupName || '';
-    const key = e.detail?.verdict === 'deleted' ? 'sharing.group_deleted_remotely' : 'sharing.group_removed_remotely';
-    showToast(t(key, name), 'info');
+    const { groupName = '', verdict, folderId } = e.detail || {};
+    if (verdict === 'deleted') {
+      // 'deleted' is a definitive verdict (Drive 404 on the folder): show a
+      // notice with a link to the Drive folder so the user can double-check
+      // it is really gone by trying to open it manually.
+      showGroupDeletedNotice(groupName, folderId);
+      return;
+    }
+    showToast(t('sharing.group_removed_remotely', groupName), 'info');
   });
+
+/** Group-deleted notice dialog. The verdict is definitive, so there is no
+ *  choice to make — just an acknowledgment plus a Google Drive folder link
+ *  inviting the user to double-check by trying to open the folder manually. */
+function showGroupDeletedNotice(groupName, folderId) {
+  document.getElementById('groupDeletedNoticeModal')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay visible';
+  overlay.id = 'groupDeletedNoticeModal';
+  const folderUrl = folderId
+    ? `https://drive.google.com/drive/folders/${encodeURIComponent(folderId)}`
+    : null;
+  overlay.innerHTML = `<div class="modal" role="dialog" aria-modal="true">
+    <h2>${lucideIcon('trash-2', 20)} ${t('sharing.group_deleted_title')}</h2>
+    <p>${t('sharing.group_deleted_remotely', esc(groupName))}</p>
+    ${folderUrl ? `<p class="setting-hint">${t('sharing.group_deleted_check_folder')}</p>
+    <p><a class="sharing-action-btn sharing-drive-link" href="${folderUrl}" target="_blank" rel="noopener">${LOGOS.googledrive(16)} ${t('sharing.open_drive_folder')}</a></p>` : ''}
+    <div class="modal-actions">
+      <button class="modal-save" id="groupDeletedNoticeOk">${t('common.ok')}</button>
+    </div>
+  </div>`;
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (ev) => { if (ev.target === overlay) close(); });
+  overlay.querySelector('#groupDeletedNoticeOk').addEventListener('click', close);
+  document.getElementById('app').appendChild(overlay);
+}
 
   // Show demo banner if in demo mode
   if (mode === 'demo') initDemoBanner();
@@ -2678,8 +2714,8 @@ const BACKUP_TABLES = [
   'settings', 'prompts', 'daily_visits',
   // sharing: owned groups (creator side) — FK order: groups → members → items
   'sharing_groups', 'sharing_members', 'sharing_items',
-  // sharing: joined groups (joiner side)
-  'joined_groups',
+  // sharing: joined groups (joiner side) + created-group name records
+  'groups',
 ];
 
 async function generateBackupJSON() {

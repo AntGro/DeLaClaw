@@ -61,7 +61,7 @@ Cross-cutting app configuration — theme, language, backend picker, sharing man
 - Stats pane renders DB age, total visits, streak
 
 ### Backup Export/Import
-- `BACKUP_TABLES` order: category/deck parents → parent tables → child/independent tables → settings/prompts/usage → sharing (groups → members → items) → joined_groups
+- `BACKUP_TABLES` order: category/deck parents → parent tables → child/independent tables → settings/prompts/usage → sharing (groups → members → items) → groups
 - Clear runs in reverse order (children before parents)
 - Export: `_meta` includes version, timestamp, table list, and `source_url`
 - Import: strips `owner_id` from all rows (trigger stamps new UID), runs migrations before applying settings

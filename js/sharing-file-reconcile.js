@@ -52,6 +52,15 @@ export function markDeleted(intentState, id) {
 }
 
 /**
+ * Forget any pending intent for an id — rollback of a mutation whose upload
+ * failed, so a later merge treats the id as untouched by this tab.
+ */
+export function discardIntent(intentState, id) {
+  intentState.createdIds.delete(id);
+  intentState.deletedIds.delete(id);
+}
+
+/**
  * Plain union by id, newer updated_at wins (ties → remote).
  * For merging two authoritative remote snapshots (e.g. legacy migration),
  * where local intents do not apply.
@@ -96,6 +105,52 @@ export function reconcileItems(local, remote, intents) {
     }
   }
 
+  return out;
+}
+
+/**
+ * Intent-aware merge of group member rosters (keyed on memberId).
+ * Used when a group.json write hits a 412 conflict: only rows this client
+ * actually changed since the load (intents.createdIds) win locally — rows
+ * this client merely holds take the newer remote version, so a concurrent
+ * join (pending → joined, flipped by the invitee) is not reverted by the
+ * creator's retry. Rows this client removed (intents.deletedIds) stay
+ * removed even if still present remotely.
+ * Without intents, falls back to local-wins-wholesale per row.
+ */
+export function mergeMemberLists(local, remote, intents) {
+  const created = intents?.createdIds;
+  const deleted = intents?.deletedIds;
+  const map = new Map();
+  for (const m of remote) {
+    if (deleted?.has(m.memberId)) continue; // we removed them: stay removed
+    map.set(m.memberId, m);
+  }
+  for (const m of local) {
+    if (!created || created.has(m.memberId)) map.set(m.memberId, m); // our change wins (legacy: all rows)
+    else if (!map.has(m.memberId)) map.set(m.memberId, m); // row unknown to both sides: keep
+  }
+  return Array.from(map.values());
+}
+
+/**
+ * Intent-aware application of a downloaded member roster over the in-memory
+ * one, for the periodic poll (the 412-conflict path uses mergeMemberLists).
+ * Rule: the remote roster wins wholesale, except rows this tab created but
+ * hasn't flushed yet (intents.createdIds) — those are retained even when
+ * absent remotely, so the poll can't drop an invite whose upload is still in
+ * flight. Rows this tab removed are deliberately NOT suppressed here: after
+ * a failed removal the row resurrects in memory, which is what lets the user
+ * retry the removal.
+ */
+export function reconcileMembers(local, remote, intents) {
+  const created = intents?.createdIds;
+  if (!created || created.size === 0) return remote.slice();
+  const remoteIds = new Set(remote.map(m => m.memberId));
+  const out = remote.slice();
+  for (const m of local) {
+    if (m.memberId && created.has(m.memberId) && !remoteIds.has(m.memberId)) out.push(m);
+  }
   return out;
 }
 

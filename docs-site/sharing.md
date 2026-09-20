@@ -62,13 +62,9 @@ flowchart TB
 
 The adapter is validated at init time against the interface contract — a missing method is a hard error, not a silent runtime crash. The Supabase sharing adapter was removed with the Supabase backend; Drive is the only sharing path.
 
-## Supabase ↔ Supabase (removed)
-
-The Supabase sharing adapter (`sharing-supabase.js`) was removed together with the Supabase backend. The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
-
 ## Drive ↔ Drive
 
-The Google Drive sharing adapter is the only sharing path. Drive sharing has no server: the shared state is a folder in the **creator's** Google Drive, and every member reads and writes the same files through the Drive API. The joiner's own Drive only ever holds pointers (the `joined_groups` personal table) with the shared folders' file IDs. Access control is enforced by Drive folder permissions plus a local trusted-contacts allowlist.
+The Google Drive sharing adapter is the only sharing path. Drive sharing has no server: the shared state is a folder in the **creator's** Google Drive, and every member reads and writes the same files through the Drive API. The joiner's own Drive only ever holds pointers (the `groups` personal table) with the shared folders' file IDs, plus one name-only record per group the joiner created themselves. Access control is enforced by Drive folder permissions plus a local trusted-contacts allowlist.
 
 ### Storage layout
 
@@ -77,12 +73,12 @@ The Google Drive sharing adapter is the only sharing path. Drive sharing has no 
 flowchart LR
     subgraph CD["Creator's Drive"]
         direction TB
-        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · joined_groups.json"]
+        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · groups.json"]
         CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · revoked.json<br/>extra_1..12.json"]
     end
     subgraph JD["Joiner's Drive"]
         direction TB
-        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json<br/>joined_groups.json &#9668; <b>pointers only</b><br/>{folderId, groupId, fileIds}"]
+        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json<br/>groups.json &#9668; <b>pointers + own-group names</b><br/>{id, folderId, fileIds} · {id, name}"]
     end
 ```
 
@@ -96,7 +92,7 @@ _Folder names shown for production (`delaclaw.com`); dev and preview builds use 
 - **Invite code**: `DLC1.<base64url({v:1, b:'googledrive', f:<folderId>})>` — one group-level code, no per-member tokens.
 - **Access control**: Drive folder permissions (writer) plus the trusted-contacts allowlist; `group.json` holds the member list. No RPC layer, no token hashing.
 - **Member identity**: the member ID is the SHA-256 hash of the member's *normalized* email (never the raw email) — stable per user across invites. Normalization lowercases, and for Gmail only (`gmail.com`/`googlemail.com`) strips dots and `+tags`, mirroring Google's semantics; other providers treat dots as significant, so they are left untouched. Because IDs are stable, removal entries in `revoked.json` are disambiguated by timestamp: only a removal recorded after the member's current join counts.
-- **Sync**: every member polls every 15 s, keyed on each file's `modifiedTime`. Concurrent writes use ETags with up to two conflict retries; the merge is intent-aware (`reconcileItems` in `sharing-file-reconcile.js`) — pending local creates are retained, pending local deletes suppress stale remote copies, and only deletions acknowledged by a successful upload propagate.
+- **Sync**: every member polls every 15 s, keyed on each file's `modifiedTime`. Concurrent writes use ETags with up to two conflict retries; the merge is intent-aware (`reconcileItems` in `sharing-file-reconcile.js`) — pending local creates are retained, pending local deletes suppress stale remote copies, and only deletions acknowledged by a successful upload propagate. The member roster poll is likewise intent-aware (`reconcileMembers`): rows this tab created but hasn't flushed yet are kept, everything else takes the remote version.
 - **Drive scopes**: with `drive.file` scope the joiner grants access through the Google Picker (only the selected files, revoked.json included); with full `drive` scope the folder is listed directly.
 
 ### Local pointers and per-member buckets
@@ -127,42 +123,148 @@ flowchart LR
 sequenceDiagram
     autonumber
     box rgb(239,246,255) Creator's Google account
-    participant CA as Creator app
+    participant CP as Creator page<br/>(rendered UI)
+    participant CA as Creator app<br/>(in-memory state + Drive API)
     participant CD as Creator's Drive
     end
     box rgb(255,251,235) Shared — lives in the creator's Drive
     participant SF as DeLaClaw-Shared-{id}
     end
     box rgb(240,253,244) Joiner's Google account
-    participant JA as Joiner app
+    participant JP as Joiner page<br/>(rendered UI)
+    participant JA as Joiner app<br/>(in-memory state + Drive API)
     participant JD as Joiner's Drive
     end
 
+    CP->>CA: Create group "{name}"
+    CA->>CP: lock modal, show progress<br/>(folder → files → group.json)
     CA->>CD: findOrCreate DeLaClaw-Shared/
     CA->>SF: create subfolder DeLaClaw-Shared-{id}
+    rect rgb(253, 237, 236)
+    opt Step 3 or 4 fails
+        CA->>CA: nothing created — nothing to trash
+        CA->>CP: error toast, create modal unlocked
+    end
+    end
     CA->>SF: upload item files<br/>(todos/habits/lists.json)<br/>+ revoked.json<br/>+ 12 empty extra_N.json placeholders<br/>then group.json LAST (its presence marks creation complete)
+    rect rgb(253, 237, 236)
+    opt Item-file or group.json upload fails
+        SF-->>CA: Error
+        CA->>CA: Partial folder trashed (best effort)<br/>no groups row written<br/>Tab killed mid-creation → orphan folder possible
+        CA->>CP: error toast, create modal unlocked
+    end
+    end
+    CA->>CD: upsert groups row<br/>(kind 'created', id + name only)<br/>own groups are discovered from these rows
+    rect rgb(253, 237, 236)
+    opt Groups-row upsert fails
+        CA->>CA: throw — folder trashed (best effort)<br/>never registered in memory, never shown<br/>creation is all-or-nothing
+        CA->>CP: error toast, create modal unlocked
+    end
+    end
+    CA->>CP: toast "group created"<br/>sharing pane re-renders
     Note over CA,SF: creator-only: inviteUser throws<br/>unless the caller is the creator
+    CP->>CA: invite B@email
+    rect rgb(253, 237, 236)
+    opt B already joined or has a pending invite
+        CA->>CA: no Drive call, no group.json write
+        CA->>CP: error toast
+    end
+    end
     CA->>SF: share folder with B@email (writer)<br/>+ revoked.json (reader)
+    rect rgb(253, 237, 236)
+    opt Drive share fails
+        SF-->>CA: Error — no invite issued<br/>no member row added to group.json
+        CA->>CP: error toast
+    end
+    end
     CA->>SF: group.json += member<br/>{memberId: hash(email), pending, pseudo: null}
+    rect rgb(253, 237, 236)
+    opt group.json write fails
+        CA->>CA: _groups: row rolled back,<br/>intent discarded — safe to retry<br/>Drive writer grant already issued — NOT revoked<br/>(reaped by the load-time audit)
+        CA->>CP: error toast
+    end
+    end
+    opt 412 conflict on upload (≤2 retries)
+        CA->>CA: _groups: merge with downloaded copy —<br/>only rows this tab changed win locally.<br/>concurrent join (pending → joined) is kept
+    end
+    CA->>CP: invite-code modal<br/>(DLC1 code + copy button)
     CA-->>JA: DLC1 invite code {b:'googledrive', f:folderId}
     Note over CA,JA: sent out of band — chat, email, …
-    JA->>JA: paste code → decode → folderId
-    JA->>SF: Google Picker → select shared files<br/>(revoked.json included)
-    Note over JA,SF: Picker grants drive.file access<br/>to only the selected files —<br/>placeholders pre-authorize future item types
-    JA->>SF: download group.json + item files
-    JA->>SF: match pending row by memberId<br/>no match → join rejected
-    JA->>SF: pending → joined, set chosen pseudo
-    JA->>JD: upsert joined_groups row<br/>(joined_groups.json; DeLaClawDev/ on dev builds)
-    Note over JD: pointer only:<br/>{folderId, groupId, fileIds}<br/>fileIds include revoked.json
+    opt Non-desktop device (coarse pointer, no hover)
+        JA->>JP: not-available notice<br/>no invite-code form offered
+    end
+    JP->>JA: open Join dialog, paste code
+    JA->>JP: code modal (textarea + Join button)
+    JA->>JA: decode → folderId
+    rect rgb(253, 237, 236)
+    opt Code undecodable
+        JA->>JP: inline error in code modal<br/>modal stays open
+    end
+    opt Group already loaded
+        JA->>JP: toast "already joined" (info) — no-op
+    end
+    end
+    alt Direct path — joiner already has Drive folder access
+        JA->>SF: list files directly (no Picker)
+        JA->>SF: download group.json + item files
+        rect rgb(253, 237, 236)
+        opt group.json unreadable or no pending invite
+            JA->>JA: silent fallback to Picker path<br/>nothing rendered
+        end
+        end
+        JA->>SF: pending → joined<br/>pseudo defaults to Google account name<br/>(group.json re-uploaded, no confirm modal)
+        rect rgb(253, 237, 236)
+        opt Re-upload or pointer upsert fails
+            JA->>JA: silent fallback to Picker path<br/>nothing rendered
+        end
+        end
+        JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
+        Note over JD: pointer only:<br/>{id, folderId, fileIds}<br/>fileIds include revoked.json
+    else Picker path — explicit file grants
+        JA->>JP: picker modal<br/>expects the full 17-file set
+        JP->>JA: open Picker, select files
+        JA->>SF: Google Picker → select shared files<br/>(revoked.json included)
+        Note over JA,SF: Picker grants drive.file access<br/>to only the selected files —<br/>placeholders pre-authorize future item types
+        rect rgb(253, 237, 236)
+        opt Selection misses files (not the full 17-file set)
+            JA->>JP: inline error in picker modal<br/>re-pick to retry
+        end
+        end
+        JA->>JP: confirm modal<br/>(pseudo input, prefilled with Google account name)
+        JP->>JA: confirm with chosen pseudo
+        JA->>SF: download group.json + item files
+        JA->>JA: match pending row by memberId
+        rect rgb(253, 237, 236)
+        opt group.json unreadable or no pending invite
+            JA->>JP: inline error in confirm modal<br/>Drive access alone is not enough
+        end
+        opt group.json re-upload fails
+            JA->>JP: inline error in confirm modal<br/>join aborts — no pointer row written
+        end
+        end
+        JA->>SF: pending → joined<br/>(group.json re-uploaded)
+        JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
+        Note over JD: pointer only:<br/>{id, folderId, fileIds}<br/>fileIds include revoked.json
+        rect rgb(253, 237, 236)
+        opt Pointer upsert fails
+            JA->>JP: inline error in confirm modal<br/>join aborts — group not joined
+        end
+        end
+    end
+    JA->>JP: toast "joined"<br/>sharing pane re-renders
     JA->>JA: startPolling (15s)
     CA->>SF: next poll (≤15s): group.json modified?
     SF-->>CA: changed → re-download
-    CA->>CA: toast "B joined" + member list re-renders
+    CA->>CA: diff members → newly joined
+    CA->>CA: reconcile roster — rows this tab created<br/>but hasn't flushed yet are kept,<br/>everything else takes the remote version
+    CA->>CP: toast ""{pseudo}" joined "{group}""<br/>member list re-renders
 ```
 
 Joining requires two gates: Drive access to the folder (the join must download `group.json`) **and** a matching pending invite (by member ID, the hash of the joiner's email). Drive access alone is not enough.
 
 Joining is desktop-only: the joiner must multi-select every group file in the Google file picker, which phones and tablets (coarse pointer, no hover) dismiss after a single tap. On such devices the join dialog says so instead of offering the invite-code form. The gate is capability-based (`isDesktopLike()`: fine pointer + hover), so touchscreen laptops are not gated.
+
+If the group.json write fails at step 21, the Drive writer grant is left in place — it is reaped by the [load-time permission audit](sync-architecture.md?id=_3-%C2%B7-sharing-startup) on the next group load.
 
 #### Create an item (creator and member)
 
@@ -272,7 +374,7 @@ sequenceDiagram
     MA->>MD: pointers → personal items<br/>(__shared__ items → General)
     end
     MA->>SF: best-effort: flip own row to<br/>status 'left' (+ leftAt)
-    MA->>MD: delete joined_groups row
+    MA->>MD: delete groups row
     MA->>MA: drop group, emit group-left<br/>polling stops
     Note over SF: creator's next poll (≤15s)<br/>sees the 'left' row
     CA->>SF: revoke leaver's Drive permission<br/>(owner-only operation)
@@ -342,10 +444,10 @@ sequenceDiagram
     CA->>SF: revoked.json += ALL member hashIds
     CA->>SF: list permissions → revoke all non-owner<br/>(revoked.json reader grants remain)
     Note over CA,SF: folder is NOT trashed yet —<br/>members must still read revoked.json
-    CA->>CA: record deletedAt in local state<br/>drop group, emit group-deleted
+    CA->>CA: _groups: drop group<br/>record deletedAt in local state<br/>emit group-deleted
     MA->>SF: next poll: folder → 404
     MA->>SF: fetch revoked.json by stored fileId →<br/>own hashId present
-    MA->>MA: explicit "group deleted" →<br/>stop polling, purge group
+    MA->>MA: explicit "group deleted" →<br/>stop polling, _groups: purge group
     MA->>MA: orphan dialog → unlink pointers<br/>(re-prompts until resolved — may be an infra issue)
     Note over CA,CD: creator app startup: deletedAt > 30 days →<br/>permanently delete DeLaClaw-Shared-{id}
 ```
@@ -373,7 +475,7 @@ sequenceDiagram
     MA->>MD: trash personal DeLaClaw/ folder
     MA->>MA: revoke OAuth token (last)
     Note over MD,SF: joined groups are left alone —<br/>member rows linger as ghost rows<br/>(no unjoin performed)
-    Note over MA,SF: the 30-day sweep needs the app to run —<br/>if never reopened, shell folders linger;<br/>members still infer deletion<br/>(revoked.json + folder both 404)
+    Note over MA,SF: the 30-day sweep needs the app to run —<br/>if never reopened, shell folders linger,<br/>members still infer deletion<br/>(revoked.json + folder both 404)
 ```
 
 #### Externally deleted Google accounts (manual)
@@ -409,7 +511,6 @@ The flows above surfaced 14 design questions, all decided on 2026-09-07 and reco
 | `sharing-drive.js` | Drive adapter (implements the target design) |
 | `sharing-ui.js` | Settings pane, share popovers, badges, join flow |
 | `sharing.js` | Factory that picks adapter by backend mode |
-| `crypto-sync.js` | AES-GCM encryption for joined-group credentials |
 
 ## Related
 

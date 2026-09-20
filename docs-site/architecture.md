@@ -118,7 +118,7 @@ The canonical table list lives in `server/schema.sql` (SQLite base schema).
 | `settings` | Key-value store (schema version, preferences) | -- |
 | `prompts` | AI prompt templates | -- |
 | `daily_visits` | Login/visit tracking | -- |
-| `joined_groups` | Groups the user has joined (encrypted tokens) | -- |
+| `groups` | Groups the user has joined (encrypted tokens) + name records for groups they created | -- |
 | `sharing_groups` | Shared group definitions | -- |
 | `sharing_members` | Group membership | `group_id` -> `sharing_groups.id` |
 | `sharing_items` | Shared items (TODOs, habits, list items) | `group_id` -> `sharing_groups.id` |
@@ -190,7 +190,6 @@ js/
     demo.js                In-memory adapter
     drive.js               Google Drive adapter (in-memory + per-table JSON persistence)
     offline-cache.js       IndexedDB caching layer
-  crypto-sync.js           AES-GCM encryption for joined_groups tokens
   sharing.js               Sharing factory (Drive adapter)
   sharing-interface.js     Sharing adapter interface contract
   sharing-drive.js         Google Drive sharing adapter (per-table JSON)

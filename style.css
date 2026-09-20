@@ -2061,6 +2061,8 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-group-disconnected .sharing-group-info h4{opacity:0.55;}
 .sharing-group-disconnected-stamp{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:3px 10px;border-radius:6px;font-size:0.76rem;font-weight:700;color:#fff;background:#e67e22;vertical-align:middle;white-space:nowrap;opacity:1;filter:none;}
 .sharing-group-disconnected-stamp svg{width:14px;height:14px;flex-shrink:0;}
+.sharing-group-skipped-stamp{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:3px 10px;border-radius:6px;font-size:0.76rem;font-weight:700;color:#fff;background:#b45309;vertical-align:middle;white-space:nowrap;}
+.sharing-group-skipped-stamp svg{width:14px;height:14px;flex-shrink:0;}
 .sharing-invite-row{display:flex;gap:6px;margin-bottom:8px;}
 .sharing-invite-input{flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--settings-bg);color:var(--text);font-size:0.9rem;}
 .sharing-invite-btn{display:inline-flex;align-items:center;gap:4px;padding:7px 11px;border-radius:8px;border:1px solid var(--accent);background:color-mix(in srgb, var(--accent) 12%, var(--settings-bg));color:var(--accent);cursor:pointer;font-size:0.86rem;font-weight:600;transition:all 0.15s;white-space:nowrap;flex-shrink:0;}

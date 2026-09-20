@@ -1759,37 +1759,40 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // Pending-invite gate: only a member with a matching pending invite may join.
       // Member IDs are deterministic per email, so the joiner matches their own row directly.
       const e = _groups.get(groupId);
-      let joinedMemberId = null;
       if (e) {
         const selfId = await memberIdFromEmail(user.email);
         const member = e.group.members.find(m => m.status === 'pending' && m.memberId === selfId);
         if (!member) throw new Error('No pending invite for this account');
+
+        // Persist the pointer BEFORE flipping to joined: if the group.json
+        // re-upload below fails, the join stays retryable (re-pasting the
+        // code finds the still-pending row), whereas a flipped group.json
+        // with no pointer row is unrecoverable.
+        // memberId lets the client match its own revoked.json entry if this
+        // account is later removed from the group. The row id is the group id:
+        // the Drive adapter's 412 merge is keyed on id with newer updated_at
+        // winning, which preserves the old union-by-folderId conflict behavior
+        // across devices.
+        const now = new Date().toISOString();
+        // name is stored in the pointer so the deleted/skipped notices can name
+        // the group even when its Drive folder is unreachable (no group.json).
+        const entry = { id: groupId, kind: 'joined', folderId, name: groupData?.name || null, fileIds, memberId: member.memberId, joinedAt: now, updated_at: now };
+        if (db) {
+          const { error } = await db.from('groups').upsert(entry, { onConflict: 'id' });
+          if (error) throw new Error(`join: failed to persist joined group: ${error.message}`);
+          await refreshGroupRows();
+        } else {
+          const existing = _groupRows.findIndex(j => j.folderId === folderId || j.id === groupId);
+          if (existing >= 0) _groupRows[existing] = entry;
+          else _groupRows.push(entry);
+        }
+
         member.status = 'joined';
-        member.joinedAt = new Date().toISOString();
+        member.joinedAt = now;
         const pseudo = String(opts?.displayName || '').trim();
         member.displayName = pseudo || user.name || fallbackDisplayName(user.email);
-        joinedMemberId = member.memberId;
         markCreated(memberIntentsFor(e), member.memberId);
         await saveGroup(groupId);
-      }
-
-      // Persist the pointer in the groups table (memberId lets the
-      // client match its own revoked.json entry if this account is later
-      // removed from the group). The row id is the group id: the Drive adapter's
-      // 412 merge is keyed on id with newer updated_at winning, which preserves
-      // the old union-by-folderId conflict behavior across devices.
-      const now = new Date().toISOString();
-      // name is stored in the pointer so the deleted/skipped notices can name
-      // the group even when its Drive folder is unreachable (no group.json).
-      const entry = { id: groupId, kind: 'joined', folderId, name: groupData?.name || null, fileIds, memberId: joinedMemberId, joinedAt: now, updated_at: now };
-      if (db) {
-        const { error } = await db.from('groups').upsert(entry, { onConflict: 'id' });
-        if (error) throw new Error(`join: failed to persist joined group: ${error.message}`);
-        await refreshGroupRows();
-      } else {
-        const existing = _groupRows.findIndex(j => j.folderId === folderId || j.id === groupId);
-        if (existing >= 0) _groupRows[existing] = entry;
-        else _groupRows.push(entry);
       }
 
       const group = _groups.get(groupId)?.group;

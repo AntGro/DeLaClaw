@@ -218,14 +218,19 @@ sequenceDiagram
             JA->>JA: silent fallback to Picker path<br/>nothing rendered
         end
         end
-        JA->>SF: pending → joined<br/>pseudo = Google account displayName<br/>(Drive about API, else email local part)<br/>(group.json re-uploaded, no confirm modal)
+        JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
+        Note over JD: pointer only:<br/>{id, folderId, fileIds}<br/>fileIds include revoked.json
         rect rgb(253, 237, 236)
-        opt Re-upload or pointer upsert fails
+        opt Pointer upsert fails
             JA->>JA: silent fallback to Picker path<br/>nothing rendered
         end
         end
-        JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
-        Note over JD: pointer only:<br/>{id, folderId, fileIds}<br/>fileIds include revoked.json
+        JA->>SF: pending → joined<br/>pseudo = Google account displayName<br/>(Drive about API, else email local part)<br/>(group.json re-uploaded, no confirm modal)
+        rect rgb(253, 237, 236)
+        opt Re-upload fails
+            JA->>JA: silent fallback to Picker path<br/>nothing rendered<br/>pointer kept — re-pasting the code retries the join
+        end
+        end
     else Picker path — explicit file grants
         JA->>JP: picker modal<br/>expects the full 17-file set
         JP->>JA: open Picker, select files
@@ -244,16 +249,18 @@ sequenceDiagram
         opt group.json unreadable or no pending invite
             JA->>JP: inline error in confirm modal<br/>Drive access alone is not enough
         end
-        opt group.json re-upload fails
-            JA->>JP: inline error in confirm modal<br/>join aborts — no pointer row written
         end
-        end
-        JA->>SF: pending → joined<br/>(group.json re-uploaded)
         JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
         Note over JD: pointer only:<br/>{id, folderId, fileIds}<br/>fileIds include revoked.json
         rect rgb(253, 237, 236)
         opt Pointer upsert fails
             JA->>JP: inline error in confirm modal<br/>join aborts — group not joined
+        end
+        end
+        JA->>SF: pending → joined<br/>(group.json re-uploaded)
+        rect rgb(253, 237, 236)
+        opt Re-upload fails
+            JA->>JP: inline error in confirm modal<br/>pointer kept — re-pasting the code retries the join
         end
         end
     end

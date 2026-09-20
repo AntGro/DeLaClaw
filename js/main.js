@@ -903,13 +903,15 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       if (document.visibilityState === 'hidden') {
         // Flush when tab goes background (mobile doesn't reliably fire beforeunload)
         adapter.forceSave().catch(() => {});
-      } else if (document.visibilityState === 'visible' && adapter.pollNow) {
-        // Catch up on external changes immediately when tab comes back
-        adapter.pollNow();
       }
     });
     // Poll on window focus (catches desktop window switching, not just tab switching)
-    window.addEventListener('focus', () => { if (adapter.pollNow) adapter.pollNow(); });
+    window.addEventListener('focus', () => {
+      if (adapter.pollNow) {
+        console.log('[DeLaClaw] window focused, polling now');
+        adapter.pollNow();
+      }
+    });
   }
 
   document.getElementById('gate').style.display = 'none';

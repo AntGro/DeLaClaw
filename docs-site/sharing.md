@@ -206,13 +206,19 @@ sequenceDiagram
     end
     alt Direct path — joiner already has Drive folder access
         JA->>SF: list files directly (no Picker)
-        JA->>SF: download group.json + item files
+        JA->>JA: gate: all required files present<br/>(group, item types, extra_*, revoked)
         rect rgb(253, 237, 236)
-        opt group.json unreadable or no pending invite
+        opt File set incomplete
             JA->>JA: silent fallback to Picker path<br/>nothing rendered
         end
         end
-        JA->>SF: pending → joined<br/>pseudo defaults to Google account name<br/>(group.json re-uploaded, no confirm modal)
+        JA->>SF: download group.json + item files
+        rect rgb(253, 237, 236)
+        opt group.json or any item file unreadable<br/>or no pending invite
+            JA->>JA: silent fallback to Picker path<br/>nothing rendered
+        end
+        end
+        JA->>SF: pending → joined<br/>pseudo = Google account displayName<br/>(Drive about API, else email local part)<br/>(group.json re-uploaded, no confirm modal)
         rect rgb(253, 237, 236)
         opt Re-upload or pointer upsert fails
             JA->>JA: silent fallback to Picker path<br/>nothing rendered

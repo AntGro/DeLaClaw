@@ -985,7 +985,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         // registered or emitted, so creation is all-or-nothing.
         const createdRow = {
           id: groupId, kind: 'created', name,
-          createdAt: new Date().toISOString(), updated_at: new Date().toISOString(),
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         };
         if (db) {
           const { error } = await db.from('groups').upsert(createdRow, { onConflict: 'id' });

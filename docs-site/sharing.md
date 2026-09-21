@@ -215,7 +215,7 @@ sequenceDiagram
         JA->>SF: download group.json + item files
         rect rgb(253, 237, 236)
         opt group.json or any item file unreadable<br/>or no pending invite
-            JA->>JA: silent fallback to Picker path<br/>nothing rendered
+            JA->>JP: inline error in code modal<br/>modal stays open
         end
         end
     else Picker path — explicit file grants
@@ -238,18 +238,18 @@ sequenceDiagram
         end
         end
     end
-    Note over JA,SF: shared tail — both paths run the same joinWithFileIds code<br/>only the error surface differs
+    Note over JA,SF: shared tail — both paths run the same joinWithFileIds code<br/>errors surface inline in the open modal
     JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
     Note over JD: pointer only:<br/>{id, folderId, fileIds}<br/>fileIds include revoked.json
     rect rgb(253, 237, 236)
     opt Pointer upsert fails
-        JA->>JA: direct: silent fallback to Picker path, nothing rendered<br/>picker: inline error in confirm modal, join aborts<br/>(group not joined — flip never ran)
+        JA->>JP: inline error in code modal (direct)<br/>or confirm modal (picker)<br/>(group not joined — flip never ran)
     end
     end
     JA->>SF: pending → joined<br/>pseudo = picker confirm input, else Google account displayName<br/>(Drive about API, else email local part)<br/>(group.json re-uploaded)
     rect rgb(253, 237, 236)
     opt Re-upload fails
-        JA->>JA: direct: silent fallback to Picker path, nothing rendered<br/>picker: inline error in confirm modal<br/>pointer kept — re-pasting the code retries the join
+        JA->>JP: inline error in code modal (direct)<br/>or confirm modal (picker)<br/>pointer kept
     end
     end
     JA->>JP: toast "joined"<br/>sharing pane re-renders

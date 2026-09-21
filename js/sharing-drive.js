@@ -1696,23 +1696,28 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     // ─── Link join ───
 
     /** Try to join a shared group by direct folder access (needs full Drive scope).
-     *  Returns the group object on success, null if scope is insufficient. */
+     *  Returns the group object on success, null when the grant is insufficient
+     *  (the caller falls back to the Picker). Failures once the full file set
+     *  is confirmed — unreadable files, no pending invite, pointer/re-upload
+     *  failure — are NOT picker-fixable, so they propagate to the caller
+     *  instead of misrouting to the Picker. */
     async tryDirectJoin(folderId) {
       const tok = await token();
+      let fileIds;
       try {
         const children = await driveListChildren(tok, folderId);
         if (children.length === 0) return null;
-        const fileIds = this.mapDocsToFileIds(children);
-        if (!fileIds.group) return null;
-        // NOTE: `return await` is load-bearing here — a bare `return` of the
-        // promise would let a joinWithFileIds rejection escape this try/catch
-        // (the try block completes holding the promise; adoption happens
-        // outside it). Awaiting surfaces the rejection inside the try so the
-        // Picker fallback below actually works.
-        return await this.joinWithFileIds(folderId, fileIds);
+        fileIds = this.mapDocsToFileIds(children);
       } catch {
-        return null; // permission denied or incomplete grant → needs Picker
+        return null; // permission denied → Picker supplies the missing access
       }
+      // Incomplete grant → Picker (it supplies the missing file access). This
+      // check lives here — not just in joinWithFileIds — so a partial grant
+      // still falls back instead of surfacing an inline error.
+      const missing = REQUIRED_GROUP_FILES.filter(k => !fileIds[k]);
+      if (missing.length > 0) return null;
+      // Full access confirmed: downstream failures are not picker-fixable.
+      return this.joinWithFileIds(folderId, fileIds);
     },
 
     /** Join a shared group using explicit file IDs (from Picker or direct access).

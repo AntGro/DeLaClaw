@@ -63,6 +63,7 @@ export const SHARING_INTERFACE = {
   tryDirectJoin:            'fn',   // (connectionRef) => Promise<Group|null>
   joinWithFileIds:          'fn',   // (connectionRef, fileIds) => Promise<Group>
   getRequiredGroupFiles:    'fn',   // () => string[] — file keys a join must include
+  mapDocsToFileIds:         'fn',   // (docs) => {key: fileId} — map Drive docs to required file keys
   reconnectGroup:           'fn',   // (groupId, newUrl, newAnonKey, token) => Promise<Group>
 
   // ── Groups — queries ────────────────────────────────────────

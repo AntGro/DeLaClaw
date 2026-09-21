@@ -846,17 +846,11 @@ async function sharingOpenJoinPicker(folderId) {
       return;
     }
 
-    // Map picked docs to required file keys. The accepted keys come from the
-    // adapter's required set (never hard-coded) so new required files —
-    // e.g. revoked.json added in phase 3 — are picked up automatically.
+    // Map picked docs to required file keys via the adapter (never hard-coded)
+    // so new required files — e.g. revoked.json added in phase 3 — are
+    // picked up automatically.
     const requiredKeys = state.sharing.getRequiredGroupFiles();
-    const fileIds = {};
-    for (const d of docs) {
-      const key = d.name.replace('.json', '');
-      if (requiredKeys.includes(key)) {
-        fileIds[key] = d.id;
-      }
-    }
+    const fileIds = state.sharing.mapDocsToFileIds(docs);
 
     if (!fileIds.group) {
       const folderDoc = docs.find(d => d.mimeType === 'application/vnd.google-apps.folder');

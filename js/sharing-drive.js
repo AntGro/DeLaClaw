@@ -1702,11 +1702,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       try {
         const children = await driveListChildren(tok, folderId);
         if (children.length === 0) return null;
-        const fileIds = {};
-        for (const f of children) {
-          const key = f.name.replace('.json', '');
-          if (REQUIRED_GROUP_FILES.includes(key)) fileIds[key] = f.id;
-        }
+        const fileIds = this.mapDocsToFileIds(children);
         if (!fileIds.group) return null;
         // NOTE: `return await` is load-bearing here — a bare `return` of the
         // promise would let a joinWithFileIds rejection escape this try/catch
@@ -1881,6 +1877,19 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     /** File keys a join must include (group + item files + placeholders).
      *  The pending → 'joined' flip is gated on this full set. */
     getRequiredGroupFiles() { return [...REQUIRED_GROUP_FILES]; },
+
+    /** Map Drive docs (listed children or Picker picks) to file IDs keyed by
+     *  required group-file key (filename without the .json suffix). Files
+     *  outside the required set are ignored; accepted keys always derive
+     *  from getRequiredGroupFiles(), never hard-coded. */
+    mapDocsToFileIds(docs) {
+      const fileIds = {};
+      for (const d of docs || []) {
+        const key = String(d?.name || '').replace('.json', '');
+        if (REQUIRED_GROUP_FILES.includes(key)) fileIds[key] = d.id;
+      }
+      return fileIds;
+    },
 
     isReady() { return _loaded; },
 

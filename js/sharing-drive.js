@@ -1728,8 +1728,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     async joinWithFileIds(folderId, fileIds, opts = {}) {
       // Gate the join on the full file set: flipping to 'joined' with only a
       // partial grant (e.g. group.json alone) would leave item sync broken with
-      // no recovery except leave + rejoin. The direct-join path's try/catch
-      // turns this into a graceful fallback to the Picker.
+      // no recovery except leave + rejoin. The direct-join path checks the file
+      // set itself before calling here (incomplete grant → Picker fallback),
+      // so this throw is a backstop: in the Picker path it surfaces as an
+      // inline error in the confirm modal.
       const missing = REQUIRED_GROUP_FILES.filter(k => !fileIds?.[k]);
       if (missing.length > 0) {
         throw new Error(

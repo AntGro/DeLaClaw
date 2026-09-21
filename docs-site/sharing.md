@@ -218,19 +218,6 @@ sequenceDiagram
             JA->>JA: silent fallback to Picker path<br/>nothing rendered
         end
         end
-        JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
-        Note over JD: pointer only:<br/>{id, folderId, fileIds}<br/>fileIds include revoked.json
-        rect rgb(253, 237, 236)
-        opt Pointer upsert fails
-            JA->>JA: silent fallback to Picker path<br/>nothing rendered
-        end
-        end
-        JA->>SF: pending → joined<br/>pseudo = Google account displayName<br/>(Drive about API, else email local part)<br/>(group.json re-uploaded, no confirm modal)
-        rect rgb(253, 237, 236)
-        opt Re-upload fails
-            JA->>JA: silent fallback to Picker path<br/>nothing rendered<br/>pointer kept — re-pasting the code retries the join
-        end
-        end
     else Picker path — explicit file grants
         JA->>JP: picker modal<br/>expects the full 17-file set
         JP->>JA: open Picker, select files
@@ -250,19 +237,20 @@ sequenceDiagram
             JA->>JP: inline error in confirm modal<br/>Drive access alone is not enough
         end
         end
-        JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
-        Note over JD: pointer only:<br/>{id, folderId, fileIds}<br/>fileIds include revoked.json
-        rect rgb(253, 237, 236)
-        opt Pointer upsert fails
-            JA->>JP: inline error in confirm modal<br/>join aborts — group not joined
-        end
-        end
-        JA->>SF: pending → joined<br/>(group.json re-uploaded)
-        rect rgb(253, 237, 236)
-        opt Re-upload fails
-            JA->>JP: inline error in confirm modal<br/>pointer kept — re-pasting the code retries the join
-        end
-        end
+    end
+    Note over JA,SF: shared tail — both paths run the same joinWithFileIds code<br/>only the error surface differs
+    JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
+    Note over JD: pointer only:<br/>{id, folderId, fileIds}<br/>fileIds include revoked.json
+    rect rgb(253, 237, 236)
+    opt Pointer upsert fails
+        JA->>JA: direct: silent fallback to Picker path, nothing rendered<br/>picker: inline error in confirm modal, join aborts<br/>(group not joined — flip never ran)
+    end
+    end
+    JA->>SF: pending → joined<br/>pseudo = picker confirm input, else Google account displayName<br/>(Drive about API, else email local part)<br/>(group.json re-uploaded)
+    rect rgb(253, 237, 236)
+    opt Re-upload fails
+        JA->>JA: direct: silent fallback to Picker path, nothing rendered<br/>picker: inline error in confirm modal<br/>pointer kept — re-pasting the code retries the join
+    end
     end
     JA->>JP: toast "joined"<br/>sharing pane re-renders
     JA->>JA: startPolling (15s)

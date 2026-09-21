@@ -10,7 +10,7 @@
 <!-- CSP hardened: all inline handlers removed via delegation (Phase 1 index.html 109, Phase 2 js/*.js 254 → 0). Secure hash for importmap restored, unsafe-* removed. -->
 <!-- frame-src includes https://docs.google.com: the Drive join picker renders in a docs.google.com iframe (google.picker). -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com https://cloudflareinsights.com; frame-src 'self' https://accounts.google.com https://content.google.com https://docs.google.com https://www.youtube.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
-<!-- Vendor: self-hosted (was CDN jsdelivr) — three @0.170.0 -->
+<!-- Vendor: self-hosted (was CDN jsdelivr) — supabase @2.116.0 (216KB raw) + three @0.186.0 -->
 <!-- Google Identity: must stay on CDN per ToS, no SRI per Google docs -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://apis.google.com/js/api.js" async defer></script>

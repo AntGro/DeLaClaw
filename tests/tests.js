@@ -1622,6 +1622,30 @@ test('drive adapter tolerates transient silent-refresh failures before declaring
     'drive.js: getToken must count consecutive silent failures before marking the token dead');
 });
 
+test('drive adapter passes login_hint to the GIS token client', () => {
+  const drive = fs.readFileSync(path.join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf-8');
+  const start = drive.indexOf('function getGoogleAccessToken(');
+  const end = drive.indexOf('// ── Drive API helpers ──', start);
+  assert(start !== -1 && end !== -1, 'drive.js: getGoogleAccessToken block not found');
+  const fn = drive.slice(start, end);
+  assert(fn.includes('initTokenClient({') && fn.includes('hint: getStoredDriveEmail()'),
+    'drive.js: initTokenClient must pass the stored Google account email as login_hint');
+  assert(drive.includes("localStorage.getItem(_DRIVE_EMAIL_KEY)") || drive.includes("localStorage.getItem('claw_drive_email')") || drive.includes('_DRIVE_EMAIL_KEY'),
+    'drive.js: the login_hint email must be persisted in localStorage (survives PWA restarts)');
+  assert(drive.includes('drive/v3/about?fields=user(emailAddress)'),
+    'drive.js: the Google account email must be captured from the Drive about API after auth');
+});
+
+test('disconnect clears the stored login_hint email', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf-8');
+  const start = main.indexOf('function clearStayConnectedCreds()');
+  const end = main.indexOf('async function disconnect()', start);
+  assert(start !== -1 && end !== -1, 'main.js: clearStayConnectedCreds block not found');
+  const fn = main.slice(start, end);
+  assert(fn.includes('clearStoredDriveEmail()'),
+    'main.js: clearStayConnectedCreds must clear the stored login_hint email (disconnect / switch account)');
+});
+
 test('local-migrations.js has entries for 1.294 and 1.297', () => {
   const content = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
   assert(content.includes("'1.294':"), 'Missing local migration entry for 1.294');

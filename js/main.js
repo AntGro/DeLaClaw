@@ -8,7 +8,7 @@ import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY } fro
 import db from './db.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
-import { DRIVE_SCOPE_FILE } from './adapters/drive.js';
+import { DRIVE_SCOPE_FILE, clearStoredDriveEmail } from './adapters/drive.js';
 import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
 import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
@@ -552,6 +552,7 @@ function saveStayConnectedCreds(url, key, mode) {
 
 function clearStayConnectedCreds() {
   localStorage.removeItem(STAY_CONNECTED_KEY);
+  clearStoredDriveEmail();
 }
 
 async function disconnect() {

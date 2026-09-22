@@ -644,8 +644,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     }
   }
 
-  /** Load a joined group using explicit file IDs (no search queries needed). */
-  async function loadGroupWithIds(folderId, groupId, fileIds) {
+  /** Load a joined group using explicit file IDs (no search queries needed).
+   *  Returns the entry; publishes it to _groups unless opts.cache === false
+   *  (the join path holds the entry locally and publishes it only once the
+   *  join pointer is persisted). */
+  async function loadGroupWithIds(folderId, groupId, fileIds, opts = {}) {
     const tok = await token();
 
     // Download group.json + all type files in parallel. A failed download
@@ -690,7 +693,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     const revokedMeta = fileIds.revoked ? { fileId: fileIds.revoked } : {};
 
     const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta, revokedMeta, joinedViaLink: true });
-    _groups.set(groupId, entry);
+    if (opts.cache !== false) _groups.set(groupId, entry);
     return entry;
   }
 
@@ -1756,12 +1759,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         return _groups.get(groupId).group;
       }
 
-      // Load group data using explicit file IDs
-      await loadGroupWithIds(folderId, groupId, fileIds);
+      // Load group data using explicit file IDs. The entry is held locally and
+      // published to _groups only once the pointer below is persisted: a failed
+      // join must not arm the already-loaded shortcut, so a retry re-runs the
+      // full join instead of toasting "joined" for a partial join.
+      const e = await loadGroupWithIds(folderId, groupId, fileIds, { cache: false });
 
       // Pending-invite gate: only a member with a matching pending invite may join.
       // Member IDs are deterministic per email, so the joiner matches their own row directly.
-      const e = _groups.get(groupId);
       if (e) {
         const selfId = await memberIdFromEmail(user.email);
         const member = e.group.members.find(m => m.status === 'pending' && m.memberId === selfId);
@@ -1789,6 +1794,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           if (existing >= 0) _groupRows[existing] = entry;
           else _groupRows.push(entry);
         }
+
+        // Publish to _groups only now that the pointer is persisted.
+        _groups.set(groupId, e);
 
         member.status = 'joined';
         member.joinedAt = now;

@@ -1161,7 +1161,7 @@ test('sharing group load is all-or-nothing: a failed file download skips the who
   // failure — never degrade to a partially-loaded group (a half-loaded group
   // could show the user's items as missing, inviting recreates that become
   // duplicates once the real file loads).
-  const idsStart = drive.indexOf('async function loadGroupWithIds(folderId, groupId, fileIds)');
+  const idsStart = drive.indexOf('async function loadGroupWithIds(folderId, groupId, fileIds');
   const idsEnd = drive.indexOf('/** Map item_type to the per-type file key. */', idsStart);
   const idsBody = drive.slice(idsStart, idsEnd);
   assert(!idsBody.includes('return null'),
@@ -1300,6 +1300,24 @@ test('groups table stores group names for unreachable-folder notices (joined + c
   // deleteGroup removes the created record; unjoinGroup removes the pointer.
   assert(drive.includes("// Drop the created-group row from the groups table"),
     'deleteGroup must drop the created-group row');
+});
+
+test('join publishes to _groups only after the pointer is persisted', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+
+  // A failed join must not arm the already-loaded shortcut: the in-memory
+  // entry is held locally and published only once the join pointer is
+  // persisted, so a retry re-runs the full join instead of toasting "joined"
+  // for a partial join.
+  const joinStart = drive.indexOf('async joinWithFileIds(folderId, fileIds, opts');
+  const joinEnd = drive.indexOf('/** Leave a joined group', joinStart);
+  const joinBody = drive.slice(joinStart, joinEnd);
+  assert(joinBody.includes('loadGroupWithIds(folderId, groupId, fileIds, { cache: false })'),
+    'joinWithFileIds must load the group without publishing to _groups');
+  const setIdx = joinBody.indexOf('_groups.set(groupId, e)');
+  const upsertIdx = joinBody.indexOf("db.from('groups').upsert(entry, { onConflict: 'id' })");
+  assert(upsertIdx !== -1 && setIdx > upsertIdx,
+    'joinWithFileIds must publish to _groups only after the pointer upsert');
 });
 
 test('no localStorage group-name cache: names come from the groups table', () => {

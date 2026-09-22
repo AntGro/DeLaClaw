@@ -246,6 +246,7 @@ sequenceDiagram
         JA->>JP: inline error in code modal (direct)<br/>or confirm modal (picker)<br/>(group not joined — flip never ran)
     end
     end
+    JA->>JA: _groups: entry stored in-memory<br/>(only after the pointer is persisted —<br/>a failed join never arms "already loaded")
     JA->>SF: pending → joined<br/>pseudo = picker confirm input, else Google account displayName<br/>(Drive about API, else email local part)<br/>(group.json re-uploaded)
     rect rgb(253, 237, 236)
     opt Re-upload fails

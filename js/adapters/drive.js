@@ -141,6 +141,22 @@ function _waitUntilTabUsable() {
   return _tabUsableWaiter;
 }
 
+// Google account email for login_hint — persisted in localStorage (survives PWA
+// restarts, unlike sessionStorage) so re-auth can skip the account chooser.
+const _DRIVE_EMAIL_KEY = 'claw_drive_email';
+
+function getStoredDriveEmail() {
+  try { return localStorage.getItem(_DRIVE_EMAIL_KEY) || ''; } catch { return ''; }
+}
+
+function storeDriveEmail(email) {
+  try { if (email) localStorage.setItem(_DRIVE_EMAIL_KEY, email); } catch {}
+}
+
+export function clearStoredDriveEmail() {
+  try { localStorage.removeItem(_DRIVE_EMAIL_KEY); } catch {}
+}
+
 function getGoogleAccessToken(clientId, promptIfNeeded = true) {
   // 1. In-memory cache — scoped by clientId
   if (_cachedToken && _cachedClientId === clientId && Date.now() < _tokenExpiry - 60000) {
@@ -182,6 +198,7 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: getDriveScope(),
+      hint: getStoredDriveEmail(),
       callback: (resp) => {
         if (resp.error) {
           reject(new Error(resp.error));
@@ -406,6 +423,18 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   emit('authenticating', t('menu.drive_signing_in'));
 
   const token = await getGoogleAccessToken(clientId, !silent);
+
+  // Persist the Google account email for login_hint on future re-auth —
+  // lets Google skip the account chooser (notably the iOS PWA popup).
+  try {
+    const about = await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (about.ok) {
+      const { user } = await about.json();
+      if (user && user.emailAddress) storeDriveEmail(user.emailAddress);
+    }
+  } catch { /* non-fatal: hint just won't be available */ }
 
   emit('loading', t('menu.drive_connecting'));
 

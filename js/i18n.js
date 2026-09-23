@@ -1372,7 +1372,7 @@ const T = {
       join_confirm_hint: 'Vous avez \u00e9t\u00e9 invit\u00e9 \u00e0 rejoindre \x26quot;{0}\x26quot;.',
       join_confirm_owner: 'Partag\u00e9 par {0}',
       join_confirm_name: 'Votre nom d\u2019affichage',
-      join_confirm_name_label: 'Votre nom d\u2019affichage dans le groupe',
+      join_confirm_name_label: 'Votre nom affich\u00e9 dans le groupe',
       join_confirm_btn: 'Rejoindre',
       join_token_used: 'Ce code d\u2019invitation a d\u00e9j\u00e0 \u00e9t\u00e9 utilis\u00e9.',
       join_no_files: 'Aucun fichier de groupe trouv\u00e9. Veuillez s\u00e9lectionner les fichiers JSON du dossier partag\u00e9.',

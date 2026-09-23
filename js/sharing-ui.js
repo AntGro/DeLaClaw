@@ -777,6 +777,7 @@ function showJoinConfirmModal(group, onConfirm) {
     <h2>${lucideIcon('users', 20)} ${t('sharing.join_confirm_title')}</h2>
     ${hintLine}
     ${ownerLine}
+    <label for="joinDisplayName">${t('sharing.join_confirm_name_label')}</label>
     <input type="text" id="joinDisplayName" class="sharing-invite-input"
       placeholder="${t('sharing.join_confirm_name')}"
       value="${esc(group._suggestedName || '')}" />

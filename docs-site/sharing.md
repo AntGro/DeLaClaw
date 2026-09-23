@@ -238,7 +238,7 @@ sequenceDiagram
         end
         end
     end
-    Note over JA,SF: shared tail — both paths run the same joinWithFileIds code<br/>errors surface inline in the open modal
+    Note over JA,SF: Run joinWithFileIds code, errors surface inline in the open modal
     JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
     Note over JD: pointer only:<br/>{id, folderId, fileIds}<br/>fileIds include revoked.json
     rect rgb(253, 237, 236)

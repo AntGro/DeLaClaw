@@ -109,13 +109,36 @@ export function reconcileItems(local, remote, intents) {
 }
 
 /**
- * Intent-aware merge of group member rosters (keyed on memberId).
+ * Resolve a pending↔joined conflict on the same member row by invite
+ * generation. The joined row wins iff its invited_at is the same or newer
+ * than the pending row's — i.e. the join belongs to the current (or a newer)
+ * invite. A re-invite stamps a newer invited_at, so a stale 'joined' from an
+ * older invite can never override the fresh 'pending'. Any other status
+ * pair (or a missing invited_at) returns null: no precedence applies.
+ */
+export function resolveMemberStatusConflict(a, b) {
+  const statuses = new Set([a?.status, b?.status]);
+  if (!(statuses.has('pending') && statuses.has('joined'))) return null;
+  const joined = a.status === 'joined' ? a : b;
+  const pending = a.status === 'pending' ? a : b;
+  const joinedInvitedAt = joined.invited_at || '';
+  const pendingInvitedAt = pending.invited_at || '';
+  if (!joinedInvitedAt || !pendingInvitedAt) return null;
+  return joinedInvitedAt >= pendingInvitedAt ? joined : pending;
+}
+
+/**
+ * Intent-aware merge of group member rosters (keyed on member_id).
  * Used when a group.json write hits a 412 conflict: only rows this client
  * actually changed since the load (intents.createdIds) win locally — rows
  * this client merely holds take the newer remote version, so a concurrent
  * join (pending → joined, flipped by the invitee) is not reverted by the
  * creator's retry. Rows this client removed (intents.deletedIds) stay
  * removed even if still present remotely.
+ * When both sides hold the same row with conflicting pending/joined
+ * statuses and neither side has an intent on it, resolveMemberStatusConflict
+ * decides by invite generation: joined wins iff its invited_at is the same or
+ * newer than the pending row's.
  * Without intents, falls back to local-wins-wholesale per row.
  */
 export function mergeMemberLists(local, remote, intents) {
@@ -123,12 +146,18 @@ export function mergeMemberLists(local, remote, intents) {
   const deleted = intents?.deletedIds;
   const map = new Map();
   for (const m of remote) {
-    if (deleted?.has(m.memberId)) continue; // we removed them: stay removed
-    map.set(m.memberId, m);
+    if (deleted?.has(m.member_id)) continue; // we removed them: stay removed
+    map.set(m.member_id, m);
   }
   for (const m of local) {
-    if (!created || created.has(m.memberId)) map.set(m.memberId, m); // our change wins (legacy: all rows)
-    else if (!map.has(m.memberId)) map.set(m.memberId, m); // row unknown to both sides: keep
+    if (!created || created.has(m.member_id)) map.set(m.member_id, m); // our change wins (legacy: all rows)
+    else if (!map.has(m.member_id)) map.set(m.member_id, m); // row unknown to both sides: keep
+    else {
+      // Same row both sides, no local intent: resolve a pending↔joined
+      // conflict by invite generation; anything else keeps the remote row.
+      const winner = resolveMemberStatusConflict(m, map.get(m.member_id));
+      if (winner) map.set(m.member_id, winner);
+    }
   }
   return Array.from(map.values());
 }
@@ -146,10 +175,10 @@ export function mergeMemberLists(local, remote, intents) {
 export function reconcileMembers(local, remote, intents) {
   const created = intents?.createdIds;
   if (!created || created.size === 0) return remote.slice();
-  const remoteIds = new Set(remote.map(m => m.memberId));
+  const remoteIds = new Set(remote.map(m => m.member_id));
   const out = remote.slice();
   for (const m of local) {
-    if (m.memberId && created.has(m.memberId) && !remoteIds.has(m.memberId)) out.push(m);
+    if (m.member_id && created.has(m.member_id) && !remoteIds.has(m.member_id)) out.push(m);
   }
   return out;
 }

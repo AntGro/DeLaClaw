@@ -999,18 +999,18 @@ test('Sharing adapter normalizes completeItem(doneBy) without nested arrays', ()
     'sharing-drive.js: completeItem must not write raw doneBy directly');
 });
 
-test('sharing member identity is memberId-based and agent-safe', () => {
+test('sharing member identity is member_id-based and agent-safe', () => {
   const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
 
   assert(iface.includes('Emails are permission material, not identity'),
-    'sharing-interface.js must document the memberId/displayName identity invariant');
+    'sharing-interface.js must document the member_id/display_name identity invariant');
   assert(iface.includes('getCurrentMember') && iface.includes('getAgentSafeGroup'),
     'sharing interface must expose current-member and agent-safe group APIs');
 
   assert(sui.includes('data-member-id') && !sui.includes('data-email'),
-    'sharing-ui.js must remove members by memberId, not email/display string');
+    'sharing-ui.js must remove members by member_id, not email/display string');
   assert(sui.includes('state.sharing.getCurrentMember(group.id)'),
     'sharing-ui.js must ask the adapter for current group membership');
 
@@ -1222,8 +1222,8 @@ test('group-deleted notice is a dialog with a Drive folder link; skipped groups 
   // the Drive folder.
   assert(drive.includes('const row = _groupRows.find(r => r.id === groupId);'),
     'handleStaleGroup must look up the groups-table row before purging');
-  assert(drive.includes('row?.folderId'),
-    'handleStaleGroup must capture the folderId before purging the row');
+  assert(drive.includes('row?.folder_id'),
+    'handleStaleGroup must capture the folder_id before purging the row');
   assert(drive.includes('{ detail: { groupName, verdict, folderId } }'),
     'sharing-group-removed-remotely must carry the folderId');
 
@@ -1373,7 +1373,7 @@ test('sharing members use stable hashed IDs with a pending-invite join gate', ()
     'sharing-drive.js must not carry the legacy emailHint fallback anymore');
   assert(drive.includes('No pending invite for this account'),
     'sharing-drive.js must reject joins without a matching pending invite');
-  assert(drive.includes('m.status === \'pending\' && m.memberId === selfId'),
+  assert(drive.includes('m.status === \'pending\' && m.member_id === selfId'),
     'sharing-drive.js must match the joiner to their pending invite by stable member ID');
   assert(drive.includes('await assertCreator(groupId)'),
     'sharing-drive.js must enforce creator-only invite/remove in the adapter');
@@ -1382,7 +1382,7 @@ test('sharing members use stable hashed IDs with a pending-invite join gate', ()
   // Regression: with stable IDs, a stale revoked.json entry must not false-trigger
   // removal for a removed-then-reinvited member — only removals recorded after
   // the current join count.
-  assert(drive.includes('r.removed_at > joinedAt'),
+  assert(drive.includes('r.removed_at > joined_at'),
     'checkRemovalViaRevoked must disambiguate removals by timestamp since member IDs are stable');
 });
 
@@ -1628,9 +1628,9 @@ test('sharing unjoin writes a left marker instead of deleting the member row', (
   const unjoinFn = unjoin.slice(0, unjoin.indexOf('},', unjoin.indexOf('emit(')));
   assert(unjoinFn.includes("self.status = 'left'"),
     'unjoinGroup must flip the member status to left');
-  assert(unjoinFn.includes('self.leftAt'),
-    'unjoinGroup must stamp leftAt on the member row');
-  assert(!unjoinFn.includes('.filter(m => m.memberId !== currentMember.memberId)'),
+  assert(unjoinFn.includes('self.left_at'),
+    'unjoinGroup must stamp left_at on the member row');
+  assert(!unjoinFn.includes('.filter(m => m.member_id !== currentMember.member_id)'),
     'unjoinGroup must not delete the member row from group.json');
   assert(drive.includes('async function revokeLeftMembers(groupId, tok)'),
     'sharing-drive.js must define the creator-side revokeLeftMembers sweep');
@@ -1645,8 +1645,8 @@ test('sharing unjoin writes a left marker instead of deleting the member row', (
 test('sharing normalizeMember preserves the left marker', () => {
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
   const norm = drive.slice(drive.indexOf('async function normalizeMember'));
-  assert(norm.includes('leftAt'),
-    'normalizeMember must preserve leftAt so the left marker survives re-saves of group.json');
+  assert(norm.includes('left_at'),
+    'normalizeMember must preserve left_at so the left marker survives re-saves of group.json');
 });
 
 test('sharing UI never displays left members', () => {
@@ -1667,11 +1667,11 @@ test('sharing re-invite revives the existing row for the same email', () => {
   // of minting a duplicate row.
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
   const invite = drive.slice(drive.indexOf('async inviteUser(groupId, inviteTarget)'));
-  assert(invite.includes('const memberId = await memberIdFromEmail(email);'),
+  assert(invite.includes('const member_id = await memberIdFromEmail(email);'),
     'inviteUser must derive the member ID deterministically from the invite email');
-  assert(invite.includes('const existing = e.group.members.find(m => m.memberId === memberId);'),
+  assert(invite.includes('const existing = e.group.members.find(m => m.member_id === member_id);'),
     'inviteUser must look up the existing member row by stable member ID');
-  assert(invite.includes("existing.status = 'pending'") && invite.includes('existing.leftAt = null'),
+  assert(invite.includes("existing.status = 'pending'") && invite.includes('existing.left_at = null'),
     'inviteUser must revive a stale row (left/removed) back to a pending invite');
 });
 
@@ -1699,11 +1699,11 @@ test('member roster mutations are tracked as intents and acknowledged on saveGro
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
   assert(drive.includes('if (!entry.memberIntents) entry.memberIntents = createIntentState();'),
     'normalizeEntry must initialise per-entry memberIntents');
-  const createdMarks = (drive.match(/markCreated\(memberIntentsFor\(e\), memberId\)/g) || []).length;
+  const createdMarks = (drive.match(/markCreated\(memberIntentsFor\(e\), member_id\)/g) || []).length;
   assert(createdMarks >= 2, 'inviteUser must markCreated on both the revive and the push branch');
-  assert(drive.includes('markCreated(memberIntentsFor(e), member.memberId);'),
+  assert(drive.includes('markCreated(memberIntentsFor(e), member.member_id);'),
     'the join flip (pending → joined) must markCreated');
-  assert(drive.includes('markDeleted(memberIntentsFor(e), memberId);'),
+  assert(drive.includes('markDeleted(memberIntentsFor(e), member_id);'),
     'removeUser must markDeleted');
   assert(drive.includes('for (const id of leftIds) markDeleted(memberIntentsFor(e), id);'),
     'revokeLeftMembers must markDeleted for each swept left marker');
@@ -1739,9 +1739,54 @@ test('inviteUser rolls back the roster when the group.json write fails', () => {
   assert(tail.includes('catch (err)'), 'inviteUser must catch a saveGroup failure');
   assert(tail.includes('undoRosterChange?.();'),
     'inviteUser must roll back the roster mutation when saveGroup throws');
-  assert(tail.includes('discardIntent(memberIntentsFor(e), memberId);'),
+  assert(tail.includes('discardIntent(memberIntentsFor(e), member_id);'),
     'inviteUser must discard the member intent when saveGroup throws');
   assert(tail.includes('throw err;'), 'inviteUser must rethrow so the UI can toast');
+});
+
+test('invite rows carry invited_at; re-invite re-stamps it; creator row has none', () => {
+  // invited_at is the invite generation used by resolveMemberStatusConflict:
+  // joined beats pending only when its invited_at is the same or newer.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const invite = drive.slice(drive.indexOf('async inviteUser(groupId, inviteTarget)'));
+  assert(invite.includes("status: 'pending'") && invite.includes('invited_at: new Date().toISOString()'),
+    'inviteUser must stamp invited_at on the new pending row');
+  assert(invite.includes('existing.invited_at = invited_at;'),
+    're-invite must re-stamp invited_at so the new invite outranks any prior join');
+  assert(drive.includes('invited_at: null, // never invited: created the group'),
+    'the creator row must carry invited_at: null (never invited)');
+  assert(drive.includes('invited_at: member.invited_at ?? null,'),
+    'normalizeMember must pass invited_at through');
+});
+
+test('groups-table pointer rows use snake_case like every other personal table', () => {
+  // The groups table is a personal table, so its rows follow the personal-table
+  // convention (snake_case) — same as the shared group.json roster and the
+  // shared item files. One convention everywhere.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  assert(drive.includes('created_at: new Date().toISOString(), updated_at: new Date().toISOString(),'),
+    'created pointer row must use created_at/updated_at');
+  assert(drive.includes("joined_at: now, updated_at: now"),
+    'join pointer row must use joined_at/updated_at');
+  assert(drive.includes('file_ids: fileIds') && drive.includes('folder_id: folderId') && drive.includes('member_id: member.member_id'),
+    'join pointer row must use file_ids/folder_id/member_id');
+  const adapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  assert(adapter.includes("const localTime = r.updated_at || r.created_at || '';"),
+    'mergeRecords stays single-convention (snake_case)');
+});
+
+test('group.json is fully snake_case (group-level + member rows)', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const groupDefaults = drive.match(/created_by: null, members: \[\], created_at: null/g) || [];
+  assert(groupDefaults.length === 2, 'both normalizeGroup fallbacks must use created_by/created_at');
+  assert(drive.includes('created_by: creatorMemberId'), 'createGroup must write created_by');
+  assert(drive.includes('created_at: new Date().toISOString(),'), 'createGroup must write created_at');
+  // No camelCase roster/group fields may remain anywhere in the sharing code.
+  for (const f of ['sharing-drive.js', 'sharing-ui.js']) {
+    const src = fs.readFileSync(path.join(JS_DIR, f), 'utf-8');
+    const hits = src.match(/\b(memberId|displayName|invitedLabel|invitedAt|joinedAt|drivePermissionId|leftAt|createdBy|createdAt)\b/g) || [];
+    assert(hits.length === 0, f + ' must not contain camelCase roster fields, found: ' + [...new Set(hits)].join(','));
+  }
 });
 
 test('loadGroup audits folder permissions for orphan grants (creator only)', () => {
@@ -2444,11 +2489,11 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   {
     const { pathToFileURL } = require('url');
     const reconcile = await import(pathToFileURL(path.join(JS_DIR, 'sharing-file-reconcile.js')).href);
-    const { createIntentState, markCreated, markDeleted, discardIntent, unionItems, reconcileItems, reconcileMembers, mergeMemberLists, captureIntents, acknowledgeIntents } = reconcile;
+    const { createIntentState, markCreated, markDeleted, discardIntent, unionItems, reconcileItems, reconcileMembers, mergeMemberLists, resolveMemberStatusConflict, captureIntents, acknowledgeIntents } = reconcile;
 
     const item = (id, updated_at) => ({ id, updated_at });
     const ids = arr => arr.map(i => i.id).sort();
-    const member = (memberId, status) => ({ memberId, status });
+    const member = (member_id, status, invited_at) => ({ member_id, status, invited_at });
 
     test('reconcile: stale local item missing remotely is dropped without a create intent', () => {
       const intents = createIntentState();
@@ -2501,7 +2546,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const out = mergeMemberLists(
         [member('a', 'pending'), member('b', 'pending')],
         [member('a', 'joined'), member('c', 'joined')]);
-      const byId = Object.fromEntries(out.map(m => [m.memberId, m.status]));
+      const byId = Object.fromEntries(out.map(m => [m.member_id, m.status]));
       assert(byId.a === 'pending', 'local row wins without intents');
       assert(byId.b === 'pending' && byId.c === 'joined', 'union keeps both sides');
     });
@@ -2513,7 +2558,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         [member('joiner', 'pending'), member('newbie', 'pending')],
         [member('joiner', 'joined'), member('creator', 'joined')],
         intents);
-      const byId = Object.fromEntries(out.map(m => [m.memberId, m.status]));
+      const byId = Object.fromEntries(out.map(m => [m.member_id, m.status]));
       assert(byId.joiner === 'joined', 'concurrent join flipped by the invitee must survive our retry');
       assert(byId.newbie === 'pending', 'our own change still wins');
       assert(byId.creator === 'joined', 'remote-only rows are kept');
@@ -2526,7 +2571,48 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         [member('staying', 'joined')],
         [member('gone', 'joined'), member('staying', 'joined')],
         intents);
-      assert(!out.some(m => m.memberId === 'gone'), 'locally removed row must not be resurrected');
+      assert(!out.some(m => m.member_id === 'gone'), 'locally removed row must not be resurrected');
+    });
+
+    test('resolveMemberStatusConflict: joined wins when invited_at is the same generation', () => {
+      const w = resolveMemberStatusConflict(
+        member('a', 'pending', '2026-09-20T10:00:00Z'),
+        member('a', 'joined', '2026-09-20T10:00:00Z'));
+      assert(w && w.status === 'joined', 'same invite generation: join stands');
+    });
+
+    test('resolveMemberStatusConflict: joined wins when its invited_at is newer', () => {
+      const w = resolveMemberStatusConflict(
+        member('a', 'joined', '2026-09-22T10:00:00Z'),
+        member('a', 'pending', '2026-09-20T10:00:00Z'));
+      assert(w && w.status === 'joined', 'newer invite generation: join stands');
+    });
+
+    test('resolveMemberStatusConflict: pending wins after a re-invite (newer invited_at)', () => {
+      const w = resolveMemberStatusConflict(
+        member('a', 'joined', '2026-09-20T10:00:00Z'),
+        member('a', 'pending', '2026-09-23T10:00:00Z'));
+      assert(w && w.status === 'pending', 're-invite is newer: stale joined must not override it');
+    });
+
+    test('resolveMemberStatusConflict: no precedence for other status pairs or missing invited_at', () => {
+      assert(resolveMemberStatusConflict(
+        member('a', 'joined', '2026-09-20T10:00:00Z'),
+        member('a', 'left', '2026-09-20T10:00:00Z')) === null, 'joined vs left: no rule');
+      assert(resolveMemberStatusConflict(
+        member('a', 'pending'),
+        member('a', 'joined', '2026-09-20T10:00:00Z')) === null, 'missing invited_at: no rule');
+    });
+
+    test('mergeMemberLists: invited_at rule decides pending/joined with no intent on the row', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'other'); // unrelated intent: must not affect 'a'
+      const out = mergeMemberLists(
+        [member('a', 'pending', '2026-09-20T10:00:00Z'), member('other', 'pending', '2026-09-20T10:00:00Z')],
+        [member('a', 'joined', '2026-09-20T10:00:00Z'), member('other', 'pending', '2026-09-20T10:00:00Z')],
+        intents);
+      const byId = Object.fromEntries(out.map(m => [m.member_id, m.status]));
+      assert(byId.a === 'joined', 'same-generation join survives the 412 merge without an intent');
     });
 
     test('reconcileMembers: without intents, the remote roster wins wholesale', () => {
@@ -2534,7 +2620,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         [member('a', 'pending'), member('b', 'pending')],
         [member('a', 'joined'), member('c', 'joined')],
         createIntentState());
-      const byId = Object.fromEntries(out.map(m => [m.memberId, m.status]));
+      const byId = Object.fromEntries(out.map(m => [m.member_id, m.status]));
       assert(byId.a === 'joined', 'remote version wins without intents');
       assert(!byId.b && byId.c === 'joined', 'local-only rows without a create intent are dropped');
     });
@@ -2546,7 +2632,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         [member('newbie', 'pending'), member('joiner', 'pending')],
         [member('joiner', 'joined'), member('creator', 'joined')],
         intents);
-      const byId = Object.fromEntries(out.map(m => [m.memberId, m.status]));
+      const byId = Object.fromEntries(out.map(m => [m.member_id, m.status]));
       assert(byId.newbie === 'pending', 'unflushed invite row must not be dropped by the poll');
       assert(byId.joiner === 'joined', 'untouched rows take the remote version');
       assert(byId.creator === 'joined', 'remote-only rows are kept');
@@ -2559,7 +2645,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         [member('newbie', 'pending')],
         [member('newbie', 'pending'), member('creator', 'joined')],
         intents);
-      assert(out.filter(m => m.memberId === 'newbie').length === 1, 'no duplicate rows');
+      assert(out.filter(m => m.member_id === 'newbie').length === 1, 'no duplicate rows');
     });
 
     test('discardIntent: clears both intent sets for the id', () => {
@@ -2876,10 +2962,10 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     });
 
     test('removeUser records the removal in revoked.json before revoking access', () => {
-      const fn = drive.match(/async removeUser\(groupId, memberId\) \{([\s\S]*?)\n    \},/);
+      const fn = drive.match(/async removeUser\(groupId, member_id\) \{([\s\S]*?)\n    \},/);
       assert(fn, 'removeUser must exist');
       const body = fn[1];
-      const writeIdx = body.indexOf('removed.push({ id: memberId, removed_at');
+      const writeIdx = body.indexOf('removed.push({ id: member_id, removed_at');
       const revokeIdx = body.indexOf('await driveRemovePermission(tok, e.folderId, permissionId)');
       assert(writeIdx !== -1, 'removeUser must append {id, removed_at} to revoked.json');
       assert(revokeIdx !== -1, 'removeUser must revoke the folder permission');
@@ -2983,6 +3069,215 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     assert(decideBackupAction('1.0', '1.0') === 'restore',
       'partial batch (settings never advanced past the backup) → restore from backup version');
   });
+
+  test('Sharing join-flip repair: loadAll heals a joined pointer whose member row is still pending', () => {
+    const drive = jsFiles['sharing-drive.js'];
+    assert(drive.includes('async function repairPendingJoinFlip(groupId)'),
+      'sharing-drive.js must define repairPendingJoinFlip');
+    // Only the pending→joined case is repaired — anything else is a no-op.
+    assert(drive.includes("if (!member || member.status !== 'pending') return;"),
+      'repair must no-op unless our own member row is still pending');
+    // The flip mirrors the join: status, joined_at from the pointer row, display_name fallback.
+    assert(drive.includes("member.status = 'joined'"),
+      'repair must flip the member row to joined');
+    assert(drive.includes('markCreated(memberIntentsFor(e), selfId)'),
+      'repair must mark the flip as a pending intent before uploading');
+    // Best-effort: a failed repair upload is logged, never fails startup.
+    assert(drive.includes('pending→joined repair upload failed'),
+      'repair must log (not throw) when the re-upload fails');
+    // loadAll runs the repair for kind-join rows after loading.
+    assert(drive.includes('await repairPendingJoinFlip(row.id)'),
+      'loadAll must run the repair for joined pointers');
+    assert(drive.includes("if (row.kind !== 'joined' || !_groups.has(row.id)) continue;"),
+      'loadAll repair pass must only cover loaded joined pointers');
+  });
+
+  // ===================================================================
+  // Shared items in Google Calendar
+  // ===================================================================
+  {
+    const cal = jsFiles['calendar-sync.js'];
+    const todos = jsFiles['todos.js'];
+    const habits = jsFiles['habits.js'];
+    const main = jsFiles['main.js'];
+
+    test('share payloads carry due_date so shared todos can sync to the calendar', () => {
+      const m = todos.match(/payload: \{ text: todo\.text, category: cat\?\.name \?\? '', priority: todo\.priority \|\| 'normal', note: todo\.note \|\| '', due_date: todo\.due_date \|\| null, snooze_until: todo\.snooze_until \|\| null \},/g);
+      assert(m && m.length === 2,
+        `expected due_date in both share payloads (shareExistingTodo + bulk share), found ${m ? m.length : 0}`);
+    });
+
+    test('calendar resolves shared pointers through the sharing payload', () => {
+      assert(cal.includes('export const SHARED_NOT_READY'), 'must export the not-ready sentinel');
+      assert(cal.includes("if (!row?.shared_id) return { status: 'personal', item: row };"),
+        'non-shared rows must pass through untouched');
+      assert(cal.includes("if (!sharingLoaded()) return { status: 'deferred' };"),
+        'shared rows must defer while sharing is not loaded');
+      assert(cal.includes('due_date: sh.payload?.due_date || null'), 'todo dates must resolve from the payload');
+      assert(cal.includes('snooze_until: sh.payload?.snooze_until || null'), 'todo snooze must resolve from the payload');
+      assert(cal.includes('done: sh.done ? 1 : 0'), 'todo done must resolve from the shared item');
+      assert(cal.includes('next_due: sh.next_due || null'), 'habit next_due must resolve from the payload');
+    });
+
+    test('calendar never deletes events for shared rows whose sharing data is not loaded', () => {
+      assert(cal.includes('if (item === SHARED_NOT_READY) continue;'),
+        'targeted path must skip deferred rows, not delete their events');
+      assert(cal.includes('deferredIds'), 'full scan must track deferred ids');
+      assert(cal.includes('handledIds.has(itemId) || deferredIds.has(itemId)'),
+        'orphan deletion must spare deferred ids');
+    });
+
+    test('shared calendar titles use [Type][Category][Group]', () => {
+      assert(cal.includes('[TODO][${todo._sharedCategory}][${todo._sharedGroupName}]'),
+        'shared todo title must be [TODO][category][group]');
+      assert(cal.includes('[Habit][${habit._sharedCategory}][${habit._sharedGroupName}]'),
+        'shared habit title must be [Habit][category][group]');
+      assert(cal.includes('`[TODO][${catLabel}]`'), 'personal todo title format must be unchanged');
+      assert(cal.includes("`[Habit][${catLabel}]`"), 'personal habit title format must be unchanged');
+    });
+
+    test('remote shared changes mark pointers dirty via fingerprint diff', () => {
+      assert(todos.includes('function sharedTodoCalFingerprint(sh)'),
+        'todos must fingerprint the calendar-relevant payload fields');
+      assert(todos.includes("state.markCalDirty?.('todos', pointer.id)"),
+        'todos must dirty the pointer when a remote change touches event fields');
+      assert(habits.includes('function sharedHabitCalFingerprint(sh)'),
+        'habits must fingerprint the calendar-relevant payload fields');
+      assert(habits.includes("state.markCalDirty?.('habits', pointer.id)"),
+        'habits must dirty the pointer when a remote change touches event fields');
+      assert(main.includes('state.markCalDirty = markCalDirty;'),
+        'main must expose markCalDirty on state (avoids a view/calendar import cycle)');
+    });
+  }
+
+  // ===================================================================
+  // Group rename (creator-only)
+  // ===================================================================
+  {
+    const drive = jsFiles['sharing-drive.js'];
+    const iface = jsFiles['sharing-interface.js'];
+    const ui = jsFiles['sharing-ui.js'];
+    const todos = jsFiles['todos.js'];
+    const habits = jsFiles['habits.js'];
+
+    test('renameGroup is creator-only and part of the sharing interface contract', () => {
+      assert(iface.includes("renameGroup:              'fn'"),
+        'SHARING_INTERFACE must require renameGroup');
+      assert(drive.includes('async renameGroup(groupId, newName)'),
+        'drive adapter must implement renameGroup(groupId, newName)');
+      assert(drive.includes('await assertCreator(groupId);'),
+        'renameGroup must assert the caller is the creator');
+      assert(drive.includes("if (!name) throw new Error('Group name cannot be empty')"),
+        'renameGroup must reject empty names');
+    });
+
+    test('rename rolls back the in-memory name when the Drive upload fails', () => {
+      assert(drive.includes('const prevName = e.group.name;'),
+        'renameGroup must capture the previous name before the upload');
+      assert(drive.includes('e.group.name = prevName;'),
+        'renameGroup must restore the previous name if saveGroup throws');
+    });
+
+    test('rename persists to the local groups row and emits group-changed', () => {
+      assert(drive.includes('await _updateGroupRowName(groupId, name);'),
+        'renameGroup must update the local groups row name');
+      assert(drive.includes("emit('group-changed', { groupId, group: e.group });"),
+        'renameGroup must emit group-changed so the pane and calendar pick it up');
+      assert(drive.includes('if (name === e.group.name) return e.group;'),
+        'renaming to the same name must be a no-op');
+    });
+
+    test('poll persists a creator-side rename to the member local row', () => {
+      assert(drive.includes('const nameChanged = normalizedGroup.name && normalizedGroup.name !== e.group.name;'),
+        'the group.json poll must detect a remote rename');
+      assert(drive.includes('if (nameChanged) await _updateGroupRowName(groupId, normalizedGroup.name);'),
+        'the poll must persist the renamed name on the local groups row');
+    });
+
+    test('calendar fingerprints include the group name so renames re-title events', () => {
+      assert(todos.includes("sh.group_name || '',"),
+        'todo fingerprint must include the group name ([TODO][Category][Group] titles)');
+      assert(habits.includes("sh.group_name || '',"),
+        'habit fingerprint must include the group name ([Habit][Category][Group] titles)');
+    });
+
+    test('rename UI is creator-only with guarded inline edit', () => {
+      assert(ui.includes('data-action="sharing-rename-group"'),
+        'the group card must expose a rename action');
+      assert(ui.includes('${isCreator ? `<button class="sharing-action-btn sharing-action-btn-compact sharing-rename-btn"'),
+        'the rename button must render for creators only');
+      assert(ui.includes('window.sharingRenameGroup = sharingRenameGroup;'),
+        'sharingRenameGroup must be exposed for delegation');
+      assert(ui.includes("input.addEventListener('blur', cancel)"),
+        'blur must cancel the rename inline edit, never save');
+      assert(ui.includes('setLocked(true);'),
+        'the rename editor must lock input and buttons while the rename is in flight');
+    });
+
+    test('rename inline editor is styled like the pane and has explicit confirm/cancel', () => {
+      assert(styleCss.includes('.sharing-rename-input{'),
+        'style.css must style the rename input (no bare browser-default input)');
+      assert(styleCss.includes('.sharing-rename-input{flex:1;min-width:0;font:inherit;'),
+        'the rename input must inherit the heading typography so editing causes no layout shift');
+      assert(ui.includes('class="sharing-rename-confirm"'),
+        'the rename editor must offer an explicit confirm button');
+      assert(ui.includes('class="sharing-rename-cancel"'),
+        'the rename editor must offer an explicit cancel button');
+      assert(ui.includes("lucideIcon('check', 14)") && ui.includes("lucideIcon('x', 14)"),
+        'confirm/cancel must use Lucide icons, never emoji');
+      assert(ui.includes('title="${esc(t(\'save\'))}"') && ui.includes('title="${esc(t(\'cancel\'))}"'),
+        'confirm/cancel buttons must use i18n titles, no hardcoded text');
+      assert(ui.includes("addEventListener('pointerdown', (e) => e.preventDefault())"),
+        'button pointerdown must not blur the input, or the blur-cancel would swallow the click');
+    });
+
+    test('group card header wraps on narrow widths', () => {
+      assert(styleCss.includes('.sharing-group-header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;'),
+        'the group header must wrap so actions drop below the name instead of overflowing the card');
+      assert(styleCss.includes('.sharing-group-info{flex:1 1 220px;min-width:0;}'),
+        'the group info column must shrink and yield space to the actions');
+    });
+
+    test('group header action buttons are icon-only with hover hints', () => {
+      for (const [cls, icon] of [
+        ['sharing-drive-link', '${LOGOS.googledrive(14)}'],
+        ['sharing-copy-link-btn', "${lucideIcon('key', 14)}"],
+        ['sharing-rename-btn', "${lucideIcon('pencil', 14)}"],
+        ['sharing-leave-btn', "${lucideIcon('log-out', 14)}"],
+      ]) {
+        assert(ui.includes(`sharing-action-btn-compact ${cls}`),
+          `${cls} must reuse the compact icon-only button style`);
+        assert(ui.includes(`${icon}</button>`) || ui.includes(`${icon}</a>`),
+          `${cls} must render the icon with no text label after it`);
+      }
+      assert(!ui.includes("${LOGOS.googledrive(14)} ${t('sharing.open_drive_folder')}"),
+        'the Drive button must not carry a text label (title tooltip only)');
+      assert(ui.includes('title="${t(\'sharing.rename_group\')}" aria-label="${t(\'sharing.rename_group\')}"'),
+        'icon-only buttons must keep i18n title and aria-label hints');
+    });
+
+    test('renameGroup enforces the 60-character limit at the adapter boundary', () => {
+      assert(drive.includes("if (name.length > 60) throw new Error('Group name must be 60 characters or fewer');"),
+        'renameGroup must reject names longer than 60 characters (UI maxlength is cosmetic)');
+    });
+
+    test('rename retries the local groups-row update once before warning', () => {
+      assert(drive.includes('({ error } = await db.from(\'groups\')'),
+        '_updateGroupRowName must retry the row update once on failure');
+      assert(drive.includes('group.json stays authoritative'),
+        'the retry comment must record that the Drive write is not rolled back');
+    });
+
+    test('shared-sync drives the calendar sync directly after the fingerprint marks pointers dirty', () => {
+      const main = jsFiles['main.js'];
+      assert(main.includes('state.syncCalendarTable = syncCalendarTable;'),
+        'main.js must expose the calendar table sync on state (same hook pattern as markCalDirty)');
+      assert(todos.includes("if (calDirtyMarked) await state.syncCalendarTable?.('todos');"),
+        '_doSyncSharedTodos must drive the calendar sync directly — a rename/remote edit writes no local row, so no flush would consume the dirty marks');
+      assert(habits.includes("if (calDirtyMarked) await state.syncCalendarTable?.('habits');"),
+        '_doSyncSharedHabits must drive the calendar sync directly — a rename/remote edit writes no local row, so no flush would consume the dirty marks');
+    });
+  }
 
   // ===================================================================
   // SUMMARY

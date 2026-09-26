@@ -105,9 +105,9 @@ async function driveGet(token, url) {
 
 async function driveAboutUser(token) {
   const res = await driveGet(token,
-    'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName,photoLink)');
+    'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,display_name,photoLink)');
   const { user } = await res.json();
-  return { email: user.emailAddress, name: user.displayName || '', photo: user.photoLink || '' };
+  return { email: user.emailAddress, name: user.display_name || '', photo: user.photoLink || '' };
 }
 
 async function driveFindFolder(token, name, parentId) {
@@ -354,11 +354,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   // memory by the Drive adapter at connect. _groupRows is a read cache,
   // refreshed from the table after every mutation and at each poll.
   // Joined rows (kind 'joined') are pointers to another user's shared folder:
-  //   { id, kind: 'joined', folderId, name, fileIds: { group, todos, habits, lists, extra_1..extra_12, revoked }, memberId, joinedAt, updated_at }
+  //   { id, kind: 'joined', folder_id, name, file_ids: { group, todos, habits, lists, extra_1..extra_12, revoked }, member_id, joined_at, updated_at }
   // Created rows (kind 'created') record groups this user created: the group
   // itself is discovered by scanning Drive, the row only stores { id,
-  // kind: 'created', name } so skipped/deleted notices can name it
-  // even when its Drive folder is unreachable.
+  // kind: 'created', name, created_at, updatedAt } so skipped/deleted notices
+  // can name it even when its Drive folder is unreachable.
   let _groupRows = [];
 
   /** Rows for groups joined via invite code (kind !== 'created'). */
@@ -440,28 +440,29 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
   async function currentMemberId(groupId) {
     const member = await getCurrentMemberInternal(groupId);
-    return member?.memberId || null;
+    return member?.member_id || null;
   }
 
   async function normalizeMember(member = {}) {
-    const memberId = member.memberId || member.member_id || null;
-    const joinedAt = member.joinedAt ?? member.joined_at ?? null;
+    const member_id = member.member_id || null;
+    const joined_at = member.joined_at ?? null;
     const role = member.role === 'owner' ? 'creator' : (member.role || 'member');
-    const invitedLabel = member.invitedLabel ?? member.invited_label ?? null;
-    const displayName = fallbackDisplayName(
-      member.displayName || member.display_name || invitedLabel || memberId,
+    const invited_label = member.invited_label ?? null;
+    const display_name = fallbackDisplayName(
+      member.display_name || invited_label || member_id,
     );
     return {
-      memberId,
+      member_id,
       role,
-      status: member.status || (joinedAt || role === 'creator' ? 'joined' : 'pending'),
-      displayName,
-      invitedLabel,
-      joinedAt,
+      status: member.status || (joined_at || role === 'creator' ? 'joined' : 'pending'),
+      display_name,
+      invited_label,
+      invited_at: member.invited_at ?? null,
+      joined_at,
       // Kept so a 'left' marker written by unjoinGroup survives normalization
       // until the creator's poll revokes the Drive permission and clears it.
-      leftAt: member.leftAt ?? member.left_at ?? null,
-      drivePermissionId: member.drivePermissionId || member.permissionId || null,
+      left_at: member.left_at ?? member.left_at ?? null,
+      drive_permission_id: member.drive_permission_id || member.permissionId || null,
     };
   }
 
@@ -469,13 +470,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     const rawMembers = Array.isArray(group?.members) ? group.members : [];
     const members = [];
     for (const m of rawMembers) members.push(await normalizeMember(m));
-    const createdBy = typeof group?.created_by === 'string'
+    const created_by = typeof group?.created_by === 'string'
       ? group.created_by
-      : (group?.created_by?.memberId || members.find(m => m.role === 'creator' || m.role === 'owner')?.memberId || null);
+      : (group?.created_by?.member_id || members.find(m => m.role === 'creator' || m.role === 'owner')?.member_id || null);
     return {
       ...(group || {}),
       backendType: group?.backendType || 'googledrive',
-      created_by: createdBy,
+      created_by,
       members,
     };
   }
@@ -484,7 +485,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     if (!entry?.group) return entry;
     const rawGroup = entry.group;
     entry.group = await normalizeGroup(rawGroup, entry.folderId);
-    const memberIds = new Set(entry.group.members.map(m => m.memberId));
+    const memberIds = new Set(entry.group.members.map(m => m.member_id));
     const normalizeMemberRef = ref => (ref && memberIds.has(ref) ? ref : null);
     for (const type of ITEM_TYPES) {
       entry.typeData[type] = (entry.typeData[type] || []).map(item => ({
@@ -529,7 +530,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     // Member IDs are deterministic per email, so the current user is found by
     // direct ID match — no email hash or hint fallbacks needed.
     const selfId = await memberIdFromEmail(user.email);
-    return entry.group.members.find(m => m.memberId === selfId) || null;
+    return entry.group.members.find(m => m.member_id === selfId) || null;
   }
 
   /** Throw unless the current user is the group's creator. */
@@ -537,7 +538,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     const e = _groups.get(groupId);
     if (!e) throw new Error(`Group ${groupId} not loaded`);
     const me = await getCurrentMemberInternal(groupId);
-    if (!me || (me.role !== 'creator' && me.memberId !== e.group.created_by)) {
+    if (!me || (me.role !== 'creator' && me.member_id !== e.group.created_by)) {
       throw new Error('Only the group creator can do this');
     }
   }
@@ -547,7 +548,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     const e = _groups.get(groupId);
     if (!e) return false;
     const me = await getCurrentMemberInternal(groupId);
-    return !!me && (me.role === 'creator' || me.memberId === e.group.created_by);
+    return !!me && (me.role === 'creator' || me.member_id === e.group.created_by);
   }
 
   // groupIds with a leave-revocation sweep currently in flight (poll re-entry guard).
@@ -567,11 +568,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     try {
       for (const m of leftMembers) {
         if (m.role === 'creator' || m.role === 'owner') continue; // never revoke the owner
-        const permissionId = m.drivePermissionId || (m.memberId || '').replace(/^drive-perm-/, '');
+        const permissionId = m.drive_permission_id || (m.member_id || '').replace(/^drive-perm-/, '');
         if (permissionId) await driveRemovePermission(tok, e.folderId, permissionId).catch(() => {});
       }
-      const leftIds = new Set(leftMembers.map(m => m.memberId));
-      e.group.members = (e.group.members || []).filter(m => !leftIds.has(m.memberId));
+      const leftIds = new Set(leftMembers.map(m => m.member_id));
+      e.group.members = (e.group.members || []).filter(m => !leftIds.has(m.member_id));
       for (const id of leftIds) markDeleted(memberIntentsFor(e), id);
       await saveGroup(groupId);
       emit('group-changed', { groupId, group: e.group });
@@ -599,7 +600,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       console.warn(`sharing: permission audit list failed for ${groupId}:`, err);
       return;
     }
-    const memberIds = new Set((e.group.members || []).map(m => m.memberId));
+    const memberIds = new Set((e.group.members || []).map(m => m.member_id));
     for (const p of perms || []) {
       if (p.type !== 'user' || p.role !== 'writer' || !p.emailAddress) continue;
       const id = await memberIdFromEmail(p.emailAddress).catch(() => null);
@@ -612,14 +613,45 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     }
   }
 
+  /**
+   * Repair a join whose pending→joined flip never reached Drive: the pointer
+   * row (kind 'joined') was persisted but the group.json re-upload failed.
+   * The only writer of our own pending→joined transition is the join, so a
+   * 'joined' pointer with our member row still 'pending' is unambiguous.
+   * Runs at startup (see loadAll), best-effort like the permission audit: a
+   * failed repair is logged and retried on the next load, never fails startup.
+   * Note: the pseudo chosen at join time lived only in the failed upload, so
+   * the repair falls back the same way the join does on empty input.
+   */
+  async function repairPendingJoinFlip(groupId) {
+    const e = _groups.get(groupId);
+    if (!e) return;
+    const me = await ensureUser().catch(() => null);
+    const selfId = me?.email ? await memberIdFromEmail(me.email).catch(() => null) : null;
+    if (!selfId) return;
+    const member = (e.group.members || []).find(m => m.member_id === selfId);
+    if (!member || member.status !== 'pending') return;
+    const row = _groupRows.find(r => r.id === groupId);
+    member.status = 'joined';
+    member.joined_at = member.joined_at || row?.joined_at || new Date().toISOString();
+    if (!member.display_name) member.display_name = me.name || fallbackDisplayName(me.email);
+    markCreated(memberIntentsFor(e), selfId);
+    try {
+      await saveGroup(groupId);
+      emit('group-changed', { groupId, group: e.group });
+    } catch (err) {
+      console.warn(`sharing: pending→joined repair upload failed for ${groupId} (retried on next load):`, err);
+    }
+  }
+
   function publicMember(member) {
     return {
-      memberId: member.memberId,
+      member_id: member.member_id,
       role: member.role,
       status: member.status,
-      displayName: member.displayName,
-      invitedLabel: member.invitedLabel,
-      joinedAt: member.joinedAt,
+      display_name: member.display_name,
+      invited_label: member.invited_label,
+      joined_at: member.joined_at,
     };
   }
 
@@ -641,6 +673,26 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     } catch (err) {
       console.warn('sharing: failed to load groups table:', err);
       _groupRows = [];
+    }
+  }
+
+  /** Update the stored name of a groups-table row (created or joined kind). */
+  async function _updateGroupRowName(groupId, name) {
+    if (db) {
+      const updatedAt = new Date().toISOString();
+      let { error } = await db.from('groups')
+        .update({ name, updated_at: updatedAt }).eq('id', groupId);
+      if (error) {
+        // The Drive write already succeeded, so group.json stays authoritative.
+        // The local row is derived persistence — retry once before warning.
+        ({ error } = await db.from('groups')
+          .update({ name, updated_at: updatedAt }).eq('id', groupId));
+      }
+      if (error) console.warn('sharing: failed to update group name in groups table:', error.message);
+      else await refreshGroupRows();
+    } else {
+      const row = _groupRows.find(r => r.id === groupId);
+      if (row) row.name = name;
     }
   }
 
@@ -811,7 +863,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     // acknowledges them — and only the ones still current at that point, so a
     // member added/removed while this request is in flight stays pending.
     const memberIntents = memberIntentsFor(e);
-    const capturedMemberIntents = captureIntents(memberIntents, e.group.members.map(m => ({ id: m.memberId })));
+    const capturedMemberIntents = captureIntents(memberIntents, e.group.members.map(m => ({ id: m.member_id })));
 
     try {
       const r = await driveUpload(tok, e.folderId, e.gMeta.fileId, 'group.json', e.group, e.gMeta.etag);
@@ -884,7 +936,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     async getCurrentUser() {
       const user = await ensureUser();
-      return { displayName: user.name || fallbackDisplayName(user.email), backendUserId: 'googledrive' };
+      return { display_name: user.name || fallbackDisplayName(user.email), backendUserId: 'googledrive' };
     },
 
     async getCurrentMemberId(groupId) {
@@ -916,11 +968,12 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           created_by: creatorMemberId,
           members: [
             {
-              memberId: creatorMemberId,
+              member_id: creatorMemberId,
               role: 'creator',
               status: 'joined',
-              displayName: user.name || fallbackDisplayName(user.email),
-              joinedAt: new Date().toISOString(),
+              display_name: user.name || fallbackDisplayName(user.email),
+              invited_at: null, // never invited: created the group
+              joined_at: new Date().toISOString(),
             },
           ],
           created_at: new Date().toISOString(),
@@ -1070,9 +1123,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // immediately — the poll only covers loaded groups, so a skipped group
       // would otherwise never get its removed/deleted verdict.
       const loadJoined = (joined) => {
-        const p = joined.fileIds
-          ? loadGroupWithIds(joined.folderId, joined.id, joined.fileIds)
-          : loadGroup(joined.folderId, joined.id); // pointer without fileIds: search-based load
+        const p = joined.file_ids
+          ? loadGroupWithIds(joined.folder_id, joined.id, joined.file_ids)
+          : loadGroup(joined.folder_id, joined.id); // pointer without file_ids: search-based load
         return p.catch(async err => {
           if (err?.code === 403 || err?.code === 404) {
             const verdict = await this.checkRemovalViaRevoked(joined.id, tok).catch(() => null);
@@ -1090,6 +1143,19 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       }
 
       await Promise.all(promises);
+
+      // Join-flip repair: a kind-'joined' pointer whose own member row is
+      // still 'pending' means the pending→joined re-upload failed after the
+      // pointer was persisted. Flip it now, best-effort (never fails the load).
+      for (const row of _groupRows) {
+        if (row.kind !== 'joined' || !_groups.has(row.id)) continue;
+        try {
+          await repairPendingJoinFlip(row.id);
+        } catch (err) {
+          console.warn(`sharing: pending→joined repair failed for ${row.id} (retried on next load):`, err);
+        }
+      }
+
       _loaded = true;
       return this.getAllGroups();
     },
@@ -1131,7 +1197,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       // Only the creator can delete
       const currentMember = await getCurrentMemberInternal(groupId);
-      if (!currentMember || currentMember.memberId !== e.group.created_by) {
+      if (!currentMember || currentMember.member_id !== e.group.created_by) {
         throw new Error('Only the group creator can delete it');
       }
 
@@ -1162,6 +1228,40 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       emit('group-deleted', { groupId });
     },
 
+    /**
+     * Rename a group. Creator-only — throws otherwise.
+     * The Drive folder is id-based (DeLaClaw-Shared-{groupId}), so only
+     * group.json and the local groups row change.
+     */
+    async renameGroup(groupId, newName) {
+      const e = _groups.get(groupId);
+      if (!e) throw new Error(`Group ${groupId} not loaded`);
+      await assertCreator(groupId);
+      const name = String(newName ?? '').trim();
+      if (!name) throw new Error('Group name cannot be empty');
+      if (name.length > 60) throw new Error('Group name must be 60 characters or fewer');
+      if (name === e.group.name) return e.group; // no-op
+
+      // Arm the in-memory name only after the upload succeeds: a failed
+      // rename must not leave the group renamed locally.
+      const prevName = e.group.name;
+      e.group.name = name;
+      try {
+        await saveGroup(groupId);
+      } catch (err) {
+        e.group.name = prevName;
+        throw err;
+      }
+      await _updateGroupRowName(groupId, name);
+      // Calendar titles embed the group name: this event flows through
+      // 'sharing-changed' → syncShared*, whose calendar fingerprint (which
+      // includes the group name) marks every pointer in this group dirty and
+      // drives the calendar sync directly — a rename writes no local row, so
+      // no Drive flush would consume the dirty marks.
+      emit('group-changed', { groupId, group: e.group });
+      return e.group;
+    },
+
     // ─── Membership ───
 
     /** Invite a user. Creator-only. Drive uses the email only for the permission grant;
@@ -1179,8 +1279,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // checked against the in-memory roster before any Drive call, so a repeated
       // click can neither demote a joined member nor mint a duplicate invite.
       // The raw email is never persisted in group.json.
-      const memberId = await memberIdFromEmail(email);
-      const existing = e.group.members.find(m => m.memberId === memberId);
+      const member_id = await memberIdFromEmail(email);
+      const existing = e.group.members.find(m => m.member_id === member_id);
       if (existing && existing.role !== 'creator') {
         if (existing.status === 'joined') throw new Error(t('sharing.already_member', email));
         if (existing.status === 'pending') throw new Error(t('sharing.already_invited', email));
@@ -1205,52 +1305,57 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         // Inviting the creator's own address: nothing to change.
       } else if (existing) {
         // Re-invite (e.g. after a 'left' marker or a prior removal): reset to
-        // a fresh pending invite on the same stable ID.
+        // a fresh pending invite on the same stable ID. invited_at is re-stamped
+        // so the new invite is a newer generation than any prior join — see
+        // resolveMemberStatusConflict.
         const prev = { ...existing };
+        const invited_at = new Date().toISOString();
         existing.role = 'member';
         existing.status = 'pending';
-        existing.leftAt = null;
-        existing.joinedAt = null;
-        existing.displayName = null;
-        existing.invitedLabel = fallbackDisplayName(email);
-        existing.drivePermissionId = perm.id;
-        markCreated(memberIntentsFor(e), memberId);
+        existing.left_at = null;
+        existing.invited_at = invited_at;
+        existing.joined_at = null;
+        existing.display_name = null;
+        existing.invited_label = fallbackDisplayName(email);
+        existing.drive_permission_id = perm.id;
+        markCreated(memberIntentsFor(e), member_id);
         undoRosterChange = () => { Object.assign(existing, prev); };
       } else {
         e.group.members.push({
-          memberId,
+          member_id,
           role: 'member',
           status: 'pending',
-          displayName: null,
-          invitedLabel: fallbackDisplayName(email),
-          joinedAt: null,
-          drivePermissionId: perm.id,
+          display_name: null,
+          invited_label: fallbackDisplayName(email),
+          invited_at: new Date().toISOString(),
+          joined_at: null,
+          drive_permission_id: perm.id,
         });
-        markCreated(memberIntentsFor(e), memberId);
+        markCreated(memberIntentsFor(e), member_id);
         undoRosterChange = () => {
-          e.group.members = e.group.members.filter(m => m.memberId !== memberId);
+          e.group.members = e.group.members.filter(m => m.member_id !== member_id);
         };
       }
       try {
         await saveGroup(groupId);
       } catch (err) {
         undoRosterChange?.();
-        discardIntent(memberIntentsFor(e), memberId);
+        discardIntent(memberIntentsFor(e), member_id);
         throw err;
       }
 
-      emit('member-invited', { groupId, memberId });
-      return { memberId };
+      emit('member-invited', { groupId, member_id });
+      return { member_id };
     },
 
     /** Remove a member from a group. Creator-only. Records the removal in
      *  revoked.json, revokes Drive access, updates group.json. */
-    async removeUser(groupId, memberId) {
+    async removeUser(groupId, member_id) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
       await assertCreator(groupId);
       const tok = await token();
-      const member = e.group.members.find(m => m.memberId === memberId);
+      const member = e.group.members.find(m => m.member_id === member_id);
       if (!member) throw new Error('Member not found');
       if (member.role === 'creator') throw new Error('Cannot remove the creator');
 
@@ -1260,8 +1365,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (e.revokedMeta?.fileId) {
         const { data, etag } = await driveDownload(tok, e.revokedMeta.fileId);
         const removed = Array.isArray(data) ? data : [];
-        if (!removed.some(r => r.id === memberId)) {
-          removed.push({ id: memberId, removed_at: new Date().toISOString() });
+        if (!removed.some(r => r.id === member_id)) {
+          removed.push({ id: member_id, removed_at: new Date().toISOString() });
         }
         const r = await driveUpload(tok, e.folderId, e.revokedMeta.fileId, 'revoked.json', removed, etag);
         e.revokedMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
@@ -1269,13 +1374,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       // 2. Revoke folder access. The file-level reader grant on revoked.json
       // (given at invite time) survives, so the member can read the notice.
-      const permissionId = member.drivePermissionId || (member.memberId || '').replace(/^drive-perm-/, '');
+      const permissionId = member.drive_permission_id || (member.member_id || '').replace(/^drive-perm-/, '');
       if (permissionId) await driveRemovePermission(tok, e.folderId, permissionId).catch(() => {});
 
-      e.group.members = e.group.members.filter(m => m.memberId !== memberId);
-      markDeleted(memberIntentsFor(e), memberId);
+      e.group.members = e.group.members.filter(m => m.member_id !== member_id);
+      markDeleted(memberIntentsFor(e), member_id);
       await saveGroup(groupId);
-      emit('member-removed', { groupId, memberId });
+      emit('member-removed', { groupId, member_id });
     },
 
     /** Update your own display name (pseudo) in a group. */
@@ -1284,8 +1389,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (!e) return;
       const currentMember = await getCurrentMemberInternal(groupId);
       if (!currentMember) return;
-      const m = e.group.members.find(m => m.memberId === currentMember.memberId);
-      if (m) m.displayName = newName;
+      const m = e.group.members.find(m => m.member_id === currentMember.member_id);
+      if (m) m.display_name = newName;
       await saveGroup(groupId);
       emit('group-changed', { groupId, group: e.group });
     },
@@ -1296,8 +1401,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
 
-      const memberId = await currentMemberId(groupId);
-      if (!memberId) throw new Error('Current group member not found');
+      const member_id = await currentMemberId(groupId);
+      if (!member_id) throw new Error('Current group member not found');
       const item = {
         id: presetId || crypto.randomUUID(),
         item_type,             // 'todo' | 'habit' | 'list_item'
@@ -1306,7 +1411,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         done: false,
         done_by: [],
         done_at: null,
-        created_by: memberId,
+        created_by: member_id,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -1362,8 +1467,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     async completeItem(groupId, itemId, doneBy) {
       const normalizedDoneBy = (Array.isArray(doneBy) ? doneBy : [doneBy]).filter(Boolean);
       if (!normalizedDoneBy.length) {
-        const memberId = await currentMemberId(groupId);
-        if (memberId) normalizedDoneBy.push(memberId);
+        const member_id = await currentMemberId(groupId);
+        if (member_id) normalizedDoneBy.push(member_id);
       }
       return this.updateItem(groupId, itemId, {
         done: true,
@@ -1523,8 +1628,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      */
     async checkRemovalViaRevoked(groupId, tok) {
       const joined = _joinedRows().find(j => j.id === groupId);
-      const revokedFileId = joined?.fileIds?.revoked;
-      const selfId = joined?.memberId;
+      const revokedFileId = joined?.file_ids?.revoked;
+      const selfId = joined?.member_id;
       // No revocation state (e.g. joined before phase 3): nothing to consult.
       if (!revokedFileId || !selfId) return 'deleted';
       let data;
@@ -1538,9 +1643,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // Member IDs are stable per email, so a removed-then-reinvited member keeps
       // the same ID: only a removal recorded after the current join counts.
       // Missing timestamps fall back to the old ID-match behavior (conservative).
-      const joinedAt = joined?.joinedAt || null;
+      const joined_at = joined?.joined_at || null;
       const wasRemoved = removed.some(r =>
-        r.id === selfId && (!joinedAt || !r.removed_at || r.removed_at > joinedAt));
+        r.id === selfId && (!joined_at || !r.removed_at || r.removed_at > joined_at));
       return wasRemoved ? 'removed' : 'deleted';
     },
 
@@ -1604,17 +1709,22 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
                 // view): announce them so the UX can toast. Diffed before the
                 // local state is overwritten; our own member ID is excluded.
                 const wasJoined = new Set((e.group.members || [])
-                  .filter(m => m.status === 'joined').map(m => m.memberId));
+                  .filter(m => m.status === 'joined').map(m => m.member_id));
                 const freshJoins = (normalizedGroup.members || []).filter(m =>
-                  m.status === 'joined' && m.memberId && !wasJoined.has(m.memberId) && m.memberId !== selfMemberId);
+                  m.status === 'joined' && m.member_id && !wasJoined.has(m.member_id) && m.member_id !== selfMemberId);
                 // Intent-aware roster: rows this tab created but hasn't
                 // flushed yet survive the overwrite, so a poll landing
                 // mid-upload can't drop them; everything else takes the
                 // remote version.
                 const members = reconcileMembers(
                   e.group.members || [], normalizedGroup.members || [], memberIntentsFor(e));
+                // A creator-side rename arrives here: persist the new name on
+                // the local groups row so name lookups stay correct even when
+                // the Drive folder is unreachable.
+                const nameChanged = normalizedGroup.name && normalizedGroup.name !== e.group.name;
                 Object.assign(e.group, normalizedGroup);
                 e.group.members = members;
+                if (nameChanged) await _updateGroupRowName(groupId, normalizedGroup.name);
                 e.gMeta.etag = etag;
                 e.gMeta.modifiedTime = meta.modifiedTime;
                 changed = true;
@@ -1666,12 +1776,12 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       const groupName = _groups.get(groupId)?.group?.name || row?.name || groupId;
       // Capture the folder ID before purging: the 'deleted' notice links to
       // the Drive folder so the user can double-check it is really gone.
-      const folderId = row?.folderId || _groups.get(groupId)?.folderId || null;
+      const folderId = row?.folder_id || _groups.get(groupId)?.folderId || null;
       _groups.delete(groupId);
       _skippedGroups.delete(groupId); // a verdict beats a transient skip mark
       emit('group-deleted', { groupId, verdict });
       if (verdict === 'removed') {
-        // Own memberId found in revoked.json — removal is certain, so purge
+        // Own member_id found in revoked.json — removal is certain, so purge
         // local item pointers outright (no dialog). The 'deleted' case keeps
         // the orphan dialog: an unreachable group may be an infra issue.
         // Handled in main.js via state.db (the adapter has no db access).
@@ -1727,7 +1837,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      *  Requires a matching pending invite (by email hash) — Drive access alone is not enough.
      *  @param {string} folderId — the shared subfolder ID
      *  @param {Object} fileIds — Drive file IDs keyed by every getRequiredGroupFiles() entry (group, todos, habits, lists, the 12 extra_* placeholders, revoked)
-     *  @param {Object} [opts] — { displayName } pseudo chosen by the joiner */
+     *  @param {Object} [opts] — { display_name } pseudo chosen by the joiner */
     async joinWithFileIds(folderId, fileIds, opts = {}) {
       // Gate the join on the full file set: flipping to 'joined' with only a
       // partial grant (e.g. group.json alone) would leave item sync broken with
@@ -1769,14 +1879,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // Member IDs are deterministic per email, so the joiner matches their own row directly.
       if (e) {
         const selfId = await memberIdFromEmail(user.email);
-        const member = e.group.members.find(m => m.status === 'pending' && m.memberId === selfId);
+        const member = e.group.members.find(m => m.status === 'pending' && m.member_id === selfId);
         if (!member) throw new Error('No pending invite for this account');
 
         // Persist the pointer BEFORE flipping to joined: if the group.json
         // re-upload below fails, the join stays retryable (re-pasting the
         // code finds the still-pending row), whereas a flipped group.json
         // with no pointer row is unrecoverable.
-        // memberId lets the client match its own revoked.json entry if this
+        // member_id lets the client match its own revoked.json entry if this
         // account is later removed from the group. The row id is the group id:
         // the Drive adapter's 412 merge is keyed on id with newer updated_at
         // winning, which preserves the old union-by-folderId conflict behavior
@@ -1784,13 +1894,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         const now = new Date().toISOString();
         // name is stored in the pointer so the deleted/skipped notices can name
         // the group even when its Drive folder is unreachable (no group.json).
-        const entry = { id: groupId, kind: 'joined', folderId, name: groupData?.name || null, fileIds, memberId: member.memberId, joinedAt: now, updated_at: now };
+        const entry = { id: groupId, kind: 'joined', folder_id: folderId, name: groupData?.name || null, file_ids: fileIds, member_id: member.member_id, joined_at: now, updated_at: now };
         if (db) {
           const { error } = await db.from('groups').upsert(entry, { onConflict: 'id' });
           if (error) throw new Error(`join: failed to persist joined group: ${error.message}`);
           await refreshGroupRows();
         } else {
-          const existing = _groupRows.findIndex(j => j.folderId === folderId || j.id === groupId);
+          const existing = _groupRows.findIndex(j => j.folder_id === folderId || j.id === groupId);
           if (existing >= 0) _groupRows[existing] = entry;
           else _groupRows.push(entry);
         }
@@ -1799,10 +1909,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         _groups.set(groupId, e);
 
         member.status = 'joined';
-        member.joinedAt = now;
-        const pseudo = String(opts?.displayName || '').trim();
-        member.displayName = pseudo || user.name || fallbackDisplayName(user.email);
-        markCreated(memberIntentsFor(e), member.memberId);
+        member.joined_at = now;
+        const pseudo = String(opts?.display_name || '').trim();
+        member.display_name = pseudo || user.name || fallbackDisplayName(user.email);
+        markCreated(memberIntentsFor(e), member.member_id);
         await saveGroup(groupId);
       }
 
@@ -1824,10 +1934,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (e) {
         try {
           const currentMember = await getCurrentMemberInternal(groupId);
-          const self = currentMember && (e.group.members || []).find(m => m.memberId === currentMember.memberId);
+          const self = currentMember && (e.group.members || []).find(m => m.member_id === currentMember.member_id);
           if (self) {
             self.status = 'left';
-            self.leftAt = new Date().toISOString();
+            self.left_at = new Date().toISOString();
             await saveGroup(groupId);
           }
         } catch (err) { console.warn('sharing: unjoin group.json update failed (non-fatal):', err); }
@@ -1868,7 +1978,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return _groups.get(groupId)?.joinedViaLink === true;
     },
 
-    /** Removed members of a group, from revoked.json: [{ memberId, status: 'revoked', removedAt }]. */
+    /** Removed members of a group, from revoked.json: [{ member_id, status: 'revoked', removedAt }]. */
     async getRevokedMembers(groupId) {
       const e = _groups.get(groupId);
       const fileId = e?.revokedMeta?.fileId;
@@ -1876,7 +1986,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       const tok = await token();
       const { data } = await driveDownload(tok, fileId).catch(() => ({ data: [] }));
       return (Array.isArray(data) ? data : []).map(r => ({
-        memberId: r.id,
+        member_id: r.id,
         status: 'revoked',
         removedAt: r.removed_at || null,
       }));

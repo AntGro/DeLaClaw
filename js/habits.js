@@ -709,7 +709,7 @@ async function refreshHabits() {
       const memberIdPerGroup = new Map();
       const gidArr = [...groupIds];
       const members = await Promise.all(gidArr.map(gid => Promise.resolve(state.sharing.getCurrentMember(gid))));
-      gidArr.forEach((gid, i) => { if (members[i]?.memberId) memberIdPerGroup.set(gid, members[i].memberId); });
+      gidArr.forEach((gid, i) => { if (members[i]?.member_id) memberIdPerGroup.set(gid, members[i].member_id); });
       for (const habit of state.allHabits) {
         if (!habit._shared || !habit.shared_group_id) continue;
         const myId = memberIdPerGroup.get(habit.shared_group_id);
@@ -774,7 +774,7 @@ async function getSharedHabitCompletionActor(groupId) {
   }
   if (typeof state.sharing?.getCurrentMember === 'function') {
     const member = await state.sharing.getCurrentMember(groupId);
-    if (member?.memberId) return member.memberId;
+    if (member?.member_id) return member.member_id;
   }
   return '';
 }
@@ -2398,6 +2398,21 @@ function _renderCalDayDetail(dayIso, habitsByDay, today) {
  * - Data (name, frequency, completions) is read live from shared storage in refreshHabits()
  */
 let _syncingHabits = false;
+
+// Calendar sync: fingerprint of the shared-payload fields that feed calendar
+// events. Remote changes (another member completes the habit) touch only the
+// shared payload, never the local pointer row, so the adapter's dirty
+// tracking can't see them — diff here and mark the pointer dirty instead.
+const _sharedHabitCalFp = new Map();
+function sharedHabitCalFingerprint(sh) {
+  return JSON.stringify([
+    sh.next_due || null,
+    sh.name || '',
+    sh.frequency_rule || '',
+    sh.creator_category || '',
+    sh.group_name || '',
+  ]);
+}
 let _bulkShareInProgress = new Set();
 const _pendingShare = new Set();
 async function syncSharedHabits() {
@@ -2464,6 +2479,22 @@ async function _doSyncSharedHabits() {
     if (error) { console.warn('syncSharedHabits: failed to create pointer', sh.id, error); continue; }
     needsRefresh = true;
   }
+
+  // ─── Calendar: mark pointers dirty when a remote change touched event fields ───
+  // (first sight only initializes the fingerprint — pointer creation already dirties)
+  // A rename or remote edit writes no local row, so no Drive flush would consume
+  // the dirty marks — drive the calendar sync directly when anything was marked.
+  let calDirtyMarked = false;
+  for (const sh of sharedHabits) {
+    const fp = sharedHabitCalFingerprint(sh);
+    const prev = _sharedHabitCalFp.get(sh.id);
+    _sharedHabitCalFp.set(sh.id, fp);
+    if (prev !== undefined && prev !== fp) {
+      const pointer = localBySharedId.get(sh.id);
+      if (pointer) { state.markCalDirty?.('habits', pointer.id); calDirtyMarked = true; }
+    }
+  }
+  if (calDirtyMarked) await state.syncCalendarTable?.('habits');
 
   // Clean up pointers for removed shared habits
   for (const local of localShared) {

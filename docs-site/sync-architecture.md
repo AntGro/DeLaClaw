@@ -143,6 +143,7 @@ sequenceDiagram
     box rgb(239,246,255) Browser tab
     participant App as "App<br/>(in-memory)"
     participant Page as "Page<br/>(rendered)"
+    participant CAL as "Calendar<br/>Sync"
     end
     box rgb(255,251,235) Google Drive
     participant PF as "Personal folder<br/>(DeLaClaw/)"
@@ -318,11 +319,18 @@ sequenceDiagram
             end
             end
         end
+        opt Joined group, own member row still 'pending'
+            App->>JOIN: "Flip own row to 'joined' + re-upload group.json<br/>repairs a join whose pointer was saved but whose<br/>pending→joined upload failed (displayName falls back<br/>to the Google account name — the chosen pseudo<br/>only ever lived in the failed upload)<br/>Best-effort: logged and retried on the next load,<br/>never fails startup"
+        end
     end
     App->>Page: "Render sharing pane (fills in if already open)"
     App->>OWN: "Poll every 15s (per-group files)"
     App->>JOIN: "Poll every 15s (per-group files)"
+    App->>App: "Poll: a changed group.json name updates<br/>the local groups row too (creator rename)"
     App->>Page: "On sharing-changed → re-render sharing UI"
+    App->>App: "sharing-changed → syncSharedTodos/Habits<br/>create pointers for new shared items"
+    App->>CAL: "Pointer inserts dirty the tables → on flush<br/>syncTable resolves dates through the payload →<br/>dated shared items get events titled<br/>[TODO][category][group] / [Habit][category][group]"
+    App->>CAL: "On later sharing-changed: diff payload fields<br/>+ group name vs fingerprint → markCalDirty on real change →<br/>drive syncTable directly (no local row is written,<br/>so no flush would consume the dirty marks) →<br/>events created, patched or deleted<br/>(a creator rename re-titles events via the group-name field)"
 
     Note over App,JOIN: "revoked.json is read at startup when a joined download fails with 403/404<br/>(access gone — the file-level read grant survives), and in the poll<br/>when a loaded group's files become unreachable:<br/>'removed' → silent auto-purge, 'deleted' → group-deleted dialog (Drive folder link)"
 
@@ -368,6 +376,8 @@ sequenceDiagram
     else Item deleted or completed
         CAL->>CAL: Delete event via Calendar API
     end
+
+    Note over CAL: Shared rows resolve dates, name and group<br/>through the pointer from the sharing payload —<br/>the DB row itself carries no dates
 ```
 
 ## Polling Path (External Change from Another Device or Agent)
@@ -418,6 +428,16 @@ flowchart LR
         W2 --> DS["_dirtyItems Map<br/>todos → Set { itemId }"]
     end
 
+    subgraph Shared["On sharing-changed (poll / join / startup)"]
+        S1["_doSyncSharedTodos/Habits:<br/>diff payload fields + group name<br/>against fingerprint"]
+        S2["state.markCalDirty(table, pointerId)<br/>on real change only"]
+        S3["state.syncCalendarTable(table)<br/>driven directly — a rename/remote edit<br/>writes no local row, so no flush follows"]
+        S1 --> S2
+        S2 --> DS
+        S2 --> S3
+        S3 --> F2
+    end
+
     subgraph Flush["On Table Flush to Drive"]
         F1["_onTableFlushed('todos')"]
         F2["syncTable('todos')"]
@@ -426,15 +446,22 @@ flowchart LR
     end
 
     subgraph Sync["Per Dirty Item"]
-        DS2 --> CHECK{"Item has<br/>calendar event?"}
-        CHECK -->|"No event + item eligible"| CREATE["Create event"]
+        DS2 --> RES{"Row has shared_id?"}
+        RES -->|"Yes"| PAYLOAD["Resolve dates/name/group<br/>from sharing payload"]
+        RES -->|"No"| ROW["Use DB row as-is"]
+        PAYLOAD --> CHECK{"Item has<br/>calendar event?"}
+        ROW --> CHECK
+        CHECK -->|"No event + item eligible"| CREATE["Create event<br/>[TODO][category][group]"]
         CHECK -->|"Event exists + item changed"| PATCH["Patch event"]
         CHECK -->|"Event exists + item done/deleted"| DELETE["Delete event"]
         CHECK -->|"Event exists + no change"| SKIP["Skip"]
+        CHECK -->|"Shared + sharing not loaded"| SKIP2["Skip — keep event"]
     end
 ```
 
 **Special cases:**
+- **Shared rows** → dates/name/group resolve through the pointer from the sharing payload at sync time (single source of truth — nothing is copied onto the pointer row). If sharing isn't loaded yet, the row is skipped: its event is kept, never deleted. Full scans exclude deferred rows from orphan-deletion.
+- **Shared-sync fingerprint** → on a real remote change (payload fields or group name), pointers are marked dirty and `syncTable` is driven directly — a rename/remote edit writes no local row, so no Drive flush would consume the marks
 - **Category rename** → `markCategoryRenamed(catTable)` marks all items of that type with `__all__` sentinel → full scan
 - **Bulk operation** (null ID) → `__all__` sentinel → full scan
 - **Category table flush** (e.g. `todo_categories`) → `CAT_TABLE_TO_ITEM_TABLE` maps it to the item table (`todos`) for sync

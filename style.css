@@ -2028,7 +2028,8 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 
 /* ── Sharing ─────────────────────────────────────────────────── */
 .sharing-group-card{background:var(--settings-control-bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px;}
-.sharing-group-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;}
+.sharing-group-header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:8px;}
+.sharing-group-info{flex:1 1 220px;min-width:0;}
 .sharing-group-info h4{margin:0;font-size:1.05rem;font-weight:650;color:var(--text);}
 .sharing-group-stats{font-size:0.86rem;color:var(--muted);}
 .sharing-group-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;flex-shrink:0;}
@@ -2046,6 +2047,12 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-member{display:flex;align-items:center;gap:6px;font-size:0.9rem;color:var(--text);}
 .sharing-member-email{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sharing-edit-name-input{width:100%;font:inherit;font-size:0.85rem;padding:2px 6px;border:1px solid var(--accent);border-radius:4px;background:var(--bg);color:var(--text);outline:none;}
+.sharing-rename-wrap{display:flex;align-items:center;gap:6px;}
+.sharing-rename-input{flex:1;min-width:0;font:inherit;padding:4px 10px;border:1px solid var(--accent);border-radius:6px;background:var(--bg);color:var(--text);outline:none;box-sizing:border-box;}
+.sharing-rename-input:disabled{opacity:0.6;}
+.sharing-rename-confirm,.sharing-rename-cancel{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:999px;border:1px solid var(--border);background:var(--settings-control-bg);color:var(--muted);cursor:pointer;padding:0;}
+.sharing-rename-confirm:hover,.sharing-rename-cancel:hover{color:var(--text);border-color:var(--accent);}
+.sharing-rename-confirm:disabled,.sharing-rename-cancel:disabled{opacity:0.5;cursor:default;}
 .sharing-you{color:var(--muted);font-style:italic;}
 .sharing-member-joined{color:#22c55e;margin-left:2px;}
 .sharing-member-creator{color:var(--accent);font-size:0.82rem;margin-left:2px;display:inline-flex;align-items:center;gap:2px;}
@@ -2118,6 +2125,7 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-join-file-list{font-size:0.82rem;color:var(--muted);margin:0 0 8px;line-height:1.5;font-style:italic;}
 .sharing-join-error{font-size:0.82rem;color:var(--danger,#ef4444);background:color-mix(in srgb,var(--danger,#ef4444) 8%,transparent);border-radius:6px;padding:8px 12px;margin:0 0 8px;line-height:1.4;}
 .sharing-join-owner{font-size:0.85rem;color:var(--muted);margin:0 0 12px;display:flex;align-items:center;gap:6px;}
+.sharing-join-name-label{display:block;font-size:0.9rem;font-weight:600;color:var(--text);margin:0 0 6px;}
 
 .sharing-danger-btn{color:var(--danger,#e74c3c);border-color:color-mix(in srgb, var(--danger,#e74c3c) 25%, transparent);margin-top:10px;}
 .sharing-danger-btn:hover{background:color-mix(in srgb, var(--danger,#e74c3c) 8%, transparent);}

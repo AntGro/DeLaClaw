@@ -177,7 +177,7 @@ sequenceDiagram
         CA->>CP: error toast
     end
     end
-    CA->>SF: group.json += member<br/>{memberId: hash(email), pending, pseudo: null}
+    CA->>SF: group.json += member<br/>{member_id: hash(email), pending, pseudo: null}
     rect rgb(253, 237, 236)
     opt group.json write fails
         CA->>CA: _groups: row rolled back,<br/>intent discarded — safe to retry<br/>Drive writer grant already issued — NOT revoked<br/>(reaped by the load-time audit)
@@ -185,7 +185,7 @@ sequenceDiagram
     end
     end
     opt 412 conflict on upload (≤2 retries)
-        CA->>CA: _groups: merge with downloaded copy —<br/>only rows this tab changed win locally.<br/>concurrent join (pending → joined) is kept
+        CA->>CA: _groups: merge with downloaded copy —<br/>only rows this tab changed win locally.<br/>concurrent join (pending → joined) is kept<br/>pending↔joined with no intent: joined wins<br/>iff its invited_at ≥ the pending row's
     end
     CA->>CP: invite-code modal<br/>(DLC1 code + copy button)
     CA-->>JA: DLC1 invite code {b:'googledrive', f:folderId}
@@ -231,7 +231,7 @@ sequenceDiagram
         JA->>JP: confirm modal<br/>(pseudo input, prefilled with Google account name)
         JP->>JA: confirm with chosen pseudo
         JA->>SF: download group.json + item files
-        JA->>JA: match pending row by memberId
+        JA->>JA: match pending row by member_id
         rect rgb(253, 237, 236)
         opt group.json unreadable or no pending invite
             JA->>JP: inline error in confirm modal<br/>Drive access alone is not enough
@@ -250,10 +250,12 @@ sequenceDiagram
     JA->>SF: pending → joined<br/>pseudo = picker confirm input, else Google account displayName<br/>(Drive about API, else email local part)<br/>(group.json re-uploaded)
     rect rgb(253, 237, 236)
     opt Re-upload fails
-        JA->>JP: inline error in code modal (direct)<br/>or confirm modal (picker)<br/>pointer kept
+        JA->>JP: inline error in code modal (direct)<br/>or confirm modal (picker)<br/>pointer kept — the pending→joined flip self-heals at next startup
     end
     end
     JA->>JP: toast "joined"<br/>sharing pane re-renders
+    JA->>JA: sharing-changed → syncSharedTodos/Habits<br/>pointers created for the group's items
+    Note over JA: dated shared items → calendar events<br/>titled [TODO][category][group]
     JA->>JA: startPolling (15s)
     CA->>SF: next poll (≤15s): group.json modified?
     SF-->>CA: changed → re-download
@@ -293,10 +295,12 @@ sequenceDiagram
     Note over MA,SF: intent cleared only after<br/>a successful upload —<br/>an id created mid-upload stays pending
     Note over MA,SF: Drive write fails →<br/>local pointer row deleted (rollback)
     MA->>MA: toast "Shared!" + refresh
+    Note over MA: dated item → calendar event<br/>titled [TODO][category][group]
     OA->>SF: next poll (≤15s): item file modified?
     SF-->>OA: changed → re-download + merge
     OA->>OD: syncShared*: new shared_id →<br/>create pointer in __shared__
     OA->>OA: refresh → item appears with shared badge
+    Note over OA: dated item → calendar event<br/>titled [TODO][category][group]
 ```
 
 #### Modify an item (rename, mark done, habit completion)
@@ -322,6 +326,7 @@ sequenceDiagram
     SF-->>OA: changed → re-download
     OA->>OA: sharing-changed → sync + refresh
     Note over OA: attribution = stable hashId + timestamp<br/>(done_by / completion entries)
+    Note over OA: date fields diffed vs fingerprint →<br/>markCalDirty → calendar event patched<br/>(done → event deleted)
 ```
 
 #### Delete an item
@@ -347,7 +352,7 @@ sequenceDiagram
     SF-->>OA: changed → re-download
     OA->>OA: reconcileItems: item missing remotely,<br/>no pending create intent →<br/>drop as remote deletion
     OA->>OD: syncShared*: shared_id gone remotely →<br/>delete local pointer
-    OA->>OA: refresh → item disappears
+    OA->>OA: refresh → item disappears<br/>calendar event deleted
     Note over MA,OA: intent-aware merge —<br/>a conflicting concurrent edit<br/>cannot resurrect the deleted item:<br/>the deleter's pending delete suppresses<br/>the stale copy on the 412-conflict merge
     Note over MA,OA: intents are in-memory only<br/>(per tab, per item file) —<br/>nothing is written to Drive,<br/>nothing to prune
 ```
@@ -375,9 +380,10 @@ sequenceDiagram
     alt keep copies
     MA->>MD: pointers → personal items<br/>(__shared__ items → General)
     end
-    MA->>SF: best-effort: flip own row to<br/>status 'left' (+ leftAt)
+    MA->>SF: best-effort: flip own row to<br/>status 'left' (+ left_at)
     MA->>MD: delete groups row
     MA->>MA: drop group, emit group-left<br/>polling stops
+    Note over MA: keep copies → pointers become personal rows (same id):<br/>events re-titled without the [group] segment<br/>no copies → orphan dialog → unlink → events deleted
     Note over SF: creator's next poll (≤15s)<br/>sees the 'left' row
     CA->>SF: revoke leaver's Drive permission<br/>(owner-only operation)
     CA->>SF: clear the 'left' row<br/>from group.json
@@ -410,10 +416,10 @@ sequenceDiagram
     MA->>SF: next poll: folder → 404
     MA->>SF: fetch revoked.json by stored fileId
     alt own hashId present
-    MA->>MA: explicit "removed" state →<br/>stop polling, purge group + delete item pointers (no dialog — removal is certain)
+    MA->>MA: explicit "removed" state →<br/>stop polling, purge group + delete item pointers (no dialog — removal is certain)<br/>deleted pointers → their calendar events are deleted
     else revoked.json also 404
     MA->>MA: group deleted → purge group (see below)
-    MA->>MA: orphan dialog → unlink pointers<br/>(re-prompts until resolved — may be an infra issue)
+    MA->>MA: orphan dialog → unlink pointers<br/>(re-prompts until resolved — may be an infra issue)<br/>deleted pointers → their calendar events are deleted
     else transport error
     MA->>MA: flaky connection — keep polling
     end
@@ -452,6 +458,46 @@ sequenceDiagram
     MA->>MA: explicit "group deleted" →<br/>stop polling, _groups: purge group
     MA->>MA: orphan dialog → unlink pointers<br/>(re-prompts until resolved — may be an infra issue)
     Note over CA,CD: creator app startup: deletedAt > 30 days →<br/>permanently delete DeLaClaw-Shared-{id}
+```
+
+#### Creator renames a group
+
+Rename is creator-only. The Drive folder is id-based (`DeLaClaw-Shared-{id}`), so only `group.json` and the local `groups` rows change. Members pick the new name up on the next 15-second poll; calendar event titles (`[Type][Category][Group]`) are re-written through the calendar fingerprint, which includes the group name.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
+sequenceDiagram
+    autonumber
+    box rgb(239,246,255) Creator's Google account
+    participant CP as Creator page<br/>(rendered UI)
+    participant CA as Creator app
+    participant CD as Creator's Drive
+    end
+    box rgb(255,251,235) Shared — lives in the creator's Drive
+    participant SF as DeLaClaw-Shared-{id}
+    end
+    box rgb(240,253,244) Member's Google account
+    participant MP as Member page<br/>(rendered UI)
+    participant MA as Member app
+    end
+
+    CP->>CA: inline edit → renameGroup(id, new name)
+    CA->>CA: verify caller is the creator (else throw)
+    Note over CA: same name → no-op<br/>empty name → throw
+    CA->>CA: capture previous name,<br/>hold in-memory update until upload succeeds
+    CA->>SF: upload group.json (new name, ETag-guarded)
+    rect rgb(253, 237, 236)
+    opt upload fails
+        CA->>CA: restore previous in-memory name
+        CA->>CP: error toast, edit cancelled
+    end
+    end
+    CA->>CA: update local groups row → emit group-changed
+    CA->>CP: success toast, re-render pane
+    MA->>SF: next 15s poll: group.json changed
+    MA->>MA: update in-memory name + local groups row
+    MA->>MP: sharing-changed → re-render pane
+    Note over CA,MA: calendar fingerprint includes the group name —<br/>pointers in this group are marked dirty and the calendar<br/>sync is driven directly (no local row is written,<br/>so no flush would consume the dirty marks) —<br/>existing events are re-titled
 ```
 
 #### Member deletes their DeLaClaw account connection (deleteAccount)

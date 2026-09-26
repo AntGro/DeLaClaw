@@ -158,7 +158,7 @@ async function refreshTodos() {
       const memberIdPerGroup = new Map();
       const gidArr = [...groupIds];
       const members = await Promise.all(gidArr.map(gid => Promise.resolve(state.sharing.getCurrentMember(gid))));
-      gidArr.forEach((gid, i) => { if (members[i]?.memberId) memberIdPerGroup.set(gid, members[i].memberId); });
+      gidArr.forEach((gid, i) => { if (members[i]?.member_id) memberIdPerGroup.set(gid, members[i].member_id); });
       for (const todo of allTodos) {
         if (!todo._shared || !todo.shared_group_id) continue;
         const myId = memberIdPerGroup.get(todo.shared_group_id);
@@ -1276,6 +1276,23 @@ function getTodos() { return allTodos; }
  * - Shared TODO deleted from Drive → delete local todo
  */
 let _syncingTodos = false;
+
+// Calendar sync: fingerprint of the shared-payload fields that feed calendar
+// events. Remote changes (another member edits a deadline) touch only the
+// shared payload, never the local pointer row, so the adapter's dirty
+// tracking can't see them — diff here and mark the pointer dirty instead.
+// The group name is included because calendar titles embed it ([TODO][Category][Group]).
+const _sharedTodoCalFp = new Map();
+function sharedTodoCalFingerprint(sh) {
+  return JSON.stringify([
+    sh.payload?.due_date || null,
+    sh.payload?.snooze_until || null,
+    sh.done ? 1 : 0,
+    sh.payload?.text || sh.payload?.title || '',
+    sh.payload?.category || '',
+    sh.group_name || '',
+  ]);
+}
 let _bulkShareInProgress = new Set();
 const _pendingShare = new Set();
 async function syncSharedTodos() {
@@ -1323,6 +1340,22 @@ async function _doSyncSharedTodos() {
       needsRefresh = true;
     }
   }
+
+  // ─── Calendar: mark pointers dirty when a remote change touched event fields ───
+  // (first sight only initializes the fingerprint — pointer creation already dirties)
+  // A rename or remote edit writes no local row, so no Drive flush would consume
+  // the dirty marks — drive the calendar sync directly when anything was marked.
+  let calDirtyMarked = false;
+  for (const sh of allShared) {
+    const fp = sharedTodoCalFingerprint(sh);
+    const prev = _sharedTodoCalFp.get(sh.id);
+    _sharedTodoCalFp.set(sh.id, fp);
+    if (prev !== undefined && prev !== fp) {
+      const pointer = localBySharedId.get(sh.id);
+      if (pointer) { state.markCalDirty?.('todos', pointer.id); calDirtyMarked = true; }
+    }
+  }
+  if (calDirtyMarked) await state.syncCalendarTable?.('todos');
 
   // ─── Cleanup: local shared todos whose shared_id no longer exists on remote ───
   for (const local of localShared) {
@@ -1424,7 +1457,7 @@ async function shareExistingTodo(id, el) {
       await state.sharing.addItem(groupId, {
         id: sharedId,
         item_type: 'todo',
-        payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', snooze_until: todo.snooze_until || null },
+        payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null },
       });
       // 2. Create local pointer — keep original sort_order so position stays
       const { error: ptrErr } = await state.db.from('todos').insert({
@@ -1475,7 +1508,7 @@ async function bulkShareTodoCategory(catId, el) {
               await state.sharing.addItem(groupId, {
                 id: sharedId,
                 item_type: 'todo',
-                payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', snooze_until: todo.snooze_until || null },
+                payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null },
               });
               const { error: ptrErr } = await state.db.from('todos').insert({
                 text: '', priority: 'normal', done: false,

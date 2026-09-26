@@ -969,6 +969,8 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     // Hook calendar sync to Drive flush so they stay coupled
     if (state.driveMode) {
       adapter._markCalDirty = markCalDirty;
+      state.markCalDirty = markCalDirty; // shared-sync fingerprint diff marks pointers dirty directly
+      state.syncCalendarTable = syncCalendarTable; // shared-sync drives the calendar directly: renames/remote edits touch no local row, so no flush would consume the dirty marks
       adapter._onTableFlushed = (table) => {
         // Category table flush → sync the corresponding item table
         const itemTable = CAT_TABLE_TO_ITEM_TABLE[table];
@@ -1139,7 +1141,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       state.sharing.onUpdate((event, detail) => {
         document.dispatchEvent(new CustomEvent('sharing-changed'));
         if (event === 'member-joined' && detail?.member) {
-          const name = detail.member.displayName || '';
+          const name = detail.member.display_name || '';
           showToast(t('sharing.member_joined', name, detail.group?.name || ''), 'success');
         }
       });

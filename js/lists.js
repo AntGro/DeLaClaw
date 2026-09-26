@@ -98,7 +98,7 @@ async function refreshLists() {
       const memberIdPerGroup = new Map();
       const gidArr = [...groupIds];
       const members = await Promise.all(gidArr.map(gid => Promise.resolve(state.sharing.getCurrentMember(gid))));
-      gidArr.forEach((gid, i) => { if (members[i]?.memberId) memberIdPerGroup.set(gid, members[i].memberId); });
+      gidArr.forEach((gid, i) => { if (members[i]?.member_id) memberIdPerGroup.set(gid, members[i].member_id); });
       for (const item of state.allListItems) {
         if (!item._shared || !item.shared_group_id) continue;
         const myId = memberIdPerGroup.get(item.shared_group_id);

@@ -167,8 +167,10 @@ function nextDay(dateStr) {
 function habitToEvent(habit) {
   if (!habit.next_due) return null;
   const date = habit.next_due.slice(0, 10); // YYYY-MM-DD
-  const catLabel = getCatLabel(getHabitCategories(), habit.category_id);
-  const prefix = catLabel ? `[Habit][${catLabel}]` : '[Habit]';
+  // Shared habits: [Habit][category][group name]; personal: [Habit][category]
+  const prefix = habit._sharedGroupName
+    ? (habit._sharedCategory ? `[Habit][${habit._sharedCategory}][${habit._sharedGroupName}]` : `[Habit][${habit._sharedGroupName}]`)
+    : (() => { const catLabel = getCatLabel(getHabitCategories(), habit.category_id); return catLabel ? `[Habit][${catLabel}]` : '[Habit]'; })();
   return {
     summary: `${prefix} ${habit.name}`,
     start: { date },
@@ -178,11 +180,13 @@ function habitToEvent(habit) {
 }
 
 function todoToEvent(todo) {
-  const date = todo.due_date || todo.snoozed_until;
+  const date = todo.due_date || todo.snooze_until;
   if (!date) return null;
   const d = date.slice(0, 10);
-  const catLabel = getCatLabel(getTodoCategories(), todo.category_id);
-  const prefix = catLabel ? `[TODO][${catLabel}]` : '[TODO]';
+  // Shared todos: [TODO][category][group name]; personal: [TODO][category]
+  const prefix = todo._sharedGroupName
+    ? (todo._sharedCategory ? `[TODO][${todo._sharedCategory}][${todo._sharedGroupName}]` : `[TODO][${todo._sharedGroupName}]`)
+    : (() => { const catLabel = getCatLabel(getTodoCategories(), todo.category_id); return catLabel ? `[TODO][${catLabel}]` : '[TODO]'; })();
   return {
     summary: `${prefix} ${todo.text}`,
     start: { date: d },
@@ -444,19 +448,99 @@ async function sendBatch(token, ops) {
   return results;
 }
 
+// ── Shared-item resolution ────────────────────────────────────────────
+// Shared todos/habits live as pointer rows locally (empty text/name, no
+// dates); the real data sits in the sharing layer's payload. Resolve a
+// pointer into a calendar-ready row, or report why it can't be synced yet.
+
+/** Sentinel: shared row whose sharing data isn't loaded yet — skip it, never delete its event. */
+export const SHARED_NOT_READY = Symbol('shared-not-ready');
+
+function sharingLoaded() {
+  try { return state.sharing?.isReady?.() === true; }
+  catch { return false; }
+}
+
+function sharedGroupName(groupId) {
+  try {
+    if (typeof state.sharing?.getGroupName === 'function') {
+      return state.sharing.getGroupName(groupId) || null;
+    }
+    const g = state.sharing?.getAllGroups?.().find(x => x.id === groupId);
+    return g?.name || null;
+  } catch { return null; }
+}
+
+/**
+ * Resolve a DB row into the item the calendar should sync.
+ * Returns { status, item } where status is:
+ *  - 'personal' — not a shared row, use item as-is
+ *  - 'ready'    — shared row merged with its payload (item set)
+ *  - 'deferred' — shared row but sharing isn't loaded yet (skip, don't delete)
+ *  - 'gone'     — shared row whose item no longer exists remotely (delete event)
+ */
+function resolveSharedRow(itemType, row) {
+  if (!row?.shared_id) return { status: 'personal', item: row };
+  if (!sharingLoaded()) return { status: 'deferred' };
+  let sh = null;
+  try {
+    if (itemType === 'todo') {
+      sh = state.sharing.getAllSharedItems().find(i => i.item_type === 'todo' && i.id === row.shared_id) || null;
+    } else if (itemType === 'habit') {
+      sh = state.sharing.getAllSharedHabits().find(h => h.id === row.shared_id) || null;
+    }
+  } catch { sh = null; }
+  if (!sh) return { status: 'gone' };
+  const groupName = sharedGroupName(row.shared_group_id);
+  if (itemType === 'todo') {
+    return {
+      status: 'ready',
+      item: {
+        ...row,
+        text: sh.payload?.text || sh.payload?.title || '',
+        due_date: sh.payload?.due_date || null,
+        snooze_until: sh.payload?.snooze_until || null,
+        done: sh.done ? 1 : 0,
+        _sharedCategory: sh.payload?.category || '',
+        _sharedGroupName: groupName,
+      },
+    };
+  }
+  return {
+    status: 'ready',
+    item: {
+      ...row,
+      name: sh.name || '',
+      next_due: sh.next_due || null,
+      frequency_rule: sh.frequency_rule || '',
+      _sharedCategory: sh.creator_category || '',
+      _sharedGroupName: groupName,
+    },
+  };
+}
+
 /**
  * Look up one item by type + id from the DB. Works regardless of whether
  * the UI refresh functions have populated state arrays.
+ * Returns SHARED_NOT_READY for shared rows whose sharing data isn't loaded.
  */
 async function getActiveItemFromDb(itemType, itemId) {
   if (itemType === 'habit') {
     const { data } = await state.db.from('habits').select('*').eq('id', itemId);
     const h = data?.[0];
-    return (h && h.next_due) ? h : null;
+    if (!h) return null;
+    const r = resolveSharedRow('habit', h);
+    if (r.status === 'deferred') return SHARED_NOT_READY;
+    if (r.status === 'gone') return null;
+    return (r.item.next_due) ? r.item : null;
   } else if (itemType === 'todo') {
     const { data } = await state.db.from('todos').select('*').eq('id', itemId);
     const td = data?.[0];
-    return (td && !td.done && (td.due_date || td.snoozed_until)) ? td : null;
+    if (!td) return null;
+    const r = resolveSharedRow('todo', td);
+    if (r.status === 'deferred') return SHARED_NOT_READY;
+    if (r.status === 'gone') return null;
+    return (!r.item.done && (r.item.due_date || r.item.snooze_until)) ? r.item : null;
   } else if (itemType === 'birthday') {
     const { data } = await state.db.from('birthdays').select('*').eq('id', itemId);
     const b = data?.[0];
@@ -497,15 +581,24 @@ export async function syncTable(tableName) {
   if (fullScan) {
     // Full push: all items with dates → create or update; orphaned sync entries → delete
     const wantSync = [];
+    const deferredIds = new Set(); // shared rows skipped: keep their events, don't orphan-delete
+    const resolveRow = (type, row) => {
+      const r = resolveSharedRow(type, row);
+      if (r.status === 'deferred') { deferredIds.add(row.id); return null; }
+      if (r.status === 'gone') return null;
+      return r.item;
+    };
     if (itemType === 'habit') {
       const { data: habits } = await state.db.from('habits').select('*');
       for (const h of (habits || [])) {
-        if (h.next_due) wantSync.push({ id: h.id, item: h });
+        const item = resolveRow('habit', h);
+        if (item?.next_due) wantSync.push({ id: item.id, item });
       }
     } else if (itemType === 'todo') {
       const { data: todos } = await state.db.from('todos').select('*');
       for (const td of (todos || [])) {
-        if (!td.done && (td.due_date || td.snoozed_until)) wantSync.push({ id: td.id, item: td });
+        const item = resolveRow('todo', td);
+        if (item && !item.done && (item.due_date || item.snooze_until)) wantSync.push({ id: item.id, item });
       }
     } else if (itemType === 'birthday') {
       const { data: birthdays } = await state.db.from('birthdays').select('*');
@@ -533,7 +626,7 @@ export async function syncTable(tableName) {
     }
 
     for (const [itemId, entry] of syncMap) {
-      if (handledIds.has(itemId)) continue;
+      if (handledIds.has(itemId) || deferredIds.has(itemId)) continue;
       ops.push({ method: 'DELETE', path: `${calPath}/events/${encodeURIComponent(entry.gcal_event_id)}` });
       opMeta.push({ action: 'delete', id: itemId });
     }
@@ -542,6 +635,8 @@ export async function syncTable(tableName) {
     for (const itemId of dirtySet) {
       const syncEntry = await getSyncEntry(itemType, itemId);
       const item = await getActiveItemFromDb(itemType, itemId);
+
+      if (item === SHARED_NOT_READY) continue; // sharing not loaded yet — keep any existing event
 
       if (item) {
         const event = itemToEvent(itemType, item);

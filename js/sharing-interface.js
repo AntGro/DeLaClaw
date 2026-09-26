@@ -10,15 +10,15 @@
 // Data shapes
 // -----------
 //
-// SharingUser   { memberId?: string, displayName: string, backendUserId?: string }
+// SharingUser   { member_id?: string, display_name: string, backendUserId?: string }
 //
-// GroupMember   { memberId: string, /* deterministic per user: hash of their email, never the raw email.
+// GroupMember   { member_id: string, /* deterministic per user: hash of their email, never the raw email.
 //                                  Stable across invites, so removal entries in revoked.json are
-//                                  disambiguated by timestamp (removed_at vs the member's joinedAt). */
+//                                  disambiguated by timestamp (removed_at vs the member's joined_at). */
 //                 role: 'creator'|'owner'|'member',
 //                 status: 'pending'|'joined'|'revoked',
-//                 displayName: string, /* user-chosen pseudo */
-//                 invitedLabel?: string, joinedAt?: string|null }
+//                 display_name: string, /* user-chosen pseudo */
+//                 invited_label?: string, joined_at?: string|null }
 //
 // Group         { id: string, name: string, backendType: string,
 //                 created_by: string|null, members: GroupMember[], folderId?: string }
@@ -31,7 +31,7 @@
 //
 // Identity invariant:
 // Emails are permission material, not identity. Shared identity is
-// memberId + group-local displayName. Raw emails must not be stored in
+// member_id + group-local display_name. Raw emails must not be stored in
 // shared group state or emitted into agent-readable data.
 //
 // ===================================================================
@@ -49,11 +49,12 @@ export const SHARING_INTERFACE = {
   createGroup:              'fn',   // (name: string, onProgress?: (ev: {step, done, total}) => void) => Promise<Group>
   loadAll:                  'fn',   // () => Promise<Group[]>
   deleteGroup:              'fn',   // (groupId) => Promise<void> — creator-only, throws otherwise
+  renameGroup:              'fn',   // (groupId, newName: string) => Promise<Group> — creator-only, throws otherwise
 
   // ── Groups — membership ─────────────────────────────────────
   // inviteUser/removeUser are creator-only and throw otherwise.
   inviteUser:               'fn',   // (groupId, inviteTargetOrLabel) => Promise<void>
-  removeUser:               'fn',   // (groupId, memberId) => Promise<void>
+  removeUser:               'fn',   // (groupId, member_id) => Promise<void>
   unjoinGroup:              'fn',   // (groupId) => Promise<void> — the only leave path
 
   // ── Groups — join flow ──────────────────────────────────────

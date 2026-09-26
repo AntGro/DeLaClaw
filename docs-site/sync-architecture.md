@@ -256,6 +256,7 @@ sequenceDiagram
     box rgb(239,246,255) Browser tab
     participant App as "App<br/>(in-memory)"
     participant Page as "Page<br/>(rendered)"
+    participant CAL as "Calendar<br/>Sync"
     end
     box rgb(255,251,235) Google Drive
     participant PF as "Personal folder<br/>(DeLaClaw/)"

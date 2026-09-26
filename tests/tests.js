@@ -3297,6 +3297,45 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(cal.includes('if (ok2xx || s === 404 || s === 410)'),
         'a delete clears its sync entry only on 2xx/404/410; anything else keeps the entry for retry');
     });
+
+    test('calendar settings offer a resynchronize button when sync is active', () => {
+      const main = jsFiles['main.js'];
+      const delegation = jsFiles['delegation.js'];
+      const subIdx = indexHtml.indexOf('id="calSyncSubSettings"');
+      const btnIdx = indexHtml.indexOf('data-action="resync-cal-sync"');
+      assert(subIdx !== -1 && btnIdx !== -1 && btnIdx > subIdx,
+        'the resync button must live inside #calSyncSubSettings, which is only shown when sync is enabled');
+      assert(indexHtml.includes('data-icon="refresh-cw"'),
+        'the resync button must use a Lucide icon, not an emoji');
+      assert(main.includes('window.resyncCalSync = resyncCalSync;'),
+        'resyncCalSync must be exposed on window for the delegation handler');
+      assert(delegation.includes("case 'resync-cal-sync': callWindow('resyncCalSync', []);"),
+        'delegation.js must route data-action="resync-cal-sync" to window.resyncCalSync');
+    });
+
+    test('resync is strictly equivalent to toggling sync off then on', () => {
+      const main = jsFiles['main.js'];
+      const body = main.slice(main.indexOf('async function resyncCalSync'));
+      const disableIdx = body.indexOf('await disableCalSync(');
+      const enableIdx = body.indexOf('await enableCalSync()');
+      const reconcileIdx = body.indexOf('await reconcileCalendar(');
+      assert(disableIdx !== -1 && enableIdx !== -1 && reconcileIdx !== -1,
+        'resyncCalSync must call disableCalSync, enableCalSync and reconcileCalendar');
+      assert(disableIdx < enableIdx && enableIdx < reconcileIdx,
+        'resync must delete all events first, then re-enable, then full-push — the off→on order');
+      assert(body.includes('if (_calSyncBusy) return;'),
+        'resyncCalSync must share the _calSyncBusy guard against double-invocation');
+      assert(body.includes('cal_sync.resynced'),
+        'resyncCalSync must toast cal_sync.resynced on success');
+    });
+
+    test('cal_sync resync strings exist in EN/FR/ES', () => {
+      const i18n = jsFiles['i18n.js'];
+      for (const key of ['resync:', 'resynced:']) {
+        const count = (i18n.match(new RegExp(`\\b${key}`, 'g')) || []).length;
+        assert(count >= 3, `cal_sync.${key.replace(':', '')} must be defined in all three languages (found ${count})`);
+      }
+    });
   }
 
   // ===================================================================

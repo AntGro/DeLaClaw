@@ -748,6 +748,8 @@ const T = {
       sync_complete: 'Calendar sync complete',
       removing_type: 'Removing {0}…',
       remove_complete: 'Calendar events removed',
+      resync: 'Resynchronize',
+      resynced: 'Calendar resynchronized',
     },
   },
   fr: {
@@ -1471,6 +1473,8 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       sync_complete: 'Synchronisation terminée',
       removing_type: 'Suppression des {0}…',
       remove_complete: 'Événements supprimés',
+      resync: 'Resynchroniser',
+      resynced: 'Calendrier resynchronisé',
     },
   },
   es: {
@@ -2194,6 +2198,8 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       sync_complete: 'Sincronización completada',
       removing_type: 'Eliminando {0}…',
       remove_complete: 'Eventos eliminados',
+      resync: 'Resincronizar',
+      resynced: 'Calendario resincronizado',
     },
   },
 };

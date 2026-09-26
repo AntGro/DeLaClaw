@@ -1892,6 +1892,8 @@ function updateStaticLabels() {
   if (settingsCalSyncTodosLabel) settingsCalSyncTodosLabel.textContent = t('cal_sync.todos');
   const settingsCalSyncBirthdaysLabel = document.getElementById('settingsCalSyncBirthdaysLabel');
   if (settingsCalSyncBirthdaysLabel) settingsCalSyncBirthdaysLabel.textContent = t('cal_sync.birthdays');
+  const settingsCalSyncResyncLabel = document.getElementById('settingsCalSyncResyncLabel');
+  if (settingsCalSyncResyncLabel) settingsCalSyncResyncLabel.textContent = t('cal_sync.resync');
   const settingsTabsLabel = document.getElementById('settingsTabsLabel');
   if (settingsTabsLabel) settingsTabsLabel.textContent = t('menu.settings_tabs');
   const settingsTabsHint = document.getElementById('settingsTabsHint');
@@ -3547,6 +3549,46 @@ async function toggleCalSync() {
   }
 }
 
+/**
+ * Resynchronize: delete every synced event, then full-push all current
+ * items. Strictly equivalent to toggling sync off then on (same two code
+ * paths, same calendar kept for re-use).
+ */
+async function resyncCalSync() {
+  if (_calSyncBusy) return;
+  const prefs = await getCalSyncPrefs();
+  if (!prefs.enabled) return;
+  _calSyncBusy = true;
+  const btn = document.querySelector('[data-action="resync-cal-sync"]');
+  if (btn) { btn.classList.add('is-pending'); btn.disabled = true; }
+  const progressEl = document.getElementById('calSyncProgress');
+  const progressText = document.getElementById('calSyncProgressText');
+  const progressFill = document.getElementById('calSyncProgressFill');
+  try {
+    if (progressEl) progressEl.style.display = '';
+    if (progressFill) progressFill.style.width = '0%';
+    await disableCalSync({
+      onProgress: _calSyncProgressCb(progressEl, progressText, progressFill, 'removing_type', 'remove_complete'),
+    });
+    const calId = await enableCalSync();
+    if (!calId) {
+      // Re-enable failed (e.g. token/scope issue): stay disabled with events
+      // deleted — the user can toggle sync back on manually to re-push.
+      showToast(t('cal_sync.enable_failed'), 'error');
+      await updateCalSyncUI();
+      return;
+    }
+    await reconcileCalendar(
+      _calSyncProgressCb(progressEl, progressText, progressFill, 'syncing_type', 'sync_complete'),
+    );
+    showToast(t('cal_sync.resynced'), 'success');
+    await updateCalSyncUI();
+  } finally {
+    _calSyncBusy = false;
+    if (btn) { btn.classList.remove('is-pending'); btn.disabled = false; }
+  }
+}
+
 async function toggleCalSyncSub(subKey) {
   if (_calSyncBusy) return;
   _calSyncBusy = true;
@@ -3589,6 +3631,7 @@ async function toggleCalSyncSub(subKey) {
 
 window.toggleCalSync = toggleCalSync;
 window.toggleCalSyncSub = toggleCalSyncSub;
+window.resyncCalSync = resyncCalSync;
 window.markCategoryRenamed = markCategoryRenamed;
 
 // ── Delete account (Settings > Account > Danger Zone) ──

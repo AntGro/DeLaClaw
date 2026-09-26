@@ -307,6 +307,7 @@
       case 'toggle-cal-sync-habits': callWindow('toggleCalSyncSub', ['habits']); break;
       case 'toggle-cal-sync-todos': callWindow('toggleCalSyncSub', ['todos']); break;
       case 'toggle-cal-sync-birthdays': callWindow('toggleCalSyncSub', ['birthdays']); break;
+      case 'resync-cal-sync': callWindow('resyncCalSync', []); break;
       default: {
         var camel = action.replace(/-([a-z])/g, function(_,c){ return c.toUpperCase(); });
         if (window[camel] && typeof window[camel] === 'function') {

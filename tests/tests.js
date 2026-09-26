@@ -3342,6 +3342,25 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'resyncCalSync must re-enable the toggles in its finally block');
     });
 
+    test('calendar mutations are serialized per table', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(cal.includes('const _tableChains = new Map()'),
+        'must keep a per-table promise chain for calendar mutations');
+      const lockBody = cal.slice(cal.indexOf('function _withTableLock'));
+      assert(lockBody.includes('prev.catch(() => {})'),
+        'a rejected run must not break the serialization chain');
+      assert(lockBody.includes('cur.then(dropTail, dropTail)'),
+        'the chain tail must be dropped whether the run settles or fails');
+      assert(/export function syncTable\(tableName\) \{\s*return _withTableLock\(tableName, \(\) => _syncTableInner\(tableName\)\);\s*\}/.test(cal),
+        'syncTable must run inside the per-table lock');
+      assert(cal.includes('return _withTableLock(tableName, () => _deleteTypeEventsInner(itemType));'),
+        'deleteTypeEvents must run inside the per-table lock');
+      assert(cal.includes('async function _syncTableInner(tableName)'),
+        'the syncTable body must live in _syncTableInner');
+      assert(cal.includes('async function _deleteTypeEventsInner(itemType)'),
+        'the deleteTypeEvents body must live in _deleteTypeEventsInner');
+    });
+
     test('cal_sync resync strings exist in EN/FR/ES', () => {
       const i18n = jsFiles['i18n.js'];
       for (const key of ['resync:', 'resynced:']) {

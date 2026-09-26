@@ -359,6 +359,26 @@ const MAX_BATCH_SIZE = 50; // Google's limit per batch request
 
 const _dirtyItems = new Map(); // table → Set<id>
 
+// ── Serialization ──
+// Calendar mutations (syncTable, deleteTypeEvents) snapshot the gcal_sync
+// map at their start and act on it at their end. Two concurrent runs
+// interleave at await points and act on stale snapshots: double-POST of the
+// same item, or one run clearing an entry the other just upserted (ghost /
+// duplicate events in Google Calendar, unrepairable afterwards). A per-table
+// promise chain serializes them: each call appends to the tail, a rejection
+// never breaks the chain, and a waiter re-runs afterwards, picking up any
+// dirty marks that arrived meanwhile.
+const _tableChains = new Map(); // table → tail promise
+
+function _withTableLock(tableName, fn) {
+  const prev = _tableChains.get(tableName) || Promise.resolve();
+  const cur = prev.catch(() => {}).then(fn);
+  _tableChains.set(tableName, cur);
+  const dropTail = () => { if (_tableChains.get(tableName) === cur) _tableChains.delete(tableName); };
+  cur.then(dropTail, dropTail);
+  return cur;
+}
+
 /**
  * Mark an item as dirty so the next flush syncs only it.
  * Called by the Drive adapter on non-GET mutations.
@@ -557,7 +577,11 @@ async function getActiveItemFromDb(itemType, itemId) {
  * Uses the dirty-item set to avoid scanning all items.
  * On first enable (empty gcal_sync), pushes all items.
  */
-export async function syncTable(tableName) {
+export function syncTable(tableName) {
+  return _withTableLock(tableName, () => _syncTableInner(tableName));
+}
+
+async function _syncTableInner(tableName) {
   const itemType = TABLE_TO_TYPE[tableName];
   if (!itemType) return;
 
@@ -757,7 +781,12 @@ export async function reconcileAll(onProgress) {
  * Delete all calendar events for one item type and clear sync entries.
  * Called when a type toggle is turned off.
  */
-export async function deleteTypeEvents(itemType) {
+export function deleteTypeEvents(itemType) {
+  const tableName = { habit: 'habits', todo: 'todos', birthday: 'birthdays' }[itemType];
+  return _withTableLock(tableName, () => _deleteTypeEventsInner(itemType));
+}
+
+async function _deleteTypeEventsInner(itemType) {
   const prefs = await getCalSyncPrefs();
   if (!prefs.calendarId || state.demoMode || !_getToken) return;
 

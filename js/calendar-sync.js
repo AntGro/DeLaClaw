@@ -422,6 +422,9 @@ async function sendBatch(token, ops) {
         'Content-Type': `multipart/mixed; boundary=${boundary}`,
       },
       body,
+      // Lets the batch survive tab close on beforeunload/force-save flushes
+      // (64KB body limit — larger batches behave as before).
+      keepalive: true,
     });
 
     if (!resp.ok) {

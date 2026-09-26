@@ -3336,6 +3336,22 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         assert(count >= 3, `cal_sync.${key.replace(':', '')} must be defined in all three languages (found ${count})`);
       }
     });
+
+    test('forceSave notifies _onTableFlushed so the calendar sync fires on tab-hide saves', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const body = drive.slice(drive.indexOf('async forceSave()'));
+      assert(body.includes('adapter._onTableFlushed'),
+        'forceSave must notify _onTableFlushed — the debounced path is not the only flush path');
+      assert(body.includes('flushed.push(t)'),
+        'only tables that actually flushed may be notified (flushTable rethrows on failure)');
+    });
+
+    test('calendar batch requests use keepalive so they survive tab close', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      const body = cal.slice(cal.indexOf('async function sendBatch'));
+      assert(body.includes('keepalive: true'),
+        'sendBatch must set keepalive like the Drive upload does — beforeunload flushes cannot await the response');
+    });
   }
 
   // ===================================================================

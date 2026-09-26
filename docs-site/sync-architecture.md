@@ -230,7 +230,7 @@ sequenceDiagram
 
     App->>Page: "Hide login — show app shell"
     App->>Page: "Render current view from in-memory data (welcome / todos / …)"
-    App->>PF: "Start 30s poll + tab-focus poll (personal tables)"
+    App->>App: "Start 30s poll + tab-focus poll (personal tables) — local timer only, no Drive request"
 
     Note over App,Page: "Calendar is NOT synced on page load<br/>trusted already in sync, syncs on table flush only"
 ```

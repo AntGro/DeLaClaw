@@ -3271,6 +3271,37 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'the per-type delete loop must be gone from disableCalSync');
     });
 
+    test('toggle-off fails loud: wipe failure keeps the ledger and the enabled flag', () => {
+      const start = cal.indexOf('export async function disableCalSync');
+      const body = cal.slice(start, cal.indexOf('\n}\n', start));
+      assert(!body.includes('catch (_)'),
+        'disableCalSync must not swallow failures — callers report them');
+      const wipeIdx = body.indexOf('await wipeDeLaClawCalendar()');
+      const flagIdx = body.indexOf("setSetting('gcal_sync_enabled', 'false')");
+      assert(wipeIdx !== -1 && flagIdx !== -1 && wipeIdx < flagIdx,
+        'the enabled flag must only be cleared after a successful wipe');
+    });
+
+    test('account deletion verifies the calendar DELETE before clearing state', () => {
+      const start = cal.indexOf('export async function disableCalSync');
+      const body = cal.slice(start, cal.indexOf('\n}\n', start));
+      const checkIdx = body.indexOf('res.status !== 404');
+      const clearIdx = body.indexOf('await clearSyncEntries()');
+      assert(checkIdx !== -1,
+        'the deleteCalendar branch must check the DELETE response');
+      assert(checkIdx < clearIdx,
+        'a failed calendar DELETE must throw before the ledger is cleared');
+    });
+
+    test('toggle-off, resync and account deletion surface calendar failures', () => {
+      assert(main.includes("t('cal_sync.disable_failed')"),
+        'master toggle-off must toast when the wipe fails');
+      assert(main.includes("t('cal_sync.resync_failed')"),
+        'resync must abort with a toast when the wipe fails');
+      assert(main.includes("t('account.calendar_delete_failed')"),
+        'account deletion must abort (not proceed) when the calendar DELETE fails');
+    });
+
     test('per-type deletion requeues failed ids instead of dropping them', () => {
       const body = cal.slice(cal.indexOf('async function _deleteTypeEventsInner'));
       assert(body.includes('markDirty(tableName, e.item_id)'),
@@ -3502,11 +3533,11 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'the deleteTypeEvents body must live in _deleteTypeEventsInner');
     });
 
-    test('cal_sync resync strings exist in EN/FR/ES', () => {
+    test('calendar failure strings exist in EN/FR/ES', () => {
       const i18n = jsFiles['i18n.js'];
-      for (const key of ['resync:', 'resynced:', 'migrating:', 'migration_failed:', 'scope_disabled:', 'removing_all:']) {
+      for (const key of ['resync:', 'resynced:', 'migrating:', 'migration_failed:', 'scope_disabled:', 'removing_all:', 'disable_failed:', 'resync_failed:', 'calendar_delete_failed:']) {
         const count = (i18n.match(new RegExp(`\\b${key}`, 'g')) || []).length;
-        assert(count >= 3, `cal_sync.${key.replace(':', '')} must be defined in all three languages (found ${count})`);
+        assert(count >= 3, `i18n '${key.replace(':', '')}' must be defined in all three languages (found ${count})`);
       }
     });
 

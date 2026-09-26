@@ -418,32 +418,37 @@ export async function enableCalSync() {
  * Disable calendar sync. Deletes every event from the DeLaClaw calendar
  * (wipe-based: ledger rows and orphans alike) but keeps the calendar
  * itself so it can be reused on re-enable (avoids orphaned/duplicate
- * calendars). All-or-nothing: on wipe failure the ledger is kept so a
- * later toggle-off retries the wipe.
+ * calendars). All-or-nothing: on wipe failure the error propagates and both
+ * the ledger and the enabled flag are left untouched, so the user can retry
+ * from a consistent state. With deleteCalendar=true (account deletion) the
+ * whole calendar is deleted instead; the DELETE response is verified — any
+ * failure throws before the ledger or calendar ID are cleared, so a calendar
+ * full of user data can never silently orphan.
  */
 export async function disableCalSync({ deleteCalendar = false, onProgress } = {}) {
   if (!state.demoMode && _getToken) {
-    try {
-      const token = await _getToken();
-      const calId = await getSetting('gcal_calendar_id');
-      if (token && calId) {
-        if (deleteCalendar) {
-          // Account deletion — remove the entire calendar from Google
-          await fetch(`${CALENDAR_API}/calendars/${encodeURIComponent(calId)}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` },
-          });
-          // Clear all local sync entries
-          await clearSyncEntries();
-        } else {
-          // Normal toggle — wipe every event, then clear the ledger
-          if (onProgress) onProgress({ type: null, index: 0, total: 1 });
-          await wipeDeLaClawCalendar();
-          await clearSyncEntries();
-          if (onProgress) onProgress({ type: null, index: 1, total: 1, done: true });
+    const token = await _getToken();
+    const calId = await getSetting('gcal_calendar_id');
+    if (token && calId) {
+      if (deleteCalendar) {
+        // Account deletion — remove the entire calendar from Google
+        const res = await fetch(`${CALENDAR_API}/calendars/${encodeURIComponent(calId)}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok && res.status !== 404) {
+          throw new Error(`calendar delete failed: HTTP ${res.status}`);
         }
+        // Clear all local sync entries
+        await clearSyncEntries();
+      } else {
+        // Normal toggle — wipe every event, then clear the ledger
+        if (onProgress) onProgress({ type: null, index: 0, total: 1 });
+        await wipeDeLaClawCalendar();
+        await clearSyncEntries();
+        if (onProgress) onProgress({ type: null, index: 1, total: 1, done: true });
       }
-    } catch (_) { /* best effort */ }
+    }
   } else {
     // Demo or no token — just clear local sync entries
     await clearSyncEntries();

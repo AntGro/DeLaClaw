@@ -3579,10 +3579,19 @@ async function toggleCalSync() {
     if (prefs.enabled) {
       if (progressEl) progressEl.style.display = '';
       if (progressFill) progressFill.style.width = '0%';
-      await disableCalSync({
-        onProgress: _calSyncProgressCb(progressEl, progressText, progressFill, 'removing_type', 'remove_complete'),
-      });
-      showToast(t('cal_sync.disabled'), 'success');
+      try {
+        await disableCalSync({
+          onProgress: _calSyncProgressCb(progressEl, progressText, progressFill, 'removing_type', 'remove_complete'),
+        });
+        showToast(t('cal_sync.disabled'), 'success');
+      } catch (err) {
+        // Wipe failed: disableCalSync leaves the ledger and the enabled flag
+        // untouched, so report and let the user retry.
+        console.error('[cal-sync] disable failed', err);
+        showToast(t('cal_sync.disable_failed'), 'error');
+      } finally {
+        if (progressEl) progressEl.style.display = 'none';
+      }
     } else {
       const calId = await enableCalSync();
       if (!calId) return;
@@ -3629,9 +3638,18 @@ async function resyncCalSync() {
   try {
     if (progressEl) progressEl.style.display = '';
     if (progressFill) progressFill.style.width = '0%';
-    await disableCalSync({
-      onProgress: _calSyncProgressCb(progressEl, progressText, progressFill, 'removing_type', 'remove_complete'),
-    });
+    try {
+      await disableCalSync({
+        onProgress: _calSyncProgressCb(progressEl, progressText, progressFill, 'removing_type', 'remove_complete'),
+      });
+    } catch (err) {
+      // Wipe failed: the calendar, ledger and enabled flag are untouched —
+      // abort the resync so the user can retry from a consistent state.
+      console.error('[cal-sync] resync wipe failed', err);
+      showToast(t('cal_sync.resync_failed'), 'error');
+      await updateCalSyncUI();
+      return;
+    }
     const calId = await enableCalSync();
     if (!calId) {
       // Re-enable failed (e.g. token/scope issue): stay disabled with events
@@ -3731,14 +3749,20 @@ window.markCategoryRenamed = markCategoryRenamed;
           if (msgEl) msgEl.textContent = text;
         }
 
-        // 1. Calendar cleanup
+        // 1. Calendar cleanup — the DeLaClaw calendar must actually be deleted
+        // before account data goes. A failed DELETE aborts the whole flow so a
+        // calendar full of user data can never silently orphan.
         try {
           const prefs = await getCalSyncPrefs();
           if (prefs?.enabled) {
             setStep(t('account.step_calendar'));
             await disableCalSync({ deleteCalendar: true });
           }
-        } catch { /* best effort */ }
+        } catch (err) {
+          console.error('[account] calendar deletion failed', err);
+          showToast(t('account.calendar_delete_failed'), 'error');
+          return;
+        }
 
         // 2. Delete data via adapter
         setStep(t('account.step_data'));

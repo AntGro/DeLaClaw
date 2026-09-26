@@ -26,8 +26,8 @@ Only possible when calendar sync is not already enabled. On enable:
 
 ## Opt-out
 
-- **Master toggle off**: wipes every event in the DeLaClaw calendar (wipe-based: paginated list + batch delete, catching orphans with no ledger row), then clears the `gcal_sync` ledger. The calendar itself is kept for re-use (avoids orphaned/duplicate calendars). All-or-nothing: on wipe failure the ledger is kept so a later toggle-off retries. Sets `gcal_sync_enabled=false`. Cross-device: any device reading the shared settings will see sync as disabled.
-- **Account deletion** (`deleteCalendar=true`): deletes the entire DeLaClaw calendar from Google, clears the ledger, clears the stored calendar ID.
+- **Master toggle off**: wipes every event in the DeLaClaw calendar (wipe-based: paginated list + batch delete, catching orphans with no ledger row), then clears the `gcal_sync` ledger. The calendar itself is kept for re-use (avoids orphaned/duplicate calendars). All-or-nothing: on wipe failure the error propagates and both the ledger and `gcal_sync_enabled` are left untouched, so the user can retry from a consistent state. Cross-device: any device reading the shared settings will see sync as disabled.
+- **Account deletion** (`deleteCalendar=true`): deletes the entire DeLaClaw calendar from Google, clears the ledger, clears the stored calendar ID. The calendar DELETE response is verified: any failure other than 404 (already gone) throws before the ledger or calendar ID are cleared, and the account-deletion flow aborts — a calendar full of user data can never silently orphan.
 
 ## Event format
 

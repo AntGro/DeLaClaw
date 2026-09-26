@@ -208,7 +208,19 @@ sequenceDiagram
                 end
             end
             App->>PF: "Write settings.json once with the final schema_version — the batch completion marker"
+            rect rgb(253, 237, 236)
+            opt The settings.json write fails
+                PF-->>App: "Error"
+                App->>Page: "Login screen — generic connection error<br/>State on Drive: migration tables uploaded, settings.json still carries the pre-batch schema_version, backup-v{old}.json intact<br/>Retry re-enters as an Existing install (branch above) → restores the tables from the backup in place and re-runs the batch from the backup's version<br/>Flow ends here — back to the login screen"
+            end
+            end
             App->>PF: "Delete the backup — the batch succeeded"
+            rect rgb(253, 237, 236)
+            opt The backup delete fails
+                Note over App,PF: "Failure is swallowed (console.warn) — no error crosses the wire"
+                App->>Page: "Hide login — show app shell (the batch already completed)<br/>State on Drive: backup-v{old}.json lingers — harmless, it is not a table file<br/>Next connect with pending migrations removes it via the stale-backup action<br/>With no pending migrations it stays in the folder"
+            end
+            end
         end
     else Fresh install (no table files)
         App->>App: "Create empty in-memory store"

@@ -3277,6 +3277,26 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(habits.includes("if (calDirtyMarked) await state.syncCalendarTable?.('habits');"),
         '_doSyncSharedHabits must drive the calendar sync directly — a rename/remote edit writes no local row, so no flush would consume the dirty marks');
     });
+
+    test('calendar sync re-queues failed ops instead of dropping them', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(cal.includes('function requeueFailedOps(tableName, ids)'),
+        'calendar-sync must have a requeueFailedOps helper that puts ids back in _dirtyItems');
+      assert(cal.includes('requeueFailedOps(tableName, opMeta.map(m => m.id))'),
+        'a sendBatch throw must re-queue every attempted id — the dirty set is already consumed');
+      assert(cal.includes('requeueFailedOps(tableName, [...failedIds])'),
+        'per-op failures must be re-queued for a later syncTable run');
+      assert(/const isRetryable = \(s\) => s === 0 \|\| s === 429 \|\| s >= 500/.test(cal),
+        'only unknown/rate-limited/server-error outcomes are retried — other 4xx would loop forever');
+    });
+
+    test('calendar sync no longer treats status 0 as a successful delete', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(!/if \(s === 0 \|\|/.test(cal),
+        'status 0 (no parseable batch result) must not clear the sync entry — the event may still exist');
+      assert(cal.includes('if (ok2xx || s === 404 || s === 410)'),
+        'a delete clears its sync entry only on 2xx/404/410; anything else keeps the entry for retry');
+    });
   }
 
   // ===================================================================

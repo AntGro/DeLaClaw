@@ -304,6 +304,7 @@ sequenceDiagram
             App->>JOIN: "Read revoked.json via its saved fileId<br/>(the file-level read grant survives folder revocation)"
             alt own member ID found in revoked.json
                 App->>App: "Verdict 'removed' → pointer purged silently<br/>+ local item pointers purged (no dialog)"
+                App->>PF: "Debounced flush (~2s) rewrites groups.json +<br/>todos/habits/list_items.json without the purged rows"
                 App->>CAL: "Pointer-row deletes dirty the tables →<br/>on flush syncTable deletes their events (via gcal_sync)"
             else no entry — or revoked.json itself gone (404)
                 App->>App: "Verdict 'deleted' → pointer purged + group-deleted dialog<br/>(with a Drive folder link to double-check)"

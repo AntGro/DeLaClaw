@@ -3192,21 +3192,89 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'must resolve event ids via the stored-or-derived helper');
     });
 
-    test('migration deletes, re-pushes, validates, then marks done', () => {
+    test('migration gate is row-driven: work remains iff old rows exist', () => {
       assert(cal.includes('export async function migrateEventIdsToDeterministic()'),
         'must export the migration');
-      assert(cal.includes("await setSetting(ID_MIGRATION_FLAG, 'done')"),
+      assert(cal.includes(".from('gcal_sync').select('gcal_event_id')"),
+        'the migration gate must inspect gcal_sync rows, not calendar prefs');
+      assert(cal.includes('.some(r => r.gcal_event_id)'),
+        'any row still carrying a gcal_event_id means work remains');
+      assert(!cal.includes('shared rows present'),
+        'the shared-rows abort must be gone (no shared items exist yet)');
+    });
+
+    test('migration wipes the calendar, then re-pushes and validates', () => {
+      assert(cal.includes('async function wipeCalendarEvents(token, calendarId)'),
+        'must have a wipe primitive (paginated list + batch delete)');
+      assert(cal.includes("singleEvents: 'false'"),
+        'the wipe listing must return recurring series as single masters');
+      assert(cal.includes("timeMin: '2000-01-01T00:00:00Z'"),
+        'the wipe listing must use an explicit far-past timeMin');
+      assert(cal.includes('event(s) could not be deleted'),
+        'the wipe must be all-or-nothing: throw when any event survives');
+      const mig = cal.slice(cal.indexOf('export async function migrateEventIdsToDeterministic()'));
+      assert(mig.includes('await wipeCalendarEvents(token, calId)'),
+        'the migration must wipe the calendar');
+      assert(mig.includes('await clearSyncEntries()'),
+        'the migration must clear the ledger after the wipe');
+      assert(mig.includes('await loadTodoCategories()') && mig.includes('await loadHabitCategories()'),
+        'category maps must load before the recreate pass rebuilds titles');
+      assert(mig.includes("await setSetting(ID_MIGRATION_FLAG, 'done')"),
         'must only mark done after validation');
-      assert(cal.includes('could not be deleted'),
-        'must abort when the delete phase leaves entries behind');
-      assert(cal.includes('shared rows present'),
-        'must refuse when shared rows exist');
-      assert(cal.includes('still dirty'),
+      assert(mig.includes('still dirty'),
         'must validate that no failed ops are still pending');
-      assert(cal.includes('without entry'),
-        'must validate that every syncable item has an entry');
-      assert(main.includes('migrateEventIdsToDeterministic().catch'),
-        'main must trigger the migration at startup (background)');
+      assert(mig.includes('without ledger row'),
+        'must validate that every syncable item has a ledger row');
+    });
+
+    test('migration turns calendar sync off on 403 instead of blocking forever', () => {
+      const mig = cal.slice(cal.indexOf('export async function migrateEventIdsToDeterministic()'));
+      assert(mig.includes("await setSetting('gcal_scope_missing', 'true')"),
+        'a 403 must record the scope-missing marker');
+      assert(mig.includes("await setSetting('gcal_sync_enabled', 'false')"),
+        'a 403 must turn calendar sync off');
+      assert(main.includes("t('cal_sync.scope_disabled')"),
+        'main must tell the user how to re-enable sync after the auto-disable');
+    });
+
+    test('migration is a login gate: no app access until it completes', () => {
+      assert(main.includes("throw new Error('cal_migration_failed')"),
+        'a deferred migration must throw out of connect()');
+      const gateIdx = main.indexOf("throw new Error('cal_migration_failed')");
+      const hideIdx = main.indexOf("document.getElementById('gate').style.display = 'none'");
+      assert(gateIdx !== -1 && hideIdx !== -1 && gateIdx < hideIdx,
+        'the gate must throw before the login screen hides');
+      assert(!main.includes('migrateEventIdsToDeterministic().catch'),
+        'the fire-and-forget startup trigger must be gone');
+      assert(main.includes("e.message === 'cal_migration_failed'"),
+        'doLogin/autoConnect must handle the migration failure like other login errors');
+    });
+
+    test('calendar wipe pauses table syncs so mid-wipe events keep their dirty marks', () => {
+      assert(cal.includes('let _wipeRunning = false'),
+        'must track an in-flight wipe');
+      assert(cal.includes('if (_wipeRunning) return; // wipe in flight'),
+        '_syncTableInner must return early without consuming dirty sets during a wipe');
+      assert(cal.includes('export async function wipeDeLaClawCalendar()'),
+        'must export the wipe helper used by toggle-off and resync');
+      assert(cal.includes('export async function clearSyncEntries()'),
+        'must export the ledger-clear helper');
+    });
+
+    test('toggle-off wipes the calendar instead of deleting per type', () => {
+      const body = cal.slice(cal.indexOf('export async function disableCalSync'));
+      assert(body.includes('await wipeDeLaClawCalendar()'),
+        'disableCalSync must wipe the whole calendar (ledger rows and orphans)');
+      assert(body.includes('await clearSyncEntries()'),
+        'disableCalSync must clear the ledger after the wipe');
+      assert(!body.includes('deleteTypeEvents(types[i])'),
+        'the per-type delete loop must be gone from disableCalSync');
+    });
+
+    test('per-type deletion requeues failed ids instead of dropping them', () => {
+      const body = cal.slice(cal.indexOf('async function _deleteTypeEventsInner'));
+      assert(body.includes('markDirty(tableName, e.item_id)'),
+        'failed deletes must requeue the id so a later run retries');
     });
 
     test('gcal_sync schema is the lean pair in server/schema.sql', () => {
@@ -3436,7 +3504,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('cal_sync resync strings exist in EN/FR/ES', () => {
       const i18n = jsFiles['i18n.js'];
-      for (const key of ['resync:', 'resynced:']) {
+      for (const key of ['resync:', 'resynced:', 'migrating:', 'migration_failed:', 'scope_disabled:', 'removing_all:']) {
         const count = (i18n.match(new RegExp(`\\b${key}`, 'g')) || []).length;
         assert(count >= 3, `cal_sync.${key.replace(':', '')} must be defined in all three languages (found ${count})`);
       }

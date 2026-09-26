@@ -4,7 +4,7 @@ For any coding agent (Human, Claude, Cursor, Codex) working in this repo. This i
 
 ## 0. Purpose
 
-DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, vanilla JS (ES modules). Own your data: Google Drive | Local Bun+SQLite | Demo. PWA, offline-first via IndexedDB cache, dark/light, i18n (EN/FR/ES). Supabase support has been removed entirely (adapter, client library, auth module, sharing adapter). The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
+DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, vanilla JS (ES modules). Own your data: Google Drive | Local Bun+SQLite | Demo. PWA, dark/light, i18n (EN/FR/ES). Supabase support has been removed entirely (adapter, client library, auth module, sharing adapter). The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
 
 ## 1. Core Product Principles
 

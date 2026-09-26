@@ -9,7 +9,7 @@ import db from './db.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 import { DRIVE_SCOPE_FILE, clearStoredDriveEmail } from './adapters/drive.js';
-import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, migrateEventIdsToDeterministic, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
+import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
 import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
@@ -433,6 +433,16 @@ async function autoConnect(url, key, mode) {
     await connect(url, key, mode, /* skipDemoChooser */ true, { silentAuth: mode === 'googledrive' });
   } catch (e) {
     console.warn('[DeLaClaw] autoConnect failed:', e.message, e.orig || e);
+    if (e.message === 'cal_migration_failed') {
+      // Calendar migration gate failed — show the login form with the error
+      // so the user can retry (same shape as the schema_missing path).
+      showHero();
+      const form = document.getElementById('loginForm');
+      if (form) form.style.display = 'flex';
+      const err = document.getElementById('loginError');
+      if (err) err.textContent = t('cal_sync.migration_failed');
+      return;
+    }
     if (mode === 'googledrive') {
       // Silent OAuth refresh failed (common on mobile — Safari ITP blocks
       // third-party cookies in the GIS iframe). Show a minimal reconnect
@@ -626,6 +636,8 @@ async function doLogin() {
       err.textContent = t('login.drive_scope_denied') || 'DeLaClaw needs Google Drive access to store your data. Please try again and accept the Drive permission.';
     } else if (e.message === 'popup_failed_to_open') {
       err.textContent = t('login.drive_popup_blocked') || 'Pop-up blocked by your browser — please try again.';
+    } else if (e.message === 'cal_migration_failed') {
+      err.textContent = t('cal_sync.migration_failed');
     } else {
       console.error('[DeLaClaw] connect error:', e);
       err.textContent = t('toast.connection_failed');
@@ -893,6 +905,30 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   }
   db.setAdapter(adapter);
 
+  // Calendar event-ID migration gate (Drive mode only): the app shell stays
+  // hidden until the gcal_sync ledger is migrated to deterministic event
+  // IDs. 'deferred' throws and returns to the login screen, like the schema
+  // migrations — no app access with an unmigrated ledger.
+  if (state.driveMode) {
+    const { initCalSync, migrateEventIdsToDeterministic } = await import('./calendar-sync.js');
+    initCalSync(adapter.getToken);
+    const progressEl = document.getElementById('driveProgress');
+    const progressText = document.getElementById('driveProgressText');
+    const progressFill = document.getElementById('driveProgressFill');
+    if (progressEl) {
+      progressEl.style.display = '';
+      if (progressText) progressText.textContent = t('cal_sync.migrating');
+      if (progressFill) progressFill.style.width = '40%';
+    }
+    let migResult = 'deferred';
+    try {
+      migResult = await migrateEventIdsToDeterministic();
+    } finally {
+      if (progressEl) progressEl.style.display = 'none';
+    }
+    if (migResult === 'deferred') throw new Error('cal_migration_failed');
+  }
+
   // Flush pending Drive saves and stop polling on page close
   if (mode === 'googledrive' && adapter.forceSave) {
     window.addEventListener('beforeunload', () => {
@@ -919,6 +955,19 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   document.getElementById('gateToolbar').style.display = 'none';
   hideHero();
   document.getElementById('app').classList.add('active');
+
+  // The migration gate turns calendar sync off when the Calendar scope is
+  // missing/revoked (instead of blocking the app forever) — tell the user
+  // how to re-enable it.
+  if (state.driveMode) {
+    try {
+      const { data } = await state.db.from('settings').select('value').eq('key', 'gcal_scope_missing').single();
+      if (data?.value === 'true') {
+        await state.db.from('settings').delete().eq('key', 'gcal_scope_missing');
+        showToast(t('cal_sync.scope_disabled'), 'error');
+      }
+    } catch (_) {}
+  }
 
   // Re-render logos now that the app is visible and layout is computed
   initLogos();
@@ -980,8 +1029,8 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     }
     // No full sync on page load — trust calendar is already synced.
     // Full push only happens on first enable (toggleCalSync).
-    // One-shot migration to deterministic event ids (background, idempotent).
-    migrateEventIdsToDeterministic().catch(e => console.warn('[cal-migration]', e));
+    // The deterministic event-ID migration runs as a login gate in connect()
+    // (before the app shell shows); nothing to do here.
   }
 
   // Restore view early (before async refreshes) to avoid flash
@@ -3509,8 +3558,9 @@ function _calSyncProgressCb(progressEl, progressText, progressFill, msgKey, done
       if (progressFill) progressFill.style.width = '100%';
       setTimeout(() => { if (progressEl) progressEl.style.display = 'none'; }, 1500);
     } else {
-      const label = t(`cal_sync.${ev.type === 'habit' ? 'habits' : ev.type === 'todo' ? 'todos' : 'birthdays'}`);
-      if (progressText) progressText.textContent = t(`cal_sync.${msgKey}`, label);
+      // ev.type == null → calendar-wide wipe (no per-type phase)
+      const label = ev.type == null ? null : t(`cal_sync.${ev.type === 'habit' ? 'habits' : ev.type === 'todo' ? 'todos' : 'birthdays'}`);
+      if (progressText) progressText.textContent = label == null ? t('cal_sync.removing_all') : t(`cal_sync.${msgKey}`, label);
       if (progressFill && ev.total > 0) progressFill.style.width = `${Math.round(((ev.index + 0.5) / ev.total) * 100)}%`;
     }
   };
@@ -3552,9 +3602,10 @@ async function toggleCalSync() {
 }
 
 /**
- * Resynchronize: delete every synced event, then full-push all current
- * items. Strictly equivalent to toggling sync off then on (same two code
- * paths, same calendar kept for re-use).
+ * Resynchronize: wipe the DeLaClaw calendar (every event, including orphans
+ * with no ledger row), clear the ledger, then full-push all current items.
+ * Wipe-based: strictly equivalent to toggling sync off then on (same two
+ * code paths, same calendar kept for re-use).
  */
 async function resyncCalSync() {
   if (_calSyncBusy) return;

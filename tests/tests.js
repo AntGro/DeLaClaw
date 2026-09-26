@@ -3151,6 +3151,74 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   }
 
   // ===================================================================
+  // Deterministic calendar event IDs + id migration
+  // ===================================================================
+  {
+    const cal = jsFiles['calendar-sync.js'];
+    const main = jsFiles['main.js'];
+
+    test('event ids are derived from item ids (dashes stripped, base32hex)', () => {
+      assert(cal.includes('export function deterministicEventId(itemId)'),
+        'must export deterministicEventId');
+      assert(cal.includes("String(itemId).replace(/-/g, '')"),
+        'must strip dashes from the item id');
+      assert(cal.includes('/^[a-v0-9]{5,1024}$/'),
+        'must validate the base32hex event-id alphabet');
+    });
+
+    test('creates send the deterministic event id and keep the event body for 409 recovery', () => {
+      assert(cal.includes('body: { ...event, id: newEventId }'),
+        'create ops must carry the deterministic id');
+      assert(cal.includes("opMeta.push({ action: 'create', id, event });") ||
+             cal.includes("opMeta.push({ action: 'create', id: itemId, event });"),
+        'create opMeta must keep the event body for the 409 patch path');
+    });
+
+    test('409 on create patches the existing event instead of duplicating', () => {
+      assert(cal.includes('} else if (s === 409) {'),
+        'must branch on 409 in create result processing');
+      assert(cal.includes("method: 'PATCH'") && cal.includes('patchResp.ok'),
+        '409 path must PATCH the existing event');
+      assert(cal.includes('never create a duplicate'),
+        '409 path must document the no-duplicate intent');
+    });
+
+    test('sync entries are bare (item_type, item_id) pairs', () => {
+      assert(cal.includes('await state.db.from(\'gcal_sync\').insert({ item_type: itemType, item_id: itemId });'),
+        'entry writes must not store gcal_event_id or last_synced_at');
+      assert(!/upsertSyncEntry\([^)]*eventId/.test(cal),
+        'no caller may pass an event id to the entry writer');
+      assert(cal.includes('function eventIdForEntry(itemId, entry)'),
+        'must resolve event ids via the stored-or-derived helper');
+    });
+
+    test('migration deletes, re-pushes, validates, then marks done', () => {
+      assert(cal.includes('export async function migrateEventIdsToDeterministic()'),
+        'must export the migration');
+      assert(cal.includes("await setSetting(ID_MIGRATION_FLAG, 'done')"),
+        'must only mark done after validation');
+      assert(cal.includes('could not be deleted'),
+        'must abort when the delete phase leaves entries behind');
+      assert(cal.includes('shared rows present'),
+        'must refuse when shared rows exist');
+      assert(cal.includes('still dirty'),
+        'must validate that no failed ops are still pending');
+      assert(cal.includes('without entry'),
+        'must validate that every syncable item has an entry');
+      assert(main.includes('migrateEventIdsToDeterministic().catch'),
+        'main must trigger the migration at startup (background)');
+    });
+
+    test('gcal_sync schema is the lean pair in server/schema.sql', () => {
+      const schemaSrc = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'schema.sql'), 'utf8');
+      const m = schemaSrc.match(/CREATE TABLE IF NOT EXISTS gcal_sync \(([\s\S]*?)\);/);
+      assert(m, 'gcal_sync table must exist in schema.sql');
+      assert(!m[1].includes('gcal_event_id'), 'gcal_sync must not have gcal_event_id');
+      assert(!m[1].includes('last_synced_at'), 'gcal_sync must not have last_synced_at');
+    });
+  }
+
+  // ===================================================================
   // Group rename (creator-only)
   // ===================================================================
   {

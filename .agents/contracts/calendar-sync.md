@@ -44,7 +44,15 @@ Each event carries `extendedProperties.private` with `delaclaw_type` and `delacl
 
 ## ID mapping
 
-The `gcal_sync` table maps `(item_type, item_id)` → `gcal_event_id`. This is the only link between a DeLaClaw item and its Calendar event.
+Event IDs are **deterministic**: the Google event ID is the item's UUID with dashes stripped (32 hex chars — valid base32hex). The `gcal_sync` table is a bare set of live `(item_type, item_id)` pairs; the event ID is derived, never stored. Rows written before the deterministic-ID migration still carry `gcal_event_id`, which wins while present so the migration's delete phase can address the old events.
+
+Consequences:
+
+- A `409` on create means "this item's event already exists" (retry after a crash between insert and entry write, or an interrupted migration) — the handler PATCHes the existing event into shape and records the entry, never duplicates.
+- Cross-device races are safe: two tabs creating the same item's event converge on the same ID via 409 → patch.
+- `last_synced_at` was write-only (nothing read it) and is gone.
+
+One-shot migration (`migrateEventIdsToDeterministic`, runs at startup while sync is on): validates every synced item ID is derivable and no shared rows exist, deletes all events of each synced type (aborts if any entry survives), re-pushes with deterministic IDs via the normal `syncTable` path, and only sets `gcal_event_id_migration=done` after validation (dirty sets empty, every syncable item has an entry). Any failure defers to the next startup.
 
 ## Sync model
 
@@ -113,7 +121,7 @@ Calendar operations are sent to Google's Calendar batch endpoint (`multipart/mix
 
 ## Error handling
 
-Fire-and-forget. If a Calendar API call fails (network, expired token), the event stays out of sync until the source item is next modified, which will retry the operation.
+Failed operations (network error, 429, 5xx) go back into the per-table dirty set and are retried on a later `syncTable` run — a failed op is never silently dropped. Other 4xx are not retried. Update on a 404 keeps the entry without resurrecting the event.
 
 ## Settings storage
 

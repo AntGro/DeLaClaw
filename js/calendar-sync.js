@@ -117,6 +117,24 @@ async function deleteEvent(token, calendarId, eventId) {
 }
 
 // ── gcal_sync table operations ──────────────────────────────────
+// The table is a bare set of live (item_type, item_id) pairs. The Google
+// event ID is derived from the item ID (dashes stripped from the UUID):
+// 32 hex chars, valid base32hex (a-v, 0-9). Rows written before the
+// deterministic-ID migration still carry gcal_event_id — it wins while
+// present so the migration's delete phase can address the old events.
+
+const EVENT_ID_RE = /^[a-v0-9]{5,1024}$/;
+
+/** Derive the Google event ID for an item, or null if the id is not a valid base. */
+export function deterministicEventId(itemId) {
+  const stripped = String(itemId).replace(/-/g, '');
+  return EVENT_ID_RE.test(stripped) ? stripped : null;
+}
+
+/** Event ID for a sync entry: stored id wins during the migration transition, else derived. */
+function eventIdForEntry(itemId, entry) {
+  return entry?.gcal_event_id || deterministicEventId(itemId);
+}
 
 async function getSyncEntry(itemType, itemId) {
   const { data } = await state.db.from('gcal_sync').select('*')
@@ -124,24 +142,9 @@ async function getSyncEntry(itemType, itemId) {
   return data;
 }
 
-async function upsertSyncEntry(itemType, itemId, eventId) {
-  await state.db.from('gcal_sync').upsert({
-    item_type: itemType,
-    item_id: itemId,
-    gcal_event_id: eventId,
-    last_synced_at: new Date().toISOString(),
-  }, { onConflict: 'item_type,item_id' });
-}
-
-// Fallback for adapters without composite onConflict: delete + insert
-async function upsertSyncEntryFallback(itemType, itemId, eventId) {
+async function upsertSyncEntry(itemType, itemId) {
   await state.db.from('gcal_sync').delete().eq('item_type', itemType).eq('item_id', itemId);
-  await state.db.from('gcal_sync').insert({
-    item_type: itemType,
-    item_id: itemId,
-    gcal_event_id: eventId,
-    last_synced_at: new Date().toISOString(),
-  });
+  await state.db.from('gcal_sync').insert({ item_type: itemType, item_id: itemId });
 }
 
 async function deleteSyncEntry(itemType, itemId) {
@@ -149,6 +152,41 @@ async function deleteSyncEntry(itemType, itemId) {
 }
 
 // ── Item → Event conversion ─────────────────────────────────────
+
+/**
+ * All items of a type that should currently have a calendar event, plus the
+ * ids of shared rows whose sharing data isn't loaded yet ('deferred' —
+ * their events are kept as-is and never orphan-deleted).
+ */
+async function getSyncableItems(itemType) {
+  const items = [];
+  const deferredIds = new Set(); // shared rows skipped: keep their events, don't orphan-delete
+  const resolveRow = (type, row) => {
+    const r = resolveSharedRow(type, row);
+    if (r.status === 'deferred') { deferredIds.add(row.id); return null; }
+    if (r.status === 'gone') return null;
+    return r.item;
+  };
+  if (itemType === 'habit') {
+    const { data: habits } = await state.db.from('habits').select('*');
+    for (const h of (habits || [])) {
+      const item = resolveRow('habit', h);
+      if (item?.next_due) items.push({ id: item.id, item });
+    }
+  } else if (itemType === 'todo') {
+    const { data: todos } = await state.db.from('todos').select('*');
+    for (const td of (todos || [])) {
+      const item = resolveRow('todo', td);
+      if (item && !item.done && (item.due_date || item.snooze_until)) items.push({ id: item.id, item });
+    }
+  } else if (itemType === 'birthday') {
+    const { data: birthdays } = await state.db.from('birthdays').select('*');
+    for (const b of (birthdays || [])) {
+      if (b.date || b.birthday) items.push({ id: b.id, item: b });
+    }
+  }
+  return { items, deferredIds };
+}
 
 function getCatLabel(catMap, catId) {
   if (!catId) return '';
@@ -607,32 +645,7 @@ async function _syncTableInner(tableName) {
 
   if (fullScan) {
     // Full push: all items with dates → create or update; orphaned sync entries → delete
-    const wantSync = [];
-    const deferredIds = new Set(); // shared rows skipped: keep their events, don't orphan-delete
-    const resolveRow = (type, row) => {
-      const r = resolveSharedRow(type, row);
-      if (r.status === 'deferred') { deferredIds.add(row.id); return null; }
-      if (r.status === 'gone') return null;
-      return r.item;
-    };
-    if (itemType === 'habit') {
-      const { data: habits } = await state.db.from('habits').select('*');
-      for (const h of (habits || [])) {
-        const item = resolveRow('habit', h);
-        if (item?.next_due) wantSync.push({ id: item.id, item });
-      }
-    } else if (itemType === 'todo') {
-      const { data: todos } = await state.db.from('todos').select('*');
-      for (const td of (todos || [])) {
-        const item = resolveRow('todo', td);
-        if (item && !item.done && (item.due_date || item.snooze_until)) wantSync.push({ id: item.id, item });
-      }
-    } else if (itemType === 'birthday') {
-      const { data: birthdays } = await state.db.from('birthdays').select('*');
-      for (const b of (birthdays || [])) {
-        if (b.date || b.birthday) wantSync.push({ id: b.id, item: b });
-      }
-    }
+    const { items: wantSync, deferredIds } = await getSyncableItems(itemType);
 
     const { data: syncEntries } = await state.db.from('gcal_sync').select('*').eq('item_type', itemType);
     const syncMap = new Map((syncEntries || []).map(e => [e.item_id, e]));
@@ -643,18 +656,23 @@ async function _syncTableInner(tableName) {
       const event = itemToEvent(itemType, item);
       if (!event) continue;
       const existing = syncMap.get(id);
-      if (existing?.gcal_event_id) {
-        ops.push({ method: 'PATCH', path: `${calPath}/events/${encodeURIComponent(existing.gcal_event_id)}`, body: event });
-        opMeta.push({ action: 'update', id, eventId: existing.gcal_event_id, event });
+      const existingEventId = existing && eventIdForEntry(id, existing);
+      if (existingEventId) {
+        ops.push({ method: 'PATCH', path: `${calPath}/events/${encodeURIComponent(existingEventId)}`, body: event });
+        opMeta.push({ action: 'update', id, eventId: existingEventId, event });
       } else {
-        ops.push({ method: 'POST', path: `${calPath}/events`, body: event });
-        opMeta.push({ action: 'create', id });
+        const newEventId = deterministicEventId(id);
+        if (!newEventId) { console.warn(`Calendar sync: skipping ${itemType} ${id} — id cannot map to an event id`); continue; }
+        ops.push({ method: 'POST', path: `${calPath}/events`, body: { ...event, id: newEventId } });
+        opMeta.push({ action: 'create', id, event });
       }
     }
 
     for (const [itemId, entry] of syncMap) {
       if (handledIds.has(itemId) || deferredIds.has(itemId)) continue;
-      ops.push({ method: 'DELETE', path: `${calPath}/events/${encodeURIComponent(entry.gcal_event_id)}` });
+      const eventId = eventIdForEntry(itemId, entry);
+      if (!eventId) continue;
+      ops.push({ method: 'DELETE', path: `${calPath}/events/${encodeURIComponent(eventId)}` });
       opMeta.push({ action: 'delete', id: itemId });
     }
   } else {
@@ -668,18 +686,23 @@ async function _syncTableInner(tableName) {
       if (item) {
         const event = itemToEvent(itemType, item);
         if (!event) continue;
-        if (syncEntry?.gcal_event_id) {
+        const existingEventId = syncEntry && eventIdForEntry(itemId, syncEntry);
+        if (existingEventId) {
           // Update existing event
-          ops.push({ method: 'PATCH', path: `${calPath}/events/${encodeURIComponent(syncEntry.gcal_event_id)}`, body: event });
-          opMeta.push({ action: 'update', id: itemId, eventId: syncEntry.gcal_event_id, event });
+          ops.push({ method: 'PATCH', path: `${calPath}/events/${encodeURIComponent(existingEventId)}`, body: event });
+          opMeta.push({ action: 'update', id: itemId, eventId: existingEventId, event });
         } else {
-          // Create new event
-          ops.push({ method: 'POST', path: `${calPath}/events`, body: event });
-          opMeta.push({ action: 'create', id: itemId });
+          // Create new event with the deterministic id
+          const newEventId = deterministicEventId(itemId);
+          if (!newEventId) { console.warn(`Calendar sync: skipping ${itemType} ${itemId} — id cannot map to an event id`); continue; }
+          ops.push({ method: 'POST', path: `${calPath}/events`, body: { ...event, id: newEventId } });
+          opMeta.push({ action: 'create', id: itemId, event });
         }
-      } else if (syncEntry?.gcal_event_id) {
+      } else if (syncEntry) {
         // Item deleted or lost its date → remove event
-        ops.push({ method: 'DELETE', path: `${calPath}/events/${encodeURIComponent(syncEntry.gcal_event_id)}` });
+        const eventId = eventIdForEntry(itemId, syncEntry);
+        if (!eventId) continue;
+        ops.push({ method: 'DELETE', path: `${calPath}/events/${encodeURIComponent(eventId)}` });
         opMeta.push({ action: 'delete', id: itemId });
       }
     }
@@ -712,7 +735,26 @@ async function _syncTableInner(tableName) {
     try {
       if (meta.action === 'create') {
         if (ok2xx && result.body?.id) {
-          await upsertSyncEntryFallback(itemType, meta.id, result.body.id);
+          await upsertSyncEntry(itemType, meta.id);
+        } else if (s === 409) {
+          // The deterministic id is already taken: the event was created by
+          // an earlier attempt that never recorded its entry (crash between
+          // insert and entry write, or an interrupted id migration). Patch it
+          // into shape and record the entry — never create a duplicate.
+          const eventId = deterministicEventId(meta.id);
+          if (eventId && meta.event) {
+            try {
+              const patchResp = await fetch(`${CALENDAR_API}${calPath}/events/${encodeURIComponent(eventId)}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(meta.event),
+              });
+              if (patchResp.ok) await upsertSyncEntry(itemType, meta.id);
+              else failedIds.add(meta.id); // retried via the dirty set
+            } catch (_) {
+              failedIds.add(meta.id);
+            }
+          }
         } else if (isRetryable(s)) {
           failedIds.add(meta.id);
         }
@@ -801,10 +843,15 @@ async function _deleteTypeEventsInner(itemType) {
   if (!syncEntries || syncEntries.length === 0) return;
 
   // Build delete ops
-  const ops = syncEntries.map(e => ({
-    method: 'DELETE',
-    path: `${calPath}/events/${encodeURIComponent(e.gcal_event_id)}`,
-  }));
+  const ops = [];
+  for (const e of syncEntries) {
+    const eventId = eventIdForEntry(e.item_id, e);
+    if (!eventId) continue;
+    ops.push({
+      method: 'DELETE',
+      path: `${calPath}/events/${encodeURIComponent(eventId)}`,
+    });
+  }
 
   const results = await sendBatch(token, ops);
 
@@ -862,4 +909,99 @@ export async function resetCalendar() {
   const calId = await findOrCreateCalendar(token);
   await setSetting('gcal_calendar_id', calId);
   await reconcileAll();
+}
+
+// ── One-shot migration to deterministic event IDs ───────────────
+// Old gcal_sync rows map (item_type, item_id) → server-generated
+// gcal_event_id. New rows are bare (item_type, item_id) pairs; the event id
+// is derived from the item id. Runs once at startup while calendar sync is
+// on: deletes every synced event, re-pushes with deterministic ids, and only
+// marks itself done after the resync validates. Safe to re-run: any failure
+// aborts without marking done, and the 409-on-create path heals partial
+// runs (recreate → 409 → patch + entry).
+
+const ID_MIGRATION_FLAG = 'gcal_event_id_migration';
+
+/** Shared rows are out of scope for the migration (dev-only sharing): refuse rather than guess. */
+async function hasSharedRows(table) {
+  try {
+    const { data } = await state.db.from(table).select('id,shared_id');
+    return (data || []).some(r => r.shared_id);
+  } catch (_) {
+    return false; // table has no shared_id column
+  }
+}
+
+export async function migrateEventIdsToDeterministic() {
+  if (state.demoMode) return 'skipped';
+  let flag = null;
+  try { flag = await getSetting(ID_MIGRATION_FLAG); } catch (_) { return 'deferred'; }
+  if (flag === 'done') return 'done';
+
+  const prefs = await getCalSyncPrefs();
+  const types = [];
+  if (prefs.enabled) {
+    if (prefs.habits) types.push(['habit', 'habits']);
+    if (prefs.todos) types.push(['todo', 'todos']);
+    if (prefs.birthdays) types.push(['birthday', 'birthdays']);
+  }
+  if (types.length === 0 || !prefs.calendarId) {
+    // Nothing synced (or no calendar to address): drop any stale entries and finish.
+    for (const [itemType] of types) {
+      try { await state.db.from('gcal_sync').delete().eq('item_type', itemType); } catch (_) {}
+    }
+    await setSetting(ID_MIGRATION_FLAG, 'done');
+    return 'done';
+  }
+
+  let token;
+  try { token = await _getToken(); } catch (_) { return 'deferred'; }
+  if (!token) return 'deferred';
+
+  try {
+    // Preconditions: every synced item id must map to an event id, and no
+    // shared rows may exist.
+    for (const [itemType, table] of types) {
+      const { items } = await getSyncableItems(itemType);
+      for (const { id } of items) {
+        if (!deterministicEventId(id)) throw new Error(`non-derivable id for ${itemType} ${id}`);
+      }
+      if (await hasSharedRows(table)) throw new Error(`shared rows present in ${table}`);
+    }
+
+    // Delete phase: remove every synced event (stored id wins while
+    // pre-migration rows exist). Aborts if any entry survives a retryable
+    // delete failure — entries and schema stay untouched in that case.
+    for (const [itemType, table] of types) {
+      await _withTableLock(table, async () => {
+        await _deleteTypeEventsInner(itemType);
+        const { data: remaining } = await state.db.from('gcal_sync').select('item_id').eq('item_type', itemType);
+        if (remaining && remaining.length > 0) {
+          throw new Error(`${remaining.length} ${itemType} event(s) could not be deleted`);
+        }
+        markDirty(table, null); // full scan on the recreate pass below
+      });
+    }
+
+    // Recreate phase: the normal sync machinery, now writing deterministic ids.
+    for (const [, table] of types) await syncTable(table);
+
+    // Validation: no failed ops still pending (failures requeue into the
+    // dirty set) and every syncable item has an entry.
+    for (const [itemType, table] of types) {
+      const dirty = _dirtyItems.get(table);
+      if (dirty && dirty.size > 0) throw new Error(`${itemType} resync incomplete (${dirty.size} ids still dirty)`);
+      const { items } = await getSyncableItems(itemType);
+      const { data: entries } = await state.db.from('gcal_sync').select('item_id').eq('item_type', itemType);
+      const entryIds = new Set((entries || []).map(e => e.item_id));
+      const missing = items.filter(({ id }) => !entryIds.has(id)).length;
+      if (missing > 0) throw new Error(`${itemType} resync incomplete (${missing} items without entry)`);
+    }
+
+    await setSetting(ID_MIGRATION_FLAG, 'done');
+    return 'done';
+  } catch (e) {
+    console.warn('[cal-migration] deferred to next startup:', (e && e.message) || e);
+    return 'deferred';
+  }
 }

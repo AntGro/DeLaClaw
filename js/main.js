@@ -9,7 +9,7 @@ import db from './db.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 import { DRIVE_SCOPE_FILE, clearStoredDriveEmail } from './adapters/drive.js';
-import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
+import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, migrateEventIdsToDeterministic, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
 import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
@@ -980,6 +980,8 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     }
     // No full sync on page load — trust calendar is already synced.
     // Full push only happens on first enable (toggleCalSync).
+    // One-shot migration to deterministic event ids (background, idempotent).
+    migrateEventIdsToDeterministic().catch(e => console.warn('[cal-migration]', e));
   }
 
   // Restore view early (before async refreshes) to avoid flash

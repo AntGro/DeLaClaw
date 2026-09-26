@@ -344,10 +344,12 @@ CREATE TRIGGER IF NOT EXISTS trg_protect_flashcard_decks_upd
   BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
 
 -- Google Calendar sync tracking
+-- gcal_sync is a bare set of live (item_type, item_id) pairs: the Google event
+-- id is derived from the item id (dashes stripped), so no mapping column is
+-- needed. (Calendar sync only runs on the Drive backend, where this table is
+-- a JSON file — the local SQLite copy is always empty, so no DDL migration.)
 CREATE TABLE IF NOT EXISTS gcal_sync (
   item_type TEXT NOT NULL,
   item_id TEXT NOT NULL,
-  gcal_event_id TEXT NOT NULL,
-  last_synced_at TEXT DEFAULT (datetime('now')),
   PRIMARY KEY (item_type, item_id)
 );

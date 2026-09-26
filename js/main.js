@@ -3561,6 +3561,15 @@ async function resyncCalSync() {
   _calSyncBusy = true;
   const btn = document.querySelector('[data-action="resync-cal-sync"]');
   if (btn) { btn.classList.add('is-pending'); btn.disabled = true; }
+  // Disable the sync toggles while the resync runs — flipping one mid-resync
+  // would race the delete-all + full-push sequence.
+  const toggleRows = [
+    '[data-action="toggle-cal-sync"]',
+    '[data-action="toggle-cal-sync-habits"]',
+    '[data-action="toggle-cal-sync-todos"]',
+    '[data-action="toggle-cal-sync-birthdays"]',
+  ].map(s => document.querySelector(s)).filter(Boolean);
+  toggleRows.forEach(r => r.classList.add('is-pending'));
   const progressEl = document.getElementById('calSyncProgress');
   const progressText = document.getElementById('calSyncProgressText');
   const progressFill = document.getElementById('calSyncProgressFill');
@@ -3586,6 +3595,7 @@ async function resyncCalSync() {
   } finally {
     _calSyncBusy = false;
     if (btn) { btn.classList.remove('is-pending'); btn.disabled = false; }
+    toggleRows.forEach(r => r.classList.remove('is-pending'));
   }
 }
 

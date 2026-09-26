@@ -3329,6 +3329,19 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'resyncCalSync must toast cal_sync.resynced on success');
     });
 
+    test('resync disables the calendar toggles while it runs', () => {
+      const main = jsFiles['main.js'];
+      const body = main.slice(main.indexOf('async function resyncCalSync'));
+      for (const action of ['toggle-cal-sync', 'toggle-cal-sync-habits', 'toggle-cal-sync-todos', 'toggle-cal-sync-birthdays']) {
+        assert(body.includes(`'[data-action="${action}"]'`),
+          `resyncCalSync must disable the ${action} toggle while the resync runs`);
+      }
+      assert(body.includes("toggleRows.forEach(r => r.classList.add('is-pending'))"),
+        'resyncCalSync must grey out the toggles when it starts');
+      assert(body.includes("toggleRows.forEach(r => r.classList.remove('is-pending'))"),
+        'resyncCalSync must re-enable the toggles in its finally block');
+    });
+
     test('cal_sync resync strings exist in EN/FR/ES', () => {
       const i18n = jsFiles['i18n.js'];
       for (const key of ['resync:', 'resynced:']) {

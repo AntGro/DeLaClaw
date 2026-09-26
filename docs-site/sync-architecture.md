@@ -345,7 +345,7 @@ sequenceDiagram
     App->>Page: "On sharing-changed → re-render sharing UI"
     App->>App: "sharing-changed → syncSharedTodos/Habits<br/>create pointers for new shared items"
     App->>CAL: "Pointer inserts dirty the tables → on flush<br/>syncTable resolves dates through the payload →<br/>dated shared items get events titled<br/>[TODO][category][group] / [Habit][category][group]"
-    App->>CAL: "On later sharing-changed: diff payload fields<br/>+ group name vs fingerprint → markCalDirty on real change →<br/>drive syncTable directly (no local row is written,<br/>so no flush would consume the dirty marks) →<br/>events created, patched or deleted<br/>(a creator rename re-titles events via the group-name field)"
+    App->>CAL: "On later sharing-changed: diff payload fields + group name vs fingerprint → markCalDirty on real change<br/>drive syncTable directly (no local row is written, so no flush would consume the dirty marks)<br/>events created, patched or deleted (a creator rename re-titles via the group-name field)"
 
     opt Later sync: a pointer's shared_id is in no loaded group file and its group is gone from memory
         App->>Page: "Orphan dialog after 2 consecutive detections"

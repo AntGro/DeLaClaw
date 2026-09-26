@@ -335,7 +335,7 @@ sequenceDiagram
             end
         end
         opt Joined group, own member row still 'pending'
-            App->>JOIN: "Flip own row to 'joined' + re-upload group.json<br/>repairs a join whose pointer was saved but whose<br/>pending→joined upload failed (displayName falls back<br/>to the Google account name — the chosen pseudo<br/>only ever lived in the failed upload)<br/>Best-effort: logged and retried on the next load,<br/>never fails startup"
+            App->>JOIN: "Flip own row to 'joined' + re-upload group.json<br/>repairs a join whose pointer was saved but whose pending→joined upload failed (displayName falls back to the Google account name)<br/>Best-effort: retried next load, never fails startup"
         end
     end
     App->>Page: "Render sharing pane (fills in if already open)"

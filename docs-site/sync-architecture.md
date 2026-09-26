@@ -208,7 +208,19 @@ sequenceDiagram
                 end
             end
             App->>PF: "Write settings.json once with the final schema_version — the batch completion marker"
+            rect rgb(253, 237, 236)
+            opt The settings.json write fails
+                PF-->>App: "Error"
+                App->>Page: "Login screen — generic connection error<br/>State on Drive: migration tables uploaded, settings.json still carries the pre-batch schema_version, backup-v{old}.json intact<br/>Retry re-enters as an Existing install (branch above) → restores the tables from the backup in place and re-runs the batch from the backup's version<br/>Flow ends here — back to the login screen"
+            end
+            end
             App->>PF: "Delete the backup — the batch succeeded"
+            rect rgb(253, 237, 236)
+            opt The backup delete fails
+                Note over App,PF: "Failure is swallowed (console.warn) — no error crosses the wire"
+                App->>Page: "Hide login — show app shell (the batch already completed)<br/>State on Drive: backup-v{old}.json lingers — harmless, it is not a table file<br/>Next connect with pending migrations removes it via the stale-backup action<br/>With no pending migrations it stays in the folder"
+            end
+            end
         end
     else Fresh install (no table files)
         App->>App: "Create empty in-memory store"
@@ -230,7 +242,7 @@ sequenceDiagram
 
     App->>Page: "Hide login — show app shell"
     App->>Page: "Render current view from in-memory data (welcome / todos / …)"
-    App->>PF: "Start 30s poll + tab-focus poll (personal tables)"
+    App->>App: "Start 30s poll + tab-focus poll (personal tables) — local timer only, no Drive request"
 
     Note over App,Page: "Calendar is NOT synced on page load<br/>trusted already in sync, syncs on table flush only"
 ```
@@ -244,6 +256,7 @@ sequenceDiagram
     box rgb(239,246,255) Browser tab
     participant App as "App<br/>(in-memory)"
     participant Page as "Page<br/>(rendered)"
+    participant CAL as "Calendar<br/>Sync"
     end
     box rgb(255,251,235) Google Drive
     participant PF as "Personal folder<br/>(DeLaClaw/)"
@@ -291,6 +304,8 @@ sequenceDiagram
             App->>JOIN: "Read revoked.json via its saved fileId<br/>(the file-level read grant survives folder revocation)"
             alt own member ID found in revoked.json
                 App->>App: "Verdict 'removed' → pointer purged silently<br/>+ local item pointers purged (no dialog)"
+                App->>PF: "Debounced flush (~2s) rewrites groups.json +<br/>todos/habits/list_items.json without the purged rows"
+                App->>CAL: "Pointer-row deletes dirty the tables →<br/>on flush syncTable deletes their events (via gcal_sync)"
             else no entry — or revoked.json itself gone (404)
                 App->>App: "Verdict 'deleted' → pointer purged + group-deleted dialog<br/>(with a Drive folder link to double-check)"
             end
@@ -320,7 +335,7 @@ sequenceDiagram
             end
         end
         opt Joined group, own member row still 'pending'
-            App->>JOIN: "Flip own row to 'joined' + re-upload group.json<br/>repairs a join whose pointer was saved but whose<br/>pending→joined upload failed (displayName falls back<br/>to the Google account name — the chosen pseudo<br/>only ever lived in the failed upload)<br/>Best-effort: logged and retried on the next load,<br/>never fails startup"
+            App->>JOIN: "Flip own row to 'joined' + re-upload group.json<br/>repairs a join whose pointer was saved but whose pending→joined upload failed (displayName falls back to the Google account name)<br/>Best-effort: retried next load, never fails startup"
         end
     end
     App->>Page: "Render sharing pane (fills in if already open)"
@@ -330,7 +345,19 @@ sequenceDiagram
     App->>Page: "On sharing-changed → re-render sharing UI"
     App->>App: "sharing-changed → syncSharedTodos/Habits<br/>create pointers for new shared items"
     App->>CAL: "Pointer inserts dirty the tables → on flush<br/>syncTable resolves dates through the payload →<br/>dated shared items get events titled<br/>[TODO][category][group] / [Habit][category][group]"
-    App->>CAL: "On later sharing-changed: diff payload fields<br/>+ group name vs fingerprint → markCalDirty on real change →<br/>drive syncTable directly (no local row is written,<br/>so no flush would consume the dirty marks) →<br/>events created, patched or deleted<br/>(a creator rename re-titles events via the group-name field)"
+    App->>CAL: "On later sharing-changed: diff payload fields + group name vs fingerprint → markCalDirty on real change<br/>drive syncTable directly (no local row is written, so no flush would consume the dirty marks)<br/>events created, patched or deleted (a creator rename re-titles via the group-name field)"
+
+    opt Later sync: a pointer's shared_id is in no loaded group file and its group is gone from memory
+        App->>Page: "Orphan dialog after 2 consecutive detections"
+        rect rgb(253, 237, 236)
+        alt User accepts (unlink)
+            App->>App: "Pointers with local content → shared_id/shared_group_id nullified (become personal)<br/>Pointers without content → deleted"
+            App->>CAL: "Deleted pointers → their events deleted<br/>Nullified pointers → events re-titled without the group part"
+        else User cancels
+            App->>App: "Pointers kept — the dialog returns after 2 more consecutive detections"
+        end
+        end
+    end
 
     Note over App,JOIN: "revoked.json is read at startup when a joined download fails with 403/404<br/>(access gone — the file-level read grant survives), and in the poll<br/>when a loaded group's files become unreachable:<br/>'removed' → silent auto-purge, 'deleted' → group-deleted dialog (Drive folder link)"
 
@@ -420,8 +447,10 @@ sequenceDiagram
 Calendar sync never does a full scan on every flush. Instead, it tracks which specific items changed.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'primaryColor': '#ffffff', 'primaryBorderColor': '#cbd5e1', 'primaryTextColor': '#0f172a', 'lineColor': '#334155', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#cbd5e1'}}}%%
 flowchart LR
     subgraph Writes["On Every Write"]
+        direction TB
         W1["db.from('todos').update(...)"]
         W2["markCalDirty('todos', itemId)"]
         W1 --> W2
@@ -429,6 +458,7 @@ flowchart LR
     end
 
     subgraph Shared["On sharing-changed (poll / join / startup)"]
+        direction TB
         S1["_doSyncSharedTodos/Habits:<br/>diff payload fields + group name<br/>against fingerprint"]
         S2["state.markCalDirty(table, pointerId)<br/>on real change only"]
         S3["state.syncCalendarTable(table)<br/>driven directly — a rename/remote edit<br/>writes no local row, so no flush follows"]
@@ -439,6 +469,7 @@ flowchart LR
     end
 
     subgraph Flush["On Table Flush to Drive"]
+        direction TB
         F1["_onTableFlushed('todos')"]
         F2["syncTable('todos')"]
         F1 --> F2
@@ -446,6 +477,7 @@ flowchart LR
     end
 
     subgraph Sync["Per Dirty Item"]
+        direction TB
         DS2 --> RES{"Row has shared_id?"}
         RES -->|"Yes"| PAYLOAD["Resolve dates/name/group<br/>from sharing payload"]
         RES -->|"No"| ROW["Use DB row as-is"]
@@ -457,9 +489,21 @@ flowchart LR
         CHECK -->|"Event exists + no change"| SKIP["Skip"]
         CHECK -->|"Shared + sharing not loaded"| SKIP2["Skip — keep event"]
     end
+
+    subgraph ToggleOff["On Type Toggle OFF"]
+        direction TB
+        T1["Type toggle OFF"]
+        T2["deleteTypeEvents(type)"]
+        T3["Delete all events of the type<br/>+ clear gcal_sync entries"]
+        T1 --> T2
+        T2 --> T3
+    end
+
+    T2 -.->|"same per-table<br/>promise chain"| F2
 ```
 
 **Special cases:**
+- **Serialization** → `syncTable` and `deleteTypeEvents` run inside a per-table promise chain (`_withTableLock`); concurrent runs (flush-driven vs sharing-poll-driven, or either vs resync) serialize instead of interleaving on stale `gcal_sync` snapshots
 - **Shared rows** → dates/name/group resolve through the pointer from the sharing payload at sync time (single source of truth — nothing is copied onto the pointer row). If sharing isn't loaded yet, the row is skipped: its event is kept, never deleted. Full scans exclude deferred rows from orphan-deletion.
 - **Shared-sync fingerprint** → on a real remote change (payload fields or group name), pointers are marked dirty and `syncTable` is driven directly — a rename/remote edit writes no local row, so no Drive flush would consume the marks
 - **Category rename** → `markCategoryRenamed(catTable)` marks all items of that type with `__all__` sentinel → full scan

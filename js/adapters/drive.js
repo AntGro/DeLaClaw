@@ -1218,9 +1218,23 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       if (tablesToSave.length > 0) {
         syncStart();
         let _err = false;
-        try { await Promise.all(tablesToSave.map(t => flushTable(t, 0, true))); }
-        catch (e) { _err = true; }
+        const flushed = [];
+        try {
+          // flushTable rethrows on failure, so only successful tables land in `flushed`
+          await Promise.all(tablesToSave.map(t =>
+            flushTable(t, 0, true).then(() => { flushed.push(t); }),
+          ));
+        } catch (e) { _err = true; }
         finally { syncEnd(_err); }
+        // Notify listeners (e.g. calendar sync) for tables that actually
+        // flushed. The debounced path does this per table — forceSave must
+        // too, otherwise a tab-hide save uploads to Drive but the calendar
+        // event is never created.
+        if (adapter._onTableFlushed) {
+          for (const t of flushed) {
+            try { adapter._onTableFlushed(t); } catch (_) {}
+          }
+        }
       }
     },
 

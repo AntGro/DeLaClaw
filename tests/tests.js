@@ -3277,6 +3277,118 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(habits.includes("if (calDirtyMarked) await state.syncCalendarTable?.('habits');"),
         '_doSyncSharedHabits must drive the calendar sync directly — a rename/remote edit writes no local row, so no flush would consume the dirty marks');
     });
+
+    test('calendar sync re-queues failed ops instead of dropping them', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(cal.includes('function requeueFailedOps(tableName, ids)'),
+        'calendar-sync must have a requeueFailedOps helper that puts ids back in _dirtyItems');
+      assert(cal.includes('requeueFailedOps(tableName, opMeta.map(m => m.id))'),
+        'a sendBatch throw must re-queue every attempted id — the dirty set is already consumed');
+      assert(cal.includes('requeueFailedOps(tableName, [...failedIds])'),
+        'per-op failures must be re-queued for a later syncTable run');
+      assert(/const isRetryable = \(s\) => s === 0 \|\| s === 429 \|\| s >= 500/.test(cal),
+        'only unknown/rate-limited/server-error outcomes are retried — other 4xx would loop forever');
+    });
+
+    test('calendar sync no longer treats status 0 as a successful delete', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(!/if \(s === 0 \|\|/.test(cal),
+        'status 0 (no parseable batch result) must not clear the sync entry — the event may still exist');
+      assert(cal.includes('if (ok2xx || s === 404 || s === 410)'),
+        'a delete clears its sync entry only on 2xx/404/410; anything else keeps the entry for retry');
+    });
+
+    test('calendar settings offer a resynchronize button when sync is active', () => {
+      const main = jsFiles['main.js'];
+      const delegation = jsFiles['delegation.js'];
+      const subIdx = indexHtml.indexOf('id="calSyncSubSettings"');
+      const btnIdx = indexHtml.indexOf('data-action="resync-cal-sync"');
+      assert(subIdx !== -1 && btnIdx !== -1 && btnIdx > subIdx,
+        'the resync button must live inside #calSyncSubSettings, which is only shown when sync is enabled');
+      assert(indexHtml.includes('data-icon="refresh-cw"'),
+        'the resync button must use a Lucide icon, not an emoji');
+      assert(main.includes('window.resyncCalSync = resyncCalSync;'),
+        'resyncCalSync must be exposed on window for the delegation handler');
+      assert(delegation.includes("case 'resync-cal-sync': callWindow('resyncCalSync', []);"),
+        'delegation.js must route data-action="resync-cal-sync" to window.resyncCalSync');
+    });
+
+    test('resync is strictly equivalent to toggling sync off then on', () => {
+      const main = jsFiles['main.js'];
+      const body = main.slice(main.indexOf('async function resyncCalSync'));
+      const disableIdx = body.indexOf('await disableCalSync(');
+      const enableIdx = body.indexOf('await enableCalSync()');
+      const reconcileIdx = body.indexOf('await reconcileCalendar(');
+      assert(disableIdx !== -1 && enableIdx !== -1 && reconcileIdx !== -1,
+        'resyncCalSync must call disableCalSync, enableCalSync and reconcileCalendar');
+      assert(disableIdx < enableIdx && enableIdx < reconcileIdx,
+        'resync must delete all events first, then re-enable, then full-push — the off→on order');
+      assert(body.includes('if (_calSyncBusy) return;'),
+        'resyncCalSync must share the _calSyncBusy guard against double-invocation');
+      assert(body.includes('cal_sync.resynced'),
+        'resyncCalSync must toast cal_sync.resynced on success');
+    });
+
+    test('resync disables the calendar toggles while it runs', () => {
+      const main = jsFiles['main.js'];
+      const body = main.slice(main.indexOf('async function resyncCalSync'));
+      for (const action of ['toggle-cal-sync', 'toggle-cal-sync-habits', 'toggle-cal-sync-todos', 'toggle-cal-sync-birthdays']) {
+        assert(body.includes(`'[data-action="${action}"]'`),
+          `resyncCalSync must disable the ${action} toggle while the resync runs`);
+      }
+      assert(body.includes("toggleRows.forEach(r => r.classList.add('is-pending'))"),
+        'resyncCalSync must grey out the toggles when it starts');
+      assert(body.includes("toggleRows.forEach(r => r.classList.remove('is-pending'))"),
+        'resyncCalSync must re-enable the toggles in its finally block');
+    });
+
+    test('disabled modal-cancel buttons look disabled', () => {
+      assert(styleCss.includes('.modal-cancel:disabled'),
+        'style.css must visually grey out .modal-cancel when disabled (create-group modal disables Cancel mid-create)');
+    });
+
+    test('calendar mutations are serialized per table', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(cal.includes('const _tableChains = new Map()'),
+        'must keep a per-table promise chain for calendar mutations');
+      const lockBody = cal.slice(cal.indexOf('function _withTableLock'));
+      assert(lockBody.includes('prev.catch(() => {})'),
+        'a rejected run must not break the serialization chain');
+      assert(lockBody.includes('cur.then(dropTail, dropTail)'),
+        'the chain tail must be dropped whether the run settles or fails');
+      assert(/export function syncTable\(tableName\) \{\s*return _withTableLock\(tableName, \(\) => _syncTableInner\(tableName\)\);\s*\}/.test(cal),
+        'syncTable must run inside the per-table lock');
+      assert(cal.includes('return _withTableLock(tableName, () => _deleteTypeEventsInner(itemType));'),
+        'deleteTypeEvents must run inside the per-table lock');
+      assert(cal.includes('async function _syncTableInner(tableName)'),
+        'the syncTable body must live in _syncTableInner');
+      assert(cal.includes('async function _deleteTypeEventsInner(itemType)'),
+        'the deleteTypeEvents body must live in _deleteTypeEventsInner');
+    });
+
+    test('cal_sync resync strings exist in EN/FR/ES', () => {
+      const i18n = jsFiles['i18n.js'];
+      for (const key of ['resync:', 'resynced:']) {
+        const count = (i18n.match(new RegExp(`\\b${key}`, 'g')) || []).length;
+        assert(count >= 3, `cal_sync.${key.replace(':', '')} must be defined in all three languages (found ${count})`);
+      }
+    });
+
+    test('forceSave notifies _onTableFlushed so the calendar sync fires on tab-hide saves', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const body = drive.slice(drive.indexOf('async forceSave()'));
+      assert(body.includes('adapter._onTableFlushed'),
+        'forceSave must notify _onTableFlushed — the debounced path is not the only flush path');
+      assert(body.includes('flushed.push(t)'),
+        'only tables that actually flushed may be notified (flushTable rethrows on failure)');
+    });
+
+    test('calendar batch requests use keepalive so they survive tab close', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      const body = cal.slice(cal.indexOf('async function sendBatch'));
+      assert(body.includes('keepalive: true'),
+        'sendBatch must set keepalive like the Drive upload does — beforeunload flushes cannot await the response');
+    });
   }
 
   // ===================================================================

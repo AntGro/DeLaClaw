@@ -359,6 +359,26 @@ const MAX_BATCH_SIZE = 50; // Google's limit per batch request
 
 const _dirtyItems = new Map(); // table → Set<id>
 
+// ── Serialization ──
+// Calendar mutations (syncTable, deleteTypeEvents) snapshot the gcal_sync
+// map at their start and act on it at their end. Two concurrent runs
+// interleave at await points and act on stale snapshots: double-POST of the
+// same item, or one run clearing an entry the other just upserted (ghost /
+// duplicate events in Google Calendar, unrepairable afterwards). A per-table
+// promise chain serializes them: each call appends to the tail, a rejection
+// never breaks the chain, and a waiter re-runs afterwards, picking up any
+// dirty marks that arrived meanwhile.
+const _tableChains = new Map(); // table → tail promise
+
+function _withTableLock(tableName, fn) {
+  const prev = _tableChains.get(tableName) || Promise.resolve();
+  const cur = prev.catch(() => {}).then(fn);
+  _tableChains.set(tableName, cur);
+  const dropTail = () => { if (_tableChains.get(tableName) === cur) _tableChains.delete(tableName); };
+  cur.then(dropTail, dropTail);
+  return cur;
+}
+
 /**
  * Mark an item as dirty so the next flush syncs only it.
  * Called by the Drive adapter on non-GET mutations.
@@ -422,6 +442,9 @@ async function sendBatch(token, ops) {
         'Content-Type': `multipart/mixed; boundary=${boundary}`,
       },
       body,
+      // Lets the batch survive tab close on beforeunload/force-save flushes
+      // (64KB body limit — larger batches behave as before).
+      keepalive: true,
     });
 
     if (!resp.ok) {
@@ -554,7 +577,11 @@ async function getActiveItemFromDb(itemType, itemId) {
  * Uses the dirty-item set to avoid scanning all items.
  * On first enable (empty gcal_sync), pushes all items.
  */
-export async function syncTable(tableName) {
+export function syncTable(tableName) {
+  return _withTableLock(tableName, () => _syncTableInner(tableName));
+}
+
+async function _syncTableInner(tableName) {
   const itemType = TABLE_TO_TYPE[tableName];
   if (!itemType) return;
 
@@ -661,30 +688,71 @@ export async function syncTable(tableName) {
   if (ops.length === 0) return;
 
   // ── Execute batch ──
-  const results = await sendBatch(token, ops);
+  let results;
+  try {
+    results = await sendBatch(token, ops);
+  } catch (e) {
+    // Whole batch failed (e.g. network down): nothing was applied, so keep
+    // every attempted id dirty for a later run instead of dropping them.
+    requeueFailedOps(tableName, opMeta.map(m => m.id));
+    throw e;
+  }
 
   // ── Process results ──
+  const failedIds = new Set();
+  // Retryable: unknown outcome, rate-limited, or server error. Other 4xx are
+  // not retried — the request itself won't succeed on a later attempt.
+  const isRetryable = (s) => s === 0 || s === 429 || s >= 500;
   for (let i = 0; i < opMeta.length; i++) {
     const meta = opMeta[i];
     const result = results[i] || { status: 0, body: null };
+    const s = result.status;
+    const ok2xx = s >= 200 && s < 300;
 
     try {
       if (meta.action === 'create') {
-        if (result.status >= 200 && result.status < 300 && result.body?.id) {
+        if (ok2xx && result.body?.id) {
           await upsertSyncEntryFallback(itemType, meta.id, result.body.id);
+        } else if (isRetryable(s)) {
+          failedIds.add(meta.id);
         }
       } else if (meta.action === 'delete') {
-        // Only clear sync entry if the delete actually succeeded (or event was already gone)
-        const s = result.status;
-        if (s === 0 || (s >= 200 && s < 300) || s === 404 || s === 410) {
+        // Only clear the sync entry if the delete actually succeeded (or the
+        // event was already gone). Status 0 means "no parseable result" — not
+        // success: keep the entry so a later run retries the delete (a 404
+        // then clears it).
+        if (ok2xx || s === 404 || s === 410) {
           await deleteSyncEntry(itemType, meta.id);
+        } else if (isRetryable(s)) {
+          failedIds.add(meta.id);
         }
+      } else if (meta.action === 'update') {
+        // update: sync entry stays as-is (event ID unchanged).
+        // 404: the event was deleted out-of-band (e.g. in Google Calendar) —
+        // keep the entry and don't retry (no resurrection, no retry loop).
+        if (!ok2xx && isRetryable(s)) failedIds.add(meta.id);
       }
-      // update: sync entry stays as-is (event ID unchanged)
     } catch (e) {
       console.warn(`Calendar sync failed for ${itemType} ${meta.id}:`, e);
+      failedIds.add(meta.id);
     }
   }
+  // Failed ops go back in the dirty set so a later syncTable run retries
+  // them. Without this the dirty set is consumed up front and a failed op
+  // (e.g. an event delete lost on a 500) is never retried.
+  requeueFailedOps(tableName, [...failedIds]);
+}
+
+/**
+ * Put ids back in the dirty set so a later syncTable run retries them.
+ * Targeted retry (never '__all__'): the diff logic re-derives the right op
+ * from the row + sync entry.
+ */
+function requeueFailedOps(tableName, ids) {
+  if (!ids.length) return;
+  if (!_dirtyItems.has(tableName)) _dirtyItems.set(tableName, new Set());
+  const set = _dirtyItems.get(tableName);
+  for (const id of ids) set.add(id);
 }
 
 /**
@@ -713,7 +781,12 @@ export async function reconcileAll(onProgress) {
  * Delete all calendar events for one item type and clear sync entries.
  * Called when a type toggle is turned off.
  */
-export async function deleteTypeEvents(itemType) {
+export function deleteTypeEvents(itemType) {
+  const tableName = { habit: 'habits', todo: 'todos', birthday: 'birthdays' }[itemType];
+  return _withTableLock(tableName, () => _deleteTypeEventsInner(itemType));
+}
+
+async function _deleteTypeEventsInner(itemType) {
   const prefs = await getCalSyncPrefs();
   if (!prefs.calendarId || state.demoMode || !_getToken) return;
 
@@ -735,10 +808,12 @@ export async function deleteTypeEvents(itemType) {
 
   const results = await sendBatch(token, ops);
 
-  // Only clear sync entries for successfully deleted events
+  // Only clear sync entries for events actually deleted (or already gone).
+  // Status 0 means "no parseable result" — not success: keep the entry so a
+  // later toggle-off retries the delete (a 404 then clears it).
   for (let i = 0; i < syncEntries.length; i++) {
     const s = results[i]?.status || 0;
-    if (s === 0 || (s >= 200 && s < 300) || s === 404 || s === 410) {
+    if ((s >= 200 && s < 300) || s === 404 || s === 410) {
       await deleteSyncEntry(itemType, syncEntries[i].item_id);
     }
   }

@@ -801,6 +801,7 @@ body.paused-mode:has(.schema-banner) .schema-banner{top:var(--paused-banner-h,36
 .modal-actions button{padding:8px 18px;border-radius:7px;font-size:0.86rem;font-weight:600;cursor:pointer;border:none;transition:all 0.2s ease;}
 .modal-actions .modal-cancel{background:var(--surface2);color:var(--text);border:1px solid var(--border);}
 .modal-actions .modal-cancel:hover{border-color:var(--text);color:var(--text);transform:translateY(-1px);}
+.modal-cancel:disabled{opacity:0.5;pointer-events:none;cursor:wait;}
 .modal-actions .modal-save{background:var(--accent);color:#fff;box-shadow:0 2px 10px rgba(100,108,255,0.25);}
 .modal-actions .modal-save:hover{opacity:0.9;transform:translateY(-1px);box-shadow:0 4px 16px rgba(100,108,255,0.35);}
 .modal-save.loading{pointer-events:none;opacity:0.7;}

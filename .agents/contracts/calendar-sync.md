@@ -141,6 +141,8 @@ Failed operations (network error, 429, 5xx) go back into the per-table dirty set
 
 Calendar-wide wipes (migration, toggle-off, resync) are all-or-nothing: any event surviving the batch delete throws before the ledger is cleared, so the ledger always describes the calendar.
 
+`_wipeRunning` only stops syncs that have not started yet; a sync already awaiting a Google response is not recalled (a same-session race: e.g. toggling sync off while a create is in flight can leave one event behind). Deliberately accepted as-is (Sep 2026): the race window is a single API round-trip on an interactive action, and a global calendar lock was judged not worth the complexity. Cross-device races are outside any in-memory guard by design; deterministic IDs make concurrent writes converge.
+
 ## Settings storage
 
 All calendar settings live in the shared `settings` key-value table (persisted through the Drive backend):

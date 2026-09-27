@@ -133,8 +133,9 @@ Once the app holds a valid access token, login runs. In order:
 8. **Hide the login screen, show the app shell, and render the current view
    from memory.**
 9. **Start the 30s poll and the tab-focus poll** over the personal tables. The
-   calendar is never read at startup — it is a write-only projection, synced
-   on table flush only.
+   calendar is never read at startup — it is a write-only projection. It
+   syncs on table flush, plus one startup reconciliation of the local
+   `gcal_sync` ledger (section 3) — no calendar listing involved.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
@@ -244,7 +245,7 @@ sequenceDiagram
     App->>Page: "Render current view from in-memory data (welcome / todos / …)"
     App->>App: "Start 30s poll + tab-focus poll (personal tables) — local timer only, no Drive request"
 
-    Note over App,Page: "Calendar is NOT synced on page load<br/>trusted already in sync, syncs on table flush only"
+    Note over App,Page: "Calendar is never READ at startup (write-only projection)<br/>writes happen on table flush + one startup ledger reconciliation<br/>(local diff vs gcal_sync — no calendar listing)"
 ```
 
 ### 3 · Sharing startup
@@ -339,6 +340,17 @@ sequenceDiagram
         end
     end
     App->>Page: "Render sharing pane (fills in if already open)"
+    App->>CAL: "reconcileLedger: diff every syncable TODO / habit / birthday<br/>against its gcal_sync entry (local only)"
+    alt Items with no ledger entry (entry write/upload was lost,<br/>or the sync never ran for them)
+        App->>CAL: "Mark dirty → syncTable creates the event<br/>409 = event already there → adopt it and record the entry"
+    else Nothing missing
+        App->>App: "No calendar API calls — purely local check"
+    end
+    rect rgb(253, 237, 236)
+    opt reconcileLedger throws
+        App->>App: "Error swallowed (console.warn) — the 15s poll still starts"
+    end
+    end
     App->>OWN: "Poll every 15s (per-group files)"
     App->>JOIN: "Poll every 15s (per-group files)"
     App->>App: "Poll: a changed group.json name updates<br/>the local groups row too (creator rename)"

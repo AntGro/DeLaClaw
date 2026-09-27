@@ -12,7 +12,7 @@
 // is the sole gate for whether sync fires.
 // ===================================================================
 
-import state from './state.js';
+import state, { SHARED_CATEGORY } from './state.js';
 import { t } from './i18n.js';
 import { showToast, showConfirmAction, closeConfirmAction } from './utils.js';
 import { lucideIcon } from './icons.js';
@@ -266,6 +266,20 @@ function getCatLabel(catMap, catId) {
   return cat.shortname || cat.name || '';
 }
 
+/**
+ * Category label for a shared item's event title. Shared items keep
+ * per-member categories on the local pointer row — recategorizing writes
+ * only the pointer, never the shared payload. The payload/creator category
+ * is just the sharer's value at share time, so the local row wins. Falls
+ * back to it when the pointer has no real local category (received share,
+ * never recategorized: category_id null or the __shared__ pseudo-category).
+ */
+function sharedItemCatLabel(item, catMap, fallback) {
+  const cat = item.category_id ? catMap.get(item.category_id) : null;
+  if (cat && cat.name !== SHARED_CATEGORY) return cat.shortname || cat.name || '';
+  return fallback || '';
+}
+
 /** Google all-day end.date is exclusive — return the day after. */
 function nextDay(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -277,8 +291,9 @@ function habitToEvent(habit) {
   if (!habit.next_due) return null;
   const date = habit.next_due.slice(0, 10); // YYYY-MM-DD
   // Shared habits: [Habit][category][group name]; personal: [Habit][category]
+  // The category is the member's own (local pointer row), not the creator's.
   const prefix = habit._sharedGroupName
-    ? (habit._sharedCategory ? `[Habit][${habit._sharedCategory}][${habit._sharedGroupName}]` : `[Habit][${habit._sharedGroupName}]`)
+    ? (() => { const catLabel = sharedItemCatLabel(habit, getHabitCategories(), habit._sharedCategory); return catLabel ? `[Habit][${catLabel}][${habit._sharedGroupName}]` : `[Habit][${habit._sharedGroupName}]`; })()
     : (() => { const catLabel = getCatLabel(getHabitCategories(), habit.category_id); return catLabel ? `[Habit][${catLabel}]` : '[Habit]'; })();
   return {
     summary: `${prefix} ${habit.name}`,
@@ -293,8 +308,9 @@ function todoToEvent(todo) {
   if (!date) return null;
   const d = date.slice(0, 10);
   // Shared todos: [TODO][category][group name]; personal: [TODO][category]
+  // The category is the member's own (local pointer row), not the payload's.
   const prefix = todo._sharedGroupName
-    ? (todo._sharedCategory ? `[TODO][${todo._sharedCategory}][${todo._sharedGroupName}]` : `[TODO][${todo._sharedGroupName}]`)
+    ? (() => { const catLabel = sharedItemCatLabel(todo, getTodoCategories(), todo._sharedCategory); return catLabel ? `[TODO][${catLabel}][${todo._sharedGroupName}]` : `[TODO][${todo._sharedGroupName}]`; })()
     : (() => { const catLabel = getCatLabel(getTodoCategories(), todo.category_id); return catLabel ? `[TODO][${catLabel}]` : '[TODO]'; })();
   return {
     summary: `${prefix} ${todo.text}`,

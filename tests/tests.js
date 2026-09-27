@@ -3127,11 +3127,17 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'orphan deletion must spare deferred ids');
     });
 
-    test('shared calendar titles use [Type][Category][Group]', () => {
-      assert(cal.includes('[TODO][${todo._sharedCategory}][${todo._sharedGroupName}]'),
+    test('shared calendar titles use [Type][Category][Group] with the member-local category', () => {
+      assert(cal.includes('[TODO][${catLabel}][${todo._sharedGroupName}]'),
         'shared todo title must be [TODO][category][group]');
-      assert(cal.includes('[Habit][${habit._sharedCategory}][${habit._sharedGroupName}]'),
+      assert(cal.includes('[Habit][${catLabel}][${habit._sharedGroupName}]'),
         'shared habit title must be [Habit][category][group]');
+      assert(cal.includes('sharedItemCatLabel(todo, getTodoCategories(), todo._sharedCategory)'),
+        'shared todo category must resolve from the local pointer row (payload only as fallback)');
+      assert(cal.includes('sharedItemCatLabel(habit, getHabitCategories(), habit._sharedCategory)'),
+        'shared habit category must resolve from the local pointer row (creator category only as fallback)');
+      assert(cal.includes('cat.name !== SHARED_CATEGORY'),
+        'the __shared__ pseudo-category must not leak into event titles');
       assert(cal.includes('`[TODO][${catLabel}]`'), 'personal todo title format must be unchanged');
       assert(cal.includes("`[Habit][${catLabel}]`"), 'personal habit title format must be unchanged');
     });

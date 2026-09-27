@@ -281,16 +281,38 @@ function sharedItemCatLabel(item, catMap) {
   return '';
 }
 
-/** Google all-day end.date is exclusive — return the day after. */
+/** Format a Date as YYYY-MM-DD in the device's local timezone. */
+function toLocalDateStr(d) {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+/**
+ * Calendar date (YYYY-MM-DD) for an event, in the device's local timezone.
+ * DeLaClaw stores deadlines as UTC ISO strings, but the calendar is a
+ * day-level projection in local time: slicing the UTC string directly puts
+ * post-midnight local deadlines (e.g. 00:30 BST) on the previous day, and
+ * the same UTC round-trip made nextDay() return the start date instead of
+ * the day after during BST. Date-only values (no time component) are
+ * already calendar dates and pass through unchanged.
+ */
+function localDateStr(value) {
+  const s = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s.slice(0, 10);
+  return toLocalDateStr(d);
+}
+
+/** Google all-day end.date is exclusive — return the day after (local time). */
 function nextDay(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  return toLocalDateStr(d);
 }
 
 function habitToEvent(habit) {
   if (!habit.next_due) return null;
-  const date = habit.next_due.slice(0, 10); // YYYY-MM-DD
+  const date = localDateStr(habit.next_due); // YYYY-MM-DD, local time
   // Shared habits: [Habit][category][group name]; personal: [Habit][category]
   // The category is the member's own (local pointer row), not the creator's.
   const prefix = habit._sharedGroupName
@@ -307,7 +329,7 @@ function habitToEvent(habit) {
 function todoToEvent(todo) {
   const date = todo.due_date || todo.snooze_until;
   if (!date) return null;
-  const d = date.slice(0, 10);
+  const d = localDateStr(date); // YYYY-MM-DD in local time (stored value is UTC)
   // Shared todos: [TODO][category][group name]; personal: [TODO][category]
   // The category is the member's own (local pointer row), not the payload's.
   const prefix = todo._sharedGroupName

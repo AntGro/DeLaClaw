@@ -3475,6 +3475,22 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'a delete clears its sync entry only on 2xx/404/410; anything else keeps the entry for retry');
     });
 
+    test('calendar event dates are derived in local time, not UTC', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(cal.includes('function localDateStr(value)'),
+        'calendar-sync must resolve event dates through a local-timezone helper');
+      assert(cal.includes('const d = localDateStr(date);'),
+        'todoToEvent must not slice the UTC string — a 00:30 local deadline would land on the previous day');
+      assert(cal.includes('const date = localDateStr(habit.next_due);'),
+        'habitToEvent must use the same local-timezone date helper');
+      assert(cal.includes('/^\\d{4}-\\d{2}-\\d{2}$/.test(s)'),
+        'date-only values (habits, birthdays) must pass through unchanged');
+      assert(cal.includes('return toLocalDateStr(d);'),
+        'nextDay must format the day-after in local time — the old UTC round-trip returned the start date during BST');
+      assert(!cal.includes('date.slice(0, 10)') && !cal.includes('next_due.slice(0, 10)'),
+        'no raw UTC string slicing may remain on the event-date path');
+    });
+
     test('calendar settings offer a resynchronize button when sync is active', () => {
       const main = jsFiles['main.js'];
       const delegation = jsFiles['delegation.js'];

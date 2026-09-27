@@ -41,6 +41,8 @@ If no category shortname exists, the category name is used. Birthdays have no ca
 
 All events are **all-day events** (date only, no specific time). Birthdays are **yearly recurring** (`RRULE:FREQ=YEARLY`).
 
+**Timezone rule:** deadlines are stored as UTC ISO strings, but the calendar is a day-level projection in the device's **local** timezone. Event dates are derived via `localDateStr()` — slicing the UTC string directly would put post-midnight local deadlines (e.g. 00:30 BST) on the previous day, and the same UTC round-trip once made `nextDay()` return the start date instead of the day after during BST. Date-only values (habits' `next_due`, birthdays) pass through unchanged.
+
 Each event carries `extendedProperties.private` with `delaclaw_type` and `delaclaw_id` for identification.
 
 ## ID mapping

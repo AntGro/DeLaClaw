@@ -9,7 +9,7 @@ import db from './db.js';
 import { createRestAdapter } from './adapters/rest.js';
 import { wrapWithOfflineCache } from './adapters/offline-cache.js';
 import { DRIVE_SCOPE_FILE, clearStoredDriveEmail } from './adapters/drive.js';
-import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
+import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, reconcileLedger as reconcileCalendarLedger, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
 import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
@@ -1188,6 +1188,10 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
         db: state.db,
       });
       loadInitialSharing('sharing');
+      // Ledger reconciliation: heal items whose calendar event was created
+      // but whose gcal_sync entry was lost (or never written) before the
+      // sharing poll starts driving its own calendar syncs.
+      try { await reconcileCalendarLedger(); } catch (e) { console.warn('Calendar ledger reconciliation:', e); }
       state.sharing.startPolling();
       state.sharing.onUpdate((event, detail) => {
         document.dispatchEvent(new CustomEvent('sharing-changed'));

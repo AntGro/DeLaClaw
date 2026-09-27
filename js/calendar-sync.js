@@ -936,6 +936,37 @@ export async function reconcileAll(onProgress) {
 }
 
 /**
+ * Startup ledger reconciliation: for every syncable item (dated todo /
+ * habit / birthday), verify a gcal_sync ledger entry exists. Items without
+ * one — event created but the entry write/upload was lost, or the sync
+ * never ran for them — are marked dirty so the next syncTable run creates
+ * the event, or 409-adopts it when the event already exists. Purely local:
+ * no calendar API calls unless something is actually missing.
+ * Called once at startup, after the tables load and before polling starts.
+ */
+export async function reconcileLedger() {
+  const prefs = await getCalSyncPrefs();
+  if (!prefs.enabled || !prefs.calendarId || state.demoMode || !_getToken) return;
+
+  const types = [];
+  if (prefs.habits) types.push({ table: 'habits', type: 'habit' });
+  if (prefs.todos) types.push({ table: 'todos', type: 'todo' });
+  if (prefs.birthdays) types.push({ table: 'birthdays', type: 'birthday' });
+
+  for (const { table, type } of types) {
+    const { items } = await getSyncableItems(type);
+    if (!items.length) continue;
+    const { data: entries } = await state.db.from('gcal_sync').select('item_id').eq('item_type', type);
+    const have = new Set((entries || []).map(e => e.item_id));
+    let marked = false;
+    for (const { id } of items) {
+      if (!have.has(id)) { markDirty(table, id); marked = true; }
+    }
+    if (marked) await syncTable(table);
+  }
+}
+
+/**
  * Delete all calendar events for one item type and clear sync entries.
  * Called when a type toggle is turned off.
  */

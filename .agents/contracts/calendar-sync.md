@@ -133,6 +133,10 @@ Each type (habits, TODOs, birthdays) has an independent toggle in settings (`gca
 
 The Resynchronize button (settings, shown while sync is active) is strictly equivalent to toggling sync off then on: wipe the calendar → clear the ledger → verify/create the calendar → full-push all types. Toggles are greyed out while it runs.
 
+## Startup ledger reconciliation
+
+Once at startup — after the tables load, before the sharing poll starts — `reconcileLedger()` diffs every syncable item (dated TODOs, habits, birthdays) against its `gcal_sync` entries. Items with no entry (event created but the entry write/upload was lost, or the sync never ran for them) are marked dirty and synced: the normal targeted path creates the event, or 409-adopts it when the event already exists. Purely local unless something is actually missing. Entries without items (the reverse direction) are left to Resynchronize, which deletes their orphaned events. An out-of-band event deletion in Google Calendar keeps its ledger entry, so it is never resurrected by this check.
+
 ## Batch API
 
 Calendar operations are sent to Google's Calendar batch endpoint (`multipart/mixed`). Requests are split into chunks of at most **50 operations** (Google's limit).

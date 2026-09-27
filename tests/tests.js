@@ -3475,6 +3475,25 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'a delete clears its sync entry only on 2xx/404/410; anything else keeps the entry for retry');
     });
 
+    test('startup reconciles the calendar ledger before polling starts', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(cal.includes('export async function reconcileLedger()'),
+        'calendar-sync must export a reconcileLedger startup check');
+      assert(cal.includes('const { items } = await getSyncableItems(type);'),
+        'reconcileLedger must diff the syncable items against the ledger entries');
+      assert(cal.includes('if (!have.has(id)) { markDirty(table, id); marked = true; }'),
+        'items without a ledger entry must be marked dirty');
+      assert(cal.includes('if (marked) await syncTable(table);'),
+        'a non-empty diff must drive a syncTable run so the 409-adopt/create heal applies');
+      assert(cal.includes("if (prefs.birthdays) types.push({ table: 'birthdays', type: 'birthday' });"),
+        'the ledger check must cover birthdays as well as todos and habits');
+      const main = jsFiles['main.js'];
+      const pollIdx = main.indexOf('state.sharing.startPolling()');
+      const recIdx = main.indexOf('await reconcileCalendarLedger()');
+      assert(recIdx !== -1 && recIdx < pollIdx,
+        'main.js must run the ledger reconciliation before the sharing poll starts');
+    });
+
     test('calendar event dates are derived in local time, not UTC', () => {
       const cal = jsFiles['calendar-sync.js'];
       assert(cal.includes('function localDateStr(value)'),

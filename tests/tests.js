@@ -1227,8 +1227,8 @@ test('sharing group load is all-or-nothing: a failed file download skips the who
   const allStart = drive.indexOf('/** Load all groups');
   const allEnd = drive.indexOf('getAllGroups()', allStart);
   const allBody = drive.slice(allStart, allEnd);
-  assert(allBody.includes('if (err?.code === 403 || err?.code === 404)'),
-    'loadAll must detect access loss (403/404) on joined group loads');
+  assert(/if \(\(err\?\.code === 403 \|\| err\?\.code === 404\) && !isDriveRateLimited\(err\)\)/.test(allBody),
+    'loadAll must detect access loss (403/404) on joined group loads, skipping rate-limited 403s');
   assert(allBody.includes('checkRemovalViaRevoked(joined.id, tok)'),
     'loadAll must consult revoked.json when a joined load fails with 403/404');
   assert(allBody.includes('handleStaleGroup(joined.id, verdict)'),
@@ -3031,6 +3031,17 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'consecutive-404 strike logic must be gone');
       assert(!/notFoundStrikes/.test(drive),
         'notFoundStrikes must not be referenced anywhere');
+    });
+
+    test('rate-limited 403s never feed the removal verdict', () => {
+      // The Drive reason field is what tells a usage-limit 403 apart from a
+      // privilege 403 — the status code alone cannot.
+      assert(drive.includes('err.reason'), 'driveGet must surface the Drive error reason');
+      assert(drive.includes('rateLimitExceeded'), 'the rate-limit reason family must be known');
+      assert(drive.includes('isDriveRateLimited'), 'a rate-limit guard must exist');
+      const guarded = (drive.match(/isDriveRateLimited\(err\)/g) || []).length;
+      assert(guarded >= 2,
+        'the startup-load and poll verdict checks must both skip rate-limited 403s');
     });
 
     test('getRevokedMembers reads revoked.json instead of returning a stub', () => {

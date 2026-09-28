@@ -99,7 +99,19 @@ async function driveGet(token, url) {
   const res = await fetch(url, {
     headers: { 'Authorization': `Bearer ${token}` },
   });
-  if (!res.ok) throw Object.assign(new Error(`Drive GET ${res.status}`), { code: res.status });
+  if (!res.ok) {
+    const err = new Error(`Drive GET ${res.status}`);
+    err.code = res.status;
+    // Surface the Drive error reason (e.g. rateLimitExceeded vs
+    // insufficientPermissions): per the Drive docs the reason field is what
+    // distinguishes a usage-limit 403 from a privilege 403 — the status
+    // code alone cannot. Non-JSON bodies keep today's shape.
+    try {
+      const reason = (await res.json())?.error?.errors?.[0]?.reason;
+      if (reason) err.reason = reason;
+    } catch {}
+    throw err;
+  }
   return res;
 }
 
@@ -171,7 +183,24 @@ function downloadError(what, err) {
   const e = new Error(`sharing: failed to download ${what}: ${err?.message || err}`);
   if (err?.code != null) e.code = err.code;
   else if (err?.status != null) e.code = err.status;
+  if (err?.reason != null) e.reason = err.reason;
   return e;
+}
+
+// Drive 403 reasons that mean "throttled / quota", not "access lost".
+// The status code alone cannot tell them apart — the reason field is the
+// signal (https://developers.google.com/workspace/drive/api/guides/handle-errors#403-errors).
+const DRIVE_RATE_LIMIT_REASONS = new Set([
+  'rateLimitExceeded',
+  'userRateLimitExceeded',
+  'dailyLimitExceeded',
+  'quotaExceeded',
+  'sharingRateLimitExceeded',
+]);
+
+/** True when a Drive error is a throttle/quota 403 — transient, never an access-loss signal. */
+function isDriveRateLimited(err) {
+  return !!err && DRIVE_RATE_LIMIT_REASONS.has(err.reason);
 }
 
 async function driveUpload(token, folderId, fileId, fileName, data, etag) {
@@ -1151,12 +1180,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // from the group, or the group was deleted): consult revoked.json
       // immediately — the poll only covers loaded groups, so a skipped group
       // would otherwise never get its removed/deleted verdict.
+      // A rate-limited 403 is transient, not access loss: skip the verdict
+      // check and let the next load retry.
       const loadJoined = (joined) => {
         const p = joined.file_ids
           ? loadGroupWithIds(joined.folder_id, joined.id, joined.file_ids)
           : loadGroup(joined.folder_id, joined.id); // pointer without file_ids: search-based load
         return p.catch(async err => {
-          if (err?.code === 403 || err?.code === 404) {
+          if ((err?.code === 403 || err?.code === 404) && !isDriveRateLimited(err)) {
             const verdict = await this.checkRemovalViaRevoked(joined.id, tok).catch(() => null);
             if (verdict) {
               await this.handleStaleGroup(joined.id, verdict);
@@ -1798,8 +1829,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           } catch (err) {
             // Group files unreachable (deleted folder or revoked access):
             // consult revoked.json — the only signal. 'removed' → we were
-            // kicked; 'deleted' → the group is gone; null → transient.
-            if (err?.code === 404 || err?.status === 404 || err?.code === 403 || err?.status === 403) {
+            // kicked; 'deleted' → unreachable with no notice to consult
+            // (ambiguous: deletion vs removal); null → transient.
+            // A rate-limited 403 is transient, not access loss: skip the
+            // verdict check and retry on the next poll.
+            if ((err?.code === 404 || err?.status === 404 || err?.code === 403 || err?.status === 403) && !isDriveRateLimited(err)) {
               const verdict = await this.checkRemovalViaRevoked(groupId, tok).catch(() => null);
               if (verdict) staleGroupIds.push({ groupId, verdict });
             } else {

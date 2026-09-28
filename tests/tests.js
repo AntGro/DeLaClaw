@@ -1052,6 +1052,9 @@ test('sharing remove-member modal stays open with in-progress effect', () => {
     'utils keepOpen branch must close the modal itself once the callback settles');
   assert(utils.includes("busyBtn.classList.remove('loading')"),
     'closeConfirmAction must reset the keepOpen busy state for the next open');
+  const css = fs.readFileSync(STYLE_FILE, 'utf-8');
+  assert(css.includes('.modal-save.loading:not(.confirm-action-btn)::before'),
+    'the generic modal-save spinner must not fire on the confirm-action button (two spinners otherwise)');
 });
 
 test('sharing create-group modal locks UI and reports file progress', () => {

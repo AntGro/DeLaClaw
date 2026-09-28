@@ -157,6 +157,7 @@ let _confirmActionCallback = null;
 let _confirmCancelCallback = null;
 let _confirmActionKeepOpen = false;
 let _confirmActionLocked = false;
+let _confirmActionProgressText = null;
 
 function showConfirmAction(title, message, onConfirm, detail, opts) {
   document.getElementById('confirmActionTitle').textContent = title;
@@ -230,6 +231,7 @@ function showConfirmAction(title, message, onConfirm, detail, opts) {
   }
   _confirmActionCallback = onConfirm;
   _confirmActionKeepOpen = !!opts?.keepOpen;
+  _confirmActionProgressText = opts?.progressText || null;
   _confirmCancelCallback = opts?.onCancel || null;
   document.getElementById('confirmActionModal').classList.add('visible');
 }
@@ -242,6 +244,12 @@ function closeConfirmAction() {
   _confirmCancelCallback = null;
   _confirmActionKeepOpen = false;
   if (cancelCb) try { cancelCb(); } catch {}
+  // Reset busy state left by a keepOpen in-progress run
+  const busyBtn = document.getElementById('confirmActionBtn');
+  if (busyBtn) { busyBtn.classList.remove('loading'); busyBtn.disabled = false; }
+  const cancelBtn2 = document.getElementById('confirmActionCancelBtn');
+  if (cancelBtn2) cancelBtn2.style.display = '';
+  _confirmActionProgressText = null;
   // Reset variant
   const modal = document.querySelector('.confirm-action-modal');
   if (modal) modal.classList.remove('confirm-neutral');
@@ -287,11 +295,21 @@ async function executeConfirmAction() {
     const toggleChecked = toggleInput ? toggleInput.checked : false;
     _confirmCancelCallback = null; // confirm path — do not fire cancel
     if (keepOpen) {
-      // Lock modal open for progress display (e.g. account deletion)
+      // Lock the modal open with an in-progress effect (e.g. account
+      // deletion, member removal): the confirm button shows a spinner,
+      // Cancel is hidden, backdrop/Escape are blocked until the callback
+      // settles, then the modal closes itself.
       _confirmActionLocked = true;
       const btn = document.getElementById('confirmActionBtn');
       const cancelBtn = document.getElementById('confirmActionCancelBtn');
-      if (btn) btn.style.display = 'none';
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('loading');
+        if (_confirmActionProgressText) {
+          const btnTextEl = document.getElementById('confirmActionBtnText');
+          if (btnTextEl) btnTextEl.textContent = _confirmActionProgressText;
+        }
+      }
       if (cancelBtn) cancelBtn.style.display = 'none';
       const wordWrap = document.getElementById('confirmWordWrap');
       if (wordWrap) wordWrap.style.display = 'none';
@@ -301,6 +319,7 @@ async function executeConfirmAction() {
         await cb(toggleChecked);
       } finally {
         _confirmActionLocked = false;
+        closeConfirmAction();
       }
     } else {
       closeConfirmAction();

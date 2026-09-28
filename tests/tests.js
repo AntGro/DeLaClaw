@@ -1035,6 +1035,25 @@ test('sharing leave keep-copies conversion is throw-on-error', () => {
     'habit completion restores must also be throw-on-error');
 });
 
+test('sharing remove-member modal stays open with in-progress effect', () => {
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const utils = fs.readFileSync(path.join(JS_DIR, 'utils.js'), 'utf-8');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+
+  assert(sui.includes('{ keepOpen: true, progressText: t(\'sharing.removing_member\') }'),
+    'sharingRemoveMember must keep the confirm modal open with an in-progress label');
+  for (const key of ['removing_member']) {
+    assert(i18n.includes(`${key}: 'Removing\\u2026'`),
+      `i18n EN must define sharing.${key}`);
+  }
+  assert(utils.includes("btn.classList.add('loading')"),
+    'utils keepOpen branch must show a spinner on the confirm button, not hide it');
+  assert(utils.includes('_confirmActionLocked = false;\n        closeConfirmAction();'),
+    'utils keepOpen branch must close the modal itself once the callback settles');
+  assert(utils.includes("busyBtn.classList.remove('loading')"),
+    'closeConfirmAction must reset the keepOpen busy state for the next open');
+});
+
 test('sharing create-group modal locks UI and reports file progress', () => {
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');

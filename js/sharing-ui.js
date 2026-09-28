@@ -416,7 +416,9 @@ async function sharingRemoveMember(groupId, member_id) {
         showToast(t('sharing.member_removed'), 'info');
         renderSharingPane();
       } catch (e) { showToast(e.message, 'error'); }
-    }
+    },
+    null,
+    { keepOpen: true, progressText: t('sharing.removing_member') }
   );
 }
 

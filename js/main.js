@@ -1286,18 +1286,21 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   document.addEventListener('sharing-group-removed-remotely', (e) => {
     const { groupName = '', verdict, folderId } = e.detail || {};
     if (verdict === 'deleted') {
-      // 'deleted' is a definitive verdict (Drive 404 on the folder): show a
-      // notice with a link to the Drive folder so the user can double-check
-      // it is really gone by trying to open it manually.
+      // 'deleted' means the group files are unreachable and no removal notice
+      // could be consulted (a 404 conflates "gone" with "revoked from you"):
+      // show a notice with a link to the Drive folder so the user can
+      // double-check it is really gone by trying to open it manually.
       showGroupDeletedNotice(groupName, folderId);
       return;
     }
     showToast(t('sharing.group_removed_remotely', groupName), 'info');
   });
 
-/** Group-deleted notice dialog. The verdict is definitive, so there is no
- *  choice to make — just an acknowledgment plus a Google Drive folder link
- *  inviting the user to double-check by trying to open the folder manually. */
+/** Group-deleted notice dialog. The verdict means "unreachable with no removal
+ *  notice to consult" — a 404 cannot tell a real deletion from a removal —
+ *  so there is no choice to make here, just an acknowledgment plus a Google
+ *  Drive folder link inviting the user to double-check by trying to open
+ *  the folder manually. */
 function showGroupDeletedNotice(groupName, folderId) {
   document.getElementById('groupDeletedNoticeModal')?.remove();
   const overlay = document.createElement('div');
@@ -1492,8 +1495,8 @@ function _processOrphanQueue() {
 // 'sharing-group-purge-items' is dispatched by the sharing adapter when the
 // poll finds our own memberId in revoked.json (verdict 'removed'). Removal is
 // certain, so local item pointers are deleted outright. The orphan dialog is
-// kept only for the 'deleted' verdict, where an unreachable group may be an
-// infra issue rather than a real deletion.
+// kept only for the 'deleted' verdict, where a 404 cannot distinguish a real
+// deletion from a removal without a readable notice.
 document.addEventListener('sharing-group-purge-items', async (e) => {
   const groupId = e.detail?.groupId;
   if (!groupId || !state.db) return;

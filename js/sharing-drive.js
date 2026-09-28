@@ -1684,6 +1684,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      * Consult revoked.json after the group files became unreachable (403/404).
      * Detection is based only on this file — no consecutive-failure counting.
      * Returns 'removed' | 'deleted' | null (transient: leave for the next poll).
+     * 'deleted' is the fallback when no notice can be consulted (no
+     * file_ids.revoked, revoked.json 404, or no matching entry): a 404
+     * conflates "gone" with "revoked from you", so it is a guess, not a
+     * proven deletion.
      */
     async checkRemovalViaRevoked(groupId, tok) {
       const joined = _joinedRows().find(j => j.id === groupId);
@@ -1842,7 +1846,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (verdict === 'removed') {
         // Own member_id found in revoked.json — removal is certain, so purge
         // local item pointers outright (no dialog). The 'deleted' case keeps
-        // the orphan dialog: an unreachable group may be an infra issue.
+        // the orphan dialog: a 404 conflates "gone" with "revoked from you",
+        // so without a readable notice we cannot tell a real deletion from
+        // a removal, and the unlink stays a manual choice.
         // Handled in main.js via state.db (the adapter has no db access).
         try { document.dispatchEvent(new CustomEvent('sharing-group-purge-items', { detail: { groupId } })); } catch {}
       }

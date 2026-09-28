@@ -498,14 +498,14 @@ sequenceDiagram
     MA->>CAL: "table flush → dirty rows re-sync →<br/>deleted pointers → their events are deleted"
     MA->>MP: info toast — removed from the group
     else revoked.json also 404
-    MA->>MA: "'deleted' verdict — the group is gone:<br/>drop the group from memory, stage the groups-row delete<br/>table marked dirty, no Drive request fires here"
+    MA->>MA: "'deleted' verdict — unreachable, no notice to consult:<br/>drop the group from memory, stage the groups-row delete<br/>table marked dirty, no Drive request fires here"
     MA->>MD: "debounced flush (~2s)<br/>uploads the groups-row delete"
     rect rgb(253, 237, 236)
     opt The flush fails
         MA->>MA: "Warned, non-fatal — table stays dirty,<br/>the debounced retry uploads it later<br/>Worst case the group re-surfaces on the next load<br/>and the 'deleted' verdict purges it again"
     end
     end
-    MA->>MP: "notice dialog with a Drive-folder link to double-check<br/>orphan dialog → unlink pointers when acted on<br/>(re-prompts until resolved — may be an infra issue)<br/>unlinking stages the pointer deletes for the debounced flush"
+    MA->>MP: "notice dialog with a Drive-folder link to double-check<br/>orphan dialog → unlink pointers when acted on<br/>(re-prompts until resolved — 404 cannot tell deletion from removal)<br/>unlinking stages the pointer deletes for the debounced flush"
     MA->>CAL: "table flush → dirty rows re-sync →<br/>deleted pointers → their events are deleted"
     else transport error
     MA->>MA: "no verdict — transient<br/>keep polling, retried on the next 15s cycle"
@@ -515,7 +515,7 @@ sequenceDiagram
 
 #### Creator deletes a group
 
-Deletion goes through a ~30-day grace period so members get an explicit stop-polling signal instead of an abrupt 404.
+Deletion revokes every member's folder permission and trashes the subfolder immediately (recoverable from Drive trash). No deletion marker is written to revoked.json — members detect it through the same ambiguous 'deleted' verdict as "Member detects the removal" above.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
@@ -532,20 +532,19 @@ sequenceDiagram
     participant MA as Member app
     end
 
-    CA->>CA: confirm dialog (warns if members remain):<br/>keep copies?
-    alt keep copies
-    CA->>CD: pointers → personal items<br/>(__shared__ items → General)
+    CA->>CA: confirm dialog (warns if members remain):<br/>keep-items toggle
+    alt keep items
+    CA->>CA: pointers → personal items<br/>(__shared__ items → General)
+    else delete items
+    CA->>CA: delete own item pointers
     end
     CA->>CA: verify caller is the creator (else throw)
-    CA->>SF: revoked.json += ALL member hashIds
     CA->>SF: list permissions → revoke all non-owner<br/>(revoked.json reader grants remain)
-    Note over CA,SF: folder is NOT trashed yet —<br/>members must still read revoked.json
-    CA->>CA: _groups: drop group<br/>record deletedAt in local state<br/>emit group-deleted
+    CA->>CD: trash the subfolder
+    CA->>CA: _groups: drop group<br/>delete created-group row
+    Note over CA,MA: no deletion marker is written —<br/>members take the 'deleted' path of<br/>"Member detects the removal"
     MA->>SF: next poll: folder → 404
-    MA->>SF: fetch revoked.json by stored fileId →<br/>own hashId present
-    MA->>MA: explicit "group deleted" →<br/>stop polling, _groups: purge group
-    MA->>MA: orphan dialog → unlink pointers<br/>(re-prompts until resolved — may be an infra issue)
-    Note over CA,CD: creator app startup: deletedAt > 30 days →<br/>permanently delete DeLaClaw-Shared-{id}
+    MA->>MA: "'deleted' verdict → drop group from memory<br/>notice dialog + orphan dialog → unlink pointers when acted on<br/>(re-prompts until resolved — 404 cannot tell deletion from removal)"
 ```
 
 #### Creator renames a group

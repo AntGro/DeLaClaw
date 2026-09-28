@@ -384,7 +384,7 @@ sequenceDiagram
     MA->>MA: "copy content from the in-memory shared payloads<br/>(local pointers store text/name as '' — enriched<br/>before the link is cut)"
     MA->>MA: "in-place row updates, ids preserved:<br/>shared_id/shared_group_id → null, enriched fields copied,<br/>__shared__ items → General, habit completions re-inserted<br/>tables marked dirty"
     rect rgb(253, 237, 236)
-    opt The conversion throws
+    opt "The conversion throws (a DB select/update/insert fails)"
         MA->>MP: "Error toast — the leave is aborted,<br/>the group stays joined<br/>Retry is safe: already-converted pointers<br/>no longer match and are skipped"
     end
     end

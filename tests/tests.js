@@ -1020,6 +1020,21 @@ test('sharing member identity is member_id-based and agent-safe', () => {
     'sharing-drive.js must not write raw invite email into group.json members');
 });
 
+test('sharing leave keep-copies conversion is throw-on-error', () => {
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const fn = sui.slice(sui.indexOf('async function _convertGroupItemsToPersonal'));
+  const body = fn.slice(0, fn.indexOf('\n}\n') + 3);
+
+  assert(body.includes('if (error) throw'),
+    '_convertGroupItemsToPersonal must throw on DB errors, not ignore { error }');
+  const unguarded = (body.match(/state\.db\.from\(/g) || [])
+    .length - (body.match(/dbThrow\(\s*state\.db\.from\(/g) || []).length;
+  assert(unguarded === 0,
+    '_convertGroupItemsToPersonal must wrap every DB call in the throw-on-error helper');
+  assert(body.includes('habit_completions') && body.includes('restore completion'),
+    'habit completion restores must also be throw-on-error');
+});
+
 test('sharing create-group modal locks UI and reports file progress', () => {
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');

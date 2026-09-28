@@ -559,9 +559,16 @@ async function sharingRenameGroup(groupId, el) {
 /**
  * Convert all items belonging to a group into personal items.
  * Nulls shared_id and shared_group_id; moves items in __shared__ category to General.
+ * Every DB call is throw-on-error: a silent conversion failure would let the
+ * leave proceed (flush + 'left' flip) while pointers still reference the group.
  */
 async function _convertGroupItemsToPersonal(groupId) {
   const nullShared = { shared_id: null, shared_group_id: null };
+  const dbThrow = async (promise, what) => {
+    const { data, error } = await promise;
+    if (error) throw new Error(`${what}: ${error.message || error}`);
+    return data;
+  };
 
   // Build a lookup of shared-layer data so we can enrich pointers (which store
   // text/name as '' locally) before severing the shared link.
@@ -583,12 +590,15 @@ async function _convertGroupItemsToPersonal(groupId) {
 
   // ── Todos ──
   {
-    const { data: cats } = await state.db.from('todo_categories').select('id, name, is_protected');
+    const cats = await dbThrow(
+      state.db.from('todo_categories').select('id, name, is_protected'),
+      'load todo categories');
     const sharedCat = cats?.find(c => c.is_protected && c.name === '__shared__');
     const defaultCat = cats?.find(c => c.is_protected && c.name !== '__shared__');
 
-    const { data: rows } = await state.db.from('todos').select('id, text, shared_id, category_id')
-      .eq('shared_group_id', groupId);
+    const rows = await dbThrow(
+      state.db.from('todos').select('id, text, shared_id, category_id').eq('shared_group_id', groupId),
+      'load shared todos');
     for (const row of (rows || [])) {
       const sh = row.shared_id ? sharedLookup.get(row.shared_id) : null;
       const enriched = {};
@@ -602,18 +612,23 @@ async function _convertGroupItemsToPersonal(groupId) {
         enriched.category = '';
         enriched.category_id = defaultCat.id;
       }
-      await state.db.from('todos').update({ ...nullShared, ...enriched }).eq('id', row.id);
+      await dbThrow(
+        state.db.from('todos').update({ ...nullShared, ...enriched }).eq('id', row.id),
+        `convert todo ${row.id}`);
     }
   }
 
   // ── Habits ──
   {
-    const { data: cats } = await state.db.from('habit_categories').select('id, name, is_protected');
+    const cats = await dbThrow(
+      state.db.from('habit_categories').select('id, name, is_protected'),
+      'load habit categories');
     const sharedCat = cats?.find(c => c.is_protected && c.name === '__shared__');
     const defaultCat = cats?.find(c => c.is_protected && c.name !== '__shared__');
 
-    const { data: rows } = await state.db.from('habits').select('id, name, shared_id, category_id, frequency_rule')
-      .eq('shared_group_id', groupId);
+    const rows = await dbThrow(
+      state.db.from('habits').select('id, name, shared_id, category_id, frequency_rule').eq('shared_group_id', groupId),
+      'load shared habits');
     for (const row of (rows || [])) {
       const sh = row.shared_id ? sharedHabitLookup.get(row.shared_id) : null;
       const enriched = {};
@@ -625,17 +640,21 @@ async function _convertGroupItemsToPersonal(groupId) {
         enriched.category = '';
         enriched.category_id = defaultCat.id;
       }
-      await state.db.from('habits').update({ ...nullShared, ...enriched }).eq('id', row.id);
+      await dbThrow(
+        state.db.from('habits').update({ ...nullShared, ...enriched }).eq('id', row.id),
+        `convert habit ${row.id}`);
 
       // Restore completions from the shared layer — they were deleted locally
       // when the habit was originally shared.
       if (sh?.completions?.length && row.id) {
         for (const c of sh.completions) {
-          await state.db.from('habit_completions').insert({
-            habit_id: row.id,
-            completed_at: c.completed_at,
-            note: c.note || null,
-          });
+          await dbThrow(
+            state.db.from('habit_completions').insert({
+              habit_id: row.id,
+              completed_at: c.completed_at,
+              note: c.note || null,
+            }),
+            `restore completion for habit ${row.id}`);
         }
       }
     }
@@ -643,8 +662,9 @@ async function _convertGroupItemsToPersonal(groupId) {
 
   // ── List items ──
   {
-    const { data: rows } = await state.db.from('list_items').select('id, text, note, shared_id')
-      .eq('shared_group_id', groupId);
+    const rows = await dbThrow(
+      state.db.from('list_items').select('id, text, note, shared_id').eq('shared_group_id', groupId),
+      'load shared list items');
     for (const row of (rows || [])) {
       const sh = row.shared_id ? sharedLookup.get(row.shared_id) : null;
       const enriched = {};
@@ -652,7 +672,9 @@ async function _convertGroupItemsToPersonal(groupId) {
         enriched.text = sh.payload?.text || sh.payload?.title || row.text || '';
         if (sh.payload?.note != null) enriched.note = sh.payload.note;
       }
-      await state.db.from('list_items').update({ ...nullShared, ...enriched }).eq('id', row.id);
+      await dbThrow(
+        state.db.from('list_items').update({ ...nullShared, ...enriched }).eq('id', row.id),
+        `convert list item ${row.id}`);
     }
   }
 }

@@ -359,15 +359,17 @@ sequenceDiagram
 
 #### Member unjoins
 
-`leaveGroup` is removed — `unjoinGroup` is the only leave path. Leaving flips the member row to `status: 'left'` (kept, not deleted) so the creator's next poll can revoke the Drive permission — only the folder owner can revoke it — before clearing the row. `status: 'left'` rows are never displayed, so the member list always reflects who actually has access. Caveat: if the creator never opens the app again, the Drive permission lingers until they do.
+`leaveGroup` is removed — `unjoinGroup` is the only leave path. Leaving flips the member row to `status: 'left'` (kept, not deleted) so the creator's next poll can revoke the Drive permission — only the folder owner can revoke it — before clearing the row. `status: 'left'` rows are never displayed, so the member list always reflects who actually has access. Caveat: if the creator never opens the app again, the Drive permission lingers until they do. If the local groups-row delete never reaches Drive, the next load repairs it: a joined group whose own member row is already `'left'` in `group.json` is dropped without surfacing it, and the row delete is retried.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
 sequenceDiagram
     autonumber
     box rgb(240,253,244) Member's Google account
-    participant MA as Member app
+    participant MP as Member page<br/>(rendered UI)
+    participant MA as Member app<br/>(in-memory state + Drive API)
     participant MD as Member's Drive
+    participant CAL as Calendar<br/>Sync
     end
     box rgb(255,251,235) Shared — lives in the creator's Drive
     participant SF as DeLaClaw-Shared-{id}
@@ -376,17 +378,52 @@ sequenceDiagram
     participant CA as Creator app
     end
 
-    MA->>MA: confirm dialog: keep copies?
+    MP->>MA: leave group
+    MA->>MP: confirm dialog: keep copies?
     alt keep copies
-    MA->>MD: pointers → personal items<br/>(__shared__ items → General)
+    MA->>MA: "copy content from the in-memory shared payloads<br/>(local pointers store text/name as '' — enriched<br/>before the link is cut)"
+    MA->>MA: "in-place row updates, ids preserved:<br/>shared_id/shared_group_id → null, enriched fields copied,<br/>__shared__ items → General, habit completions re-inserted<br/>tables marked dirty"
+    rect rgb(253, 237, 236)
+    opt The conversion throws
+        MA->>MP: "Error toast — the leave is aborted,<br/>the group stays joined<br/>Retry is safe: already-converted pointers<br/>no longer match and are skipped"
     end
-    MA->>SF: best-effort: flip own row to<br/>status 'left' (+ left_at)
-    MA->>MD: delete groups row
-    MA->>MA: drop group, emit group-left<br/>polling stops
-    Note over MA: keep copies → pointers become personal rows (same id):<br/>events re-titled without the [group] segment<br/>no copies → orphan dialog → unlink → events deleted
+    end
+    MA->>MD: "forced flush — the converted tables are uploaded<br/>before the 'left' flip, so a hard crash can no longer<br/>lose the kept copies after the flip"
+    rect rgb(253, 237, 236)
+    opt The forced flush fails
+        MA->>MP: "Error toast — the leave is aborted, the group stays joined<br/>Tables stay dirty — the debounced retry uploads them later<br/>Retrying the leave re-runs the conversion as a no-op"
+    end
+    end
+    MA->>CAL: "table flush → dirty rows re-sync →<br/>events re-titled without the [group] segment (same event id)"
+    end
+    MA->>SF: Flip own row to status 'left' (+ left_at)<br/>in group.json
+    rect rgb(253, 237, 236)
+    opt The 'left' write fails (best-effort, swallowed)
+        MA->>MA: "console.warn only — the leave continues locally<br/>The creator never sees the marker, so the Drive permission<br/>is never revoked (the lingering-permission caveat noted above)"
+    end
+    end
+    MA->>MA: "delete groups row<br/>staged in memory — table marked dirty<br/>no Drive request fires here"
+    MA->>MA: "drop group, emit group-left<br/>the 15s poll keeps running — it simply<br/>skips this group from the next cycle on"
+    MA->>MD: "debounced flush (~2s)<br/>uploads the groups-row delete"
+    rect rgb(253, 237, 236)
+    opt The groups-row delete never reaches Drive
+        MA->>MA: "Warned, non-fatal — the leave continues<br/>group dropped from memory this session<br/>The stale row persists — on the next load<br/>the self-leave repair drops the group<br/>and retries the row delete"
+    end
+    end
+    Note over MA: "no copies → pointers stay until the orphan dialog<br/>unlinks them → their events are deleted"
     Note over SF: creator's next poll (≤15s)<br/>sees the 'left' row
     CA->>SF: revoke leaver's Drive permission<br/>(owner-only operation)
+    rect rgb(253, 237, 236)
+    opt The revoke fails (swallowed silently, no log)
+        CA->>CA: "The 'left' row is still cleared below<br/>Backstop: the load-time permission audit revokes writer grants<br/>with no matching member row in group.json"
+    end
+    end
     CA->>SF: clear the 'left' row<br/>from group.json
+    rect rgb(253, 237, 236)
+    opt The group.json save fails
+        CA->>CA: "Error logged — the 'left' row is kept<br/>Retried on the next 15s poll<br/>The leaver already lost access, the row is never displayed"
+    end
+    end
 ```
 
 #### Creator removes a member
@@ -396,33 +433,84 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     box rgb(239,246,255) Creator's Google account
-    participant CA as Creator app
+    participant CP as Creator page<br/>(rendered UI)
+    participant CA as Creator app<br/>(in-memory state + Drive API)
     end
     box rgb(255,251,235) Shared — lives in the creator's Drive
     participant SF as DeLaClaw-Shared-{id}
     end
+
+    CP->>CA: remove member (confirm dialog)
+    CA->>SF: "reassign the member's items to the creator<br/>created_by rewrite + updated_at bump, per item file"
+    rect rgb(253, 237, 236)
+    opt An item-file upload fails
+        CA->>CP: "Error toast — the removal is aborted<br/>nothing changed, the member stays in the group"
+    end
+    end
+    CA->>SF: "revoked.json: download, append<br/>{id: member hashId, removed_at}, upload"
+    rect rgb(253, 237, 236)
+    opt The revoked.json write fails
+        CA->>CP: "Error toast — the removal is aborted<br/>No one is ever removed without a notice"
+    end
+    end
+    CA->>SF: "revoke the member's folder Drive permission<br/>(the reader grant on revoked.json remains)"
+    rect rgb(253, 237, 236)
+    opt "The revoke fails (swallowed silently, no log)"
+        CA->>CA: "The removal continues — the row is cleared below<br/>Backstop: the load-time permission audit revokes writer grants<br/>with no matching member row in group.json"
+    end
+    end
+    CA->>SF: "group.json −= member row, save"
+    rect rgb(253, 237, 236)
+    opt The group.json save fails
+        CA->>CP: "Error toast — the member row stays<br/>The permission is already revoked and the notice exists,<br/>so the member still gets the 'removed' verdict on their next poll<br/>The row is cleared when the removal is retried"
+    end
+    end
+    CA->>CP: "emit member-removed → success toast,<br/>re-render the sharing pane"
+    Note over CA,SF: "the member detects this asynchronously<br/>on their next 15s poll — see Member detects the removal"
+```
+
+#### Member detects the removal
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
+sequenceDiagram
+    autonumber
     box rgb(240,253,244) Removed member's Google account
-    participant MA as Member app
+    participant MP as Member page<br/>(rendered UI)
+    participant MA as Member app<br/>(in-memory state + Drive API)
     participant MD as Member's Drive
+    participant CAL as Calendar<br/>Sync
+    end
+    box rgb(255,251,235) Shared — lives in the creator's Drive
+    participant SF as DeLaClaw-Shared-{id}
     end
 
-    CA->>CA: verify caller is the creator (else throw)<br/>member UI for invite/remove is hidden from non-creators
-    CA->>SF: reassign removed member's items:<br/>created_by → creator
-    CA->>SF: revoked.json += {id: member hashId,<br/>removed_at: timestamp}
-    CA->>SF: driveRemovePermission(folderPermId)<br/>reader grant on revoked.json remains
-    Note over CA,SF: revocation is not atomic —<br/>permissions are removed one by one
-    CA->>SF: group.json −= member row, save
-    CA->>CA: emit member-removed
-    MA->>SF: next poll: folder → 404
+    Note over MA,SF: "member's next 15s poll:<br/>group files → 403/404 (access revoked)"
     MA->>SF: fetch revoked.json by stored fileId
-    alt own hashId present
-    MA->>MA: explicit "removed" state →<br/>stop polling, purge group + delete item pointers (no dialog — removal is certain)<br/>deleted pointers → their calendar events are deleted
-    else revoked.json also 404
-    MA->>MA: group deleted → purge group (see below)
-    MA->>MA: orphan dialog → unlink pointers<br/>(re-prompts until resolved — may be an infra issue)<br/>deleted pointers → their calendar events are deleted
-    else transport error
-    MA->>MA: flaky connection — keep polling
+    alt "own hashId present (removed after the current join)"
+    MA->>MA: "'removed' verdict — removal is certain:<br/>drop the group from memory, stage the deletes in memory<br/>groups row + all pointers, tables marked dirty<br/>no dialog — the orphan dialog is suppressed for this group<br/>the 15s poll keeps running — it simply<br/>skips this group from the next cycle on"
+    MA->>MD: "debounced flush (~2s)<br/>uploads the groups-row + pointer deletes"
+    rect rgb(253, 237, 236)
+    opt The flush fails
+        MA->>MA: "Warned, non-fatal — tables stay dirty,<br/>the debounced retry uploads them later<br/>Worst case the group re-surfaces on the next load<br/>and the 'removed' verdict purges it again"
     end
+    end
+    MA->>CAL: "table flush → dirty rows re-sync →<br/>deleted pointers → their events are deleted"
+    MA->>MP: info toast — removed from the group
+    else revoked.json also 404
+    MA->>MA: "'deleted' verdict — the group is gone:<br/>drop the group from memory, stage the groups-row delete<br/>table marked dirty, no Drive request fires here"
+    MA->>MD: "debounced flush (~2s)<br/>uploads the groups-row delete"
+    rect rgb(253, 237, 236)
+    opt The flush fails
+        MA->>MA: "Warned, non-fatal — table stays dirty,<br/>the debounced retry uploads it later<br/>Worst case the group re-surfaces on the next load<br/>and the 'deleted' verdict purges it again"
+    end
+    end
+    MA->>MP: "notice dialog with a Drive-folder link to double-check<br/>orphan dialog → unlink pointers when acted on<br/>(re-prompts until resolved — may be an infra issue)<br/>unlinking stages the pointer deletes for the debounced flush"
+    MA->>CAL: "table flush → dirty rows re-sync →<br/>deleted pointers → their events are deleted"
+    else transport error
+    MA->>MA: "no verdict — transient<br/>keep polling, retried on the next 15s cycle"
+    end
+    Note over MA: "groups joined before revocation notices existed<br/>have no revoked.json to consult → 'deleted' verdict"
 ```
 
 #### Creator deletes a group

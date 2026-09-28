@@ -2972,6 +2972,21 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(writeIdx < revokeIdx, 'revoked.json write must precede the permission revocation');
     });
 
+    test('removeUser reassigns the removed member\'s items to the creator first', () => {
+      const fn = drive.match(/async removeUser\(groupId, member_id\) \{([\s\S]*?)\n    \},/);
+      assert(fn, 'removeUser must exist');
+      const body = fn[1];
+      const reassignIdx = body.indexOf('item.created_by = creatorId');
+      const writeIdx = body.indexOf('removed.push({ id: member_id, removed_at');
+      assert(reassignIdx !== -1, 'removeUser must rewrite created_by to the creator');
+      assert(body.includes('item.updated_at = now'),
+        'the reassignment must bump updated_at so it wins concurrent-edit merges');
+      assert(body.includes('await saveTypedItems(groupId, type)'),
+        'the reassignment must persist each touched item file');
+      assert(writeIdx !== -1 && reassignIdx < writeIdx,
+        'the items rewrite must precede the revoked.json notice, so a failure aborts with nothing changed');
+    });
+
     test('removal detection is based only on revoked.json (no 404 strikes)', () => {
       assert(drive.includes('async checkRemovalViaRevoked(groupId, tok)'),
         'poll must consult revoked.json via checkRemovalViaRevoked');
@@ -3593,6 +3608,65 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'forceSave must notify _onTableFlushed — the debounced path is not the only flush path');
       assert(body.includes('flushed.push(t)'),
         'only tables that actually flushed may be notified (flushTable rethrows on failure)');
+    });
+
+    test('drive: flushTable rethrows upload failures (debounced retry and gating depend on it)', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const body = drive.slice(drive.indexOf('async function flushTable('), drive.indexOf('function scheduleSave(table)'));
+      const logIdx = body.indexOf('console.error(`Drive: save failed for ${table}`, e);');
+      assert(logIdx !== -1, 'flushTable must log the save failure');
+      const tail = body.slice(logIdx, logIdx + 700);
+      assert(tail.includes('throw e;') && tail.indexOf('throw e;') < tail.indexOf('} finally'),
+        'flushTable must rethrow after logging — swallowing silently cleared the dirty flag on failure, losing the upload with no retry');
+    });
+
+    test('drive: forceSave re-schedules tables that failed to flush', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const body = drive.slice(drive.indexOf('async forceSave()'), drive.indexOf('get connected()'));
+      assert(body.includes('scheduleSave(r.t)'),
+        'forceSave must re-schedule failed tables for the debounced retry instead of silently dropping them from dirtyTables');
+    });
+
+    test('drive adapter exposes flushTables to gate operations on upload success', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const idx = drive.indexOf('async flushTables(');
+      assert(idx !== -1, 'drive adapter must expose flushTables');
+      const body = drive.slice(idx, idx + 1500);
+      assert(body.includes('adapter._onTableFlushed'),
+        'flushTables must notify _onTableFlushed like the other flush paths so the calendar sync fires');
+      assert(body.includes('scheduleSave(t);') && body.includes('throw e;'),
+        'flushTables must keep the debounced retry alive before rethrowing the failure');
+    });
+
+    test('leave flow force-flushes converted tables before flipping left in group.json', () => {
+      const ui = jsFiles['sharing-ui.js'];
+      const convertIdx = ui.indexOf('await _convertGroupItemsToPersonal(groupId);');
+      const flushIdx = ui.indexOf('flushTables');
+      const unjoinIdx = ui.indexOf('await state.sharing.unjoinGroup(groupId);');
+      assert(convertIdx !== -1 && flushIdx !== -1 && unjoinIdx !== -1 &&
+             convertIdx < flushIdx && flushIdx < unjoinIdx,
+        'the keep-copies leave must flush tables to Drive between the conversion and the left flip');
+    });
+
+    test('loadAll repairs a self-leave whose groups-row delete never landed', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      const idx = drive.indexOf('async function repairSelfLeave(groupId)');
+      assert(idx !== -1, 'sharing-drive must define a self-leave repair');
+      const body = drive.slice(idx, idx + 1800);
+      assert(body.includes("member.status !== 'left'"),
+        'the repair must only trigger on our own left-marked member row');
+      assert(body.includes('_groups.delete(groupId)'),
+        'the repair must drop the group without surfacing it, so the pointer sync cannot re-add pointers');
+      assert(body.includes("db.from('groups').delete().eq('id', groupId)"),
+        'the repair must retry the groups-table row delete');
+    });
+
+    test('loadAll runs the self-leave repair alongside the join-flip repair', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      const loadAll = drive.slice(drive.indexOf('async loadAll()'), drive.indexOf('getAllGroups()'));
+      assert(loadAll.includes('await repairPendingJoinFlip(row.id);') &&
+             loadAll.includes('await repairSelfLeave(row.id);'),
+        'loadAll must run both post-load repairs before the startup pointer sync');
     });
 
     test('calendar batch requests use keepalive so they survive tab close', () => {

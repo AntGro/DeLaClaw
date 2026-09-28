@@ -938,6 +938,10 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         }
       } catch (e) {
         console.error(`Drive: save failed for ${table}`, e);
+        // Rethrow: callers decide — the debounced path re-schedules the retry
+        // (the table stays dirty), forceSave tracks per-table success, and
+        // flushTables gates operations on the upload actually succeeding.
+        throw e;
       } finally {
         flushingTables.delete(table);
         delete flushPromises[table];
@@ -1220,12 +1224,20 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         let _err = false;
         const flushed = [];
         try {
-          // flushTable rethrows on failure, so only successful tables land in `flushed`
-          await Promise.all(tablesToSave.map(t =>
-            flushTable(t, 0, true).then(() => { flushed.push(t); }),
+          // flushTable rethrows on failure: settle per table so one failure
+          // doesn't skip the rest. Failed tables are re-scheduled for the
+          // debounced retry instead of being silently dropped from dirtyTables.
+          const results = await Promise.all(tablesToSave.map(t =>
+            flushTable(t, 0, true).then(
+              () => ({ t, ok: true }),
+              (e) => ({ t, ok: false, err: e }),
+            ),
           ));
-        } catch (e) { _err = true; }
-        finally { syncEnd(_err); }
+          for (const r of results) {
+            if (r.ok) flushed.push(r.t);
+            else { _err = true; scheduleSave(r.t); }
+          }
+        } finally { syncEnd(_err); }
         // Notify listeners (e.g. calendar sync) for tables that actually
         // flushed. The debounced path does this per table — forceSave must
         // too, otherwise a tab-hide save uploads to Drive but the calendar
@@ -1234,6 +1246,37 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
           for (const t of flushed) {
             try { adapter._onTableFlushed(t); } catch (_) {}
           }
+        }
+      }
+    },
+
+    /**
+     * Upload dirty tables now instead of waiting for the debounce timer.
+     * Rethrows the first failure so callers can gate an operation on its
+     * writes actually reaching Drive (e.g. the leave flow forces the
+     * converted tables up before flipping 'left' in group.json — a hard
+     * crash between the flip and the debounced flush would otherwise lose
+     * the kept copies). Tables that failed stay dirty and keep their
+     * debounced retry. Notifies _onTableFlushed for uploaded tables so the
+     * calendar sync runs, like the debounced path.
+     */
+    async flushTables(tables) {
+      const targets = tables ? tables.filter(t => dirtyTables.has(t)) : [...dirtyTables];
+      const flushed = [];
+      for (const t of targets) {
+        if (saveTimers[t]) { clearTimeout(saveTimers[t]); delete saveTimers[t]; }
+        try {
+          await flushTable(t);
+          dirtyTables.delete(t); // only clear dirty after successful flush
+          flushed.push(t);
+        } catch (e) {
+          scheduleSave(t); // keep the debounced retry alive for the rest
+          throw e;
+        }
+      }
+      if (adapter._onTableFlushed) {
+        for (const t of flushed) {
+          try { adapter._onTableFlushed(t); } catch (_) {}
         }
       }
     },

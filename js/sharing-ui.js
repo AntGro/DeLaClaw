@@ -428,6 +428,11 @@ async function sharingUnjoinGroup(groupId) {
       try {
         if (keepCopies) {
           await _convertGroupItemsToPersonal(groupId);
+          // The 'left' flip in unjoinGroup uploads group.json immediately,
+          // while table writes are debounced — force the converted tables to
+          // Drive first. Otherwise a hard crash between the flip and the
+          // flush would lose the kept copies after the flip went through.
+          await state.driveAdapter.flushTables?.();
         }
         await state.sharing.unjoinGroup(groupId);
         showToast(t('sharing.left_group'), 'info');

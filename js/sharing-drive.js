@@ -644,8 +644,37 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     }
   }
 
-  function publicMember(member) {
-    return {
+  /**
+   * Self-leave repair: a previous unjoinGroup wrote our member row as
+   * status 'left' in group.json but the groups-table row delete never
+   * landed, so the group would re-surface on every load — and the pointer
+   * sync would re-add pointers for items already converted to personal
+   * copies. The only writer of our own 'left' status is unjoinGroup, and a
+   * re-invite revives the row in place (resetting the status), so a 'left'
+   * row at load time unambiguously means "I left, finish the job": drop
+   * the group without surfacing it and retry the row delete.
+   * Runs at startup (see loadAll), best-effort like the permission audit: a
+   * failed repair is logged and retried on the next load, never fails startup.
+   */
+  async function repairSelfLeave(groupId) {
+    const e = _groups.get(groupId);
+    if (!e) return;
+    const me = await ensureUser().catch(() => null);
+    const selfId = me?.email ? await memberIdFromEmail(me.email).catch(() => null) : null;
+    if (!selfId) return;
+    const member = (e.group.members || []).find(m => m.member_id === selfId);
+    if (!member || member.status !== 'left') return;
+    _groups.delete(groupId);
+    if (db) {
+      const { error } = await db.from('groups').delete().eq('id', groupId);
+      if (error) console.warn(`sharing: self-leave repair groups-row delete failed for ${groupId}:`, error.message);
+      await refreshGroupRows();
+    } else {
+      _groupRows = _groupRows.filter(r => r.id !== groupId);
+    }
+  }
+
+  function publicMember(member) {    return {
       member_id: member.member_id,
       role: member.role,
       status: member.status,
@@ -1144,15 +1173,26 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       await Promise.all(promises);
 
-      // Join-flip repair: a kind-'joined' pointer whose own member row is
-      // still 'pending' means the pending→joined re-upload failed after the
-      // pointer was persisted. Flip it now, best-effort (never fails the load).
+      // Post-load repairs (best-effort, never fail the load):
+      // - join-flip: a kind-'joined' pointer whose own member row is still
+      //   'pending' means the pending→joined re-upload failed after the
+      //   pointer was persisted. Flip it now.
+      // - self-leave: a kind-'joined' pointer whose own member row is
+      //   already 'left' in group.json means a previous leave completed the
+      //   flip but the groups-table row delete never landed. Drop the group
+      //   without surfacing it (so the pointer sync can't re-add pointers
+      //   for already-converted copies) and retry the row delete.
       for (const row of _groupRows) {
         if (row.kind !== 'joined' || !_groups.has(row.id)) continue;
         try {
           await repairPendingJoinFlip(row.id);
         } catch (err) {
           console.warn(`sharing: pending→joined repair failed for ${row.id} (retried on next load):`, err);
+        }
+        try {
+          await repairSelfLeave(row.id);
+        } catch (err) {
+          console.warn(`sharing: self-leave repair failed for ${row.id} (retried on next load):`, err);
         }
       }
 
@@ -1348,8 +1388,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return { member_id };
     },
 
-    /** Remove a member from a group. Creator-only. Records the removal in
-     *  revoked.json, revokes Drive access, updates group.json. */
+    /** Remove a member from a group. Creator-only. Reassigns the removed
+     *  member's items to the creator, records the removal in revoked.json,
+     *  revokes Drive access, updates group.json. */
     async removeUser(groupId, member_id) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
@@ -1359,7 +1400,25 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (!member) throw new Error('Member not found');
       if (member.role === 'creator') throw new Error('Cannot remove the creator');
 
-      // 1. Record the removal in revoked.json FIRST — the member must be able
+      // 1. Reassign the removed member's items to the creator, so no ghost
+      // creator IDs linger in the shared files. Runs before the revoked.json
+      // notice: a rewrite failure aborts the removal with nothing changed.
+      // updated_at is bumped so the new owner wins any concurrent-edit merge.
+      const creatorId = e.group.created_by || await currentMemberId(groupId);
+      const now = new Date().toISOString();
+      for (const type of ITEM_TYPES) {
+        const items = e.typeData[type] || [];
+        if (!items.some(item => item.created_by === member_id)) continue;
+        for (const item of items) {
+          if (item.created_by === member_id) {
+            item.created_by = creatorId;
+            item.updated_at = now;
+          }
+        }
+        await saveTypedItems(groupId, type);
+      }
+
+      // 2. Record the removal in revoked.json FIRST — the member must be able
       // to read it after their folder access is revoked. Aborts the removal
       // if this write fails, so no one is ever removed without a notice.
       if (e.revokedMeta?.fileId) {
@@ -1372,7 +1431,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         e.revokedMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
       }
 
-      // 2. Revoke folder access. The file-level reader grant on revoked.json
+      // 3. Revoke folder access. The file-level reader grant on revoked.json
       // (given at invite time) survives, so the member can read the notice.
       const permissionId = member.drive_permission_id || (member.member_id || '').replace(/^drive-perm-/, '');
       if (permissionId) await driveRemovePermission(tok, e.folderId, permissionId).catch(() => {});

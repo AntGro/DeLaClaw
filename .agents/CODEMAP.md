@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-29T17:48:36.624Z from 39 modules (v2.9.12). Total LOC 30961. Do not hand-edit.
+> Generated 2026-09-29T18:03:36.144Z from 39 modules (v2.9.13). Total LOC 31011. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -29,12 +29,12 @@
 |--------|-----|--------|---------|------------|-------|
 | main | 3731 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
 | sharing-drive | 2278 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
-| i18n | 2255 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
+| i18n | 2270 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
 | drive | 1464 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
-| sharing-ui | 1305 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:39,guard+pendingSet,window:8 |
+| sharing-ui | 1331 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:39,guard+pendingSet,window:8 |
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
 | calendar-sync | 1198 | birthdays,gcal_sync,habits,settings,todos | drive-folders,habits,i18n,icons | main.js | - |
-| utils | 895 | flashcards,x | i18n,icons,state,version | - | esc:7,window:6 |
+| utils | 904 | flashcards,x | i18n,icons,state,version | - | esc:7,window:6 |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 464 | - | habits,i18n,icons,utils | - | - |
 | delegation | 421 | - |  | - | window:1 |

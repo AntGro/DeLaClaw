@@ -3070,6 +3070,33 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(wipe.includes('_groups.delete(row.id)'), 'the loaded group entry must be dropped on 404');
     });
 
+    test('group delete/leave modals stay open with per-step progress and refresh views', () => {
+      const ui = jsFiles['sharing-ui.js'];
+      const del = ui.slice(ui.indexOf('async function sharingDeleteGroup'));
+      const leave = ui.slice(ui.indexOf('async function sharingUnjoinGroup'));
+      for (const [name, src, steps] of [
+        ['delete-group', del, ['deleting_converting_items', 'deleting_items', 'deleting_group', 'refreshing_views']],
+        ['leave-group', leave, ['deleting_converting_items', 'leaving_group', 'refreshing_views']],
+      ]) {
+        assert(src.includes('keepOpen: true'), `${name} modal must stay open until the action is done`);
+        for (const step of steps) {
+          assert(src.includes(`setConfirmActionProgress(t('sharing.${step}'))`),
+            `${name} must report the ${step} step`);
+        }
+        assert(src.includes('await _refreshViewsAfterItemsChanged()'),
+          `${name} must explicitly refresh views (the sync cannot see the conversion)`);
+      }
+    });
+
+    test('setConfirmActionProgress only updates while the modal is locked', () => {
+      const utils = jsFiles['utils.js'];
+      assert(utils.includes('function setConfirmActionProgress'), 'utils must expose setConfirmActionProgress');
+      const body = utils.slice(utils.indexOf('function setConfirmActionProgress'));
+      assert(body.includes('_confirmActionLocked'), 'progress updates must be gated on the modal lock');
+      assert(utils.includes('setConfirmActionProgress,') || utils.includes('setConfirmActionProgress\n'),
+        'setConfirmActionProgress must be exported');
+    });
+
     test('setup help names the actual Drive folder', () => {
       const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
       const lines = i18n.split('\n').filter(l => l.includes('drive_1_desc:'));

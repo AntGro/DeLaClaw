@@ -872,9 +872,18 @@ function restoreTextInputs(root, selector, keyAttr, snap) {
   }
 }
 
+// Update the confirm-action button label mid-run (keepOpen mode only).
+// Lets a long callback report which step is in progress, e.g.
+// setConfirmActionProgress(t('sharing.deleting_group')).
+function setConfirmActionProgress(text) {
+  if (!_confirmActionLocked) return;
+  const btnTextEl = document.getElementById('confirmActionBtnText');
+  if (btnTextEl) btnTextEl.textContent = text;
+}
+
 export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
-  showConfirmAction, closeConfirmAction, executeConfirmAction,
+  showConfirmAction, closeConfirmAction, executeConfirmAction, setConfirmActionProgress,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, fetchAll,
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, isDesktopLike,

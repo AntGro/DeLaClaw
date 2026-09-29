@@ -19,7 +19,7 @@
 
 import state from './state.js';
 import { t } from './i18n.js';
-import { esc, escQ, showToast, showConfirmAction, isDesktopLike } from './utils.js';
+import { esc, escQ, showToast, showConfirmAction, isDesktopLike, setConfirmActionProgress } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { LOGOS } from './backend-logos.js';
 import { decodeInviteEnvelope } from './sharing-envelope.js';
@@ -410,6 +410,7 @@ async function sharingUnjoinGroup(groupId) {
     async (keepCopies) => {
       try {
         if (keepCopies) {
+          setConfirmActionProgress(t('sharing.deleting_converting_items'));
           await _convertGroupItemsToPersonal(groupId);
           // The 'left' flip in unjoinGroup uploads group.json immediately,
           // while table writes are debounced — force the converted tables to
@@ -417,7 +418,10 @@ async function sharingUnjoinGroup(groupId) {
           // flush would lose the kept copies after the flip went through.
           await state.driveAdapter.flushTables?.();
         }
+        setConfirmActionProgress(t('sharing.leaving_group'));
         await state.sharing.unjoinGroup(groupId);
+        setConfirmActionProgress(t('sharing.refreshing_views'));
+        await _refreshViewsAfterItemsChanged();
         showToast(t('sharing.left_group'), 'info');
         renderSharingPane();
         document.dispatchEvent(new CustomEvent('sharing-changed'));
@@ -430,6 +434,7 @@ async function sharingUnjoinGroup(groupId) {
       btnText: t('sharing.leave'),
       iconSvg: lucideIcon('log-out', 28),
       btnIconSvg: lucideIcon('log-out', 15, 'currentColor'),
+      keepOpen: true,
     }
   );
 }
@@ -663,6 +668,22 @@ async function _convertGroupItemsToPersonal(groupId) {
 }
 
 /**
+ * Re-read the item views from the DB. Used after local item mutations that
+ * bypass the shared sync (keep-copies conversion, group item deletion): the
+ * conversion severs the shared link, so the sharing-changed sync detects no
+ * change and the in-memory caches would keep rendering stale group chips.
+ * Dynamic imports avoid a static cycle (todos/habits/lists import sharing-ui).
+ */
+async function _refreshViewsAfterItemsChanged() {
+  const [{ refreshTodos }, { refreshHabits }, { refreshLists }] = await Promise.all([
+    import('./todos.js'), import('./habits.js'), import('./lists.js'),
+  ]);
+  await refreshTodos();
+  await refreshHabits();
+  await refreshLists();
+}
+
+/**
  * Delete all local items belonging to a group.
  */
 async function _deleteGroupItems(groupId) {
@@ -683,11 +704,16 @@ async function sharingDeleteGroup(groupId) {
     async (keepItems) => {
       try {
         if (keepItems) {
+          setConfirmActionProgress(t('sharing.deleting_converting_items'));
           await _convertGroupItemsToPersonal(groupId);
         } else {
+          setConfirmActionProgress(t('sharing.deleting_items'));
           await _deleteGroupItems(groupId);
         }
+        setConfirmActionProgress(t('sharing.deleting_group'));
         await state.sharing.deleteGroup(groupId);
+        setConfirmActionProgress(t('sharing.refreshing_views'));
+        await _refreshViewsAfterItemsChanged();
         showToast(t('sharing.group_deleted'), 'info');
         renderSharingPane();
         // Refresh all pages to reflect changes
@@ -695,7 +721,7 @@ async function sharingDeleteGroup(groupId) {
       } catch (e) { showToast(e.message, 'error'); }
     },
     detail,
-    { toggleLabel: t('sharing.delete_group_keep_items') }
+    { toggleLabel: t('sharing.delete_group_keep_items'), keepOpen: true }
   );
 }
 

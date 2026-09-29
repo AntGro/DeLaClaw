@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -231,6 +231,10 @@ function renderTodos() {
   if (!grid) return;
   cleanupDragArtifacts();
 
+  // A background sharing sync can re-render while the user is typing in a
+  // quick-add box — keep the in-progress text (and focus) across the render.
+  const pendingInputs = snapshotTextInputs(grid, '.todo-cat-input', 'data-category');
+
   // Show page-level empty state when user has zero TODOs and no custom categories
   const catRows = Array.from(_todoCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
   if (allTodos.length === 0 && catRows.length <= 1) {
@@ -271,6 +275,7 @@ function renderTodos() {
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
   restoreInnerScrollPositions(grid, innerScrolls);
+  restoreTextInputs(grid, '.todo-cat-input', 'data-category', pendingInputs);
 
   // Init drag-and-drop for each card (individual TODO items)
   categoryIdList.forEach(catId => {
@@ -662,21 +667,30 @@ async function setTodoPriority(id, level) {
   const todo = allTodos.find(t => t.id === id);
 
   if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-    // ─── Shared: write only to Drive ───
-    try {
-      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
-      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-        payload: { ...currentPayload, priority: level },
-      });
-    } catch (e) { console.warn('Failed to update shared todo priority on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+    // ─── Shared: write only to Drive (optimistic — refresh on staging) ───
+    let onStaged;
+    const staged = new Promise(resolve => { onStaged = resolve; });
+    const label = t(`todos.priority_${level}`) || level;
+    const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+      payload: { text: todo.text, category: todo.category || '', priority: level },
+    }, { onStaged });
+    upload.then(
+      () => showToast(label, 'success'),
+      async (e) => {
+        console.warn('Failed to update shared todo priority on Drive:', e);
+        await refreshTodos();
+        showToast(t('toast.update_failed'), 'error');
+      }
+    );
+    await Promise.race([staged, upload.then(() => {}, () => {})]);
   } else {
     // ─── Normal: write to local DB ───
     const { error } = await state.db.from('todos').update({ priority: level }).eq('id', id);
     if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    const label = t(`todos.priority_${level}`) || level;
+    showToast(label, 'success');
   }
 
-  const label = t(`todos.priority_${level}`) || level;
-  showToast(label, 'success');
   await refreshTodos();
 }
 
@@ -720,19 +734,28 @@ async function toggleTodo(id, done, btnEl) {
     const todo = allTodos.find(t => t.id === id);
 
     if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-      try {
-        if (done) {
-          await state.sharing.completeItem(todo.shared_group_id, todo.shared_id);
-        } else {
-          await state.sharing.uncompleteItem(todo.shared_group_id, todo.shared_id);
+      // Optimistic: the sharing layer stages the change in memory (onStaged)
+      // and uploads in the background; a failed upload rolls the memory back.
+      let onStaged;
+      const staged = new Promise(resolve => { onStaged = resolve; });
+      const upload = done
+        ? state.sharing.completeItem(todo.shared_group_id, todo.shared_id, undefined, { onStaged })
+        : state.sharing.uncompleteItem(todo.shared_group_id, todo.shared_id, { onStaged });
+      upload.then(
+        () => showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success'),
+        async (e) => {
+          console.warn('Failed to toggle shared todo on Drive:', e);
+          await refreshTodos();
+          showToast(t('toast.update_failed'), 'error');
         }
-      } catch (e) { console.warn('Failed to toggle shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+      );
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
     } else {
       const { error } = await state.db.from('todos').update({ done }).eq('id', id);
       if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+      showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
     }
 
-    showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
     await refreshTodos();
   } finally {
     _pendingTodoToggles.delete(id);
@@ -746,14 +769,26 @@ async function deleteTodo(id) {
     'Delete this TODO? This cannot be undone.',
     async () => {
       const todo = allTodos.find(t => t.id === id);
+      const pointerRow = todo ? { ...todo } : null;
       const { error } = await state.db.from('todos').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
 
-      // Delete from Drive if shared (removes for all group members)
+      // Delete from Drive if shared (removes for all group members). The
+      // upload runs in the background; a failure restores the pointer row.
       if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-        try {
-          await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
-        } catch (e) { console.warn('Failed to delete shared todo from Drive:', e); }
+        let onStaged;
+        const staged = new Promise(resolve => { onStaged = resolve; });
+        const upload = state.sharing.deleteItem(todo.shared_group_id, todo.shared_id, { onStaged });
+        upload.then(
+          () => {},
+          async (e) => {
+            console.warn('Failed to delete shared todo from Drive:', e);
+            if (pointerRow) await state.db.from('todos').insert(pointerRow);
+            await refreshTodos();
+            showToast(t('toast.delete_failed'), 'error');
+          }
+        );
+        await Promise.race([staged, upload.then(() => {}, () => {})]);
       }
 
       // Animate item out before re-rendering
@@ -781,13 +816,29 @@ async function deleteAllDoneTodos(catId) {
     t('todos.delete_all_done'),
     `Delete all ${doneTodos.length} completed TODO${doneTodos.length > 1 ? 's' : ''} in "${catName}"? This cannot be undone.`,
     async () => {
+      const pointerRows = [];
       for (const td of doneTodos) {
+        if (td.shared_id && td.shared_group_id) pointerRows.push({ ...td });
         await state.db.from('todos').delete().eq('id', td.id);
-        // Delete from Drive if shared
-        if (td.shared_id && td.shared_group_id && state.sharing) {
-          try { await state.sharing.deleteItem(td.shared_group_id, td.shared_id); }
-          catch (e) { console.warn('Failed to delete shared todo from Drive:', e); }
-        }
+      }
+      // Shared deletes upload in the background; failures restore the pointer rows.
+      if (state.sharing && pointerRows.length) {
+        (async () => {
+          const failed = [];
+          for (const pr of pointerRows) {
+            try {
+              await state.sharing.deleteItem(pr.shared_group_id, pr.shared_id);
+            } catch (e) {
+              console.warn('Failed to delete shared todo from Drive:', e);
+              failed.push(pr);
+            }
+          }
+          if (failed.length) {
+            for (const pr of failed) await state.db.from('todos').insert(pr);
+            await refreshTodos();
+            showToast(t('toast.delete_failed'), 'error');
+          }
+        })();
       }
       showToast(t('toast.deleted'), 'info');
       await refreshTodos();
@@ -894,24 +945,38 @@ async function editTodoInline(id, itemEl) {
       }
       if (Object.keys(updates).length > 0) {
         if (todo.shared_id && todo.shared_group_id && state.sharing) {
-          // ─── Shared: category to local pointer, text/priority/due_date to Drive ───
+          // ─── Shared: category to local pointer, text/priority/due_date to Drive (optimistic) ───
           if (updates.category_id !== undefined) {
             await state.db.from('todos').update({ category_id: updates.category_id, category: updates.category }).eq('id', id);
           }
-          try {
-            const driveUpdates = {};
-            if (updates.text) driveUpdates.text = updates.text;
-            if (updates.due_date !== undefined) driveUpdates.due_date = updates.due_date;
-            if (updates.priority) driveUpdates.priority = updates.priority;
-            if (Object.keys(driveUpdates).length > 0) {
-              const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
-              await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-                payload: { ...currentPayload, ...driveUpdates },
-              });
-            }
-          } catch (e) { console.warn('Failed to update shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
-          Object.assign(todo, updates);
-          showToast(t('todos.todo_updated'), 'success');
+          const driveUpdates = {};
+          if (updates.text) driveUpdates.text = updates.text;
+          if (updates.due_date !== undefined) driveUpdates.due_date = updates.due_date;
+          if (updates.priority) driveUpdates.priority = updates.priority;
+          let failed = false;
+          if (Object.keys(driveUpdates).length > 0) {
+            const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
+            let onStaged;
+            const staged = new Promise(resolve => { onStaged = resolve; });
+            const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+              payload: { ...currentPayload, ...driveUpdates },
+            }, { onStaged });
+            upload.then(
+              () => showToast(t('todos.todo_updated'), 'success'),
+              async (e) => {
+                failed = true;
+                console.warn('Failed to update shared todo on Drive:', e);
+                await refreshTodos();
+                showToast(t('toast.update_failed'), 'error');
+              }
+            );
+            // Unblock on staging; a pre-staging failure is caught by the
+            // failure branch above, so don't hang here.
+            await Promise.race([staged, upload.then(() => {}, () => {})]);
+          } else {
+            showToast(t('todos.todo_updated'), 'success');
+          }
+          if (!failed) Object.assign(todo, updates);
         } else {
           // ─── Normal: write all to local DB ───
           const { error } = await state.db.from('todos').update(updates).eq('id', id);
@@ -1031,23 +1096,38 @@ async function deleteCategory(catId) {
     : `Delete empty category "${cat.name}"?`;
 
   showConfirmAction(t('common.delete'), msg, async () => {
-    // Propagate deletion of shared items to sharing layer before CASCADE removes local rows
-    if (state.sharing) {
-      for (const todo of todosInCat) {
-        if (todo.shared_id && todo.shared_group_id) {
-          try { await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id); }
-          catch (e) { console.warn('Failed to delete shared todo:', e); }
-        }
-      }
-    }
-    // Explicitly delete items so calendar sync (markDirty) fires for each.
-    // SQL CASCADE would handle this on Supabase, but Drive/Demo have no FK enforcement.
+    // Snapshots for rollback.
+    const catRow = { ...cat };
+    const todoRows = todosInCat.map(td => ({ ...td }));
+    // Delete locally first to unblock the UI. Explicitly delete items so
+    // calendar sync (markDirty) fires for each. SQL CASCADE would handle this
+    // on Supabase, but Drive/Demo have no FK enforcement.
     for (const todo of todosInCat) {
       await state.db.from('todos').delete().eq('id', todo.id);
     }
     await state.db.from('todo_categories').delete().eq('id', catId);
     showToast(t('toast.deleted'), 'info');
     await refreshTodos();
+    // Propagate deletion of shared items to the sharing layer in the
+    // background (sequential, etag order). A failure restores the category
+    // and its items locally.
+    if (state.sharing) {
+      const sharedTodos = todosInCat.filter(t => t.shared_id && t.shared_group_id);
+      if (sharedTodos.length) {
+        const upload = (async () => {
+          for (const todo of sharedTodos) {
+            await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
+          }
+        })();
+        upload.catch(async (e) => {
+          console.warn('Failed to delete shared todos from Drive:', e);
+          await state.db.from('todo_categories').insert(catRow);
+          for (const r of todoRows) await state.db.from('todos').insert(r);
+          await refreshTodos();
+          showToast(t('toast.delete_failed'), 'error');
+        });
+      }
+    }
   });
 }
 
@@ -1099,19 +1179,31 @@ async function doSnooze(snoozeUntil) {
   snoozeBtns.forEach(b => { b.disabled = true; b.classList.add('is-pending'); });
 
   try {
+    const snoozedMsg = `${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
     if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-      // ─── Shared: write snooze to Drive payload ───
+      // ─── Shared: write snooze to Drive payload (optimistic — refresh on staging) ───
       const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
-      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+      let onStaged;
+      const staged = new Promise(resolve => { onStaged = resolve; });
+      const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
         payload: { ...currentPayload, snooze_until: snoozeUntil.toISOString() },
-      });
+      }, { onStaged });
+      upload.then(
+        () => showToast(snoozedMsg, 'success'),
+        async (e) => {
+          console.warn('Failed to snooze todo:', e);
+          await refreshTodos();
+          showToast(t('toast.update_failed'), 'error');
+        }
+      );
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
     } else {
       // ─── Normal: write to local DB ───
       const { error } = await state.db.from('todos').update({ snooze_until: snoozeUntil.toISOString() }).eq('id', taskId);
       if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+      showToast(snoozedMsg, 'success');
     }
     closeSnoozeModal();
-    showToast(`${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 'success');
     await refreshTodos();
   } catch (e) {
     console.warn('Failed to snooze todo:', e);
@@ -1131,15 +1223,27 @@ function unsnoozeTodo(id, el) {
       try {
         const todo = allTodos.find(t => t.id === id);
         if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+          // ─── Shared: clear snooze in the Drive payload (optimistic) ───
           const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
-          await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+          let onStaged;
+          const staged = new Promise(resolve => { onStaged = resolve; });
+          const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
             payload: { ...currentPayload, snooze_until: null },
-          });
+          }, { onStaged });
+          upload.then(
+            () => showToast(t('todos.unsnoozed'), 'success'),
+            async (e) => {
+              console.warn('Failed to unsnooze todo:', e);
+              await refreshTodos();
+              showToast(t('toast.update_failed'), 'error');
+            }
+          );
+          await Promise.race([staged, upload.then(() => {}, () => {})]);
         } else {
           const { error } = await state.db.from('todos').update({ snooze_until: null }).eq('id', id);
           if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+          showToast(t('todos.unsnoozed'), 'success');
         }
-        showToast(t('todos.unsnoozed'), 'success');
         await refreshTodos();
       } catch (e) {
         console.warn('Failed to unsnooze todo:', e);
@@ -1283,6 +1387,10 @@ let _syncingTodos = false;
 // tracking can't see them — diff here and mark the pointer dirty instead.
 // The group name is included because calendar titles embed it ([TODO][Category][Group]).
 const _sharedTodoCalFp = new Map();
+// Last-seen updated_at per shared item: detects remote content edits, which
+// change the in-memory item (and therefore the rendered view) without
+// touching any local pointer row.
+const _sharedTodoSeenAt = new Map();
 function sharedTodoCalFingerprint(sh) {
   return JSON.stringify([
     sh.payload?.due_date || null,
@@ -1296,10 +1404,10 @@ function sharedTodoCalFingerprint(sh) {
 let _bulkShareInProgress = new Set();
 const _pendingShare = new Set();
 async function syncSharedTodos() {
-  if (_syncingTodos) return;
+  if (_syncingTodos) return false;
   _syncingTodos = true;
   try {
-    await _doSyncSharedTodos();
+    return await _doSyncSharedTodos();
   } finally {
     _syncingTodos = false;
   }
@@ -1354,6 +1462,11 @@ async function _doSyncSharedTodos() {
       const pointer = localBySharedId.get(sh.id);
       if (pointer) { state.markCalDirty?.('todos', pointer.id); calDirtyMarked = true; }
     }
+    // Remote content edits bump updated_at on every mutation — a change here
+    // means the rendered item changed even though no pointer row moved.
+    const prevSeen = _sharedTodoSeenAt.get(sh.id);
+    _sharedTodoSeenAt.set(sh.id, sh.updated_at);
+    if (prevSeen !== undefined && prevSeen !== sh.updated_at) needsRefresh = true;
   }
   if (calDirtyMarked) await state.syncCalendarTable?.('todos');
 
@@ -1364,6 +1477,7 @@ async function _doSyncSharedTodos() {
       if (group) {
         // Group exists but item gone from remote → delete local pointer
         await state.db.from('todos').delete().eq('id', local.id);
+        _sharedTodoSeenAt.delete(local.shared_id);
         needsRefresh = true;
       } else {
         // Group not loaded — transient skip, or the group was dropped and its
@@ -1373,9 +1487,7 @@ async function _doSyncSharedTodos() {
     }
   }
 
-  if (needsRefresh) {
-    await refreshTodos();
-  }
+  return needsRefresh;
 }
 
 window.syncSharedTodos = syncSharedTodos;
@@ -1392,14 +1504,21 @@ async function shareTodoFromAdd(btn) {
   const guardKey = `add-${catId}`;
   if (_pendingShare.has(guardKey)) return;
 
-  openSharePopover(btn, async (groupId, assignees) => {
+  openSharePopover(btn, (groupId, assignees) => {
     if (_pendingShare.has(guardKey)) return;
     _pendingShare.add(guardKey);
     if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
-    try {
+
+    // Resolves once the shared item is staged in memory, before the Drive upload.
+    let onStaged;
+    const staged = new Promise(resolve => { onStaged = resolve; });
+
+    (async () => {
       const sharedId = crypto.randomUUID();
       const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catId);
       const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
+
+      // Stage the local pointer row first (fast local write).
       const { data: localRow, error: localErr } = await state.db.from('todos').insert({
         text: '', priority: 'normal', done: false,
         category: cat?.name ?? '', category_id: catId,
@@ -1409,31 +1528,40 @@ async function shareTodoFromAdd(btn) {
       }).select().single();
       if (localErr) { showToast(localErr.message, 'error'); return; }
 
-      try {
-        await state.sharing.addItem(groupId, {
-          id: sharedId,
-          item_type: 'todo',
-          payload: { text, category: cat?.name ?? '', priority },
-          assignees,
-        });
-      } catch (driveErr) {
-        // Clean up local row since Drive write failed
-        if (localRow?.id) await state.db.from('todos').delete().eq('id', localRow.id);
-        throw driveErr;
-      }
+      // The shared upload runs in the background: success toasts, failure
+      // rolls the pointer row back and restores the typed text.
+      const upload = state.sharing.addItem(groupId, {
+        id: sharedId,
+        item_type: 'todo',
+        payload: { text, category: cat?.name ?? '', priority },
+        assignees,
+        onStaged,
+      });
+      upload.then(
+        () => showToast(t('sharing.shared') + '!', 'success'),
+        async (driveErr) => {
+          if (localRow?.id) await state.db.from('todos').delete().eq('id', localRow.id);
+          input.value = text;
+          await refreshTodos();
+          showToast(driveErr.message, 'error');
+        }
+      );
+
+      // Unblock the UI once the item is staged in memory — don't wait for the
+      // upload. If the upload fails before staging, the failure branch above
+      // handles the rollback, so don't hang here.
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
 
       input.value = '';
       input.dataset.priority = 'low';
       const prioBtn = addRow.querySelector('.todo-add-priority-btn');
       if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'normal');
-      showToast(t('sharing.shared') + '!', 'success');
       await refreshTodos();
-    } catch (e) {
-      showToast(e.message, 'error');
-    } finally {
-      _pendingShare.delete(guardKey);
-      if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
-    }
+    })().catch(e => showToast(e.message, 'error'))
+      .finally(() => {
+        _pendingShare.delete(guardKey);
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+      });
   }, { showAssignees: false });
 }
 
@@ -1446,20 +1574,17 @@ async function shareExistingTodo(id, el) {
   if (!todo || todo.shared_id) return;
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-todo"][data-id="${CSS.escape(id)}"]`);
   if (!btn) return;
-  openSharePopover(btn, async (groupId) => {
+  openSharePopover(btn, (groupId) => {
     if (_pendingShare.has(id)) return;
     _pendingShare.add(id);
     if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
-    try {
+    (async () => {
       const sharedId = crypto.randomUUID();
       const cat = _todoCatMap.get(catIdForTodo(todo));
-      // 1. Create shared item on the sharing layer
-      await state.sharing.addItem(groupId, {
-        id: sharedId,
-        item_type: 'todo',
-        payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null },
-      });
-      // 2. Create local pointer — keep original sort_order so position stays
+      const payload = { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null };
+      // Keep the personal row: a failed upload restores it verbatim.
+      const personalRow = { ...todo };
+      // 1. Stage locally — pointer in, personal item out — and refresh immediately.
       const { error: ptrErr } = await state.db.from('todos').insert({
         text: '', priority: 'normal', done: false,
         category: cat?.name ?? '', category_id: catIdForTodo(todo),
@@ -1468,16 +1593,28 @@ async function shareExistingTodo(id, el) {
         shared_group_id: groupId,
       });
       if (ptrErr) { showToast(ptrErr.message, 'error'); return; }
-      // 3. Delete the personal item
       await state.db.from('todos').delete().eq('id', todo.id);
-      showToast(t('sharing.shared') + '!', 'success');
       await refreshTodos();
-    } catch (e) {
-      showToast(e.message, 'error');
-    } finally {
-      _pendingShare.delete(id);
-      if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
-    }
+      // 2. The shared upload runs in the background: success toasts, failure
+      // restores the personal item and drops the pointer.
+      state.sharing.addItem(groupId, {
+        id: sharedId,
+        item_type: 'todo',
+        payload,
+      }).then(
+        () => showToast(t('sharing.shared') + '!', 'success'),
+        async (driveErr) => {
+          await state.db.from('todos').delete().eq('shared_id', sharedId);
+          await state.db.from('todos').insert(personalRow);
+          await refreshTodos();
+          showToast(driveErr.message, 'error');
+        }
+      );
+    })().catch(e => showToast(e.message, 'error'))
+      .finally(() => {
+        _pendingShare.delete(id);
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+      });
   }, { showAssignees: false });
 }
 window.shareExistingTodo = shareExistingTodo;
@@ -1501,29 +1638,45 @@ async function bulkShareTodoCategory(catId, el) {
         _bulkShareInProgress.add(catId);
         if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
         try {
-          let shared = 0;
+          // Stage everything locally first: pointer in, personal item out.
+          const staged = [];
           for (const todo of items) {
-            try {
-              const sharedId = crypto.randomUUID();
-              await state.sharing.addItem(groupId, {
-                id: sharedId,
-                item_type: 'todo',
-                payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null },
-              });
-              const { error: ptrErr } = await state.db.from('todos').insert({
-                text: '', priority: 'normal', done: false,
-                category: cat?.name ?? '', category_id: catId,
-                sort_order: todo.sort_order ?? 0,
-                shared_id: sharedId,
-                shared_group_id: groupId,
-              });
-              if (ptrErr) continue;
-              await state.db.from('todos').delete().eq('id', todo.id);
-              shared++;
-            } catch (e) { console.error('[DeLaClaw] bulk share todo failed:', e); }
+            const sharedId = crypto.randomUUID();
+            const { error: ptrErr } = await state.db.from('todos').insert({
+              text: '', priority: 'normal', done: false,
+              category: cat?.name ?? '', category_id: catId,
+              sort_order: todo.sort_order ?? 0,
+              shared_id: sharedId,
+              shared_group_id: groupId,
+            });
+            if (ptrErr) continue;
+            await state.db.from('todos').delete().eq('id', todo.id);
+            staged.push({ todo: { ...todo }, sharedId, payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null } });
           }
-          if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+          // Unblock the UI on staging — the uploads run in the background.
           await refreshTodos();
+          _bulkShareInProgress.delete(catId);
+          if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+          let ok = 0;
+          for (const s of staged) {
+            try {
+              await state.sharing.addItem(groupId, {
+                id: s.sharedId,
+                item_type: 'todo',
+                payload: s.payload,
+              });
+              ok++;
+            } catch (e) {
+              console.error('[DeLaClaw] bulk share todo failed:', e);
+              // Roll the item back: drop the pointer, restore the personal row.
+              await state.db.from('todos').delete().eq('shared_id', s.sharedId);
+              await state.db.from('todos').insert(s.todo);
+            }
+          }
+          await refreshTodos();
+          if (ok === staged.length && ok > 0) showToast(t('sharing.share_all_done', ok), 'success');
+          else if (ok > 0) showToast(t('sharing.share_all_partial', ok, staged.length), 'error');
+          else if (staged.length > 0) showToast(t('toast.failed_to_add'), 'error');
         } finally {
           _bulkShareInProgress.delete(catId);
           if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
@@ -1551,7 +1704,7 @@ async function unshareTodo(id, el) {
       try {
         const cat = _todoCatMap.get(catIdForTodo(todo));
         // 1. Create personal todo (same category, keep text/priority/note)
-        const { error: insErr } = await state.db.from('todos').insert({
+        const { data: personalRow, error: insErr } = await state.db.from('todos').insert({
           text: todo.text || '',
           priority: todo.priority || 'normal',
           done: todo.done ? 1 : 0,
@@ -1559,13 +1712,27 @@ async function unshareTodo(id, el) {
           category_id: catIdForTodo(todo),
           sort_order: todo.sort_order || 0,
           snooze_until: todo.snooze_until || null,
-        });
+        }).select().single();
         if (insErr) { showToast(insErr.message, 'error'); return; }
-        // 2. Delete shared item from sharing layer
-        await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
-        // 3. Delete the local pointer
+        // 2. Delete the local pointer and refresh immediately; the shared
+        // item's Drive deletion runs in the background. A failure drops the
+        // personal copy again and restores the pointer row.
+        const pointerRow = { ...todo };
         await state.db.from('todos').delete().eq('id', todo.id);
-        showToast(t('sharing.unshared'), 'success');
+        let onStaged;
+        const staged = new Promise(resolve => { onStaged = resolve; });
+        const upload = state.sharing.deleteItem(todo.shared_group_id, todo.shared_id, { onStaged });
+        upload.then(
+          () => showToast(t('sharing.unshared'), 'success'),
+          async (e) => {
+            console.warn('Failed to unshare todo on Drive:', e);
+            if (personalRow?.id) await state.db.from('todos').delete().eq('id', personalRow.id);
+            await state.db.from('todos').insert(pointerRow);
+            await refreshTodos();
+            showToast(e.message, 'error');
+          }
+        );
+        await Promise.race([staged, upload.then(() => {}, () => {})]);
         await refreshTodos();
       } catch (e) {
         showToast(e.message, 'error');

@@ -840,6 +840,38 @@ function autoResizeTextarea(ta, maxHeight = 120) {
 }
 window.autoResizeTextarea = autoResizeTextarea;
 
+// ── Preserve in-progress quick-add text across re-renders ──
+// A background sharing sync (or the 15s poll) can trigger a full view
+// re-render while the user is typing in a quick-add box. Snapshot the
+// current values (keyed per input) before replacing the DOM and restore
+// them after, so nothing the user typed is lost.
+function snapshotTextInputs(root, selector, keyAttr) {
+  const snap = { values: new Map(), focusKey: null };
+  if (!root) return snap;
+  root.querySelectorAll(selector).forEach(el => {
+    const key = el.getAttribute(keyAttr);
+    if (key == null) return;
+    if (el.value) snap.values.set(key, el.value);
+    if (document.activeElement === el) snap.focusKey = key;
+  });
+  return snap;
+}
+
+function restoreTextInputs(root, selector, keyAttr, snap) {
+  if (!root || !snap) return;
+  root.querySelectorAll(selector).forEach(el => {
+    const v = snap.values.get(el.getAttribute(keyAttr));
+    if (v !== undefined) el.value = v;
+  });
+  if (snap.focusKey != null) {
+    const el = root.querySelector(`${selector}[${keyAttr}="${CSS.escape(snap.focusKey)}"]`);
+    if (el) {
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }
+}
+
 export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
   showConfirmAction, closeConfirmAction, executeConfirmAction,
@@ -849,6 +881,7 @@ export {
   backfillCategoryColors, nextPaletteColor,
   parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,
   autoResizeTextarea,
+  snapshotTextInputs, restoreTextInputs,
 };
 
 window.closeConfirmAction = closeConfirmAction;

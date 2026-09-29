@@ -1259,15 +1259,12 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   // Listen for sharing updates (Drive sharing module polls and fires sharing-changed)
   document.addEventListener('sharing-changed', async () => {
     try {
-      // syncShared* functions refresh their own data when pointers change;
-      // always do a full refresh afterwards so deletions / conversions are
-      // picked up even when sync itself found nothing new.
-      await syncSharedTodos();
-      await syncSharedHabits();
-      await syncSharedListItems();
-      await refreshTodos();
-      await refreshHabits();
-      await refreshLists();
+      // Each sync reports whether anything affecting the display changed
+      // (pointer created/deleted/repaired, or shared content updated) —
+      // refresh only the views that need it.
+      if (await syncSharedTodos()) await refreshTodos();
+      if (await syncSharedHabits()) await refreshHabits();
+      if (await syncSharedListItems()) await refreshLists();
     } catch (e) {
       console.warn('sharing refresh:', e);
     }
@@ -1396,6 +1393,12 @@ document.addEventListener('sharing-group-purge-items', async (e) => {
       await state.db.from(table).delete().eq('shared_group_id', groupId);
     }
   } catch (err) { console.warn('sharing purge items:', err); return; }
+  // The syncs can't see this deletion (the group is already gone from
+  // memory), so refresh the views directly instead of relying on the
+  // sharing-changed handler below.
+  await refreshTodos();
+  await refreshHabits();
+  await refreshLists();
   document.dispatchEvent(new CustomEvent('sharing-changed'));
 });
 
@@ -3642,32 +3645,51 @@ window.markCategoryRenamed = markCategoryRenamed;
           if (msgEl) msgEl.textContent = text;
         }
 
-        // 1. Calendar cleanup — the DeLaClaw calendar must actually be deleted
-        // before account data goes. A failed DELETE aborts the whole flow so a
-        // calendar full of user data can never silently orphan.
+        // The wipe runs as gated steps: any failure aborts the whole flow and
+        // the account connection stays intact, so the user can retry. Steps
+        // are naturally retryable: a re-run only processes what is left.
+        const abort = (stepKey, err) => {
+          console.error(`[account] deletion aborted at ${stepKey}`, err);
+          showToast(t('account.step_failed', { step: t(stepKey) }), 'error');
+          window.location.href = window.location.origin + window.location.pathname;
+        };
+
+        // 1. Delete groups created by this user — removes them for all
+        // members, so it runs first while the token is known good.
+        if (state.sharing) {
+          try {
+            setStep(t('account.step_created_groups'));
+            await state.sharing.deleteOwnedGroups();
+          } catch (err) { abort('account.step_created_groups', err); return; }
+
+          // 2. Leave joined groups (no keep-copies dialog — personal data
+          // is wiped next anyway).
+          try {
+            setStep(t('account.step_joined_groups'));
+            await state.sharing.leaveJoinedGroups();
+          } catch (err) { abort('account.step_joined_groups', err); return; }
+        }
+
+        // 3. Delete the synced calendar — it must actually be deleted before
+        // account data goes, so a calendar full of user data can never
+        // silently orphan.
         try {
           const prefs = await getCalSyncPrefs();
           if (prefs?.enabled) {
             setStep(t('account.step_calendar'));
             await disableCalSync({ deleteCalendar: true });
           }
-        } catch (err) {
-          console.error('[account] calendar deletion failed', err);
-          showToast(t('account.calendar_delete_failed'), 'error');
-          return;
-        }
+        } catch (err) { abort('account.step_calendar', err); return; }
 
-        // 2. Delete data via adapter
+        // 4. Permanently delete personal data via the adapter.
         setStep(t('account.step_data'));
-        const result = await (db.adapter?.deleteAccount?.() || { ok: false, error: 'Not supported' });
-        if (!result.ok) {
-          showToast(t('account.delete_failed'), 'error');
-          window.location.href = window.location.origin + window.location.pathname;
-          return;
-        }
+        const result = await (db.adapter?.deletePersonalData?.() || { ok: false, error: 'Not supported' });
+        if (!result.ok) { abort('account.step_data', new Error(result.error || 'unknown error')); return; }
 
-        // 3. Disconnect — tears down adapter, clears creds, reloads to gate
+        // 5. Revoke OAuth (best effort, last) and disconnect — tears down
+        // the adapter, clears creds, reloads to gate.
         setStep(t('account.step_signout'));
+        try { await db.adapter?.revokeToken?.(); } catch { /* best effort */ }
         await disconnect();
       },
       null,

@@ -1397,45 +1397,62 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     },
 
     /**
-     * Delete the user's DeLaClaw account: trash the environment's Drive folder (and all
-     * files inside it), revoke the OAuth token, and clear local state.
-     * Returns { ok: true } on success or { ok: false, error: string }.
+     * Permanently delete the user's personal DeLaClaw Drive folder and every
+     * file inside it. Unlike trashing, this cannot be undone.
+     * Returns { ok: true } on success or { ok: false, error: string } — the
+     * caller aborts the account deletion on failure.
      */
-    async deleteAccount() {
+    async deletePersonalData() {
       try {
         const tok = await getToken();
         if (!tok) return { ok: false, error: 'No valid token — please sign in again' };
 
-        // 1. Delete the synced calendar (DeLaClaw / DeLaClawDev) if sync was enabled
-        try {
-          const calRow = store.settings?.find(r => r.key === 'gcal_calendar_id');
-          const calId = calRow?.value;
-          if (calId) {
-            await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}`, {
-              method: 'DELETE',
-              headers: { 'Authorization': `Bearer ${tok}` },
-            });
-          }
-        } catch { /* best effort */ }
+        // List every file in the personal folder, then permanently delete
+        // each one before deleting the folder itself.
+        let pageToken = null;
+        const childIds = [];
+        do {
+          const url = new URL('https://www.googleapis.com/drive/v3/files');
+          url.searchParams.set('q', `'${folderId}' in parents and trashed = false`);
+          url.searchParams.set('fields', 'files(id),nextPageToken');
+          url.searchParams.set('pageSize', '100');
+          if (pageToken) url.searchParams.set('pageToken', pageToken);
+          const listRes = await fetch(url, { headers: { 'Authorization': `Bearer ${tok}` } });
+          if (!listRes.ok) return { ok: false, error: `Could not list personal files (HTTP ${listRes.status})` };
+          const data = await listRes.json();
+          for (const f of data.files || []) childIds.push(f.id);
+          pageToken = data.nextPageToken;
+        } while (pageToken);
 
-        // 2. Trash the environment's Drive folder (cascades to all files inside)
-        try {
-          await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}`, {
-            method: 'PATCH',
-            headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ trashed: true }),
+        for (const id of childIds) {
+          const delRes = await fetch(`https://www.googleapis.com/drive/v3/files/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${tok}` },
           });
-        } catch { /* best effort */ }
+          if (!delRes.ok) return { ok: false, error: `Could not permanently delete a personal file (HTTP ${delRes.status})` };
+        }
 
-        // 3. Revoke the OAuth token
-        try {
-          await fetch(`https://oauth2.googleapis.com/revoke?token=${tok}`, { method: 'POST' });
-        } catch { /* best effort */ }
-
+        const folderRes = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${tok}` },
+        });
+        if (!folderRes.ok) return { ok: false, error: `Could not permanently delete the personal folder (HTTP ${folderRes.status})` };
         return { ok: true };
       } catch (e) {
         return { ok: false, error: e.message || 'Unexpected error' };
       }
+    },
+
+    /**
+     * Revoke the OAuth token. Best effort — runs last, after the data is
+     * gone, so a revoke failure never blocks the wipe.
+     */
+    async revokeToken() {
+      try {
+        const tok = await getToken();
+        if (tok) await fetch(`https://oauth2.googleapis.com/revoke?token=${tok}`, { method: 'POST' });
+      } catch { /* best effort */ }
+      clearDriveTokenCache(clientId);
     },
   };
 

@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, nextPaletteColor, autoResizeTextarea } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, truncateWithShowMore, fetchAll, nextPaletteColor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
@@ -127,6 +127,10 @@ function renderLists() {
   if (!grid) return;
   cleanupDragArtifacts();
 
+  // A background sharing sync can re-render while the user is typing in a
+  // quick-add box — keep the in-progress text (and focus) across the render.
+  const pendingInputs = snapshotTextInputs(grid, '.list-quick-input', 'data-list-id');
+
   const lists = state.allLists || [];
   const allItems = state.allListItems || [];
 
@@ -211,6 +215,7 @@ function renderLists() {
   const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   grid.className = 'project-grid';
+  restoreTextInputs(grid, '.list-quick-input', 'data-list-id', pendingInputs);
   window.scrollTo(0, scrollY);
   restoreInnerScrollPositions(grid, innerScrolls);
 
@@ -556,7 +561,14 @@ function editListItemInlineFull(id) {
         if ('note' in updates) drivePayload.note = updates.note;
         if (Object.keys(drivePayload).length > 0) {
           const currentPayload = item._shared?.payload || {};
-          await state.sharing.updateItem(item.shared_group_id, item.shared_id, { payload: { ...currentPayload, ...drivePayload } });
+          // Optimistic: upload in the background; a failure rolls the
+          // in-memory shared item back (adapter) and refreshes the view.
+          state.sharing.updateItem(item.shared_group_id, item.shared_id, { payload: { ...currentPayload, ...drivePayload } })
+            .catch(e => {
+              console.warn('Failed to update shared list item:', e);
+              renderLists();
+              showToast(t('toast.update_failed'), 'error');
+            });
         }
         // list_id is local-only — update pointer directly
         if ('list_id' in updates) {
@@ -678,17 +690,22 @@ async function toggleListItemCheck(id, btnEl) {
     if (!item) return;
     const newVal = item.checked ? 0 : 1;
 
-    // Shared → Drive only
+    // Shared → Drive only (optimistic)
     if (item.shared_id && item.shared_group_id && state.sharing) {
-      try {
-        if (newVal) {
-          await state.sharing.completeItem(item.shared_group_id, item.shared_id);
-        } else {
-          await state.sharing.uncompleteItem(item.shared_group_id, item.shared_id);
-        }
-        item.checked = newVal;
-        renderLists();
-      } catch (e) { showToast(e.message, 'error'); }
+      // Stage locally, refresh on staging; the upload runs in the background.
+      // A failure rolls the in-memory shared item back (adapter).
+      let onStaged;
+      const staged = new Promise(resolve => { onStaged = resolve; });
+      const upload = newVal
+        ? state.sharing.completeItem(item.shared_group_id, item.shared_id, undefined, { onStaged })
+        : state.sharing.uncompleteItem(item.shared_group_id, item.shared_id, { onStaged });
+      upload.then(
+        () => {},
+        (e) => { renderLists(); showToast(e.message, 'error'); }
+      );
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
+      item.checked = newVal;
+      renderLists();
       return;
     }
 
@@ -713,14 +730,27 @@ async function deleteListItem(id) {
     t('common.delete'),
     `Remove "${item.text}"?`,
     async () => {
-      // Shared → delete from Drive + delete local pointer
-      if (item.shared_id && item.shared_group_id && state.sharing) {
-        try {
-          await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
-        } catch (e) { /* item may already be gone from Drive */ }
-      }
+      const pointerRow = item.shared_id ? { ...item } : null;
       const { error } = await state.db.from('list_items').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // Shared → delete from Drive too (removes for all group members).
+      // The upload runs in the background; a failure restores the pointer row.
+      if (item.shared_id && item.shared_group_id && state.sharing) {
+        let onStaged;
+        const staged = new Promise(resolve => { onStaged = resolve; });
+        const upload = state.sharing.deleteItem(item.shared_group_id, item.shared_id, { onStaged });
+        upload.then(
+          () => {},
+          async (e) => {
+            console.warn('Failed to delete shared list item from Drive:', e);
+            if (pointerRow) await state.db.from('list_items').insert(pointerRow);
+            renderLists();
+            showToast(t('toast.delete_failed'), 'error');
+          }
+        );
+        await Promise.race([staged, upload.then(() => {}, () => {})]);
+      }
 
       // Animate item out before re-rendering
       const el = document.querySelector(`[data-item-id="${CSS.escape(id)}"]`);
@@ -890,20 +920,34 @@ async function deleteList(listId) {
     t('common.delete'),
     msg,
     async () => {
-      // Delete shared items from Drive first
-      if (state.sharing) {
-        for (const item of items) {
-          if (item.shared_id && item.shared_group_id) {
-            try { await state.sharing.deleteItem(item.shared_group_id, item.shared_id); } catch { /* ok */ }
-          }
-        }
-      }
-      // Delete items in bulk from local DB
+      // Snapshots for rollback.
+      const listRow = { ...list };
+      const itemRows = items.map(i => ({ ...i }));
+      // Delete locally first to unblock the UI.
       if (itemCount > 0) await state.db.from('list_items').delete().eq('list_id', listId);
       const { error } = await state.db.from('lists').delete().eq('id', listId);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
       showToast(t('toast.removed'), 'info');
       await refreshLists();
+      // Delete shared items from Drive in the background (sequential, etag
+      // order). A failure restores the list and its items locally.
+      if (state.sharing) {
+        const sharedItems = items.filter(i => i.shared_id && i.shared_group_id);
+        if (sharedItems.length) {
+          const upload = (async () => {
+            for (const item of sharedItems) {
+              await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
+            }
+          })();
+          upload.catch(async (e) => {
+            console.warn('Failed to delete shared list items from Drive:', e);
+            await state.db.from('lists').insert(listRow);
+            for (const r of itemRows) await state.db.from('list_items').insert(r);
+            await refreshLists();
+            showToast(t('toast.delete_failed'), 'error');
+          });
+        }
+      }
     }
   );
 }
@@ -950,11 +994,16 @@ async function getOrCreateSharedList(localLists) {
   return result;
 }
 
+// Last-seen updated_at per shared list item: detects remote content edits,
+// which change the in-memory item (and therefore the rendered view) without
+// touching any local pointer row.
+const _sharedListItemSeenAt = new Map();
+
 async function syncSharedListItems() {
-  if (_syncingListItems) return;
+  if (_syncingListItems) return false;
   _syncingListItems = true;
   try {
-    await _doSyncSharedListItems();
+    return await _doSyncSharedListItems();
   } finally {
     _syncingListItems = false;
   }
@@ -999,6 +1048,14 @@ async function _doSyncSharedListItems() {
 
   let needsRefresh = false;
 
+  // Remote content edits bump updated_at on every mutation — a change here
+  // means the rendered item changed even though no pointer row moved.
+  for (const sh of sharedItems) {
+    const prevSeen = _sharedListItemSeenAt.get(sh.id);
+    _sharedListItemSeenAt.set(sh.id, sh.updated_at);
+    if (prevSeen !== undefined && prevSeen !== sh.updated_at) needsRefresh = true;
+  }
+
   // Create pointers for new shared items — always land in the "Shared" list
   for (const sh of sharedItems) {
     if (existingSharedIds.has(sh.id)) continue;
@@ -1035,6 +1092,7 @@ async function _doSyncSharedListItems() {
       if (group) {
         // Group exists but item gone from remote → delete local pointer
         await state.db.from('list_items').delete().eq('id', ptr.id);
+        _sharedListItemSeenAt.delete(ptr.shared_id);
         needsRefresh = true;
       }
       // else: group not loaded — transient skip, or the group was dropped and
@@ -1043,9 +1101,7 @@ async function _doSyncSharedListItems() {
     }
   }
 
-  if (needsRefresh) {
-    await refreshLists();
-  }
+  return needsRefresh;
 }
 
 async function shareListItemFromAdd(btn, listId) {
@@ -1075,11 +1131,16 @@ async function shareListItemFromAdd(btn, listId) {
   // Find list name for payload context
   const listObj = (state.allLists || []).find(l => l.id === actualListId);
 
-  openSharePopover(actualBtn, async (groupId) => {
+  openSharePopover(actualBtn, (groupId) => {
     if (_pendingShare.has(guardKey)) return;
     _pendingShare.add(guardKey);
     if (actualBtn) { actualBtn.disabled = true; actualBtn.classList.add('is-pending'); actualBtn.setAttribute('aria-busy', 'true'); }
-    try {
+
+    // Resolves once the shared item is staged in memory, before the Drive upload.
+    let onStaged;
+    const staged = new Promise(resolve => { onStaged = resolve; });
+
+    (async () => {
       // Pre-generate UUID for pointer → Drive linkage
       const presetId = crypto.randomUUID();
 
@@ -1095,25 +1156,36 @@ async function shareListItemFromAdd(btn, listId) {
       });
       if (ptrErr) { showToast(t('toast.failed_to_add') + ': ' + ptrErr.message, 'error'); return; }
 
-      // 2. Write to Drive with the same ID
-      try {
-        await state.sharing.addItem(groupId, {
-          id: presetId,
-          item_type: 'list_item',
-          payload: { text, list_name: listObj?.name || '' },
-        });
-        input.value = '';
-        showToast(t('sharing.shared') + '!', 'success');
-        await refreshLists();
-      } catch (e) {
-        // Drive failed — clean up local pointer
-        await state.db.from('list_items').delete().eq('shared_id', presetId);
-        showToast(e.message, 'error');
-      }
-    } finally {
-      _pendingShare.delete(guardKey);
-      if (actualBtn) { actualBtn.disabled = false; actualBtn.classList.remove('is-pending'); actualBtn.removeAttribute('aria-busy'); }
-    }
+      // 2. The shared upload runs in the background: success toasts, failure
+      // rolls the pointer row back and restores the typed text.
+      const upload = state.sharing.addItem(groupId, {
+        id: presetId,
+        item_type: 'list_item',
+        payload: { text, list_name: listObj?.name || '' },
+        onStaged,
+      });
+      upload.then(
+        () => showToast(t('sharing.shared') + '!', 'success'),
+        async (driveErr) => {
+          await state.db.from('list_items').delete().eq('shared_id', presetId);
+          input.value = text;
+          await refreshLists();
+          showToast(driveErr.message, 'error');
+        }
+      );
+
+      // Unblock the UI once the item is staged in memory — don't wait for the
+      // upload. If the upload fails before staging, the failure branch above
+      // handles the rollback, so don't hang here.
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
+
+      input.value = '';
+      await refreshLists();
+    })().catch(e => showToast(e.message, 'error'))
+      .finally(() => {
+        _pendingShare.delete(guardKey);
+        if (actualBtn) { actualBtn.disabled = false; actualBtn.classList.remove('is-pending'); actualBtn.removeAttribute('aria-busy'); }
+      });
   }, { showAssignees: false });
 }
 window.shareListItemFromAdd = shareListItemFromAdd;
@@ -1132,13 +1204,9 @@ async function shareExistingListItem(id, el) {
     if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
     try {
       const sharedId = crypto.randomUUID();
-      // 1. Create shared item on the sharing layer
-      await state.sharing.addItem(groupId, {
-        id: sharedId,
-        item_type: 'list_item',
-        payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
-      });
-      // 2. Create local pointer — keep original sort_order so position stays
+      // 1. Stage locally FIRST: pointer in, personal item out. The snapshot
+      // allows a full rollback if the Drive upload fails.
+      const personalItem = { ...item };
       const { error: ptrErr } = await state.db.from('list_items').insert({
         list_id: item.list_id,
         text: '',
@@ -1147,10 +1215,26 @@ async function shareExistingListItem(id, el) {
         shared_group_id: groupId,
       });
       if (ptrErr) { showToast(t('toast.failed_to_add') + ': ' + ptrErr.message, 'error'); return; }
-      // 3. Delete the personal item
+      // 2. Delete the personal item
       await state.db.from('list_items').delete().eq('id', item.id);
-      showToast(t('sharing.shared') + '!', 'success');
       await refreshLists();
+      // 3. The shared upload runs in the background: success toasts, failure
+      // drops the pointer and restores the personal item.
+      const upload = state.sharing.addItem(groupId, {
+        id: sharedId,
+        item_type: 'list_item',
+        payload: { text: personalItem.text, list_name: listObj?.name || '', note: personalItem.note || '' },
+      });
+      upload.then(
+        () => showToast(t('sharing.shared') + '!', 'success'),
+        async (e) => {
+          console.error('[DeLaClaw] share existing list item failed:', e);
+          await state.db.from('list_items').delete().eq('shared_id', sharedId);
+          await state.db.from('list_items').insert(personalItem);
+          await refreshLists();
+          showToast(e.message, 'error');
+        }
+      );
     } catch (e) {
       showToast(e.message, 'error');
     } finally {
@@ -1180,29 +1264,49 @@ async function bulkShareList(listId, el) {
         _bulkShareInProgress.add(listId);
         if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
         try {
-          let shared = 0;
+          // Stage everything locally first: pointer in, personal item out.
+          // The uploads run in the background afterwards.
+          const staged = [];
           for (const item of listItems) {
-            try {
-              const sharedId = crypto.randomUUID();
-              await state.sharing.addItem(groupId, {
-                id: sharedId,
-                item_type: 'list_item',
-                payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
-              });
-              const { error: ptrErr } = await state.db.from('list_items').insert({
-                list_id: listId,
-                text: '',
-                sort_order: item.sort_order ?? 0,
-                shared_id: sharedId,
-                shared_group_id: groupId,
-              });
-              if (ptrErr) continue;
-              await state.db.from('list_items').delete().eq('id', item.id);
-              shared++;
-            } catch (e) { console.error('[DeLaClaw] bulk share list item failed:', e); }
+            const sharedId = crypto.randomUUID();
+            const { error: ptrErr } = await state.db.from('list_items').insert({
+              list_id: listId,
+              text: '',
+              sort_order: item.sort_order ?? 0,
+              shared_id: sharedId,
+              shared_group_id: groupId,
+            });
+            if (ptrErr) continue;
+            await state.db.from('list_items').delete().eq('id', item.id);
+            staged.push({
+              sharedId,
+              payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
+              personalItem: { ...item },
+            });
           }
-          if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+          // Unblock the UI on staging.
           await refreshLists();
+          _bulkShareInProgress.delete(listId);
+          if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+          let ok = 0;
+          for (const s of staged) {
+            try {
+              await state.sharing.addItem(groupId, {
+                id: s.sharedId,
+                item_type: 'list_item',
+                payload: s.payload,
+              });
+              ok++;
+            } catch (e) {
+              console.error('[DeLaClaw] bulk share list item failed:', e);
+              await state.db.from('list_items').delete().eq('shared_id', s.sharedId);
+              await state.db.from('list_items').insert(s.personalItem);
+            }
+          }
+          await refreshLists();
+          if (ok === staged.length && ok > 0) showToast(t('sharing.share_all_done', ok), 'success');
+          else if (ok > 0) showToast(t('sharing.share_all_partial', ok, staged.length), 'error');
+          else if (staged.length > 0) showToast(t('toast.failed_to_add'), 'error');
         } finally {
           _bulkShareInProgress.delete(listId);
           if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
@@ -1228,21 +1332,36 @@ async function unshareListItem(id, el) {
       const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unshare-list-item"][data-id="${CSS.escape(id)}"]`);
       if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
       try {
+        const pointerRow = { ...item };
         // 1. Create personal list item (same list)
-        const { error: insErr } = await state.db.from('list_items').insert({
+        const { data: newItem, error: insErr } = await state.db.from('list_items').insert({
           list_id: item.list_id,
           text: item.text || '',
           note: item.note || '',
           checked: item.checked ? 1 : 0,
           sort_order: item.sort_order || 0,
-        });
+        }).select().single();
         if (insErr) { showToast(insErr.message, 'error'); return; }
-        // 2. Delete shared item from sharing layer
-        await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
-        // 3. Delete the local pointer
+        // 2. Delete the local pointer
         await state.db.from('list_items').delete().eq('id', item.id);
-        showToast(t('sharing.unshared'), 'success');
+        // 3. Unblock the UI on local staging; the shared delete runs in the
+        // background. A failure drops the personal copy and restores the pointer.
         await refreshLists();
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+        let onStaged;
+        const staged = new Promise(resolve => { onStaged = resolve; });
+        const upload = state.sharing.deleteItem(item.shared_group_id, item.shared_id, { onStaged });
+        upload.then(
+          () => showToast(t('sharing.unshared'), 'success'),
+          async (e) => {
+            console.warn('Failed to delete shared list item from Drive:', e);
+            if (newItem?.id) await state.db.from('list_items').delete().eq('id', newItem.id);
+            await state.db.from('list_items').insert(pointerRow);
+            await refreshLists();
+            showToast(e.message, 'error');
+          }
+        );
+        await Promise.race([staged, upload.then(() => {}, () => {})]);
       } catch (e) {
         showToast(e.message, 'error');
       } finally {

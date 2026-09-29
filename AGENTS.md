@@ -92,6 +92,6 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - `docs-site/attributions.md` must list all third-party assets with correct load source (vendor/ vs CDN). Update when vendor versions change.
 - `docs-site/setup.md`, `architecture.md`, `sharing.md`, `contributing.md` must stay in sync with adapter changes.
 - No personal info, workspace config, memory files in public repo.
-- **Mermaid diagrams** (`docs-site/`): read `.agents/skills/mermaid-diagrams.md` before creating or editing Mermaid diagrams.
+- **Mermaid diagrams** (`docs-site/`): read `.agents/skills/mermaid-diagrams.md` before creating or editing Mermaid diagrams. Validate every touched block with the Mermaid v10 parser (`mermaid.parse`, node + jsdom shim) before committing — a block missing its `sequenceDiagram` header fails to render with no useful error (lesson v2.9.6).
 
 Keep this file short, accurate, and alive. When you learn a durable lesson that prevents a bug, add it here.

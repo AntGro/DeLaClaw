@@ -285,17 +285,37 @@ sequenceDiagram
     end
 
     MA->>MD: insert pointer row<br/>text:'', shared_id=UUID<br/>category = own choice
-    MA->>SF: addItem → markCreated(id) intent<br/>+ append to item file<br/>(ETag-guarded write)
+    rect rgb(253, 237, 236)
+    opt pointer insert fails
+        MA->>MA: error toast — nothing shared
+    end
+    end
+    MA->>SF: addItem → markCreated(id) intent<br/>+ stage item in memory<br/>(onStaged hook fires) → upload starts<br/>in background (ETag-guarded write)
     Note over MA,SF: intent cleared only after<br/>a successful upload —<br/>an id created mid-upload stays pending
-    Note over MA,SF: Drive write fails →<br/>local pointer row deleted (rollback)
-    MA->>MA: toast "Shared!" + refresh
+    rect rgb(253, 237, 236)
+    opt staging throws or upload fails
+        SF-->>MA: throw
+        MA->>MA: staged item + intent rolled back<br/>(no-op if staging itself threw)
+        MA->>MD: delete pointer row
+        MA->>MA: typed text restored, error toast
+    end
+    end
+    MA->>MA: refresh → item appears immediately<br/>(text comes from the staged item)<br/>while the upload settles
+    MA->>MA: toast "Shared!" on upload success
     Note over MA: dated item → calendar event<br/>titled [TODO][category][group]
     OA->>SF: next poll (≤15s): item file modified?
+    rect rgb(253, 237, 236)
+    opt poll download fails (transient)
+        OA->>OA: warn + retried next poll,<br/>nothing changes
+    end
+    end
     SF-->>OA: changed → re-download + merge
     OA->>OD: syncShared*: new shared_id →<br/>create pointer in __shared__
     OA->>OA: refresh → item appears with shared badge
     Note over OA: dated item → calendar event<br/>titled [TODO][category][group]
 ```
+
+The optimistic render above is the TODO add-row flow. Since v2.9.0 the same pattern applies to every shared mutation — share-existing, bulk share, rename, mark done, delete, unshare, habit edits and completions, list item edit/toggle: the view refreshes on in-memory staging via the `onStaged` hook, the upload runs in the background, and a failed upload rolls the local state back with an error toast.
 
 #### Modify an item (rename, mark done, habit completion)
 
@@ -313,12 +333,29 @@ sequenceDiagram
     participant OA as Other member app
     end
 
-    MA->>SF: updateItem — rename<br/>merge changes + updated_at
-    MA->>SF: completeItem — done=true<br/>done_by=[hashId], done_at=now
-    MA->>SF: addSharedHabitCompletion —<br/>completions += {completed_at, note}
+    MA->>MA: stage mutation in memory<br/>updateItem: merge changes + updated_at<br/>completeItem: done / done_by=[hashId] / done_at<br/>habit completion: push {id, completed_at,<br/>completed_by} + updateSharedHabit publishes next_due<br/>(onStaged hook fires → view refreshes)
+    rect rgb(253, 237, 236)
+    opt group not loaded / item not found
+        MA->>MA: throw — nothing staged,<br/>error toast
+    end
+    end
+    MA->>SF: upload in background — serialized per item<br/>by the in-memory mutation queue<br/>(ETag-guarded whole-file write)
+    Note over MA,SF: 412 → re-download + intent-aware merge,<br/>retry (max 2)
+    rect rgb(253, 237, 236)
+    opt upload fails
+        SF-->>MA: throw
+        MA->>MA: queue recomputes the item:<br/>oldest-pending base + replay of<br/>surviving mutations<br/>(a newer mutation staged mid-upload survives)
+        MA->>MA: view refreshed, error toast
+    end
+    end
     OA->>SF: next poll (≤15s): item file modified?
-    SF-->>OA: changed → re-download
-    OA->>OA: sharing-changed → sync + refresh
+    rect rgb(253, 237, 236)
+    opt poll download fails (transient)
+        OA->>OA: warn + retried next poll,<br/>nothing changes
+    end
+    end
+    SF-->>OA: changed → re-download + intent-aware merge
+    OA->>OA: sharing-changed → sync pointers + refresh
     Note over OA: attribution = stable hashId + timestamp<br/>(done_by / completion entries)
     Note over OA: date fields diffed vs fingerprint →<br/>markCalDirty → calendar event patched<br/>(done → event deleted)
 ```
@@ -341,12 +378,31 @@ sequenceDiagram
     participant OD as Other member's Drive
     end
 
-    MA->>SF: deleteItem — splice from in-memory items<br/>+ markDeleted(id) sync intent<br/>+ ETag-guarded whole-file write
+    MA->>MD: delete local pointer row
+    rect rgb(253, 237, 236)
+    opt pointer delete fails
+        MA->>MA: error toast — shared delete<br/>never attempted
+    end
+    end
+    MA->>SF: deleteItem — splice from in-memory items<br/>+ markDeleted(id) intent (onStaged fires) →<br/>upload in background, direct write<br/>(not via the mutation queue, ETag-guarded)
+    rect rgb(253, 237, 236)
+    opt staging throws or upload fails
+        SF-->>MA: throw
+        MA->>MA: item re-inserted at original index,<br/>intents restored<br/>(no-op if staging itself threw)
+        MA->>MD: restore pointer row,<br/>view refreshed, error toast
+    end
+    end
+    MA->>MA: toast "Deleted", refresh →<br/>item disappears
     OA->>SF: next poll (≤15s): item file modified?
+    rect rgb(253, 237, 236)
+    opt poll download fails (transient)
+        OA->>OA: warn + retried next poll,<br/>nothing changes
+    end
+    end
     SF-->>OA: changed → re-download
     OA->>OA: reconcileItems: item missing remotely,<br/>no pending create intent →<br/>drop as remote deletion
     OA->>OD: syncShared*: shared_id gone remotely →<br/>delete local pointer
-    OA->>OA: refresh → item disappears<br/>calendar event deleted
+    OA->>OA: refresh → item disappears<br/>(calendar event deleted as orphaned<br/>sync entry on next full sync)
     Note over MA,OA: intent-aware merge —<br/>a conflicting concurrent edit<br/>cannot resurrect the deleted item:<br/>the deleter's pending delete suppresses<br/>the stale copy on the 412-conflict merge
     Note over MA,OA: intents are in-memory only<br/>(per tab, per item file) —<br/>nothing is written to Drive,<br/>nothing to prune
 ```
@@ -500,7 +556,7 @@ sequenceDiagram
 
 #### Creator deletes a group
 
-Deletion revokes every member's folder permission and trashes the subfolder immediately (recoverable from Drive trash). No deletion marker is written — members take the access-loss path of "Member loses access" below.
+Deletion revokes every member's folder permission and trashes the subfolder immediately (recoverable from Drive trash). No deletion marker is written — members take the access-loss path of "Member loses access" below. Calendar events follow through the debounced table flush: kept items' events are re-titled (personal, no `[Group]`), deleted pointers' events are removed.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
@@ -509,6 +565,7 @@ sequenceDiagram
     box rgb(239,246,255) Creator's Google account
     participant CA as Creator app
     participant CD as Creator's Drive
+    participant CAL as Calendar<br/>Sync
     end
     box rgb(255,251,235) Shared — lives in the creator's Drive
     participant SF as DeLaClaw-Shared-{id}
@@ -523,10 +580,28 @@ sequenceDiagram
     else delete items
     CA->>CA: delete own item pointers
     end
-    CA->>CA: verify caller is the creator (else throw)
+    rect rgb(253, 237, 236)
+    opt DB write fails (either branch)
+        CA->>CA: error toast — group untouched
+    end
+    end
     CA->>SF: list permissions → revoke all non-owner
+    Note over CA,SF: list/revoke failures are non-fatal —<br/>warn + continue, folder is trashed next anyway
     CA->>CD: trash the subfolder
+    rect rgb(253, 237, 236)
+    opt trash fails
+        CA->>CA: error toast — group kept<br/>local item changes already applied
+    end
+    end
     CA->>CA: _groups: drop group<br/>delete created-group row
+    Note over CA: row-delete failure only warns —<br/>group already dropped from memory
+    CA->>CA: emit group-deleted → sharing-changed<br/>(via main.js onUpdate)
+    CA->>CA: info toast, re-render pane<br/>sharing-changed → refresh all pages
+    alt keep items
+    CA->>CAL: debounced flush → PATCH events<br/>personal titles, no [Group]
+    else delete items
+    CA->>CAL: debounced flush → full scan<br/>DELETE orphaned events
+    end
     Note over CA,MA: no deletion marker is written —<br/>members take the access-loss path of<br/>"Member loses access"
     MA->>SF: next poll: folder → 404
     MA->>MA: "definite access loss → drop group from memory<br/>purge pointers outright (no dialog)<br/>info toast — no longer have access"
@@ -556,7 +631,7 @@ sequenceDiagram
     CP->>CA: inline edit → renameGroup(id, new name)
     CA->>CA: verify caller is the creator (else throw)
     Note over CA: same name → no-op<br/>empty name → throw
-    CA->>CA: capture previous name,<br/>hold in-memory update until upload succeeds
+    CA->>CA: capture previous name,<br/>stage new name in memory<br/>(upload serializes e.group)
     CA->>SF: upload group.json (new name, ETag-guarded)
     rect rgb(253, 237, 236)
     opt upload fails
@@ -568,34 +643,72 @@ sequenceDiagram
     CA->>CP: success toast, re-render pane
     MA->>SF: next 15s poll: group.json changed
     MA->>MA: update in-memory name + local groups row
-    MA->>MP: sharing-changed → re-render pane
+    MA->>MA: emit group-changed (adapter-internal)
+    MA->>MP: main.js onUpdate → sharing-changed<br/>→ re-render pane
     Note over CA,MA: calendar fingerprint includes the group name —<br/>pointers in this group are marked dirty and the calendar<br/>sync is driven directly (no local row is written,<br/>so no flush would consume the dirty marks) —<br/>existing events are re-titled
 ```
 
 #### Member deletes their DeLaClaw account connection (deleteAccount)
 
-This is DeLaClaw's Drive-backed `deleteAccount` (delete the synced calendar,
-trash the personal `DeLaClaw/` folder (`DeLaClawDev/` on dev and preview builds),
-revoke OAuth), not deletion of the Google account itself —
-externally deleted Google accounts are handled manually (see below).
+This is DeLaClaw's Drive-backed account wipe, not deletion of the Google account
+itself — externally deleted Google accounts are handled manually (see below).
+It runs as gated steps, in order: (1) the groups the user created are deleted —
+for all their members; (2) joined groups are left, with no keep-copies dialog;
+(3) the synced DeLaClaw calendar is deleted; (4) the personal `DeLaClaw/` folder
+(`DeLaClawDev/` on dev and preview builds) and every file in it is permanently
+deleted. If any step fails, the whole flow aborts: the account connection stays
+intact and the user can retry. The OAuth token is revoked last (best effort),
+then the app disconnects and reloads to the login gate.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
 sequenceDiagram
     autonumber
-    box rgb(240,253,244) Member's Google account
+    box rgb(240,253,244) Member's browser
+    participant UI as Settings UI
     participant MA as Member app
+    participant SH as Sharing adapter
+    end
+    box rgb(240,253,244) Member's Google account
+    participant CAL as Synced calendar
     participant MD as Member's Drive
     end
-    box rgb(255,251,235) Shared — lives in the creator's Drive
-    participant SF as DeLaClaw-Shared-{id}
-    end
 
-    MA->>MD: delete the synced DeLaClaw calendar (best effort)
-    MA->>MD: trash personal DeLaClaw/ folder
-    MA->>MA: revoke OAuth token (last)
-    Note over MD,SF: joined groups are left alone —<br/>member rows linger as ghost rows<br/>(no unjoin performed)
-    Note over MD,SF: created groups are left alone too —<br/>the shared folders survive, members keep access<br/>while the creator's Drive account lives.<br/>if the account itself is deleted, members hit<br/>definite access loss on their next poll and purge
+    UI->>MA: click Delete account<br/>(Settings > Account > Danger zone)
+    MA->>UI: type-to-confirm dialog,<br/>names what will be deleted
+    UI->>MA: confirm word typed
+    MA->>SH: 1. deleteOwnedGroups()
+    SH->>MD: for each created group:<br/>revoke member permissions,<br/>trash DeLaClaw-Shared-{id}
+    rect rgb(253, 237, 236)
+    opt a group delete fails
+        SH-->>MA: throw
+        MA->>UI: error toast — account deletion aborted,<br/>connection intact, retry possible
+    end
+    end
+    MA->>SH: 2. leaveJoinedGroups()
+    SH->>MD: for each joined group:<br/>flip own row to 'left' in group.json,<br/>purge shared pointers (no keep-copies dialog)
+    rect rgb(253, 237, 236)
+    opt a leave fails
+        SH-->>MA: throw
+        MA->>UI: error toast — account deletion aborted
+    end
+    end
+    Note over SH,MD: the Drive permission itself is revoked<br/>on the creator's next poll — eventual, not awaited
+    MA->>MA: 3. disableCalSync(deleteCalendar: true)<br/>if calendar sync is enabled
+    MA->>CAL: DELETE synced calendar
+    rect rgb(253, 237, 236)
+    opt calendar DELETE fails
+        MA->>UI: error toast — account deletion aborted
+    end
+    end
+    MA->>MD: 4. deletePersonalData()<br/>list files, DELETE each permanently,<br/>then DELETE the DeLaClaw/ folder
+    rect rgb(253, 237, 236)
+    opt any DELETE fails
+        MA->>UI: error toast — account deletion aborted
+    end
+    end
+    MA->>MA: 5. revokeToken() best effort,<br/>then disconnect()
+    MA->>UI: reload to login gate
 ```
 
 #### Externally deleted Google accounts
@@ -613,7 +726,7 @@ The flows above surfaced 14 design questions, all decided on 2026-09-07 and reco
 5. **Join admission** — joining requires a matching pending invite (by member ID, the hash of the joiner's email); Drive access alone is not enough.
 6. **Removed members' items** — reassigned to the creator (`created_by` rewrite), no ghost creator IDs.
 7. **Creator-only enforcement** — `inviteUser`/`removeUser` throw unless the caller is the creator; the invite/remove UI is hidden from non-creators.
-8. **Account deletion** — joined groups are left alone; created groups are left in place too (the synced calendar is deleted and the personal folder is trashed) — members keep access while the creator's Drive account lives.
+8. **Account deletion** — superseded 2026-09-29: the wipe now runs in gated order — created groups deleted (for all members), joined groups left, synced calendar deleted, personal Drive folder permanently deleted; any step failing aborts the flow and the connection stays intact. (Was: joined groups left alone, created groups left in place, calendar deleted, personal folder trashed.)
 9. **Externally deleted accounts** — no detection; ghost rows linger until the creator removes them.
 10. **Placeholder exhaustion** — `extra_N.json` raised from 10 to 12 now; behavior at exhaustion deferred.
 11. **Received-item placement** — always `__shared__`.

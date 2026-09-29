@@ -18,6 +18,7 @@ import {
   acknowledgeIntents,
 } from './sharing-file-reconcile.js';
 import { t } from './i18n.js';
+import { createMutationQueue } from './sharing-mutation-queue.js';
 //
 // See sharing-interface.js for the abstract contract this implements.
 //
@@ -562,6 +563,36 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     if (!entry.typeIntents) entry.typeIntents = {};
     if (!entry.typeIntents[type]) entry.typeIntents[type] = createIntentState();
     return entry.typeIntents[type];
+  }
+
+  // ── Optimistic-mutation rollback ──
+  // Every mutating method stages in memory first (the onStaged point), then
+  // uploads. If the upload throws, the staging is rolled back so no zombie
+  // item or stale intent survives to be resurrected by a later flush/merge.
+  /** Snapshot an id's intent membership so a failed upload can restore it exactly. */
+  function snapshotIntents(intents, id) {
+    return { created: intents.createdIds.has(id), deleted: intents.deletedIds.has(id) };
+  }
+  function restoreIntents(intents, id, snap) {
+    if (snap.created) intents.createdIds.add(id); else intents.createdIds.delete(id);
+    if (snap.deleted) intents.deletedIds.add(id); else intents.deletedIds.delete(id);
+  }
+  /** Remove a staged item from the current array by id (a 412 retry may have replaced the array). */
+  function removeStagedById(entry, key, id) {
+    const arr = entry.typeData[key] || [];
+    const ix = arr.findIndex(i => i.id === id);
+    if (ix >= 0) arr.splice(ix, 1);
+  }
+
+  // ── Per-item optimistic-mutation sequencing ──
+  // Staging stays immediate (the UI unblocks on staging); uploads for the
+  // same item are serialized by the queue, and a failed upload recomputes
+  // the item as oldest-pending-base + replays of the surviving mutations —
+  // a failed mutation never reaches Drive, newer mutations survive it.
+  // See js/sharing-mutation-queue.js.
+  const _mutationQueue = createMutationQueue();
+  function _mutationKey(groupId, type, itemId) {
+    return groupId + '|' + type + '|' + itemId;
   }
 
   /** Intent state for one group entry's member roster; created lazily. */
@@ -1296,6 +1327,37 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     },
 
     /**
+     * Delete every group created by the current user. Used by the
+     * account-deletion flow: any failure throws and aborts the wipe.
+     * This removes the group for all members, not just the deleter —
+     * the folder lives in the creator's Drive, so it cannot survive
+     * without them. A created group whose folder is already gone on
+     * Drive counts as deleted (its row is dropped); anything else that
+     * fails to load or delete aborts the whole pass.
+     */
+    async deleteOwnedGroups() {
+      await refreshGroupRows();
+      const tok = await token();
+      for (const row of _groupRows.filter(r => r.kind === 'created' && r.id)) {
+        if (!_groups.has(row.id)) {
+          // Not loaded (skipped at startup): locate the folder now.
+          const folder = await driveFindFolder(tok, GROUP_PREFIX + row.id, null);
+          if (!folder) {
+            // Folder already gone on Drive — nothing left to delete.
+            if (db) {
+              const { error } = await db.from('groups').delete().eq('id', row.id);
+              if (error) console.warn('sharing: failed to drop row for missing group folder:', error.message);
+            }
+            _groupRows = _groupRows.filter(r => r.id !== row.id);
+            continue;
+          }
+          await loadGroup(folder.id, row.id, { owned: true });
+        }
+        await this.deleteGroup(row.id);
+      }
+    },
+
+    /**
      * Rename a group. Creator-only — throws otherwise.
      * The Drive folder is id-based (DeLaClaw-Shared-{groupId}), so only
      * group.json and the local groups row change.
@@ -1309,8 +1371,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (name.length > 60) throw new Error('Group name must be 60 characters or fewer');
       if (name === e.group.name) return e.group; // no-op
 
-      // Arm the in-memory name only after the upload succeeds: a failed
-      // rename must not leave the group renamed locally.
+      // Stage the new name before the upload (saveGroup serializes e.group);
+      // a failed upload restores the previous name, so no half-renamed
+      // state survives locally.
       const prevName = e.group.name;
       e.group.name = name;
       try {
@@ -1463,7 +1526,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     // ─── Items ───
 
-    async addItem(groupId, { id: presetId, item_type, payload, assignees = [] }) {
+    async addItem(groupId, { id: presetId, item_type, payload, assignees = [], onStaged } = {}) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
 
@@ -1485,13 +1548,24 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       const key = typeKey(item_type);
       if (!e.typeData[key]) e.typeData[key] = [];
       e.typeData[key].push(item);
-      markCreated(intentStateFor(e, key), item.id);
-      await saveTypedItems(groupId, key);
+      const intents = intentStateFor(e, key);
+      const prevIntents = snapshotIntents(intents, item.id);
+      markCreated(intents, item.id);
+      // Fires after the item is staged in memory, before the Drive upload —
+      // lets callers render optimistically without waiting for the network.
+      if (typeof onStaged === 'function') onStaged(item);
+      try {
+        await saveTypedItems(groupId, key);
+      } catch (err) {
+        removeStagedById(e, key, item.id);
+        restoreIntents(intents, item.id, prevIntents);
+        throw err;
+      }
       emit('item-added', { groupId, item });
       return item;
     },
 
-    async updateItem(groupId, itemId, changes) {
+    async updateItem(groupId, itemId, changes, { onStaged } = {}) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
 
@@ -1504,22 +1578,51 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       }
       if (!item) throw new Error(`Item ${itemId} not found`);
 
-      Object.assign(item, changes, { updated_at: new Date().toISOString() });
-      await saveTypedItems(groupId, key);
+      const prev = { ...item };
+      const stagedAt = new Date().toISOString();
+      const mkey = _mutationKey(groupId, key, itemId);
+      Object.assign(item, changes, { updated_at: stagedAt });
+      if (typeof onStaged === 'function') onStaged(item);
+      const entry = _mutationQueue.enqueue(mkey, {
+        restore: () => {
+          // A 412 retry may have replaced the array — restore into the current holder.
+          const cur = (e.typeData[key] || []).find(i => i.id === itemId);
+          if (cur) {
+            for (const k of Object.keys(cur)) if (!(k in prev)) delete cur[k];
+            Object.assign(cur, prev);
+          }
+        },
+        replay: () => {
+          const cur = (e.typeData[key] || []).find(i => i.id === itemId);
+          if (cur) Object.assign(cur, changes, { updated_at: stagedAt });
+        },
+      });
+      await _mutationQueue.runSerialized(mkey, entry, () => saveTypedItems(groupId, key));
       emit('item-updated', { groupId, item });
       return item;
     },
 
-    async deleteItem(groupId, itemId) {
+    async deleteItem(groupId, itemId, { onStaged } = {}) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
 
       for (const type of ITEM_TYPES) {
-        const idx = (e.typeData[type] || []).findIndex(i => i.id === itemId);
+        const arr = e.typeData[type] || [];
+        const idx = arr.findIndex(i => i.id === itemId);
         if (idx >= 0) {
-          e.typeData[type].splice(idx, 1);
-          markDeleted(intentStateFor(e, type), itemId);
-          await saveTypedItems(groupId, type);
+          const intents = intentStateFor(e, type);
+          const prevIntents = snapshotIntents(intents, itemId);
+          const [removed] = arr.splice(idx, 1);
+          markDeleted(intents, itemId);
+          if (typeof onStaged === 'function') onStaged({ groupId, itemId });
+          try {
+            await saveTypedItems(groupId, type);
+          } catch (err) {
+            const cur = e.typeData[type] || [];
+            if (!cur.some(i => i.id === itemId)) cur.splice(Math.min(idx, cur.length), 0, removed);
+            restoreIntents(intents, itemId, prevIntents);
+            throw err;
+          }
           break;
         }
       }
@@ -1530,7 +1633,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      * Complete a shared item.
      * @param {string[]} doneBy — emails of who did it; defaults to current user
      */
-    async completeItem(groupId, itemId, doneBy) {
+    async completeItem(groupId, itemId, doneBy, opts) {
       const normalizedDoneBy = (Array.isArray(doneBy) ? doneBy : [doneBy]).filter(Boolean);
       if (!normalizedDoneBy.length) {
         const member_id = await currentMemberId(groupId);
@@ -1540,11 +1643,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         done: true,
         done_by: normalizedDoneBy,
         done_at: new Date().toISOString(),
-      });
+      }, opts);
     },
 
-    async uncompleteItem(groupId, itemId) {
-      return this.updateItem(groupId, itemId, { done: false, done_by: [], done_at: null });
+    async uncompleteItem(groupId, itemId, opts) {
+      return this.updateItem(groupId, itemId, { done: false, done_by: [], done_at: null }, opts);
     },
 
     // ─── Shared Habits (new format) ───
@@ -1554,13 +1657,22 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      * Uses the new format: { id, item_type:'habit', name, frequency_rule,
      * creator_category, created_by, completions:[] }
      */
-    async addSharedHabit(groupId, habitData) {
+    async addSharedHabit(groupId, habitData, { onStaged } = {}) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
       if (!e.typeData.habits) e.typeData.habits = [];
       e.typeData.habits.push(habitData);
-      markCreated(intentStateFor(e, 'habits'), habitData.id);
-      await saveTypedItems(groupId, 'habits');
+      const intents = intentStateFor(e, 'habits');
+      const prevIntents = snapshotIntents(intents, habitData.id);
+      markCreated(intents, habitData.id);
+      if (typeof onStaged === 'function') onStaged(habitData);
+      try {
+        await saveTypedItems(groupId, 'habits');
+      } catch (err) {
+        removeStagedById(e, 'habits', habitData.id);
+        restoreIntents(intents, habitData.id, prevIntents);
+        throw err;
+      }
       emit('item-added', { groupId, item: habitData });
       return habitData;
     },
@@ -1569,14 +1681,31 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      * Update a shared habit in a group's habits.json.
      * Merges `changes` into the habit with matching id.
      */
-    async updateSharedHabit(groupId, sharedId, changes) {
+    async updateSharedHabit(groupId, sharedId, changes, { onStaged } = {}) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
       const items = e.typeData.habits || [];
       const item = items.find(h => h.id === sharedId);
       if (!item) throw new Error(`Shared habit ${sharedId} not found`);
-      Object.assign(item, changes, { updated_at: new Date().toISOString() });
-      await saveTypedItems(groupId, 'habits');
+      const prev = { ...item };
+      const stagedAt = new Date().toISOString();
+      const mkey = _mutationKey(groupId, 'habits', sharedId);
+      Object.assign(item, changes, { updated_at: stagedAt });
+      if (typeof onStaged === 'function') onStaged(item);
+      const entry = _mutationQueue.enqueue(mkey, {
+        restore: () => {
+          const cur = (e.typeData.habits || []).find(h => h.id === sharedId);
+          if (cur) {
+            for (const k of Object.keys(cur)) if (!(k in prev)) delete cur[k];
+            Object.assign(cur, prev);
+          }
+        },
+        replay: () => {
+          const cur = (e.typeData.habits || []).find(h => h.id === sharedId);
+          if (cur) Object.assign(cur, changes, { updated_at: stagedAt });
+        },
+      });
+      await _mutationQueue.runSerialized(mkey, entry, () => saveTypedItems(groupId, 'habits'));
       emit('item-updated', { groupId, item });
       return item;
     },
@@ -1584,15 +1713,25 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     /**
      * Delete a shared habit from a group's habits.json.
      */
-    async deleteSharedHabit(groupId, sharedId) {
+    async deleteSharedHabit(groupId, sharedId, { onStaged } = {}) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
       const items = e.typeData.habits || [];
       const idx = items.findIndex(h => h.id === sharedId);
       if (idx >= 0) {
-        items.splice(idx, 1);
-        markDeleted(intentStateFor(e, 'habits'), sharedId);
-        await saveTypedItems(groupId, 'habits');
+        const intents = intentStateFor(e, 'habits');
+        const prevIntents = snapshotIntents(intents, sharedId);
+        const [removed] = items.splice(idx, 1);
+        markDeleted(intents, sharedId);
+        if (typeof onStaged === 'function') onStaged({ groupId, itemId: sharedId });
+        try {
+          await saveTypedItems(groupId, 'habits');
+        } catch (err) {
+          const cur = e.typeData.habits || [];
+          if (!cur.some(h => h.id === sharedId)) cur.splice(Math.min(idx, cur.length), 0, removed);
+          restoreIntents(intents, sharedId, prevIntents);
+          throw err;
+        }
       }
       emit('item-deleted', { groupId, itemId: sharedId });
     },
@@ -1600,16 +1739,37 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     /**
      * Add a completion to a shared habit on Drive.
      */
-    async addSharedHabitCompletion(groupId, sharedId, completion) {
+    async addSharedHabitCompletion(groupId, sharedId, completion, { onStaged } = {}) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
       const items = e.typeData.habits || [];
       const item = items.find(h => h.id === sharedId);
       if (!item) throw new Error(`Shared habit ${sharedId} not found`);
       if (!item.completions) item.completions = [];
+      const prevCompletions = item.completions.slice();
+      const prevUpdatedAt = item.updated_at;
+      const stagedAt = new Date().toISOString();
+      const mkey = _mutationKey(groupId, 'habits', sharedId);
       item.completions.push(completion);
-      item.updated_at = new Date().toISOString();
-      await saveTypedItems(groupId, 'habits');
+      item.updated_at = stagedAt;
+      if (typeof onStaged === 'function') onStaged(item);
+      const entry = _mutationQueue.enqueue(mkey, {
+        restore: () => {
+          const cur = (e.typeData.habits || []).find(h => h.id === sharedId);
+          if (cur) {
+            cur.completions = prevCompletions;
+            cur.updated_at = prevUpdatedAt;
+          }
+        },
+        replay: () => {
+          const cur = (e.typeData.habits || []).find(h => h.id === sharedId);
+          if (cur) {
+            cur.completions.push(completion);
+            cur.updated_at = stagedAt;
+          }
+        },
+      });
+      await _mutationQueue.runSerialized(mkey, entry, () => saveTypedItems(groupId, 'habits'));
       emit('item-updated', { groupId, item });
       return item;
     },
@@ -1958,11 +2118,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     // reconnectGroup is Supabase-only (remote URL migration); no-op for Drive
     async reconnectGroup() { return null; },
 
-    async unjoinGroup(groupId) {
-      // Mark self as 'left' in remote group.json (best-effort). The entry is kept
-      // — not deleted — so the creator's next poll can revoke this member's Drive
-      // permission (only the folder owner can revoke it) before clearing the entry.
+    async unjoinGroup(groupId, opts = {}) {
+      // Mark self as 'left' in remote group.json. Best-effort by default;
+      // pass { strict: true } (account-deletion flow) to throw on failure.
+      // The entry is kept — not deleted — so the creator's next poll can
+      // revoke this member's Drive permission (only the folder owner can
+      // revoke it) before clearing the entry.
       const e = _groups.get(groupId);
+      if (opts.strict && !e) throw new Error(`Group ${groupId} is not loaded`);
       if (e) {
         try {
           const currentMember = await getCurrentMemberInternal(groupId);
@@ -1972,11 +2135,17 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
             self.left_at = new Date().toISOString();
             await saveGroup(groupId);
           }
-        } catch (err) { console.warn('sharing: unjoin group.json update failed (non-fatal):', err); }
+        } catch (err) {
+          if (opts.strict) throw err;
+          console.warn('sharing: unjoin group.json update failed (non-fatal):', err);
+        }
       }
       if (db) {
         const { error } = await db.from('groups').delete().eq('id', groupId);
-        if (error) console.warn('sharing: unjoin groups-row delete failed:', error.message);
+        if (error) {
+          if (opts.strict) throw new Error(`Could not remove the local group record: ${error.message}`);
+          console.warn('sharing: unjoin groups-row delete failed:', error.message);
+        }
         await refreshGroupRows();
       } else {
         _groupRows = _groupRows.filter(r => r.id !== groupId);
@@ -1987,6 +2156,36 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // that used to offer unlinking them is gone; kept copies were already
       // converted to personal by the leave dialog before this ran.
       try { document.dispatchEvent(new CustomEvent('sharing-group-purge-items', { detail: { groupId } })); } catch {}
+    },
+
+    /**
+     * Leave every joined group. Used by the account-deletion flow: any
+     * failure throws and aborts the wipe. Unlike the interactive leave,
+     * there is no keep-copies dialog — shared pointers are purged outright
+     * (personal data is wiped right after anyway). The Drive permission
+     * itself is revoked on the creator's next poll; "left" here means the
+     * flip and the local purge landed.
+     */
+    async leaveJoinedGroups() {
+      await refreshGroupRows();
+      for (const row of _joinedRows()) {
+        if (!_groups.has(row.id)) {
+          // Not loaded (skipped at startup): try a targeted load now.
+          // Definite access loss means the group is already gone for us —
+          // clean up and continue; anything else aborts the wipe.
+          try {
+            if (row.file_ids) await loadGroupWithIds(row.folder_id, row.id, row.file_ids);
+            else await loadGroup(row.folder_id, row.id);
+          } catch (err) {
+            if (isDefiniteAccessLoss(err)) {
+              await this.handleStaleGroup(row.id);
+              continue;
+            }
+            throw err;
+          }
+        }
+        await this.unjoinGroup(row.id, { strict: true });
+      }
     },
 
     /** Get the invite code for a group. */

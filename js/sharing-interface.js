@@ -49,12 +49,14 @@ export const SHARING_INTERFACE = {
   loadAll:                  'fn',   // () => Promise<Group[]>
   deleteGroup:              'fn',   // (groupId) => Promise<void> — creator-only, throws otherwise
   renameGroup:              'fn',   // (groupId, newName: string) => Promise<Group> — creator-only, throws otherwise
+  deleteOwnedGroups:        'fn',   // () => Promise<void> — delete every group created by the user; throws on any failure (account-deletion flow)
+  leaveJoinedGroups:        'fn',   // () => Promise<void> — leave every joined group (strict); throws on any failure (account-deletion flow)
 
   // ── Groups — membership ─────────────────────────────────────
   // inviteUser/removeUser are creator-only and throw otherwise.
   inviteUser:               'fn',   // (groupId, inviteTargetOrLabel) => Promise<void>
   removeUser:               'fn',   // (groupId, member_id) => Promise<void>
-  unjoinGroup:              'fn',   // (groupId) => Promise<void> — the only leave path
+  unjoinGroup:              'fn',   // (groupId, opts?) => Promise<void> — the only leave path; opts.strict throws instead of warning (account-deletion flow)
 
   // ── Groups — join flow ──────────────────────────────────────
   // joinWithFileIds requires a matching pending invite (by emailHash) AND the
@@ -86,17 +88,17 @@ export const SHARING_INTERFACE = {
   getMemberInviteLink:       'any',  // (groupId, token) => string|null | null for Drive (uses getInviteLink)
 
   // ── Items — CRUD ────────────────────────────────────────────
-  addItem:                  'fn',   // (groupId, itemData) => Promise<SharedItem>
-  updateItem:               'fn',   // (groupId, itemId, changes) => Promise<SharedItem>
-  deleteItem:               'fn',   // (groupId, itemId) => Promise<void>
-  completeItem:             'fn',   // (groupId, itemId, doneBy?) => Promise<SharedItem>
-  uncompleteItem:           'fn',   // (groupId, itemId) => Promise<SharedItem>
+  addItem:                  'fn',   // (groupId, itemData) => Promise<SharedItem>; itemData may carry onStaged(item), fired after in-memory staging, before the Drive upload; a failed upload rolls back the staging and rethrows
+  updateItem:               'fn',   // (groupId, itemId, changes, opts?) => Promise<SharedItem>; opts.onStaged like addItem; a failed upload restores the previous in-memory values
+  deleteItem:               'fn',   // (groupId, itemId, opts?) => Promise<void>; opts.onStaged like addItem; a failed upload restores the item and its intents
+  completeItem:             'fn',   // (groupId, itemId, doneBy?, opts?) => Promise<SharedItem>
+  uncompleteItem:           'fn',   // (groupId, itemId, opts?) => Promise<SharedItem>
 
   // ── Items — habits (type-specific) ──────────────────────────
-  addSharedHabit:           'fn',   // (groupId, habitData) => Promise<SharedItem>
-  updateSharedHabit:        'fn',   // (groupId, sharedId, changes) => Promise<SharedItem>
-  deleteSharedHabit:        'fn',   // (groupId, sharedId) => Promise<void>
-  addSharedHabitCompletion:  'fn',  // (groupId, sharedId, completion) => Promise<SharedItem>
+  addSharedHabit:           'fn',   // (groupId, habitData, opts?) => Promise<SharedItem>; opts.onStaged like addItem
+  updateSharedHabit:        'fn',   // (groupId, sharedId, changes, opts?) => Promise<SharedItem>; opts.onStaged like addItem
+  deleteSharedHabit:        'fn',   // (groupId, sharedId, opts?) => Promise<void>; opts.onStaged like addItem
+  addSharedHabitCompletion:  'fn',  // (groupId, sharedId, completion, opts?) => Promise<SharedItem>; opts.onStaged like addItem
 
   // ── Sync ────────────────────────────────────────────────────
   poll:                     'fn',   // () => Promise<boolean>

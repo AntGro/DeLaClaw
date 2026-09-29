@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder, bulkSortOrder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -802,7 +802,7 @@ function planLastDoneEdit(completions, newIso) {
   return { kept, toDelete, updateId: latestKept?.id || null, needsInsert: !latestKept };
 }
 
-async function setSharedHabitLastDone(habit, newIso) {
+async function setSharedHabitLastDone(habit, newIso, opts = {}) {
   const sh = getSharedHabitForLocalHabit(habit);
   if (!sh) throw new Error('Shared habit not found');
 
@@ -825,7 +825,7 @@ async function setSharedHabitLastDone(habit, newIso) {
   }
 
   const nextCompletions = sortHabitCompletionList(result);
-  await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions });
+  await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions }, opts);
   return latestHabitCompletion(nextCompletions)?.completed_at || null;
 }
 
@@ -938,6 +938,10 @@ function renderHabits() {
   const grid = document.getElementById('habitCategoryGrid');
   if (!grid) return;
 
+  // A background sharing sync can re-render while the user is typing in a
+  // quick-add box — keep the in-progress text (and focus) across the render.
+  const pendingInputs = snapshotTextInputs(grid, '.todo-cat-input', 'data-category');
+
   // If in calendar mode, render calendar instead
   if (habitViewMode === 'calendar') {
     renderHabitCalendar();
@@ -980,6 +984,7 @@ function renderHabits() {
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
   restoreInnerScrollPositions(grid, innerScrolls);
+  restoreTextInputs(grid, '.todo-cat-input', 'data-category', pendingInputs);
   initHabitHoverDelay(grid);
   // Init cross-category drag (no within-category reorder)
   for (const catId of categoryIdList) {
@@ -1342,10 +1347,9 @@ async function saveNewHabit() {
   if (!freq) { showToast(t('habits.enter_frequency'), 'error'); return; }
 
   if (groupId && state.sharing) {
-    // ─── Shared habit: local pointer + canonical shared data ───
+    // ─── Shared habit: local pointer + canonical shared data (optimistic) ───
     const sharedId = crypto.randomUUID();
     // Insert local pointer FIRST to prevent syncSharedHabits race
-    // (addSharedHabit emits sharing-changed before we return here)
     const { data: pointerData, error: pointerErr } = await state.db.from('habits').insert({
       name: '', frequency_rule: '', category: catName, category_id: catId, is_draft: 0,
       shared_id: sharedId, shared_group_id: groupId,
@@ -1355,40 +1359,51 @@ async function saveNewHabit() {
       showToast(t('toast.failed_to_add') + ': ' + pointerErr.message, 'error');
       return;
     }
-    try {
-      const actor = await getSharedHabitCompletionActor(groupId);
-      const sharedItem = {
-        id: sharedId,
-        item_type: 'habit',
-        name,
-        frequency_rule: freq,
-        creator_category: catName,
-        created_by: actor,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        completions: [],
-      };
-      if (lastDoneVal) {
-        sharedItem.completions.push({
-          id: crypto.randomUUID(),
-          completed_at: habitDateInputToIso(lastDoneVal),
-          completed_by: actor,
-        });
-      }
-      await state.sharing.addSharedHabit(groupId, sharedItem);
-    } catch (e) {
-      console.warn('Failed to write shared habit:', e);
-      // Clean up the local pointer since the shared write failed
-      if (pointerData?.id) await state.db.from('habits').delete().eq('id', pointerData.id);
-      showToast(t('toast.failed_to_add') + ' (shared)', 'error');
-      return;
+    const actor = await getSharedHabitCompletionActor(groupId);
+    const sharedItem = {
+      id: sharedId,
+      item_type: 'habit',
+      name,
+      frequency_rule: freq,
+      creator_category: catName,
+      created_by: actor,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      completions: [],
+    };
+    if (lastDoneVal) {
+      sharedItem.completions.push({
+        id: crypto.randomUUID(),
+        completed_at: habitDateInputToIso(lastDoneVal),
+        completed_by: actor,
+      });
     }
-    // Compute next_due on the pointer immediately and publish to shared storage
-    if (pointerData?.id) {
-      const nextDue = await updateHabitNextDue(pointerData.id, freq, lastDoneVal || null);
+    // Compute next_due on the pointer immediately (local, fast).
+    let nextDue = null;
+    if (pointerData?.id) nextDue = await updateHabitNextDue(pointerData.id, freq, lastDoneVal || null);
+
+    // The shared uploads run in the background: unblock the UI on staging.
+    // A failure drops the pointer row again.
+    let onStaged;
+    const staged = new Promise(resolve => { onStaged = resolve; });
+    const upload = (async () => {
+      await state.sharing.addSharedHabit(groupId, sharedItem, { onStaged });
       if (nextDue != null) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: nextDue });
-    }
-  } else {
+    })();
+    upload.then(
+      () => showToast(t('habits.habit_added', name), 'success'),
+      async (e) => {
+        console.warn('Failed to write shared habit:', e);
+        if (pointerData?.id) await state.db.from('habits').delete().eq('id', pointerData.id);
+        await refreshHabits();
+        showToast(t('toast.failed_to_add') + ' (shared)', 'error');
+      }
+    );
+    await Promise.race([staged, upload.then(() => {}, () => {})]);
+    closeAddHabitModal();
+    await refreshHabits();
+    return;
+  }
     // ─── Normal (non-shared) habit ───
     const { data, error } = await state.db.from('habits').insert({
       name, frequency_rule: freq, category: catName, category_id: catId, is_draft: isDraft,
@@ -1401,7 +1416,6 @@ async function saveNewHabit() {
     if (data?.id) {
       await updateHabitNextDue(data.id, freq, lastDoneVal || null);
     }
-  }
 
   closeAddHabitModal();
   showToast(t('habits.habit_added', name), 'success');
@@ -1479,6 +1493,8 @@ function editHabitInline(habitId, itemEl) {
         }
       }
       if (Object.keys(updates).length > 0) {
+        // Background upload promise for shared flows (null for personal).
+        let sharedUpload = null;
         if (habit.shared_id && habit.shared_group_id && state.sharing) {
           if (updates.category_id !== undefined) {
             const { error } = await state.db.from('habits').update({ category: updates.category, category_id: updates.category_id }).eq('id', habitId);
@@ -1487,15 +1503,11 @@ function editHabitInline(habitId, itemEl) {
           const sharedUpdates = {};
           if (updates.name !== undefined) sharedUpdates.name = updates.name;
           if (updates.frequency_rule !== undefined) sharedUpdates.frequency_rule = updates.frequency_rule;
-          try {
-            if (Object.keys(sharedUpdates).length > 0) {
-              await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, sharedUpdates);
-            }
-          } catch (e) {
-            console.warn('Failed to update shared habit:', e);
-            showToast(t('toast.update_failed'), 'error');
-            return;
-          }
+          // Optimistic: upload in the background. A failure rolls the in-memory
+          // shared item back (adapter) and refreshes the view.
+          sharedUpload = Object.keys(sharedUpdates).length > 0
+            ? state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, sharedUpdates)
+            : Promise.resolve();
         } else {
           const { error } = await state.db.from('habits').update(updates).eq('id', habitId);
           if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
@@ -1504,10 +1516,18 @@ function editHabitInline(habitId, itemEl) {
         if (updates.frequency_rule) {
           const lastDone = getHabitLastDone(habitId);
           await updateHabitNextDue(habitId, updates.frequency_rule, lastDone, { earlyGuard: false });
-          // Publish next_due so other members read it directly
-          if (habit.shared_id && habit.shared_group_id && state.sharing) {
-            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
-          }
+        }
+        if (sharedUpload) {
+          // Chain the next_due publish after the main update (etag order),
+          // with a single failure handler for the whole background chain.
+          const full = updates.frequency_rule
+            ? sharedUpload.then(() => state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due }))
+            : sharedUpload;
+          full.catch(e => {
+            console.warn('Failed to update shared habit:', e);
+            refreshHabits();
+            showToast(t('toast.update_failed'), 'error');
+          });
         }
         showToast(t('habits.habit_updated'), 'success');
       }
@@ -1565,7 +1585,10 @@ async function saveEditHabit() {
 
   if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
     await state.db.from('habits').update({ category: catName, category_id: catId }).eq('id', id);
-    try {
+    // Optimistic: close the modal on local staging; the shared uploads run in
+    // the background. A failure rolls the in-memory shared state back (adapter)
+    // and refreshes the view.
+    const upload = (async () => {
       await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, {
         name,
         frequency_rule: freq,
@@ -1573,11 +1596,15 @@ async function saveEditHabit() {
       if (lastDoneVal !== prevDateStr) {
         latestForNextDue = await setSharedHabitLastDone(habit, lastDoneVal ? habitDateInputToIso(lastDoneVal) : null);
       }
-    } catch (e) {
+      await updateHabitNextDue(id, freq, latestForNextDue, { earlyGuard: false });
+      // Publish next_due so other members read it directly
+      await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+    })();
+    upload.catch(e => {
       console.warn('Failed to update shared habit:', e);
+      refreshHabits();
       showToast(t('toast.update_failed'), 'error');
-      return;
-    }
+    });
   } else {
     const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: catName, category_id: catId }).eq('id', id);
     if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
@@ -1591,13 +1618,9 @@ async function saveEditHabit() {
         return;
       }
     }
+    await updateHabitNextDue(id, freq, latestForNextDue, { earlyGuard: false });
   }
 
-  await updateHabitNextDue(id, freq, latestForNextDue, { earlyGuard: false });
-  // Publish next_due for shared habits so other members read it directly
-  if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-    await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
-  }
   closeEditHabitModal();
   showToast(t('habits.habit_updated'), 'success');
   await refreshHabits();
@@ -1610,16 +1633,27 @@ async function deleteHabit(habitId) {
     t('common.delete'),
     `Delete "${habit.name}"? All completion history will be lost.`,
     async () => {
-      // If shared, also delete from Drive (removes for all group members)
-      if (habit.shared_id && habit.shared_group_id && state.sharing) {
-        try {
-          await state.sharing.deleteSharedHabit(habit.shared_group_id, habit.shared_id);
-        } catch (e) {
-          console.warn('Failed to delete shared habit from Drive:', e);
-        }
-      }
+      const pointerRow = habit.shared_id ? { ...habit } : null;
       const { error } = await state.db.from('habits').delete().eq('id', habitId);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+
+      // If shared, also delete from Drive (removes for all group members).
+      // The upload runs in the background; a failure restores the pointer row.
+      if (habit.shared_id && habit.shared_group_id && state.sharing) {
+        let onStaged;
+        const staged = new Promise(resolve => { onStaged = resolve; });
+        const upload = state.sharing.deleteSharedHabit(habit.shared_group_id, habit.shared_id, { onStaged });
+        upload.then(
+          () => {},
+          async (e) => {
+            console.warn('Failed to delete shared habit from Drive:', e);
+            if (pointerRow) await state.db.from('habits').insert(pointerRow);
+            await refreshHabits();
+            showToast(t('toast.delete_failed'), 'error');
+          }
+        );
+        await Promise.race([staged, upload.then(() => {}, () => {})]);
+      }
 
       // Animate item out before re-rendering
       const el = document.querySelector(`[data-habit-id="${CSS.escape(habitId)}"]`);
@@ -1661,21 +1695,30 @@ async function markHabitDone(habitId, btnEl) {
     const now = new Date().toISOString();
 
     if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-      try {
-        const completion = {
-          id: crypto.randomUUID(),
-          completed_at: now,
-          completed_by: await getSharedHabitCompletionActor(habit.shared_group_id),
-        };
-        await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion);
+      // Optimistic: refresh on staging; the uploads run in the background.
+      // A failure rolls the in-memory completion back (adapter) and refreshes.
+      const completion = {
+        id: crypto.randomUUID(),
+        completed_at: now,
+        completed_by: await getSharedHabitCompletionActor(habit.shared_group_id),
+      };
+      let onStaged;
+      const staged = new Promise(resolve => { onStaged = resolve; });
+      const upload = (async () => {
+        await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion, { onStaged });
         await updateHabitNextDue(habitId, habit.frequency_rule, now);
         // Publish next_due so other members read it directly
         await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
-      } catch (e) {
-        console.warn('Failed to push shared habit completion:', e);
-        showToast(t('habits.failed_record'), 'error');
-        return;
-      }
+      })();
+      upload.then(
+        () => {},
+        async (e) => {
+          console.warn('Failed to push shared habit completion:', e);
+          await refreshHabits();
+          showToast(t('habits.failed_record'), 'error');
+        }
+      );
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
     } else {
       const { error } = await state.db.from('habit_completions').insert({ habit_id: habitId, completed_at: now });
       if (error) { showToast(t('habits.failed_record'), 'error'); return; }
@@ -1728,16 +1771,30 @@ function editHabitLastDone(habitId, event, triggerEl) {
     try {
       let latestForNextDue = newIso;
       if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-        latestForNextDue = await setSharedHabitLastDone(habit, newIso);
+        // Optimistic: refresh on staging; the shared uploads run in the
+        // background. A failure rolls the in-memory state back (adapter)
+        // and refreshes the view.
+        let onStaged;
+        const staged = new Promise(resolve => { onStaged = resolve; });
+        const upload = (async () => {
+          latestForNextDue = await setSharedHabitLastDone(habit, newIso, { onStaged });
+          await updateHabitNextDue(habitId, habit.frequency_rule, latestForNextDue, { earlyGuard: false });
+          // Publish next_due so other members read it directly
+          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+        })();
+        upload.then(
+          () => {},
+          (e) => {
+            console.warn('Failed to update habit completion:', e);
+            refreshHabits();
+            showToast(t('toast.failed_to_update'), 'error');
+          }
+        );
+        await Promise.race([staged, upload.then(() => {}, () => {})]);
       } else {
         latestForNextDue = await setLocalHabitLastDone(habitId, newIso);
-      }
-
-      if (habit) {
-        await updateHabitNextDue(habitId, habit.frequency_rule, latestForNextDue, { earlyGuard: false });
-        // Publish next_due for shared habits so other members read it directly
-        if (habit.shared_id && habit.shared_group_id && state.sharing) {
-          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+        if (habit) {
+          await updateHabitNextDue(habitId, habit.frequency_rule, latestForNextDue, { earlyGuard: false });
         }
       }
 
@@ -1817,21 +1874,31 @@ async function deleteHabitCompletion(compId) {
     'Are you sure you want to delete this completion record?',
     async () => {
       if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-        // ─── Shared: remove from shared completions ───
-        try {
-          const sharedHabits = state.sharing.getAllSharedHabits();
-          const sh = sharedHabits.find(h => h.id === habit.shared_id);
-          if (sh?.completions) {
-            const idx = sh.completions.findIndex(c => c.id === comp.id || c.completed_at === comp.completed_at);
-            if (idx >= 0) sh.completions.splice(idx, 1);
-            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: sh.completions });
-            // Recompute next_due from new latest completion (or null if none left)
-            const latest = sh.completions.length ? sh.completions[sh.completions.length - 1].completed_at : null;
-            await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
+        // ─── Shared: remove from shared completions (optimistic) ───
+        const sharedHabits = state.sharing.getAllSharedHabits();
+        const sh = sharedHabits.find(h => h.id === habit.shared_id);
+        if (sh?.completions) {
+          const idx = sh.completions.findIndex(c => c.id === comp.id || c.completed_at === comp.completed_at);
+          // Fresh array (no in-place splice) so the adapter rollback can restore it.
+          const nextCompletions = idx >= 0
+            ? [...sh.completions.slice(0, idx), ...sh.completions.slice(idx + 1)]
+            : [...sh.completions];
+          // Recompute next_due from new latest completion (or null if none left)
+          const latest = nextCompletions.length ? nextCompletions[nextCompletions.length - 1].completed_at : null;
+          await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
+          // The uploads run in the background: a failure rolls the in-memory
+          // shared item back (adapter) and refreshes the view.
+          const upload = (async () => {
+            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions });
             // Publish next_due so other members read it directly
             await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
-          }
-        } catch (e) { showToast(t('toast.failed_to_delete'), 'error'); return; }
+          })();
+          upload.catch(e => {
+            console.warn('Failed to delete shared habit completion:', e);
+            refreshHabits();
+            showToast(t('toast.failed_to_delete'), 'error');
+          });
+        }
       } else {
         // ─── Normal: delete from local DB ───
         const { error } = await state.db.from('habit_completions').delete().eq('id', compId);
@@ -1888,23 +1955,30 @@ async function saveHabitCompletion(compId) {
   const newNote = noteEl ? noteEl.value.trim() : null;
 
   if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-    // ─── Shared: update in shared completions ───
-    try {
-      const sharedHabits = state.sharing.getAllSharedHabits();
-      const sh = sharedHabits.find(h => h.id === habit.shared_id);
-      if (sh?.completions) {
-        const sharedComp = sh.completions.find(c => c.id === comp.id || c.completed_at === oldCompletedAt);
-        if (sharedComp) {
-          sharedComp.completed_at = newDate;
-          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: sh.completions });
-          // Recompute next_due from latest completion
-          const latest = sh.completions[sh.completions.length - 1]?.completed_at || null;
-          await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
-          // Publish next_due so other members read it directly
-          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
-        }
-      }
-    } catch (e) { showToast(t('toast.failed_to_update'), 'error'); return; }
+    // ─── Shared: update in shared completions (optimistic) ───
+    const sharedHabits = state.sharing.getAllSharedHabits();
+    const sh = sharedHabits.find(h => h.id === habit.shared_id);
+    const sharedComp = sh?.completions?.find(c => c.id === comp.id || c.completed_at === oldCompletedAt);
+    if (sharedComp) {
+      // Fresh array (no in-place mutation) so the adapter rollback can restore it.
+      const nextCompletions = sh.completions.map(c =>
+        c === sharedComp ? { ...c, completed_at: newDate } : c);
+      // Recompute next_due from latest completion
+      const latest = nextCompletions[nextCompletions.length - 1]?.completed_at || null;
+      await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
+      // The uploads run in the background: a failure rolls the in-memory
+      // shared item back (adapter) and refreshes the view.
+      const upload = (async () => {
+        await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions });
+        // Publish next_due so other members read it directly
+        await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+      })();
+      upload.catch(e => {
+        console.warn('Failed to update shared habit completion:', e);
+        refreshHabits();
+        showToast(t('toast.failed_to_update'), 'error');
+      });
+    }
   } else {
     // ─── Normal: update in local DB ───
     const updates = { completed_at: newDate };
@@ -1980,17 +2054,12 @@ async function deleteHabitCategory(catId) {
     : `Delete empty category "${cat.name}"?`;
 
   showConfirmAction(t('common.delete'), msg, async () => {
-    // Propagate deletion of shared habits to sharing layer before CASCADE removes local rows
-    if (state.sharing) {
-      for (const habit of habitsInCat) {
-        if (habit.shared_id && habit.shared_group_id) {
-          try { await state.sharing.deleteItem(habit.shared_group_id, habit.shared_id); }
-          catch (e) { console.warn('Failed to delete shared habit:', e); }
-        }
-      }
-    }
-    // Explicitly delete items so calendar sync (markDirty) fires for each.
-    // SQL CASCADE would handle this on SQLite, but Drive/Demo have no FK enforcement.
+    // Snapshots for rollback.
+    const catRow = { ...cat };
+    const habitRows = habitsInCat.map(h => ({ ...h }));
+    // Delete locally first to unblock the UI. Explicitly delete items so
+    // calendar sync (markDirty) fires for each. SQL CASCADE would handle this
+    // on SQLite, but Drive/Demo have no FK enforcement.
     for (const habit of habitsInCat) {
       await state.db.from('habits').delete().eq('id', habit.id);
     }
@@ -1998,6 +2067,26 @@ async function deleteHabitCategory(catId) {
     if (error) { showToast(t('toast.delete_failed') + ': ' + error.message, 'error'); return; }
     showToast(t('habits.category_deleted', cat.name), 'info');
     await refreshHabits();
+    // Propagate deletion of shared habits to the sharing layer in the
+    // background (sequential, etag order). A failure restores the category
+    // and its habits locally.
+    if (state.sharing) {
+      const sharedHabits = habitsInCat.filter(h => h.shared_id && h.shared_group_id);
+      if (sharedHabits.length) {
+        const upload = (async () => {
+          for (const habit of sharedHabits) {
+            await state.sharing.deleteItem(habit.shared_group_id, habit.shared_id);
+          }
+        })();
+        upload.catch(async (e) => {
+          console.warn('Failed to delete shared habits from Drive:', e);
+          await state.db.from('habit_categories').insert(catRow);
+          for (const r of habitRows) await state.db.from('habits').insert(r);
+          await refreshHabits();
+          showToast(t('toast.delete_failed'), 'error');
+        });
+      }
+    }
   });
 }
 
@@ -2404,6 +2493,10 @@ let _syncingHabits = false;
 // shared payload, never the local pointer row, so the adapter's dirty
 // tracking can't see them — diff here and mark the pointer dirty instead.
 const _sharedHabitCalFp = new Map();
+// Last-seen updated_at per shared habit: detects remote content edits, which
+// change the in-memory item (and therefore the rendered view) without
+// touching any local pointer row.
+const _sharedHabitSeenAt = new Map();
 function sharedHabitCalFingerprint(sh) {
   return JSON.stringify([
     sh.next_due || null,
@@ -2416,10 +2509,10 @@ function sharedHabitCalFingerprint(sh) {
 let _bulkShareInProgress = new Set();
 const _pendingShare = new Set();
 async function syncSharedHabits() {
-  if (_syncingHabits) return;
+  if (_syncingHabits) return false;
   _syncingHabits = true;
   try {
-    await _doSyncSharedHabits();
+    return await _doSyncSharedHabits();
   } finally {
     _syncingHabits = false;
   }
@@ -2493,6 +2586,11 @@ async function _doSyncSharedHabits() {
       const pointer = localBySharedId.get(sh.id);
       if (pointer) { state.markCalDirty?.('habits', pointer.id); calDirtyMarked = true; }
     }
+    // Remote content edits bump updated_at on every mutation — a change here
+    // means the rendered habit changed even though no pointer row moved.
+    const prevSeen = _sharedHabitSeenAt.get(sh.id);
+    _sharedHabitSeenAt.set(sh.id, sh.updated_at);
+    if (prevSeen !== undefined && prevSeen !== sh.updated_at) needsRefresh = true;
   }
   if (calDirtyMarked) await state.syncCalendarTable?.('habits');
 
@@ -2503,6 +2601,7 @@ async function _doSyncSharedHabits() {
       if (group) {
         // Group exists but item gone from remote → delete local pointer
         await state.db.from('habits').delete().eq('id', local.id);
+        _sharedHabitSeenAt.delete(local.shared_id);
         needsRefresh = true;
       } else {
         // Group not loaded — transient skip, or the group was dropped and its
@@ -2512,9 +2611,7 @@ async function _doSyncSharedHabits() {
     }
   }
 
-  if (needsRefresh) {
-    await refreshHabits();
-  }
+  return needsRefresh;
 }
 
 window.syncSharedHabits = syncSharedHabits;
@@ -2565,26 +2662,43 @@ async function shareExistingHabit(id, el) {
         updated_at: new Date().toISOString(),
         completions: localCompletions,
       };
-      // 1. Create shared habit on the sharing layer
-      await state.sharing.addSharedHabit(groupId, sharedItem);
-      // 2. Create local pointer
+      // 1. Stage locally FIRST: pointer in, personal habit + completions out.
+      // Snapshots allow a full rollback if the Drive upload fails.
+      const personalHabit = { ...habit };
+      const personalCompletions = (state.allHabitCompletions || [])
+        .filter(c => c.habit_id === habit.id)
+        .map(c => ({ ...c }));
       const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
         name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
         category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
         shared_id: sharedId, shared_group_id: groupId,
       }).select().single();
       if (ptrErr) { showToast(ptrErr.message, 'error'); return; }
-      // 3. Delete local completions then the personal habit
       await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
       await state.db.from('habits').delete().eq('id', habit.id);
-      // Compute next_due on the pointer and publish to shared storage
+      let nextDue = null;
       if (pointer?.id) {
-        const nextDue = await updateHabitNextDue(pointer.id, habit.frequency_rule,
+        nextDue = await updateHabitNextDue(pointer.id, habit.frequency_rule,
           localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
-        if (nextDue != null) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: nextDue });
       }
-      showToast(t('sharing.shared') + '!', 'success');
       await refreshHabits();
+      // 2. The shared uploads run in the background: success toasts, failure
+      // restores the personal habit and its completions and drops the pointer.
+      const upload = (async () => {
+        await state.sharing.addSharedHabit(groupId, sharedItem);
+        if (nextDue != null) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: nextDue });
+      })();
+      upload.then(
+        () => showToast(t('sharing.shared') + '!', 'success'),
+        async (e) => {
+          console.error('[DeLaClaw] share existing habit failed:', e);
+          if (pointer?.id) await state.db.from('habits').delete().eq('id', pointer.id);
+          await state.db.from('habits').insert(personalHabit);
+          for (const c of personalCompletions) await state.db.from('habit_completions').insert(c);
+          await refreshHabits();
+          showToast(e.message, 'error');
+        }
+      );
     } catch (e) {
       showToast(e.message, 'error');
     } finally {
@@ -2614,15 +2728,38 @@ async function bulkShareHabitCategory(catId, el) {
         if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
         try {
           const actor = await getSharedHabitCompletionActor(groupId);
-          let shared = 0;
+          // Stage everything locally first: pointer in, personal habit +
+          // completions out. The uploads run in the background afterwards.
+          const staged = [];
           for (const habit of items) {
-            try {
-              const sharedId = crypto.randomUUID();
-              const catRow = _habitCatMap.get(habit.category_id || _defaultHabitCatId);
-              const localCompletions = (state.allHabitCompletions || [])
-                .filter(c => c.habit_id === habit.id)
-                .map(c => ({ id: crypto.randomUUID(), completed_at: c.completed_at, completed_by: actor }));
-              await state.sharing.addSharedHabit(groupId, {
+            const sharedId = crypto.randomUUID();
+            const catRow = _habitCatMap.get(habit.category_id || _defaultHabitCatId);
+            const localCompletions = (state.allHabitCompletions || [])
+              .filter(c => c.habit_id === habit.id)
+              .map(c => ({ id: crypto.randomUUID(), completed_at: c.completed_at, completed_by: actor }));
+            // Snapshots for rollback — taken before the local deletes below.
+            const personalHabit = { ...habit };
+            const personalCompletions = (state.allHabitCompletions || [])
+              .filter(c => c.habit_id === habit.id).map(c => ({ ...c }));
+            const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
+              name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
+              category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
+              created_at: habit.created_at || new Date().toISOString(),
+              shared_id: sharedId, shared_group_id: groupId,
+            }).select().single();
+            if (ptrErr) continue;
+            await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
+            await state.db.from('habits').delete().eq('id', habit.id);
+            let nextDue = null;
+            if (pointer?.id) {
+              await updateHabitNextDue(pointer.id, habit.frequency_rule,
+                localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
+              const ptr = state.allHabits.find(h => String(h.id) === String(pointer.id));
+              if (ptr) nextDue = ptr.next_due;
+            }
+            staged.push({
+              sharedId,
+              sharedItem: {
                 id: sharedId, item_type: 'habit',
                 name: habit.name, frequency_rule: habit.frequency_rule,
                 creator_category: catRow?.name ?? habit.category ?? '',
@@ -2630,27 +2767,34 @@ async function bulkShareHabitCategory(catId, el) {
                 created_at: habit.created_at || new Date().toISOString(),
                 updated_at: new Date().toISOString(),
                 completions: localCompletions,
-              });
-              const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
-                name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
-                category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
-                created_at: habit.created_at || new Date().toISOString(),
-                shared_id: sharedId, shared_group_id: groupId,
-              }).select().single();
-              if (ptrErr) continue;
-              await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
-              await state.db.from('habits').delete().eq('id', habit.id);
-              if (pointer?.id) {
-                await updateHabitNextDue(pointer.id, habit.frequency_rule,
-                  localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
-                const ptr = state.allHabits.find(h => String(h.id) === String(pointer.id));
-                if (ptr) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: ptr.next_due });
-              }
-              shared++;
-            } catch (e) { console.error('[DeLaClaw] bulk share habit failed:', e); }
+              },
+              nextDue,
+              personalHabit,
+              personalCompletions,
+              pointerId: pointer?.id,
+            });
           }
-          if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+          // Unblock the UI on staging.
           await refreshHabits();
+          _bulkShareInProgress.delete(catId);
+          if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+          let ok = 0;
+          for (const s of staged) {
+            try {
+              await state.sharing.addSharedHabit(groupId, s.sharedItem);
+              if (s.nextDue != null) await state.sharing.updateSharedHabit(groupId, s.sharedId, { next_due: s.nextDue });
+              ok++;
+            } catch (e) {
+              console.error('[DeLaClaw] bulk share habit failed:', e);
+              if (s.pointerId) await state.db.from('habits').delete().eq('id', s.pointerId);
+              await state.db.from('habits').insert(s.personalHabit);
+              for (const c of s.personalCompletions) await state.db.from('habit_completions').insert(c);
+            }
+          }
+          await refreshHabits();
+          if (ok === staged.length && ok > 0) showToast(t('sharing.share_all_done', ok), 'success');
+          else if (ok > 0) showToast(t('sharing.share_all_partial', ok, staged.length), 'error');
+          else if (staged.length > 0) showToast(t('toast.failed_to_add'), 'error');
         } finally {
           _bulkShareInProgress.delete(catId);
           if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
@@ -2677,6 +2821,10 @@ async function unshareHabit(id, el) {
       if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
       try {
         const catRow = _habitCatMap.get(habit.category_id || _defaultHabitCatId);
+        // Snapshots for rollback: pointer row + its completions.
+        const pointerRow = { ...habit };
+        const pointerCompletions = (state.allHabitCompletions || [])
+          .filter(c => c.habit_id === habit.id).map(c => ({ ...c }));
         // 1. Create personal habit
         const { data: newHabit, error: insErr } = await state.db.from('habits').insert({
           name: habit.name || '',
@@ -2696,13 +2844,29 @@ async function unshareHabit(id, el) {
             note: null,
           });
         }
-        // 3. Delete shared habit from sharing layer
-        await state.sharing.deleteSharedHabit(habit.shared_group_id, habit.shared_id);
-        // 4. Delete local pointer + its completions
+        // 3. Delete local pointer + its completions
         await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
         await state.db.from('habits').delete().eq('id', habit.id);
-        showToast(t('sharing.unshared'), 'success');
+        // 4. Unblock the UI on local staging; the shared delete runs in the
+        // background. A failure drops the personal copy and restores the pointer.
         await refreshHabits();
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+        let onStaged;
+        const staged = new Promise(resolve => { onStaged = resolve; });
+        const upload = state.sharing.deleteSharedHabit(habit.shared_group_id, habit.shared_id, { onStaged });
+        upload.then(
+          () => showToast(t('sharing.unshared'), 'success'),
+          async (e) => {
+            console.warn('Failed to delete shared habit from Drive:', e);
+            await state.db.from('habit_completions').delete().eq('habit_id', newHabit.id);
+            await state.db.from('habits').delete().eq('id', newHabit.id);
+            await state.db.from('habits').insert(pointerRow);
+            for (const c of pointerCompletions) await state.db.from('habit_completions').insert(c);
+            await refreshHabits();
+            showToast(e.message, 'error');
+          }
+        );
+        await Promise.race([staged, upload.then(() => {}, () => {})]);
       } catch (e) {
         showToast(e.message, 'error');
       } finally {

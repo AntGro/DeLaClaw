@@ -22,16 +22,27 @@ let failed = 0;
 const failures = [];
 
 function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log(`  ✅ ${name}`);
-  } catch (e) {
+  const pass = () => { passed++; console.log(`  ✅ ${name}`); };
+  const fail = e => {
     failed++;
-    failures.push({ name, error: e.message });
+    failures.push({ name, error: e && e.message });
     console.log(`  ❌ ${name}`);
-    console.log(`     ${e.message}`);
+    console.log(`     ${e && e.message}`);
+  };
+  try {
+    const r = fn();
+    if (r && typeof r.then === 'function') pendingAsyncTests.push(r.then(pass, fail));
+    else pass();
+  } catch (e) {
+    fail(e);
   }
+}
+
+const pendingAsyncTests = [];
+
+async function assertRejects(promise, msg) {
+  try { await promise; } catch (e) { return; }
+  throw new Error(msg);
 }
 
 function assert(condition, msg) {
@@ -211,8 +222,9 @@ test('Sharing refresh handler centralizes sync before render', () => {
   const handlerIdx = main.indexOf("document.addEventListener('sharing-changed', async () =>");
   assert(handlerIdx !== -1, 'main.js must own a single async sharing-changed handler');
   const handler = main.slice(handlerIdx, main.indexOf('  // Show demo banner', handlerIdx));
-  // syncShared* handle pointer create/delete; the handler then does a full
-  // refresh to also pick up external mutations (group-deletion cleanup, etc.)
+  // Each sync reports whether anything affecting the display changed; the
+  // handler refreshes only the views that need it — no unconditional
+  // full refresh of all three views.
   for (const seq of [
     ['syncSharedTodos', 'refreshTodos'],
     ['syncSharedHabits', 'refreshHabits'],
@@ -223,12 +235,53 @@ test('Sharing refresh handler centralizes sync before render', () => {
     assert(positions[0] < positions[1],
       `sharing handler must run ${seq.join(' -> ')}`);
   }
+  assert(/if \(await syncSharedTodos\(\)\) await refreshTodos\(\);/.test(handler),
+    'todos refresh must be conditional on the sync reporting changes');
+  assert(/if \(await syncSharedHabits\(\)\) await refreshHabits\(\);/.test(handler),
+    'habits refresh must be conditional on the sync reporting changes');
+  assert(/if \(await syncSharedListItems\(\)\) await refreshLists\(\);/.test(handler),
+    'lists refresh must be conditional on the sync reporting changes');
   assert(!jsFiles['todos.js'].includes("document.addEventListener('sharing-changed'"),
     'todos.js must not register its own sharing-changed listener');
   assert(!jsFiles['habits.js'].includes("document.addEventListener('sharing-changed'"),
     'habits.js must not register its own sharing-changed listener');
   assert(!jsFiles['lists.js'].includes("document.addEventListener('sharing-changed'"),
     'lists.js must not register its own sharing-changed listener');
+});
+
+test('Shared syncs report display changes via return value (pointer moves + updated_at)', () => {
+  // Every mutation bumps updated_at, so a changed updated_at with no pointer
+  // move means a remote content edit the view must re-render for.
+  for (const [file, doSync, retSync] of [
+    ['todos.js', '_doSyncSharedTodos', 'syncSharedTodos'],
+    ['habits.js', '_doSyncSharedHabits', 'syncSharedHabits'],
+    ['lists.js', '_doSyncSharedListItems', 'syncSharedListItems'],
+  ]) {
+    const src = jsFiles[file];
+    assert(src.includes(`return await ${doSync}()`),
+      `${file}: ${retSync} must return the change flag`);
+    assert(new RegExp(`function ${doSync}\\(\\)[\\s\\S]*?return needsRefresh;`).test(src),
+      `${file}: ${doSync} must return needsRefresh instead of refreshing internally`);
+    assert(!new RegExp(`function ${doSync}\\(\\)[\\s\\S]*?if \\(needsRefresh\\) \\{\\s*await refresh`).test(src),
+      `${file}: ${doSync} must not refresh internally — the handler owns the refresh`);
+    assert(/prevSeen !== undefined && prevSeen !== sh\.updated_at/.test(src),
+      `${file}: ${doSync} must detect remote content edits via updated_at`);
+  }
+});
+
+test('Purge handler refreshes views directly (syncs cannot see the purge)', () => {
+  const main = jsFiles['main.js'];
+  const idx = main.indexOf("document.addEventListener('sharing-group-purge-items'");
+  assert(idx !== -1, 'purge listener must exist');
+  const slice = main.slice(idx, idx + 1500);
+  // The group is already gone from memory when pointers are deleted, so the
+  // syncs would report no changes — the purge must refresh the views itself.
+  const purgeEnd = slice.indexOf("dispatchEvent(new CustomEvent('sharing-changed'))");
+  assert(purgeEnd !== -1, 'purge handler still notifies sharing-changed for footer/pane');
+  const before = slice.slice(0, purgeEnd);
+  for (const r of ['await refreshTodos();', 'await refreshHabits();', 'await refreshLists();']) {
+    assert(before.includes(r), `purge handler must call ${r} directly`);
+  }
 });
 
 test('No orphan machinery remains (access-loss purge replaced it)', () => {
@@ -274,7 +327,7 @@ test("unjoinGroup purges the member's still-shared pointers", () => {
   // flip, so the remaining shared pointers are purged outright — the orphan
   // dialog that used to offer unlinking them is gone.
   const drive = jsFiles['sharing-drive.js'];
-  const start = drive.indexOf('async unjoinGroup(groupId)');
+  const start = drive.indexOf('async unjoinGroup(groupId');
   assert(start !== -1, 'unjoinGroup must exist');
   const body = drive.slice(start, start + 2500);
   assert(body.includes("'sharing-group-purge-items'"),
@@ -1001,7 +1054,7 @@ test('Shared list add action passes clicked button element', () => {
 test('Sharing adapter normalizes completeItem(doneBy) without nested arrays', () => {
   const drive = jsFiles['sharing-drive.js'];
 
-  const start = drive.indexOf('async completeItem(groupId, itemId, doneBy)');
+  const start = drive.indexOf('async completeItem(groupId, itemId, doneBy, opts)');
   const end = drive.indexOf('async uncompleteItem', start);
   assert(start !== -1 && end !== -1, 'sharing-drive.js: completeItem block not found');
   const fn = drive.slice(start, end);
@@ -1674,7 +1727,7 @@ test('sharing unjoin writes a left marker instead of deleting the member row', (
   // Leaving must keep a status:'left' tombstone in group.json so the creator's
   // poll can revoke the leaver's Drive permission (only the folder owner can).
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
-  const unjoin = drive.slice(drive.indexOf('async unjoinGroup(groupId)'));
+  const unjoin = drive.slice(drive.indexOf('async unjoinGroup(groupId'));
   const unjoinFn = unjoin.slice(0, unjoin.indexOf('},', unjoin.indexOf('emit(')));
   assert(unjoinFn.includes("self.status = 'left'"),
     'unjoinGroup must flip the member status to left');
@@ -2775,10 +2828,18 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(drive.includes('unionItems('), 'must use unionItems for the legacy migration');
       assert(drive.includes('captureIntents(') && drive.includes('acknowledgeIntents('),
         'saveTypedItems must capture/acknowledge intents per upload');
-      assert(drive.includes('markCreated(intentStateFor(e, key), item.id)'), 'addItem must mark creates');
-      assert(drive.includes("markCreated(intentStateFor(e, 'habits'), habitData.id)"), 'addSharedHabit must mark creates');
-      assert(drive.includes('markDeleted(intentStateFor(e, type), itemId)'), 'deleteItem must mark deletes');
-      assert(drive.includes("markDeleted(intentStateFor(e, 'habits'), sharedId)"), 'deleteSharedHabit must mark deletes');
+      const addItemBlock = drive.slice(drive.indexOf('async addItem('), drive.indexOf('async updateItem('));
+      assert(addItemBlock.includes('markCreated(') && addItemBlock.includes('intentStateFor(e, key)'),
+        'addItem must mark creates');
+      const addHabitBlock = drive.slice(drive.indexOf('async addSharedHabit('), drive.indexOf('async updateSharedHabit('));
+      assert(addHabitBlock.includes('markCreated(') && addHabitBlock.includes("intentStateFor(e, 'habits')"),
+        'addSharedHabit must mark creates');
+      const deleteBlock = drive.slice(drive.indexOf('async deleteItem('), drive.indexOf('async completeItem('));
+      assert(deleteBlock.includes('markDeleted(') && deleteBlock.includes('intentStateFor(e, type)'),
+        'deleteItem must mark deletes');
+      const deleteHabitBlock = drive.slice(drive.indexOf('async deleteSharedHabit('), drive.indexOf('async addSharedHabitCompletion('));
+      assert(deleteHabitBlock.includes('markDeleted(') && deleteHabitBlock.includes("intentStateFor(e, 'habits')"),
+        'deleteSharedHabit must mark deletes');
       assert(drive.includes('entry.typeIntents[type] = createIntentState()'), 'entries must init per-type intent state');
     });
 
@@ -2962,6 +3023,44 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'folder name must be hostname-derived, not hardcoded');
     });
 
+    test('account deletion runs the gated wipe in order', () => {
+      const src = jsFiles['main.js'];
+      const steps = ['deleteOwnedGroups()', 'leaveJoinedGroups()',
+        'disableCalSync({ deleteCalendar: true })', 'deletePersonalData', 'revokeToken'];
+      let idx = 0;
+      for (const step of steps) {
+        const at = src.indexOf(step, idx);
+        assert(at !== -1, `wipe must include ${step}`);
+        assert(at >= idx, `wipe steps out of order at ${step}`);
+        idx = at;
+      }
+      for (const stepKey of ['account.step_created_groups', 'account.step_joined_groups',
+                             'account.step_calendar', 'account.step_data']) {
+        assert(src.includes(`abort('${stepKey}'`),
+          `a ${stepKey} failure must abort the wipe`);
+      }
+    });
+
+    test('drive adapter permanently deletes personal data (no trash)', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      assert(drive.includes('async deletePersonalData()'), 'drive adapter must expose deletePersonalData');
+      assert(!drive.includes('async deleteAccount()'), 'the old trash-based deleteAccount must be gone');
+      const body = drive.slice(drive.indexOf('async deletePersonalData()'));
+      assert(body.includes("method: 'DELETE'"), 'personal data must be permanently deleted, not trashed');
+      assert(!body.includes('trashed: true'), 'the personal-data wipe must not trash');
+      assert(body.includes('{ ok: false'), 'failures must return ok:false so the UI aborts');
+      assert(drive.includes('async revokeToken()'), 'drive adapter must expose revokeToken');
+    });
+
+    test('sharing adapter exposes the strict wipe methods', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      assert(drive.includes('async deleteOwnedGroups()'), 'must expose deleteOwnedGroups');
+      assert(drive.includes('this.deleteGroup(row.id)'), 'deleteOwnedGroups must go through deleteGroup');
+      assert(drive.includes('async leaveJoinedGroups()'), 'must expose leaveJoinedGroups');
+      const leave = drive.slice(drive.indexOf('async leaveJoinedGroups()'));
+      assert(leave.includes('{ strict: true }'), 'the wipe leave must be strict');
+    });
+
     test('setup help names the actual Drive folder', () => {
       const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
       const lines = i18n.split('\n').filter(l => l.includes('drive_1_desc:'));
@@ -3053,6 +3152,387 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   }
 
   // ===================================================================
+  // SHARING ADD FLOW — optimistic: the shared upload runs in the background
+  // addItem stages the item in memory first and fires the optional onStaged
+  // hook before the Drive upload, so the UI can render without waiting for
+  // the network. shareTodoFromAdd unblocks on staging (not on upload);
+  // a background upload failure rolls the pointer row back and restores the
+  // typed text.
+  // ===================================================================
+  {
+    const drive = jsFiles['sharing-drive.js'];
+    const todosSrc = jsFiles['todos.js'];
+
+    test('addItem fires onStaged after in-memory staging, before the Drive upload', () => {
+      const m = drive.match(/async addItem\(groupId, \{([\s\S]*?)\n    \},/);
+      assert(m, 'addItem declaration must be parseable');
+      const body = m[1];
+      const pushIdx = body.indexOf('e.typeData[key].push(item)');
+      const stagedIdx = body.indexOf('onStaged(item)');
+      const uploadIdx = body.indexOf('await saveTypedItems(groupId, key)');
+      assert(pushIdx !== -1 && stagedIdx !== -1 && uploadIdx !== -1,
+        'addItem must stage in memory, fire onStaged, then upload');
+      assert(pushIdx < stagedIdx && stagedIdx < uploadIdx,
+        'onStaged must fire after the in-memory push and before the Drive upload');
+      assert(/typeof onStaged === 'function'/.test(body),
+        'onStaged must be optional (guarded call)');
+    });
+
+    test('shareTodoFromAdd unblocks on staging, not on the upload', () => {
+      const start = todosSrc.indexOf('async function shareTodoFromAdd');
+      const end = todosSrc.indexOf('window.shareTodoFromAdd', start);
+      assert(start !== -1 && end !== -1, 'shareTodoFromAdd must exist');
+      const body = todosSrc.slice(start, end);
+      assert(body.includes('onStaged'), 'must pass onStaged to addItem');
+      assert(!body.includes('await state.sharing.addItem'),
+        'must not await the shared upload before unblocking the UI');
+      assert(/\.delete\(\)\.eq\('id', localRow\.id\)/.test(body),
+        'a background upload failure must delete the staged pointer row');
+      assert(body.includes('input.value = text'),
+        'a background upload failure must restore the typed text');
+    });
+  }
+
+  // ===================================================================
+  // OPTIMISTIC-EVERYWHERE — every shared mutation stages in memory first
+  // and fires onStaged before the Drive upload; a failed upload rolls the
+  // staging back (adapter-level) so no zombie item or stale intent survives
+  // to be resurrected by a later flush/merge. Views unblock on staging via
+  // Promise.race and run the upload in the background with a local rollback.
+  // ===================================================================
+  {
+    const drive = jsFiles['sharing-drive.js'];
+    const todosSrc = jsFiles['todos.js'];
+    const habitsSrc = jsFiles['habits.js'];
+    const listsSrc = jsFiles['lists.js'];
+
+    function methodBody(name, endMarker) {
+      const start = drive.indexOf(`async ${name}(`);
+      const end = drive.indexOf(endMarker, start);
+      assert(start !== -1 && end !== -1, `${name} block must be parseable`);
+      return drive.slice(start, end);
+    }
+
+    test('updateItem stages, fires onStaged, and rolls back on upload failure', () => {
+      const body = methodBody('updateItem', 'async deleteItem(');
+      assert(body.includes('{ onStaged } = {}'), 'updateItem must accept the onStaged option');
+      const assignIdx = body.indexOf('Object.assign(item, changes');
+      const stagedIdx = body.indexOf('onStaged(item)');
+      const uploadIdx = body.indexOf('_mutationQueue.runSerialized(mkey, entry,');
+      assert(assignIdx !== -1 && stagedIdx !== -1 && uploadIdx !== -1, 'must stage, fire onStaged, then upload');
+      assert(assignIdx < stagedIdx && stagedIdx < uploadIdx, 'onStaged must fire after staging, before upload');
+      assert(/restore: \(\) => \{[\s\S]*?Object\.assign\(cur, prev\)/.test(body),
+        'a failed upload must restore the pre-staging item snapshot via the queued restore');
+    });
+
+    test('deleteItem stages, fires onStaged, and rolls back on upload failure', () => {
+      const body = methodBody('deleteItem', 'async completeItem(');
+      assert(body.includes('{ onStaged } = {}'), 'deleteItem must accept the onStaged option');
+      const spliceIdx = body.indexOf('arr.splice(idx, 1)');
+      const uploadIdx = body.indexOf('await saveTypedItems(groupId, type)');
+      assert(spliceIdx !== -1 && uploadIdx !== -1 && spliceIdx < uploadIdx,
+        'must stage the delete in memory before uploading');
+      assert(/catch \(err\)[\s\S]*?cur\.splice\(/.test(body),
+        'a failed upload must re-insert the removed item');
+      assert(body.includes('restoreIntents(intents, itemId, prevIntents)'),
+        'a failed upload must restore the pre-staging intent snapshot');
+    });
+
+    test('shared-habit mutations accept onStaged and roll back on upload failure', () => {
+      for (const [name, endMarker] of [
+        ['addSharedHabit', 'async updateSharedHabit('],
+        ['updateSharedHabit', 'async deleteSharedHabit('],
+        ['deleteSharedHabit', 'async addSharedHabitCompletion('],
+        ['addSharedHabitCompletion', 'async forceSave('],
+      ]) {
+        const body = methodBody(name, endMarker);
+        assert(body.includes('{ onStaged } = {}'), `${name} must accept the onStaged option`);
+        assert(/typeof onStaged === 'function'/.test(body), `${name}: onStaged must be optional (guarded call)`);
+        assert(body.includes('_mutationQueue.runSerialized(mkey, entry,') || /catch \(err\)/.test(body),
+          `${name}: a failed upload must roll the staging back`);
+      }
+    });
+
+    test('completeItem/uncompleteItem pass opts through to updateItem', () => {
+      const doneBy = drive.indexOf('async completeItem(groupId, itemId, doneBy, opts)');
+      assert(doneBy !== -1, 'completeItem must accept opts');
+      const doneBlock = drive.slice(doneBy, drive.indexOf('async uncompleteItem', doneBy));
+      assert(doneBlock.includes('}, opts)'), 'completeItem must forward opts to updateItem');
+      const undoneBy = drive.indexOf('async uncompleteItem(groupId, itemId, opts)');
+      assert(undoneBy !== -1, 'uncompleteItem must accept opts');
+    });
+
+    test('share-existing + bulk share (todos, habits, lists) unblock on staging', () => {
+      // The view must refresh (unblock the UI) before the shared upload
+      // call site; the upload itself settles in the background.
+      const cases = [
+        [todosSrc, 'shareExistingTodo', 'await refreshTodos()', 'state.sharing.addItem('],
+        [todosSrc, 'bulkShareTodoCategory', 'await refreshTodos()', 'state.sharing.addItem('],
+        [habitsSrc, 'shareExistingHabit', 'refreshHabits()', 'state.sharing.addSharedHabit('],
+        [habitsSrc, 'bulkShareHabitCategory', 'refreshHabits()', 'state.sharing.addSharedHabit('],
+        [listsSrc, 'shareExistingListItem', 'await refreshLists()', 'state.sharing.addItem('],
+        [listsSrc, 'bulkShareList', 'await refreshLists()', 'state.sharing.addItem('],
+      ];
+      for (const [src, name, refreshCall, uploadCall] of cases) {
+        const start = src.indexOf(`async function ${name}(`);
+        assert(start !== -1, `${name} must exist`);
+        const nextFn = src.indexOf('\nasync function ', start + 20);
+        const nextWin = src.indexOf(`\nwindow.${name}`, start);
+        const end = Math.min(nextFn !== -1 ? nextFn : Infinity, nextWin !== -1 ? nextWin : Infinity);
+        assert(end !== Infinity, `${name}: function boundary must be parseable`);
+        const body = src.slice(start, end);
+        const refreshIdx = body.indexOf(refreshCall);
+        const uploadIdx = body.indexOf(uploadCall);
+        assert(refreshIdx !== -1 && uploadIdx !== -1, `${name}: must refresh and upload`);
+        assert(refreshIdx < uploadIdx,
+          `${name}: must refresh (unblock the UI) before the shared upload call site`);
+      }
+    });
+
+    test('unshare flows unblock on local staging, upload deletes in background', () => {
+      const cases = [
+        [todosSrc, 'unshareTodo', 'state.sharing.deleteItem('],
+        [habitsSrc, 'unshareHabit', 'state.sharing.deleteSharedHabit('],
+        [listsSrc, 'unshareListItem', 'state.sharing.deleteItem('],
+      ];
+      for (const [src, name, uploadCall] of cases) {
+        const start = src.indexOf(`async function ${name}(`);
+        assert(start !== -1, `${name} must exist`);
+        const nextFn = src.indexOf('\nasync function ', start + 20);
+        const nextWin = src.indexOf(`\nwindow.${name}`, start);
+        const end = Math.min(nextFn !== -1 ? nextFn : Infinity, nextWin !== -1 ? nextWin : Infinity);
+        assert(end !== Infinity, `${name}: function boundary must be parseable`);
+        const body = src.slice(start, end);
+        assert(!body.includes(`await ${uploadCall}`),
+          `${name}: must not await the shared delete before unblocking the UI`);
+        assert(body.includes(uploadCall), `${name}: must still issue the shared delete`);
+        assert(/\.then\(/.test(body), `${name}: the background delete must settle with a rollback handler`);
+      }
+    });
+
+    test('i18n defines share_all_partial in EN/FR/ES', () => {
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      const count = (i18nSrc.match(/share_all_partial:/g) || []).length;
+      assert(count === 3, `share_all_partial must be defined in all three locales, found ${count}`);
+    });
+
+    test('sharing-drive.js wires update-style mutations through the mutation queue', () => {
+      assert(drive.includes(`import { createMutationQueue } from './sharing-mutation-queue.js'`),
+        'sharing-drive.js must import the mutation queue module');
+      for (const [name, endMarker] of [
+        ['updateItem', 'async deleteItem('],
+        ['updateSharedHabit', 'async deleteSharedHabit('],
+        ['addSharedHabitCompletion', 'async forceSave('],
+      ]) {
+        const start = drive.indexOf(`async ${name}(`);
+        const end = drive.indexOf(endMarker, start);
+        assert(start !== -1 && end !== -1, `${name} block must be parseable`);
+        const body = drive.slice(start, end);
+        assert(body.includes('_mutationQueue.enqueue(mkey,'), `${name}: must enqueue the mutation at staging`);
+        assert(body.includes('restore:'), `${name}: must supply a restore closure`);
+        assert(body.includes('replay:'), `${name}: must supply a replay closure`);
+        assert(body.includes('_mutationQueue.runSerialized(mkey, entry,'),
+          `${name}: must upload through runSerialized`);
+        assert(!body.includes('await saveTypedItems'),
+          `${name}: must not upload outside the serialized helper`);
+      }
+    });
+
+    test('completeItem/uncompleteItem inherit the sequencing via updateItem', () => {
+      const start = drive.indexOf('async completeItem(groupId, itemId, doneBy, opts)');
+      const end = drive.indexOf('async uncompleteItem', start);
+      const body = drive.slice(start, end);
+      assert(body.includes('return this.updateItem('), 'completeItem must delegate to updateItem');
+    });
+  }
+
+  // ===================================================================
+  // Sharing mutation queue — rollback+replay sequencing, behavioral
+  // (js/sharing-mutation-queue.js, wired in js/sharing-drive.js)
+  // ===================================================================
+  {
+    const { pathToFileURL } = require('url');
+    const { createMutationQueue } = await import(pathToFileURL(path.join(JS_DIR, 'sharing-mutation-queue.js')).href);
+
+    // Fake adapter-level update flow over a plain object, using the real
+    // queue module: `memory` is the in-memory item, `driveLog` records
+    // exactly what each upload would have serialized to Drive.
+    function makeUpdateHarness(initial, key = 'item') {
+      const queue = createMutationQueue();
+      const memory = { ...initial };
+      const driveLog = [];
+      let inFlight = 0;
+      let maxInFlight = 0;
+      function update(changes, { fail = false, gate = null } = {}) {
+        const prev = { ...memory };
+        const stagedAt = 'staged-at';
+        Object.assign(memory, changes);
+        const entry = queue.enqueue(key, {
+          restore: () => {
+            for (const k of Object.keys(memory)) if (!(k in prev)) delete memory[k];
+            Object.assign(memory, prev);
+          },
+          replay: () => Object.assign(memory, changes),
+        });
+        return queue.runSerialized(key, entry, async () => {
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          try {
+            if (gate) await gate;
+            if (fail) throw new Error('upload failed');
+            driveLog.push({ ...memory });
+          } finally {
+            inFlight--;
+          }
+        });
+      }
+      return { memory, driveLog, update, maxInFlight: () => maxInFlight };
+    }
+
+    test('mutation queue: failed A never reaches Drive, B survives', async () => {
+      const h = makeUpdateHarness({ priority: 'normal', done: false });
+      const pA = h.update({ priority: 'high' }, { fail: true });
+      const pB = h.update({ done: true });
+      await assertRejects(pA, 'A must reject');
+      await pB;
+      assert(h.memory.priority === 'normal' && h.memory.done === true,
+        `memory must be {priority:normal,done:true}, got ${JSON.stringify(h.memory)}`);
+      assert(h.driveLog.length === 1, `only B may upload, got ${h.driveLog.length} uploads`);
+      assert(h.driveLog[0].priority === 'normal' && h.driveLog[0].done === true,
+        `Drive must hold {priority:normal,done:true}, got ${JSON.stringify(h.driveLog[0])}`);
+    });
+
+    test('mutation queue: failed completion C1 is not persisted, C2 survives', async () => {
+      const queue = createMutationQueue();
+      const memory = { completions: [] };
+      const driveLog = [];
+      function addCompletion(c, { fail = false } = {}) {
+        const prev = memory.completions.slice();
+        memory.completions.push(c);
+        const entry = queue.enqueue('habit', {
+          restore: () => { memory.completions = prev; },
+          replay: () => { memory.completions.push(c); },
+        });
+        return queue.runSerialized('habit', entry, async () => {
+          if (fail) throw new Error('upload failed');
+          driveLog.push(memory.completions.slice());
+        });
+      }
+      const pA = addCompletion('C1', { fail: true });
+      const pB = addCompletion('C2');
+      await assertRejects(pA, 'A must reject');
+      await pB;
+      assert(JSON.stringify(memory.completions) === '["C2"]',
+        `memory completions must be ["C2"], got ${JSON.stringify(memory.completions)}`);
+      assert(driveLog.length === 1 && JSON.stringify(driveLog[0]) === '["C2"]',
+        `Drive completions must be ["C2"], got ${JSON.stringify(driveLog)}`);
+    });
+
+    test('mutation queue: two consecutive failures roll back to the base', async () => {
+      const h = makeUpdateHarness({ priority: 'normal', done: false });
+      const pA = h.update({ priority: 'high' }, { fail: true });
+      const pB = h.update({ done: true }, { fail: true });
+      await assertRejects(pA, 'A must reject');
+      await assertRejects(pB, 'B must reject');
+      assert(h.memory.priority === 'normal' && h.memory.done === false,
+        `memory must be back to base, got ${JSON.stringify(h.memory)}`);
+      assert(h.driveLog.length === 0, `no successful upload, got ${h.driveLog.length}`);
+    });
+
+    test('mutation queue: single failed mutation rolls back to its snapshot', async () => {
+      const h = makeUpdateHarness({ priority: 'normal' });
+      await assertRejects(h.update({ priority: 'high', brandNew: true }, { fail: true }), 'must reject');
+      assert(h.memory.priority === 'normal' && !('brandNew' in h.memory),
+        `memory must be back to base, got ${JSON.stringify(h.memory)}`);
+      assert(h.driveLog.length === 0, 'Drive must be untouched');
+    });
+
+    test('mutation queue: overlapping updates apply in staging order', async () => {
+      const h = makeUpdateHarness({ priority: 'normal' });
+      const pA = h.update({ priority: 'high' });
+      const pB = h.update({ priority: 'low' });
+      await pA;
+      await pB;
+      assert(h.memory.priority === 'low', `last staged wins, got ${h.memory.priority}`);
+      assert(h.driveLog.length === 2 && h.driveLog[1].priority === 'low', 'both uploads run in order');
+      assert(h.maxInFlight() === 1, 'uploads for one item must never overlap');
+    });
+
+    test('mutation queue: a gated upload blocks the same item only', async () => {
+      const h = makeUpdateHarness({ v: 0 });
+      let releaseA;
+      const gateA = new Promise(r => { releaseA = r; });
+      const pA = h.update({ v: 1 }, { gate: gateA });
+      const pB = h.update({ v: 2 });
+      await new Promise(r => setTimeout(r, 20));
+      assert(h.driveLog.length === 0, 'B must wait for A\u2019s upload to settle');
+      releaseA();
+      await pA;
+      await pB;
+      assert(h.driveLog.length === 2, 'both uploads complete after the gate releases');
+    });
+
+    test('mutation queue: different items upload independently', async () => {
+      const queue = createMutationQueue();
+      const order = [];
+      let releaseA;
+      const gateA = new Promise(r => { releaseA = r; });
+      const eA = queue.enqueue('a', { restore() {}, replay() {} });
+      const eB = queue.enqueue('b', { restore() {}, replay() {} });
+      const pA = queue.runSerialized('a', eA, async () => { order.push('a-start'); await gateA; order.push('a-end'); });
+      const pB = queue.runSerialized('b', eB, async () => { order.push('b-only'); });
+      await pB;
+      assert(order.includes('b-only') && !order.includes('a-end'),
+        `b must complete while a is still gated, got [${order}]`);
+      releaseA();
+      await pA;
+      assert(order.join(',') === 'a-start,b-only,a-end', `unexpected order [${order}]`);
+    });
+  }
+
+  // ===================================================================
+  // QUICK-ADD INPUT PRESERVATION — a background sharing sync (an upload
+  // completing, the 15s poll) triggers a full re-render via
+  // 'sharing-changed'. The render functions must not wipe what the user
+  // is typing in a quick-add box: values (and focus) are snapshotted
+  // before the DOM is replaced and restored after.
+  // ===================================================================
+  {
+    const utils = jsFiles['utils.js'];
+    const todosSrc = jsFiles['todos.js'];
+    const habitsSrc = jsFiles['habits.js'];
+    const listsSrc = jsFiles['lists.js'];
+
+    test('utils.js defines and exports snapshotTextInputs/restoreTextInputs', () => {
+      assert(utils.includes('function snapshotTextInputs('), 'snapshotTextInputs must be defined');
+      assert(utils.includes('function restoreTextInputs('), 'restoreTextInputs must be defined');
+      assert(/export \{[\s\S]*snapshotTextInputs, restoreTextInputs/.test(utils),
+        'both helpers must be exported from utils.js');
+      assert(utils.includes('document.activeElement'),
+        'the snapshot must record which input is focused');
+    });
+
+    for (const [file, src, selector, keyAttr, renderFn] of [
+      ['todos.js', todosSrc, '.todo-cat-input', 'data-category', 'function renderTodos()'],
+      ['habits.js', habitsSrc, '.todo-cat-input', 'data-category', 'function renderHabits()'],
+      ['lists.js', listsSrc, '.list-quick-input', 'data-list-id', 'function renderLists()'],
+    ]) {
+      test(`${file}: render preserves quick-add text across re-render`, () => {
+        const start = src.indexOf(renderFn);
+        assert(start !== -1, `${renderFn} must exist in ${file}`);
+        const body = src.slice(start);
+        const snapIdx = body.indexOf(`snapshotTextInputs(grid, '${selector}', '${keyAttr}')`);
+        const htmlIdx = body.indexOf('grid.innerHTML = html;');
+        const restoreIdx = body.indexOf(`restoreTextInputs(grid, '${selector}', '${keyAttr}', pendingInputs)`);
+        assert(snapIdx !== -1 && htmlIdx !== -1 && restoreIdx !== -1,
+          `${file} must snapshot before innerHTML and restore after`);
+        assert(snapIdx < htmlIdx && htmlIdx < restoreIdx,
+          'snapshot must run before the DOM is replaced, restore after');
+      });
+    }
+  }
+
+  // ===================================================================
   // DRIVE BACKUP POLICY (runtime)
   // ===================================================================
   console.log('\n--- Drive Backup Policy\n');
@@ -3116,7 +3596,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     const main = jsFiles['main.js'];
 
     test('share payloads carry due_date so shared todos can sync to the calendar', () => {
-      const m = todos.match(/payload: \{ text: todo\.text, category: cat\?\.name \?\? '', priority: todo\.priority \|\| 'normal', note: todo\.note \|\| '', due_date: todo\.due_date \|\| null, snooze_until: todo\.snooze_until \|\| null \},/g);
+      const m = todos.match(/text: todo\.text, category: cat\?\.name \?\? '', priority: todo\.priority \|\| 'normal', note: todo\.note \|\| '', due_date: todo\.due_date \|\| null, snooze_until: todo\.snooze_until \|\| null/g);
       assert(m && m.length === 2,
         `expected due_date in both share payloads (shareExistingTodo + bulk share), found ${m ? m.length : 0}`);
     });
@@ -3322,7 +3802,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'master toggle-off must toast when the wipe fails');
       assert(main.includes("t('cal_sync.resync_failed')"),
         'resync must abort with a toast when the wipe fails');
-      assert(main.includes("t('account.calendar_delete_failed')"),
+      assert(main.includes("abort('account.step_calendar'"),
         'account deletion must abort (not proceed) when the calendar DELETE fails');
     });
 
@@ -3594,7 +4074,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('calendar failure strings exist in EN/FR/ES', () => {
       const i18n = jsFiles['i18n.js'];
-      for (const key of ['resync:', 'resynced:', 'migrating:', 'migration_failed:', 'scope_disabled:', 'removing_all:', 'disable_failed:', 'resync_failed:', 'calendar_delete_failed:']) {
+      for (const key of ['resync:', 'resynced:', 'migrating:', 'migration_failed:', 'scope_disabled:', 'removing_all:', 'disable_failed:', 'resync_failed:', 'step_failed:']) {
         const count = (i18n.match(new RegExp(`\\b${key}`, 'g')) || []).length;
         assert(count >= 3, `i18n '${key.replace(':', '')}' must be defined in all three languages (found ${count})`);
       }
@@ -3679,6 +4159,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   // ===================================================================
   // SUMMARY
   // ===================================================================
+  await Promise.all(pendingAsyncTests);
   console.log(`\n${'═'.repeat(50)}`);
   console.log(`  Results: ${passed} passed, ${failed} failed`);
   console.log(`${'═'.repeat(50)}\n`);

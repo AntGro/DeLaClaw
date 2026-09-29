@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-29T23:37:32.503Z from 39 modules (v2.10.0). Total LOC 30311. Do not hand-edit.
+> Generated 2026-09-29T23:50:36.300Z from 39 modules (v2.10.1). Total LOC 30352. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -36,7 +36,7 @@
 | utils | 901 | flashcards,x | i18n,icons,state,version | - | esc:7,window:6 |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 451 | - | habits,i18n,icons,utils | - | - |
-| delegation | 396 | - |  | - | window:1 |
+| delegation | 398 | - |  | - | window:1 |
 | demo | 310 | x |  | drive.js | - |
 | offline-cache | 281 | - | ./state,state.js | main.js | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
@@ -45,9 +45,9 @@
 | agents-ui | 200 | agent_grants | db,i18n,icons,utils | main.js | esc:29,window:5 |
 | storm3d | 185 | - |  | hero.js | - |
 | rest | 162 | x |  | main.js | - |
+| groups | 152 | - | i18n,icons,sharing-ui,state | main.js | esc:2,window:4 |
 | sharing-interface | 135 | - |  | sharing.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
-| groups | 113 | - | i18n,icons,sharing-ui,state | main.js | esc:2,window:2 |
 | sharing | 100 | - | sharing-drive,sharing-interface | - | - |
 | sharing-mutation-queue | 83 | - |  | sharing-drive.js | - |
 | sharing-envelope | 73 | - |  | sharing-drive.js,sharing-ui.js | - |

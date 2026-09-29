@@ -14,6 +14,20 @@ import { sharingGroupCardHtml, visibleMembers } from './sharing-ui.js';
 
 let selectedGroupId = null;
 let _subscribed = false;
+let _addMenuOpen = false;
+
+// Dismiss the Add/Join menu on outside click or Escape.
+document.addEventListener('click', (e) => {
+  if (!_addMenuOpen) return;
+  if (e.target?.closest?.('.groups-add-wrap')) return;
+  _addMenuOpen = false;
+  if (state.currentView === 'groups') renderGroups();
+});
+document.addEventListener('keydown', (e) => {
+  if (!_addMenuOpen || e.key !== 'Escape') return;
+  _addMenuOpen = false;
+  if (state.currentView === 'groups') renderGroups();
+});
 
 // Structural adapter events only: item-level changes (item-added, …) don't
 // affect this view, and re-rendering on them could wipe an in-progress invite.
@@ -37,6 +51,30 @@ function ensureSubscribed() {
 export function selectGroup(groupId) {
   selectedGroupId = groupId || null;
   renderGroups();
+}
+
+/** Toggle the Add/Join chooser menu. Exposed for data-action delegation. */
+export function groupsAddMenu() {
+  _addMenuOpen = !_addMenuOpen;
+  renderGroups();
+}
+
+/** Run the chosen Add/Join action and close the menu. Exposed for data-action delegation. */
+export function groupsAddChoice(choice) {
+  _addMenuOpen = false;
+  renderGroups();
+  if (choice === 'create') window.sharingCreateGroup?.();
+  else window.sharingOpenJoinCodeModal?.();
+}
+
+function addMenuHtml() {
+  return `<div class="groups-add-wrap${_addMenuOpen ? ' open' : ''}">
+    <button class="btn groups-add-btn" data-action="groups-add-menu" aria-haspopup="menu" aria-expanded="${_addMenuOpen ? 'true' : 'false'}">${lucideIcon('plus', 16)} ${t('groups.add_join_group')} ${lucideIcon('chevron-down', 14)}</button>
+    ${_addMenuOpen ? `<div class="groups-add-menu" role="menu">
+      <button class="header-menu-item" role="menuitem" data-action="groups-add-choice" data-choice="create"><span class="header-menu-icon">${lucideIcon('plus', 16)}</span> ${t('sharing.create_group')}</button>
+      <button class="header-menu-item" role="menuitem" data-action="groups-add-choice" data-choice="join"><span class="header-menu-icon">${lucideIcon('log-in', 16)}</span> ${t('sharing.join_group')}</button>
+    </div>` : ''}
+  </div>`;
 }
 
 function groupListItemHtml(group, selected) {
@@ -99,8 +137,7 @@ export async function renderGroups() {
   container.innerHTML = `<div class="groups-layout${selected ? ' groups-detail-active' : ''}">
     <aside class="groups-sidebar" aria-label="${t('sharing.groups')}">
       <div class="groups-sidebar-actions">
-        <button class="btn groups-add-btn" data-action="sharing-create-group">${lucideIcon('plus', 16)} ${t('groups.add_group')}</button>
-        <button class="btn" data-action="sharing-open-join-code" title="${t('sharing.join_group')}" aria-label="${t('sharing.join_group')}">${lucideIcon('log-in', 16)}</button>
+        ${addMenuHtml()}
       </div>
       <div class="groups-list">${listHtml}</div>
     </aside>
@@ -109,4 +146,6 @@ export async function renderGroups() {
 }
 
 window.selectGroup = selectGroup;
+window.groupsAddMenu = groupsAddMenu;
+window.groupsAddChoice = groupsAddChoice;
 window.renderGroups = renderGroups;

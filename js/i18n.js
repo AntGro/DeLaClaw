@@ -634,7 +634,7 @@ const T = {
       open_drive_folder: 'Open in Drive',
     },
     groups: {
-      add_group: 'Add Group',
+      add_join_group: 'Add / Join Group',
       back_to_groups: 'Back to groups',
       select_prompt: 'Select a group to see its members and manage it.',
     },
@@ -1344,7 +1344,7 @@ const T = {
       open_drive_folder: 'Ouvrir dans Drive',
     },
     groups: {
-      add_group: 'Ajouter un groupe',
+      add_join_group: 'Ajouter / Rejoindre',
       back_to_groups: 'Retour aux groupes',
       select_prompt: 'S\u00e9lectionnez un groupe pour voir ses membres et le g\u00e9rer.',
     },
@@ -2055,7 +2055,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       open_drive_folder: 'Abrir en Drive',
     },
     groups: {
-      add_group: 'A\u00f1adir grupo',
+      add_join_group: 'A\u00f1adir / Unirse',
       back_to_groups: 'Volver a los grupos',
       select_prompt: 'Selecciona un grupo para ver sus miembros y gestionarlo.',
     },

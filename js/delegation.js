@@ -267,6 +267,8 @@
       case 'sharing-complete-submit': callWindow('sharingCompleteSubmit', [el.dataset.groupId, el.dataset.itemId]); break;
       case 'groups-select': callWindow('selectGroup', [el.dataset.groupId]); break;
       case 'groups-back': callWindow('selectGroup', [null]); break;
+      case 'groups-add-menu': callWindow('groupsAddMenu', []); break;
+      case 'groups-add-choice': callWindow('groupsAddChoice', [el.dataset.choice]); break;
       case 'welcome-set-priority': e.stopPropagation(); callWindow('welcomeSetPriority', [el.dataset.todoId||getId(el), el.dataset.priority]); break;
       case 'welcome-open-priority-picker': callWindow('welcomeOpenPriorityPicker', [el.dataset.todoId||getId(el), e, el]); break;
       case 'welcome-toggle-todo': { var wDone = el.dataset.done === 'true'; callWindow('welcomeToggleTodo', [el.dataset.todoId||getId(el), wDone, el]); } break;

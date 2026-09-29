@@ -270,7 +270,11 @@ async function driveTrashFile(token, fileId) {
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ trashed: true }),
   });
-  if (!res.ok) throw new Error(`Drive trash ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const err = new Error(`Drive trash ${res.status}: ${await res.text()}`);
+    err.code = res.status;
+    throw err;
+  }
 }
 
 async function driveShareWithUser(token, fileId, email, role = 'writer') {
@@ -1332,8 +1336,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
      * This removes the group for all members, not just the deleter —
      * the folder lives in the creator's Drive, so it cannot survive
      * without them. A created group whose folder is already gone on
-     * Drive counts as deleted (its row is dropped); anything else that
-     * fails to load or delete aborts the whole pass.
+     * Drive counts as deleted (its row is dropped) — including a folder
+     * that vanished after the group was loaded, where the trash throws
+     * 404; anything else that fails to load or delete aborts the whole pass.
      */
     async deleteOwnedGroups() {
       await refreshGroupRows();
@@ -1353,7 +1358,21 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           }
           await loadGroup(folder.id, row.id, { owned: true });
         }
-        await this.deleteGroup(row.id);
+        try {
+          await this.deleteGroup(row.id);
+        } catch (err) {
+          if (err?.code !== 404) throw err;
+          // The folder vanished from Drive after the group was loaded —
+          // counts as already deleted: drop the local state and continue.
+          _groups.delete(row.id);
+          if (db) {
+            const { error } = await db.from('groups').delete().eq('id', row.id);
+            if (error) console.warn('sharing: failed to drop row for missing group folder:', error.message);
+            else await refreshGroupRows();
+          } else {
+            _groupRows = _groupRows.filter(r => r.id !== row.id);
+          }
+        }
       }
     },
 

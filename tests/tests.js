@@ -3061,6 +3061,15 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(leave.includes('{ strict: true }'), 'the wipe leave must be strict');
     });
 
+    test('deleteOwnedGroups treats a 404 trash on a loaded group as already deleted', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      const trash = drive.slice(drive.indexOf('async function driveTrashFile'));
+      assert(trash.includes('err.code = res.status'), 'driveTrashFile must surface the status code');
+      const wipe = drive.slice(drive.indexOf('async deleteOwnedGroups()'));
+      assert(wipe.includes('err?.code !== 404'), 'a 404 from deleteGroup must not abort the wipe');
+      assert(wipe.includes('_groups.delete(row.id)'), 'the loaded group entry must be dropped on 404');
+    });
+
     test('setup help names the actual Drive folder', () => {
       const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
       const lines = i18n.split('\n').filter(l => l.includes('drive_1_desc:'));

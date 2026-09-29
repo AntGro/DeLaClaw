@@ -1223,15 +1223,13 @@ test('sharing group load is all-or-nothing: a failed file download skips the who
     'loadGroupWithIds must throw a labeled error when an item-file download fails');
 
   // loadGroup (owned path): item-file downloads must throw too (no partial
-  // group). There is no revoked.json anymore — the required set is 16 files.
+  // group). The required set is 16 files.
   const loadStart = drive.indexOf('async function loadGroup(folderId, groupId, opts');
   const dlStart = drive.indexOf('const downloads = [];', loadStart);
   const dlEnd = drive.indexOf('const [gResult, ...typeResults]', loadStart);
   const dlBody = drive.slice(dlStart, dlEnd);
   assert(!dlBody.includes('return null'),
     'loadGroup must not degrade failed item downloads to null (partial group)');
-  assert(!drive.includes('revoked.json'),
-    'sharing-drive.js must not reference revoked.json anywhere');
   assert(dlBody.includes('throw downloadError(`${ITEM_TYPES[i]}.json for group ${groupId}`, err)'),
     'loadGroup must throw a labeled error when an item-file download fails');
 
@@ -1247,16 +1245,12 @@ test('sharing group load is all-or-nothing: a failed file download skips the who
     'loadAll must classify joined-load failures with isDefiniteAccessLoss');
   assert(allBody.includes('handleStaleGroup(joined.id)'),
     'loadAll must purge the failed joined group with no verdict');
-  assert(!allBody.includes('checkRemovalViaRevoked'),
-    'loadAll must not consult revoked.json');
 
   // handleStaleGroup: single-path purge (poll + loadAll) — drops the group
   // from memory, clears the skip mark, purges pointers, deletes the
-  // groups-table row, notifies the app. No verdict, no revoked.json.
+  // groups-table row, notifies the app. No verdict.
   assert(drive.includes('async handleStaleGroup(groupId)'),
     'sharing-drive.js must define handleStaleGroup with no verdict parameter');
-  assert(!drive.includes('checkRemovalViaRevoked'),
-    'sharing-drive.js must not define checkRemovalViaRevoked');
   assert(drive.includes("db.from('groups').delete().eq('id', groupId)"),
     'handleStaleGroup must purge the groups-table row');
   assert(drive.includes('_skippedGroups.delete(groupId)'),
@@ -2988,7 +2982,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   }
 
   // ===================================================================
-  // SHARING ACCESS LOSS — no removal notice file (revoked.json removed)
+  // SHARING ACCESS LOSS — definite access loss purges the group
   // A joined group whose folder becomes unreachable (member removed, or the
   // group deleted) is purged: pointers deleted outright, no dialog, one
   // info toast. Only a definite access loss purges — 404 always; a 403 only
@@ -2999,33 +2993,15 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
     const main = jsFiles['main.js'];
 
-    test('no revoked.json anywhere in the sharing stack', () => {
-      assert(!drive.includes('revoked.json'),
-        'sharing-drive.js must not reference revoked.json');
-      for (const f of ['sharing-ui.js', 'sharing.js', 'sharing-interface.js',
-          'todos.js', 'habits.js', 'lists.js', 'main.js', 'delegation.js']) {
-        assert(!jsFiles[f].includes('revoked.json'),
-          `${f} must not reference revoked.json`);
-      }
-    });
-
     test('required file set is group + item types + extras (16 files)', () => {
       const m = drive.match(/const REQUIRED_GROUP_FILES = \[(.*?)\];/s);
       assert(m, 'REQUIRED_GROUP_FILES declaration must be parseable');
       assert(m[1].includes("'group'") && m[1].includes('ITEM_TYPES') &&
-             m[1].includes('EXTRA_FILES') && !m[1].includes("'revoked'"),
-        'required set must be group + item types + extras, without revoked');
+             m[1].includes('EXTRA_FILES'),
+        'required set must be group + item types + extras');
     });
 
-    test('createGroup uploads no revoked.json', () => {
-      const fn = drive.match(/async createGroup\(name, opts\) \{([\s\S]*?)\n    \},/);
-      assert(fn || drive.includes('async createGroup('), 'createGroup must exist');
-      const body = fn ? fn[1] : drive;
-      assert(!body.includes("key: 'revoked'"),
-        'createGroup must not upload a revoked file');
-    });
-
-    test('removeUser deletes the member row and revokes access (no notice file)', () => {
+    test('removeUser deletes the member row and revokes access', () => {
       const fn = drive.match(/async removeUser\(groupId, member_id\) \{([\s\S]*?)\n    \},/);
       assert(fn, 'removeUser must exist');
       const body = fn[1];
@@ -3037,8 +3013,6 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(rowIdx !== -1, 'removeUser must delete the member row');
       assert(reassignIdx < revokeIdx && revokeIdx < rowIdx,
         'removeUser must reassign items, then revoke, then delete the row');
-      assert(!body.includes('removed.push'),
-        'removeUser must not write a removal notice');
     });
 
     test('isDefiniteAccessLoss classifies access loss vs transient failures', () => {

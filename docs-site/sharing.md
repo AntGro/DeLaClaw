@@ -1,7 +1,5 @@
 # Sharing
 
-Last updated: 2026-09-29
-
 DeLaClaw lets you share TODOs, habits, and list items with other people through sharing groups. This page explains the architecture, data flow, and security model.
 
 This page describes the sharing implementation — built from the 14 design decisions made on 2026-09-07 (recorded in the "DeLaClaw design decisions" space, "Drive sharing" tab). Assumption: sharing is not yet exposed, no groups exist in the wild, so there are no backward-compatibility constraints (greenfield).

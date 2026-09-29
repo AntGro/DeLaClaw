@@ -88,7 +88,7 @@ const EXTRA_FILES      = Array.from({ length: EXTRA_COUNT }, (_, i) => `extra_${
 // The complete file set a group folder must contain. Joining is gated on ALL of
 // these: the pending → 'joined' flip only happens when the joiner has access to
 // every file, so a partial grant (e.g. group.json alone) can never half-join.
-const REQUIRED_GROUP_FILES = ['group', ...ITEM_TYPES, ...EXTRA_FILES, 'revoked'];
+const REQUIRED_GROUP_FILES = ['group', ...ITEM_TYPES, ...EXTRA_FILES];
 // group.json is written LAST during createGroup: its presence marks creation as
 // complete. The created row in the groups table is only written afterwards,
 // so a row always points at a fully created group.
@@ -201,6 +201,30 @@ const DRIVE_RATE_LIMIT_REASONS = new Set([
 /** True when a Drive error is a throttle/quota 403 — transient, never an access-loss signal. */
 function isDriveRateLimited(err) {
   return !!err && DRIVE_RATE_LIMIT_REASONS.has(err.reason);
+}
+
+// 403 reasons that positively identify lost access (the folder permission was
+// revoked). Anything else fails open: an unknown or missing reason is treated
+// as transient and retried, rather than risk purging a group on a signal we
+// cannot read.
+const DRIVE_ACCESS_LOSS_REASONS = new Set([
+  'insufficientPermissions',
+  'forbidden',
+]);
+
+/** True when a Drive error proves the group folder is unreachable for good:
+ *  the member was removed or the group was deleted. A 404 is always access
+ *  loss (Drive never throttles via 404); a 403 counts only with a known
+ *  access-loss reason — rate-limit reasons and unknown/missing reasons are
+ *  transient and retried on the next cycle. */
+function isDefiniteAccessLoss(err) {
+  const code = err?.code ?? err?.status;
+  if (code === 404) return true;
+  if (code === 403) {
+    if (isDriveRateLimited(err)) return false;
+    return DRIVE_ACCESS_LOSS_REASONS.has(err?.reason);
+  }
+  return false;
 }
 
 async function driveUpload(token, folderId, fileId, fileName, data, etag) {
@@ -373,7 +397,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   //   typeData: { todos: [], habits: [], lists: [] },
   //   typeMeta: { todos: { fileId, etag, modifiedTime }, ... },
   //   typeIntents: { todos: { createdIds, deletedIds }, ... }, // in-memory sync intents
-  //   revokedMeta: { fileId, etag, modifiedTime }, // revoked.json (removed-member notices)
   //   gMeta: { fileId, etag, modifiedTime },
   //   joinedViaLink: boolean,   // true if joined via invite code
   // }
@@ -383,7 +406,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   // memory by the Drive adapter at connect. _groupRows is a read cache,
   // refreshed from the table after every mutation and at each poll.
   // Joined rows (kind 'joined') are pointers to another user's shared folder:
-  //   { id, kind: 'joined', folder_id, name, file_ids: { group, todos, habits, lists, extra_1..extra_12, revoked }, member_id, joined_at, updated_at }
+  //   { id, kind: 'joined', folder_id, name, file_ids: { group, todos, habits, lists, extra_1..extra_12 }, member_id, joined_at, updated_at }
   // Created rows (kind 'created') record groups this user created: the group
   // itself is discovered by scanning Drive, the row only stores { id,
   // kind: 'created', name, created_at, updatedAt } so skipped/deleted notices
@@ -399,7 +422,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     _groupRows.find(r => r.id === groupId)?.name || null;
 
   // Groups whose load failed transiently in the current loadAll() run
-  // (a required file failed to download, no removed/deleted verdict).
+  // (a required file failed to download without a definite access loss).
   // groupId → { name }. Rebuilt on every loadAll; the Sharing pane renders
   // them with a "skipped" chip. A group that loads fine never lands here.
   const _skippedGroups = new Map();
@@ -460,8 +483,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
   /** Member ID — deterministic per user: 16 hex chars of SHA-256 of the
    *  normalized email. Stable across invites, so a removed-then-reinvited
-   *  member keeps the same ID; removal entries in revoked.json are
-   *  disambiguated by timestamp instead. The raw email is never persisted
+   *  member keeps the same ID. The raw email is never persisted
    *  in group.json. */
   async function memberIdFromEmail(email) {
     return (await sha256Hex(normalizeEmail(email))).slice(0, 16);
@@ -532,8 +554,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     for (const type of ITEM_TYPES) {
       if (!entry.typeIntents[type]) entry.typeIntents[type] = createIntentState();
     }
-    // revoked.json metadata: absent for groups created before phase 3.
-    if (!entry.revokedMeta) entry.revokedMeta = {};
     return entry;
   }
 
@@ -764,9 +784,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     // Download group.json + all type files in parallel. A failed download
     // aborts the whole group load — groups are never partially loaded (see
     // loadGroup). loadAll() isolates the failure per folder; the group is
-    // retried on the next page load. revoked.json is NOT downloaded here:
-    // its content is only evaluated at poll time (removed-vs-deleted), so
-    // only the fileId is recorded.
+    // retried on the next page load.
     const downloads = [
       fileIds.group
         ? driveDownload(tok, fileIds.group).catch(err => { throw downloadError(`group.json for joined group ${groupId}`, err); })
@@ -800,9 +818,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         typeMeta[type] = {};
       }
     }
-    const revokedMeta = fileIds.revoked ? { fileId: fileIds.revoked } : {};
-
-    const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta, revokedMeta, joinedViaLink: true });
+    const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta, joinedViaLink: true });
     if (opts.cache !== false) _groups.set(groupId, entry);
     return entry;
   }
@@ -824,9 +840,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     // Find all core files in parallel. A throw here means the listing itself
     // failed ("couldn't look properly") — the caller isolates it per folder and
     // must NOT treat the group as incomplete.
-    const [gFile, revokedFile, ...typeFiles] = await Promise.all([
+    const [gFile, ...typeFiles] = await Promise.all([
       driveFindFile(tok, folderId, 'group.json'),
-      driveFindFile(tok, folderId, 'revoked.json'),
       ...ITEM_TYPES.map(type => driveFindFile(tok, folderId, `${type}.json`)),
     ]);
 
@@ -847,10 +862,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     downloads.push(gFile
       ? driveDownload(tok, gFile.id).then(r => ({ ...r, file: gFile }))
       : Promise.resolve(null));
-    downloads.push(revokedFile
-      ? driveDownload(tok, revokedFile.id).then(r => ({ ...r, file: revokedFile }))
-          .catch(err => { throw downloadError(`revoked.json for group ${groupId}`, err); })
-      : Promise.resolve(null));
     for (let i = 0; i < ITEM_TYPES.length; i++) {
       const file = typeFiles[i];
       downloads.push(file
@@ -858,7 +869,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
             .catch(err => { throw downloadError(`${ITEM_TYPES[i]}.json for group ${groupId}`, err); })
         : Promise.resolve(null));
     }
-    const [gResult, revokedResult, ...typeResults] = await Promise.all(downloads);
+    const [gResult, ...typeResults] = await Promise.all(downloads);
 
     let group = { id: groupId, name: groupId, created_by: null, members: [], created_at: null };
     let gMeta = {};
@@ -882,11 +893,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       }
     }
 
-    const revokedMeta = revokedResult
-      ? { fileId: revokedFile.id, etag: revokedResult.etag, modifiedTime: revokedFile.modifiedTime }
-      : {};
-
-    const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta, revokedMeta });
+    const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta });
     _groups.set(groupId, entry);
 
     // Creator-only hygiene: reap folder writer grants with no member row
@@ -1037,14 +1044,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           created_at: new Date().toISOString(),
         };
 
-        // Create empty per-type files + reserved extras + revoked.json in
-        // parallel, reporting per-file progress as each upload resolves.
-        // revoked.json starts empty: the creator appends {id, removed_at}
-        // entries when removing members (phase 3).
+        // Create empty per-type files + reserved extras in parallel, reporting
+        // per-file progress as each upload resolves.
         const allFiles = [
           ...ITEM_TYPES.map(type => ({ key: type, name: `${type}.json` })),
           ...EXTRA_FILES.map(name => ({ key: name, name: `${name}.json` })),
-          { key: 'revoked', name: 'revoked.json' },
         ];
         const totalFiles = allFiles.length;
         let doneFiles = 0;
@@ -1063,15 +1067,12 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
         const typeMeta = {};
         const typeData = {};
-        let revokedMeta = {};
         for (let i = 0; i < allFiles.length; i++) {
           const { key } = allFiles[i];
           const r = results[i];
           if (ITEM_TYPES.includes(key)) {
             typeMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
             typeData[key] = [];
-          } else if (key === 'revoked') {
-            revokedMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
           }
           // Extra files are created on Drive but not tracked in memory (unused for now)
         }
@@ -1085,7 +1086,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           typeData,
           typeMeta,
           typeIntents,
-          revokedMeta,
           gMeta: { fileId: gRes.id, etag: gRes.etag, modifiedTime: gRes.modifiedTime },
         };
         // Record the created group in the groups table (kind 'created') BEFORE
@@ -1175,24 +1175,20 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         );
       }
 
-      // Joined groups (link-join): load using saved file IDs (or search for
-      // legacy pointers). A 403/404 here means our access is gone (removed
-      // from the group, or the group was deleted): consult revoked.json
-      // immediately — the poll only covers loaded groups, so a skipped group
-      // would otherwise never get its removed/deleted verdict.
-      // A rate-limited 403 is transient, not access loss: skip the verdict
-      // check and let the next load retry.
+      // Joined groups: load using saved file IDs. A definite access loss here
+      // (removed from the group, or the group was deleted) cleans the group
+      // up immediately — the poll only covers loaded groups, so a skipped
+      // group would otherwise never be purged. Anything else (throttled or
+      // unknown-reason 403s, 5xx, network blips) is transient: rethrow and
+      // retry on the next load.
       const loadJoined = (joined) => {
         const p = joined.file_ids
           ? loadGroupWithIds(joined.folder_id, joined.id, joined.file_ids)
           : loadGroup(joined.folder_id, joined.id); // pointer without file_ids: search-based load
         return p.catch(async err => {
-          if ((err?.code === 403 || err?.code === 404) && !isDriveRateLimited(err)) {
-            const verdict = await this.checkRemovalViaRevoked(joined.id, tok).catch(() => null);
-            if (verdict) {
-              await this.handleStaleGroup(joined.id, verdict);
-              return null;
-            }
+          if (isDefiniteAccessLoss(err)) {
+            await this.handleStaleGroup(joined.id);
+            return null;
           }
           throw err;
         });
@@ -1359,13 +1355,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       // Grant Drive editor access on the subfolder. The email is permission material only.
       const perm = await driveShareWithUser(tok, e.folderId, email, 'writer');
-      // Grant reader access on revoked.json specifically: if this member is
-      // later removed, the folder grant is revoked but this file-level grant
-      // survives, so their client can read the removal notice.
-      if (e.revokedMeta?.fileId) {
-        await driveShareWithUser(tok, e.revokedMeta.fileId, email, 'reader')
-          .catch(err => console.warn('sharing: failed to grant revoked.json reader', err));
-      }
       // Snapshot the roster mutation so a failed group.json write can roll it
       // back: the invite is then exactly as if it never happened, and
       // retrying passes the duplicate-invite guard. (The Drive grant already
@@ -1420,8 +1409,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     },
 
     /** Remove a member from a group. Creator-only. Reassigns the removed
-     *  member's items to the creator, records the removal in revoked.json,
-     *  revokes Drive access, updates group.json. */
+     *  member's items to the creator, revokes Drive access, deletes the
+     *  member row from group.json. The removed member's client detects the
+     *  lost access on its next poll and purges its local pointers. */
     async removeUser(groupId, member_id) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
@@ -1432,9 +1422,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (member.role === 'creator') throw new Error('Cannot remove the creator');
 
       // 1. Reassign the removed member's items to the creator, so no ghost
-      // creator IDs linger in the shared files. Runs before the revoked.json
-      // notice: a rewrite failure aborts the removal with nothing changed.
-      // updated_at is bumped so the new owner wins any concurrent-edit merge.
+      // creator IDs linger in the shared files. A rewrite failure aborts the
+      // removal with nothing changed. updated_at is bumped so the new owner
+      // wins any concurrent-edit merge.
       const creatorId = e.group.created_by || await currentMemberId(groupId);
       const now = new Date().toISOString();
       for (const type of ITEM_TYPES) {
@@ -1449,21 +1439,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         await saveTypedItems(groupId, type);
       }
 
-      // 2. Record the removal in revoked.json FIRST — the member must be able
-      // to read it after their folder access is revoked. Aborts the removal
-      // if this write fails, so no one is ever removed without a notice.
-      if (e.revokedMeta?.fileId) {
-        const { data, etag } = await driveDownload(tok, e.revokedMeta.fileId);
-        const removed = Array.isArray(data) ? data : [];
-        if (!removed.some(r => r.id === member_id)) {
-          removed.push({ id: member_id, removed_at: new Date().toISOString() });
-        }
-        const r = await driveUpload(tok, e.folderId, e.revokedMeta.fileId, 'revoked.json', removed, etag);
-        e.revokedMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
-      }
-
-      // 3. Revoke folder access. The file-level reader grant on revoked.json
-      // (given at invite time) survives, so the member can read the notice.
+      // 2. Revoke folder access.
       const permissionId = member.drive_permission_id || (member.member_id || '').replace(/^drive-perm-/, '');
       if (permissionId) await driveRemovePermission(tok, e.folderId, permissionId).catch(() => {});
 
@@ -1711,38 +1687,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       }
     },
 
-    /**
-     * Consult revoked.json after the group files became unreachable (403/404).
-     * Detection is based only on this file — no consecutive-failure counting.
-     * Returns 'removed' | 'deleted' | null (transient: leave for the next poll).
-     * 'deleted' is the fallback when no notice can be consulted (no
-     * file_ids.revoked, revoked.json 404, or no matching entry): a 404
-     * conflates "gone" with "revoked from you", so it is a guess, not a
-     * proven deletion.
-     */
-    async checkRemovalViaRevoked(groupId, tok) {
-      const joined = _joinedRows().find(j => j.id === groupId);
-      const revokedFileId = joined?.file_ids?.revoked;
-      const selfId = joined?.member_id;
-      // No revocation state (e.g. joined before phase 3): nothing to consult.
-      if (!revokedFileId || !selfId) return 'deleted';
-      let data;
-      try {
-        ({ data } = await driveDownload(tok, revokedFileId));
-      } catch (err) {
-        if (err?.code === 404 || err?.status === 404) return 'deleted'; // revoked.json gone too → group deleted
-        return null; // transient failure: try again next poll
-      }
-      const removed = Array.isArray(data) ? data : [];
-      // Member IDs are stable per email, so a removed-then-reinvited member keeps
-      // the same ID: only a removal recorded after the current join counts.
-      // Missing timestamps fall back to the old ID-match behavior (conservative).
-      const joined_at = joined?.joined_at || null;
-      const wasRemoved = removed.some(r =>
-        r.id === selfId && (!joined_at || !r.removed_at || r.removed_at > joined_at));
-      return wasRemoved ? 'removed' : 'deleted';
-    },
-
     async poll() {
       const tok = await token();
       let changed = false;
@@ -1827,15 +1771,12 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
               }
             }
           } catch (err) {
-            // Group files unreachable (deleted folder or revoked access):
-            // consult revoked.json — the only signal. 'removed' → we were
-            // kicked; 'deleted' → unreachable with no notice to consult
-            // (ambiguous: deletion vs removal); null → transient.
-            // A rate-limited 403 is transient, not access loss: skip the
-            // verdict check and retry on the next poll.
-            if ((err?.code === 404 || err?.status === 404 || err?.code === 403 || err?.status === 403) && !isDriveRateLimited(err)) {
-              const verdict = await this.checkRemovalViaRevoked(groupId, tok).catch(() => null);
-              if (verdict) staleGroupIds.push({ groupId, verdict });
+            // Group files unreachable. A definite access loss (member removed
+            // or group deleted) queues the group for cleanup; anything else —
+            // throttled or unknown-reason 403s, 5xx, network blips — is
+            // transient and retried on the next poll.
+            if (isDefiniteAccessLoss(err)) {
+              staleGroupIds.push(groupId);
             } else {
               console.warn(`sharing poll group ${groupId}:`, err);
             }
@@ -1851,8 +1792,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       // Clean up groups whose files are gone (group deleted, or we were removed)
       if (staleGroupIds.length) {
-        for (const { groupId: gid, verdict } of staleGroupIds) {
-          await this.handleStaleGroup(gid, verdict);
+        for (const gid of staleGroupIds) {
+          await this.handleStaleGroup(gid);
         }
         changed = true;
       }
@@ -1861,32 +1802,25 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     },
 
     /**
-     * Apply a removed/deleted verdict for a group: drop it from memory,
-     * notify the app, and purge the groups-table row. Shared by the poll
-     * and by loadAll — a joined group that fails to load with 403/404 never
-     * reaches the poll, so it gets its verdict at startup instead.
+     * Clean up a group whose folder became unreachable (member removed or
+     * group deleted): drop it from memory and purge the groups-table row.
+     * Local item pointers are deleted outright via 'sharing-group-purge-items'
+     * (handled in main.js — the adapter has no db access). Shared by the poll
+     * and by loadAll: a joined group that fails to load with a definite
+     * access loss never reaches the poll, so it is cleaned up at startup
+     * instead.
      */
-    async handleStaleGroup(groupId, verdict) {
+    async handleStaleGroup(groupId) {
       const row = _groupRows.find(r => r.id === groupId);
       // Live group data first, then the name stored in the groups table
       // row (survives an unreachable folder).
       const groupName = _groups.get(groupId)?.group?.name || row?.name || groupId;
-      // Capture the folder ID before purging: the 'deleted' notice links to
-      // the Drive folder so the user can double-check it is really gone.
-      const folderId = row?.folder_id || _groups.get(groupId)?.folderId || null;
       _groups.delete(groupId);
-      _skippedGroups.delete(groupId); // a verdict beats a transient skip mark
-      emit('group-deleted', { groupId, verdict });
-      if (verdict === 'removed') {
-        // Own member_id found in revoked.json — removal is certain, so purge
-        // local item pointers outright (no dialog). The 'deleted' case keeps
-        // the orphan dialog: a 404 conflates "gone" with "revoked from you",
-        // so without a readable notice we cannot tell a real deletion from
-        // a removal, and the unlink stays a manual choice.
-        // Handled in main.js via state.db (the adapter has no db access).
-        try { document.dispatchEvent(new CustomEvent('sharing-group-purge-items', { detail: { groupId } })); } catch {}
-      }
-      try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName, verdict, folderId } })); } catch {}
+      _skippedGroups.delete(groupId); // cleanup beats a transient skip mark
+      emit('group-deleted', { groupId });
+      // Handled in main.js via state.db (the adapter has no db access).
+      try { document.dispatchEvent(new CustomEvent('sharing-group-purge-items', { detail: { groupId } })); } catch {}
+      try { document.dispatchEvent(new CustomEvent('sharing-group-removed-remotely', { detail: { groupName } })); } catch {}
       // Purge the groups-table row
       if (db) {
         const { error } = await db.from('groups').delete().eq('id', groupId);
@@ -1935,7 +1869,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     /** Join a shared group using explicit file IDs (from Picker or direct access).
      *  Requires a matching pending invite (by email hash) — Drive access alone is not enough.
      *  @param {string} folderId — the shared subfolder ID
-     *  @param {Object} fileIds — Drive file IDs keyed by every getRequiredGroupFiles() entry (group, todos, habits, lists, the 12 extra_* placeholders, revoked)
+     *  @param {Object} fileIds — Drive file IDs keyed by every getRequiredGroupFiles() entry (group, todos, habits, lists, the 12 extra_* placeholders)
      *  @param {Object} [opts] — { display_name } pseudo chosen by the joiner */
     async joinWithFileIds(folderId, fileIds, opts = {}) {
       // Gate the join on the full file set: flipping to 'joined' with only a
@@ -1985,11 +1919,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         // re-upload below fails, the join stays retryable (re-pasting the
         // code finds the still-pending row), whereas a flipped group.json
         // with no pointer row is unrecoverable.
-        // member_id lets the client match its own revoked.json entry if this
-        // account is later removed from the group. The row id is the group id:
-        // the Drive adapter's 412 merge is keyed on id with newer updated_at
-        // winning, which preserves the old union-by-folderId conflict behavior
-        // across devices.
+        // member_id identifies this client's own membership row. The row id is
+        // the group id: the Drive adapter's 412 merge is keyed on id with
+        // newer updated_at winning, which preserves the old union-by-folderId
+        // conflict behavior across devices.
         const now = new Date().toISOString();
         // name is stored in the pointer so the deleted/skipped notices can name
         // the group even when its Drive folder is unreachable (no group.json).
@@ -2050,6 +1983,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       }
       _groups.delete(groupId);
       emit('group-left', { groupId });
+      // Purge the member's still-shared pointers outright. The orphan dialog
+      // that used to offer unlinking them is gone; kept copies were already
+      // converted to personal by the leave dialog before this ran.
+      try { document.dispatchEvent(new CustomEvent('sharing-group-purge-items', { detail: { groupId } })); } catch {}
     },
 
     /** Get the invite code for a group. */
@@ -2075,20 +2012,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     /** Check if a group was joined via invite code. */
     isJoinedViaLink(groupId) {
       return _groups.get(groupId)?.joinedViaLink === true;
-    },
-
-    /** Removed members of a group, from revoked.json: [{ member_id, status: 'revoked', removedAt }]. */
-    async getRevokedMembers(groupId) {
-      const e = _groups.get(groupId);
-      const fileId = e?.revokedMeta?.fileId;
-      if (!fileId) return [];
-      const tok = await token();
-      const { data } = await driveDownload(tok, fileId).catch(() => ({ data: [] }));
-      return (Array.isArray(data) ? data : []).map(r => ({
-        member_id: r.id,
-        status: 'revoked',
-        removedAt: r.removed_at || null,
-      }));
     },
 
     // ─── Backend capabilities (injected, backend-agnostic) ───

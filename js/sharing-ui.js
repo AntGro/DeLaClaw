@@ -199,25 +199,6 @@ export async function renderSharingPane() {
         </div>`;
     }
 
-    // Revoked members toggle (archive-toggle pattern)
-    const revokedMembers = state.sharing?.getRevokedMembers?.(group.id) || [];
-    if (isCreator && revokedMembers.length > 0) {
-      const toggleId = `revoked-toggle-${group.id}`;
-      const listId = `revoked-list-${group.id}`;
-      html += `<div class="archive-toggle" data-action="toggle-revoked-members" data-group-id="${esc(group.id)}" id="${toggleId}">
-          <span class="arrow" id="revoked-arrow-${esc(group.id)}">▶</span> ${t('sharing.removed')} (${revokedMembers.length})
-        </div>
-        <div class="archived-tasks" id="${listId}">`;
-      for (const member of revokedMembers) {
-        const label = memberLabel(member);
-        html += `<div class="sharing-member sharing-member-revoked">
-            ${avatarDot(member, 22)}
-            <span class="sharing-member-email">${esc(label)} <span class="sharing-member-revoked-tag">${t('sharing.revoked')}</span></span>
-          </div>`;
-      }
-      html += `</div>`;
-    }
-
     html += `</div>
       ${isCreator ? `<div class="sharing-invite-row">
         <input type="text" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${invitePlaceholder}" data-action="sharing-invite-on-enter" data-group-id="${esc(group.id)}">
@@ -229,7 +210,7 @@ export async function renderSharingPane() {
 
   // ── Skipped groups (transient load failure this session) ──
   // These groups are not loaded — a required file failed to download and no
-  // removed/deleted verdict was reached. Shown with a chip instead of being
+  // definite access loss was detected. Shown with a chip instead of being
   // silently dropped; retried on the next page load.
   const skippedGroups = state.sharing.getSkippedGroups?.() || [];
   for (const skipped of skippedGroups) {
@@ -934,8 +915,7 @@ async function sharingOpenJoinPicker(folderId) {
     }
 
     // Map picked docs to required file keys via the adapter (never hard-coded)
-    // so new required files — e.g. revoked.json added in phase 3 — are
-    // picked up automatically.
+    // so new required files are picked up automatically.
     const requiredKeys = state.sharing.getRequiredGroupFiles();
     const fileIds = state.sharing.mapDocsToFileIds(docs);
 
@@ -955,8 +935,8 @@ async function sharingOpenJoinPicker(folderId) {
       return;
     }
 
-    // All required files (group + item files + placeholders + revoked.json)
-    // must be selected: a partial grant can never half-join — the pending →
+    // All required files (group + item files + placeholders) must be
+    // selected: a partial grant can never half-join — the pending →
     // 'joined' flip is gated on the full set inside joinWithFileIds.
     const missing = requiredKeys.filter(k => !fileIds[k]);
     if (missing.length > 0) {
@@ -1007,7 +987,7 @@ function showBadgeTooltip(badge) {
   const tip = document.createElement('div');
   tip.className = 'shared-badge-tooltip';
 
-  const activeMembers = visibleMembers(group).filter(m => m.status !== 'revoked');
+  const activeMembers = visibleMembers(group);
   tip.innerHTML = activeMembers.map(m => {
     const label = memberLabel(m);
     return `<div class="shared-badge-tooltip-row">${avatarDot(m, 20)}<span>${esc(label)}</span></div>`;
@@ -1298,13 +1278,6 @@ export function applySettingsI18n() {
 
 // ── Expose actions on window (CSP delegation handled in js/delegation.js) ──
 
-function toggleRevokedMembers(groupId) {
-  const container = document.getElementById(`revoked-list-${groupId}`);
-  const arrow = document.getElementById(`revoked-arrow-${groupId}`);
-  if (container) container.classList.toggle('visible');
-  if (arrow) arrow.classList.toggle('open');
-}
-
 window.sharingCreateGroup = sharingCreateGroup;
 window.sharingCreateGroupSubmit = sharingCreateGroupSubmit;
 window.sharingInvite = sharingInvite;
@@ -1322,7 +1295,6 @@ window.sharingCopyLink = sharingCopyCode;
 window.sharingCopyMemberLink = sharingCopyMemberCode;
 window.sharingCopyLinkValue = sharingCopyCodeValue;
 window.sharingOpenJoinPicker = sharingOpenJoinPicker;
-window.toggleRevokedMembers = toggleRevokedMembers;
 window.submitSharePopover = submitSharePopover;
 window.sharePopoverOpenSharing = function() {
   closeSharePopover();

@@ -231,32 +231,54 @@ test('Sharing refresh handler centralizes sync before render', () => {
     'lists.js must not register its own sharing-changed listener');
 });
 
-test('Orphan handler is module-level, not inside connect()', () => {
+test('No orphan machinery remains (access-loss purge replaced it)', () => {
   const main = jsFiles['main.js'];
-  // Listener must exist at module level
-  assert(main.includes("document.addEventListener('sharing-orphan-detected'"),
-    'main.js must register sharing-orphan-detected listener');
-  // Must NOT be inside connect() — extract connect body and check
-  const connectIdx = main.indexOf('async function connect(');
-  assert(connectIdx !== -1, 'connect() must exist');
-  const connectBody = main.slice(connectIdx, main.indexOf('\n}\n', connectIdx) + 3);
-  assert(!connectBody.includes('sharing-orphan-detected'),
-    'orphan listener must be outside connect() to avoid leak on reconnect');
+  for (const dead of ['sharing-orphan-detected', '_orphanQueue', '_processOrphanQueue',
+      'ORPHAN_THRESHOLD', '_orphanConfirmed', '_orphanCounts', '_orphanDialogOpen']) {
+    assert(!main.includes(dead), `main.js must not contain ${dead}`);
+  }
+  for (const f of ['todos.js', 'habits.js', 'lists.js']) {
+    assert(!jsFiles[f].includes('sharing-orphan-detected'),
+      `${f} sync must not dispatch sharing-orphan-detected`);
+  }
+  assert(!main.includes('showGroupDeletedNotice'),
+    'main.js must not show a group-deleted dialog');
 });
 
-test('Orphan handler uses queued processing, not direct showConfirmAction', () => {
+test('Removed-remotely listener shows the single access-loss toast (no verdict branching)', () => {
   const main = jsFiles['main.js'];
-  // Must have a queue and threshold
-  assert(main.includes('_orphanQueue'), 'must use _orphanQueue for sequential processing');
-  assert(main.includes('ORPHAN_THRESHOLD'), 'must require multiple detections before prompting');
-  assert(main.includes('_processOrphanQueue'), 'must process queue sequentially');
+  assert(main.includes("document.addEventListener('sharing-group-removed-remotely'"),
+    'main.js must listen for sharing-group-removed-remotely');
+  assert(main.includes("t('sharing.group_no_longer_accessible', groupName)"),
+    'main.js must toast sharing.group_no_longer_accessible with the group name');
+  assert(!main.includes("verdict === 'deleted'"),
+    'main.js must not branch the removed-remotely notice on a verdict');
 });
 
-test('Orphan handler passes onCancel to showConfirmAction', () => {
+test('main.js purges item pointers on sharing-group-purge-items (no dialog)', () => {
   const main = jsFiles['main.js'];
-  // Find the orphan showConfirmAction call and check it has onCancel
-  const orphanSection = main.slice(main.indexOf('function _processOrphanQueue'));
-  assert(orphanSection.includes('onCancel'), 'orphan dialog must pass onCancel to allow retry');
+  assert(main.includes("document.addEventListener('sharing-group-purge-items'"),
+    'main.js must listen for sharing-group-purge-items');
+  const idx = main.indexOf("document.addEventListener('sharing-group-purge-items'");
+  const slice = main.slice(idx, idx + 1500);
+  for (const table of ['habits', 'todos', 'list_items']) {
+    assert(slice.includes(`'${table}'`), `purge handler must delete pointer rows from ${table}`);
+  }
+  assert(slice.includes('.delete()'), 'purge handler must delete the pointer rows outright');
+  assert(!slice.includes('showConfirmAction'), 'purge handler must not show a dialog');
+  assert(slice.includes("'sharing-changed'"), 'purge handler must trigger a view refresh');
+});
+
+test("unjoinGroup purges the member's still-shared pointers", () => {
+  // The leave dialog already converted kept copies to personal before the
+  // flip, so the remaining shared pointers are purged outright — the orphan
+  // dialog that used to offer unlinking them is gone.
+  const drive = jsFiles['sharing-drive.js'];
+  const start = drive.indexOf('async unjoinGroup(groupId)');
+  assert(start !== -1, 'unjoinGroup must exist');
+  const body = drive.slice(start, start + 2500);
+  assert(body.includes("'sharing-group-purge-items'"),
+    'unjoinGroup must dispatch sharing-group-purge-items');
 });
 
 test('showConfirmAction supports onCancel callback', () => {
@@ -270,25 +292,17 @@ test('showConfirmAction supports onCancel callback', () => {
   assert(execFn.includes('_confirmCancelCallback = null'), 'executeConfirmAction must clear cancel callback before close');
 });
 
-test('Sync dispatches sharing-orphan-detected instead of clearing directly', () => {
+test('Sync leaves dangling pointers in place (no orphan event)', () => {
+  // A pointer whose group is gone from memory is either transient (skipped
+  // load) or already purged by the access-loss / leave path — sync must not
+  // touch it either way.
   for (const [file, label] of [['habits.js', 'habits'], ['todos.js', 'todos'], ['lists.js', 'lists']]) {
     const src = jsFiles[file];
-    // Must dispatch event, not update/nullify directly
-    assert(src.includes("sharing-orphan-detected"), `${label} sync must dispatch sharing-orphan-detected`);
-    // Must NOT directly nullify shared fields in the orphan branch
-    const orphanIdx = src.indexOf('sharing-orphan-detected');
-    // Check the surrounding context doesn't do update({shared_id: null}) in the same branch
-    const nearContext = src.slice(Math.max(0, orphanIdx - 200), orphanIdx);
-    assert(!nearContext.includes("shared_id: null"), `${label} sync must not directly nullify shared fields near orphan detection`);
+    assert(!src.includes('sharing-orphan-detected'),
+      `${label} sync must not dispatch sharing-orphan-detected`);
+    assert(!src.includes("shared_id: null"),
+      `${label} sync must not nullify shared fields for dropped groups`);
   }
-});
-
-test('Orphan handler deletes empty pointers instead of nullifying', () => {
-  const main = jsFiles['main.js'];
-  const handler = main.slice(main.indexOf('function _processOrphanQueue'));
-  assert(handler.includes('hasContent'), 'orphan confirm must check if item has local content');
-  assert(handler.includes('.delete()'), 'orphan confirm must delete empty pointer items');
-  assert(handler.includes('.update('), 'orphan confirm must nullify items with local content');
 });
 
 test('Shared habit next_due read from shared storage during refresh', () => {
@@ -1208,38 +1222,49 @@ test('sharing group load is all-or-nothing: a failed file download skips the who
   assert(idsBody.includes('throw downloadError(`${type}.json for joined group ${groupId}`, err)'),
     'loadGroupWithIds must throw a labeled error when an item-file download fails');
 
-  // loadGroup (owned path): revoked.json and item-file downloads must throw too.
-  // (group.json already threw: its download has no catch handler.)
+  // loadGroup (owned path): item-file downloads must throw too (no partial
+  // group). There is no revoked.json anymore — the required set is 16 files.
   const loadStart = drive.indexOf('async function loadGroup(folderId, groupId, opts');
   const dlStart = drive.indexOf('const downloads = [];', loadStart);
-  const dlEnd = drive.indexOf('const [gResult, revokedResult', loadStart);
+  const dlEnd = drive.indexOf('const [gResult, ...typeResults]', loadStart);
   const dlBody = drive.slice(dlStart, dlEnd);
   assert(!dlBody.includes('return null'),
-    'loadGroup must not degrade failed revoked/item downloads to null (partial group)');
-  assert(dlBody.includes('throw downloadError(`revoked.json for group ${groupId}`, err)'),
-    'loadGroup must throw a labeled error when the revoked.json download fails');
+    'loadGroup must not degrade failed item downloads to null (partial group)');
+  assert(!drive.includes('revoked.json'),
+    'sharing-drive.js must not reference revoked.json anywhere');
   assert(dlBody.includes('throw downloadError(`${ITEM_TYPES[i]}.json for group ${groupId}`, err)'),
     'loadGroup must throw a labeled error when an item-file download fails');
 
-  // loadAll: a joined load that fails with 403/404 (access gone — removed or
-  // group deleted) must consult revoked.json immediately and apply the
-  // verdict, because the poll only covers loaded groups.
+  // loadAll: a joined load that fails with definite access loss (404, or a
+  // 403 with a known access-loss reason) is purged immediately via
+  // handleStaleGroup — the poll only covers loaded groups, so a skipped
+  // group would otherwise never be purged. Anything else is transient and
+  // retried on the next load.
   const allStart = drive.indexOf('/** Load all groups');
   const allEnd = drive.indexOf('getAllGroups()', allStart);
   const allBody = drive.slice(allStart, allEnd);
-  assert(/if \(\(err\?\.code === 403 \|\| err\?\.code === 404\) && !isDriveRateLimited\(err\)\)/.test(allBody),
-    'loadAll must detect access loss (403/404) on joined group loads, skipping rate-limited 403s');
-  assert(allBody.includes('checkRemovalViaRevoked(joined.id, tok)'),
-    'loadAll must consult revoked.json when a joined load fails with 403/404');
-  assert(allBody.includes('handleStaleGroup(joined.id, verdict)'),
-    'loadAll must apply the removed/deleted verdict for the failed joined group');
+  assert(allBody.includes('isDefiniteAccessLoss(err)'),
+    'loadAll must classify joined-load failures with isDefiniteAccessLoss');
+  assert(allBody.includes('handleStaleGroup(joined.id)'),
+    'loadAll must purge the failed joined group with no verdict');
+  assert(!allBody.includes('checkRemovalViaRevoked'),
+    'loadAll must not consult revoked.json');
 
-  // handleStaleGroup: shared verdict handling (poll + loadAll) — drops the
-  // group, notifies the app, purges the groups-table row.
-  assert(drive.includes('async handleStaleGroup(groupId, verdict)'),
-    'sharing-drive.js must define handleStaleGroup');
+  // handleStaleGroup: single-path purge (poll + loadAll) — drops the group
+  // from memory, clears the skip mark, purges pointers, deletes the
+  // groups-table row, notifies the app. No verdict, no revoked.json.
+  assert(drive.includes('async handleStaleGroup(groupId)'),
+    'sharing-drive.js must define handleStaleGroup with no verdict parameter');
+  assert(!drive.includes('checkRemovalViaRevoked'),
+    'sharing-drive.js must not define checkRemovalViaRevoked');
   assert(drive.includes("db.from('groups').delete().eq('id', groupId)"),
     'handleStaleGroup must purge the groups-table row');
+  assert(drive.includes('_skippedGroups.delete(groupId)'),
+    'handleStaleGroup must clear a stale skip mark');
+  assert(drive.includes("'sharing-group-purge-items'"),
+    'handleStaleGroup must dispatch sharing-group-purge-items');
+  assert(drive.includes('{ detail: { groupName } }'),
+    'sharing-group-removed-remotely must carry only the group name');
 
   // loadAll must still isolate the (now throwing) per-folder failures so one
   // bad folder cannot break the other groups.
@@ -1247,32 +1272,29 @@ test('sharing group load is all-or-nothing: a failed file download skips the who
     'loadAll must isolate per-folder load failures so one bad folder cannot break all groups');
 });
 
-test('group-deleted notice is a dialog with a Drive folder link; skipped groups get a chip', () => {
+test('access-loss notice is a single toast; skipped groups get a chip', () => {
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
   const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
   const css = fs.readFileSync(STYLE_FILE, 'utf-8');
   const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
 
-  // handleStaleGroup looks up the groups-table row before purging and passes
-  // the folderId with the removed-remotely event so the notice can link to
-  // the Drive folder.
+  // handleStaleGroup resolves the group name (live data, then the stored
+  // groups-table row) and the removed-remotely event carries only the name.
   assert(drive.includes('const row = _groupRows.find(r => r.id === groupId);'),
     'handleStaleGroup must look up the groups-table row before purging');
-  assert(drive.includes('row?.folder_id'),
-    'handleStaleGroup must capture the folder_id before purging the row');
-  assert(drive.includes('{ detail: { groupName, verdict, folderId } }'),
-    'sharing-group-removed-remotely must carry the folderId');
+  assert(drive.includes('row?.name || groupId'),
+    'handleStaleGroup must fall back to the stored row name');
 
-  // main.js: 'deleted' verdict → notice dialog with Drive link; 'removed' stays a toast.
-  assert(main.includes("verdict === 'deleted'"),
-    'main.js must branch the removed-remotely notice on the deleted verdict');
-  assert(main.includes('showGroupDeletedNotice(groupName, folderId)'),
-    'main.js must show the group-deleted dialog for the deleted verdict');
-  assert(main.includes('drive.google.com/drive/folders/'),
-    'group-deleted dialog must link to the Drive folder');
-  assert(main.includes('LOGOS.googledrive(16)'),
-    'group-deleted dialog must show the Google Drive icon next to the link');
+  // main.js: one toast, no dialog, no verdict branching.
+  assert(main.includes("t('sharing.group_no_longer_accessible', groupName)"),
+    'main.js must toast the access-loss notice with the group name');
+  assert(!main.includes("verdict === 'deleted'"),
+    'main.js must not branch the notice on a verdict');
+  const noticeIdx = main.indexOf("document.addEventListener('sharing-group-removed-remotely'");
+  const noticeBody = main.slice(noticeIdx, main.indexOf('});', noticeIdx) + 3);
+  assert(!noticeBody.includes('drive.google.com'),
+    'the access-loss notice must not link to the Drive folder');
 
   // loadAll: transient per-folder failures are recorded as skipped groups.
   assert(drive.includes('_skippedGroups.clear()'),
@@ -1282,7 +1304,7 @@ test('group-deleted notice is a dialog with a Drive folder link; skipped groups 
   assert(drive.includes('getSkippedGroups()'),
     'sharing-drive.js must expose getSkippedGroups()');
   assert(drive.includes('_skippedGroups.delete(groupId)'),
-    'handleStaleGroup must clear a stale skip mark when a verdict is applied');
+    'handleStaleGroup must clear a stale skip mark when purging');
 
   // sharing-ui: skipped groups render with a chip in the Sharing pane.
   assert(sui.includes('getSkippedGroups?.()'),
@@ -1296,7 +1318,7 @@ test('group-deleted notice is a dialog with a Drive folder link; skipped groups 
   const starts = {};
   for (const m of i18nSrc.matchAll(/^  (en|fr|es): \{$/gm)) starts[m[1]] = m.index;
   const order = ['en', 'fr', 'es'];
-  for (const key of ['group_deleted_title', 'group_deleted_check_folder', 'group_skipped']) {
+  for (const key of ['group_no_longer_accessible', 'group_skipped']) {
     for (let i = 0; i < order.length; i++) {
       const slice = i18nSrc.slice(starts[order[i]], i + 1 < order.length ? starts[order[i + 1]] : i18nSrc.length);
       assert(new RegExp(`^\\s{6}${key}:`, 'm').test(slice),
@@ -1416,11 +1438,9 @@ test('sharing members use stable hashed IDs with a pending-invite join gate', ()
     'sharing-drive.js must enforce creator-only invite/remove in the adapter');
   assert(iface.includes('creator-only') && iface.includes('pending invite'),
     'sharing-interface.js must document creator-only ops and the pending-invite join requirement');
-  // Regression: with stable IDs, a stale revoked.json entry must not false-trigger
-  // removal for a removed-then-reinvited member — only removals recorded after
-  // the current join count.
-  assert(drive.includes('r.removed_at > joined_at'),
-    'checkRemovalViaRevoked must disambiguate removals by timestamp since member IDs are stable');
+  // No removal notice file exists anymore: re-inviting a removed member
+  // revives the member row in place, and a later removal is detected purely
+  // as access loss on the member's next poll.
 });
 
 test('sharing email normalization is Gmail-scoped (dots significant elsewhere)', () => {
@@ -1616,10 +1636,9 @@ test('sharing tab shows with loading state while init is pending', () => {
 });
 
 test('sharing join picker accepts every required file key', () => {
-  // Regression: revoked.json became the 17th required group file (phase 3)
-  // but the picker's doc→key allowlist in sharing-ui.js still hard-coded
-  // the old 16 keys, so selecting revoked.json was silently dropped and the
-  // join failed with "Missing files: revoked.json".
+  // Regression: the picker's doc→key allowlist in sharing-ui.js once
+  // hard-coded the key list, so a newly added required file was silently
+  // dropped and the join failed with "Missing files: …".
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
   assert(!sui.includes("['group', 'todos', 'habits', 'lists']"),
     'sharing-ui.js must not hard-code the join picker key allowlist');
@@ -1693,7 +1712,7 @@ test('sharing UI never displays left members', () => {
   assert(sui.includes("filter(m => m.status !== 'left')"),
     'visibleMembers must exclude status:left tombstones');
   for (const site of ['visibleMembers(group).length', 'for (const member of visibleMembers(group))',
-      'visibleMembers(group).filter', 'visibleMembers(selectedGroup)']) {
+      'const activeMembers = visibleMembers(group)', 'visibleMembers(selectedGroup)']) {
     assert(sui.includes(site), `member display site must use visibleMembers (${site})`);
   }
 });
@@ -2969,135 +2988,93 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   }
 
   // ===================================================================
-  // Sharing phase 3 — revoked.json (removed-member notices)
+  // SHARING ACCESS LOSS — no removal notice file (revoked.json removed)
+  // A joined group whose folder becomes unreachable (member removed, or the
+  // group deleted) is purged: pointers deleted outright, no dialog, one
+  // info toast. Only a definite access loss purges — 404 always; a 403 only
+  // with a known access-loss reason. Anything else fails open (transient).
   // ===================================================================
   {
     const drive = jsFiles['sharing-drive.js'];
     const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
     const main = jsFiles['main.js'];
 
-    test('revoked.json is part of the required file set', () => {
-      assert(drive.includes("...EXTRA_FILES, 'revoked']"), 'REQUIRED_GROUP_FILES must include revoked');
+    test('no revoked.json anywhere in the sharing stack', () => {
+      assert(!drive.includes('revoked.json'),
+        'sharing-drive.js must not reference revoked.json');
+      for (const f of ['sharing-ui.js', 'sharing.js', 'sharing-interface.js',
+          'todos.js', 'habits.js', 'lists.js', 'main.js', 'delegation.js']) {
+        assert(!jsFiles[f].includes('revoked.json'),
+          `${f} must not reference revoked.json`);
+      }
+    });
+
+    test('required file set is group + item types + extras (16 files)', () => {
       const m = drive.match(/const REQUIRED_GROUP_FILES = \[(.*?)\];/s);
       assert(m, 'REQUIRED_GROUP_FILES declaration must be parseable');
       assert(m[1].includes("'group'") && m[1].includes('ITEM_TYPES') &&
-             m[1].includes('EXTRA_FILES') && m[1].includes("'revoked'"),
-        'required set must be group + item types + extras + revoked (17 files)');
+             m[1].includes('EXTRA_FILES') && !m[1].includes("'revoked'"),
+        'required set must be group + item types + extras, without revoked');
     });
 
-    test('createGroup creates revoked.json alongside the item files', () => {
-      assert(drive.includes("{ key: 'revoked', name: 'revoked.json' }"),
-        'createGroup must upload revoked.json');
-      assert(drive.includes('revokedMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime }') ||
-             drive.includes("} else if (key === 'revoked')"),
-        'createGroup must track revoked.json metadata');
+    test('createGroup uploads no revoked.json', () => {
+      const fn = drive.match(/async createGroup\(name, opts\) \{([\s\S]*?)\n    \},/);
+      assert(fn || drive.includes('async createGroup('), 'createGroup must exist');
+      const body = fn ? fn[1] : drive;
+      assert(!body.includes("key: 'revoked'"),
+        'createGroup must not upload a revoked file');
     });
 
-    test('inviteUser grants reader access on revoked.json', () => {
-      assert(drive.includes("driveShareWithUser(tok, e.revokedMeta.fileId, email, 'reader')"),
-        'inviteUser must grant the invitee reader access on revoked.json');
-    });
-
-    test('removeUser records the removal in revoked.json before revoking access', () => {
-      const fn = drive.match(/async removeUser\(groupId, member_id\) \{([\s\S]*?)\n    \},/);
-      assert(fn, 'removeUser must exist');
-      const body = fn[1];
-      const writeIdx = body.indexOf('removed.push({ id: member_id, removed_at');
-      const revokeIdx = body.indexOf('await driveRemovePermission(tok, e.folderId, permissionId)');
-      assert(writeIdx !== -1, 'removeUser must append {id, removed_at} to revoked.json');
-      assert(revokeIdx !== -1, 'removeUser must revoke the folder permission');
-      assert(writeIdx < revokeIdx, 'revoked.json write must precede the permission revocation');
-    });
-
-    test('removeUser reassigns the removed member\'s items to the creator first', () => {
+    test('removeUser deletes the member row and revokes access (no notice file)', () => {
       const fn = drive.match(/async removeUser\(groupId, member_id\) \{([\s\S]*?)\n    \},/);
       assert(fn, 'removeUser must exist');
       const body = fn[1];
       const reassignIdx = body.indexOf('item.created_by = creatorId');
-      const writeIdx = body.indexOf('removed.push({ id: member_id, removed_at');
+      const revokeIdx = body.indexOf('driveRemovePermission');
+      const rowIdx = body.indexOf('.filter(m => m.member_id !== member_id)');
       assert(reassignIdx !== -1, 'removeUser must rewrite created_by to the creator');
-      assert(body.includes('item.updated_at = now'),
-        'the reassignment must bump updated_at so it wins concurrent-edit merges');
-      assert(body.includes('await saveTypedItems(groupId, type)'),
-        'the reassignment must persist each touched item file');
-      assert(writeIdx !== -1 && reassignIdx < writeIdx,
-        'the items rewrite must precede the revoked.json notice, so a failure aborts with nothing changed');
+      assert(revokeIdx !== -1, 'removeUser must revoke the folder permission');
+      assert(rowIdx !== -1, 'removeUser must delete the member row');
+      assert(reassignIdx < revokeIdx && revokeIdx < rowIdx,
+        'removeUser must reassign items, then revoke, then delete the row');
+      assert(!body.includes('removed.push'),
+        'removeUser must not write a removal notice');
     });
 
-    test('removal detection is based only on revoked.json (no 404 strikes)', () => {
-      assert(drive.includes('async checkRemovalViaRevoked(groupId, tok)'),
-        'poll must consult revoked.json via checkRemovalViaRevoked');
-      assert(!/notFoundStrikes >= 3/.test(drive),
-        'consecutive-404 strike logic must be gone');
+    test('isDefiniteAccessLoss classifies access loss vs transient failures', () => {
+      const fn = drive.match(/function isDefiniteAccessLoss\(err\) \{([\s\S]*?)\n\}/);
+      assert(fn, 'sharing-drive.js must define isDefiniteAccessLoss');
+      const body = fn[1];
+      assert(body.includes('code === 404'), 'a 404 is always access loss');
+      assert(body.includes('isDriveRateLimited(err)'),
+        'rate-limited 403s are excluded before the access-loss check');
+      assert(body.includes('DRIVE_ACCESS_LOSS_REASONS.has(err?.reason)'),
+        'a 403 counts as access loss only with a known access-loss reason');
+      assert(body.includes('return false;'),
+        'unknown/missing 403 reasons and other errors fail open (transient)');
+      assert(drive.includes("'insufficientPermissions'") && drive.includes("'forbidden'"),
+        'the access-loss reason set must hold insufficientPermissions and forbidden');
+    });
+
+    test('poll and startup load both gate on isDefiniteAccessLoss', () => {
+      const uses = drive.match(/isDefiniteAccessLoss\(err\)/g) || [];
+      assert(uses.length >= 2,
+        'the 15s poll and the startup joined-load must both gate on isDefiniteAccessLoss');
       assert(!/notFoundStrikes/.test(drive),
         'notFoundStrikes must not be referenced anywhere');
     });
 
-    test('rate-limited 403s never feed the removal verdict', () => {
-      // The Drive reason field is what tells a usage-limit 403 apart from a
-      // privilege 403 — the status code alone cannot.
-      assert(drive.includes('err.reason'), 'driveGet must surface the Drive error reason');
-      assert(drive.includes('rateLimitExceeded'), 'the rate-limit reason family must be known');
-      assert(drive.includes('isDriveRateLimited'), 'a rate-limit guard must exist');
-      const guarded = (drive.match(/isDriveRateLimited\(err\)/g) || []).length;
-      assert(guarded >= 2,
-        'the startup-load and poll verdict checks must both skip rate-limited 403s');
-    });
-
-    test('getRevokedMembers reads revoked.json instead of returning a stub', () => {
-      assert(!drive.includes('Drive does hard-delete, no revoked state'),
-        'getRevokedMembers stub must be replaced');
-      assert(/async getRevokedMembers\(groupId\)/.test(drive),
-        'getRevokedMembers must be async and read revoked.json');
-    });
-
-    test("revoked.json verdicts drive distinct 'removed' vs 'deleted' notices", () => {
-      // 'deleted' verdict → notice dialog with Drive folder link;
-      // 'removed' verdict → plain toast (removal is certain, purge is silent).
-      assert(main.includes("verdict === 'deleted'"),
-        'main.js must branch the removed-remotely notice on the deleted verdict');
-      assert(main.includes('showGroupDeletedNotice(groupName, folderId)'),
-        'main.js must show the group-deleted dialog for the deleted verdict');
-      assert(main.includes("t('sharing.group_removed_remotely', groupName)"),
-        'main.js must keep the removed toast for the removed verdict');
-      for (const loc of ['en', 'fr', 'es']) {
-        assert(new RegExp(`^  ${loc}: \\{`, 'm').test(i18nSrc), `i18n.js must define locale ${loc}`);
-      }
-      // group_deleted_remotely must exist in all three locale sharing sections
+    test('group_no_longer_accessible exists in all three locales', () => {
       const starts = {};
       for (const m of i18nSrc.matchAll(/^  (en|fr|es): \{$/gm)) starts[m[1]] = m.index;
       const order = ['en', 'fr', 'es'];
       for (let i = 0; i < order.length; i++) {
         const slice = i18nSrc.slice(starts[order[i]], i + 1 < order.length ? starts[order[i + 1]] : i18nSrc.length);
-        assert(/^\s{6}group_deleted_remotely:/m.test(slice),
-          `i18n.js [${order[i]}].sharing must define 'group_deleted_remotely:'`);
+        assert(/^\s{6}group_no_longer_accessible:/m.test(slice),
+          `i18n.js [${order[i]}].sharing must define 'group_no_longer_accessible:'`);
       }
-    });
-
-    test("a 'removed' verdict dispatches sharing-group-purge-items (no dialog)", () => {
-      const m = drive.match(/async handleStaleGroup\(groupId, verdict\) \{([\s\S]*?)\n    \},/);
-      assert(m, 'handleStaleGroup must exist');
-      const body = m[1];
-      assert(body.includes("if (verdict === 'removed')"),
-        'cleanup must branch on the removed verdict');
-      const purgeIdx = body.indexOf("'sharing-group-purge-items'");
-      assert(purgeIdx !== -1, 'removed verdict must dispatch sharing-group-purge-items');
-      assert(body.lastIndexOf("if (verdict === 'removed')", purgeIdx) !== -1,
-        'sharing-group-purge-items must be gated on the removed verdict only');
-    });
-
-    test('main.js purges item pointers on sharing-group-purge-items and suppresses the orphan dialog', () => {
-      assert(main.includes("addEventListener('sharing-group-purge-items'"),
-        'main.js must listen for sharing-group-purge-items');
-      const idx = main.indexOf("addEventListener('sharing-group-purge-items'");
-      const slice = main.slice(idx, idx + 1500);
-      for (const table of ['habits', 'todos', 'list_items']) {
-        assert(slice.includes(`'${table}'`), `purge handler must delete pointer rows from ${table}`);
-      }
-      assert(slice.includes('.delete()'), 'purge handler must delete the pointer rows outright');
-      assert(slice.includes('_orphanConfirmed.add(groupId)'),
-        'purge handler must suppress the orphan dialog for the removed group');
-      assert(slice.includes("'sharing-changed'"), 'purge handler must trigger a view refresh');
+      assert(!/group_removed_remotely|group_deleted_remotely|group_deleted_title|group_deleted_check_folder/.test(i18nSrc),
+        'the old verdict/i18n keys must be gone from i18n.js');
     });
   }
 

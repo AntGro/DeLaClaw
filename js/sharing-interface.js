@@ -13,10 +13,9 @@
 // SharingUser   { member_id?: string, display_name: string, backendUserId?: string }
 //
 // GroupMember   { member_id: string, /* deterministic per user: hash of their email, never the raw email.
-//                                  Stable across invites, so removal entries in revoked.json are
-//                                  disambiguated by timestamp (removed_at vs the member's joined_at). */
+//                                  Stable across invites, so a removed-then-reinvited member keeps the same ID. */
 //                 role: 'creator'|'owner'|'member',
-//                 status: 'pending'|'joined'|'revoked',
+//                 status: 'pending'|'joined'|'left',
 //                 display_name: string, /* user-chosen pseudo */
 //                 invited_label?: string, joined_at?: string|null }
 //
@@ -76,7 +75,6 @@ export const SHARING_INTERFACE = {
   getGroupByFolderId:       'fn',   // (connectionRef) => Group|undefined
   getInviteLink:            'fn',   // (groupId) => string|null
   isJoinedViaLink:          'fn',   // (groupId) => boolean
-  getRevokedMembers:        'fn',   // (groupId) => GroupMember[]  (status='revoked')
 
   // ── Items — queries ─────────────────────────────────────────
   getAllSharedItems:         'fn',   // (itemType?) => SharedItem[]

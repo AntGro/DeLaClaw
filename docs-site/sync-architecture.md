@@ -280,7 +280,7 @@ sequenceDiagram
     end
 
     par Per found owned folder
-        App->>OWN: "Find group.json + revoked.json + todos/habits/lists.json in parallel"
+        App->>OWN: "Find group.json + todos/habits/lists.json in parallel"
         rect rgb(253, 237, 236)
         opt The file listing itself fails
             OWN-->>App: "Error"
@@ -290,33 +290,25 @@ sequenceDiagram
         alt group.json missing on an owned folder (files deleted on Drive)
             App->>App: "Skipped chip with the stored name —<br/>the user's own group is never silently dropped"
         else group.json found
-            App->>OWN: "Download group.json + revoked.json + todos/habits/lists.json in parallel"
+            App->>OWN: "Download group.json + todos/habits/lists.json in parallel"
             rect rgb(253, 237, 236)
-            opt Any required file (group.json, revoked.json, todos/habits/lists.json) fails to download
+            opt Any required file (group.json, todos/habits/lists.json) fails to download
                 OWN-->>App: "Error for that file"
                 App->>App: "Group skipped this cycle — never partially loaded<br/>(a half-loaded group could show items as missing, and the user might recreate them,<br/>then the real file loads and there are duplicates)<br/>Shown with a 'skipped' chip in the Sharing pane<br/>Retried on the next page load — the 15s poll does not re-attempt it<br/>Other groups are unaffected"
             end
             end
         end
     and Per joined pointer
-        App->>JOIN: "Download group.json + todos/habits/lists.json via saved file IDs<br/>(revoked.json content is NOT downloaded here — only its fileId is recorded)"
+        App->>JOIN: "Download group.json + todos/habits/lists.json via saved file IDs"
         rect rgb(253, 237, 236)
-        opt Download fails with 403/404 (our access is gone)
-            App->>JOIN: "Read revoked.json via its saved fileId<br/>(the file-level read grant survives folder revocation)"
-            alt own member ID found in revoked.json
-                App->>App: "Verdict 'removed' → pointer purged silently<br/>+ local item pointers purged (no dialog)"
-                App->>PF: "Debounced flush (~2s) rewrites groups.json +<br/>todos/habits/list_items.json without the purged rows"
-                App->>CAL: "Pointer-row deletes dirty the tables →<br/>on flush syncTable deletes their events (via gcal_sync)"
-            else no entry — or revoked.json itself gone (404)
-                App->>App: "Verdict 'deleted' → pointer purged + group-deleted dialog<br/>(with a Drive folder link to double-check)"
-            end
-            opt revoked.json unreadable (transient)
-                App->>App: "No verdict → group skipped this cycle,<br/>chip in the Sharing pane, retried on the next page load"
-            end
+        opt Download fails with definite access loss<br/>(404, or 403 with a known access-loss reason)
+            App->>App: "Group purged: pointer dropped from memory,<br/>all local item pointers deleted outright (no dialog),<br/>groups-row delete staged"
+            App->>PF: "Debounced flush (~2s) rewrites groups.json +<br/>todos/habits/list_items.json without the purged rows"
+            App->>CAL: "Pointer-row deletes dirty the tables →<br/>on flush syncTable deletes their events (via gcal_sync)"
+            App->>Page: "Info toast — no longer have access to the group"
         end
-        opt Download fails otherwise (transient)
-            JOIN-->>App: "Error for that file"
-            App->>App: "Group skipped this cycle — never partially loaded<br/>(same duplicate risk as an owned folder)<br/>Shown with a 'skipped' chip in the Sharing pane<br/>Retried on the next page load — the 15s poll does not re-attempt it"
+        opt Download fails otherwise (transient — throttled or<br/>unknown-reason 403, 5xx, network blip)
+            App->>App: "Group skipped this cycle — never partially loaded<br/>and never purged (transient failures never purge)<br/>Shown with a 'skipped' chip in the Sharing pane<br/>Retried on the next page load — the 15s poll does not re-attempt it"
         end
         end
     end
@@ -359,19 +351,7 @@ sequenceDiagram
     App->>CAL: "Pointer inserts dirty the tables → on flush<br/>syncTable resolves dates through the payload →<br/>dated shared items get events titled<br/>[TODO][category][group] / [Habit][category][group]"
     App->>CAL: "On later sharing-changed: diff payload fields + group name vs fingerprint → markCalDirty on real change<br/>drive syncTable directly (no local row is written, so no flush would consume the dirty marks)<br/>events created, patched or deleted (a creator rename re-titles via the group-name field)"
 
-    opt Later sync: a pointer's shared_id is in no loaded group file and its group is gone from memory
-        App->>Page: "Orphan dialog after 2 consecutive detections"
-        rect rgb(253, 237, 236)
-        alt User accepts (unlink)
-            App->>App: "Pointers with local content → shared_id/shared_group_id nullified (become personal)<br/>Pointers without content → deleted"
-            App->>CAL: "Deleted pointers → their events deleted<br/>Nullified pointers → events re-titled without the group part"
-        else User cancels
-            App->>App: "Pointers kept — the dialog returns after 2 more consecutive detections"
-        end
-        end
-    end
-
-    Note over App,JOIN: "revoked.json is read at startup when a joined download fails with 403/404<br/>(access gone — the file-level read grant survives), and in the poll<br/>when a loaded group's files become unreachable:<br/>'removed' → silent auto-purge, 'deleted' → group-deleted dialog (Drive folder link)"
+    Note over App,JOIN: "a joined group's folder becoming unreachable (404, or 403<br/>with a known access-loss reason) purges the group: pointers deleted<br/>outright, no dialog, info toast — at startup and in the 15s poll.<br/>Throttled or unknown-reason 403s never purge."
 
     rect rgb(255, 243, 205)
     Note over App,OWN: "Planned · phase 4: startup sweep permanently deletes<br/>group folders whose deletedAt is older than 30 days"
@@ -516,7 +496,7 @@ flowchart LR
 
 **Special cases:**
 - **Serialization** → `syncTable` and `deleteTypeEvents` run inside a per-table promise chain (`_withTableLock`); concurrent runs (flush-driven vs sharing-poll-driven, or either vs resync) serialize instead of interleaving on stale `gcal_sync` snapshots
-- **Shared rows** → dates/name/group resolve through the pointer from the sharing payload at sync time (single source of truth — nothing is copied onto the pointer row). If sharing isn't loaded yet, the row is skipped: its event is kept, never deleted. Full scans exclude deferred rows from orphan-deletion.
+- **Shared rows** → dates/name/group resolve through the pointer from the sharing payload at sync time (single source of truth — nothing is copied onto the pointer row). If sharing isn't loaded yet, the row is skipped: its event is kept, never deleted.
 - **Shared-sync fingerprint** → on a real remote change (payload fields or group name), pointers are marked dirty and `syncTable` is driven directly — a rename/remote edit writes no local row, so no Drive flush would consume the marks
 - **Category rename** → `markCategoryRenamed(catTable)` marks all items of that type with `__all__` sentinel → full scan
 - **Bulk operation** (null ID) → `__all__` sentinel → full scan

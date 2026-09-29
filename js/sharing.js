@@ -34,7 +34,6 @@ function createDemoSharingStub() {
       const isArrayQuery = [
         'getAllGroups', 'getItems', 'getAllSharedItems',
         'getAllSharedHabits', 'getAllSharedTodos', 'getAllSharedListItems',
-        'getRevokedMembers',
       ].includes(key);
       const isSyncQuery = ['getGroup', 'getGroupByFolderId', 'getInviteLink',
         'isJoinedViaLink', 'getCurrentMember', 'getAgentSafeGroup'].includes(key);

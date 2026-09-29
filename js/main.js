@@ -1282,47 +1282,12 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     }
   });
 
-  // Notify user when a group is removed remotely (kicked) or deleted by its creator
+  // Notify the user when a joined group becomes unreachable (removed by the
+  // creator, or the group was deleted): its item pointers were purged.
   document.addEventListener('sharing-group-removed-remotely', (e) => {
-    const { groupName = '', verdict, folderId } = e.detail || {};
-    if (verdict === 'deleted') {
-      // 'deleted' means the group files are unreachable and no removal notice
-      // could be consulted (a 404 conflates "gone" with "revoked from you"):
-      // show a notice with a link to the Drive folder so the user can
-      // double-check it is really gone by trying to open it manually.
-      showGroupDeletedNotice(groupName, folderId);
-      return;
-    }
-    showToast(t('sharing.group_removed_remotely', groupName), 'info');
+    const { groupName = '' } = e.detail || {};
+    showToast(t('sharing.group_no_longer_accessible', groupName), 'info');
   });
-
-/** Group-deleted notice dialog. The verdict means "unreachable with no removal
- *  notice to consult" — a 404 cannot tell a real deletion from a removal —
- *  so there is no choice to make here, just an acknowledgment plus a Google
- *  Drive folder link inviting the user to double-check by trying to open
- *  the folder manually. */
-function showGroupDeletedNotice(groupName, folderId) {
-  document.getElementById('groupDeletedNoticeModal')?.remove();
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay visible';
-  overlay.id = 'groupDeletedNoticeModal';
-  const folderUrl = folderId
-    ? `https://drive.google.com/drive/folders/${encodeURIComponent(folderId)}`
-    : null;
-  overlay.innerHTML = `<div class="modal" role="dialog" aria-modal="true">
-    <h2>${lucideIcon('trash-2', 20)} ${t('sharing.group_deleted_title')}</h2>
-    <p>${t('sharing.group_deleted_remotely', esc(groupName))}</p>
-    ${folderUrl ? `<p class="setting-hint">${t('sharing.group_deleted_check_folder')}</p>
-    <p><a class="sharing-action-btn sharing-drive-link" href="${folderUrl}" target="_blank" rel="noopener">${LOGOS.googledrive(16)} ${t('sharing.open_drive_folder')}</a></p>` : ''}
-    <div class="modal-actions">
-      <button class="modal-save" id="groupDeletedNoticeOk">${t('common.ok')}</button>
-    </div>
-  </div>`;
-  const close = () => overlay.remove();
-  overlay.addEventListener('click', (ev) => { if (ev.target === overlay) close(); });
-  overlay.querySelector('#groupDeletedNoticeOk').addEventListener('click', close);
-  document.getElementById('app').appendChild(overlay);
-}
 
   // Show demo banner if in demo mode
   if (mode === 'demo') initDemoBanner();
@@ -1418,93 +1383,14 @@ function removeDemoBanner() {
 
 
 // ===================================================================
-// ORPHAN SHARED-ITEM HANDLER (module-level, survives reconnect)
+// PURGE ITEMS OF AN UNREACHABLE GROUP (no dialog)
 // ===================================================================
-const _orphanCounts = {};    // groupId -> consecutive detection count
-const _orphanConfirmed = new Set();  // groups already unlinked
-const _orphanQueue = [];     // queued groupIds awaiting dialog
-let _orphanDialogOpen = false;
-
-const ORPHAN_THRESHOLD = 2; // require N consecutive sync detections before prompting
-
-document.addEventListener('sharing-orphan-detected', (e) => {
-  const groupId = e.detail?.groupId;
-  if (!groupId || _orphanConfirmed.has(groupId)) return;
-
-  // Increment counter — only prompt after threshold consecutive detections
-  _orphanCounts[groupId] = (_orphanCounts[groupId] || 0) + 1;
-  if (_orphanCounts[groupId] < ORPHAN_THRESHOLD) return;
-
-  // Avoid duplicate queue entries
-  if (_orphanQueue.includes(groupId)) return;
-  _orphanQueue.push(groupId);
-  _processOrphanQueue();
-});
-
-function _processOrphanQueue() {
-  if (_orphanDialogOpen || _orphanQueue.length === 0) return;
-  const groupId = _orphanQueue[0];
-  _orphanDialogOpen = true;
-  const label = state.sharing?.getGroupName?.(groupId) || groupId.slice(0, 8);
-  showConfirmAction(
-    t('sharing.orphan_detected_title'),
-    t('sharing.orphan_detected_message', label),
-    async () => {
-      _orphanConfirmed.add(groupId);
-      _orphanQueue.shift();
-      _orphanDialogOpen = false;
-      // Delete pointer items with no local content; nullify ones that have text
-      for (const table of ['habits', 'todos', 'list_items']) {
-        const nameCol = table === 'habits' ? 'name' : 'text';
-        const { data: rows } = await state.db.from(table).select('id,' + nameCol).eq('shared_group_id', groupId);
-        if (!rows) continue;
-        for (const row of rows) {
-          const hasContent = (row[nameCol] || '').trim() !== '';
-          if (hasContent) {
-            await state.db.from(table).update({ shared_id: null, shared_group_id: null }).eq('id', row.id);
-          } else {
-            await state.db.from(table).delete().eq('id', row.id);
-          }
-        }
-      }
-      await refreshHabits(); await refreshTodos(); await refreshLists();
-      showToast(t('sharing.group_deleted'), 'info');
-      _processOrphanQueue(); // next in queue
-    },
-    null,
-    {
-      variant: 'neutral',
-      btnText: t('sharing.orphan_unlink'),
-      iconSvg: lucideIcon('unlink', 24),
-      btnIconSvg: lucideIcon('unlink', 15, 'currentColor'),
-      onCancel: () => {
-        // Cancel — allow retry on next sync cycle
-        delete _orphanCounts[groupId];
-        _orphanQueue.shift();
-        _orphanDialogOpen = false;
-        _processOrphanQueue(); // next in queue
-      },
-    }
-  );
-}
-
-
-// ===================================================================
-// PURGE ITEMS OF A REMOVED MEMBER (no dialog — revoked.json is certain)
-// ===================================================================
-// 'sharing-group-purge-items' is dispatched by the sharing adapter when the
-// poll finds our own memberId in revoked.json (verdict 'removed'). Removal is
-// certain, so local item pointers are deleted outright. The orphan dialog is
-// kept only for the 'deleted' verdict, where a 404 cannot distinguish a real
-// deletion from a removal without a readable notice.
+// 'sharing-group-purge-items' is dispatched by the sharing adapter when a
+// joined group's folder becomes unreachable (member removed or group
+// deleted): local item pointers are deleted outright, with no dialog.
 document.addEventListener('sharing-group-purge-items', async (e) => {
   const groupId = e.detail?.groupId;
   if (!groupId || !state.db) return;
-  // Suppress the orphan dialog for this group even if it was already queued
-  _orphanConfirmed.add(groupId);
-  const qi = _orphanQueue.indexOf(groupId);
-  if (qi >= 0) _orphanQueue.splice(qi, 1);
-  delete _orphanCounts[groupId];
   try {
     for (const table of ['habits', 'todos', 'list_items']) {
       await state.db.from(table).delete().eq('shared_group_id', groupId);

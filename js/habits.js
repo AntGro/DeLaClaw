@@ -2504,11 +2504,11 @@ async function _doSyncSharedHabits() {
         // Group exists but item gone from remote → delete local pointer
         await state.db.from('habits').delete().eq('id', local.id);
         needsRefresh = true;
-      } else if (state.sharing.isReady?.()) {
-        // Groups loaded but this one is gone → ask user before clearing
-        try { document.dispatchEvent(new CustomEvent('sharing-orphan-detected', { detail: { groupId: local.shared_group_id } })); } catch {}
+      } else {
+        // Group not loaded — transient skip, or the group was dropped and its
+        // pointers were already purged. Leave the pointer; the next sync
+        // re-evaluates it.
       }
-      // else: sharing not loaded yet — skip, will retry on next sync
     }
   }
 

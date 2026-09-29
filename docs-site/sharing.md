@@ -24,7 +24,6 @@ flowchart TB
             direction TB
             GJ["group.json<br/>members, creator, name"]
             ITEMS["todos/habits/lists.json<br/>item files (plain JSON arrays)"]
-            REVOKED["revoked.json<br/>removed members {id, removed_at}"]
             EXTRA["extra_1..12.json<br/>future placeholders"]
         end
         PA -->|"direct file read/write"| SHARED
@@ -43,8 +42,6 @@ flowchart TB
 **Shared category (`__shared__`)** — items received from others always land in a protected `__shared__` category/list on the receiver's side. Items you share yourself stay in their current category.
 
 **Sync intents** — each group entry keeps, per item file, two in-memory sets: locally created IDs not yet acknowledged by a successful upload (`createdIds`) and locally deleted IDs not yet acknowledged (`deletedIds`). Reconciliation consults them: a local item missing remotely is retained only with a pending create intent (otherwise it was deleted remotely and is dropped); a remote item missing locally is suppressed only with a pending delete intent (otherwise it is a remote creation and is accepted). Items present on both sides resolve by newer `updated_at`. Each upload captures the exact intents its payload represents and clears only those on success — an ID created while an upload is in flight stays pending, and failed uploads retain their intents. The logic lives in the backend-agnostic `sharing-file-reconcile.js`, shared by all file-based adapters; nothing is written to Drive, so there is nothing to prune.
-
-**revoked.json** — a notice file in the shared folder listing removed members as `{id, removed_at}` entries. A removed member keeps read-only access to this one file after losing access to everything else, so their client can distinguish "I was removed" from a flaky connection or a deleted group.
 
 ## Backend-agnostic design
 
@@ -74,7 +71,7 @@ flowchart LR
     subgraph CD["Creator's Drive"]
         direction TB
         CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · groups.json"]
-        CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · revoked.json<br/>extra_1..12.json"]
+        CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · extra_1..12.json"]
     end
     subgraph JD["Joiner's Drive"]
         direction TB
@@ -86,14 +83,13 @@ _Folder names shown for production (`delaclaw.com`); dev and preview builds use 
 
 - `group.json` — members (hashed IDs + pseudos), creator, name
 - `todos.json` / `habits.json` / `lists.json` — item files: plain JSON arrays of item objects
-- `revoked.json` — removed-member entries `{id, removed_at}`; read-only for removed members
 - `extra_1..12.json` — empty placeholders, pre-authorize future item types (avoids sending every member back through the Drive Picker)
 
 - **Invite code**: `DLC1.<base64url({v:1, b:'googledrive', f:<folderId>})>` — one group-level code, no per-member tokens.
 - **Access control**: Drive folder permissions (writer) plus the trusted-contacts allowlist; `group.json` holds the member list. No RPC layer, no token hashing.
-- **Member identity**: the member ID is the SHA-256 hash of the member's *normalized* email (never the raw email) — stable per user across invites. Normalization lowercases, and for Gmail only (`gmail.com`/`googlemail.com`) strips dots and `+tags`, mirroring Google's semantics; other providers treat dots as significant, so they are left untouched. Because IDs are stable, removal entries in `revoked.json` are disambiguated by timestamp: only a removal recorded after the member's current join counts.
+- **Member identity**: the member ID is the SHA-256 hash of the member's *normalized* email (never the raw email) — stable per user across invites. Normalization lowercases, and for Gmail only (`gmail.com`/`googlemail.com`) strips dots and `+tags`, mirroring Google's semantics; other providers treat dots as significant, so they are left untouched.
 - **Sync**: every member polls every 15 s, keyed on each file's `modifiedTime`. Concurrent writes use ETags with up to two conflict retries; the merge is intent-aware (`reconcileItems` in `sharing-file-reconcile.js`) — pending local creates are retained, pending local deletes suppress stale remote copies, and only deletions acknowledged by a successful upload propagate. The member roster poll is likewise intent-aware (`reconcileMembers`): rows this tab created but hasn't flushed yet are kept, everything else takes the remote version.
-- **Drive scopes**: with `drive.file` scope the joiner grants access through the Google Picker (only the selected files, revoked.json included); with full `drive` scope the folder is listed directly.
+- **Drive scopes**: with `drive.file` scope the joiner grants access through the Google Picker (only the selected files); with full `drive` scope the folder is listed directly.
 
 ### Local pointers and per-member buckets
 
@@ -102,7 +98,7 @@ Shared items do **not** force the same buckets on every member. Each member's pe
 - Items **you** share stay in your current category with a shared badge.
 - Items **received** from others always land in the protected `__shared__` category — and like any other row, the pointer can then be moved into one of your own categories.
 - Ordering (`sort_order`) is per-member and never synced.
-- When a shared item disappears remotely, the next sync deletes the local pointer; when a whole group disappears, a confirmation dialog offers to unlink the pointers or keep retrying (it re-prompts until resolved).
+- When a shared item disappears remotely, the next sync deletes the local pointer; when a whole group becomes unreachable (member removed, or the group deleted), the pointers are purged and a toast says access was lost — no dialog, no unlink choice.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'primaryColor': '#ffffff', 'primaryBorderColor': '#cbd5e1', 'primaryTextColor': '#0f172a', 'lineColor': '#334155'}}}%%
@@ -146,7 +142,7 @@ sequenceDiagram
         CA->>CP: error toast, create modal unlocked
     end
     end
-    CA->>SF: upload item files<br/>(todos/habits/lists.json)<br/>+ revoked.json<br/>+ 12 empty extra_N.json placeholders<br/>then group.json LAST (its presence marks creation complete)
+    CA->>SF: upload item files<br/>(todos/habits/lists.json)<br/>+ 12 empty extra_N.json placeholders<br/>then group.json LAST (its presence marks creation complete)
     rect rgb(253, 237, 236)
     opt Item-file or group.json upload fails
         SF-->>CA: Error
@@ -170,7 +166,7 @@ sequenceDiagram
         CA->>CP: error toast
     end
     end
-    CA->>SF: share folder with B@email (writer)<br/>+ revoked.json (reader)
+    CA->>SF: share folder with B@email (writer)
     rect rgb(253, 237, 236)
     opt Drive share fails
         SF-->>CA: Error — no invite issued<br/>no member row added to group.json
@@ -206,7 +202,7 @@ sequenceDiagram
     end
     alt Direct path — joiner already has Drive folder access
         JA->>SF: list files directly (no Picker)
-        JA->>JA: gate: all required files present<br/>(group, item types, extra_*, revoked)
+        JA->>JA: gate: all required files present<br/>(group, item types, extra_*)
         rect rgb(253, 237, 236)
         opt File set incomplete
             JA->>JA: silent fallback to Picker path<br/>nothing rendered
@@ -219,12 +215,12 @@ sequenceDiagram
         end
         end
     else Picker path — explicit file grants
-        JA->>JP: picker modal<br/>expects the full 17-file set
+        JA->>JP: picker modal<br/>expects the full 16-file set
         JP->>JA: open Picker, select files
-        JA->>SF: Google Picker → select shared files<br/>(revoked.json included)
+        JA->>SF: Google Picker → select shared files
         Note over JA,SF: Picker grants drive.file access<br/>to only the selected files —<br/>placeholders pre-authorize future item types
         rect rgb(253, 237, 236)
-        opt Selection misses files (not the full 17-file set)
+        opt Selection misses files (not the full 16-file set)
             JA->>JP: inline error in picker modal<br/>re-pick to retry
         end
         end
@@ -240,7 +236,7 @@ sequenceDiagram
     end
     Note over JA,SF: Run joinWithFileIds code, errors surface inline in the open modal
     JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
-    Note over JD: pointer only:<br/>{id, folderId, fileIds}<br/>fileIds include revoked.json
+    Note over JD: pointer only:<br/>{id, folderId, fileIds}
     rect rgb(253, 237, 236)
     opt Pointer upsert fails
         JA->>JP: inline error in code modal (direct)<br/>or confirm modal (picker)<br/>(group not joined — flip never ran)
@@ -403,14 +399,14 @@ sequenceDiagram
     end
     end
     MA->>MA: "delete groups row<br/>staged in memory — table marked dirty<br/>no Drive request fires here"
-    MA->>MA: "drop group, emit group-left<br/>the 15s poll keeps running — it simply<br/>skips this group from the next cycle on"
+    MA->>MA: "drop group, emit group-left<br/>purge the member's still-shared pointers outright<br/>(kept copies were converted to personal before the flip)<br/>the 15s poll keeps running — it simply<br/>skips this group from the next cycle on"
     MA->>MD: "debounced flush (~2s)<br/>uploads the groups-row delete"
     rect rgb(253, 237, 236)
     opt The groups-row delete never reaches Drive
         MA->>MA: "Warned, non-fatal — the leave continues<br/>group dropped from memory this session<br/>The stale row persists — on the next load<br/>the self-leave repair drops the group<br/>and retries the row delete"
     end
     end
-    Note over MA: "no copies → pointers stay until the orphan dialog<br/>unlinks them → their events are deleted"
+    Note over MA: "no copies → the leave purges the member's still-shared pointers outright<br/>their events are deleted"
     Note over SF: creator's next poll (≤15s)<br/>sees the 'left' row
     CA->>SF: revoke leaver's Drive permission<br/>(owner-only operation)
     rect rgb(253, 237, 236)
@@ -447,13 +443,7 @@ sequenceDiagram
         CA->>CP: "Error toast — the removal is aborted<br/>nothing changed, the member stays in the group"
     end
     end
-    CA->>SF: "revoked.json: download, append<br/>{id: member hashId, removed_at}, upload"
-    rect rgb(253, 237, 236)
-    opt The revoked.json write fails
-        CA->>CP: "Error toast — the removal is aborted<br/>No one is ever removed without a notice"
-    end
-    end
-    CA->>SF: "revoke the member's folder Drive permission<br/>(the reader grant on revoked.json remains)"
+    CA->>SF: "revoke the member's folder Drive permission"
     rect rgb(253, 237, 236)
     opt "The revoke fails (swallowed silently, no log)"
         CA->>CA: "The removal continues — the row is cleared below<br/>Backstop: the load-time permission audit revokes writer grants<br/>with no matching member row in group.json"
@@ -462,14 +452,25 @@ sequenceDiagram
     CA->>SF: "group.json −= member row, save"
     rect rgb(253, 237, 236)
     opt The group.json save fails
-        CA->>CP: "Error toast — the member row stays<br/>The permission is already revoked and the notice exists,<br/>so the member still gets the 'removed' verdict on their next poll<br/>The row is cleared when the removal is retried"
+        CA->>CP: "Error toast — the member row stays<br/>The permission is already revoked,<br/>so the member's next poll hits definite access loss and purges the group<br/>The row is cleared when the removal is retried"
     end
     end
     CA->>CP: "emit member-removed → success toast,<br/>re-render the sharing pane"
-    Note over CA,SF: "the member detects this asynchronously<br/>on their next 15s poll — see Member detects the removal"
+    Note over CA,SF: "the member detects this asynchronously<br/>on their next 15s poll — see Member loses access"
 ```
 
-#### Member detects the removal
+#### Member loses access (removed or group deleted)
+
+Removal and deletion are treated the same from the member's side: the group
+folder becomes unreachable either way, and Drive cannot tell "you were
+removed" from "the group was deleted" (both surface as 404). So a definite
+access loss purges the group — pointers deleted outright, no dialog — and a
+toast says access was lost. What distinguishes access loss from a flaky
+connection is the error's `reason` field: a 404, or a 403 carrying a known
+access-loss reason (`insufficientPermissions`, `forbidden`), proves the folder
+is gone for good. Anything else — a throttled 403, a 403 with an unknown or
+missing reason, a 5xx, a network blip — is transient and retried on the next
+poll; it never purges.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
@@ -485,37 +486,23 @@ sequenceDiagram
     participant SF as DeLaClaw-Shared-{id}
     end
 
-    Note over MA,SF: "member's next 15s poll:<br/>group files → 403/404 (access revoked)"
-    MA->>SF: fetch revoked.json by stored fileId
-    alt "own hashId present (removed after the current join)"
-    MA->>MA: "'removed' verdict — removal is certain:<br/>drop the group from memory, stage the deletes in memory<br/>groups row + all pointers, tables marked dirty<br/>no dialog — the orphan dialog is suppressed for this group<br/>the 15s poll keeps running — it simply<br/>skips this group from the next cycle on"
+    Note over MA,SF: "member's next 15s poll:<br/>group files → 404, or 403 with a known access-loss reason"
+    MA->>MA: "definite access loss:<br/>drop the group from memory, delete all item pointers outright<br/>(no dialog — removal and deletion are treated the same)<br/>stage the groups-row delete, tables marked dirty"
     MA->>MD: "debounced flush (~2s)<br/>uploads the groups-row + pointer deletes"
     rect rgb(253, 237, 236)
     opt The flush fails
-        MA->>MA: "Warned, non-fatal — tables stay dirty,<br/>the debounced retry uploads them later<br/>Worst case the group re-surfaces on the next load<br/>and the 'removed' verdict purges it again"
+        MA->>MA: "Warned, non-fatal — tables stay dirty,<br/>the debounced retry uploads them later<br/>Worst case the group re-surfaces on the next load<br/>and the access-loss purge runs again"
     end
     end
     MA->>CAL: "table flush → dirty rows re-sync →<br/>deleted pointers → their events are deleted"
-    MA->>MP: info toast — removed from the group
-    else revoked.json also 404
-    MA->>MA: "'deleted' verdict — unreachable, no notice to consult:<br/>drop the group from memory, stage the groups-row delete<br/>table marked dirty, no Drive request fires here"
-    MA->>MD: "debounced flush (~2s)<br/>uploads the groups-row delete"
-    rect rgb(253, 237, 236)
-    opt The flush fails
-        MA->>MA: "Warned, non-fatal — table stays dirty,<br/>the debounced retry uploads it later<br/>Worst case the group re-surfaces on the next load<br/>and the 'deleted' verdict purges it again"
-    end
-    end
-    MA->>MP: "notice dialog with a Drive-folder link to double-check<br/>orphan dialog → unlink pointers when acted on<br/>(re-prompts until resolved — 404 cannot tell deletion from removal)<br/>unlinking stages the pointer deletes for the debounced flush"
-    MA->>CAL: "table flush → dirty rows re-sync →<br/>deleted pointers → their events are deleted"
-    else transport error
-    MA->>MA: "no verdict — transient<br/>keep polling, retried on the next 15s cycle"
-    end
-    Note over MA: "groups joined before revocation notices existed<br/>have no revoked.json to consult → 'deleted' verdict"
+    MA->>MP: info toast — "You no longer have access to {group}"<br/>the 15s poll keeps running — it simply<br/>skips this group from the next cycle on
+    Note over MA,SF: "transient failures never purge:<br/>throttled 403s, 403s with an unknown or missing reason,<br/>5xx, network blips — retried on the next 15s poll"
+    Note over MA: "a joined group that fails to load with definite access loss<br/>never reaches the poll — it is purged at startup instead"
 ```
 
 #### Creator deletes a group
 
-Deletion revokes every member's folder permission and trashes the subfolder immediately (recoverable from Drive trash). No deletion marker is written to revoked.json — members detect it through the same ambiguous 'deleted' verdict as "Member detects the removal" above.
+Deletion revokes every member's folder permission and trashes the subfolder immediately (recoverable from Drive trash). No deletion marker is written — members take the access-loss path of "Member loses access" below.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
@@ -539,12 +526,12 @@ sequenceDiagram
     CA->>CA: delete own item pointers
     end
     CA->>CA: verify caller is the creator (else throw)
-    CA->>SF: list permissions → revoke all non-owner<br/>(revoked.json reader grants remain)
+    CA->>SF: list permissions → revoke all non-owner
     CA->>CD: trash the subfolder
     CA->>CA: _groups: drop group<br/>delete created-group row
-    Note over CA,MA: no deletion marker is written —<br/>members take the 'deleted' path of<br/>"Member detects the removal"
+    Note over CA,MA: no deletion marker is written —<br/>members take the access-loss path of<br/>"Member loses access"
     MA->>SF: next poll: folder → 404
-    MA->>MA: "'deleted' verdict → drop group from memory<br/>notice dialog + orphan dialog → unlink pointers when acted on<br/>(re-prompts until resolved — 404 cannot tell deletion from removal)"
+    MA->>MA: "definite access loss → drop group from memory<br/>purge pointers outright (no dialog)<br/>info toast — no longer have access"
 ```
 
 #### Creator renames a group
@@ -605,12 +592,10 @@ sequenceDiagram
     participant SF as DeLaClaw-Shared-{id}
     end
 
-    MA->>SF: for each created group:<br/>grace-period deletion (see above)
-    Note over MA,SF: created groups go through the<br/>revoked.json flow so members<br/>get the explicit stop-polling signal
     MA->>MD: trash personal DeLaClaw/ folder
     MA->>MA: revoke OAuth token (last)
     Note over MD,SF: joined groups are left alone —<br/>member rows linger as ghost rows<br/>(no unjoin performed)
-    Note over MA,SF: the 30-day sweep needs the app to run —<br/>if never reopened, shell folders linger,<br/>members still infer deletion<br/>(revoked.json + folder both 404)
+    Note over MD,SF: created groups are left alone too —<br/>the shared folders survive, members keep access<br/>while the creator's Drive account lives;<br/>if the account itself is deleted, members hit<br/>definite access loss on their next poll and purge
 ```
 
 #### Externally deleted Google accounts (manual)
@@ -628,13 +613,13 @@ The flows above surfaced 14 design questions, all decided on 2026-09-07 and reco
 5. **Join admission** — joining requires a matching pending invite (by member ID, the hash of the joiner's email); Drive access alone is not enough.
 6. **Removed members' items** — reassigned to the creator (`created_by` rewrite), no ghost creator IDs.
 7. **Creator-only enforcement** — `inviteUser`/`removeUser` throw unless the caller is the creator; the invite/remove UI is hidden from non-creators.
-8. **Account deletion** — joined groups are left alone; created groups are deleted via the grace-period flow.
+8. **Account deletion** — joined groups are left alone; created groups are left in place too (only the personal folder is trashed) — members keep access while the creator's Drive account lives.
 9. **Externally deleted accounts** — manual detection only.
 10. **Placeholder exhaustion** — `extra_N.json` raised from 10 to 12 now; behavior at exhaustion deferred.
 11. **Received-item placement** — always `__shared__`.
-12. **Orphan dialog** — re-prompts until the group returns or deletion is accepted.
-13. **revoked.json on member removal** — removed members keep read-only access to a single `revoked.json` notice file.
-14. **Group deletion grace period** — all member IDs written to `revoked.json`, shell folder kept ~30 days, then hard-deleted.
+12. **Access loss** — a joined group whose folder becomes unreachable (member removed, or the group deleted) is purged: pointers deleted outright, no dialog; a toast says access was lost.
+13. **No removal notice file** — removal is detected as definite access loss on the next poll (404, or 403 with a known access-loss reason). Throttled or unknown-reason 403s never purge.
+14. **Group deletion** — permissions revoked and the folder trashed immediately; no deletion marker, no grace period; members purge on access loss.
 
 
 ## Module structure

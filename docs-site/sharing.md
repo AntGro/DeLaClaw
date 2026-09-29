@@ -1,10 +1,10 @@
 # Sharing
 
-Last updated: 2026-09-10
+Last updated: 2026-09-29
 
 DeLaClaw lets you share TODOs, habits, and list items with other people through sharing groups. This page explains the architecture, data flow, and security model.
 
-This page describes the **target design** — the 14 design decisions made on 2026-09-07 (recorded in the "DeLaClaw design decisions" space, "Drive sharing" tab). Assumption: sharing is not yet exposed, no groups exist in the wild, so there are no backward-compatibility constraints (greenfield). Implementation is pending.
+This page describes the sharing implementation — built from the 14 design decisions made on 2026-09-07 (recorded in the "DeLaClaw design decisions" space, "Drive sharing" tab). Assumption: sharing is not yet exposed, no groups exist in the wild, so there are no backward-compatibility constraints (greenfield).
 
 ## Overview
 
@@ -173,7 +173,7 @@ sequenceDiagram
         CA->>CP: error toast
     end
     end
-    CA->>SF: group.json += member<br/>{member_id: hash(email), pending, pseudo: null}
+    CA->>SF: group.json += member<br/>{member_id: hash(email), status 'pending', display_name: null}
     rect rgb(253, 237, 236)
     opt group.json write fails
         CA->>CA: _groups: row rolled back,<br/>intent discarded — safe to retry<br/>Drive writer grant already issued — NOT revoked<br/>(reaped by the load-time audit)
@@ -576,8 +576,9 @@ sequenceDiagram
 
 #### Member deletes their DeLaClaw account connection (deleteAccount)
 
-This is DeLaClaw's Drive-backed `deleteAccount` (trash the personal
-`DeLaClaw/` folder (`DeLaClawDev/` on dev and preview builds), revoke OAuth), not deletion of the Google account itself —
+This is DeLaClaw's Drive-backed `deleteAccount` (delete the synced calendar,
+trash the personal `DeLaClaw/` folder (`DeLaClawDev/` on dev and preview builds),
+revoke OAuth), not deletion of the Google account itself —
 externally deleted Google accounts are handled manually (see below).
 
 ```mermaid
@@ -592,15 +593,16 @@ sequenceDiagram
     participant SF as DeLaClaw-Shared-{id}
     end
 
+    MA->>MD: delete the synced DeLaClaw calendar (best effort)
     MA->>MD: trash personal DeLaClaw/ folder
     MA->>MA: revoke OAuth token (last)
     Note over MD,SF: joined groups are left alone —<br/>member rows linger as ghost rows<br/>(no unjoin performed)
-    Note over MD,SF: created groups are left alone too —<br/>the shared folders survive, members keep access<br/>while the creator's Drive account lives;<br/>if the account itself is deleted, members hit<br/>definite access loss on their next poll and purge
+    Note over MD,SF: created groups are left alone too —<br/>the shared folders survive, members keep access<br/>while the creator's Drive account lives.<br/>if the account itself is deleted, members hit<br/>definite access loss on their next poll and purge
 ```
 
-#### Externally deleted Google accounts (manual)
+#### Externally deleted Google accounts
 
-If a member deletes their Google account outside DeLaClaw, their Drive permission dies but their row stays in `group.json` — a ghost member. Detection is manual-only: the creator periodically re-validates Drive permissions against the `group.json` member list (a "check member accounts" action in Settings → Sharing) and removes the ghost rows surfaced by the check. No automatic polling or enforcement.
+If a member deletes their Google account outside DeLaClaw, their Drive permission dies but their row stays in `group.json` — a ghost member. There is no detection for this: the row lingers until the creator removes it from the member list. No automatic polling or enforcement.
 
 ### Design decisions (decided 2026-09-07)
 
@@ -613,8 +615,8 @@ The flows above surfaced 14 design questions, all decided on 2026-09-07 and reco
 5. **Join admission** — joining requires a matching pending invite (by member ID, the hash of the joiner's email); Drive access alone is not enough.
 6. **Removed members' items** — reassigned to the creator (`created_by` rewrite), no ghost creator IDs.
 7. **Creator-only enforcement** — `inviteUser`/`removeUser` throw unless the caller is the creator; the invite/remove UI is hidden from non-creators.
-8. **Account deletion** — joined groups are left alone; created groups are left in place too (only the personal folder is trashed) — members keep access while the creator's Drive account lives.
-9. **Externally deleted accounts** — manual detection only.
+8. **Account deletion** — joined groups are left alone; created groups are left in place too (the synced calendar is deleted and the personal folder is trashed) — members keep access while the creator's Drive account lives.
+9. **Externally deleted accounts** — no detection; ghost rows linger until the creator removes them.
 10. **Placeholder exhaustion** — `extra_N.json` raised from 10 to 12 now; behavior at exhaustion deferred.
 11. **Received-item placement** — always `__shared__`.
 12. **Access loss** — a joined group whose folder becomes unreachable (member removed, or the group deleted) is purged: pointers deleted outright, no dialog; a toast says access was lost.

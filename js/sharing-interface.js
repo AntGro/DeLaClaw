@@ -83,6 +83,7 @@ export const SHARING_INTERFACE = {
   getAllSharedHabits:        'fn',   // () => SharedItem[]
   getAllSharedTodos:         'fn',   // () => SharedItem[]
   getAllSharedListItems:     'fn',   // () => SharedItem[]
+  hasPendingCreate:          'fn',   // (groupId, itemId) => boolean — true while this tab staged the item but no upload acknowledged it yet
 
   // ── Items — invite codes ────────────────────────────────────
   getMemberInviteLink:       'any',  // (groupId, token) => string|null | null for Drive (uses getInviteLink)

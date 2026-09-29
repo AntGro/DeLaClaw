@@ -981,6 +981,89 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     }
   }
 
+  // ── Debounced shared-item flush ──
+  // Mirrors the personal-table write path (js/adapters/drive.js): mutations
+  // stage in memory immediately and mark the (group, type) dirty; a single
+  // debounced upload carries everything staged within the window. Each caller
+  // gets a promise that settles with the flush covering its staging — the
+  // failure/rollback contract is unchanged, only the timing coalesces.
+  const SHARED_FLUSH_DEBOUNCE_MS = 2000;
+  const _sharedDirty = new Set();       // "groupId:type" with unflushed staged changes
+  const _sharedFlushTimers = new Map(); // key -> timeout id
+  const _sharedFlushing = new Set();    // key with an upload in flight
+  const _sharedWaiters = new Map();     // key -> [{ resolve, reject }] for the next flush
+
+  const _sharedFlushKey = (groupId, type) => `${groupId}:${type}`;
+
+  function _armSharedFlush(groupId, type) {
+    const key = _sharedFlushKey(groupId, type);
+    if (_sharedFlushTimers.has(key)) return;
+    _sharedFlushTimers.set(key, setTimeout(() => {
+      _sharedFlushTimers.delete(key);
+      _runSharedFlush(groupId, type);
+    }, SHARED_FLUSH_DEBOUNCE_MS));
+  }
+
+  /**
+   * Schedule the debounced upload for (groupId, type). The returned promise
+   * resolves when a flush covering this call's staging succeeds, and rejects
+   * when that flush fails (after the internal 412 retries) — the caller's
+   * rollback path then runs exactly as with an immediate upload.
+   */
+  function scheduleSharedFlush(groupId, type) {
+    const key = _sharedFlushKey(groupId, type);
+    _sharedDirty.add(key);
+    return new Promise((resolve, reject) => {
+      if (!_sharedWaiters.has(key)) _sharedWaiters.set(key, []);
+      _sharedWaiters.get(key).push({ resolve, reject });
+      _armSharedFlush(groupId, type);
+    });
+  }
+
+  /**
+   * Run one debounced flush generation: upload the current state, then settle
+   * exactly the waiters attached before the upload started. Mutations staged
+   * while the upload is in flight belong to the next generation — the payload
+   * was captured without them, so they get a fresh timer afterwards.
+   */
+  async function _runSharedFlush(groupId, type) {
+    const key = _sharedFlushKey(groupId, type);
+    if (_sharedFlushing.has(key)) { _armSharedFlush(groupId, type); return; }
+    const waiters = _sharedWaiters.get(key) || [];
+    _sharedWaiters.delete(key);
+    if (!waiters.length) return;
+    _sharedFlushing.add(key);
+    try {
+      await saveTypedItems(groupId, type);
+      _sharedDirty.delete(key);
+      for (const w of waiters) w.resolve();
+    } catch (err) {
+      // Fail fast, like an immediate upload: each caller runs its rollback,
+      // which re-stages whatever still needs uploading (or nothing, if the
+      // rollback restored the pre-staging state). Clearing dirty here means a
+      // failed flush can never wedge the poll skip below.
+      _sharedDirty.delete(key);
+      for (const w of waiters) w.reject(err);
+    } finally {
+      _sharedFlushing.delete(key);
+    }
+    if ((_sharedWaiters.get(key) || []).length) _armSharedFlush(groupId, type);
+  }
+
+  /**
+   * True while this tab has staged the item but no upload has acknowledged
+   * it yet. Views use it to tell "being shared right now" apart from "new
+   * from another member" when creating local pointers.
+   */
+  function hasPendingCreate(groupId, itemId) {
+    const e = _groups.get(groupId);
+    if (!e) return false;
+    for (const type of ITEM_TYPES) {
+      if (intentStateFor(e, type).createdIds.has(itemId)) return true;
+    }
+    return false;
+  }
+
   /** Persist a per-type items file with ETag conflict handling. */
   async function saveTypedItems(groupId, type, retries = 0) {
     const e = _groups.get(groupId);
@@ -1574,7 +1657,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // lets callers render optimistically without waiting for the network.
       if (typeof onStaged === 'function') onStaged(item);
       try {
-        await saveTypedItems(groupId, key);
+        await scheduleSharedFlush(groupId, key);
       } catch (err) {
         removeStagedById(e, key, item.id);
         restoreIntents(intents, item.id, prevIntents);
@@ -1616,7 +1699,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           if (cur) Object.assign(cur, changes, { updated_at: stagedAt });
         },
       });
-      await _mutationQueue.runSerialized(mkey, entry, () => saveTypedItems(groupId, key));
+      await _mutationQueue.runSerialized(mkey, entry, () => scheduleSharedFlush(groupId, key));
       emit('item-updated', { groupId, item });
       return item;
     },
@@ -1635,7 +1718,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           markDeleted(intents, itemId);
           if (typeof onStaged === 'function') onStaged({ groupId, itemId });
           try {
-            await saveTypedItems(groupId, type);
+            await scheduleSharedFlush(groupId, type);
           } catch (err) {
             const cur = e.typeData[type] || [];
             if (!cur.some(i => i.id === itemId)) cur.splice(Math.min(idx, cur.length), 0, removed);
@@ -1686,7 +1769,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       markCreated(intents, habitData.id);
       if (typeof onStaged === 'function') onStaged(habitData);
       try {
-        await saveTypedItems(groupId, 'habits');
+        await scheduleSharedFlush(groupId, 'habits');
       } catch (err) {
         removeStagedById(e, 'habits', habitData.id);
         restoreIntents(intents, habitData.id, prevIntents);
@@ -1724,7 +1807,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           if (cur) Object.assign(cur, changes, { updated_at: stagedAt });
         },
       });
-      await _mutationQueue.runSerialized(mkey, entry, () => saveTypedItems(groupId, 'habits'));
+      await _mutationQueue.runSerialized(mkey, entry, () => scheduleSharedFlush(groupId, 'habits'));
       emit('item-updated', { groupId, item });
       return item;
     },
@@ -1744,7 +1827,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         markDeleted(intents, sharedId);
         if (typeof onStaged === 'function') onStaged({ groupId, itemId: sharedId });
         try {
-          await saveTypedItems(groupId, 'habits');
+          await scheduleSharedFlush(groupId, 'habits');
         } catch (err) {
           const cur = e.typeData.habits || [];
           if (!cur.some(h => h.id === sharedId)) cur.splice(Math.min(idx, cur.length), 0, removed);
@@ -1788,7 +1871,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           }
         },
       });
-      await _mutationQueue.runSerialized(mkey, entry, () => saveTypedItems(groupId, 'habits'));
+      await _mutationQueue.runSerialized(mkey, entry, () => scheduleSharedFlush(groupId, 'habits'));
       emit('item-updated', { groupId, item });
       return item;
     },
@@ -1815,6 +1898,15 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     getAllSharedListItems() {
       return this.getAllSharedItems('list_item');
+    },
+
+    /**
+     * True while this tab has staged the item but no upload has acknowledged
+     * it yet. Views use it to tell "being shared right now" apart from "new
+     * from another member" when creating local pointers.
+     */
+    hasPendingCreate(groupId, itemId) {
+      return hasPendingCreate(groupId, itemId);
     },
 
     /** Get items for one group, optionally filtered by type. */
@@ -1861,7 +1953,18 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         if (e.joinedViaLink) continue; // can't write to someone else's group.json as non-owner
         await saveGroup(groupId);
         for (const type of ITEM_TYPES) {
-          if (e.typeData[type]?.length) await saveTypedItems(groupId, type);
+          const key = _sharedFlushKey(groupId, type);
+          // Cancel any pending debounce and flush dirty types now; the
+          // flush settles the waiters attached to it.
+          if (_sharedFlushTimers.has(key)) {
+            clearTimeout(_sharedFlushTimers.get(key));
+            _sharedFlushTimers.delete(key);
+          }
+          if (_sharedDirty.has(key) || (_sharedWaiters.get(key) || []).length) {
+            await _runSharedFlush(groupId, type);
+          } else if (e.typeData[type]?.length) {
+            await saveTypedItems(groupId, type);
+          }
         }
       }
     },
@@ -1882,6 +1985,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       for (const [groupId, e] of _groups) {
         // Poll per-type files
         for (const type of ITEM_TYPES) {
+          // Skip types with unflushed local changes or an upload in flight —
+          // same rule as the personal tables (js/adapters/drive.js): the
+          // debounced flush owns the upload until it settles.
+          const fkey = _sharedFlushKey(groupId, type);
+          if (_sharedDirty.has(fkey) || _sharedFlushing.has(fkey)) continue;
           const meta = e.typeMeta[type];
           if (!meta?.fileId) {
             // For joined groups without a file ID, skip (can't discover by search under drive.file)
@@ -2262,6 +2370,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     destroy() {
       this.stopPolling();
+      for (const t of _sharedFlushTimers.values()) clearTimeout(t);
+      _sharedFlushTimers.clear();
+      _sharedDirty.clear();
+      _sharedFlushing.clear();
+      _sharedWaiters.clear();
       _groups.clear();
       _groupRows = [];
       _user = null;

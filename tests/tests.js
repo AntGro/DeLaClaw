@@ -3199,17 +3199,17 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     const drive = jsFiles['sharing-drive.js'];
     const todosSrc = jsFiles['todos.js'];
 
-    test('addItem fires onStaged after in-memory staging, before the Drive upload', () => {
+    test('addItem fires onStaged after in-memory staging, before the debounced upload', () => {
       const m = drive.match(/async addItem\(groupId, \{([\s\S]*?)\n    \},/);
       assert(m, 'addItem declaration must be parseable');
       const body = m[1];
       const pushIdx = body.indexOf('e.typeData[key].push(item)');
       const stagedIdx = body.indexOf('onStaged(item)');
-      const uploadIdx = body.indexOf('await saveTypedItems(groupId, key)');
+      const uploadIdx = body.indexOf('scheduleSharedFlush(groupId, key)');
       assert(pushIdx !== -1 && stagedIdx !== -1 && uploadIdx !== -1,
-        'addItem must stage in memory, fire onStaged, then upload');
+        'addItem must stage in memory, fire onStaged, then schedule the debounced upload');
       assert(pushIdx < stagedIdx && stagedIdx < uploadIdx,
-        'onStaged must fire after the in-memory push and before the Drive upload');
+        'onStaged must fire after the in-memory push and before the Drive upload is scheduled');
       assert(/typeof onStaged === 'function'/.test(body),
         'onStaged must be optional (guarded call)');
     });
@@ -3265,9 +3265,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const body = methodBody('deleteItem', 'async completeItem(');
       assert(body.includes('{ onStaged } = {}'), 'deleteItem must accept the onStaged option');
       const spliceIdx = body.indexOf('arr.splice(idx, 1)');
-      const uploadIdx = body.indexOf('await saveTypedItems(groupId, type)');
+      const uploadIdx = body.indexOf('await scheduleSharedFlush(groupId, type)');
       assert(spliceIdx !== -1 && uploadIdx !== -1 && spliceIdx < uploadIdx,
-        'must stage the delete in memory before uploading');
+        'must stage the delete in memory before scheduling the debounced upload');
       assert(/catch \(err\)[\s\S]*?cur\.splice\(/.test(body),
         'a failed upload must re-insert the removed item');
       assert(body.includes('restoreIntents(intents, itemId, prevIntents)'),
@@ -3298,18 +3298,22 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(undoneBy !== -1, 'uncompleteItem must accept opts');
     });
 
-    test('share-existing + bulk share (todos, habits, lists) unblock on staging', () => {
-      // The view must refresh (unblock the UI) before the shared upload
-      // call site; the upload itself settles in the background.
+    test('share flows stage in shared memory before planting the local pointer', () => {
+      // Stage-before-pointer: the in-memory staging (created intent + dirty
+      // type) must happen before the local pointer row exists, so the poll
+      // and the orphan-pointer cleanup can't misread the in-between state.
+      // The UI unblocks on staging; the debounced upload settles afterwards.
       const cases = [
-        [todosSrc, 'shareExistingTodo', 'await refreshTodos()', 'state.sharing.addItem('],
-        [todosSrc, 'bulkShareTodoCategory', 'await refreshTodos()', 'state.sharing.addItem('],
-        [habitsSrc, 'shareExistingHabit', 'refreshHabits()', 'state.sharing.addSharedHabit('],
-        [habitsSrc, 'bulkShareHabitCategory', 'refreshHabits()', 'state.sharing.addSharedHabit('],
-        [listsSrc, 'shareExistingListItem', 'await refreshLists()', 'state.sharing.addItem('],
-        [listsSrc, 'bulkShareList', 'await refreshLists()', 'state.sharing.addItem('],
+        [todosSrc, 'shareExistingTodo', 'state.sharing.addItem(groupId, {'],
+        [todosSrc, 'bulkShareTodoCategory', 'state.sharing.addItem(groupId, {'],
+        [todosSrc, 'shareTodoFromAdd', 'state.sharing.addItem(groupId, {'],
+        [habitsSrc, 'saveNewHabit', 'state.sharing.addSharedHabit(groupId,'],
+        [habitsSrc, 'shareExistingHabit', 'state.sharing.addSharedHabit(groupId,'],
+        [habitsSrc, 'bulkShareHabitCategory', 'state.sharing.addSharedHabit(groupId,'],
+        [listsSrc, 'shareExistingListItem', 'state.sharing.addItem(groupId, {'],
+        [listsSrc, 'bulkShareList', 'state.sharing.addItem(groupId, {'],
       ];
-      for (const [src, name, refreshCall, uploadCall] of cases) {
+      for (const [src, name, uploadCall] of cases) {
         const start = src.indexOf(`async function ${name}(`);
         assert(start !== -1, `${name} must exist`);
         const nextFn = src.indexOf('\nasync function ', start + 20);
@@ -3317,11 +3321,35 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         const end = Math.min(nextFn !== -1 ? nextFn : Infinity, nextWin !== -1 ? nextWin : Infinity);
         assert(end !== Infinity, `${name}: function boundary must be parseable`);
         const body = src.slice(start, end);
-        const refreshIdx = body.indexOf(refreshCall);
+        assert(body.includes('onStaged'), `${name}: must pass onStaged to the share call`);
+        assert(body.includes('Promise.race([staged'), `${name}: must unblock the UI on staging`);
         const uploadIdx = body.indexOf(uploadCall);
-        assert(refreshIdx !== -1 && uploadIdx !== -1, `${name}: must refresh and upload`);
-        assert(refreshIdx < uploadIdx,
-          `${name}: must refresh (unblock the UI) before the shared upload call site`);
+        const pointerIdx = body.indexOf('shared_id: sharedId');
+        assert(uploadIdx !== -1 && pointerIdx !== -1, `${name}: must stage in memory and plant a pointer`);
+        assert(uploadIdx < pointerIdx,
+          `${name}: must stage in shared memory before inserting the local pointer`);
+      }
+    });
+
+    test('share failure rollbacks only touch locally-staged state', () => {
+      // A failure before the in-memory staging must not delete or restore
+      // local rows that were never touched.
+      const cases = [
+        [todosSrc, 'shareTodoFromAdd', 'localStaged'],
+        [todosSrc, 'shareExistingTodo', 'locallyStaged'],
+        [habitsSrc, 'shareExistingHabit', 'localStaged'],
+        [listsSrc, 'shareExistingListItem', 'localStaged'],
+      ];
+      for (const [src, name, flag] of cases) {
+        const start = src.indexOf(`async function ${name}(`);
+        assert(start !== -1, `${name} must exist`);
+        const nextFn = src.indexOf('\nasync function ', start + 20);
+        const nextWin = src.indexOf(`\nwindow.${name}`, start);
+        const end = Math.min(nextFn !== -1 ? nextFn : Infinity, nextWin !== -1 ? nextWin : Infinity);
+        assert(end !== Infinity, `${name}: function boundary must be parseable`);
+        const body = src.slice(start, end);
+        assert(new RegExp(`if \\(${flag}`).test(body),
+          `${name}: the background failure rollback must be guarded by the local-staging flag`);
       }
     });
 
@@ -3379,6 +3407,123 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const end = drive.indexOf('async uncompleteItem', start);
       const body = drive.slice(start, end);
       assert(body.includes('return this.updateItem('), 'completeItem must delegate to updateItem');
+    });
+  }
+
+  // ===================================================================
+  // DEBOUNCED SHARED FLUSH — shared item uploads coalesce per (group, type)
+  // like the personal tables: mutations stage in memory and mark the type
+  // dirty immediately; one debounced upload carries everything staged within
+  // the window. The sharing poll skips dirty/in-flight types, and the syncs
+  // never plant a pointer for an item this tab is still sharing.
+  // ===================================================================
+  {
+    const drive = jsFiles['sharing-drive.js'];
+    const todosSrc = jsFiles['todos.js'];
+    const habitsSrc = jsFiles['habits.js'];
+    const listsSrc = jsFiles['lists.js'];
+
+    function methodBody(name, endMarker) {
+      const start = drive.indexOf(`async ${name}(`);
+      const end = drive.indexOf(endMarker, start);
+      assert(start !== -1 && end !== -1, `${name} block must be parseable`);
+      return drive.slice(start, end);
+    }
+
+    test('shared mutations schedule a debounced flush instead of uploading directly', () => {
+      for (const [name, endMarker] of [
+        ['addItem', 'async updateItem('],
+        ['updateItem', 'async deleteItem('],
+        ['deleteItem', 'async completeItem('],
+        ['addSharedHabit', 'async updateSharedHabit('],
+        ['updateSharedHabit', 'async deleteSharedHabit('],
+        ['deleteSharedHabit', 'async addSharedHabitCompletion('],
+        ['addSharedHabitCompletion', 'async forceSave('],
+      ]) {
+        const body = methodBody(name, endMarker);
+        assert(body.includes('scheduleSharedFlush('), `${name} must schedule the debounced flush`);
+        assert(!body.includes('saveTypedItems('), `${name} must not upload directly`);
+      }
+    });
+
+    test('debounced flush coalesces per (group, type) and settles waiters per generation', () => {
+      assert(drive.includes('SHARED_FLUSH_DEBOUNCE_MS'), 'must define the debounce window');
+      assert(drive.includes('`${groupId}:${type}`'),
+        'the debounce key must be per (group, type)');
+      assert(/if \(_sharedFlushTimers\.has\(key\)\) return;/.test(drive),
+        'must keep a single timer per (group, type)');
+      // Waiters are snapshotted before the upload so a mutation staged
+      // mid-upload is never settled by a flush whose payload excluded it.
+      const runFlush = drive.slice(drive.indexOf('async function _runSharedFlush'));
+      const snapshotIdx = runFlush.indexOf('_sharedWaiters.delete(key)');
+      const uploadIdx = runFlush.indexOf('await saveTypedItems(groupId, type)');
+      assert(snapshotIdx !== -1 && uploadIdx !== -1 && snapshotIdx < uploadIdx,
+        'must snapshot the waiter list before the upload starts');
+      assert(/if \(\(_sharedWaiters\.get\(key\) \|\| \[\]\)\.length\) _armSharedFlush\(groupId, type\)/.test(runFlush),
+        'mutations staged mid-upload must get a fresh timer afterwards');
+      assert(/catch \(err\) \{[\s\S]*?_sharedDirty\.delete\(key\)/.test(runFlush),
+        'a failed flush must clear the dirty mark so the poll skip cannot wedge');
+    });
+
+    test('sharing poll skips types with unflushed changes or an upload in flight', () => {
+      const pollStart = drive.indexOf('async poll()');
+      assert(pollStart !== -1, 'poll must exist');
+      const pollBody = drive.slice(pollStart, drive.indexOf('async handleStaleGroup', pollStart));
+      assert(/_sharedDirty\.has\(fkey\) \|\| _sharedFlushing\.has\(fkey\)/.test(pollBody),
+        'poll must skip types that are dirty or flushing');
+    });
+
+    test('hasPendingCreate is exposed on the adapter and the interface', () => {
+      assert(drive.includes('hasPendingCreate(groupId, itemId)'),
+        'sharing-drive.js must expose hasPendingCreate');
+      assert(/intentStateFor\(e, type\)\.createdIds\.has\(itemId\)/.test(drive),
+        'hasPendingCreate must consult the unacknowledged created intents');
+      const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(/hasPendingCreate:\s+'fn'/.test(iface),
+        'SHARING_INTERFACE must declare hasPendingCreate');
+    });
+
+    test('syncs never plant a pointer for an item this tab is sharing', () => {
+      for (const [src, name] of [
+        [todosSrc, 'syncSharedTodos'],
+        [habitsSrc, 'syncSharedHabits'],
+        [listsSrc, 'syncSharedListItems'],
+      ]) {
+        assert(src.includes('state.sharing.hasPendingCreate(sh.group_id, sh.id)'),
+          `${name} must skip pointer creation while the share is in flight`);
+      }
+    });
+
+    test('bulk share keeps the original category on the local pointer', () => {
+      // Regression test for bulk-shared items landing in the Shared category:
+      // the pointer must carry the source category id, not __shared__.
+      const cases = [
+        [todosSrc, 'bulkShareTodoCategory', 'category_id: catId'],
+        [habitsSrc, 'bulkShareHabitCategory', 'category_id: habit.category_id || _defaultHabitCatId'],
+        [listsSrc, 'bulkShareList', 'list_id: listId'],
+      ];
+      for (const [src, name, marker] of cases) {
+        const start = src.indexOf(`async function ${name}(`);
+        assert(start !== -1, `${name} must exist`);
+        const end = src.indexOf(`\nwindow.${name}`, start);
+        assert(end !== -1, `${name}: function boundary must be parseable`);
+        const body = src.slice(start, end);
+        assert(body.includes(marker),
+          `${name}: the pointer insert must preserve the source category/list (${marker})`);
+      }
+    });
+
+    test('forceSave flushes dirty shared types immediately; destroy clears timers', () => {
+      const forceBody = methodBody('forceSave', 'async poll()');
+      assert(forceBody.includes('_runSharedFlush(groupId, type)'),
+        'forceSave must run the debounced flush for dirty types');
+      assert(/clearTimeout\(_sharedFlushTimers\.get\(key\)\)/.test(forceBody),
+        'forceSave must cancel the pending debounce timer before flushing');
+      const destroyStart = drive.indexOf('destroy()');
+      assert(destroyStart !== -1, 'destroy must exist');
+      const destroyBody = drive.slice(destroyStart, drive.indexOf('},', destroyStart) + 2);
+      assert(destroyBody.includes('_sharedFlushTimers.clear()'),
+        'destroy must clear the debounce timers');
     });
   }
 

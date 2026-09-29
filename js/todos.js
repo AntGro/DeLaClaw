@@ -1437,6 +1437,10 @@ async function _doSyncSharedTodos() {
   // Create pointers for new shared TODOs
   for (const sh of allShared) {
     if (!localBySharedId.has(sh.id)) {
+      // Skip items this tab staged but hasn't planted a pointer for yet —
+      // the share flow inserts the real pointer right after staging. Without
+      // this the sync would plant a __shared__-category duplicate.
+      if (state.sharing.hasPendingCreate(sh.group_id, sh.id)) continue;
       // Double-check DB to avoid race with shareTodoFromAdd
       const { data: existing } = await state.db.from('todos').select('id').eq('shared_id', sh.id).limit(1);
       if (existing?.length) continue;
@@ -1511,25 +1515,19 @@ async function shareTodoFromAdd(btn) {
 
     // Resolves once the shared item is staged in memory, before the Drive upload.
     let onStaged;
-    const staged = new Promise(resolve => { onStaged = resolve; });
+    let wasStaged = false;
+    const staged = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
 
     (async () => {
       const sharedId = crypto.randomUUID();
       const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catId);
       const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
 
-      // Stage the local pointer row first (fast local write).
-      const { data: localRow, error: localErr } = await state.db.from('todos').insert({
-        text: '', priority: 'normal', done: false,
-        category: cat?.name ?? '', category_id: catId,
-        sort_order: minOrder,
-        shared_id: sharedId,
-        shared_group_id: groupId,
-      }).select().single();
-      if (localErr) { showToast(localErr.message, 'error'); return; }
-
-      // The shared upload runs in the background: success toasts, failure
-      // rolls the pointer row back and restores the typed text.
+      // Stage the shared item in memory first: this marks the created intent
+      // and the dirty type, so the poll skips it and the orphan-pointer
+      // cleanup can't see a pointer whose item isn't staged yet.
+      let localStaged = false;
+      let localRow = null;
       const upload = state.sharing.addItem(groupId, {
         id: sharedId,
         item_type: 'todo',
@@ -1537,12 +1535,16 @@ async function shareTodoFromAdd(btn) {
         assignees,
         onStaged,
       });
+      // The shared upload runs in the background: success toasts, failure
+      // rolls back only what was actually staged locally.
       upload.then(
         () => showToast(t('sharing.shared') + '!', 'success'),
         async (driveErr) => {
-          if (localRow?.id) await state.db.from('todos').delete().eq('id', localRow.id);
+          if (localStaged && localRow?.id) {
+            await state.db.from('todos').delete().eq('id', localRow.id);
+            await refreshTodos();
+          }
           input.value = text;
-          await refreshTodos();
           showToast(driveErr.message, 'error');
         }
       );
@@ -1551,6 +1553,24 @@ async function shareTodoFromAdd(btn) {
       // upload. If the upload fails before staging, the failure branch above
       // handles the rollback, so don't hang here.
       await Promise.race([staged, upload.then(() => {}, () => {})]);
+      if (!wasStaged) return;
+
+      // Stage the local pointer row (fast local write).
+      const { data, error: localErr } = await state.db.from('todos').insert({
+        text: '', priority: 'normal', done: false,
+        category: cat?.name ?? '', category_id: catId,
+        sort_order: minOrder,
+        shared_id: sharedId,
+        shared_group_id: groupId,
+      }).select().single();
+      if (localErr) {
+        // Back out the staged shared item — it hasn't uploaded yet.
+        state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+        showToast(localErr.message, 'error');
+        return;
+      }
+      localRow = data;
+      localStaged = true;
 
       input.value = '';
       input.dataset.priority = 'low';
@@ -1584,7 +1604,38 @@ async function shareExistingTodo(id, el) {
       const payload = { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null };
       // Keep the personal row: a failed upload restores it verbatim.
       const personalRow = { ...todo };
-      // 1. Stage locally — pointer in, personal item out — and refresh immediately.
+      // 1. Stage the shared item in memory first: this marks the created
+      // intent and the dirty type, so the poll skips it and the
+      // orphan-pointer cleanup can't see a pointer whose item isn't staged.
+      let onStaged;
+      let wasStaged = false;
+      const staged = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+      let locallyStaged = false;
+      const upload = state.sharing.addItem(groupId, {
+        id: sharedId,
+        item_type: 'todo',
+        payload,
+        onStaged,
+      });
+      // 2. The shared upload runs in the background: success toasts, failure
+      // restores the personal item and drops the pointer — but only when the
+      // local staging below actually happened.
+      upload.then(
+        () => showToast(t('sharing.shared') + '!', 'success'),
+        async (driveErr) => {
+          if (locallyStaged) {
+            await state.db.from('todos').delete().eq('shared_id', sharedId);
+            await state.db.from('todos').insert(personalRow);
+            await refreshTodos();
+          }
+          showToast(driveErr.message, 'error');
+        }
+      );
+      // Unblock the UI on staging — don't wait for the upload. If the upload
+      // fails before staging, the failure branch above handles the rollback.
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
+      if (!wasStaged) return;
+      // 3. Stage locally — pointer in, personal item out — and refresh.
       const { error: ptrErr } = await state.db.from('todos').insert({
         text: '', priority: 'normal', done: false,
         category: cat?.name ?? '', category_id: catIdForTodo(todo),
@@ -1592,24 +1643,15 @@ async function shareExistingTodo(id, el) {
         shared_id: sharedId,
         shared_group_id: groupId,
       });
-      if (ptrErr) { showToast(ptrErr.message, 'error'); return; }
+      if (ptrErr) {
+        // Back out the staged shared item — it hasn't uploaded yet.
+        state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+        showToast(ptrErr.message, 'error');
+        return;
+      }
       await state.db.from('todos').delete().eq('id', todo.id);
+      locallyStaged = true;
       await refreshTodos();
-      // 2. The shared upload runs in the background: success toasts, failure
-      // restores the personal item and drops the pointer.
-      state.sharing.addItem(groupId, {
-        id: sharedId,
-        item_type: 'todo',
-        payload,
-      }).then(
-        () => showToast(t('sharing.shared') + '!', 'success'),
-        async (driveErr) => {
-          await state.db.from('todos').delete().eq('shared_id', sharedId);
-          await state.db.from('todos').insert(personalRow);
-          await refreshTodos();
-          showToast(driveErr.message, 'error');
-        }
-      );
     })().catch(e => showToast(e.message, 'error'))
       .finally(() => {
         _pendingShare.delete(id);
@@ -1638,10 +1680,28 @@ async function bulkShareTodoCategory(catId, el) {
         _bulkShareInProgress.add(catId);
         if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
         try {
-          // Stage everything locally first: pointer in, personal item out.
+          // Stage each item in the shared memory first, then plant the local
+          // pointer: the created intent and dirty type keep the poll and the
+          // orphan-pointer cleanup from misreading the in-between state. The
+          // debounced flush uploads everything in one go.
           const staged = [];
           for (const todo of items) {
             const sharedId = crypto.randomUUID();
+            const payload = { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null };
+            let onStaged;
+            let wasStaged = false;
+            const stagedP = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+            const upload = state.sharing.addItem(groupId, {
+              id: sharedId,
+              item_type: 'todo',
+              payload,
+              onStaged,
+            });
+            await Promise.race([stagedP, upload.then(() => {}, () => {})]);
+            if (!wasStaged) {
+              console.error('[DeLaClaw] bulk share todo staging failed:', sharedId);
+              continue;
+            }
             const { error: ptrErr } = await state.db.from('todos').insert({
               text: '', priority: 'normal', done: false,
               category: cat?.name ?? '', category_id: catId,
@@ -1649,9 +1709,13 @@ async function bulkShareTodoCategory(catId, el) {
               shared_id: sharedId,
               shared_group_id: groupId,
             });
-            if (ptrErr) continue;
+            if (ptrErr) {
+              // Back out the staged shared item — it hasn't uploaded yet.
+              state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+              continue;
+            }
             await state.db.from('todos').delete().eq('id', todo.id);
-            staged.push({ todo: { ...todo }, sharedId, payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null } });
+            staged.push({ todo: { ...todo }, sharedId, upload });
           }
           // Unblock the UI on staging — the uploads run in the background.
           await refreshTodos();
@@ -1660,11 +1724,7 @@ async function bulkShareTodoCategory(catId, el) {
           let ok = 0;
           for (const s of staged) {
             try {
-              await state.sharing.addItem(groupId, {
-                id: s.sharedId,
-                item_type: 'todo',
-                payload: s.payload,
-              });
+              await s.upload;
               ok++;
             } catch (e) {
               console.error('[DeLaClaw] bulk share todo failed:', e);

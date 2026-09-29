@@ -1060,6 +1060,11 @@ async function _doSyncSharedListItems() {
   for (const sh of sharedItems) {
     if (existingSharedIds.has(sh.id)) continue;
 
+    // Skip items this tab staged but hasn't planted a pointer for yet —
+    // the share flow inserts the real pointer right after staging. Without
+    // this the sync would plant a duplicate in the Shared list.
+    if (state.sharing.hasPendingCreate(sh.group_id, sh.id)) continue;
+
     let targetList = await getOrCreateSharedList(localLists);
     if (!targetList) continue;
 
@@ -1204,9 +1209,40 @@ async function shareExistingListItem(id, el) {
     if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
     try {
       const sharedId = crypto.randomUUID();
-      // 1. Stage locally FIRST: pointer in, personal item out. The snapshot
-      // allows a full rollback if the Drive upload fails.
+      const payload = { text: item.text, list_name: listObj?.name || '', note: item.note || '' };
+      // 1. Stage the shared item in memory first: this marks the created
+      // intent and the dirty type, so the poll skips it and the
+      // orphan-pointer cleanup can't see a pointer whose item isn't staged.
+      // The snapshot allows a full rollback if the Drive upload fails.
       const personalItem = { ...item };
+      let onStaged;
+      let wasStaged = false;
+      const staged = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+      let localStaged = false;
+      // 2. The shared upload runs in the background: success toasts, failure
+      // drops the pointer and restores the personal item — but only when the
+      // local staging below actually happened.
+      const upload = state.sharing.addItem(groupId, {
+        id: sharedId,
+        item_type: 'list_item',
+        payload,
+        onStaged,
+      });
+      upload.then(
+        () => showToast(t('sharing.shared') + '!', 'success'),
+        async (e) => {
+          console.error('[DeLaClaw] share existing list item failed:', e);
+          if (localStaged) {
+            await state.db.from('list_items').delete().eq('shared_id', sharedId);
+            await state.db.from('list_items').insert(personalItem);
+            await refreshLists();
+          }
+          showToast(e.message, 'error');
+        }
+      );
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
+      if (!wasStaged) return;
+      // 3. Stage locally: pointer in, personal item out.
       const { error: ptrErr } = await state.db.from('list_items').insert({
         list_id: item.list_id,
         text: '',
@@ -1214,27 +1250,15 @@ async function shareExistingListItem(id, el) {
         shared_id: sharedId,
         shared_group_id: groupId,
       });
-      if (ptrErr) { showToast(t('toast.failed_to_add') + ': ' + ptrErr.message, 'error'); return; }
-      // 2. Delete the personal item
+      if (ptrErr) {
+        // Back out the staged shared item — it hasn't uploaded yet.
+        state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+        showToast(t('toast.failed_to_add') + ': ' + ptrErr.message, 'error');
+        return;
+      }
       await state.db.from('list_items').delete().eq('id', item.id);
+      localStaged = true;
       await refreshLists();
-      // 3. The shared upload runs in the background: success toasts, failure
-      // drops the pointer and restores the personal item.
-      const upload = state.sharing.addItem(groupId, {
-        id: sharedId,
-        item_type: 'list_item',
-        payload: { text: personalItem.text, list_name: listObj?.name || '', note: personalItem.note || '' },
-      });
-      upload.then(
-        () => showToast(t('sharing.shared') + '!', 'success'),
-        async (e) => {
-          console.error('[DeLaClaw] share existing list item failed:', e);
-          await state.db.from('list_items').delete().eq('shared_id', sharedId);
-          await state.db.from('list_items').insert(personalItem);
-          await refreshLists();
-          showToast(e.message, 'error');
-        }
-      );
     } catch (e) {
       showToast(e.message, 'error');
     } finally {
@@ -1264,11 +1288,28 @@ async function bulkShareList(listId, el) {
         _bulkShareInProgress.add(listId);
         if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
         try {
-          // Stage everything locally first: pointer in, personal item out.
-          // The uploads run in the background afterwards.
+          // Stage each item in the shared memory first, then plant the local
+          // pointer: the created intent and dirty type keep the poll and the
+          // orphan-pointer cleanup from misreading the in-between state. The
+          // debounced flush uploads everything in one go.
           const staged = [];
           for (const item of listItems) {
             const sharedId = crypto.randomUUID();
+            const payload = { text: item.text, list_name: listObj?.name || '', note: item.note || '' };
+            let onStaged;
+            let wasStaged = false;
+            const stagedP = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+            const upload = state.sharing.addItem(groupId, {
+              id: sharedId,
+              item_type: 'list_item',
+              payload,
+              onStaged,
+            });
+            await Promise.race([stagedP, upload.then(() => {}, () => {})]);
+            if (!wasStaged) {
+              console.error('[DeLaClaw] bulk share list item staging failed:', sharedId);
+              continue;
+            }
             const { error: ptrErr } = await state.db.from('list_items').insert({
               list_id: listId,
               text: '',
@@ -1276,11 +1317,15 @@ async function bulkShareList(listId, el) {
               shared_id: sharedId,
               shared_group_id: groupId,
             });
-            if (ptrErr) continue;
+            if (ptrErr) {
+              // Back out the staged shared item — it hasn't uploaded yet.
+              state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+              continue;
+            }
             await state.db.from('list_items').delete().eq('id', item.id);
             staged.push({
               sharedId,
-              payload: { text: item.text, list_name: listObj?.name || '', note: item.note || '' },
+              upload,
               personalItem: { ...item },
             });
           }
@@ -1291,11 +1336,7 @@ async function bulkShareList(listId, el) {
           let ok = 0;
           for (const s of staged) {
             try {
-              await state.sharing.addItem(groupId, {
-                id: s.sharedId,
-                item_type: 'list_item',
-                payload: s.payload,
-              });
+              await s.upload;
               ok++;
             } catch (e) {
               console.error('[DeLaClaw] bulk share list item failed:', e);

@@ -1347,18 +1347,12 @@ async function saveNewHabit() {
   if (!freq) { showToast(t('habits.enter_frequency'), 'error'); return; }
 
   if (groupId && state.sharing) {
-    // ─── Shared habit: local pointer + canonical shared data (optimistic) ───
+    // ─── Shared habit: canonical shared data + local pointer (optimistic) ───
     const sharedId = crypto.randomUUID();
-    // Insert local pointer FIRST to prevent syncSharedHabits race
-    const { data: pointerData, error: pointerErr } = await state.db.from('habits').insert({
-      name: '', frequency_rule: '', category: catName, category_id: catId, is_draft: 0,
-      shared_id: sharedId, shared_group_id: groupId,
-    }).select().single();
-    if (pointerErr) {
-      console.warn('Failed to create local pointer:', pointerErr);
-      showToast(t('toast.failed_to_add') + ': ' + pointerErr.message, 'error');
-      return;
-    }
+    // Compute next_due purely — a new habit has no existing next_due to guard.
+    const nextDue = isStructuredRule(freq)
+      ? normalizeHabitNextDue(computeNextDue(freq, lastDoneVal || null))
+      : null;
     const actor = await getSharedHabitCompletionActor(groupId);
     const sharedItem = {
       id: sharedId,
@@ -1371,6 +1365,7 @@ async function saveNewHabit() {
       updated_at: new Date().toISOString(),
       completions: [],
     };
+    if (nextDue != null) sharedItem.next_due = nextDue;
     if (lastDoneVal) {
       sharedItem.completions.push({
         id: crypto.randomUUID(),
@@ -1378,28 +1373,46 @@ async function saveNewHabit() {
         completed_by: actor,
       });
     }
-    // Compute next_due on the pointer immediately (local, fast).
-    let nextDue = null;
-    if (pointerData?.id) nextDue = await updateHabitNextDue(pointerData.id, freq, lastDoneVal || null);
 
-    // The shared uploads run in the background: unblock the UI on staging.
-    // A failure drops the pointer row again.
+    // Stage the shared item in memory first: this marks the created intent
+    // and the dirty type, so the poll skips it and the orphan-pointer
+    // cleanup can't see a pointer whose item isn't staged yet.
     let onStaged;
-    const staged = new Promise(resolve => { onStaged = resolve; });
-    const upload = (async () => {
-      await state.sharing.addSharedHabit(groupId, sharedItem, { onStaged });
-      if (nextDue != null) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: nextDue });
-    })();
+    let wasStaged = false;
+    const staged = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+    let localStaged = false;
+    let pointerId = null;
+    // The shared upload runs in the background: unblock the UI on staging.
+    // A failure drops the pointer row again — but only when the local
+    // staging below actually happened.
+    const upload = state.sharing.addSharedHabit(groupId, sharedItem, { onStaged });
     upload.then(
       () => showToast(t('habits.habit_added', name), 'success'),
       async (e) => {
         console.warn('Failed to write shared habit:', e);
-        if (pointerData?.id) await state.db.from('habits').delete().eq('id', pointerData.id);
-        await refreshHabits();
+        if (localStaged && pointerId) {
+          await state.db.from('habits').delete().eq('id', pointerId);
+          await refreshHabits();
+        }
         showToast(t('toast.failed_to_add') + ' (shared)', 'error');
       }
     );
     await Promise.race([staged, upload.then(() => {}, () => {})]);
+    if (wasStaged) {
+      const { data, error } = await state.db.from('habits').insert({
+        name: '', frequency_rule: '', category: catName, category_id: catId, is_draft: 0,
+        shared_id: sharedId, shared_group_id: groupId, next_due: nextDue,
+      }).select().single();
+      if (error) {
+        // Back out the staged shared item — it hasn't uploaded yet.
+        state.sharing.deleteSharedHabit(groupId, sharedId).catch(() => {});
+        console.warn('Failed to create local pointer:', error);
+        showToast(t('toast.failed_to_add') + ': ' + error.message, 'error');
+        return;
+      }
+      pointerId = data?.id;
+      localStaged = true;
+    }
     closeAddHabitModal();
     await refreshHabits();
     return;
@@ -2562,6 +2575,10 @@ async function _doSyncSharedHabits() {
 
     if (currentPointer) continue;
 
+    // Skip items this tab staged but hasn't planted a pointer for yet —
+    // the share flow inserts the real pointer right after staging. Without
+    // this the sync would plant a __shared__-category duplicate.
+    if (state.sharing.hasPendingCreate(sh.group_id, sh.id)) continue;
     // Double-check DB to avoid races with local pointer creation.
     const { data: existing } = await state.db.from('habits').select('id').eq('shared_id', sh.id).limit(1);
     if (existing?.length) continue;
@@ -2651,6 +2668,10 @@ async function shareExistingHabit(id, el) {
           completed_at: c.completed_at,
           completed_by: actor,
         }));
+      const lastDone = localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null;
+      const nextDue = isStructuredRule(habit.frequency_rule)
+        ? normalizeHabitNextDue(computeNextDue(habit.frequency_rule, lastDone))
+        : null;
       const sharedItem = {
         id: sharedId,
         item_type: 'habit',
@@ -2662,43 +2683,56 @@ async function shareExistingHabit(id, el) {
         updated_at: new Date().toISOString(),
         completions: localCompletions,
       };
-      // 1. Stage locally FIRST: pointer in, personal habit + completions out.
+      if (nextDue != null) sharedItem.next_due = nextDue;
+      // 1. Stage the shared item in memory first: this marks the created
+      // intent and the dirty type, so the poll skips it and the
+      // orphan-pointer cleanup can't see a pointer whose item isn't staged.
       // Snapshots allow a full rollback if the Drive upload fails.
       const personalHabit = { ...habit };
       const personalCompletions = (state.allHabitCompletions || [])
         .filter(c => c.habit_id === habit.id)
         .map(c => ({ ...c }));
-      const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
-        name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
-        category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
-        shared_id: sharedId, shared_group_id: groupId,
-      }).select().single();
-      if (ptrErr) { showToast(ptrErr.message, 'error'); return; }
-      await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
-      await state.db.from('habits').delete().eq('id', habit.id);
-      let nextDue = null;
-      if (pointer?.id) {
-        nextDue = await updateHabitNextDue(pointer.id, habit.frequency_rule,
-          localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
-      }
-      await refreshHabits();
-      // 2. The shared uploads run in the background: success toasts, failure
-      // restores the personal habit and its completions and drops the pointer.
-      const upload = (async () => {
-        await state.sharing.addSharedHabit(groupId, sharedItem);
-        if (nextDue != null) await state.sharing.updateSharedHabit(groupId, sharedId, { next_due: nextDue });
-      })();
+      let onStaged;
+      let wasStaged = false;
+      const staged = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+      let localStaged = false;
+      let pointerId = null;
+      // 2. The shared upload runs in the background: success toasts, failure
+      // restores the personal habit and its completions and drops the
+      // pointer — but only when the local staging below actually happened.
+      const upload = state.sharing.addSharedHabit(groupId, sharedItem, { onStaged });
       upload.then(
         () => showToast(t('sharing.shared') + '!', 'success'),
         async (e) => {
           console.error('[DeLaClaw] share existing habit failed:', e);
-          if (pointer?.id) await state.db.from('habits').delete().eq('id', pointer.id);
-          await state.db.from('habits').insert(personalHabit);
-          for (const c of personalCompletions) await state.db.from('habit_completions').insert(c);
-          await refreshHabits();
+          if (localStaged) {
+            if (pointerId) await state.db.from('habits').delete().eq('id', pointerId);
+            await state.db.from('habits').insert(personalHabit);
+            for (const c of personalCompletions) await state.db.from('habit_completions').insert(c);
+            await refreshHabits();
+          }
           showToast(e.message, 'error');
         }
       );
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
+      if (!wasStaged) return;
+      // 3. Stage locally: pointer in, personal habit + completions out.
+      const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
+        name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
+        category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
+        shared_id: sharedId, shared_group_id: groupId, next_due: nextDue,
+      }).select().single();
+      if (ptrErr) {
+        // Back out the staged shared item — it hasn't uploaded yet.
+        state.sharing.deleteSharedHabit(groupId, sharedId).catch(() => {});
+        showToast(ptrErr.message, 'error');
+        return;
+      }
+      await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
+      await state.db.from('habits').delete().eq('id', habit.id);
+      pointerId = pointer?.id;
+      localStaged = true;
+      await refreshHabits();
     } catch (e) {
       showToast(e.message, 'error');
     } finally {
@@ -2728,8 +2762,10 @@ async function bulkShareHabitCategory(catId, el) {
         if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
         try {
           const actor = await getSharedHabitCompletionActor(groupId);
-          // Stage everything locally first: pointer in, personal habit +
-          // completions out. The uploads run in the background afterwards.
+          // Stage each item in the shared memory first, then plant the local
+          // pointer: the created intent and dirty type keep the poll and the
+          // orphan-pointer cleanup from misreading the in-between state. The
+          // debounced flush uploads everything in one go.
           const staged = [];
           for (const habit of items) {
             const sharedId = crypto.randomUUID();
@@ -2737,38 +2773,49 @@ async function bulkShareHabitCategory(catId, el) {
             const localCompletions = (state.allHabitCompletions || [])
               .filter(c => c.habit_id === habit.id)
               .map(c => ({ id: crypto.randomUUID(), completed_at: c.completed_at, completed_by: actor }));
+            const lastDone = localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null;
+            const nextDue = isStructuredRule(habit.frequency_rule)
+              ? normalizeHabitNextDue(computeNextDue(habit.frequency_rule, lastDone))
+              : null;
+            const sharedItem = {
+              id: sharedId, item_type: 'habit',
+              name: habit.name, frequency_rule: habit.frequency_rule,
+              creator_category: catRow?.name ?? habit.category ?? '',
+              created_by: actor,
+              created_at: habit.created_at || new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              completions: localCompletions,
+            };
+            if (nextDue != null) sharedItem.next_due = nextDue;
             // Snapshots for rollback — taken before the local deletes below.
             const personalHabit = { ...habit };
             const personalCompletions = (state.allHabitCompletions || [])
               .filter(c => c.habit_id === habit.id).map(c => ({ ...c }));
+            let onStaged;
+            let wasStaged = false;
+            const stagedP = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+            const upload = state.sharing.addSharedHabit(groupId, sharedItem, { onStaged });
+            await Promise.race([stagedP, upload.then(() => {}, () => {})]);
+            if (!wasStaged) {
+              console.error('[DeLaClaw] bulk share habit staging failed:', sharedId);
+              continue;
+            }
             const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
               name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
               category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
               created_at: habit.created_at || new Date().toISOString(),
-              shared_id: sharedId, shared_group_id: groupId,
+              shared_id: sharedId, shared_group_id: groupId, next_due: nextDue,
             }).select().single();
-            if (ptrErr) continue;
+            if (ptrErr) {
+              // Back out the staged shared item — it hasn't uploaded yet.
+              state.sharing.deleteSharedHabit(groupId, sharedId).catch(() => {});
+              continue;
+            }
             await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
             await state.db.from('habits').delete().eq('id', habit.id);
-            let nextDue = null;
-            if (pointer?.id) {
-              await updateHabitNextDue(pointer.id, habit.frequency_rule,
-                localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null);
-              const ptr = state.allHabits.find(h => String(h.id) === String(pointer.id));
-              if (ptr) nextDue = ptr.next_due;
-            }
             staged.push({
               sharedId,
-              sharedItem: {
-                id: sharedId, item_type: 'habit',
-                name: habit.name, frequency_rule: habit.frequency_rule,
-                creator_category: catRow?.name ?? habit.category ?? '',
-                created_by: actor,
-                created_at: habit.created_at || new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                completions: localCompletions,
-              },
-              nextDue,
+              upload,
               personalHabit,
               personalCompletions,
               pointerId: pointer?.id,
@@ -2781,8 +2828,7 @@ async function bulkShareHabitCategory(catId, el) {
           let ok = 0;
           for (const s of staged) {
             try {
-              await state.sharing.addSharedHabit(groupId, s.sharedItem);
-              if (s.nextDue != null) await state.sharing.updateSharedHabit(groupId, s.sharedId, { next_due: s.nextDue });
+              await s.upload;
               ok++;
             } catch (e) {
               console.error('[DeLaClaw] bulk share habit failed:', e);

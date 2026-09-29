@@ -3525,6 +3525,23 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(destroyBody.includes('_sharedFlushTimers.clear()'),
         'destroy must clear the debounce timers');
     });
+
+    test('tab hide/close and disconnect flush the sharing adapter too', () => {
+      // The debounced upload can lag staging by ~2s; without a flush on tab
+      // hide/close/disconnect a staged share would never reach Drive while
+      // its personal row is already gone.
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      const sharingFlushes = (mainSrc.match(/state\.sharing\?\.forceSave|state\.sharing\.forceSave\(\)/g) || []).length;
+      assert(sharingFlushes >= 3,
+        `beforeunload, tab-hide and disconnect must flush the sharing adapter, found ${sharingFlushes}`);
+      const discStart = mainSrc.indexOf('async function disconnect()');
+      assert(discStart !== -1, 'disconnect must exist');
+      const discBody = mainSrc.slice(discStart, mainSrc.indexOf('\n}\n', discStart));
+      const flushIdx = discBody.indexOf('state.sharing.forceSave()');
+      const destroyIdx = discBody.indexOf('state.sharing.destroy()');
+      assert(flushIdx !== -1 && destroyIdx !== -1 && flushIdx < destroyIdx,
+        'disconnect must flush the sharing adapter before destroying it');
+    });
   }
 
   // ===================================================================

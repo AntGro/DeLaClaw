@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-29T21:36:18.609Z from 39 modules (v2.9.14). Total LOC 31272. Do not hand-edit.
+> Generated 2026-09-29T21:52:05.461Z from 39 modules (v2.9.15). Total LOC 31275. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,7 +27,7 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 3731 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
+| main | 3734 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
 | sharing-drive | 2391 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
 | i18n | 2270 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
 | drive | 1464 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |

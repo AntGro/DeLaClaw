@@ -569,6 +569,7 @@ async function disconnect() {
   // Force-save and clean up Drive adapter before disconnecting
   if (state.driveMode && state.driveAdapter) {
     try { await state.driveAdapter.forceSave(); } catch {}
+    if (state.sharing) { try { await state.sharing.forceSave(); } catch {} }
     if (state.sharing) { try { state.sharing.destroy(); } catch {} }
     if (state.driveAdapter.destroy) state.driveAdapter.destroy();
   }
@@ -934,12 +935,14 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     window.addEventListener('beforeunload', () => {
       // Force-save first, then clean up — destroy() clears timers
       adapter.forceSave().catch(() => {});
+      if (state.sharing?.forceSave) state.sharing.forceSave().catch(() => {});
       if (adapter.destroy) adapter.destroy();
     });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
         // Flush when tab goes background (mobile doesn't reliably fire beforeunload)
         adapter.forceSave().catch(() => {});
+        if (state.sharing?.forceSave) state.sharing.forceSave().catch(() => {});
       }
     });
     // Poll on window focus (catches desktop window switching, not just tab switching)

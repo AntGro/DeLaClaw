@@ -337,7 +337,6 @@ const T = {
       change_photo: 'Change photo', remove_photo: 'Remove photo', upload_photo: 'Upload photo', crop_photo: 'Crop photo',
       photo_updated: 'Photo updated', photo_removed: 'Photo removed',
     },
-    // ── Wardrobe ──
     lists: {
       add_list: 'New List', edit_list: 'Edit List', add_item: 'Add item…',
       delete_list_confirm: 'Delete this list?',

@@ -80,7 +80,7 @@ Cross-cutting app configuration — theme, language, backend picker, sharing man
 - Language change → all features re-render via `applyI18n()`
 
 ## Risks / Gotchas
-- Wardrobe category duplication on lang switch (fixed May 31) — root cause SW caching stale JS
+- Category duplication on lang switch (fixed May 31) — root cause SW caching stale JS
 - Demo mode leaking real categories — fixed via `swapLsScope` sandbox
 - Backup import must run migrations before applying settings
 - Stats pane loads lazily (`loadUsageStats()` called only when pane activated)

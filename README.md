@@ -25,6 +25,7 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 | **Flashcards** | Spaced repetition (FSRS algorithm) with deck organization and text memorization mode |
 | **Birthdays** | Birthday tracker with countdowns and avatar support |
 | **Lists** | General-purpose checklists with archival support |
+| **Group** | Sharing-group management: members, invites, shared-item counts |
 
 ### Capabilities
 
@@ -83,6 +84,7 @@ js/
   flashcards.js         Flashcard SRS + text memorization
   birthdays.js          Birthday tracker
   lists.js              Checklists
+  groups.js             Sharing-group management tab
   delegation.js         CSP-safe event delegation
   i18n.js               Translation strings (en/fr/es)
   icons.js              Lucide icon rendering

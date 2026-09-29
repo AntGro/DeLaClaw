@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-29T23:15:56.583Z from 38 modules (v2.9.19). Total LOC 30156. Do not hand-edit.
+> Generated 2026-09-29T23:37:32.503Z from 39 modules (v2.10.0). Total LOC 30311. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -22,21 +22,21 @@
 | todos | 1906 | todo_categories,todos | currentView,db,js,markCalDirty,sharing,syncCalendarTable | i18n,icons,item-utils,sharing-ui,state,utils | calendar-sync.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 31 | 68 |
 | welcome | 851 | - | PROJECTS,allBirthdays,allHabitCompletions,allHabits,archivedProjectIds,currentView,db,js | flashcards,habits,i18n,icons,item-utils,sharing-ui,state,todos,utils | main.js | modal,app-header,btn | pendingSet | 79 | 43 |
 
-## Core modules (31)
+## Core modules (32)
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 3698 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
+| main | 3709 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
 | sharing-drive | 2391 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
-| i18n | 2189 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
+| i18n | 2204 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
 | drive | 1463 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
-| sharing-ui | 1331 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | habits.js,lists.js,main.js,todos.js | esc:39,guard+pendingSet,window:8 |
+| sharing-ui | 1345 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | groups.js,habits.js,lists.js,main.js | esc:39,guard+pendingSet,window:8 |
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
 | calendar-sync | 1198 | birthdays,gcal_sync,habits,settings,todos | drive-folders,habits,i18n,icons | main.js | - |
 | utils | 901 | flashcards,x | i18n,icons,state,version | - | esc:7,window:6 |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 451 | - | habits,i18n,icons,utils | - | - |
-| delegation | 394 | - |  | - | window:1 |
+| delegation | 396 | - |  | - | window:1 |
 | demo | 310 | x |  | drive.js | - |
 | offline-cache | 281 | - | ./state,state.js | main.js | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
@@ -47,11 +47,12 @@
 | rest | 162 | x |  | main.js | - |
 | sharing-interface | 135 | - |  | sharing.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
+| groups | 113 | - | i18n,icons,sharing-ui,state | main.js | esc:2,window:2 |
 | sharing | 100 | - | sharing-drive,sharing-interface | - | - |
 | sharing-mutation-queue | 83 | - |  | sharing-drive.js | - |
 | sharing-envelope | 73 | - |  | sharing-drive.js,sharing-ui.js | - |
 | drive-backup-policy | 67 | - | ../migrations/version-compare.js,./../migrations/version-compare | drive.js | - |
-| state | 50 | - | db | birthdays.js,calendar-sync.js,flashcards.js,habits.js | window:1 |
+| state | 50 | - | db | birthdays.js,calendar-sync.js,flashcards.js,groups.js | window:1 |
 | drive-folders | 43 | - |  | calendar-sync.js,drive.js,main.js,sharing-drive.js | - |
 | bootstrap | 26 | - |  | - | - |
 | backend-logos | 23 | - |  | main.js,sharing-ui.js | - |

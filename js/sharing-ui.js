@@ -69,7 +69,8 @@ function memberLabel(member) {
  * group.json only so the creator's poll can revoke their Drive access — they
  * are never displayed (the member list must always reflect who has access).
  */
-function visibleMembers(group) {
+/** Members with access (excludes rows flipped to 'left'). Shared with the Group tab. */
+export function visibleMembers(group) {
   return (group?.members || []).filter(m => m.status !== 'left');
 }
 
@@ -97,6 +98,75 @@ export function updateSharingNavVisibility() {
   const willHaveSharing = activeMode === 'demo'
     || (activeMode === 'googledrive' && !state.sharingInitFailed);
   btn.style.display = (state.sharing || willHaveSharing) ? '' : 'none';
+}
+
+/**
+ * Render one group's management card (header, members, invite row, delete).
+ * Shared by the Settings → Sharing pane and the Group tab — the data-action
+ * handlers are identical, only the surrounding layout differs.
+ */
+export async function sharingGroupCardHtml(group) {
+  let currentMember = null;
+  try { currentMember = await state.sharing.getCurrentMember(group.id); } catch { currentMember = null; }
+  const isCreator = !!currentMember && currentMember.member_id === group.created_by;
+  const memberCount = visibleMembers(group).length;
+  const itemCount = state.sharing.getItems(group.id).length;
+  const memberStr = memberCount === 1 ? t('sharing.member') : t('sharing.members', memberCount);
+  const itemStr = itemCount === 1 ? t('sharing.shared_item') : t('sharing.shared_items', itemCount);
+  const inviteCode = isCreator ? state.sharing.getInviteLink(group.id) : null;
+  const invitePlaceholder = t('sharing.invite_placeholder');
+
+  // Group health status
+  const healthStatus = state.sharing.getGroupHealthStatus?.(group.id) || 'healthy';
+  const isDisconnected = healthStatus !== 'healthy';
+  const disconnectedClass = isDisconnected ? ' sharing-group-disconnected' : '';
+  const disconnectedStamp = isDisconnected
+    ? `<span class="sharing-group-disconnected-stamp">${lucideIcon('wifi-off', 14, 'currentColor')} ${t('sharing.group_disconnected')}</span>`
+    : '';
+
+  let html = `<div class="sharing-group-card${disconnectedClass}">
+    <div class="sharing-group-header">
+      <div class="sharing-group-info">
+        <h4>${esc(group.name)}${disconnectedStamp}</h4>
+        <span class="sharing-group-stats">${memberStr} \u00b7 ${itemStr}</span>
+      </div>
+      <div class="sharing-group-actions">
+        ${group.folderId ? `<a class="sharing-action-btn sharing-action-btn-compact sharing-drive-link" href="https://drive.google.com/drive/folders/${encodeURIComponent(group.folderId)}" target="_blank" rel="noopener" title="${t('sharing.open_drive_folder')}" aria-label="${t('sharing.open_drive_folder')}">${LOGOS.googledrive(14)}</a>` : ''}
+        ${inviteCode ? `<button class="sharing-action-btn sharing-action-btn-compact sharing-copy-link-btn" data-action="sharing-copy-code" data-group-id="${esc(group.id)}" title="${t('sharing.copy_code')}" aria-label="${t('sharing.copy_code')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('key', 14)}</button>` : ''}
+        ${isCreator ? `<button class="sharing-action-btn sharing-action-btn-compact sharing-rename-btn" data-action="sharing-rename-group" data-group-id="${esc(group.id)}" title="${t('sharing.rename_group')}" aria-label="${t('sharing.rename_group')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('pencil', 14)}</button>` : ''}
+        ${!isCreator ? `<button class="sharing-action-btn sharing-action-btn-compact sharing-leave-btn" data-action="sharing-unjoin-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}" aria-label="${t('sharing.leave')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('log-out', 14)}</button>` : ''}
+      </div>
+    </div>
+    <div class="sharing-members">`;
+
+  for (const member of visibleMembers(group)) {
+    const isYou = !!currentMember && member.member_id === currentMember.member_id;
+    const canRemove = isCreator && !isYou;
+    const hasJoined = member.status === 'joined' || member.role === 'owner' || member.role === 'creator' || !!member.joined_at;
+    const isCreatorMember = member.role === 'creator';
+    const label = memberLabel(member);
+    const statusHtml = isYou ? ` <span class="sharing-you">(${t('sharing.you')})</span>`
+      : isCreatorMember ? ` <span class="sharing-member-creator">${lucideIcon('crown', 12)} ${t('sharing.creator')}</span>`
+      : hasJoined ? ` <span class="sharing-member-joined">${lucideIcon('check', 12)}</span>`
+      : ` <span class="sharing-member-pending">${t('sharing.pending')}</span>`;
+    const canCopyCode = isCreator && !isYou && !hasJoined && member.token && state.sharing.getMemberInviteLink;
+    html += `<div class="sharing-member">
+        ${avatarDot(member, 22)}
+        <span class="sharing-member-email">${esc(label)}${statusHtml}</span>
+        ${isYou ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-edit-my-name" data-group-id="${esc(group.id)}" data-member-id="${esc(member.member_id)}" data-current-name="${esc(label)}" title="${t('sharing.edit_name')}" aria-label="${t('sharing.edit_name')}">${lucideIcon('pencil', 12)}</button>` : ''}
+        ${canCopyCode ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-copy-member-code" data-group-id="${esc(group.id)}" data-token="${esc(member.token)}" title="${t('sharing.copy_code')}" aria-label="${t('sharing.copy_code')}">${lucideIcon('key', 12)}</button>` : ''}
+        ${canRemove ? `<button class="sharing-remove-btn" data-action="sharing-remove-member" data-group-id="${esc(group.id)}" data-member-id="${esc(member.member_id)}" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
+      </div>`;
+  }
+
+  html += `</div>
+    ${isCreator ? `<div class="sharing-invite-row">
+      <input type="text" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${invitePlaceholder}" data-action="sharing-invite-on-enter" data-group-id="${esc(group.id)}">
+      <button class="sharing-invite-btn" data-action="sharing-invite" data-group-id="${esc(group.id)}">${lucideIcon('user-plus', 14)} ${t('sharing.invite')}</button>
+    </div>` : ''}
+    ${isCreator ? `<button class="sharing-delete-btn" data-action="sharing-delete-group" data-group-id="${esc(group.id)}">${lucideIcon('trash-2', 14)} ${t('sharing.delete_group')}</button>` : ''}
+  </div>`;
+  return html;
 }
 
 /** Render the full sharing settings pane content. */
@@ -145,67 +215,7 @@ export async function renderSharingPane() {
   }
 
   for (const group of groups) {
-    let currentMember = null;
-    try { currentMember = await state.sharing.getCurrentMember(group.id); } catch { currentMember = null; }
-    const isCreator = !!currentMember && currentMember.member_id === group.created_by;
-    const isJoined = state.sharing.isJoinedViaLink(group.id);
-    const memberCount = visibleMembers(group).length;
-    const itemCount = state.sharing.getItems(group.id).length;
-    const memberStr = memberCount === 1 ? t('sharing.member') : t('sharing.members', memberCount);
-    const itemStr = itemCount === 1 ? t('sharing.shared_item') : t('sharing.shared_items', itemCount);
-    const inviteCode = isCreator ? state.sharing.getInviteLink(group.id) : null;
-    const invitePlaceholder = t('sharing.invite_placeholder');
-
-    // Group health status
-    const healthStatus = state.sharing.getGroupHealthStatus?.(group.id) || 'healthy';
-    const isDisconnected = healthStatus !== 'healthy';
-    const disconnectedClass = isDisconnected ? ' sharing-group-disconnected' : '';
-    const disconnectedStamp = isDisconnected
-      ? `<span class="sharing-group-disconnected-stamp">${lucideIcon('wifi-off', 14, 'currentColor')} ${t('sharing.group_disconnected')}</span>`
-      : '';
-
-    html += `<div class="sharing-group-card${disconnectedClass}">
-      <div class="sharing-group-header">
-        <div class="sharing-group-info">
-          <h4>${esc(group.name)}${disconnectedStamp}</h4>
-          <span class="sharing-group-stats">${memberStr} \u00b7 ${itemStr}</span>
-        </div>
-        <div class="sharing-group-actions">
-          ${group.folderId ? `<a class="sharing-action-btn sharing-action-btn-compact sharing-drive-link" href="https://drive.google.com/drive/folders/${encodeURIComponent(group.folderId)}" target="_blank" rel="noopener" title="${t('sharing.open_drive_folder')}" aria-label="${t('sharing.open_drive_folder')}">${LOGOS.googledrive(14)}</a>` : ''}
-          ${inviteCode ? `<button class="sharing-action-btn sharing-action-btn-compact sharing-copy-link-btn" data-action="sharing-copy-code" data-group-id="${esc(group.id)}" title="${t('sharing.copy_code')}" aria-label="${t('sharing.copy_code')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('key', 14)}</button>` : ''}
-          ${isCreator ? `<button class="sharing-action-btn sharing-action-btn-compact sharing-rename-btn" data-action="sharing-rename-group" data-group-id="${esc(group.id)}" title="${t('sharing.rename_group')}" aria-label="${t('sharing.rename_group')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('pencil', 14)}</button>` : ''}
-          ${!isCreator ? `<button class="sharing-action-btn sharing-action-btn-compact sharing-leave-btn" data-action="sharing-unjoin-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}" aria-label="${t('sharing.leave')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('log-out', 14)}</button>` : ''}
-        </div>
-      </div>
-      <div class="sharing-members">`;
-
-    for (const member of visibleMembers(group)) {
-      const isYou = !!currentMember && member.member_id === currentMember.member_id;
-      const canRemove = isCreator && !isYou;
-      const hasJoined = member.status === 'joined' || member.role === 'owner' || member.role === 'creator' || !!member.joined_at;
-      const isCreatorMember = member.role === 'creator';
-      const label = memberLabel(member);
-      const statusHtml = isYou ? ` <span class="sharing-you">(${t('sharing.you')})</span>`
-        : isCreatorMember ? ` <span class="sharing-member-creator">${lucideIcon('crown', 12)} ${t('sharing.creator')}</span>`
-        : hasJoined ? ` <span class="sharing-member-joined">${lucideIcon('check', 12)}</span>`
-        : ` <span class="sharing-member-pending">${t('sharing.pending')}</span>`;
-      const canCopyCode = isCreator && !isYou && !hasJoined && member.token && state.sharing.getMemberInviteLink;
-      html += `<div class="sharing-member">
-          ${avatarDot(member, 22)}
-          <span class="sharing-member-email">${esc(label)}${statusHtml}</span>
-          ${isYou ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-edit-my-name" data-group-id="${esc(group.id)}" data-member-id="${esc(member.member_id)}" data-current-name="${esc(label)}" title="${t('sharing.edit_name')}" aria-label="${t('sharing.edit_name')}">${lucideIcon('pencil', 12)}</button>` : ''}
-          ${canCopyCode ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-copy-member-code" data-group-id="${esc(group.id)}" data-token="${esc(member.token)}" title="${t('sharing.copy_code')}" aria-label="${t('sharing.copy_code')}">${lucideIcon('key', 12)}</button>` : ''}
-          ${canRemove ? `<button class="sharing-remove-btn" data-action="sharing-remove-member" data-group-id="${esc(group.id)}" data-member-id="${esc(member.member_id)}" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
-        </div>`;
-    }
-
-    html += `</div>
-      ${isCreator ? `<div class="sharing-invite-row">
-        <input type="text" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${invitePlaceholder}" data-action="sharing-invite-on-enter" data-group-id="${esc(group.id)}">
-        <button class="sharing-invite-btn" data-action="sharing-invite" data-group-id="${esc(group.id)}">${lucideIcon('user-plus', 14)} ${t('sharing.invite')}</button>
-      </div>` : ''}
-      ${isCreator ? `<button class="sharing-delete-btn" data-action="sharing-delete-group" data-group-id="${esc(group.id)}">${lucideIcon('trash-2', 14)} ${t('sharing.delete_group')}</button>` : ''}
-    </div>`;
+    html += await sharingGroupCardHtml(group);
   }
 
   // ── Skipped groups (transient load failure this session) ──
@@ -358,11 +368,15 @@ async function sharingCopyMemberCode(groupId, token) {
   }
 }
 
-async function sharingInvite(groupId) {
-  const input = document.getElementById(`sharingInvite-${groupId}`);
+async function sharingInvite(groupId, btnEl, inputEl) {
+  // The invite row is rendered both in Settings → Sharing and in the Group
+  // tab: resolve the input relative to the clicked element instead of a
+  // global id lookup so the two copies never read each other's field.
+  const row = btnEl?.closest('.sharing-invite-row') || inputEl?.closest('.sharing-invite-row');
+  const input = inputEl || row?.querySelector('.sharing-invite-input') || document.getElementById(`sharingInvite-${groupId}`);
   const name = input?.value.trim();
   if (!name) return;
-  const btn = input?.nextElementSibling;
+  const btn = btnEl || row?.querySelector('.sharing-invite-btn') || input?.nextElementSibling;
   if (btn?.disabled) return;
   setBtnBusy(btn, true);
   try {

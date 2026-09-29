@@ -18,7 +18,8 @@ Five modules, layered:
 - `sharing-interface.js` — canonical method contract; `validateSharingAdapter()` enforces at init
 - `sharing-envelope.js` — invite code encode/decode (`DLC1.<base64url JSON>`)
 - `sharing-drive.js` — Drive adapter implementing `SharingInterface`
-- `sharing-ui.js` — settings pane, share popovers, badges, join picker, completion modals
+- `sharing-ui.js` — settings pane, share popovers, badges, join picker, completion modals, and the shared per-group management card (`sharingGroupCardHtml`) rendered by both the Settings → Sharing pane and the Group tab
+- `groups.js` — Group tab view: group sidebar + selection state; all mutations reuse the `sharing-ui.js` actions via data-action delegation, no logic of its own
 - `sharing.js` — factory that picks adapter and validates it
 
 ## Entry & Ownership

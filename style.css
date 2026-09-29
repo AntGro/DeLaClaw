@@ -2085,6 +2085,31 @@ a.sharing-drive-link{text-decoration:none;}
 .sharing-danger-btn{color:var(--danger,#e74c3c);border-color:color-mix(in srgb, var(--danger,#e74c3c) 25%, transparent);margin-top:10px;}
 .sharing-danger-btn:hover{background:color-mix(in srgb, var(--danger,#e74c3c) 8%, transparent);}
 
+/* ── Groups tab ────────────────────────────────────────────────── */
+.groups-layout{display:flex;gap:16px;align-items:flex-start;}
+.groups-sidebar{width:280px;flex-shrink:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;}
+.groups-sidebar-actions{display:flex;gap:8px;}
+.groups-add-btn{flex:1;}
+.groups-list{display:flex;flex-direction:column;gap:4px;overflow-y:auto;}
+.groups-list-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--text);cursor:pointer;text-align:left;font-family:inherit;}
+.groups-list-item:hover{background:var(--surface2);}
+.groups-list-item.selected{background:color-mix(in srgb,var(--accent) 12%,transparent);border-color:color-mix(in srgb,var(--accent) 45%,transparent);}
+.groups-list-item-icon{display:inline-flex;color:var(--muted);flex-shrink:0;}
+.groups-list-item.selected .groups-list-item-icon{color:var(--accent);}
+.groups-list-item-text{min-width:0;}
+.groups-list-item-name{display:block;font-weight:600;font-size:0.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.groups-list-item-meta{display:block;font-size:0.75rem;color:var(--muted);margin-top:2px;}
+.groups-detail{flex:1;min-width:0;}
+.groups-detail .sharing-group-card{margin-bottom:0;}
+.groups-back-btn{display:none;margin-bottom:12px;}
+@media (max-width: 900px){
+  .groups-layout{flex-direction:column;}
+  .groups-sidebar{width:100%;}
+  .groups-layout:not(.groups-detail-active) .groups-detail{display:none;}
+  .groups-layout.groups-detail-active .groups-sidebar{display:none;}
+  .groups-layout.groups-detail-active .groups-back-btn{display:inline-flex;}
+}
+
 /* ── Auth prompt modal ────────────────────────────────────────── */
 .auth-prompt-modal{max-width:480px;padding:2rem;text-align:center;}
 .auth-prompt-modal h3{margin:0.5rem 0 0.25rem;font-size:1.2rem;}

@@ -163,7 +163,7 @@ const T = {
     // ── Nav tabs ──
     nav: {
       today: 'Today', projects: 'Projects', todos: 'TODOs', habits: 'Habits',
-      birthdays: 'Birthdays', flashcards: 'Memory', lists: 'Lists',
+      birthdays: 'Birthdays', flashcards: 'Memory', lists: 'Lists', groups: 'Group',
     },
     hero: {
       projects: 'Projects', todos: 'TODOs', habits: 'Habits', flashcards: 'Flashcards',
@@ -633,6 +633,11 @@ const T = {
       join_missing_files: 'Missing files: {0}. Please select all files in the shared folder.',
       open_drive_folder: 'Open in Drive',
     },
+    groups: {
+      add_group: 'Add Group',
+      back_to_groups: 'Back to groups',
+      select_prompt: 'Select a group to see its members and manage it.',
+    },
     agents: {
       title: 'Agents',
       nav: 'Agents',
@@ -880,7 +885,7 @@ const T = {
     },
     nav: {
       today: "Aujourd'hui", projects: 'Projets', todos: 'Tâches', habits: 'Habitudes',
-      birthdays: 'Anniversaires', flashcards: 'Mémoire', lists: 'Listes',
+      birthdays: 'Anniversaires', flashcards: 'Mémoire', lists: 'Listes', groups: 'Groupe',
     },
     hero: {
       projects: 'Projets', todos: 'Tâches', habits: 'Habitudes', flashcards: 'Flashcards',
@@ -1338,6 +1343,11 @@ const T = {
       join_missing_files: 'Fichiers manquants\u00a0: {0}. Veuillez s\u00e9lectionner tous les fichiers du dossier partag\u00e9.',
       open_drive_folder: 'Ouvrir dans Drive',
     },
+    groups: {
+      add_group: 'Ajouter un groupe',
+      back_to_groups: 'Retour aux groupes',
+      select_prompt: 'S\u00e9lectionnez un groupe pour voir ses membres et le g\u00e9rer.',
+    },
     agents: {
       title: 'Agents',
       nav: 'Agents',
@@ -1585,7 +1595,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
     },
     nav: {
       today: 'Hoy', projects: 'Proyectos', todos: 'Tareas', habits: 'Hábitos',
-      birthdays: 'Cumpleaños', flashcards: 'Memoria', lists: 'Listas',
+      birthdays: 'Cumpleaños', flashcards: 'Memoria', lists: 'Listas', groups: 'Grupo',
     },
     hero: {
       projects: 'Proyectos', todos: 'Tareas', habits: 'Hábitos', flashcards: 'Flashcards',
@@ -2043,6 +2053,11 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       join_no_files: 'No se encontraron archivos del grupo. Seleccione los archivos JSON de la carpeta compartida.',
       join_missing_files: 'Archivos faltantes: {0}. Seleccione todos los archivos de la carpeta compartida.',
       open_drive_folder: 'Abrir en Drive',
+    },
+    groups: {
+      add_group: 'A\u00f1adir grupo',
+      back_to_groups: 'Volver a los grupos',
+      select_prompt: 'Selecciona un grupo para ver sus miembros y gestionarlo.',
     },
     agents: {
       title: 'Agents',

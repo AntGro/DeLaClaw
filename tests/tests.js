@@ -188,7 +188,7 @@ test('All named imports resolve to exports in target files', () => {
         // Check export { ... imp ... } or export function imp or export const imp
         const exportBlock = targetContent.match(/export\s*\{([^}]+)\}/);
         const inExportBlock = exportBlock && exportBlock[1].split(',').map(s => s.trim()).includes(imp);
-        const isExportedDirectly = new RegExp(`export\\s+(function|const|let|var)\\s+${imp}\\b`).test(targetContent);
+        const isExportedDirectly = new RegExp(`export\\s+(async\\s+)?(function|const|let|var)\\s+${imp}\\b`).test(targetContent);
         if (!inExportBlock && !isExportedDirectly) {
           throw new Error(`${name}: imports '${imp}' from ./${targetFile} but it's not exported`);
         }

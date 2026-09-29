@@ -21,6 +21,7 @@ import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from '
 import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthdays.js';
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals, syncSharedListItems } from './lists.js';
+import { renderGroups } from './groups.js';
 import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
 import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
@@ -1033,7 +1034,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
 
   // Restore view early (before async refreshes) to avoid flash
   applyTabVisibility();
-  const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'flashcards', 'lists'];
+  const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'flashcards', 'lists', 'groups'];
   const rawHash = location.hash.replace('#', '');
   const isSettingsHash = location.hash === '#settings' || location.hash.startsWith('#settings/');
   const hashView = validViews.includes(rawHash) ? rawHash : null;
@@ -1662,12 +1663,13 @@ function reRenderCurrentView() {
   else if (view === 'birthdays') renderBirthdays();
   else if (view === 'flashcards') renderFlashcards();
   else if (view === 'lists') renderLists();
+  else if (view === 'groups') renderGroups();
 }
 
 function updateStaticLabels() {
   // Nav tabs
   const tabLabels = { tabWelcome: 'nav.today', tabProjects: 'nav.projects', tabTodos: 'nav.todos', tabHabits: 'nav.habits',
-    tabBirthdays: 'nav.birthdays', tabFlashcards: 'nav.flashcards', tabLists: 'nav.lists' };
+    tabBirthdays: 'nav.birthdays', tabFlashcards: 'nav.flashcards', tabLists: 'nav.lists', tabGroups: 'nav.groups' };
   for (const [id, key] of Object.entries(tabLabels)) {
     const el = document.getElementById(id);
     if (el) {
@@ -2068,6 +2070,7 @@ const ALL_TABS = [
   { key: 'birthdays', tabId: 'tabBirthdays', icon: 'cake', color: '#f97316', labelKey: 'nav.birthdays' },
   { key: 'flashcards', tabId: 'tabFlashcards', icon: 'brain', color: '#06b6d4', labelKey: 'nav.flashcards' },
   { key: 'lists', tabId: 'tabLists', icon: 'list', color: '#14b8a6', labelKey: 'nav.lists' },
+  { key: 'groups', tabId: 'tabGroups', icon: 'users', color: '#a855f7', labelKey: 'nav.groups' },
 ];
 
 function getTabVisibility() {
@@ -3071,6 +3074,7 @@ function switchView(view, skipHash) {
   const birthdaysView = document.getElementById('birthdaysView');
   const flashcardsView = document.getElementById('flashcardsView');
   const listsView = document.getElementById('listsView');
+  const groupsView = document.getElementById('groupsView');
   const tabWelcome = document.getElementById('tabWelcome');
   const tabProjects = document.getElementById('tabProjects');
   const tabTodos = document.getElementById('tabTodos');
@@ -3078,6 +3082,7 @@ function switchView(view, skipHash) {
   const tabBirthdays = document.getElementById('tabBirthdays');
   const tabFlashcards = document.getElementById('tabFlashcards');
   const tabLists = document.getElementById('tabLists');
+  const tabGroups = document.getElementById('tabGroups');
 
   // Hide all
   if (welcomeView) welcomeView.style.display = 'none';
@@ -3087,6 +3092,7 @@ function switchView(view, skipHash) {
   if (birthdaysView) birthdaysView.style.display = 'none';
   if (flashcardsView) flashcardsView.style.display = 'none';
   if (listsView) listsView.style.display = 'none';
+  if (groupsView) groupsView.style.display = 'none';
   if (tabWelcome) tabWelcome.classList.remove('active');
   tabProjects.classList.remove('active');
   tabTodos.classList.remove('active');
@@ -3094,6 +3100,7 @@ function switchView(view, skipHash) {
   if (tabBirthdays) tabBirthdays.classList.remove('active');
   if (tabFlashcards) tabFlashcards.classList.remove('active');
   if (tabLists) tabLists.classList.remove('active');
+  if (tabGroups) tabGroups.classList.remove('active');
 
   if (view === 'welcome') {
     if (welcomeView) welcomeView.style.display = '';
@@ -3124,6 +3131,10 @@ function switchView(view, skipHash) {
     if (listsView) listsView.style.display = '';
     if (tabLists) tabLists.classList.add('active');
     renderLists();
+  } else if (view === 'groups') {
+    if (groupsView) groupsView.style.display = '';
+    if (tabGroups) tabGroups.classList.add('active');
+    renderGroups();
   }
 
   // Scroll active tab into view on mobile (horizontal carousel)

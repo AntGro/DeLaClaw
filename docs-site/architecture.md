@@ -71,7 +71,6 @@ const state = {
   allHabits: [],             // habit objects
   allHabitCompletions: [],   // habit completion records
   allBirthdays: [],          // birthday objects
-  allVestiaire: [],          // wardrobe items
   allLists: [],              // list objects
   allListItems: [],          // list item objects
   currentView: 'projects',   // active tab
@@ -111,8 +110,6 @@ The canonical table list lives in `server/schema.sql` (SQLite base schema).
 | `texts` | Full texts for memorization (chunked) | -- |
 | `text_line_progress` | Per-chunk SRS progress for texts | `text_id` -> `texts.id` |
 | `birthdays` | Birthday records with optional avatars | -- |
-| `vestiaire` | Wardrobe inventory | `category_id` -> `vestiaire_categories.id` |
-| `vestiaire_categories` | Wardrobe category containers | -- |
 | `lists` | Checklist containers | -- |
 | `list_items` | Items within lists | `list_id` -> `lists.id` |
 | `settings` | Key-value store (schema version, preferences) | -- |
@@ -202,7 +199,6 @@ js/
   habits.js                Habit tracking
   flashcards.js            Flashcard SRS + text memorization
   birthdays.js             Birthday tracker
-  vestiaire.js             Wardrobe inventory
   lists.js                 Checklists
   i18n.js                  Translation strings (en/fr/es)
   icons.js                 Lucide icon rendering + path data
@@ -242,10 +238,10 @@ Language is stored in `localStorage` and can be changed in Settings. The `t()` f
 
 ## Drag-and-drop
 
-`js/item-utils.js` provides reusable drag-and-drop reordering via long-press (100ms threshold). Both category nav buttons and bucket items (TODOs, Projects, Vestiaire, Lists, Flashcard drafts) share the same UX:
+`js/item-utils.js` provides reusable drag-and-drop reordering via long-press (100ms threshold). Both category nav buttons and bucket items (TODOs, Projects, Lists, Flashcard drafts) share the same UX:
 
 - **Activation**: long-press on touch/pointer (`LONG_PRESS_MS = 100`), not native HTML drag events
 - **Visual**: the real item follows the cursor/finger; a placeholder gap shows the drop position; siblings slide with FLIP animation. No visible drag handles — shadow-only to indicate float
-- **Cross-container**: TODOs, Vestiaire, Projects, Habits, and Lists support dragging items between categories/lists — drop updates the FK and re-numbers `sort_order` in both source and target containers
+- **Cross-container**: TODOs, Projects, Habits, and Lists support dragging items between categories/lists — drop updates the FK and re-numbers `sort_order` in both source and target containers
 - **Persistence**: `sort_order` updates are batched into a single DB write
 - **Auto-scroll**: scrollable containers auto-scroll when dragging near edges

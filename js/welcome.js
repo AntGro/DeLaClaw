@@ -20,7 +20,6 @@ let wTexts = [];
 let wTextProgress = [];
 let wBirthdays = [];
 let wProjectCount = 0;
-let wVestiaireCount = 0;
 
 // ── Helpers ──
 function startOfDay(d) {
@@ -96,7 +95,6 @@ async function refreshWelcome() {
   wBirthdays = state.allBirthdays;
   const archivedIds = state.archivedProjectIds || [];
   wProjectCount = state.PROJECTS.filter(p => !archivedIds.includes(p.id)).length;
-  wVestiaireCount = state.allVestiaire.length;
 }
 
 // ── Listen for todo mutations from the TODOs module ──
@@ -766,7 +764,6 @@ function renderWelcome() {
     { icon: 'circle-check', value: todosDoneWeek, label: t('welcome.todos_done_week'), color: '#10b981' },
     { icon: 'repeat', value: wHabitCompletionsWeek, label: t('welcome.habits_done_week'), color: '#ec4899' },
     { type: 'memory', color: '#06b6d4' },
-    { icon: 'shirt', value: wVestiaireCount, label: t('welcome.wardrobe_items'), color: '#8b5cf6' },
     { icon: 'layout-grid', value: wProjectCount, label: t('welcome.projects'), color: '#6366f1' },
   ];
   for (const s of stats) {

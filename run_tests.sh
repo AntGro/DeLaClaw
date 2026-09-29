@@ -96,7 +96,7 @@ fi
 
 if [ "$SMOKE_PASS" = true ]; then
   # Test each view tab
-  for VIEW in projects todos chores birthdays vestiaire flashcards; do
+  for VIEW in projects todos chores birthdays flashcards; do
     browser execute --expression "switchView('${VIEW}')" > /dev/null 2>&1
     sleep 0.5
     VIEW_CHECK=$(browser execute --expression "document.getElementById('${VIEW}View').style.display !== 'none'" 2>&1)

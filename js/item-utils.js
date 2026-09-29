@@ -589,10 +589,10 @@ export async function bulkSortOrder(tableName, updates) {
 // INNER SCROLL POSITION CAPTURE / RESTORE
 // ===================================================================
 // When a grid is rebuilt via innerHTML, scrollable inner lists (task-list,
-// todo-cat-list, list-item-list, vestiaire-item-list, birthday-bucket-list)
+// todo-cat-list, list-item-list, birthday-bucket-list)
 // lose their scrollTop. Capture before innerHTML, restore after.
 
-const SCROLLABLE_LIST_SELECTOR = '.task-list, .todo-cat-list, .list-item-list, .vestiaire-item-list, .birthday-bucket-list, .welcome-items';
+const SCROLLABLE_LIST_SELECTOR = '.task-list, .todo-cat-list, .list-item-list, .birthday-bucket-list, .welcome-items';
 
 function scrollContainerKey(el) {
   if (el.id) return 'id:' + el.id;
@@ -880,7 +880,7 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
 
       // Scroll the textarea into view within the scrollable task list
       // without changing the deck's maxHeight
-      const parentList = input.closest('.task-list, .vestiaire-item-list');
+      const parentList = input.closest('.task-list');
       if (parentList) {
         const parentRect = parentList.getBoundingClientRect();
         const inputRect = input.getBoundingClientRect();

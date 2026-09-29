@@ -60,9 +60,6 @@
 ### Lists
 - `open-add-list`, `navigate-to-list`, `open-edit-list`, `delete-list`, `quick-add-list-item` / `quick-add-input` (Enter), `toggle-list-item-check`, `edit-list-item-inline`, `delete-list-item`, `share-list-item-from-add`
 
-### Vestiaire
-- `open-add-vestiaire`, `navigate-to-vestiaire-cat`, `open-add-vestiaire-category`, `open-edit-vestiaire`, `delete-vestiaire`, `edit-vestiaire-inline`, `edit-vestiaire-brand-inline`, `cycle-vestiaire-status`, etc., `save-new-vestiaire-on-enter` etc.
-
 ### Sharing
 - `send-auth-from-sharing`, `sign-out-from-sharing`, `sharing-copy-link`, `sharing-leave-group` / `sharing-unjoin-group` (static ternary, no dynamic data-action), `sharing-copy-member-link` (data-token), `sharing-remove-member` (data-email), `sharing-invite` (Enter via `sharing-invite-on-enter`), `sharing-delete-group`, `sharing-create-group`, `sharing-create-group-submit` (Enter), `sharing-copy-link-value`, `sharing-open-join-picker` (folder-id), `submit-share-popover`, `sharing-complete-submit`, `select-all-on-click`
 

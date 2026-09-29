@@ -29,9 +29,6 @@ function buildPrompt(lang) {
   "birthdays": [
     { "name": "Person Name", "birthday": "YYYY-MM-DD", "note": "optional" }
   ],
-  "vestiaire": [
-    { "name": "Item name", "category": "Outerwear|Tops|Bottoms|Shoes|Accessories", "color": "Color", "brand": "Brand", "size": "Size" }
-  ],
   "lists": [
     { "name": "List Name", "color": "#hex" }
   ],
@@ -102,7 +99,7 @@ function parseCustomJSON(raw) {
   cleaned = cleaned.trim();
   const data = JSON.parse(cleaned);
   // Validate: must be an object with at least one recognised key
-  const validKeys = ['projects', 'tasks', 'todos', 'habits', 'flashcards', 'birthdays', 'vestiaire', 'lists', 'list_items'];
+  const validKeys = ['projects', 'tasks', 'todos', 'habits', 'flashcards', 'birthdays', 'lists', 'list_items'];
   const found = Object.keys(data).filter(k => validKeys.includes(k));
   if (found.length === 0) throw new Error('No recognised data tables found');
   return data;
@@ -191,16 +188,6 @@ function normalizeCustomData(data) {
       base(r, 'bd', i);
       if (r.note == null) r.note = '';
       if (r.avatar_url === undefined) r.avatar_url = null;
-      return r;
-    });
-  }
-
-  if (data.vestiaire) {
-    data.vestiaire = data.vestiaire.map((r, i) => {
-      base(r, 'vest', i);
-      if (r.note == null) r.note = '';
-      if (r.purchase_status === undefined) r.purchase_status = null;
-      if (r.image_url === undefined) r.image_url = null;
       return r;
     });
   }

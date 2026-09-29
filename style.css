@@ -991,7 +991,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 
   /* Header — fixed on mobile for reliable anchoring */
   .app-header{padding:4px 6px;gap:4px;position:fixed;top:0;left:0;right:0;}
-  #welcomeView,#projectsView,#todosView,#habitsView,#birthdaysView,#vestiaireView,#flashcardsView,#listsView{padding-top:44px;}
+  #welcomeView,#projectsView,#todosView,#habitsView,#birthdaysView,#flashcardsView,#listsView{padding-top:44px;}
   .app-header h1{font-size:1.05rem;gap:5px;}
   .app-header h1::after{height:18px;}
   .app-title-text{display:none;}
@@ -1050,9 +1050,6 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
   .bucket-item{padding:10px 10px;}
   .bucket-item-actions{opacity:1 !important;}
 
-  /* Vestiaire actions: sized for touch, visibility toggled by JS */
-  .vest-actions button{font-size:0.78rem;padding:4px 6px;}
-
   /* Todo items */
   .todo-row{gap:8px;flex-wrap:wrap;}
   .todo-text{font-size:0.86rem;min-width:0;word-break:break-word;flex:1 1 0;}
@@ -1071,9 +1068,6 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
   .birthday-card{gap:10px;}
   .birthday-avatar{width:36px;height:36px;font-size:0.95rem;}
   .avatar-crop-container{width:220px;height:220px;}
-
-  /* ===== VESTIAIRE VIEW — MOBILE ===== */
-
 
   /* Page toolbar mobile */
   .page-toolbar{padding:8px 6px;gap:6px;}
@@ -1371,46 +1365,6 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 /* Birthday icon alignment */
 .birthday-date .lucide-icon,.birthday-countdown .lucide-icon{vertical-align:middle;margin-right:3px;position:relative;top:-1px;}
 
-/* ===================================================================
-   VESTIAIRE
-   =================================================================== */
-/* Wardrobe — bucket cards reuse .project-card / .project-grid */
-.vestiaire-item-list{padding:10px 16px 12px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;}
-.vestiaire-item{display:flex;align-items:flex-start;justify-content:space-between;border-left:3px solid var(--muted);padding-left:10px;margin-bottom:4px;}
-.vestiaire-item.vest-purchased{border-left-color:#10b981;}
-.vestiaire-item.vest-tried{border-left-color:#f59e0b;}
-.vest-row{display:flex;align-items:flex-start;justify-content:space-between;width:100%;gap:8px;}
-.vest-text{font-size:0.88rem;font-weight:500;}
-.vest-brand{font-size:0.75rem;color:var(--muted);margin-left:6px;cursor:pointer;}
-.vest-brand:hover{text-decoration:underline;text-underline-offset:2px;}
-.vest-brand-empty{opacity:0.4;font-style:italic;}
-.vest-meta{font-size:0.75rem;color:var(--muted);margin-top:2px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
-.vest-status-badge{font-size:0.65rem;padding:1px 6px;border-radius:4px;font-weight:600;margin-left:6px;cursor:pointer;}
-.vest-status-badge:hover{opacity:0.8;}
-.vest-status-achete{background:#10b98120;color:#10b981;}
-.vest-status-essaye{background:#f59e0b20;color:#f59e0b;}
-.vest-status-none{background:var(--surface2);color:var(--muted);}
-/* Hover-delay action buttons (hidden until JS adds .visible) */
-.vest-actions{display:grid;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
-.vest-actions:has(:nth-child(4)):not(:has(:nth-child(5))){grid-template-columns:auto auto;}
-.vest-actions.visible{max-width:120px;opacity:1;pointer-events:auto;}
-.vest-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;}
-.vest-actions button:hover{background:var(--surface2);}
-.vestiaire-empty-cat{padding:12px 0;color:var(--muted);font-size:0.82rem;text-align:center;}
-
-.vestiaire-actions{display:flex;gap:4px;opacity:0;transition:opacity 0.15s;}
-.vestiaire-card:hover .vestiaire-actions{opacity:1;}
-.vestiaire-actions button{background:none;border:none;cursor:pointer;padding:4px;border-radius:4px;transition:background 0.15s;}
-.vestiaire-actions button:hover{background:var(--bg);}
-
-.vestiaire-empty{text-align:center;padding:60px 20px;color:var(--muted);}
-.vestiaire-empty p{margin:16px 0;font-size:0.92rem;}
-.vestiaire-empty .btn-primary{margin-top:8px;}
-
-.filter-count{font-size:0.75rem;opacity:0.7;}
-
-/* Vestiaire size icon alignment */
-.vestiaire-size .lucide-icon,.vestiaire-color .lucide-icon{vertical-align:middle;position:relative;top:-1px;}
 
 /* Purple stat value for categories */
 .stat-value.purple{color:var(--accent);}

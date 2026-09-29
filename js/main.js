@@ -19,7 +19,6 @@ const SETTINGS_PANES = ['general', 'calendar', 'sharing', 'data', 'stats', 'agen
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
 import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
 import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthdays.js';
-import { refreshVestiaire, renderVestiaire, initVestiaireModals } from './vestiaire.js';
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals, syncSharedListItems } from './lists.js';
 import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
@@ -117,13 +116,11 @@ function setDemoCategoriesFromData(data) {
 
   const todoLookup = buildCatRows(data.todos, 'category', 'todo_categories');
   const habitLookup = buildCatRows(data.habits, 'category', 'habit_categories');
-  const vestLookup = buildCatRows(data.vestiaire, 'category', 'vestiaire_categories');
   const deckLookup = buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks');
 
   // Enrich items with category_id / deck_id (fall back to default row)
   for (const t of (store.todos || [])) t.category_id = todoLookup.get(t.category) || todoLookup.get('') || null;
   for (const h of (store.habits || [])) h.category_id = habitLookup.get(h.category) || habitLookup.get('') || null;
-  for (const v of (store.vestiaire || [])) v.category_id = vestLookup.get(v.category) || vestLookup.get('') || null;
   for (const f of (store.flashcards || [])) f.deck_id = deckLookup.get(f.deck) || deckLookup.get('') || null;
   for (const tx of (store.texts || [])) tx.deck_id = deckLookup.get(tx.deck) || deckLookup.get('') || null;
 }
@@ -659,8 +656,6 @@ document.addEventListener('DOMContentLoaded', () => {
     'saveNewList', 'saveEditList',
     'addTask', 'saveNewProject', 'saveEditProject', 'submitRevision',
     'saveNewCategory', 'saveEditCategory', 'snoozeFor', 'submitSnooze', 'addTodoToCategory',
-    'saveNewVestiaire', 'saveEditVestiaire',
-    'saveNewVestiaireCategory', 'saveEditVestiaireCategory',
     'executeConfirmAction',
     'quickAddDraft', 'quickAddListItem',
     'saveGlobalPrompt', 'saveProjectPrompt',
@@ -1038,7 +1033,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
 
   // Restore view early (before async refreshes) to avoid flash
   applyTabVisibility();
-  const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'vestiaire', 'flashcards', 'lists'];
+  const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'flashcards', 'lists'];
   const rawHash = location.hash.replace('#', '');
   const isSettingsHash = location.hash === '#settings' || location.hash.startsWith('#settings/');
   const hashView = validViews.includes(rawHash) ? rawHash : null;
@@ -1115,7 +1110,6 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'habits' }, debouncedHandler(() => refreshHabits().then(() => markLastUpdated())))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'habit_completions' }, debouncedHandler(() => refreshHabits().then(() => markLastUpdated())))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'birthdays' }, debouncedHandler(() => refreshBirthdays().then(() => markLastUpdated())))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vestiaire' }, debouncedHandler(() => refreshVestiaire().then(() => markLastUpdated())))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'flashcards' }, debouncedHandler(() => refreshFlashcards().then(() => markLastUpdated())))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'flashcard_notes' }, debouncedHandler(() => refreshFlashcards().then(() => markLastUpdated())))
       .subscribe();
@@ -1164,7 +1158,6 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       habits: () => refreshHabits(),
       habit_completions: () => refreshHabits(),
       birthdays: () => refreshBirthdays(),
-      vestiaire: () => refreshVestiaire(),
       flashcards: () => refreshFlashcards(),
       flashcard_notes: () => refreshFlashcards(),
       lists: () => refreshLists(),
@@ -1233,10 +1226,6 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   // Initialize Birthdays
   initBirthdayModals();
   await refreshBirthdays();
-
-  // Initialize Wardrobe
-  initVestiaireModals();
-  await refreshVestiaire();
 
   // Initialize Flashcards
   initFlashcardModals();
@@ -1341,7 +1330,6 @@ function initDemoBanner() {
     await refreshTodos();
     await refreshHabits();
     await refreshBirthdays();
-    await refreshVestiaire();
     await refreshFlashcards();
     await refreshLists();
     refreshWelcome();
@@ -1566,7 +1554,6 @@ async function onLangSwitchDemo(lang) {
   await refreshTodos();
   await refreshHabits();
   await refreshBirthdays();
-  await refreshVestiaire();
   await refreshFlashcards();
   refreshWelcome();
   // Re-render banner text
@@ -1673,7 +1660,6 @@ function reRenderCurrentView() {
   else if (view === 'todos') renderTodos();
   else if (view === 'habits') renderHabits();
   else if (view === 'birthdays') renderBirthdays();
-  else if (view === 'vestiaire') renderVestiaire();
   else if (view === 'flashcards') renderFlashcards();
   else if (view === 'lists') renderLists();
 }
@@ -1681,7 +1667,7 @@ function reRenderCurrentView() {
 function updateStaticLabels() {
   // Nav tabs
   const tabLabels = { tabWelcome: 'nav.today', tabProjects: 'nav.projects', tabTodos: 'nav.todos', tabHabits: 'nav.habits',
-    tabBirthdays: 'nav.birthdays', tabVestiaire: 'nav.wardrobe', tabFlashcards: 'nav.flashcards', tabLists: 'nav.lists' };
+    tabBirthdays: 'nav.birthdays', tabFlashcards: 'nav.flashcards', tabLists: 'nav.lists' };
   for (const [id, key] of Object.entries(tabLabels)) {
     const el = document.getElementById(id);
     if (el) {
@@ -1702,7 +1688,6 @@ function updateStaticLabels() {
     'todosView': 'common.search',
     'habitsView': 'common.search',
     'birthdaysView': 'common.search',
-    'vestiaireView': 'common.search',
     'flashcardsView': 'flashcards.search_placeholder',
     'listsView': 'lists.search_placeholder',
   };
@@ -1761,13 +1746,6 @@ function updateStaticLabels() {
     birthdaySort.options[0].text = t('birthdays.sort_upcoming');
     birthdaySort.options[1].text = t('birthdays.sort_name');
     birthdaySort.options[2].text = t('birthdays.sort_age');
-  }
-  // Vestiaire sort
-  const vestSort = document.getElementById('vestiaireSortBy');
-  if (vestSort) {
-    vestSort.options[0].text = t('vestiaire.sort_manual');
-    vestSort.options[1].text = t('vestiaire.sort_name');
-    vestSort.options[2].text = t('vestiaire.sort_brand');
   }
   // Setup Guide
   const guideEl = document.getElementById('gateGuideLink');
@@ -2088,7 +2066,6 @@ const ALL_TABS = [
   { key: 'todos', tabId: 'tabTodos', icon: 'list-checks', color: '#22c55e', labelKey: 'nav.todos' },
   { key: 'habits', tabId: 'tabHabits', icon: 'repeat', color: '#ec4899', labelKey: 'nav.habits' },
   { key: 'birthdays', tabId: 'tabBirthdays', icon: 'cake', color: '#f97316', labelKey: 'nav.birthdays' },
-  { key: 'vestiaire', tabId: 'tabVestiaire', icon: 'shirt', color: '#8b5cf6', labelKey: 'nav.wardrobe' },
   { key: 'flashcards', tabId: 'tabFlashcards', icon: 'brain', color: '#06b6d4', labelKey: 'nav.flashcards' },
   { key: 'lists', tabId: 'tabLists', icon: 'list', color: '#14b8a6', labelKey: 'nav.lists' },
 ];
@@ -2662,12 +2639,12 @@ window.toggleTabConfigItem = toggleTabConfigItem;
 
 const BACKUP_TABLES = [
   // category / deck parents first (items FK into these)
-  'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
+  'todo_categories', 'habit_categories', 'flashcard_decks',
   // parent tables
   'projects', 'habits', 'texts', 'lists',
   // child / independent tables
   'todos', 'tasks', 'habit_completions', 'flashcards', 'flashcard_notes',
-  'text_line_progress', 'birthdays', 'vestiaire', 'list_items',
+  'text_line_progress', 'birthdays', 'list_items',
   'settings', 'prompts', 'daily_visits',
   // sharing: owned groups (creator side) — FK order: groups → members → items
   'sharing_groups', 'sharing_members', 'sharing_items',
@@ -2924,7 +2901,7 @@ async function performImport(file) {
 
     // Delete in reverse order (children before parents)
     const tables = [...(backup._meta.tables || [])].reverse();
-    const CATEGORY_TABLES = new Set(['todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks']);
+    const CATEGORY_TABLES = new Set(['todo_categories', 'habit_categories', 'flashcard_decks']);
     const PROTECTED_IDS = new Set([
       '_default_todo_cat', '_shared_todo_cat',
       '_default_habit_cat', '_shared_habit_cat',
@@ -3038,7 +3015,6 @@ async function performImport(file) {
       await refreshTodos();
       await refreshHabits();
       await refreshBirthdays();
-      await refreshVestiaire();
       await refreshFlashcards();
       await refreshLists();
       refreshWelcome();
@@ -3093,7 +3069,6 @@ function switchView(view, skipHash) {
   const todosView = document.getElementById('todosView');
   const habitsView = document.getElementById('habitsView');
   const birthdaysView = document.getElementById('birthdaysView');
-  const vestiaireView = document.getElementById('vestiaireView');
   const flashcardsView = document.getElementById('flashcardsView');
   const listsView = document.getElementById('listsView');
   const tabWelcome = document.getElementById('tabWelcome');
@@ -3101,7 +3076,6 @@ function switchView(view, skipHash) {
   const tabTodos = document.getElementById('tabTodos');
   const tabHabits = document.getElementById('tabHabits');
   const tabBirthdays = document.getElementById('tabBirthdays');
-  const tabVestiaire = document.getElementById('tabVestiaire');
   const tabFlashcards = document.getElementById('tabFlashcards');
   const tabLists = document.getElementById('tabLists');
 
@@ -3111,7 +3085,6 @@ function switchView(view, skipHash) {
   todosView.style.display = 'none';
   if (habitsView) habitsView.style.display = 'none';
   if (birthdaysView) birthdaysView.style.display = 'none';
-  if (vestiaireView) vestiaireView.style.display = 'none';
   if (flashcardsView) flashcardsView.style.display = 'none';
   if (listsView) listsView.style.display = 'none';
   if (tabWelcome) tabWelcome.classList.remove('active');
@@ -3119,7 +3092,6 @@ function switchView(view, skipHash) {
   tabTodos.classList.remove('active');
   if (tabHabits) tabHabits.classList.remove('active');
   if (tabBirthdays) tabBirthdays.classList.remove('active');
-  if (tabVestiaire) tabVestiaire.classList.remove('active');
   if (tabFlashcards) tabFlashcards.classList.remove('active');
   if (tabLists) tabLists.classList.remove('active');
 
@@ -3144,10 +3116,6 @@ function switchView(view, skipHash) {
     if (birthdaysView) birthdaysView.style.display = '';
     if (tabBirthdays) tabBirthdays.classList.add('active');
     renderBirthdays();
-  } else if (view === 'vestiaire') {
-    if (vestiaireView) vestiaireView.style.display = '';
-    if (tabVestiaire) tabVestiaire.classList.add('active');
-    renderVestiaire();
   } else if (view === 'flashcards') {
     if (flashcardsView) flashcardsView.style.display = '';
     if (tabFlashcards) tabFlashcards.classList.add('active');
@@ -3197,9 +3165,6 @@ function updateViewFooterStats() {
     },
     birthdays: () => [
       `${icon('cake')} Birthdays: ${state.allBirthdays.length}`,
-    ],
-    vestiaire: () => [
-      `${icon('shirt')} Items: ${state.allVestiaire.length}`,
     ],
     flashcards: () => {
       const c = getFlashcardCounts();
@@ -3252,7 +3217,6 @@ const _viewRefreshMap = {
   todos:      () => refreshTodos().then(() => { renderTodos(); markLastUpdated(); }),
   habits:     () => refreshHabits().then(() => { renderHabits(); markLastUpdated(); }),
   birthdays:  () => refreshBirthdays().then(() => { renderBirthdays(); markLastUpdated(); }),
-  vestiaire:  () => refreshVestiaire().then(() => { renderVestiaire(); markLastUpdated(); }),
   flashcards: () => refreshFlashcards().then(() => markLastUpdated()),
   lists:      () => refreshLists().then(() => { renderLists(); markLastUpdated(); }),
 };

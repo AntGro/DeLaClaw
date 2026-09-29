@@ -253,7 +253,6 @@ bun run server.js</pre>
       <button class="view-tab" id="tabTodos" data-action="switch-view" data-view="todos"><span data-icon="list-checks" data-size="18" data-color="currentColor"></span> <span class="tab-label">TODOs</span></button>
       <button class="view-tab" id="tabHabits" data-action="switch-view" data-view="habits"><span data-icon="repeat" data-size="18" data-color="currentColor"></span> <span class="tab-label">Habits</span></button>
       <button class="view-tab" id="tabBirthdays" data-action="switch-view" data-view="birthdays"><span data-icon="cake" data-size="18" data-color="currentColor"></span> <span class="tab-label">Birthdays</span></button>
-      <button class="view-tab" id="tabVestiaire" data-action="switch-view" data-view="vestiaire"><span data-icon="shirt" data-size="18" data-color="currentColor"></span> <span class="tab-label">Wardrobe</span></button>
       <button class="view-tab" id="tabFlashcards" data-action="switch-view" data-view="flashcards"><span data-icon="brain" data-size="18" data-color="currentColor"></span> <span class="tab-label">Memory</span></button>
       <button class="view-tab" id="tabLists" data-action="switch-view" data-view="lists"><span data-icon="list" data-size="18" data-color="currentColor"></span> <span class="tab-label">Lists</span></button>
     </div>
@@ -406,37 +405,6 @@ bun run server.js</pre>
     <div class="category-nav-buttons" id="birthdayNavButtons"></div>
     <div class="main-content">
       <div class="project-grid" id="birthdayGrid"></div>
-    </div>
-  </div>
-
-  <!-- ===== VESTIAIRE VIEW ===== -->
-  <div id="vestiaireView" style="display:none;">
-    <div class="page-toolbar">
-      <div class="page-toolbar-left">
-        <div class="page-filters" id="vestiaireFilters">
-          <button class="filter-btn active" data-filter="all" data-action="set-vestiaire-filter" data-filter="all">All</button>
-          <button class="filter-btn" data-filter="owned" data-action="set-vestiaire-filter" data-filter="owned">Owned</button>
-          <button class="filter-btn" data-filter="tried" data-action="set-vestiaire-filter" data-filter="tried">Tried</button>
-          <button class="filter-btn" data-filter="wishlist" data-action="set-vestiaire-filter" data-filter="wishlist">Wishlist</button>
-          <select id="vestiaireSortBy" class="page-sort" data-action="sort-vestiaire">
-            <option value="manual">Manual order</option>
-            <option value="name">Name</option>
-            <option value="brand">Brand</option>
-          </select>
-        </div>
-      </div>
-      <div class="page-toolbar-right">
-        <button class="btn" data-action="open-add-vestiaire" title="Add item"><span data-icon="plus" data-size="16"></span></button>
-        <button class="btn" data-action="open-add-vestiaire-category" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
-        <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search wardrobe…" data-action="filter-vestiaire"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
-        </div>
-      </div>
-    </div>
-    <div class="category-nav-buttons" id="vestiaireNavButtons"></div>
-    <div class="main-content">
-      <div class="project-grid" id="vestiaireGrid"></div>
     </div>
   </div>
 

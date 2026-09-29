@@ -52,18 +52,6 @@ CREATE TABLE IF NOT EXISTS habit_categories (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS vestiaire_categories (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-  name TEXT NOT NULL,
-  shortname TEXT,
-  color TEXT,
-  sort_order INTEGER DEFAULT 0,
-  is_protected INTEGER DEFAULT 0,
-  owner_id TEXT,
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS flashcard_decks (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   name TEXT NOT NULL,
@@ -182,22 +170,6 @@ CREATE TABLE IF NOT EXISTS birthdays (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS vestiaire (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-  name TEXT NOT NULL,
-  brand TEXT,
-  size TEXT,
-  category TEXT DEFAULT '',
-  category_id TEXT REFERENCES vestiaire_categories(id) ON DELETE CASCADE,
-  color TEXT,
-  note TEXT,
-  purchase_status TEXT,
-  sort_order INTEGER DEFAULT 0,
-  owner_id TEXT,
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT,
@@ -254,7 +226,6 @@ CREATE INDEX IF NOT EXISTS idx_habits_owner_id ON habits(owner_id);
 CREATE INDEX IF NOT EXISTS idx_habit_completions_owner_id ON habit_completions(owner_id);
 CREATE INDEX IF NOT EXISTS idx_flashcard_notes_owner_id ON flashcard_notes(owner_id);
 CREATE INDEX IF NOT EXISTS idx_birthdays_owner_id ON birthdays(owner_id);
-CREATE INDEX IF NOT EXISTS idx_vestiaire_owner_id ON vestiaire(owner_id);
 CREATE INDEX IF NOT EXISTS idx_lists_owner_id ON lists(owner_id);
 CREATE INDEX IF NOT EXISTS idx_list_items_owner_id ON list_items(owner_id);
 CREATE INDEX IF NOT EXISTS idx_prompts_owner_id ON prompts(owner_id);
@@ -269,11 +240,9 @@ CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_g
 -- ── Category table indexes ──
 CREATE INDEX IF NOT EXISTS idx_todo_categories_owner_id ON todo_categories(owner_id);
 CREATE INDEX IF NOT EXISTS idx_habit_categories_owner_id ON habit_categories(owner_id);
-CREATE INDEX IF NOT EXISTS idx_vestiaire_categories_owner_id ON vestiaire_categories(owner_id);
 CREATE INDEX IF NOT EXISTS idx_flashcard_decks_owner_id ON flashcard_decks(owner_id);
 CREATE INDEX IF NOT EXISTS idx_todos_category_id ON todos(category_id);
 CREATE INDEX IF NOT EXISTS idx_habits_category_id ON habits(category_id);
-CREATE INDEX IF NOT EXISTS idx_vestiaire_category_id ON vestiaire(category_id);
 CREATE INDEX IF NOT EXISTS idx_flashcards_deck_id ON flashcards(deck_id);
 CREATE INDEX IF NOT EXISTS idx_texts_deck_id ON texts(deck_id);
 
@@ -297,8 +266,6 @@ INSERT OR IGNORE INTO todo_categories (id, name, is_protected, sort_order) VALUE
 INSERT OR IGNORE INTO todo_categories (id, name, is_protected, sort_order) VALUES ('_shared_todo_cat', '__shared__', 1, 9999);
 INSERT OR IGNORE INTO habit_categories (id, name, is_protected, sort_order) VALUES ('_default_habit_cat', '', 1, 0);
 INSERT OR IGNORE INTO habit_categories (id, name, is_protected, sort_order) VALUES ('_shared_habit_cat', '__shared__', 1, 9999);
-INSERT OR IGNORE INTO vestiaire_categories (id, name, is_protected, sort_order) VALUES ('_default_vest_cat', '', 1, 0);
-INSERT OR IGNORE INTO vestiaire_categories (id, name, is_protected, sort_order) VALUES ('_shared_vest_cat', '__shared__', 1, 9999);
 INSERT OR IGNORE INTO flashcard_decks (id, name, is_protected, sort_order) VALUES ('_default_deck', '', 1, 0);
 INSERT OR IGNORE INTO flashcard_decks (id, name, is_protected, sort_order) VALUES ('_shared_deck', '__shared__', 1, 9999);
 
@@ -320,16 +287,6 @@ CREATE TRIGGER IF NOT EXISTS trg_protect_habit_categories
 
 CREATE TRIGGER IF NOT EXISTS trg_protect_habit_categories_upd
   BEFORE UPDATE ON habit_categories FOR EACH ROW
-  WHEN OLD.is_protected = 1
-  BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
-
-CREATE TRIGGER IF NOT EXISTS trg_protect_vestiaire_categories
-  BEFORE DELETE ON vestiaire_categories FOR EACH ROW
-  WHEN OLD.is_protected = 1
-  BEGIN SELECT RAISE(ABORT, 'Cannot delete protected category row'); END;
-
-CREATE TRIGGER IF NOT EXISTS trg_protect_vestiaire_categories_upd
-  BEFORE UPDATE ON vestiaire_categories FOR EACH ROW
   WHEN OLD.is_protected = 1
   BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
 

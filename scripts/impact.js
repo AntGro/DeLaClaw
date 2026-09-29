@@ -126,7 +126,7 @@ function analyze() {
     docs: touches('docs-site/') ? '[x]' : '[~]',
     readme: touchesFile('README.md') ? '[x]' : '[~]',
     checklist: touchesFile('COMMIT_CHECKLIST.md') || touchesFile('AGENTS.md') ? '[x]' : '[~]',
-    tests: touches('tests/') || touchesAny(['js/todos.js','js/habits.js','js/projects.js','js/flashcards.js','js/birthdays.js','js/vestiaire.js','js/lists.js']) ? '[x]' : '[~]',
+    tests: touches('tests/') || touchesAny(['js/todos.js','js/habits.js','js/projects.js','js/flashcards.js','js/birthdays.js','js/lists.js']) ? '[x]' : '[~]',
     welcome: (() => {
       if (changedFeatures.size===0 && impactedFeatures.size===0) return '[~]';
       // welcome is impacted if any feature changed, or welcome.js itself, or main.js, or any dependent is welcome

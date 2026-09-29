@@ -29,12 +29,12 @@ const SHARED_CSS = [
 // Known tables (16 core + sharing + visits)
 const KNOWN_TABLES = [
   'projects','tasks','todos','habits','habit_completions','flashcards',
-  'flashcard_notes','texts','text_line_progress','birthdays','vestiaire',
+  'flashcard_notes','texts','text_line_progress','birthdays',
   'lists','list_items','settings','prompts','nvidia_usage',
   'sharing_groups','sharing_members','sharing_items','groups','daily_visits'
 ];
 
-const FEATURE_NAMES = ['todos','habits','projects','birthdays','vestiaire','flashcards','lists','welcome'];
+const FEATURE_NAMES = ['todos','habits','projects','birthdays','flashcards','lists','welcome'];
 
 function read(p){ try { return fs.readFileSync(p,'utf-8'); } catch { return ''; } }
 
@@ -171,7 +171,7 @@ allFiles.forEach(f=>{
 const tables = {};
 KNOWN_TABLES.forEach(t=>{
   const usedBy = allFiles.filter(f=>f.tables.includes(t)).map(f=>f.name.replace('.js','')).sort();
-  if (usedBy.length || ['projects','tasks','todos','habits','habit_completions','flashcards','flashcard_notes','texts','text_line_progress','birthdays','vestiaire','lists','list_items','settings','prompts'].includes(t)) {
+  if (usedBy.length || ['projects','tasks','todos','habits','habit_completions','flashcards','flashcard_notes','texts','text_line_progress','birthdays','lists','list_items','settings','prompts'].includes(t)) {
     tables[t]= { used_by: usedBy };
   }
 });

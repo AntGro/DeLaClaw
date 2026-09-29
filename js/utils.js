@@ -338,9 +338,6 @@ document.addEventListener('click', e => {
   if (e.target.id === 'snoozeModal') closeSnoozeModal();
   if (e.target.id === 'confirmActionModal') closeConfirmAction();
   if (e.target.id === 'addCategoryModal') closeAddCategoryModal();
-  if (e.target.id === 'addVestiaireModal') closeAddVestiaireModal();
-  if (e.target.id === 'editVestiaireModal') closeEditVestiaireModal();
-  if (e.target.id === 'addVestiaireCategoryModal') closeAddVestiaireCategoryModal();
   if (e.target.id === 'addHabitModal') closeAddHabitModal();
   if (e.target.id === 'editHabitModal') closeEditHabitModal();
   if (e.target.id === 'habitHistoryModal') closeHabitHistoryModal();
@@ -351,7 +348,7 @@ document.addEventListener('click', e => {
   if (e.target.id === 'editListModal') closeEditListModal();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeAddProjectModal(); closeEditProjectModal(); closeTaskExpandModal(); closeRevisionModal(); closePromptEditor(); closeProjectPrompt(); closeSnoozeModal(); closeConfirmAction(); closeAddCategoryModal(); if (window.closeAddVestiaireModal) closeAddVestiaireModal(); if (window.closeEditVestiaireModal) closeEditVestiaireModal(); if (window.closeAddVestiaireCategoryModal) closeAddVestiaireCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); if (window.closeMigrationModal) closeMigrationModal(); if (window.closeCompareModal) closeCompareModal(); }
+  if (e.key === 'Escape') { closeAddProjectModal(); closeEditProjectModal(); closeTaskExpandModal(); closeRevisionModal(); closePromptEditor(); closeProjectPrompt(); closeSnoozeModal(); closeConfirmAction(); closeAddCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); if (window.closeMigrationModal) closeMigrationModal(); if (window.closeCompareModal) closeCompareModal(); }
 });
 
 
@@ -766,7 +763,7 @@ async function backfillCategoryColors(table, catMap) {
 /** Map item type prefix to its view name */
 const DEEP_LINK_TYPE_MAP = {
   todo: 'todos', habit: 'habits', project: 'projects', task: 'projects',
-  birthday: 'birthdays', vest: 'vestiaire', flashcard: 'flashcards',
+  birthday: 'birthdays', flashcard: 'flashcards',
   list: 'lists', listitem: 'lists',
 };
 

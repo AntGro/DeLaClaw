@@ -52,6 +52,7 @@ User jobs:
 - `sort_order` monotonic per list (for list ordering) and per item (within-list ordering)
 - Duplicate list names allowed (no unique constraint)
 - Inline edit: save on Enter/confirm, cancel on blur (standard DeLaClaw inline edit UX)
+- Wardrobe removal (v2.9.17): each former wardrobe category became a list named `Wardrobe - <name>` (default bucket → `Wardrobe`); item notes carry a `Brand / Make:` / `Size:` / `Color:` / `Status:` field block with only non-empty lines, then pre-existing notes after a blank line. Migrated ids are prefixed `vest_`
 
 ## Adapter & Backend
 - `db.from('lists')`, `db.from('list_items')`

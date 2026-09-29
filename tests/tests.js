@@ -569,16 +569,6 @@ test('Birthday hover delay uses .birthday-info as rowSelector (not .birthday-car
     `rowSelector should be '.birthday-info' (got '${hoverCall[1]}') — querySelector doesn't match self`);
 });
 
-// ===================================================================
-// 16. Wardrobe left border uses purchase status (not category color)
-// ===================================================================
-test('Wardrobe items use purchase-status-based border color', () => {
-  const vestJs = jsFiles['vestiaire.js'];
-  assert(vestJs.includes('vest-purchased') || vestJs.includes('vest-tried'),
-    'vestiaire should add status classes for border color');
-  assert(styleCss.includes('.vest-purchased'), '.vest-purchased CSS rule should exist');
-  assert(styleCss.includes('.vest-tried'), '.vest-tried CSS rule should exist');
-});
 
 // ===================================================================
 // 17. All lucideIcon() calls reference icons defined in LUCIDE_PATHS
@@ -628,7 +618,7 @@ test('No ondblclick HTML attributes in JS files (use initItemHoverDelay onDblCli
 // 19. Double-click edit: all initItemHoverDelay calls include onDblClick
 // ===================================================================
 test('All initItemHoverDelay calls include onDblClick callback', () => {
-  const pages = ['projects.js', 'todos.js', 'habits.js', 'birthdays.js', 'vestiaire.js', 'flashcards.js'];
+  const pages = ['projects.js', 'todos.js', 'habits.js', 'birthdays.js', 'flashcards.js'];
   for (const file of pages) {
     const content = jsFiles[file];
     if (!content) continue;
@@ -654,7 +644,6 @@ test('Double-click onDblClick triggers inline edit (not modal) on all pages', ()
     'todos.js': { dblClickFn: 'editTodoInline', mustUse: 'inlineEditText' },
     'habits.js': { dblClickFn: 'editHabitInline', mustUse: 'inlineEditText' },
     'birthdays.js': { dblClickFn: 'editBirthdayInline', mustUse: 'inlineEditText' },
-    'vestiaire.js': { dblClickFn: 'editVestiaire', mustUse: 'inlineEditText' },
     'flashcards.js': { dblClickFn: 'editFlashcardInline', mustUse: 'inlineEditText' },
   };
   for (const [file, { dblClickFn, mustUse }] of Object.entries(inlinePages)) {
@@ -678,7 +667,7 @@ test('Double-click onDblClick triggers inline edit (not modal) on all pages', ()
 // 21. rowSelector must differ from itemSelector (querySelector doesn't match self)
 // ===================================================================
 test('initItemHoverDelay rowSelector differs from itemSelector', () => {
-  const pagesWithHover = ['projects.js', 'todos.js', 'habits.js', 'birthdays.js', 'vestiaire.js', 'flashcards.js'];
+  const pagesWithHover = ['projects.js', 'todos.js', 'habits.js', 'birthdays.js', 'flashcards.js'];
   for (const file of pagesWithHover) {
     const content = jsFiles[file];
     if (!content) continue;
@@ -2075,7 +2064,6 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
     'js/lists.js': '.list-item',
     'js/projects.js': '.task-item',
     'js/todos.js': '.todo-item',
-    'js/vestiaire.js': '.vestiaire-item',
   };
 
   for (const [file, selector] of Object.entries(expected)) {
@@ -2086,7 +2074,7 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
   }
 
   // idAttr must be camelCase (dataset API), never raw 'data-xxx-yyy'
-  const allFiles = ['js/lists.js', 'js/projects.js', 'js/todos.js', 'js/vestiaire.js'];
+  const allFiles = ['js/lists.js', 'js/projects.js', 'js/todos.js'];
   for (const file of allFiles) {
     const src = fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8');
     const idAttrMatches = src.match(/idAttr:\s*['"]([^'"]+)['"]/g) || [];
@@ -2115,7 +2103,6 @@ test('Drag clones are globally tagged and cleaned before drag-enabled re-renders
     'lists.js': 'function renderLists',
     'todos.js': 'function renderTodos',
     'projects.js': 'function buildProjectCards',
-    'vestiaire.js': 'function renderVestiaire',
   };
   for (const [file, marker] of Object.entries(renderChecks)) {
     const src = jsFiles[file];
@@ -2449,7 +2436,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   test('CODEMAP features include all 8 core features', () => {
     const p = path.join(__dirname, '..', '.agents', 'CODEMAP.json');
     const j = JSON.parse(fs.readFileSync(p, 'utf-8'));
-    const expected = ['todos','habits','projects','birthdays','vestiaire','flashcards','lists','welcome'];
+    const expected = ['todos','habits','projects','birthdays','flashcards','lists','welcome'];
     for (const f of expected) {
       assert(j.features[f], `Missing feature in CODEMAP: ${f}`);
       assert(j.features[f].entry, `${f} missing entry`);

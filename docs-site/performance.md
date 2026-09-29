@@ -12,7 +12,7 @@ All files are served as raw, unminified source. No build step, no transpilation.
 
 ### JavaScript
 
-Feature modules live in `js/` and adapters in `js/adapters/`. The largest modules are `main.js` (app bootstrap, settings, login, view switching), `i18n.js` (translation strings for 3 languages), `habits.js`, and `flashcards.js`. Sharing logic is split across several modules (`sharing.js`, `sharing-ui.js`, `sharing-drive.js`, `sharing-interface.js`, `sharing-envelope.js`). Other modules handle individual features (todos, projects, vestiaire, birthdays, lists, welcome), drag-and-drop (`item-utils.js`), utilities, and the landing page (hero, logo, storm3d).
+Feature modules live in `js/` and adapters in `js/adapters/`. The largest modules are `main.js` (app bootstrap, settings, login, view switching), `i18n.js` (translation strings for 3 languages), `habits.js`, and `flashcards.js`. Sharing logic is split across several modules (`sharing.js`, `sharing-ui.js`, `sharing-drive.js`, `sharing-interface.js`, `sharing-envelope.js`). Other modules handle individual features (todos, projects, birthdays, lists, welcome), drag-and-drop (`item-utils.js`), utilities, and the landing page (hero, logo, storm3d).
 
 ### CSS
 

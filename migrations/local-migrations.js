@@ -450,4 +450,54 @@ export const LOCAL_MIGRATIONS = {
     CREATE INDEX IF NOT EXISTS idx_agent_grants_owner_id ON agent_grants(owner_id);
     CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON agent_grants(token_hash);
   `,
+
+  '2.9.17': `
+    -- Wardrobe tab removed: migrate vestiaire_categories -> lists
+    -- ("Wardrobe - <name>" per category) and vestiaire -> list_items,
+    -- folding brand/size/color/purchase status into the item note.
+    INSERT INTO lists (id, name, shortname, color, icon, sort_order, archived, owner_id, created_at, updated_at)
+    SELECT 'vest_' || id, 'Wardrobe - ' || name, shortname, color, NULL, sort_order, 0, owner_id, created_at, updated_at
+    FROM vestiaire_categories
+    WHERE is_protected = 0 AND name <> '';
+
+    INSERT INTO lists (id, name, shortname, color, icon, sort_order, archived, owner_id, created_at, updated_at)
+    SELECT 'vest_wardrobe', 'Wardrobe', NULL, '#8b5cf6', NULL, 9999, 0, NULL, datetime('now'), datetime('now')
+    WHERE EXISTS (
+      SELECT 1 FROM vestiaire v LEFT JOIN vestiaire_categories c ON c.id = v.category_id
+      WHERE NOT (c.is_protected = 0 AND c.name <> '')
+    );
+
+    WITH vest AS (
+      SELECT
+        v.id, v.category_id, v.name, v.sort_order, v.owner_id, v.created_at, v.updated_at,
+        v.note AS old_note,
+        CASE WHEN c.is_protected = 0 AND c.name <> '' THEN 'vest_' || v.category_id ELSE 'vest_wardrobe' END AS list_id,
+        rtrim(
+          (CASE WHEN v.brand IS NOT NULL AND v.brand <> '' THEN 'Brand / Make: ' || v.brand || char(10) ELSE '' END) ||
+          (CASE WHEN v.size IS NOT NULL AND v.size <> '' THEN 'Size: ' || v.size || char(10) ELSE '' END) ||
+          (CASE WHEN v.color IS NOT NULL AND v.color <> '' THEN 'Color: ' || v.color || char(10) ELSE '' END) ||
+          (CASE WHEN v.purchase_status = 'achete' THEN 'Status: Purchased' || char(10)
+                WHEN v.purchase_status = 'essaye' THEN 'Status: Tried' || char(10) ELSE '' END),
+          char(10)
+        ) AS block
+      FROM vestiaire v
+      LEFT JOIN vestiaire_categories c ON c.id = v.category_id
+    )
+    INSERT INTO list_items (id, list_id, text, checked, note, sort_order, shared_id, shared_group_id, owner_id, created_at, updated_at)
+    SELECT
+      'vest_' || id,
+      list_id,
+      name,
+      0,
+      CASE
+        WHEN block <> '' AND old_note IS NOT NULL AND old_note <> '' THEN block || char(10) || char(10) || old_note
+        WHEN block <> '' THEN block
+        ELSE COALESCE(old_note, '')
+      END,
+      sort_order, NULL, NULL, owner_id, created_at, updated_at
+    FROM vest;
+
+    DROP TABLE IF EXISTS vestiaire;
+    DROP TABLE IF EXISTS vestiaire_categories;
+  `,
 };

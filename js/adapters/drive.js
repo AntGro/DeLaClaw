@@ -48,9 +48,9 @@ const MAX_RETRIES = 2;
 const DRIVE_TABLES = [
   'projects', 'tasks', 'todos', 'habits', 'habit_completions',
   'flashcards', 'flashcard_notes', 'texts', 'text_line_progress',
-  'birthdays', 'vestiaire', 'lists', 'list_items',
+  'birthdays', 'lists', 'list_items',
   'settings', 'prompts', 'daily_visits',
-  'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
+  'todo_categories', 'habit_categories', 'flashcard_decks',
   'gcal_sync', 'agent_grants', 'groups',
 ];
 
@@ -652,7 +652,6 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     const catSeed = [
       ['todo_categories',      '_default_todo_cat',  '_shared_todo_cat'],
       ['habit_categories',     '_default_habit_cat', '_shared_habit_cat'],
-      ['vestiaire_categories', '_default_vest_cat',  '_shared_vest_cat'],
       ['flashcard_decks',      '_default_deck',      '_shared_deck'],
     ];
     for (const [table, defId, sharedId] of catSeed) {

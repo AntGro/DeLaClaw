@@ -83,7 +83,6 @@ js/
   habits.js             Habit tracking
   flashcards.js         Flashcard SRS + text memorization
   birthdays.js          Birthday tracker
-  vestiaire.js          Wardrobe inventory
   lists.js              Checklists
   delegation.js         CSP-safe event delegation
   i18n.js               Translation strings (en/fr/es)

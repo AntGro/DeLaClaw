@@ -6,7 +6,7 @@ Cross-cutting app configuration — theme, language, backend picker, sharing man
 ## Entry & Ownership
 - **Entry:** `js/main.js` (settings pane switching, backup, loadSettings, usage stats) + `js/state.js` (STAY_CONNECTED_KEY) + `js/agents-ui.js` (agents pane) + `js/version.js`
 - **State:** see `CODEMAP.json:core[main,state,agents-ui]` for current loc, esc_count, i18n_count
-- **Tables:** `settings` (key-value: `schema_version`, theme, etc.), `prompts`, `daily_visits`, `agent_grants`, `todo_categories`, `habit_categories`, `vestiaire_categories`, `flashcard_decks`
+- **Tables:** `settings` (key-value: `schema_version`, theme, etc.), `prompts`, `daily_visits`, `agent_grants`, `todo_categories`, `habit_categories`, `flashcard_decks`
 
 ## Dependencies
 - **Depends on:** `db`, `i18n`, `icons`, `utils`, `state`, all feature modules (for data loading)
@@ -41,7 +41,7 @@ Cross-cutting app configuration — theme, language, backend picker, sharing man
 - `schema_version` checked against `VERSION` `latest_compat` / `latest_compat_deprec` for compatibility banners
 
 ### Category Tables
-- `todo_categories`, `habit_categories`, `vestiaire_categories`, `flashcard_decks` — each has a protected default row (`name=''`, `is_protected=1`) guarded by `protect_category_row()` trigger
+- `todo_categories`, `habit_categories`, `flashcard_decks` — each has a protected default row (`name=''`, `is_protected=1`) guarded by `protect_category_row()` trigger
 - Item FKs use CASCADE on delete — deleting a user category deletes its items
 - App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members
 - Shortnames live directly on category/deck/project/list table rows as a `shortname` column (not in settings table)
@@ -75,7 +75,7 @@ Cross-cutting app configuration — theme, language, backend picker, sharing man
 - Sharing pane in settings manages group creation, auth, and member management
 
 ## Cross-Feature Edges
-- Changing category color → all features using bucket layout must re-render (todos, habits, projects, vestiaire, lists, flashcards)
+- Changing category color → all features using bucket layout must re-render (todos, habits, projects, lists, flashcards)
 - Theme toggle → affects hero, gate, storm, all header backgrounds
 - Language change → all features re-render via `applyI18n()`
 

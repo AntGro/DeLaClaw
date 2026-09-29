@@ -375,7 +375,6 @@ Tables tracked in `BACKUP_TABLES` (import order):
 |-------|---------|-----------------|
 | `todo_categories` | TODO category containers | — |
 | `habit_categories` | Habit category containers | — |
-| `vestiaire_categories` | Wardrobe category containers | — |
 | `flashcard_decks` | Flashcard deck containers | — |
 | `projects` | Project cards | — |
 | `habits` | Habit definitions | — |
@@ -388,7 +387,6 @@ Tables tracked in `BACKUP_TABLES` (import order):
 | `flashcard_notes` | Draft flashcard proposals | — |
 | `text_line_progress` | Reading progress per line | `texts.id` |
 | `birthdays` | Birthday tracker | — |
-| `vestiaire` | Wardrobe items | `vestiaire_categories.id` |
 | `list_items` | Items within lists | `lists.id` |
 | `settings` | App settings (key/value) | — |
 | `prompts` | AI prompts (global + per-project) | — |

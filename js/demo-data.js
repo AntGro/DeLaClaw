@@ -163,14 +163,6 @@ function en() {
     { id: 'demo-bd-006', name: 'Carlos Reyes', birthday: '1987-11-07', note: 'Met at the conference', avatar_url: null, created_at: d(-30), updated_at: d(-30) },
   ];
 
-  const vestiaire = [
-    { id: 'demo-vest-001', name: 'Linen blazer', category: 'Outerwear', color: 'Navy', brand: 'COS', size: 'M', note: 'Great for summer evenings', purchase_status: null, image_url: null, sort_order: 0, created_at: d(-90), updated_at: d(-10) },
-    { id: 'demo-vest-002', name: 'White Oxford shirt', category: 'Tops', color: 'White', brand: 'Uniqlo', size: 'M', note: '', purchase_status: null, image_url: null, sort_order: 1, created_at: d(-80), updated_at: d(-20) },
-    { id: 'demo-vest-003', name: 'Slim chinos', category: 'Bottoms', color: 'Khaki', brand: 'Arket', size: '32', note: 'Tapered fit', purchase_status: null, image_url: null, sort_order: 2, created_at: d(-70), updated_at: d(-15) },
-    { id: 'demo-vest-004', name: 'Running trainers', category: 'Shoes', color: 'Black/Grey', brand: 'Nike Pegasus', size: '43', note: 'Replace after 800 km', purchase_status: null, image_url: null, sort_order: 3, created_at: d(-60), updated_at: d(-5) },
-    { id: 'demo-vest-005', name: 'Wool overcoat', category: 'Outerwear', color: 'Charcoal', brand: 'Massimo Dutti', size: 'L', note: 'Dry clean only', purchase_status: null, image_url: null, sort_order: 4, created_at: d(-120), updated_at: d(-30) },
-    { id: 'demo-vest-006', name: 'Canvas tote bag', category: 'Accessories', color: 'Off-white', brand: 'Muji', size: '', note: 'Everyday carry', purchase_status: null, image_url: null, sort_order: 5, created_at: d(-50), updated_at: d(-25) },
-  ];
 
   const lists = [
     { id: 'demo-list-001', name: 'Travel Destinations', shortname: 'Travel', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
@@ -191,7 +183,7 @@ function en() {
     { id: 'demo-li-010', list_id: 'demo-list-003', text: 'In the Mood for Love', checked: 0, note: null, sort_order: 2, created_at: d(-15), updated_at: d(-15) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, lists, list_items };
 }
 
 // ── FRENCH ──
@@ -274,14 +266,6 @@ function fr() {
     { id: 'demo-bd-006', name: 'Carlos Reyes', birthday: '1987-11-07', note: 'Rencontré à la conférence', avatar_url: null, created_at: d(-30), updated_at: d(-30) },
   ];
 
-  const vestiaire = [
-    { id: 'demo-vest-001', name: 'Blazer en lin', category: 'Vestes', color: 'Marine', brand: 'COS', size: 'M', note: 'Parfait pour les soirées d\'été', purchase_status: null, image_url: null, sort_order: 0, created_at: d(-90), updated_at: d(-10) },
-    { id: 'demo-vest-002', name: 'Chemise Oxford blanche', category: 'Hauts', color: 'Blanc', brand: 'Uniqlo', size: 'M', note: '', purchase_status: null, image_url: null, sort_order: 1, created_at: d(-80), updated_at: d(-20) },
-    { id: 'demo-vest-003', name: 'Chino slim', category: 'Bas', color: 'Beige', brand: 'Arket', size: '32', note: 'Coupe fuselée', purchase_status: null, image_url: null, sort_order: 2, created_at: d(-70), updated_at: d(-15) },
-    { id: 'demo-vest-004', name: 'Baskets de course', category: 'Chaussures', color: 'Noir/Gris', brand: 'Nike Pegasus', size: '43', note: 'Remplacer après 800 km', purchase_status: null, image_url: null, sort_order: 3, created_at: d(-60), updated_at: d(-5) },
-    { id: 'demo-vest-005', name: 'Manteau en laine', category: 'Vestes', color: 'Anthracite', brand: 'Massimo Dutti', size: 'L', note: 'Nettoyage à sec uniquement', purchase_status: null, image_url: null, sort_order: 4, created_at: d(-120), updated_at: d(-30) },
-    { id: 'demo-vest-006', name: 'Tote bag en toile', category: 'Accessoires', color: 'Écru', brand: 'Muji', size: '', note: 'Sac du quotidien', purchase_status: null, image_url: null, sort_order: 5, created_at: d(-50), updated_at: d(-25) },
-  ];
 
   const lists = [
     { id: 'demo-list-001', name: 'Destinations de voyage', shortname: 'Voyage', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
@@ -303,7 +287,7 @@ function fr() {
   ];
 
   // Re-use same habit_completions (ids are the same, habit_ids match)
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, lists, list_items };
 }
 
 // ── SPANISH ──
@@ -386,14 +370,6 @@ function es() {
     { id: 'demo-bd-006', name: 'Carlos Reyes', birthday: '1987-11-07', note: 'Lo conocí en la conferencia', avatar_url: null, created_at: d(-30), updated_at: d(-30) },
   ];
 
-  const vestiaire = [
-    { id: 'demo-vest-001', name: 'Blazer de lino', category: 'Abrigos', color: 'Azul marino', brand: 'COS', size: 'M', note: 'Genial para noches de verano', purchase_status: null, image_url: null, sort_order: 0, created_at: d(-90), updated_at: d(-10) },
-    { id: 'demo-vest-002', name: 'Camisa Oxford blanca', category: 'Camisas', color: 'Blanco', brand: 'Uniqlo', size: 'M', note: '', purchase_status: null, image_url: null, sort_order: 1, created_at: d(-80), updated_at: d(-20) },
-    { id: 'demo-vest-003', name: 'Chino slim', category: 'Pantalones', color: 'Caqui', brand: 'Arket', size: '32', note: 'Corte entallado', purchase_status: null, image_url: null, sort_order: 2, created_at: d(-70), updated_at: d(-15) },
-    { id: 'demo-vest-004', name: 'Zapatillas para correr', category: 'Calzado', color: 'Negro/Gris', brand: 'Nike Pegasus', size: '43', note: 'Reemplazar tras 800 km', purchase_status: null, image_url: null, sort_order: 3, created_at: d(-60), updated_at: d(-5) },
-    { id: 'demo-vest-005', name: 'Abrigo de lana', category: 'Abrigos', color: 'Carbón', brand: 'Massimo Dutti', size: 'L', note: 'Solo limpieza en seco', purchase_status: null, image_url: null, sort_order: 4, created_at: d(-120), updated_at: d(-30) },
-    { id: 'demo-vest-006', name: 'Bolso tote de lona', category: 'Accesorios', color: 'Crudo', brand: 'Muji', size: '', note: 'Para el día a día', purchase_status: null, image_url: null, sort_order: 5, created_at: d(-50), updated_at: d(-25) },
-  ];
 
   const lists = [
     { id: 'demo-list-001', name: 'Destinos de viaje', shortname: 'Viajes', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
@@ -414,7 +390,7 @@ function es() {
     { id: 'demo-li-010', list_id: 'demo-list-003', text: 'In the Mood for Love', checked: 0, note: null, sort_order: 2, created_at: d(-15), updated_at: d(-15) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, lists, list_items };
 }
 
 // ── MAIN EXPORT ──
@@ -492,9 +468,9 @@ export function getDemoData(lang) {
 export function getEmptyData() {
   return {
     projects: [], tasks: [], todos: [], habits: [], habit_completions: [],
-    flashcards: [], flashcard_notes: [], birthdays: [], vestiaire: [],
+    flashcards: [], flashcard_notes: [], birthdays: [],
     lists: [], list_items: [],
     settings: [], prompts: [], texts: [], text_line_progress: [], daily_visits: [],
-    todo_categories: [], habit_categories: [], vestiaire_categories: [], flashcard_decks: [],
+    todo_categories: [], habit_categories: [], flashcard_decks: [],
   };
 }

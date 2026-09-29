@@ -46,14 +46,12 @@
       case 'set-todo-filter': callWindow('setTodoFilter', [el.dataset.filter]); break;
       case 'set-habit-filter': callWindow('setHabitFilter', [el.dataset.filter]); break;
       case 'set-birthday-filter': callWindow('setBirthdayFilter', [el.dataset.filter]); break;
-      case 'set-vestiaire-filter': callWindow('setVestiaireFilter', [el.dataset.filter]); break;
       case 'set-flashcard-filter': callWindow('setFlashcardFilter', [el.dataset.filter]); break;
       case 'set-habit-view-mode': callWindow('setHabitViewMode', [el.dataset.view]); break;
       case 'sort-projects': callWindow('renderProjectGrid', []); break;
       case 'sort-todos': callWindow('renderTodos', []); break;
       case 'sort-habits': callWindow('renderHabits', []); break;
       case 'sort-birthdays': callWindow('renderBirthdays', []); break;
-      case 'sort-vestiaire': callWindow('renderVestiaire', []); break;
       case 'sort-flashcards': callWindow('renderFlashcards', []); break;
       case 'sort-lists': callWindow('renderLists', []); break;
       case 'handle-model-change': callWindow('handleModelChange', []); break;
@@ -69,8 +67,6 @@
       case 'copy-habit-to-personal': callWindow('copyHabitToPersonal', [getId(el), el]); break;
       case 'open-add-habit-category': callWindow('openAddHabitCategoryModal', []); break;
       case 'open-add-birthday': callWindow('openAddBirthdayModal', []); break;
-      case 'open-add-vestiaire': callWindow('openAddVestiaireModal', [getCat(el)]); break;
-      case 'open-add-vestiaire-category': callWindow('openAddVestiaireCategoryModal', []); break;
       case 'open-add-flash-deck': callWindow('openAddFlashDeckModal', []); break;
       case 'open-add-list': callWindow('openAddListModal', []); break;
       case 'open-import': callWindow('openImportModal', []); break;
@@ -249,23 +245,6 @@
       case 'bulk-share-list': callWindow('bulkShareList', [getId(el), el]); break;
       case 'unshare-list-item': callWindow('unshareListItem', [getId(el), el]); break;
       case 'copy-list-item-to-personal': callWindow('copyListItemToPersonal', [getId(el), el]); break;
-      case 'open-add-vestiaire': callWindow('openAddVestiaireModal', [getCat(el)]); break;      case 'navigate-to-vestiaire-cat': callWindow('navigateToVestiaireCat', [getCat(el)]); break;
-      case 'open-add-vestiaire-category': callWindow('openAddVestiaireCategoryModal', []); break;
-      case 'open-edit-vestiaire': callWindow('openEditVestiaireModal', [getId(el)]); break;
-      case 'delete-vestiaire': callWindow('deleteVestiaire', [getId(el)]); break;
-      case 'edit-vestiaire-inline': callWindow('editVestiaireInline', [getId(el)]); break;
-      case 'edit-vestiaire-brand-inline': callWindow('editVestiaireBrandInline', [getId(el)]); break;
-      case 'cycle-vestiaire-status': callWindow('cycleVestiaireStatus', [getId(el)]); break;
-      case 'open-edit-vestiaire-category': callWindow('openEditVestiaireCategoryModal', [getCat(el)]); break;
-      case 'delete-vestiaire-category': callWindow('deleteVestiaireCategory', [getCat(el)]); break;
-      case 'close-add-vestiaire': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddVestiaireModal', []); break;
-      case 'save-new-vestiaire': callWindow('saveNewVestiaire', []); break;
-      case 'close-add-vestiaire-category': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddVestiaireCategoryModal', []); break;
-      case 'save-new-vestiaire-category': callWindow('saveNewVestiaireCategory', []); break;
-      case 'close-edit-vestiaire': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditVestiaireModal', []); break;
-      case 'save-edit-vestiaire': callWindow('saveEditVestiaire', []); break;
-      case 'close-edit-vestiaire-category': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditVestiaireCategoryModal', []); break;
-      case 'save-edit-vestiaire-category': callWindow('saveEditVestiaireCategory', []); break;
 
       case 'sharing-copy-code':
       case 'sharing-copy-link': callWindow('sharingCopyCode', [getId(el)||el.dataset.groupId]); break;
@@ -326,7 +305,6 @@
       case 'sort-todos': callWindow('renderTodos', []); break;
       case 'sort-habits': callWindow('renderHabits', []); break;
       case 'sort-birthdays': callWindow('renderBirthdays', []); break;
-      case 'sort-vestiaire': callWindow('renderVestiaire', []); break;
       case 'sort-flashcards': callWindow('renderFlashcards', []); break;
       case 'sort-lists': callWindow('renderLists', []); break;
       case 'handle-model-change': callWindow('handleModelChange', []); break;
@@ -350,7 +328,6 @@
           case 'filter-todos': callWindow('filterTodos', [e]); break;
           case 'filter-habits': callWindow('filterHabits', [e]); break;
           case 'filter-birthdays': callWindow('filterBirthdays', [e]); break;
-          case 'filter-vestiaire': callWindow('filterVestiaire', [e]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [e]); break;
           case 'filter-lists': callWindow('filterLists', [e]); break;
           default: break;
@@ -367,7 +344,6 @@
           case 'filter-todos': callWindow('filterTodos', [fakeEvt]); break;
           case 'filter-habits': callWindow('filterHabits', [fakeEvt]); break;
           case 'filter-birthdays': callWindow('filterBirthdays', [fakeEvt]); break;
-          case 'filter-vestiaire': callWindow('filterVestiaire', [fakeEvt]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [fakeEvt]); break;
           case 'filter-lists': callWindow('filterLists', [fakeEvt]); break;
           default: break;
@@ -390,9 +366,6 @@
         case 'save-edit-habit-category-on-enter': e.preventDefault(); callWindow('saveEditHabitCategory', []); break;
         case 'save-new-list-on-enter': e.preventDefault(); callWindow('saveNewList', []); break;
         case 'save-edit-list-on-enter': e.preventDefault(); callWindow('saveEditList', []); break;
-        case 'save-new-vestiaire-on-enter': e.preventDefault(); callWindow('saveNewVestiaire', []); break;
-        case 'save-new-vestiaire-category-on-enter': e.preventDefault(); callWindow('saveNewVestiaireCategory', []); break;
-        case 'save-edit-vestiaire-category-on-enter': e.preventDefault(); callWindow('saveEditVestiaireCategory', []); break;
         case 'save-new-birthday-on-enter': e.preventDefault(); callWindow('saveNewBirthday', []); break;
         case 'sharing-invite-on-enter': e.preventDefault(); if (window.sharingInvite) { var gid = el.dataset.groupId||el.dataset.id; window.sharingInvite(gid); } break;
         case 'sharing-create-group-on-enter': e.preventDefault(); callWindow('sharingCreateGroupSubmit', []); break;

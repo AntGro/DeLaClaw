@@ -237,4 +237,76 @@ export const DRIVE_MIGRATIONS = {
     // Restore agent_grants store (agents settings pane kept; Supabase removed).
     if (!store.agent_grants) store.agent_grants = [];
   },
+
+  '2.9.17': async (store, ctx) => {
+    // Wardrobe tab removed: migrate vestiaire_categories -> lists
+    // ("Wardrobe - <name>" per category) and vestiaire -> list_items,
+    // folding brand/size/color/purchase status into the item note.
+    // The vestiaire files are not in DRIVE_TABLES anymore, so they are
+    // fetched and deleted explicitly via ctx.
+    const tok = await ctx.getToken();
+    if (!tok) return;
+    const readFile = async (name) => {
+      const f = ctx.filesByName.get(name);
+      if (!f) return [];
+      try {
+        const { data } = await ctx.downloadFile(tok, f.id);
+        return Array.isArray(data) ? data : [];
+      } catch { return []; }
+    };
+    const buildNote = (v) => {
+      const lines = [];
+      if (v.brand) lines.push(`Brand / Make: ${v.brand}`);
+      if (v.size) lines.push(`Size: ${v.size}`);
+      if (v.color) lines.push(`Color: ${v.color}`);
+      if (v.purchase_status === 'achete') lines.push('Status: Purchased');
+      else if (v.purchase_status === 'essaye') lines.push('Status: Tried');
+      let note = lines.join('\n');
+      if (v.note) note += (note ? '\n\n' : '') + v.note;
+      return note;
+    };
+    const cats = await readFile('vestiaire_categories.json');
+    const items = await readFile('vestiaire.json');
+    store.lists = store.lists || [];
+    store.list_items = store.list_items || [];
+    const listIdFor = new Map();
+    for (const c of cats) {
+      if (c.is_protected || !c.name) continue;
+      const id = `vest_${c.id}`;
+      store.lists.push({
+        id, name: `Wardrobe - ${c.name}`,
+        shortname: c.shortname ?? null, color: c.color ?? null, icon: null,
+        sort_order: c.sort_order ?? 0, archived: 0,
+        owner_id: c.owner_id ?? null, created_at: c.created_at, updated_at: c.updated_at,
+      });
+      listIdFor.set(c.id, id);
+    }
+    let wardrobeId = null;
+    if (items.some((v) => !listIdFor.has(v.category_id))) {
+      wardrobeId = 'vest_wardrobe';
+      const now = new Date().toISOString();
+      store.lists.push({
+        id: wardrobeId, name: 'Wardrobe',
+        shortname: null, color: '#8b5cf6', icon: null,
+        sort_order: 9999, archived: 0,
+        owner_id: null, created_at: now, updated_at: now,
+      });
+    }
+    for (const v of items) {
+      const listId = listIdFor.get(v.category_id) || wardrobeId;
+      if (!listId) continue;
+      store.list_items.push({
+        id: `vest_${v.id}`, list_id: listId, text: v.name, checked: 0,
+        note: buildNote(v), sort_order: v.sort_order ?? 0,
+        shared_id: null, shared_group_id: null,
+        owner_id: v.owner_id ?? null, created_at: v.created_at, updated_at: v.updated_at,
+      });
+    }
+    for (const name of ['vestiaire.json', 'vestiaire_categories.json']) {
+      const f = ctx.filesByName.get(name);
+      if (f) { try { await ctx.deleteFile(tok, f.id); } catch {} }
+    }
+    delete store.vestiaire;
+    delete store.vestiaire_categories;
+  },
 };

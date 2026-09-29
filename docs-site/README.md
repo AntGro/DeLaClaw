@@ -12,7 +12,6 @@ DeLaClaw is a zero-dependency, no-build, self-hosted personal dashboard. It runs
 - **Habits** — Recurring habit tracker with calendar view, streak stats, and sharing
 - **Flashcards** — Spaced-repetition flashcards and text revision decks
 - **Lists** — Shareable lists for anything that doesn't fit elsewhere
-- **Vestiaire** — Wardrobe inventory tracker
 - **Birthdays** — Birthday reminders with avatar photos
 - **Sharing** — Share TODOs, habits, and lists with groups via shared Drive folders
 - **Google Calendar sync** — Optionally mirror habits, TODOs, and birthdays to a dedicated Google Calendar

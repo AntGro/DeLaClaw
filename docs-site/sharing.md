@@ -86,7 +86,7 @@ _Folder names shown for production (`delaclaw.com`); dev and preview builds use 
 - **Invite code**: `DLC1.<base64url({v:1, b:'googledrive', f:<folderId>})>` — one group-level code, no per-member tokens.
 - **Access control**: Drive folder permissions (writer) plus the trusted-contacts allowlist; `group.json` holds the member list. No RPC layer, no token hashing.
 - **Member identity**: the member ID is the SHA-256 hash of the member's *normalized* email (never the raw email) — stable per user across invites. Normalization lowercases, and for Gmail only (`gmail.com`/`googlemail.com`) strips dots and `+tags`, mirroring Google's semantics; other providers treat dots as significant, so they are left untouched.
-- **Sync**: every member polls every 15 s, keyed on each file's `modifiedTime`. Concurrent writes use ETags with up to two conflict retries; the merge is intent-aware (`reconcileItems` in `sharing-file-reconcile.js`) — pending local creates are retained, pending local deletes suppress stale remote copies, and only deletions acknowledged by a successful upload propagate. The member roster poll is likewise intent-aware (`reconcileMembers`): rows this tab created but hasn't flushed yet are kept, everything else takes the remote version.
+- **Sync**: every member polls every 15 s, keyed on each file's `modifiedTime`. Concurrent writes use ETags with up to two conflict retries; the merge is intent-aware (`reconcileItems` in `sharing-file-reconcile.js`) — pending local creates are retained, pending local deletes suppress stale remote copies, and only deletions acknowledged by a successful upload propagate. The member roster poll is likewise intent-aware (`reconcileMembers`): rows this tab created but hasn't flushed yet are kept, everything else takes the remote version. Item-file downloads skip types with unflushed staged changes or an upload in flight — their own intents protect the staged work, and the next flush reconciles.
 - **Drive scopes**: with `drive.file` scope the joiner grants access through the Google Picker (only the selected files); with full `drive` scope the folder is listed directly.
 
 ### Local pointers and per-member buckets
@@ -290,7 +290,7 @@ sequenceDiagram
         MA->>MA: error toast — nothing shared
     end
     end
-    MA->>SF: addItem → markCreated(id) intent<br/>+ stage item in memory<br/>(onStaged hook fires) → upload starts<br/>in background (ETag-guarded write)
+    MA->>SF: addItem → markCreated(id) intent<br/>+ stage item in memory<br/>(onStaged hook fires) → debounced flush<br/>(2s per group+type, ETag-guarded write)
     Note over MA,SF: intent cleared only after<br/>a successful upload —<br/>an id created mid-upload stays pending
     rect rgb(253, 237, 236)
     opt staging throws or upload fails
@@ -315,7 +315,7 @@ sequenceDiagram
     Note over OA: dated item → calendar event<br/>titled [TODO][category][group]
 ```
 
-The optimistic render above is the TODO add-row flow. Since v2.9.0 the same pattern applies to every shared mutation — share-existing, bulk share, rename, mark done, delete, unshare, habit edits and completions, list item edit/toggle: the view refreshes on in-memory staging via the `onStaged` hook, the upload runs in the background, and a failed upload rolls the local state back with an error toast.
+The optimistic render above is the TODO add-row flow. Since v2.9.0 the same pattern applies to every shared mutation — share-existing, bulk share, rename, mark done, delete, unshare, habit edits and completions, list item edit/toggle: the view refreshes on in-memory staging via the `onStaged` hook, the debounced flush (2s per group+type) settles it in the background, and a failed upload rolls the local state back with an error toast.
 
 #### Modify an item (rename, mark done, habit completion)
 

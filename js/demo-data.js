@@ -168,6 +168,8 @@ function en() {
     { id: 'demo-list-001', name: 'Travel Destinations', shortname: 'Travel', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
     { id: 'demo-list-002', name: 'Monthly Expenses to Reimburse', shortname: 'Expenses', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
     { id: 'demo-list-003', name: 'Movies to Watch', shortname: 'Movies', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-004', name: 'Wardrobe - Top', shortname: 'Top', color: '#8b5cf6', icon: 'shirt', sort_order: 3, archived: 0, created_at: d(-12), updated_at: d(-4) },
+    { id: 'demo-list-005', name: 'Wardrobe - Pants', shortname: 'Pants', color: '#7c3aed', icon: 'tag', sort_order: 4, archived: 0, created_at: d(-12), updated_at: d(-4) },
   ];
 
   const list_items = [
@@ -181,6 +183,11 @@ function en() {
     { id: 'demo-li-008', list_id: 'demo-list-003', text: 'Mulholland Drive', checked: 0, note: null, sort_order: 0, created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-li-009', list_id: 'demo-list-003', text: 'Stalker', checked: 0, note: null, sort_order: 1, created_at: d(-18), updated_at: d(-18) },
     { id: 'demo-li-010', list_id: 'demo-list-003', text: 'In the Mood for Love', checked: 0, note: null, sort_order: 2, created_at: d(-15), updated_at: d(-15) },
+    { id: 'demo-li-011', list_id: 'demo-list-004', text: 'White Oxford Shirt', checked: 0, note: 'Brand / Make: Ralph Lauren\nSize: M\nColor: White\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-012', list_id: 'demo-list-004', text: 'Navy Breton Stripe Tee', checked: 0, note: 'Brand / Make: Armor-Lux\nSize: M\nStatus: Tried', sort_order: 1, created_at: d(-11), updated_at: d(-11) },
+    { id: 'demo-li-013', list_id: 'demo-list-004', text: 'Charcoal Cashmere Sweater', checked: 0, note: 'Brand / Make: Johnstons of Elgin\nSize: L\nColor: Charcoal\nStatus: Purchased\n\nGift from my mother', sort_order: 2, created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-li-014', list_id: 'demo-list-005', text: 'Selvedge Denim Jeans', checked: 0, note: 'Brand / Make: APC\nSize: 30\nColor: Raw indigo\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-015', list_id: 'demo-list-005', text: 'Navy Wool Trousers', checked: 0, note: 'Brand / Make: Suitsupply\nSize: 30\nColor: Navy\nStatus: Tried\n\nNeed hemming if kept', sort_order: 1, created_at: d(-9), updated_at: d(-9) },
   ];
 
   return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, lists, list_items };
@@ -271,6 +278,8 @@ function fr() {
     { id: 'demo-list-001', name: 'Destinations de voyage', shortname: 'Voyage', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
     { id: 'demo-list-002', name: 'Notes de frais du mois', shortname: 'Frais', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
     { id: 'demo-list-003', name: 'Films à voir', shortname: 'Films', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-004', name: 'Garde-robe - Hauts', shortname: 'Hauts', color: '#8b5cf6', icon: 'shirt', sort_order: 3, archived: 0, created_at: d(-12), updated_at: d(-4) },
+    { id: 'demo-list-005', name: 'Garde-robe - Pantalons', shortname: 'Pantalons', color: '#7c3aed', icon: 'tag', sort_order: 4, archived: 0, created_at: d(-12), updated_at: d(-4) },
   ];
 
   const list_items = [
@@ -284,6 +293,11 @@ function fr() {
     { id: 'demo-li-008', list_id: 'demo-list-003', text: 'Mulholland Drive', checked: 0, note: null, sort_order: 0, created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-li-009', list_id: 'demo-list-003', text: 'Stalker', checked: 0, note: null, sort_order: 1, created_at: d(-18), updated_at: d(-18) },
     { id: 'demo-li-010', list_id: 'demo-list-003', text: 'In the Mood for Love', checked: 0, note: null, sort_order: 2, created_at: d(-15), updated_at: d(-15) },
+    { id: 'demo-li-011', list_id: 'demo-list-004', text: 'Chemise Oxford blanche', checked: 0, note: 'Brand / Make: Ralph Lauren\nSize: M\nColor: White\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-012', list_id: 'demo-list-004', text: 'Marinière bleu marine', checked: 0, note: 'Brand / Make: Armor-Lux\nSize: M\nStatus: Tried', sort_order: 1, created_at: d(-11), updated_at: d(-11) },
+    { id: 'demo-li-013', list_id: 'demo-list-004', text: 'Pull en cachemire anthracite', checked: 0, note: 'Brand / Make: Johnstons of Elgin\nSize: L\nColor: Charcoal\nStatus: Purchased\n\nUn cadeau de ma mère', sort_order: 2, created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-li-014', list_id: 'demo-list-005', text: 'Jean brut selvedge', checked: 0, note: 'Brand / Make: APC\nSize: 30\nColor: Raw indigo\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-015', list_id: 'demo-list-005', text: 'Pantalon en laine bleu marine', checked: 0, note: 'Brand / Make: Suitsupply\nSize: 30\nColor: Navy\nStatus: Tried\n\nÀ ourler si je le garde', sort_order: 1, created_at: d(-9), updated_at: d(-9) },
   ];
 
   // Re-use same habit_completions (ids are the same, habit_ids match)
@@ -375,6 +389,8 @@ function es() {
     { id: 'demo-list-001', name: 'Destinos de viaje', shortname: 'Viajes', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
     { id: 'demo-list-002', name: 'Gastos a reembolsar', shortname: 'Gastos', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
     { id: 'demo-list-003', name: 'Películas por ver', shortname: 'Pelis', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-004', name: 'Guardarropa - Camisetas', shortname: 'Camisetas', color: '#8b5cf6', icon: 'shirt', sort_order: 3, archived: 0, created_at: d(-12), updated_at: d(-4) },
+    { id: 'demo-list-005', name: 'Guardarropa - Pantalones', shortname: 'Pantalones', color: '#7c3aed', icon: 'tag', sort_order: 4, archived: 0, created_at: d(-12), updated_at: d(-4) },
   ];
 
   const list_items = [
@@ -388,6 +404,11 @@ function es() {
     { id: 'demo-li-008', list_id: 'demo-list-003', text: 'Mulholland Drive', checked: 0, note: null, sort_order: 0, created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-li-009', list_id: 'demo-list-003', text: 'Stalker', checked: 0, note: null, sort_order: 1, created_at: d(-18), updated_at: d(-18) },
     { id: 'demo-li-010', list_id: 'demo-list-003', text: 'In the Mood for Love', checked: 0, note: null, sort_order: 2, created_at: d(-15), updated_at: d(-15) },
+    { id: 'demo-li-011', list_id: 'demo-list-004', text: 'Camisa Oxford blanca', checked: 0, note: 'Brand / Make: Ralph Lauren\nSize: M\nColor: White\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-012', list_id: 'demo-list-004', text: 'Camiseta de rayas azul marino', checked: 0, note: 'Brand / Make: Armor-Lux\nSize: M\nStatus: Tried', sort_order: 1, created_at: d(-11), updated_at: d(-11) },
+    { id: 'demo-li-013', list_id: 'demo-list-004', text: 'Jersey de cachemira gris', checked: 0, note: 'Brand / Make: Johnstons of Elgin\nSize: L\nColor: Charcoal\nStatus: Purchased\n\nUn regalo de mi madre', sort_order: 2, created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-li-014', list_id: 'demo-list-005', text: 'Vaqueros de selvedge crudos', checked: 0, note: 'Brand / Make: APC\nSize: 30\nColor: Raw indigo\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-015', list_id: 'demo-list-005', text: 'Pantalón de lana azul marino', checked: 0, note: 'Brand / Make: Suitsupply\nSize: 30\nColor: Navy\nStatus: Tried\n\nHay que hacer el bajo si me lo quedo', sort_order: 1, created_at: d(-9), updated_at: d(-9) },
   ];
 
   return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, lists, list_items };

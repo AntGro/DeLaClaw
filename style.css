@@ -2109,7 +2109,7 @@ a.sharing-drive-link{text-decoration:none;}
 .groups-back-btn{display:none;margin-bottom:12px;}
 @media (max-width: 900px){
   .groups-layout{flex-direction:column;}
-  .groups-sidebar{width:100%;}
+  .groups-sidebar{width:100%;flex:1;min-height:0;}
   .groups-layout:not(.groups-detail-active) .groups-detail{display:none;}
   .groups-layout.groups-detail-active .groups-sidebar{display:none;}
   .groups-layout.groups-detail-active .groups-back-btn{display:inline-flex;}

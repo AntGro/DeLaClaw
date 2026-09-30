@@ -1199,9 +1199,6 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
           showToast(t('sharing.member_joined', name, detail.group?.name || ''), 'success');
         }
       });
-      // Same for the Group tab: the initial switchView() ran before sharing
-      // init, leaving it stuck on the loading state.
-      if (state.currentView === 'groups') renderGroups();
 
     } catch (e) { console.warn('sharing init:', e); state.sharingInitFailed = true; }
   }
@@ -1240,6 +1237,11 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     await refreshWelcome();
     renderWelcome();
   }
+
+  // Same for the Group tab: the early switchView() rendered it before the
+  // sharing groups finished loading (loadAll emits no event on initial load),
+  // so re-render now that getAllGroups() is populated.
+  if (state.currentView === 'groups') renderGroups();
 
   markLastUpdated();
 

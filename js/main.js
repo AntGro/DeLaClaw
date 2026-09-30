@@ -1202,6 +1202,9 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       // (loading state), fill it in now.
       const sharingPane = document.getElementById('settingsPane-sharing');
       if (sharingPane?.classList.contains('active')) renderSharingPane();
+      // Same for the Group tab: the initial switchView() ran before sharing
+      // init, leaving it stuck on the loading state.
+      if (state.currentView === 'groups') renderGroups();
 
     } catch (e) { console.warn('sharing init:', e); state.sharingInitFailed = true; }
   }

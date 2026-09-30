@@ -1707,7 +1707,6 @@ body:has(.schema-banner) .app-header{top:var(--schema-banner-h,40px);}
 .compare-th-inner{display:inline-flex;align-items:center;gap:5px;justify-content:center;}
 .compare-th-inner img{width:16px;height:16px;object-fit:contain;}
 .compare-th-googledrive{border-bottom:3px solid #4285f4;background:color-mix(in srgb,#4285f4 8%,transparent);}
-.compare-th-supabase{border-bottom:3px solid #3ECF8E;background:color-mix(in srgb,#3ECF8E 8%,transparent);}
 .compare-th-local{border-bottom:3px solid #a78bfa;background:color-mix(in srgb,#a78bfa 8%,transparent);}
 .compare-th-demo{border-bottom:3px solid #6366f1;background:color-mix(in srgb,#6366f1 8%,transparent);}
 .compare-table td{padding:8px 12px;text-align:center;border-bottom:1px solid var(--border);vertical-align:middle;}
@@ -2136,19 +2135,6 @@ a.sharing-drive-link{text-decoration:none;}
 .auth-prompt-modal .auth-actions{display:flex;gap:0.75rem;justify-content:center;margin-top:1rem;}
 .auth-prompt-modal .auth-actions button{padding:0.5rem 1.25rem;}
 .auth-prompt-modal .auth-status{font-size:0.82rem;color:var(--success,#22c55e);margin-top:0.5rem;}
-
-/* ── Supabase migration modal ── */
-.sb-migration-modal{max-width:480px;padding:2rem;text-align:center;}
-.sb-migration-modal h3{margin:0.5rem 0 0.25rem;font-size:1.2rem;}
-.sb-migration-modal .auth-hint{color:var(--muted);font-size:0.85rem;margin:0 0 1.25rem;line-height:1.4;}
-.sb-migration-sharing-warn{color:var(--warning-text,#92400e)!important;background:color-mix(in srgb,var(--warning,#f59e0b) 10%,var(--bg));border:1px solid color-mix(in srgb,var(--warning,#f59e0b) 25%,var(--border));border-radius:8px;padding:0.6rem 0.75rem;text-align:left;font-size:0.82rem!important;}
-.sb-migration-actions{display:flex;flex-direction:column;gap:0.75rem;margin:1.25rem 0;}
-.sb-migration-actions .settings-data-btn{width:100%;justify-content:center;}
-
-.sb-migration-status{font-size:0.82rem;color:var(--muted);min-height:1.2em;}
-.sb-migration-back{display:block;margin-top:0.5rem;color:var(--muted);font-size:0.8rem;text-decoration:none;}
-.sb-migration-back:hover{color:var(--text);}
-.sb-migration-modal .auth-icon{margin-bottom:0.25rem;color:var(--muted);}
 
 /* ── Auth two-step flow ── */
 .auth-prompt-modal .auth-step,.auth-inline-prompt .auth-step{text-align:left;border:1px solid var(--border);border-radius:10px;padding:0.85rem 1rem;margin-bottom:0.75rem;transition:opacity 0.25s;}

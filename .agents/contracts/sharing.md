@@ -18,7 +18,7 @@ Five modules, layered:
 - `sharing-interface.js` — canonical method contract; `validateSharingAdapter()` enforces at init
 - `sharing-envelope.js` — invite code encode/decode (`DLC1.<base64url JSON>`)
 - `sharing-drive.js` — Drive adapter implementing `SharingInterface`
-- `sharing-ui.js` — settings pane, share popovers, badges, join picker, completion modals, and the shared per-group management card (`sharingGroupCardHtml`) rendered by both the Settings → Sharing pane and the Group tab
+- `sharing-ui.js` — Group tab card, share popovers, badges, join picker, completion modals, and the per-group management card (`sharingGroupCardHtml`) rendered by the Group tab
 - `groups.js` — Group tab view: group sidebar + selection state; all mutations reuse the `sharing-ui.js` actions via data-action delegation, no logic of its own
 - `sharing.js` — factory that picks adapter and validates it
 
@@ -61,7 +61,7 @@ Five modules, layered:
 ## UI Actions
 - **Settings pane:** create group, delete group, invite member, revoke member, unjoin group, edit own display name
 - **Join picker:** `sharingOpenJoinPicker` — method picker for joining (paste invite code or open invite link); the Picker selection must be the full 16-file set
-- **Share popovers:** `submitSharePopover` — share/unshare items to groups; `sharePopoverOpenSharing` — no-groups hint links to Settings → Sharing
+- **Share popovers:** `submitSharePopover` — share/unshare items to groups; `sharePopoverOpenSharing` — no-groups hint switches to the Group tab
 - **Clipboard:** `sharingCopyCode` / `sharingCopyLink` / `sharingCopyMemberCode` / `sharingCopyMemberLink` — copy invite code or link to clipboard
 - **Completion modal:** `sharingCompleteSubmit` — submit shared habit/todo completions with attribution
 
@@ -78,7 +78,7 @@ No RPC layer — both users read/write the shared folder directly via the Drive 
 - `deleteOwnedGroups()` → deletes every created group (each via the `deleteGroup` path); a folder already gone from Drive counts as done, its row dropped
 - `leaveJoinedGroups()` → leaves every joined group; no keep-copies dialog. Definite access loss during a leave → silent `handleStaleGroup` cleanup + continue; transient failure → throw (aborts the wipe)
 - `deleteAccount` (Settings → Account → Danger zone) → gated 4-step wipe (sequential, fail-stop — completed steps are not rolled back): (1) `deleteOwnedGroups()` deletes every created group — revoke member permissions + trash the subfolder per group; (2) `leaveJoinedGroups()` leaves every joined group via `unjoinGroup` in strict mode (row flip and groups-row delete failures throw); (3) calendar sync disabled with calendar deletion; (4) `deletePersonalData()` permanently deletes every file in the personal `DeLaClaw/` folder (`files.delete`, not trash) then the folder itself. OAuth token revoked best-effort last, then `disconnect()` → reload to the login gate. Any step failing aborts the whole wipe: error toast names the step, reload to the gate, connection intact so retry works; no rollback of completed steps
-- **Access loss (member removed OR group deleted — indistinguishable):** `isDefiniteAccessLoss(err)` classifies: 404 → definite; 403 → definite only with a known access-loss reason (`insufficientPermissions`, `forbidden`) and not rate-limited (`isDriveRateLimited` → transient); anything else (throttled 403, 403 with unknown/missing reason, 5xx, network blip) → transient. Definite access loss at the 15s poll or at startup load (`loadAll`) purges the group: dropped from memory, all item pointers deleted outright via `sharing-group-purge-items` (main.js deletes `todos`/`habits`/`list_items` rows with that `shared_group_id`, no dialog), groups-row delete staged; a single toast says access was lost (`group_no_longer_accessible`). Transient failures never purge — retried on the next poll/load. A group whose load fails transiently is marked skipped (chip in the Sharing pane, retried on the next page load); definite access loss never reaches the skipped state
+- **Access loss (member removed OR group deleted — indistinguishable):** `isDefiniteAccessLoss(err)` classifies: 404 → definite; 403 → definite only with a known access-loss reason (`insufficientPermissions`, `forbidden`) and not rate-limited (`isDriveRateLimited` → transient); anything else (throttled 403, 403 with unknown/missing reason, 5xx, network blip) → transient. Definite access loss at the 15s poll or at startup load (`loadAll`) purges the group: dropped from memory, all item pointers deleted outright via `sharing-group-purge-items` (main.js deletes `todos`/`habits`/`list_items` rows with that `shared_group_id`, no dialog), groups-row delete staged; a single toast says access was lost (`group_no_longer_accessible`). Transient failures never purge — retried on the next poll/load. A group whose load fails transiently is marked skipped (chip in the Group tab sidebar, retried on the next page load); definite access loss never reaches the skipped state
 
 ## i18n
 - **sharing-ui prefix:** `sharing.` — keys for group management, invite flow, badges, completion UI
@@ -91,7 +91,7 @@ No RPC layer — both users read/write the shared folder directly via the Drive 
 
 ## Business Invariants
 - **Share-button visibility:** buttons render when `!!state.sharing`, not when groups exist
-- **No-groups popover:** clicking a share button with no groups opens the same `share-popover` container with a hint message and a link to Settings → Sharing (via `sharePopoverOpenSharing`), instead of silently returning
+- **No-groups popover:** clicking a share button with no groups opens the same `share-popover` container with a hint message and a link to the Group tab (via `sharePopoverOpenSharing`), instead of silently returning
 - **Collaborative editing:** shared items are collaboratively editable — any group member can update or delete any item in a group they belong to, not just items they created
 - **Completion attribution:** completions carry `created_by` (member hashId) for attribution. Personal/non-shared items don't need attribution
 - **Category placement is personal:** `creator_category` is origin metadata only. Local category/deck placement remains personal and must not rewrite `creator_category`

@@ -72,7 +72,7 @@ Cross-cutting app configuration — theme, language, backend picker, sharing man
 
 ## Sharing
 - Settings are per-user, not shared
-- Sharing pane in settings manages group creation, auth, and member management
+- Sharing management lives in the Group tab (the Settings → Sharing pane was removed in v2.10.4); `#settings/sharing` deep links redirect to `#groups`
 
 ## Cross-Feature Edges
 - Changing category color → all features using bucket layout must re-render (todos, habits, projects, lists, flashcards)
@@ -89,7 +89,7 @@ Cross-cutting app configuration — theme, language, backend picker, sharing man
 - `bun tests/tests.js`: theme var usage, esc for category names, CODEMAP freshness
 - Manual: switch language → verify no duplicate categories, theme persists after reload
 - Manual: export backup, import on fresh instance, verify all data restored
-- Manual: deep-link `#settings/sharing` → verify sharing pane opens directly
+- Manual: deep-link `#settings/sharing` → verify it redirects to the Group tab
 
 ## References
 - `CODEMAP.json:core[main,state,version]`

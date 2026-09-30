@@ -1,5 +1,5 @@
 // ===================================================================
-// SHARING UI — Settings pane, share popovers, completion modal
+// SHARING UI — Group tab card, share popovers, completion modal
 // ===================================================================
 //
 // Renders the sharing settings pane (groups, invite codes, trusted
@@ -82,28 +82,10 @@ function avatarDot(member, size = 24) {
   return `<span class="sharing-avatar" style="width:${size}px;height:${size}px;background:${color};font-size:${Math.round(size * 0.42)}px" title="${esc(label)}">${esc(ini)}</span>`;
 }
 
-// ── Settings Pane ────────────────────────────────────────────────
-
-let _currentUser = null;
-
-/** Show or hide the sharing nav button based on state.sharing availability. */
-export function updateSharingNavVisibility() {
-  const btn = document.getElementById('settingsNavSharingBtn');
-  if (!btn) return;
-  const activeMode = localStorage.getItem('claw_cc_active_mode');
-  // Show the tab as soon as the mode is one where sharing will exist — the
-  // pane renders a loading state until the async init finishes, then fills
-  // in. Only hide when sharing can never exist (local mode / init failed),
-  // so the tab no longer pops in late after the other tabs.
-  const willHaveSharing = activeMode === 'demo'
-    || (activeMode === 'googledrive' && !state.sharingInitFailed);
-  btn.style.display = (state.sharing || willHaveSharing) ? '' : 'none';
-}
-
 /**
  * Render one group's management card (header, members, invite row, delete).
- * Shared by the Settings → Sharing pane and the Group tab — the data-action
- * handlers are identical, only the surrounding layout differs.
+ * Used by the Group tab — the data-action handlers are identical everywhere
+ * the card appears.
  */
 export async function sharingGroupCardHtml(group) {
   let currentMember = null;
@@ -170,78 +152,6 @@ export async function sharingGroupCardHtml(group) {
 }
 
 /** Render the full sharing settings pane content. */
-export async function renderSharingPane() {
-  const container = document.getElementById('sharingPaneContent');
-  if (!container) return;
-
-  const activeMode = localStorage.getItem('claw_cc_active_mode');
-
-  // Demo mode — sharing UI is visible but group creation is not available
-  if (activeMode === 'demo') {
-    container.innerHTML = `<div class="auth-inline-prompt">
-      <div class="auth-icon">${lucideIcon('users', 28)}</div>
-      <h4>${t('sharing.demo_title')}</h4>
-      <p class="auth-inline-hint">${t('sharing.demo_hint')}</p>
-    </div>`;
-    return;
-  }
-
-  if (!state.sharing) {
-    // Drive mode but init still pending (or running): show a loading state —
-    // the pane fills in once init completes. Local mode / failed init keeps
-    // the not-available hint.
-    if (activeMode === 'googledrive' && !state.sharingInitFailed) {
-      container.innerHTML = `<p class="setting-hint">${t('common.loading')}</p>`;
-      return;
-    }
-    container.innerHTML = `<p class="setting-hint">${t('sharing.no_drive')}</p>`;
-    return;
-  }
-
-  // Get current user identity
-  try {
-    _currentUser = await state.sharing.getCurrentUser();
-  } catch { _currentUser = null; }
-
-  let html = '';
-
-  // ── Groups section ──
-  const groups = state.sharing.getAllGroups();
-
-  html += `<div class="setting-group"><div class="setting-group-label">${t('sharing.groups')}</div>`;
-
-  if (groups.length === 0) {
-    html += `<p class="setting-hint">${t('sharing.no_groups_hint')}</p>`;
-  }
-
-  for (const group of groups) {
-    html += await sharingGroupCardHtml(group);
-  }
-
-  // ── Skipped groups (transient load failure this session) ──
-  // These groups are not loaded — a required file failed to download and no
-  // definite access loss was detected. Shown with a chip instead of being
-  // silently dropped; retried on the next page load.
-  const skippedGroups = state.sharing.getSkippedGroups?.() || [];
-  for (const skipped of skippedGroups) {
-    html += `<div class="sharing-group-card">
-      <div class="sharing-group-header">
-        <div class="sharing-group-info">
-          <h4>${esc(skipped.name)}<span class="sharing-group-skipped-stamp">${lucideIcon('alert-triangle', 14, 'currentColor')} ${t('sharing.group_skipped')}</span></h4>
-        </div>
-      </div>
-    </div>`;
-  }
-
-  html += `</div>
-    <div class="sharing-bottom-actions">
-      <button class="sharing-action-btn" data-action="sharing-create-group">${lucideIcon('plus', 14)} ${t('sharing.create_group')}</button>
-      <button class="sharing-action-btn" data-action="sharing-open-join-code">${lucideIcon('log-in', 14)} ${t('sharing.join_group')}</button>
-    </div>`;
-
-  container.innerHTML = html;
-}
-
 // ── Actions (exposed on window) ─────────────────────────────────
 
 async function sharingCreateGroup() {
@@ -299,7 +209,7 @@ async function sharingCreateGroupSubmit() {
     const group = await state.sharing.createGroup(name, renderProgress);
     overlay.remove();
     showToast(t('sharing.group_created'), 'success');
-    renderSharingPane();
+    window.renderGroups?.();
   } catch (e) {
     showToast(e.message, 'error');
     delete overlay.dataset.creating;
@@ -369,9 +279,8 @@ async function sharingCopyMemberCode(groupId, token) {
 }
 
 async function sharingInvite(groupId, btnEl, inputEl) {
-  // The invite row is rendered both in Settings → Sharing and in the Group
-  // tab: resolve the input relative to the clicked element instead of a
-  // global id lookup so the two copies never read each other's field.
+  // Resolve the invite input relative to the clicked element rather than a
+  // global id lookup, so the handler always reads the field the user typed in.
   const row = btnEl?.closest('.sharing-invite-row') || inputEl?.closest('.sharing-invite-row');
   const input = inputEl || row?.querySelector('.sharing-invite-input') || document.getElementById(`sharingInvite-${groupId}`);
   const name = input?.value.trim();
@@ -386,7 +295,7 @@ async function sharingInvite(groupId, btnEl, inputEl) {
       || (result?.token && state.sharing.getMemberInviteLink ? state.sharing.getMemberInviteLink(groupId, result.token, result.expiresAt) : null)
       || state.sharing.getInviteLink?.(groupId)
       || null;
-    renderSharingPane();
+    window.renderGroups?.();
     if (inviteCode) {
       showInviteCodeModal(name, inviteCode);
     } else {
@@ -409,7 +318,7 @@ async function sharingRemoveMember(groupId, member_id) {
       try {
         await state.sharing.removeUser(groupId, member_id);
         showToast(t('sharing.member_removed'), 'info');
-        renderSharingPane();
+        window.renderGroups?.();
       } catch (e) { showToast(e.message, 'error'); }
     },
     null,
@@ -437,7 +346,7 @@ async function sharingUnjoinGroup(groupId) {
         setConfirmActionProgress(t('sharing.refreshing_views'));
         await _refreshViewsAfterItemsChanged();
         showToast(t('sharing.left_group'), 'info');
-        renderSharingPane();
+        window.renderGroups?.();
         document.dispatchEvent(new CustomEvent('sharing-changed'));
       } catch (e) { showToast(e.message, 'error'); }
     },
@@ -476,7 +385,7 @@ async function sharingEditMyName(groupId, member_id, currentName) {
     try {
       await state.sharing.updateMyDisplayName(groupId, newName);
       showToast(t('sharing.name_updated'), 'info');
-      renderSharingPane();
+      window.renderGroups?.();
     } catch (e) {
       showToast(e.message, 'error');
       nameSpan.innerHTML = prevHtml;
@@ -535,7 +444,7 @@ async function sharingRenameGroup(groupId, el) {
     try {
       await state.sharing.renameGroup(groupId, newName);
       showToast(t('sharing.group_renamed'), 'success');
-      renderSharingPane();
+      window.renderGroups?.();
     } catch (e) {
       showToast(e.message, 'error');
       h4.innerHTML = prevHtml;
@@ -729,7 +638,7 @@ async function sharingDeleteGroup(groupId) {
         setConfirmActionProgress(t('sharing.refreshing_views'));
         await _refreshViewsAfterItemsChanged();
         showToast(t('sharing.group_deleted'), 'info');
-        renderSharingPane();
+        window.renderGroups?.();
         // Refresh all pages to reflect changes
         document.dispatchEvent(new CustomEvent('sharing-changed'));
       } catch (e) { showToast(e.message, 'error'); }
@@ -779,7 +688,7 @@ export async function handleJoinCode(rawCode, opts = {}) {
   const existing = state.sharing.getGroupByFolderId?.(connectionRef);
   if (existing) {
     showToast(t('sharing.already_joined', existing.name || ''), 'info');
-    renderSharingPane();
+    window.renderGroups?.();
     return true;
   }
 
@@ -789,7 +698,7 @@ export async function handleJoinCode(rawCode, opts = {}) {
       showJoinConfirmModal(group, (name) => state.sharing.joinWithFileIds(null, { display_name: name }));
     } else {
       showToast(t('sharing.joined_group', group.name || ''), 'success');
-      renderSharingPane();
+      window.renderGroups?.();
     }
     return true;
   }
@@ -907,7 +816,7 @@ function showJoinConfirmModal(group, onConfirm) {
       overlay.remove();
       document.getElementById('sharingJoinModal')?.remove();
       showToast(t('sharing.joined_group', joined?.name || group.name || ''), 'success');
-      renderSharingPane();
+      window.renderGroups?.();
     } catch (e) {
       console.warn('join confirm failed:', e);
       if (errEl) { errEl.textContent = e.message || t('sharing.join_failed'); errEl.style.display = ''; }
@@ -966,7 +875,7 @@ async function sharingOpenJoinPicker(folderId) {
         if (group) {
           document.getElementById('sharingJoinModal')?.remove();
           showToast(t('sharing.joined_group', group.name || ''), 'success');
-          renderSharingPane();
+          window.renderGroups?.();
           return;
         }
       }
@@ -1306,16 +1215,6 @@ async function sharingCompleteSubmit(groupId, itemId) {
   }
 }
 
-// ── i18n for settings pane labels ───────────────────────────────
-
-export function applySettingsI18n() {
-  const titleEl = document.getElementById('settingsPaneSharingTitle');
-  if (titleEl) titleEl.textContent = t('sharing.title');
-  const navEl = document.getElementById('settingsNavSharing');
-  if (navEl) navEl.textContent = t('sharing.title');
-}
-
-
 // ── Expose actions on window (CSP delegation handled in js/delegation.js) ──
 
 window.sharingCreateGroup = sharingCreateGroup;
@@ -1338,7 +1237,7 @@ window.sharingOpenJoinPicker = sharingOpenJoinPicker;
 window.submitSharePopover = submitSharePopover;
 window.sharePopoverOpenSharing = function() {
   closeSharePopover();
-  if (typeof window.openSettings === 'function') window.openSettings('sharing');
-  else location.hash = '#settings/sharing';
+  if (typeof window.switchView === 'function') window.switchView('groups');
+  else location.hash = '#groups';
 };
 window.sharingCompleteSubmit = sharingCompleteSubmit;

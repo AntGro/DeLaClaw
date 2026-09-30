@@ -294,7 +294,7 @@ sequenceDiagram
             rect rgb(253, 237, 236)
             opt Any required file (group.json, todos/habits/lists.json) fails to download
                 OWN-->>App: "Error for that file"
-                App->>App: "Group skipped this cycle — never partially loaded<br/>(a half-loaded group could show items as missing, and the user might recreate them,<br/>then the real file loads and there are duplicates)<br/>Shown with a 'skipped' chip in the Sharing pane<br/>Retried on the next page load — the 15s poll does not re-attempt it<br/>Other groups are unaffected"
+                App->>App: "Group skipped this cycle — never partially loaded<br/>(a half-loaded group could show items as missing, and the user might recreate them,<br/>then the real file loads and there are duplicates)<br/>Shown with a 'skipped' chip in the Group tab sidebar<br/>Retried on the next page load — the 15s poll does not re-attempt it<br/>Other groups are unaffected"
             end
             end
         end
@@ -308,7 +308,7 @@ sequenceDiagram
             App->>Page: "Info toast — no longer have access to the group"
         end
         opt Download fails otherwise (transient — throttled or<br/>unknown-reason 403, 5xx, network blip)
-            App->>App: "Group skipped this cycle — never partially loaded<br/>and never purged (transient failures never purge)<br/>Shown with a 'skipped' chip in the Sharing pane<br/>Retried on the next page load — the 15s poll does not re-attempt it"
+            App->>App: "Group skipped this cycle — never partially loaded<br/>and never purged (transient failures never purge)<br/>Shown with a 'skipped' chip in the Group tab sidebar<br/>Retried on the next page load — the 15s poll does not re-attempt it"
         end
         end
     end

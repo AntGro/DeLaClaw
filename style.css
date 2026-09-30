@@ -2098,6 +2098,8 @@ a.sharing-drive-link{text-decoration:none;}
 .groups-list-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--text);cursor:pointer;text-align:left;font-family:inherit;}
 .groups-list-item:hover{background:var(--surface2);}
 .groups-list-item.selected{background:color-mix(in srgb,var(--accent) 12%,transparent);border-color:color-mix(in srgb,var(--accent) 45%,transparent);}
+.groups-list-item-skipped{opacity:0.8;cursor:default;}
+.groups-list-item-skipped:hover{background:transparent;}
 .groups-list-item-icon{display:inline-flex;color:var(--muted);flex-shrink:0;}
 .groups-list-item.selected .groups-list-item-icon{color:var(--accent);}
 .groups-list-item-text{min-width:0;}

@@ -47,6 +47,18 @@ function ensureSubscribed() {
   });
 }
 
+function skippedGroupItemHtml(s) {
+  // A group whose files failed to load transiently this session — shown
+  // disabled with a chip instead of being silently dropped; retried on
+  // the next page load. Not selectable: its data isn't loaded.
+  return `<div class="groups-list-item groups-list-item-skipped" aria-disabled="true">
+    <span class="groups-list-item-icon">${lucideIcon('alert-triangle', 16, 'currentColor')}</span>
+    <span class="groups-list-item-text">
+      <span class="groups-list-item-name">${esc(s.name)}<span class="sharing-group-skipped-stamp">${lucideIcon('alert-triangle', 14, 'currentColor')} ${t('sharing.group_skipped')}</span></span>
+    </span>
+  </div>`;
+}
+
 /** Select a group (null = back to the list). Exposed for data-action delegation. */
 export function selectGroup(groupId) {
   selectedGroupId = groupId || null;
@@ -98,7 +110,7 @@ export async function renderGroups() {
 
   const activeMode = localStorage.getItem('claw_cc_active_mode');
 
-  // Demo mode — same guard as the Settings → Sharing pane.
+  // Demo mode — group management is not available in the demo.
   if (activeMode === 'demo') {
     container.innerHTML = `<div class="page-empty-state">
       <div class="empty-icon">${lucideIcon('users', 48, 'var(--muted)')}</div>
@@ -121,9 +133,14 @@ export async function renderGroups() {
   if (selectedGroupId && !groups.some(g => g.id === selectedGroupId)) selectedGroupId = null;
   const selected = selectedGroupId ? groups.find(g => g.id === selectedGroupId) : null;
 
-  const listHtml = groups.length === 0
+  // Groups whose files failed to load transiently this session — listed
+  // disabled with a chip instead of being silently dropped.
+  const skippedGroups = state.sharing.getSkippedGroups?.() || [];
+
+  const listHtml = groups.length === 0 && skippedGroups.length === 0
     ? `<p class="setting-hint">${t('sharing.no_groups_hint')}</p>`
-    : groups.map(g => groupListItemHtml(g, g.id === selectedGroupId)).join('');
+    : groups.map(g => groupListItemHtml(g, g.id === selectedGroupId)).join('')
+      + skippedGroups.map(skippedGroupItemHtml).join('');
 
   const detailHtml = selected
     ? `<button class="btn groups-back-btn" data-action="groups-back">${lucideIcon('chevron-left', 16)} ${t('groups.back_to_groups')}</button>

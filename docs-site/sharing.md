@@ -8,7 +8,7 @@ This page describes the sharing implementation — built from the 14 design deci
 
 Sharing is **decentralized**: there is no central DeLaClaw server. One user (the **creator**) hosts the shared data in a folder on their own Google Drive, and other users (**members**) connect to it via invite codes. The creator's folder is the single source of truth for all group data.
 
-Groups are managed from the **Group** tab (also available under Settings → Sharing): the sidebar lists your groups with an Add Group button, and selecting a group shows its members, invite field, shared-item count, and delete/leave controls.
+Groups are managed from the **Group** tab: the sidebar lists your groups with an Add / Join Group button, and selecting a group shows its members, invite field, shared-item count, and delete/leave controls.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'primaryColor': '#ffffff', 'primaryBorderColor': '#cbd5e1', 'primaryTextColor': '#0f172a', 'lineColor': '#334155'}}}%%

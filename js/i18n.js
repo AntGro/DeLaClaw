@@ -505,7 +505,6 @@ const T = {
       updated_h_ago: 'Updated {0}h ago',
     },
     sharing: {
-      title: 'Sharing',
       groups: 'Groups',
       create_group: 'Create a group',
       group_name: 'Group name',
@@ -1215,7 +1214,6 @@ const T = {
       updated_h_ago: 'Mis \u00e0 jour il y a {0}h',
     },
     sharing: {
-      title: 'Partage',
       groups: 'Groupes',
       create_group: 'Cr\u00e9er un groupe',
       group_name: 'Nom du groupe',
@@ -1926,7 +1924,6 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       updated_h_ago: 'Actualizado hace {0}h',
     },
     sharing: {
-      title: 'Compartir',
       groups: 'Grupos',
       create_group: 'Crear un grupo',
       group_name: 'Nombre del grupo',

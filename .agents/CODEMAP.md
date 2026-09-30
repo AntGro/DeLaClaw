@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-30T09:07:35.849Z from 39 modules (v2.10.3). Total LOC 30355. Do not hand-edit.
+> Generated 2026-09-30T09:15:27.061Z from 39 modules (v2.10.4). Total LOC 30259. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -26,11 +26,11 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 3712 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
+| main | 3703 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
 | sharing-drive | 2391 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
-| i18n | 2204 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
+| i18n | 2201 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | pendingSet |
 | drive | 1463 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
-| sharing-ui | 1345 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | groups.js,habits.js,lists.js,main.js | esc:39,guard+pendingSet,window:8 |
+| sharing-ui | 1244 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | groups.js,habits.js,lists.js,todos.js | esc:38,guard+pendingSet,window:8 |
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
 | calendar-sync | 1198 | birthdays,gcal_sync,habits,settings,todos | drive-folders,habits,i18n,icons | main.js | - |
 | utils | 901 | flashcards,x | i18n,icons,state,version | - | esc:7,window:6 |
@@ -44,8 +44,8 @@
 | icons | 210 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
 | agents-ui | 200 | agent_grants | db,i18n,icons,utils | main.js | esc:29,window:5 |
 | storm3d | 185 | - |  | hero.js | - |
+| groups | 169 | - | i18n,icons,sharing-ui,state | main.js | esc:3,window:4 |
 | rest | 162 | x |  | main.js | - |
-| groups | 152 | - | i18n,icons,sharing-ui,state | main.js | esc:2,window:4 |
 | sharing-interface | 135 | - |  | sharing.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
 | sharing | 100 | - | sharing-drive,sharing-interface | - | - |

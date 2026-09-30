@@ -1342,11 +1342,12 @@ test('access-loss notice is a single toast; skipped groups get a chip', () => {
   assert(drive.includes('_skippedGroups.delete(groupId)'),
     'handleStaleGroup must clear a stale skip mark when purging');
 
-  // sharing-ui: skipped groups render with a chip in the Sharing pane.
-  assert(sui.includes('getSkippedGroups?.()'),
-    'renderSharingPane must read the skipped groups');
-  assert(sui.includes('sharing-group-skipped-stamp'),
-    'renderSharingPane must render skipped groups with a chip');
+  // groups.js: skipped groups render with a chip in the Group tab sidebar.
+  const groups = fs.readFileSync(path.join(JS_DIR, 'groups.js'), 'utf-8');
+  assert(groups.includes('getSkippedGroups?.()'),
+    'renderGroups must read the skipped groups');
+  assert(groups.includes('sharing-group-skipped-stamp'),
+    'renderGroups must render skipped groups with a chip');
   assert(css.includes('.sharing-group-skipped-stamp'),
     'style.css must define the skipped chip');
 
@@ -1656,19 +1657,16 @@ test('sharing async buttons use the standard busy shimmer', () => {
   assert(uses >= 4, `expected at least 4 setBtnBusy(btn, true) uses, found ${uses}`);
 });
 
-test('sharing tab shows with loading state while init is pending', () => {
-  // The Sharing tab must render alongside the other settings tabs even
-  // before the async Drive sharing init finishes — the pane shows a loading
-  // state and fills in on completion, instead of the tab popping in late.
-  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
-  const visFn = sui.slice(sui.indexOf('function updateSharingNavVisibility'));
-  assert(visFn.includes("'googledrive'"),
-    'sharing nav must show the tab while Drive sharing init is pending');
-  assert(sui.includes('sharingInitFailed'),
-    'a failed sharing init must hide the tab again');
-  const paneFn = sui.slice(sui.indexOf('async function renderSharingPane'));
-  assert(paneFn.includes("t('common.loading')"),
-    'sharing pane must render a loading state while init is pending');
+test('Group tab shows with loading state while init is pending', () => {
+  // Sharing management lives in the Group tab now (the Settings → Sharing
+  // pane was removed). The tab renders a loading state while the async
+  // Drive sharing init is pending and fills in on completion.
+  const groups = fs.readFileSync(path.join(JS_DIR, 'groups.js'), 'utf-8');
+  const renderFn = groups.slice(groups.indexOf('async function renderGroups'));
+  assert(renderFn.includes("'googledrive'") && renderFn.includes("t('common.loading')"),
+    'renderGroups must render a loading state while Drive sharing init is pending');
+  assert(renderFn.includes('sharingInitFailed'),
+    'renderGroups must fall back to the not-available hint when init failed');
 });
 
 test('sharing join picker accepts every required file key', () => {
@@ -2303,7 +2301,10 @@ test('sharing uses pasted DLC1 invite codes instead of #join links', () => {
   const env = fs.readFileSync(path.join(JS_DIR, 'sharing-envelope.js'), 'utf-8');
   assert(env.includes('DLC1.'), 'sharing-envelope.js missing DLC1 invite-code prefix');
   assert(sui.includes('handleJoinCode'), 'sharing-ui.js missing pasted invite-code handler');
-  assert(sui.includes('sharing-open-join-code'), 'sharing-ui.js missing Join group paste entry point');
+  assert(sui.includes('function sharingOpenJoinCodeModal'), 'sharing-ui.js missing Join group paste entry point');
+  const groups = fs.readFileSync(path.join(JS_DIR, 'groups.js'), 'utf-8');
+  assert(groups.includes("window.sharingOpenJoinCodeModal?.()"),
+    'the Group tab Add/Join menu must open the join-code modal');
   assert(!main.includes('#join='), 'main.js must not keep URL-hash invite join handling');
 });
 

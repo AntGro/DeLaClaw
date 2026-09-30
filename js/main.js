@@ -15,14 +15,14 @@ import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStat
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
 
-const SETTINGS_PANES = ['general', 'calendar', 'sharing', 'data', 'stats', 'agents', 'account'];
+const SETTINGS_PANES = ['general', 'calendar', 'data', 'stats', 'agents', 'account'];
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
 import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
 import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthdays.js';
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals, syncSharedListItems } from './lists.js';
 import { renderGroups } from './groups.js';
-import { updateSharingNavVisibility, renderSharingPane, applySettingsI18n as applySharingI18n } from './sharing-ui.js';
+import './sharing-ui.js'; // side effects: window.* sharing actions
 import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
 import { DEFAULT_CATEGORY_PALETTE, GENERAL_CATEGORY_COLOR } from './state.js';
@@ -1050,6 +1050,8 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     const hash = location.hash;
     // Settings deep links
     if (hash === '#settings' || hash.startsWith('#settings/')) {
+      // The Settings → Sharing pane was removed — sharing lives in the Group tab
+      if (hash === '#settings/sharing') { location.hash = '#groups'; return; }
       const pane = hash.split('/')[1] || 'general';
       const modal = document.getElementById('settingsModal');
       if (!modal?.classList.contains('visible')) openSettings(pane);
@@ -1120,7 +1122,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   document.addEventListener('sharing-group-unreachable', (e) => {
     const name = e.detail?.groupName || '';
     showToast(t('sharing.group_unreachable', name), 'info');
-    renderSharingPane();
+    renderGroups();
   });
   document.addEventListener('sharing-group-deletion-confirm', async (e) => {
     const { groupId, groupName } = e.detail || {};
@@ -1130,7 +1132,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       t('sharing.group_confirm_delete_msg', groupName),
       async () => {
         await state.sharing.confirmGroupDeletion(groupId);
-        renderSharingPane();
+        renderGroups();
       },
       null,
       {
@@ -1140,13 +1142,13 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
         iconSvg: lucideIcon('wifi-off', 24, 'currentColor'),
         onCancel: () => {
           state.sharing.keepGroup(groupId);
-          renderSharingPane();
+          renderGroups();
         },
       }
     );
   });
   document.addEventListener('sharing-group-recovered', () => {
-    renderSharingPane();
+    renderGroups();
   });
 
   // Drive: wire poll-based change detection to the same refresh functions
@@ -1197,11 +1199,6 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
           showToast(t('sharing.member_joined', name, detail.group?.name || ''), 'success');
         }
       });
-      updateSharingNavVisibility();
-      // If the user already opened the Sharing pane while init was pending
-      // (loading state), fill it in now.
-      const sharingPane = document.getElementById('settingsPane-sharing');
-      if (sharingPane?.classList.contains('active')) renderSharingPane();
       // Same for the Group tab: the initial switchView() ran before sharing
       // init, leaving it stuck on the loading state.
       if (state.currentView === 'groups') renderGroups();
@@ -1209,9 +1206,6 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     } catch (e) { console.warn('sharing init:', e); state.sharingInitFailed = true; }
   }
 
-
-  // Always update sharing nav visibility (even if sharing init failed or was skipped)
-  updateSharingNavVisibility();
 
   // Ensure shared groups/items are loaded before the first feature refresh.
   // Otherwise local shared pointers render as blank rows until the next poll.
@@ -1264,9 +1258,6 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     } catch (e) {
       console.warn('sharing refresh:', e);
     }
-    // Re-render sharing pane if it's currently visible
-    const sharingPane = document.getElementById('settingsPane-sharing');
-    if (sharingPane?.classList.contains('active')) renderSharingPane();
     // Update footer groups count
     const footerGc = document.getElementById('footerGroupCount');
     if (footerGc && state.sharing) {
@@ -1841,7 +1832,6 @@ function updateStaticLabels() {
   if (settingsNavStats) settingsNavStats.textContent = t('menu.settings_stats');
   const settingsPaneStatsTitle = document.getElementById('settingsPaneStatsTitle');
   if (settingsPaneStatsTitle) settingsPaneStatsTitle.textContent = t('menu.settings_stats');
-  applySharingI18n();
   applyAgentsI18n();
   // Account pane i18n
   const settingsNavAccountLabel = document.getElementById('settingsNavAccountLabel');
@@ -2180,7 +2170,6 @@ function switchSettingsPane(paneKey) {
     pane.classList.toggle('active', pane.id === `settingsPane-${paneKey}`);
   });
   if (paneKey === 'stats') { loadUsageStats(); }
-  if (paneKey === 'sharing') { renderSharingPane(); }
   if (paneKey === 'agents') { renderAgentsPane(); }
   // Sync URL hash
   const settingsHash = paneKey === 'general' ? '#settings' : '#settings/' + paneKey;
@@ -3349,6 +3338,8 @@ function expandParentIfNeeded(type, id, el) {
 function handleStartupDeepLink() {
   // Settings deep link on startup
   if (location.hash === '#settings' || location.hash.startsWith('#settings/')) {
+    // The Settings → Sharing pane was removed — sharing lives in the Group tab
+    if (location.hash === '#settings/sharing') { location.hash = '#groups'; return; }
     const pane = location.hash.split('/')[1] || 'general';
     openSettings(pane);
     return;

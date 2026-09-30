@@ -3457,6 +3457,35 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'poll must skip types that are dirty or flushing');
     });
 
+    test('sharing poll discovers groups created or joined on another device', () => {
+      const pollStart = drive.indexOf('async poll()');
+      assert(pollStart !== -1, 'poll must exist');
+      const pollBody = drive.slice(pollStart, drive.indexOf('async handleStaleGroup', pollStart));
+      assert(pollBody.includes('if (_loaded) {'),
+        'poll discovery must wait for the initial load to avoid racing loadAll');
+      assert(/for \(const row of _groupRows\)[\s\S]*?!row\?\.id \|\| _groups\.has\(row\.id\)/.test(pollBody),
+        'poll discovery must skip rows already in memory');
+      assert(pollBody.includes('driveFindFolder(tok, GROUP_PREFIX + row.id'),
+        'poll discovery must load created rows via the deterministic folder name');
+      assert(pollBody.includes("emit('group-discovered'"),
+        'poll discovery must announce newly loaded groups');
+      assert(/isDefiniteAccessLoss\(err\)\) \{[\s\S]*?await this\.handleStaleGroup\(row\.id\)/.test(pollBody),
+        'poll discovery must purge joined rows hit by definite access loss');
+    });
+
+    test('group-discovered re-renders the Group tab without stealing selection', () => {
+      const groups = fs.readFileSync(path.join(JS_DIR, 'groups.js'), 'utf-8');
+      assert(groups.includes("'group-discovered'"),
+        'STRUCTURAL_EVENTS must include group-discovered');
+      const subStart = groups.indexOf('function ensureSubscribed()');
+      assert(subStart !== -1, 'ensureSubscribed must exist');
+      const subBody = groups.slice(subStart, groups.indexOf('\n}\n', subStart));
+      assert(/event === 'group-created' && detail\?\.group\?\.id/.test(subBody),
+        'auto-select must stay reserved for group-created');
+      assert(!subBody.split('\n').some(l => l.includes('group-discovered') && l.includes('selectedGroupId =')),
+        'group-discovered must not change the tab selection');
+    });
+
     test('hasPendingCreate is exposed on the adapter and the interface', () => {
       assert(drive.includes('hasPendingCreate(groupId, itemId)'),
         'sharing-drive.js must expose hasPendingCreate');

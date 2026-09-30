@@ -1982,6 +1982,54 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // up a join/unjoin/group-creation from another device since the last cycle.
       await refreshGroupRows();
 
+      // Discover groups created or joined on another device since the last
+      // cycle: load any table row not yet in memory (same loading as loadAll,
+      // isolated per group so one bad row can't break the poll). Newly loaded
+      // groups join the per-group loop below and announce themselves with
+      // 'group-discovered' so the UI updates live. Skipped until the initial
+      // load completes to avoid racing loadAll.
+      if (_loaded) {
+        for (const row of _groupRows) {
+          if (!row?.id || _groups.has(row.id)) continue;
+          const skipName = row.name || _storedGroupName(row.id) || row.id;
+          try {
+            if (row.kind === 'created') {
+              const folder = await driveFindFolder(tok, GROUP_PREFIX + row.id, null);
+              if (!folder) {
+                _skippedGroups.set(row.id, { name: skipName });
+                continue;
+              }
+              await loadGroup(folder.id, row.id, { owned: true });
+            } else if (row.kind === 'joined') {
+              try {
+                if (row.file_ids) await loadGroupWithIds(row.folder_id, row.id, row.file_ids);
+                else await loadGroup(row.folder_id, row.id);
+              } catch (err) {
+                if (isDefiniteAccessLoss(err)) {
+                  await this.handleStaleGroup(row.id);
+                  changed = true;
+                  continue;
+                }
+                throw err;
+              }
+            } else {
+              continue;
+            }
+            if (_groups.has(row.id)) {
+              _skippedGroups.delete(row.id);
+              changed = true;
+              // 'group-discovered', not 'group-created': the Group tab
+              // auto-selects on 'group-created', which must stay reserved for
+              // a group created on this device.
+              emit('group-discovered', { group: _groups.get(row.id).group });
+            }
+          } catch (err) {
+            console.warn(`sharing poll discover group ${row.id}:`, err);
+            _skippedGroups.set(row.id, { name: skipName });
+          }
+        }
+      }
+
       for (const [groupId, e] of _groups) {
         // Poll per-type files
         for (const type of ITEM_TYPES) {

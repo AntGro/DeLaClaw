@@ -32,7 +32,7 @@ document.addEventListener('keydown', (e) => {
 // Structural adapter events only: item-level changes (item-added, …) don't
 // affect this view, and re-rendering on them could wipe an in-progress invite.
 const STRUCTURAL_EVENTS = new Set([
-  'group-created', 'group-deleted', 'group-joined',
+  'group-created', 'group-discovered', 'group-deleted', 'group-joined',
   'member-invited', 'member-removed', 'member-joined', 'group-changed',
 ]);
 
@@ -41,6 +41,8 @@ function ensureSubscribed() {
   _subscribed = true;
   state.sharing.onUpdate((event, detail) => {
     if (!STRUCTURAL_EVENTS.has(event)) return;
+    // Auto-select only on 'group-created' (this device): a group discovered
+    // via another device's poll ('group-discovered') must not steal selection.
     if (event === 'group-created' && detail?.group?.id) selectedGroupId = detail.group.id;
     if (event === 'group-deleted' && detail?.groupId === selectedGroupId) selectedGroupId = null;
     if (state.currentView === 'groups') renderGroups();
@@ -49,8 +51,9 @@ function ensureSubscribed() {
 
 function skippedGroupItemHtml(s) {
   // A group whose files failed to load transiently this session — shown
-  // disabled with a chip instead of being silently dropped; retried on
-  // the next page load. Not selectable: its data isn't loaded.
+  // disabled with a chip instead of being silently dropped; retried
+  // automatically (poll discovery and page load). Not selectable: its data
+  // isn't loaded.
   return `<div class="groups-list-item groups-list-item-skipped" aria-disabled="true">
     <span class="groups-list-item-icon">${lucideIcon('alert-triangle', 16, 'currentColor')}</span>
     <span class="groups-list-item-text">

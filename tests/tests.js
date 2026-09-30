@@ -3473,6 +3473,16 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'poll discovery must purge joined rows hit by definite access loss');
     });
 
+    test('sharing poll is single-flight', () => {
+      const pollStart = drive.indexOf('async poll()');
+      assert(pollStart !== -1, 'poll must exist');
+      const pollBody = drive.slice(pollStart, drive.indexOf('async handleStaleGroup', pollStart));
+      assert(pollBody.includes('if (_pollRunning)'),
+        'poll must skip the tick when a previous poll is still running');
+      assert(/_pollRunning = true;[\s\S]*finally \{[\s\S]*_pollRunning = false;/.test(pollBody),
+        'poll must release the guard in a finally block');
+    });
+
     test('group-discovered re-renders the Group tab without stealing selection', () => {
       const groups = fs.readFileSync(path.join(JS_DIR, 'groups.js'), 'utf-8');
       assert(groups.includes("'group-discovered'"),

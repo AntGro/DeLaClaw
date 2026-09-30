@@ -393,6 +393,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
   let _loaded = false;           // true after loadAll() completes
   let _pollTimer = null;
+  let _pollRunning = false;     // single-flight guard for poll()
   let _listeners = [];
 
   // GroupEntry shape:
@@ -1970,170 +1971,187 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     },
 
     async poll() {
-      const tok = await token();
-      let changed = false;
-      const staleGroupIds = [];  // groups to remove after iteration
+      // Single-flight: a poll that overruns the 15s interval must not run
+      // concurrently with the next tick — two overlapping polls could load
+      // the same newly discovered group twice and emit duplicate events.
+      // A skipped tick simply waits for the next one.
+      if (_pollRunning) {
+        console.debug('sharing poll: previous poll still running, skipping tick');
+        return false;
+      }
+      _pollRunning = true;
+      try {
+        // Arrow function so `this` (the adapter) is inherited unchanged.
+        const pollOnce = async () => {
+          const tok = await token();
+          let changed = false;
+          const staleGroupIds = [];  // groups to remove after iteration
 
-      // Our own member ID, so the poll never announces our own join back to us.
-      const me = await ensureUser().catch(() => null);
-      const selfMemberId = me?.email ? await memberIdFromEmail(me.email).catch(() => null) : null;
+          // Our own member ID, so the poll never announces our own join back to us.
+          const me = await ensureUser().catch(() => null);
+          const selfMemberId = me?.email ? await memberIdFromEmail(me.email).catch(() => null) : null;
 
-      // Re-read group rows: the Drive adapter's table poll may have picked
-      // up a join/unjoin/group-creation from another device since the last cycle.
-      await refreshGroupRows();
+          // Re-read group rows: the Drive adapter's table poll may have picked
+          // up a join/unjoin/group-creation from another device since the last cycle.
+          await refreshGroupRows();
 
-      // Discover groups created or joined on another device since the last
-      // cycle: load any table row not yet in memory (same loading as loadAll,
-      // isolated per group so one bad row can't break the poll). Newly loaded
-      // groups join the per-group loop below and announce themselves with
-      // 'group-discovered' so the UI updates live. Skipped until the initial
-      // load completes to avoid racing loadAll.
-      if (_loaded) {
-        for (const row of _groupRows) {
-          if (!row?.id || _groups.has(row.id)) continue;
-          const skipName = row.name || _storedGroupName(row.id) || row.id;
-          try {
-            if (row.kind === 'created') {
-              const folder = await driveFindFolder(tok, GROUP_PREFIX + row.id, null);
-              if (!folder) {
-                _skippedGroups.set(row.id, { name: skipName });
-                continue;
-              }
-              await loadGroup(folder.id, row.id, { owned: true });
-            } else if (row.kind === 'joined') {
+          // Discover groups created or joined on another device since the last
+          // cycle: load any table row not yet in memory (same loading as loadAll,
+          // isolated per group so one bad row can't break the poll). Newly loaded
+          // groups join the per-group loop below and announce themselves with
+          // 'group-discovered' so the UI updates live. Skipped until the initial
+          // load completes to avoid racing loadAll.
+          if (_loaded) {
+            for (const row of _groupRows) {
+              if (!row?.id || _groups.has(row.id)) continue;
+              const skipName = row.name || _storedGroupName(row.id) || row.id;
               try {
-                if (row.file_ids) await loadGroupWithIds(row.folder_id, row.id, row.file_ids);
-                else await loadGroup(row.folder_id, row.id);
-              } catch (err) {
-                if (isDefiniteAccessLoss(err)) {
-                  await this.handleStaleGroup(row.id);
-                  changed = true;
+                if (row.kind === 'created') {
+                  const folder = await driveFindFolder(tok, GROUP_PREFIX + row.id, null);
+                  if (!folder) {
+                    _skippedGroups.set(row.id, { name: skipName });
+                    continue;
+                  }
+                  await loadGroup(folder.id, row.id, { owned: true });
+                } else if (row.kind === 'joined') {
+                  try {
+                    if (row.file_ids) await loadGroupWithIds(row.folder_id, row.id, row.file_ids);
+                    else await loadGroup(row.folder_id, row.id);
+                  } catch (err) {
+                    if (isDefiniteAccessLoss(err)) {
+                      await this.handleStaleGroup(row.id);
+                      changed = true;
+                      continue;
+                    }
+                    throw err;
+                  }
+                } else {
                   continue;
                 }
-                throw err;
+                if (_groups.has(row.id)) {
+                  _skippedGroups.delete(row.id);
+                  changed = true;
+                  // 'group-discovered', not 'group-created': the Group tab
+                  // auto-selects on 'group-created', which must stay reserved for
+                  // a group created on this device.
+                  emit('group-discovered', { group: _groups.get(row.id).group });
+                }
+              } catch (err) {
+                console.warn(`sharing poll discover group ${row.id}:`, err);
+                _skippedGroups.set(row.id, { name: skipName });
               }
-            } else {
-              continue;
             }
-            if (_groups.has(row.id)) {
-              _skippedGroups.delete(row.id);
-              changed = true;
-              // 'group-discovered', not 'group-created': the Group tab
-              // auto-selects on 'group-created', which must stay reserved for
-              // a group created on this device.
-              emit('group-discovered', { group: _groups.get(row.id).group });
-            }
-          } catch (err) {
-            console.warn(`sharing poll discover group ${row.id}:`, err);
-            _skippedGroups.set(row.id, { name: skipName });
           }
-        }
-      }
 
-      for (const [groupId, e] of _groups) {
-        // Poll per-type files
-        for (const type of ITEM_TYPES) {
-          // Skip types with unflushed local changes or an upload in flight —
-          // same rule as the personal tables (js/adapters/drive.js): the
-          // debounced flush owns the upload until it settles.
-          const fkey = _sharedFlushKey(groupId, type);
-          if (_sharedDirty.has(fkey) || _sharedFlushing.has(fkey)) continue;
-          const meta = e.typeMeta[type];
-          if (!meta?.fileId) {
-            // For joined groups without a file ID, skip (can't discover by search under drive.file)
-            if (e.joinedViaLink) continue;
-            // Check if file was created by another user since last poll
+          for (const [groupId, e] of _groups) {
+            // Poll per-type files
+            for (const type of ITEM_TYPES) {
+              // Skip types with unflushed local changes or an upload in flight —
+              // same rule as the personal tables (js/adapters/drive.js): the
+              // debounced flush owns the upload until it settles.
+              const fkey = _sharedFlushKey(groupId, type);
+              if (_sharedDirty.has(fkey) || _sharedFlushing.has(fkey)) continue;
+              const meta = e.typeMeta[type];
+              if (!meta?.fileId) {
+                // For joined groups without a file ID, skip (can't discover by search under drive.file)
+                if (e.joinedViaLink) continue;
+                // Check if file was created by another user since last poll
+                try {
+                  const file = await driveFindFile(tok, e.folderId, `${type}.json`);
+                  if (file) {
+                    const { data, etag } = await driveDownload(tok, file.id);
+                    e.typeData[type] = reconcileItems(e.typeData[type] || [], Array.isArray(data) ? data : [], intentStateFor(e, type));
+                    e.typeMeta[type] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+                    changed = true;
+                  }
+                } catch (err) { console.warn(`sharing poll discover ${type} ${groupId}:`, err); }
+                continue;
+              }
+              try {
+                const fileMeta = await driveFileMeta(tok, meta.fileId);
+                if (fileMeta.modifiedTime > (meta.modifiedTime || '')) {
+                  const { data, etag } = await driveDownload(tok, meta.fileId);
+                  const remote = Array.isArray(data) ? data : [];
+                  if (_itemsChangedDrive(e.typeData[type] || [], remote)) {
+                    e.typeData[type] = reconcileItems(e.typeData[type] || [], remote, intentStateFor(e, type));
+                    e.typeMeta[type].etag = etag;
+                    e.typeMeta[type].modifiedTime = fileMeta.modifiedTime;
+                    changed = true;
+                    emit('items-changed', { groupId, type, items: e.typeData[type] });
+                  }
+                }
+              } catch (err) { console.warn(`sharing poll ${type} ${groupId}:`, err); }
+            }
+
+            // Poll group.json (membership changes)
+            if (e.gMeta.fileId) {
+              try {
+                const meta = await driveFileMeta(tok, e.gMeta.fileId);
+                if (meta.modifiedTime > (e.gMeta.modifiedTime || '')) {
+                  const { data, etag } = await driveDownload(tok, e.gMeta.fileId);
+                  const normalizedGroup = data ? await normalizeGroup(data, groupId) : null;
+                  if (normalizedGroup && !deepEqual(normalizedGroup, e.group)) {
+                    // Members who just joined (pending → joined since our last
+                    // view): announce them so the UX can toast. Diffed before the
+                    // local state is overwritten; our own member ID is excluded.
+                    const wasJoined = new Set((e.group.members || [])
+                      .filter(m => m.status === 'joined').map(m => m.member_id));
+                    const freshJoins = (normalizedGroup.members || []).filter(m =>
+                      m.status === 'joined' && m.member_id && !wasJoined.has(m.member_id) && m.member_id !== selfMemberId);
+                    // Intent-aware roster: rows this tab created but hasn't
+                    // flushed yet survive the overwrite, so a poll landing
+                    // mid-upload can't drop them; everything else takes the
+                    // remote version.
+                    const members = reconcileMembers(
+                      e.group.members || [], normalizedGroup.members || [], memberIntentsFor(e));
+                    // A creator-side rename arrives here: persist the new name on
+                    // the local groups row so name lookups stay correct even when
+                    // the Drive folder is unreachable.
+                    const nameChanged = normalizedGroup.name && normalizedGroup.name !== e.group.name;
+                    Object.assign(e.group, normalizedGroup);
+                    e.group.members = members;
+                    if (nameChanged) await _updateGroupRowName(groupId, normalizedGroup.name);
+                    e.gMeta.etag = etag;
+                    e.gMeta.modifiedTime = meta.modifiedTime;
+                    changed = true;
+                    emit('group-changed', { groupId, group: e.group });
+                    for (const m of freshJoins) emit('member-joined', { groupId, group: e.group, member: m });
+                  }
+                }
+              } catch (err) {
+                // Group files unreachable. A definite access loss (member removed
+                // or group deleted) queues the group for cleanup; anything else —
+                // throttled or unknown-reason 403s, 5xx, network blips — is
+                // transient and retried on the next poll.
+                if (isDefiniteAccessLoss(err)) {
+                  staleGroupIds.push(groupId);
+                } else {
+                  console.warn(`sharing poll group ${groupId}:`, err);
+                }
+              }
+            }
+
+            // Creator-side: process 'left' markers — revoke those members' Drive
+            // access (only the folder owner can) and clear the entries.
             try {
-              const file = await driveFindFile(tok, e.folderId, `${type}.json`);
-              if (file) {
-                const { data, etag } = await driveDownload(tok, file.id);
-                e.typeData[type] = reconcileItems(e.typeData[type] || [], Array.isArray(data) ? data : [], intentStateFor(e, type));
-                e.typeMeta[type] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
-                changed = true;
-              }
-            } catch (err) { console.warn(`sharing poll discover ${type} ${groupId}:`, err); }
-            continue;
+              if (await isCreatorOf(groupId)) await revokeLeftMembers(groupId, tok);
+            } catch (err) { console.warn(`sharing poll revoke-left ${groupId}:`, err); }
           }
-          try {
-            const fileMeta = await driveFileMeta(tok, meta.fileId);
-            if (fileMeta.modifiedTime > (meta.modifiedTime || '')) {
-              const { data, etag } = await driveDownload(tok, meta.fileId);
-              const remote = Array.isArray(data) ? data : [];
-              if (_itemsChangedDrive(e.typeData[type] || [], remote)) {
-                e.typeData[type] = reconcileItems(e.typeData[type] || [], remote, intentStateFor(e, type));
-                e.typeMeta[type].etag = etag;
-                e.typeMeta[type].modifiedTime = fileMeta.modifiedTime;
-                changed = true;
-                emit('items-changed', { groupId, type, items: e.typeData[type] });
-              }
-            }
-          } catch (err) { console.warn(`sharing poll ${type} ${groupId}:`, err); }
-        }
 
-        // Poll group.json (membership changes)
-        if (e.gMeta.fileId) {
-          try {
-            const meta = await driveFileMeta(tok, e.gMeta.fileId);
-            if (meta.modifiedTime > (e.gMeta.modifiedTime || '')) {
-              const { data, etag } = await driveDownload(tok, e.gMeta.fileId);
-              const normalizedGroup = data ? await normalizeGroup(data, groupId) : null;
-              if (normalizedGroup && !deepEqual(normalizedGroup, e.group)) {
-                // Members who just joined (pending → joined since our last
-                // view): announce them so the UX can toast. Diffed before the
-                // local state is overwritten; our own member ID is excluded.
-                const wasJoined = new Set((e.group.members || [])
-                  .filter(m => m.status === 'joined').map(m => m.member_id));
-                const freshJoins = (normalizedGroup.members || []).filter(m =>
-                  m.status === 'joined' && m.member_id && !wasJoined.has(m.member_id) && m.member_id !== selfMemberId);
-                // Intent-aware roster: rows this tab created but hasn't
-                // flushed yet survive the overwrite, so a poll landing
-                // mid-upload can't drop them; everything else takes the
-                // remote version.
-                const members = reconcileMembers(
-                  e.group.members || [], normalizedGroup.members || [], memberIntentsFor(e));
-                // A creator-side rename arrives here: persist the new name on
-                // the local groups row so name lookups stay correct even when
-                // the Drive folder is unreachable.
-                const nameChanged = normalizedGroup.name && normalizedGroup.name !== e.group.name;
-                Object.assign(e.group, normalizedGroup);
-                e.group.members = members;
-                if (nameChanged) await _updateGroupRowName(groupId, normalizedGroup.name);
-                e.gMeta.etag = etag;
-                e.gMeta.modifiedTime = meta.modifiedTime;
-                changed = true;
-                emit('group-changed', { groupId, group: e.group });
-                for (const m of freshJoins) emit('member-joined', { groupId, group: e.group, member: m });
-              }
+          // Clean up groups whose files are gone (group deleted, or we were removed)
+          if (staleGroupIds.length) {
+            for (const gid of staleGroupIds) {
+              await this.handleStaleGroup(gid);
             }
-          } catch (err) {
-            // Group files unreachable. A definite access loss (member removed
-            // or group deleted) queues the group for cleanup; anything else —
-            // throttled or unknown-reason 403s, 5xx, network blips — is
-            // transient and retried on the next poll.
-            if (isDefiniteAccessLoss(err)) {
-              staleGroupIds.push(groupId);
-            } else {
-              console.warn(`sharing poll group ${groupId}:`, err);
-            }
+            changed = true;
           }
-        }
 
-        // Creator-side: process 'left' markers — revoke those members' Drive
-        // access (only the folder owner can) and clear the entries.
-        try {
-          if (await isCreatorOf(groupId)) await revokeLeftMembers(groupId, tok);
-        } catch (err) { console.warn(`sharing poll revoke-left ${groupId}:`, err); }
+          return changed;
+        };
+        return await pollOnce();
+      } finally {
+        _pollRunning = false;
       }
-
-      // Clean up groups whose files are gone (group deleted, or we were removed)
-      if (staleGroupIds.length) {
-        for (const gid of staleGroupIds) {
-          await this.handleStaleGroup(gid);
-        }
-        changed = true;
-      }
-
-      return changed;
     },
 
     /**

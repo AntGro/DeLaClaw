@@ -8,7 +8,7 @@ Status: Accepted
 Goal was a personal life OS you can run forever with zero recurring cost:
 
 - Host cost must be 0 → GitHub Pages serves static `index.html`, no server to run for the author
-- Scaling cost must be 0 → BYOB (bring your own backend): Supabase (free tier), Local Bun+SQLite, Google Drive, or in-memory Demo. Author pays zero per user.
+- Scaling cost must be 0 → BYOB (bring your own backend): Local Bun+SQLite, Google Drive, or in-memory Demo. Author pays zero per user.
 - Longevity matters — code should be readable and forkable in 10 years, no framework churn, no `npm install` to audit.
 
 Framework + bundler would add build complexity, supply-chain risk, and break the GitHub Pages zero-host model.
@@ -17,9 +17,9 @@ Framework + bundler would add build complexity, supply-chain risk, and break the
 
 - Single-page app, vanilla JS ES modules, no build step
 - `index.html` is the entry — open it via GitHub Pages, no bundler
-- Vendor JS self-hosted in `vendor/` (supabase, three) except Google Identity (ToS requires CDN, explicitly allowed via CSP)
+- Vendor JS self-hosted in `vendor/` (three) except Google Identity (ToS requires CDN, explicitly allowed via CSP)
 - PWA via `sw.js` with exact `PRECACHE_URLS`, `CACHE_VERSION` bumped by hook
-- Backend abstraction via `js/db.js` proxy — same surface for Supabase / REST / Drive / Demo (BYOB)
+- Backend abstraction via `js/db.js` proxy — same surface for REST / Drive / Demo (BYOB)
 
 ## Consequences
 

@@ -5,7 +5,7 @@ Status: Accepted
 
 ## Context
 
-DeLaClaw mutates data in place (toggle TODO DONE, mark habit DONE, approve task, save modals). Users sometimes click the same action multiple times. Because network operations (Supabase + offline-cache + Drive) can be slow, the same action may execute multiple times before the first promise settles.
+DeLaClaw mutates data in place (toggle TODO DONE, mark habit DONE, approve task, save modals). Users sometimes click the same action multiple times. Because network operations (offline-cache + Drive) can be slow, the same action may execute multiple times before the first promise settles.
 
 Observed bugs before guards: duplicate tasks, double-toggle creating two completions, modal save inserting twice.
 

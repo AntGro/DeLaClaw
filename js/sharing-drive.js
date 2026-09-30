@@ -2242,7 +2242,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     },
 
     /** Leave a joined group (removes the groups-table row + group.json). */
-    // reconnectGroup is Supabase-only (remote URL migration); no-op for Drive
+    // reconnectGroup is a no-op for Drive (kept for adapter interface parity)
     async reconnectGroup() { return null; },
 
     async unjoinGroup(groupId, opts = {}) {

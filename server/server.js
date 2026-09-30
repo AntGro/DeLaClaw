@@ -1,6 +1,6 @@
 // ===================================================================
 // DeLaClaw — Local REST API server (Bun + SQLite)
-// Drop-in replacement for Supabase PostgREST.
+// PostgREST-compatible REST API server.
 // Usage: bun run server/server.js [--port 3737] [--db server/last.db]
 // ===================================================================
 

@@ -70,7 +70,7 @@ export const DRIVE_MIGRATIONS = {
     if (!store.agent_grants) store.agent_grants = [];
   },
   '1.436': async (_store) => {
-    // 1.436: Supabase sharing-only invited_label migration.
+    // 1.436: sharing-only invited_label migration.
     // Drive shared group JSON is normalized lazily by js/sharing-drive.js.
   },
 
@@ -234,7 +234,7 @@ export const DRIVE_MIGRATIONS = {
   },
 
   '2.0.10': async (store) => {
-    // Restore agent_grants store (agents settings pane kept; Supabase removed).
+    // Restore agent_grants store (agents settings pane kept).
     if (!store.agent_grants) store.agent_grants = [];
   },
 

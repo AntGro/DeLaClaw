@@ -2553,7 +2553,7 @@ async function _doSyncSharedHabits() {
   for (const sh of sharedHabits) {
     const currentPointer = localBySharedId.get(sh.id);
 
-    // Repair old Supabase pointers created before the shared record id was canonical.
+    // Repair old pointers created before the shared record id was canonical.
     // Prefer the legacy pointer because it preserves the creator's local deck.
     const legacySharedId = sh._payload_id && sh._payload_id !== sh.id ? sh._payload_id : null;
     const legacyPointer = legacySharedId ? localBySharedId.get(legacySharedId) : null;

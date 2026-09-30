@@ -128,7 +128,7 @@ export const LOCAL_MIGRATIONS = {
     CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON agent_grants(token_hash);
   `,
   '1.436': `
-    -- Supabase sharing-only member identity migration; local backend has no sharing_members table.
+    -- sharing-only member identity migration; local backend has no sharing_members table.
     SELECT 1;
   `,
   '1.474': `
@@ -435,7 +435,7 @@ export const LOCAL_MIGRATIONS = {
   `,
 
   '2.0.10': `
-    -- Restore agent_grants (agents settings pane kept; Supabase removed)
+    -- Restore agent_grants (agents settings pane kept)
     CREATE TABLE IF NOT EXISTS agent_grants (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
       owner_id TEXT,

@@ -79,7 +79,7 @@ fi
 if [ "$SMOKE_PASS" = true ]; then
   # Submit login (mock accepts anything)
   echo "  Logging in..."
-  browser type --selector "#username" --text "https://test.supabase.co" > /dev/null 2>&1
+  browser type --selector "#username" --text "https://test.example.com" > /dev/null 2>&1
   browser type --selector "#password" --text "test-key" > /dev/null 2>&1
   browser click --selector ".btn-primary" > /dev/null 2>&1
   sleep 2

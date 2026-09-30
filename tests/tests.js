@@ -2337,9 +2337,6 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
 // ── Auth Prompt UI ──
 
-
-// (Removed: test for Supabase Site URL in setup guide — Supabase setup steps removed in deprecation)
-
 // Run remaining checks
 // (Removed: Playwright browser smoke test + integration tests —
 //  the browser-automation tests were never run reliably in this

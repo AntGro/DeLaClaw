@@ -49,7 +49,6 @@ function parseFile(filePath) {
   while ((m = importRe.exec(txt)) !== null) {
     // normalize: remove .js if present, keep full path
     let imp = m[1].replace(/\.js$/,'');
-    // 'supabase' adapter is 'adapters/supabase' vs 'supabase' — normalize to adapter name
     if (imp.startsWith('adapters/')) imp = imp.replace('adapters/','');
     imports.push(imp);
   }
@@ -122,7 +121,7 @@ const byImportName = {};
 allFiles.forEach(f=>{
   const base = f.name.replace('.js','');
   byImportName[base]=f;
-  // also adapters/supabase -> supabase
+  // also adapters/<name> -> <name>
   byImportName[f.file.replace('.js','').replace('js/','')]=f;
 });
 
@@ -130,7 +129,7 @@ const dependentsMap = {};
 allFiles.forEach(f=>{ dependentsMap[f.name]=[]; });
 allFiles.forEach(f=>{
   f.imports.forEach(imp=>{
-    // imp could be 'state', 'utils', 'adapters/supabase' normalized to 'supabase', 'rest', etc.
+    // imp could be 'state', 'utils', or an adapter name normalized from 'adapters/<name>'
     const key = imp.split('/').pop().replace('.js','');
     // find file matching key
     const target = allFiles.find(t=> t.name.replace('.js','')===key || t.file.endsWith(`${key}.js`));
@@ -253,7 +252,6 @@ md+=`\n## Adapters
 
 All business logic talks to \`db.js\` proxy. Implementations in \`js/adapters/\` must expose \`from(table).select/insert/update/delete\`.
 
-- supabase.js: PostgREST + Realtime + auth
 - rest.js: Bun+SQLite REST
 - demo.js: in-memory (seeded)
 - drive.js: in-memory + Drive JSON persistence

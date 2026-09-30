@@ -5,7 +5,7 @@ Status: Accepted
 
 ## Context
 
-DeLaClaw needs external agents (automations, background workers, custom tools) to act on behalf of a user without sharing the user's session. Must work across BYOB backends (Supabase, Local, Drive) and must not require central infrastructure operated by the author.
+DeLaClaw needs external agents (automations, background workers, custom tools) to act on behalf of a user without sharing the user's session. Must work across BYOB backends (Local, Drive) and must not require central infrastructure operated by the author.
 
 Requirements:
 - Revocable, scoped, expiring delegation
@@ -27,21 +27,13 @@ Contract:
 
 Trust model: storage adapter is trusted to verify hash + enforce owner isolation; agent is untrusted, limited by scope/expiry/revocation.
 
-## Reference implementation (Supabase)
-
-- Table `agent_grants(id, owner_id, display_name, token_hash UNIQUE, scope, last_used_at, expires_at, revoked_at)`
-- Function `has_agent_access()` SECURITY DEFINER reads `request.headers`, returns granting owner for RLS
-- RLS policies use `has_agent_access()` to enforce owner-scoped access
-
-Other backends MUST implement equivalent verification behind same `db.js` surface. Local single-user case may start as trusted but MUST NOT allow cross-owner access when multi-user.
-
 ## Consequences
 
 - Positive: no central auth service, scoped delegation, plaintext never stored, owner isolation preserved across all backends
-- Positive: same `db.js` contract for Supabase/REST/Drive/Demo
+- Positive: same `db.js` contract for REST/Drive/Demo
 - Negative: each backend needs hash verification + scope + expiry + revocation; current Local/Drive implementations are incomplete (trusted-only gap)
 - Negative: bearer token compromise remains possible; security depends on expiry, revocation, and scope limits — hashing protects stored secrets, not a stolen active token
-- Neutral: adds agent_grants table/RPCs in Supabase reference; other backends need file/JSON equivalent
+- Neutral: adds agent_grants table + verification helpers per backend
 
 ## Alternatives considered
 

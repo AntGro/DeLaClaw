@@ -2,7 +2,7 @@
 // AGENTS UI — Settings > Agents pane
 // Friendly copy-paste setup for external agents (Claude Code, Codex…)
 // Token lifecycle is backend-agnostic (adapter interface). The agent
-// connection method is being reworked after the Supabase removal —
+// connection method is being reworked —
 // tokens are issued and revocable now; connection instructions follow.
 // ===================================================================
 import db from './db.js';
@@ -27,8 +27,8 @@ Agent: ${displayName}
 DeLaClaw Agent Token: ${token}
 
 Connecting (for you, the AI agent):
-DeLaClaw no longer uses Supabase — the agent connection method is being
-reworked. Keep this token somewhere safe: a DeLaClaw update will add the
+The agent connection method is being reworked.
+Keep this token somewhere safe: a DeLaClaw update will add the
 exact connection instructions for the active backend here.
 
 Security: keep this token secret. Never log it, paste it publicly, or

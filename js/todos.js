@@ -1101,7 +1101,7 @@ async function deleteCategory(catId) {
     const todoRows = todosInCat.map(td => ({ ...td }));
     // Delete locally first to unblock the UI. Explicitly delete items so
     // calendar sync (markDirty) fires for each. SQL CASCADE would handle this
-    // on Supabase, but Drive/Demo have no FK enforcement.
+    // where the backend enforces FKs, but Drive/Demo have no FK enforcement.
     for (const todo of todosInCat) {
       await state.db.from('todos').delete().eq('id', todo.id);
     }

@@ -34,7 +34,7 @@ let _lastUpdatedTimer = null;
 
 // ===================================================================
 // BACKEND-SCOPED localStorage — isolate per-backend settings so switching
-// between Supabase, Local, and Demo never leaks data across modes.
+// between Local, Drive, and Demo never leaks data across modes.
 // Keys listed here are saved/restored under `scope:{mode}:{key}`.
 // Global keys (STAY_CONNECTED_KEY, cc-lang, install-dismiss) are never scoped.
 // ===================================================================

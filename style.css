@@ -991,7 +991,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 
   /* Header — fixed on mobile for reliable anchoring */
   .app-header{padding:4px 6px;gap:4px;position:fixed;top:0;left:0;right:0;}
-  #welcomeView,#projectsView,#todosView,#habitsView,#birthdaysView,#flashcardsView,#listsView{padding-top:44px;}
+  #welcomeView,#projectsView,#todosView,#habitsView,#birthdaysView,#flashcardsView,#listsView,#groupsView{padding-top:44px;}
   .app-header h1{font-size:1.05rem;gap:5px;}
   .app-header h1::after{height:18px;}
   .app-title-text{display:none;}

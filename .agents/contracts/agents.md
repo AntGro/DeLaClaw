@@ -3,7 +3,7 @@
 ## Purpose
 Allow external AI agents (Claude Code, Codex CLI, OpenClaw…) to access the user's DeLaClaw data via API tokens. Multi-token, hashed-at-rest, revocable, scoped to owner.
 
-Supabase was removed (v2.0.9) — the agent *connection method* (how an external agent reaches the data) is being reworked and is currently TBD. The token lifecycle in Settings (create / copy setup prompt / revoke / list) is kept and functional.
+The agent *connection method* (how an external agent reaches the data) is being reworked and is currently TBD. The token lifecycle in Settings (create / copy setup prompt / revoke / list) is kept and functional.
 
 User jobs:
 - create named agent token → get ready-to-paste prompt for Claude/Codex
@@ -46,7 +46,7 @@ User jobs:
 ## i18n
 - **Prefix:** `agents.` — see CODEMAP for current key count (EN/FR/ES)
 - Keys: `title`, `nav`, `description(_friendly)`, `create*`, `name_*`, `token_*`, `copy*`, `revoke*`, `no_tokens*`, `last_used`, `never_used`, `how_it_works*`, `how_to_use*`, `security_hint`, `manage_title`, `revoke_hint`
-- Supabase-specific copy was rewritten post-removal: `how_it_works_body` and the setup prompt state the connection method is being reworked; no Project URL / anon key references remain
+- The copy is backend-agnostic: `how_it_works_body` and the setup prompt state the connection method is being reworked; no Project URL / anon key references remain
 - All UI via `t()`, placeholder via `esc(t(...))`
 
 ## Business Invariants
@@ -64,7 +64,7 @@ User jobs:
 
 ## Cross-Feature Edges
 - No Welcome aggregation
-- Migration history: `1.410` created the table (Supabase parity era) → `2.0.9` dropped it (Supabase removal) → `2.0.10` restored it (agents pane kept)
+- Migration history: `1.410` created the table → `2.0.9` dropped it → `2.0.10` restored it (agents pane kept)
 
 ## Risks / Gotchas
 - Token shown once — no recovery

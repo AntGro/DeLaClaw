@@ -32,7 +32,7 @@
   <p>DeLaClaw is a personal productivity app — a self-hosted command center for tasks, habits, flashcards, and other personal data. It runs entirely in your browser.</p>
 
   <h2>Data you own</h2>
-  <p>All your data (tasks, projects, habits, flashcards, birthdays, lists, and settings) is stored in your own backend — a Supabase instance, Google Drive, or local SQLite database. DeLaClaw has no central server and does not collect, store, or transmit your data to any DeLaClaw-operated service.</p>
+  <p>All your data (tasks, projects, habits, flashcards, birthdays, lists, and settings) is stored in your own backend — Google Drive or a local SQLite database. DeLaClaw has no central server and does not collect, store, or transmit your data to any DeLaClaw-operated service.</p>
 
   <h2>Google Drive integration</h2>
   <p>DeLaClaw offers an optional Google Drive backend that stores your data in a <code>DeLaClaw/</code> folder in your own Drive. Authentication uses Google Identity Services directly in the browser via OAuth 2.0. DeLaClaw never sees or stores your Google password. Access tokens are held in browser memory only and are not persisted.</p>
@@ -61,7 +61,7 @@
   <h2>Browser storage</h2>
   <p>DeLaClaw uses standard browser storage for local preferences:</p>
   <ul>
-    <li><strong>localStorage</strong>: theme, language, active tab, stay-connected credentials (your Supabase URL and anon key, if you opt in), sharing preferences, and tab settings.</li>
+    <li><strong>localStorage</strong>: theme, language, active tab, stay-connected credentials (if you opt in), sharing preferences, and tab settings.</li>
     <li><strong>IndexedDB</strong>: offline cache of your data, scoped by backend mode. Cleared on reconnect.</li>
     <li><strong>Service Worker cache</strong>: static app assets for offline loading. Versioned and replaced on each update.</li>
   </ul>
@@ -70,10 +70,9 @@
   <h2>Third-party services</h2>
   <p>The only external services DeLaClaw communicates with are:</p>
   <ul>
-    <li><strong>Your Supabase instance</strong> — for data storage (if using Supabase mode).</li>
     <li><strong>Google Identity Services &amp; Drive API</strong> — for authentication and data storage/sharing (if using Google Drive mode). Subject to <a href="https://policies.google.com/privacy">Google's privacy policy</a>.</li>
     <li><strong>Google Fonts</strong> — to load the DM Sans typeface.</li>
-    <li><strong>jsDelivr CDN</strong> — to load the Supabase JS client and Three.js. Subject to <a href="https://www.jsdelivr.com/terms/privacy-policy-jsdelivr-net">jsDelivr's privacy policy</a>.</li>
+    <li><strong>jsDelivr CDN</strong> — to load Three.js. Subject to <a href="https://www.jsdelivr.com/terms/privacy-policy-jsdelivr-net">jsDelivr's privacy policy</a>.</li>
   </ul>
 
   <h2>Data sharing with third parties</h2>

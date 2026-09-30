@@ -673,16 +673,12 @@ export async function handleJoinCode(rawCode, opts = {}) {
   }
 
   const activeMode = localStorage.getItem('claw_cc_active_mode');
-  if (env.b === 'supabase' && activeMode !== 'supabase') {
-    showJoinCodeError(t('sharing.join_backend_supabase'), errEl);
-    return false;
-  }
   if (env.b === 'googledrive' && activeMode !== 'googledrive') {
     showJoinCodeError(t('sharing.join_backend_drive'), errEl);
     return false;
   }
 
-  const connectionRef = env.b === 'googledrive' ? env.f : code;
+  const connectionRef = env.f;
 
   // Check if already joined via this folderId / invite code.
   const existing = state.sharing.getGroupByFolderId?.(connectionRef);
@@ -701,11 +697,6 @@ export async function handleJoinCode(rawCode, opts = {}) {
       window.renderGroups?.();
     }
     return true;
-  }
-
-  if (env.b === 'supabase') {
-    showJoinCodeError(t('sharing.join_code_used'), errEl);
-    return false;
   }
 
   if (!state.sharing.openJoinPicker) {

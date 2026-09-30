@@ -1,9 +1,7 @@
 // sharing-envelope.js — obfuscated invite-code envelope
 // Format: DLC1.<base64url(JSON.stringify({ v, b, ... }))>
 // v = version (1)
-// b = backend ('googledrive'; 'supabase' only decodes legacy invites, which are rejected as unsupported)
-// Supabase payload (legacy, rejected downstream): { v:1, b:'supabase', u, k, g, t, x? }
-//   u = remote Supabase URL, k = anon key, g = groupId, t = member token, x = expires_at
+// b = backend ('googledrive')
 // Drive payload: { v:1, b:'googledrive', f }
 //   f = shared Drive folderId
 // This is an opaque access code, not encryption. For Drive, access control is
@@ -53,10 +51,6 @@ export function decodeInviteEnvelope(str) {
     const obj = JSON.parse(json);
     if (!obj || typeof obj !== 'object') return null;
     if (obj.v !== 1) return null;
-    if (obj.b === 'supabase') {
-      if (!obj.u || !obj.k || !obj.g || !obj.t) return null;
-      return obj;
-    }
     if (obj.b === 'googledrive') {
       if (!obj.f) return null;
       return obj;

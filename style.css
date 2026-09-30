@@ -2108,11 +2108,19 @@ a.sharing-drive-link{text-decoration:none;}
 .groups-detail .sharing-group-card{margin-bottom:0;}
 .groups-back-btn{display:none;margin-bottom:12px;}
 @media (max-width: 900px){
-  .groups-layout{flex-direction:column;}
-  .groups-sidebar{width:100%;flex:1;min-height:0;}
-  .groups-layout:not(.groups-detail-active) .groups-detail{display:none;}
-  .groups-layout.groups-detail-active .groups-sidebar{display:none;}
+  /* Master-detail slider: both panes stay rendered side by side and toggling
+     .groups-detail-active slides them (list left out, detail in from the
+     right, and the reverse on back). Vertical fill comes from stretch. */
+  .groups-layout{flex-direction:row;gap:0;overflow-x:hidden;}
+  .groups-sidebar{flex:0 0 100%;width:auto;min-height:0;}
+  .groups-detail{flex:0 0 100%;min-height:0;}
+  .groups-sidebar,.groups-detail{transition:transform .28s ease;}
+  .groups-layout.groups-detail-active .groups-sidebar,
+  .groups-layout.groups-detail-active .groups-detail{transform:translateX(-100%);}
   .groups-layout.groups-detail-active .groups-back-btn{display:inline-flex;}
+}
+@media (prefers-reduced-motion: reduce){
+  .groups-sidebar,.groups-detail{transition:none;}
 }
 
 /* ── Auth prompt modal ────────────────────────────────────────── */

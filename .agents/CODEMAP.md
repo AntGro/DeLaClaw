@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-09-30T13:19:16.775Z from 39 modules (v2.10.11). Total LOC 30243. Do not hand-edit.
+> Generated 2026-09-30T13:28:13.108Z from 39 modules (v2.10.12). Total LOC 30273. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -43,8 +43,8 @@
 | sharing-file-reconcile | 217 | - |  | drive.js,sharing-drive.js | - |
 | icons | 210 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,demo-chooser.js | - |
 | agents-ui | 200 | agent_grants | db,i18n,icons,utils | main.js | esc:29,window:5 |
+| groups | 199 | - | i18n,icons,sharing-ui,state | main.js | esc:3,window:4 |
 | storm3d | 185 | - |  | hero.js | - |
-| groups | 169 | - | i18n,icons,sharing-ui,state | main.js | esc:3,window:4 |
 | rest | 162 | x |  | main.js | - |
 | sharing-interface | 135 | - |  | sharing.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |

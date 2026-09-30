@@ -59,10 +59,47 @@ function skippedGroupItemHtml(s) {
   </div>`;
 }
 
-/** Select a group (null = back to the list). Exposed for data-action delegation. */
+/** Detail pane HTML for the selected group (or the empty state). */
+async function detailPaneHtml(selected) {
+  const groups = state.sharing.getAllGroups();
+  return selected
+    ? `<button class="btn groups-back-btn" data-action="groups-back">${lucideIcon('chevron-left', 16)} ${t('groups.back_to_groups')}</button>
+       ${await sharingGroupCardHtml(selected)}`
+    : `<div class="page-empty-state">
+        <div class="empty-icon">${lucideIcon('users', 48, 'var(--muted)')}</div>
+        <h3>${t('sharing.groups')}</h3>
+        <p>${groups.length === 0 ? t('sharing.no_groups_hint') : t('groups.select_prompt')}</p>
+      </div>`;
+}
+
+/**
+ * Select a group (null = back to the list). Exposed for data-action delegation.
+ * Updates the panes in place and toggles the layout class so narrow screens
+ * animate the master-detail slide (list slides left out, detail slides in
+ * from the right, and the reverse on back). A full re-render here would
+ * destroy the DOM and skip the transition; on wide screens the class is
+ * inert so the in-place update is visually identical to a re-render.
+ */
 export function selectGroup(groupId) {
   selectedGroupId = groupId || null;
-  renderGroups();
+  const layout = document.querySelector('#groupsView .groups-layout');
+  if (!layout || !state.sharing) { renderGroups(); return; }
+  const mySelection = selectedGroupId;
+  const selected = mySelection
+    ? state.sharing.getAllGroups().find(g => g.id === mySelection)
+    : null;
+  if (mySelection && !selected) { renderGroups(); return; }
+  detailPaneHtml(selected).then(html => {
+    if (selectedGroupId !== mySelection) return; // superseded by a newer tap
+    const detail = layout.querySelector('.groups-detail');
+    if (detail) detail.innerHTML = html;
+    layout.querySelectorAll('.groups-list-item').forEach(el => {
+      const on = el.dataset.groupId === mySelection;
+      el.classList.toggle('selected', on);
+      el.setAttribute('aria-current', on ? 'true' : 'false');
+    });
+    layout.classList.toggle('groups-detail-active', !!mySelection);
+  }).catch(e => { console.error('selectGroup:', e); renderGroups(); });
 }
 
 /** Toggle the Add/Join chooser menu. Exposed for data-action delegation. */
@@ -142,14 +179,7 @@ export async function renderGroups() {
     : groups.map(g => groupListItemHtml(g, g.id === selectedGroupId)).join('')
       + skippedGroups.map(skippedGroupItemHtml).join('');
 
-  const detailHtml = selected
-    ? `<button class="btn groups-back-btn" data-action="groups-back">${lucideIcon('chevron-left', 16)} ${t('groups.back_to_groups')}</button>
-       ${await sharingGroupCardHtml(selected)}`
-    : `<div class="page-empty-state">
-        <div class="empty-icon">${lucideIcon('users', 48, 'var(--muted)')}</div>
-        <h3>${t('sharing.groups')}</h3>
-        <p>${groups.length === 0 ? t('sharing.no_groups_hint') : t('groups.select_prompt')}</p>
-      </div>`;
+  const detailHtml = await detailPaneHtml(selected);
 
   container.innerHTML = `<div class="groups-layout${selected ? ' groups-detail-active' : ''}">
     <aside class="groups-sidebar" aria-label="${t('sharing.groups')}">

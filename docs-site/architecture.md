@@ -22,8 +22,6 @@ flowchart TD
     drive --> calsync["js/calendar-sync.js<br/>(optional Google Calendar)"]
 ```
 
-> Supabase support has been removed entirely (adapter, client library, auth module, sharing adapter). The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
-
 ## Adapter pattern
 
 The app never talks to a backend directly. All database access goes through `db.js`, which delegates to the active adapter.

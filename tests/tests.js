@@ -2385,7 +2385,6 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   test('main.js saveStayConnectedCreds never persists keys', () => {
     const m = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'main.js'), 'utf8');
     assert(m.includes("key: ''"), 'saveStayConnectedCreds must never persist keys');
-    assert(!m.includes('getSupabaseKeyRole') && !m.includes('service_role'), 'no Supabase key-role checks remain');
   });
 
   test('state.js STAY_CONNECTED_KEY has security comment', () => {

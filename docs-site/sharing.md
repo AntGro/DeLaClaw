@@ -57,7 +57,7 @@ flowchart TB
     SI --> DRIVE
 ```
 
-The adapter is validated at init time against the interface contract — a missing method is a hard error, not a silent runtime crash. The Supabase sharing adapter was removed with the Supabase backend; Drive is the only sharing path.
+The adapter is validated at init time against the interface contract — a missing method is a hard error, not a silent runtime crash. Drive is the only sharing path.
 
 ## Drive ↔ Drive
 

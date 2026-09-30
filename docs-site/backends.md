@@ -12,8 +12,6 @@ DeLaClaw supports three backend adapters. This document is the single source of 
 | **Local** | SQLite (Bun server) | None | None (single-device) | N/A (is local) | ⚠️ Possible via REST |
 | **Demo** | In-memory | None | None | N/A | ❌ |
 
-> **Supabase backend support has been removed.** The Supabase adapter, client library, and auth module have been deleted from the codebase. The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
-
 ---
 
 ## 2. Adapter Contract

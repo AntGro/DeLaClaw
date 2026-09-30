@@ -23,10 +23,6 @@ The simplest persistent backend — no database, no API keys.
 
 All data loads into memory on connect and writes back to Drive with a 2-second debounce per table after each mutation. The JSON files are plain exports — you can download, inspect, or delete them from Drive at any time.
 
-## Supabase (removed)
-
-> **Supabase backend support has been removed.** The Supabase adapter, client library, and auth module have been deleted from the codebase. The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
-
 ## Local mode (Bun + SQLite)
 
 ### 1. Install Bun

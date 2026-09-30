@@ -509,10 +509,14 @@ function showDriveReconnectScreen(url, key) {
   reconnectBtn.addEventListener('click', async () => {
     reconnectBtn.disabled = true;
     reconnectBtn.textContent = t('toast.connecting') || 'Connecting…';
+    // Drop the overlay so the gate's progress bar is visible while connecting
+    screen.style.display = 'none';
     try {
       await connect(url, key, 'googledrive', true, { silentAuth: false });
       screen.remove();
     } catch (err) {
+      // Restore the overlay so the user can retry
+      screen.style.display = '';
       reconnectBtn.disabled = false;
       reconnectBtn.textContent = t('login.drive_reconnect') || 'Reconnect';
       msg.textContent = t('login.drive_reconnect_failed') || 'Could not reconnect — try again.';

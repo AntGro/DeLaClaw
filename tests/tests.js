@@ -3473,6 +3473,29 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'poll discovery must purge joined rows hit by definite access loss');
     });
 
+    test('text revision holds new chunks until nothing is due', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const gates = flashJs.match(/const due = (?:pool\.filter\(p => p\.chunk\.last_review\)|chunks\.filter\(ch => ch\.last_review\));\s*\n\s*const candidates = due\.length > 0 \? due : (?:pool|chunks);/g) || [];
+      assert(gates.length === 3,
+        `all three text-revision pickers must gate new chunks behind due ones (found ${gates.length})`);
+    });
+
+    test('text revision breaks ties by chunk order, not randomly', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(!/const picked = tied\[Math\.floor\(Math\.random\(\) \* tied\.length\)\]/.test(flashJs),
+        'random tie-break must be gone from text-revision picking');
+      assert(flashJs.includes('a.chunk.chunk_index - b.chunk.chunk_index'),
+        'tied chunks must break by chunk order so a text is learned following its flow');
+      assert((flashJs.match(/const picked = tied\[0\];/g) || []).length === 3,
+        'all three text-revision pickers must take the first tied chunk');
+    });
+
+    test('flashcard practice holds new cards until nothing is due', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/const fresh = dueCount > 0 \? \[\] : pool\.filter\(c => !c\.last_review\)/.test(flashJs),
+        'practice session must not introduce new cards while due cards remain');
+    });
+
     test('sharing poll is single-flight', () => {
       const pollStart = drive.indexOf('async poll()');
       assert(pollStart !== -1, 'poll must exist');

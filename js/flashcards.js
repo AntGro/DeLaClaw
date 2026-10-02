@@ -1119,7 +1119,10 @@ function startPractice(deckFilter, anchorEl) {
   const failed = pool.filter(c => c.last_review && c.stability > 0 && c.stability <= 2);
   const overdue = pool.filter(c => c.last_review && c.stability > 2)
     .sort((a, b) => new Date(a.next_review || 0) - new Date(b.next_review || 0));
-  const fresh = pool.filter(c => !c.last_review).sort(() => Math.random() - 0.5);
+  // New cards wait until nothing is due: no new material while
+  // unmastered cards are pending.
+  const dueCount = pool.filter(c => c.last_review).length;
+  const fresh = dueCount > 0 ? [] : pool.filter(c => !c.last_review).sort(() => Math.random() - 0.5);
 
   let selected = [];
   for (const group of [failed, overdue, fresh]) {
@@ -1567,26 +1570,31 @@ function startTextPractice(deckFilter, anchorEl) {
   }
 
   if (pool.length === 0) { showAllCaughtUp('texts', anchorEl); return; }
+  // New chunks wait until nothing is due: no new material while
+  // unmastered chunks are pending.
+  const due = pool.filter(p => p.chunk.last_review);
+  const candidates = due.length > 0 ? due : pool;
 
-  // Pick the single most due chunk (one revision per session)
-  // Among chunks with the same priority, pick randomly
+  // Pick the single most due chunk (one revision per session).
+  // Ties break by chunk order so a text is learned following its flow.
   const nowStr = now.toISOString();
-  pool.sort((a, b) => {
+  candidates.sort((a, b) => {
     const rA = a.chunk.last_review && a.chunk.stability ? retrievability(a.chunk.stability, a.chunk.last_review, nowStr) : -1;
     const rB = b.chunk.last_review && b.chunk.stability ? retrievability(b.chunk.stability, b.chunk.last_review, nowStr) : -1;
     return rA - rB;
   });
 
-  // Find all chunks tied at the lowest retrievability
-  const lowestR = pool[0].chunk.last_review && pool[0].chunk.stability
-    ? retrievability(pool[0].chunk.stability, pool[0].chunk.last_review, nowStr) : -1;
-  const tied = pool.filter(p => {
+  const lowestR = candidates[0].chunk.last_review && candidates[0].chunk.stability
+    ? retrievability(candidates[0].chunk.stability, candidates[0].chunk.last_review, nowStr) : -1;
+  const tied = candidates.filter(p => {
     const r = p.chunk.last_review && p.chunk.stability
       ? retrievability(p.chunk.stability, p.chunk.last_review, nowStr) : -1;
     return Math.abs(r - lowestR) < 0.01;
   });
+  tied.sort((a, b) => (a.chunk.chunk_index - b.chunk.chunk_index) ||
+    (a.text.id < b.text.id ? -1 : a.text.id > b.text.id ? 1 : 0));
 
-  const picked = tied[Math.floor(Math.random() * tied.length)];
+  const picked = tied[0];
   trSessionActive = true;
   trSessionDeck = deckFilter || null;
   trSessionTextId = picked.text.id;
@@ -1608,23 +1616,31 @@ function startTextPracticeForText(textId) {
   }
 
   if (pool.length === 0) { showToast(t('text_revision.no_chunks_due')); return; }
+  // New chunks wait until nothing is due: no new material while
+  // unmastered chunks are pending.
+  const due = pool.filter(p => p.chunk.last_review);
+  const candidates = due.length > 0 ? due : pool;
 
+  // Pick the single most due chunk (one revision per session).
+  // Ties break by chunk order so a text is learned following its flow.
   const nowStr = now.toISOString();
-  pool.sort((a, b) => {
+  candidates.sort((a, b) => {
     const rA = a.chunk.last_review && a.chunk.stability ? retrievability(a.chunk.stability, a.chunk.last_review, nowStr) : -1;
     const rB = b.chunk.last_review && b.chunk.stability ? retrievability(b.chunk.stability, b.chunk.last_review, nowStr) : -1;
     return rA - rB;
   });
 
-  const lowestR = pool[0].chunk.last_review && pool[0].chunk.stability
-    ? retrievability(pool[0].chunk.stability, pool[0].chunk.last_review, nowStr) : -1;
-  const tied = pool.filter(p => {
+  const lowestR = candidates[0].chunk.last_review && candidates[0].chunk.stability
+    ? retrievability(candidates[0].chunk.stability, candidates[0].chunk.last_review, nowStr) : -1;
+  const tied = candidates.filter(p => {
     const r = p.chunk.last_review && p.chunk.stability
       ? retrievability(p.chunk.stability, p.chunk.last_review, nowStr) : -1;
     return Math.abs(r - lowestR) < 0.01;
   });
+  tied.sort((a, b) => (a.chunk.chunk_index - b.chunk.chunk_index) ||
+    (a.text.id < b.text.id ? -1 : a.text.id > b.text.id ? 1 : 0));
 
-  const picked = tied[Math.floor(Math.random() * tied.length)];
+  const picked = tied[0];
   trSessionActive = true;
   trSessionDeck = deckIdForText(tx);
   trSessionTextId = picked.text.id;
@@ -1819,24 +1835,30 @@ window.continueTextSameText = function() {
     (!ch.last_review || !ch.next_review || new Date(ch.next_review) <= now)
   );
   if (chunks.length === 0) { showToast(t('text_revision.no_chunks_due')); endTextPractice(); return; }
+  // New chunks wait until nothing is due: no new material while
+  // unmastered chunks are pending.
+  const due = chunks.filter(ch => ch.last_review);
+  const candidates = due.length > 0 ? due : chunks;
 
+  // Pick the single most due chunk.
+  // Ties break by chunk order so a text is learned following its flow.
   const nowStr = now.toISOString();
-  chunks.sort((a, b) => {
+  candidates.sort((a, b) => {
     const rA = a.last_review && a.stability ? retrievability(a.stability, a.last_review, nowStr) : -1;
     const rB = b.last_review && b.stability ? retrievability(b.stability, b.last_review, nowStr) : -1;
     return rA - rB;
   });
 
-  // Find all chunks tied at the lowest retrievability
-  const lowestR = chunks[0].last_review && chunks[0].stability
-    ? retrievability(chunks[0].stability, chunks[0].last_review, nowStr) : -1;
-  const tied = chunks.filter(ch => {
+  const lowestR = candidates[0].last_review && candidates[0].stability
+    ? retrievability(candidates[0].stability, candidates[0].last_review, nowStr) : -1;
+  const tied = candidates.filter(ch => {
     const r = ch.last_review && ch.stability
       ? retrievability(ch.stability, ch.last_review, nowStr) : -1;
     return Math.abs(r - lowestR) < 0.01;
   });
+  tied.sort((a, b) => a.chunk_index - b.chunk_index);
 
-  const picked = tied[Math.floor(Math.random() * tied.length)];
+  const picked = tied[0];
   showTextPracticeOverlay(text, picked);
 };
 

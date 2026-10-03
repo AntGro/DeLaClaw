@@ -3507,6 +3507,17 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'all text-revision pickers must skip chunks without the role\'s lines');
     });
 
+    test('practice overlay scrolls tall content (safe centering)', () => {
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      const overlayBlock = css.match(/\.practice-overlay \{[^}]*\}/)[0];
+      assert(overlayBlock.includes('overflow-y:auto'),
+        '.practice-overlay must scroll when content exceeds the viewport');
+      assert(!/justify-content:\s*center/.test(overlayBlock),
+        '.practice-overlay must not use justify-content:center (pushes overflowing content off-screen)');
+      assert(css.includes('.practice-overlay > :not(.practice-header)'),
+        'overlay content must use auto margins for safe vertical centering');
+    });
+
     test('i18n: every t() key used in js/ resolves (no raw keys in UI)', async () => {
       // Browser shims for the i18n module top-level code.
       if (!globalThis.localStorage) globalThis.localStorage = { getItem: () => 'en', setItem: () => {} };

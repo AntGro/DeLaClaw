@@ -1488,8 +1488,18 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .practice-overlay {
   position:fixed; inset:0; z-index:9999;
   background:var(--bg);
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  display:flex; flex-direction:column; align-items:center;
   padding:20px; box-sizing:border-box;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+}
+/* Safe centering: content is vertically centered when it fits, top-aligned
+   and scrollable when it overflows (plain justify-content:center would push
+   the top off-screen with no way to scroll back). */
+.practice-overlay > :not(.practice-header) {
+  margin-top:auto;
+  margin-bottom:auto;
+  flex-shrink:0;
 }
 .practice-header-logo {
   width:24px; height:24px; flex-shrink:0; color:var(--muted); opacity:0.5;

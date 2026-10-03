@@ -1807,14 +1807,17 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
   const chunkLines = sceneMode
     ? rawChunk.map(ln => {
         const kind = ln.speaker === text.focus_role ? 'mine' : (ln.speaker ? 'cue' : 'dir');
-        // Cue lines keep their speaker label after reveal, as when masked.
-        const speakerTag = kind === 'cue' ? `<span class='tr-speaker'>${esc(ln.speaker)}:</span> ` : '';
-        return {
-          kind,
-          speaker: ln.speaker,
-          plain: sceneLineText(ln),
-          html: speakerTag + (renderSceneLineHtml(ln) || '\u00A0'),
-        };
+        const content = renderSceneLineHtml(ln) || '\u00A0';
+        // Theatrical typesetting on reveal: the speaker's name on its own line
+        // (cues and the revised role alike); standalone directions centered.
+        let html;
+        if (kind === 'dir') {
+          html = `<div class='tr-reveal-dir'>${content}</div>`;
+        } else {
+          const name = kind === 'mine' ? text.focus_role : ln.speaker;
+          html = `<div class='tr-reveal-speaker'>${esc(name)}</div>${content}`;
+        }
+        return { kind, speaker: ln.speaker, plain: sceneLineText(ln), html };
       })
     : rawChunk.map(line => ({ kind: 'mine', speaker: null, plain: line, html: esc(line || '\u00A0') }));
   trOverlayLines = chunkLines;

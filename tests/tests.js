@@ -3507,12 +3507,17 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'all text-revision pickers must skip chunks without the role\'s lines');
     });
 
-    test('scene revision: revealed cue lines keep their speaker label', () => {
+    test('scene revision: revealed lines use theatrical typesetting', () => {
       const flashJs = jsFiles['flashcards.js'];
-      assert(/const speakerTag = kind === 'cue' \? `<span class='tr-speaker'>/.test(flashJs),
-        'cue line HTML must keep the speaker label after reveal');
-      assert(/html: speakerTag \+ \(renderSceneLineHtml\(ln\)/.test(flashJs),
-        'revealed cue HTML must prepend the speaker tag to the line content');
+      assert(flashJs.includes("html = `<div class='tr-reveal-speaker'>${esc(name)}</div>${content}`"),
+        'revealed dialogue lines must show the speaker name on its own line');
+      assert(flashJs.includes("const name = kind === 'mine' ? text.focus_role : ln.speaker;"),
+        'the speaker line must cover both cue lines and the revised role');
+      assert(flashJs.includes("html = `<div class='tr-reveal-dir'>${content}</div>`"),
+        'standalone directions must get their own reveal style');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.tr-reveal-speaker'), 'missing .tr-reveal-speaker CSS');
+      assert(css.includes('.tr-reveal-dir'), 'missing .tr-reveal-dir CSS');
     });
 
     test('free practice: revise button samples a chunk when nothing is due', () => {

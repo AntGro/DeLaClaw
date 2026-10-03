@@ -22,6 +22,22 @@ export function sceneSpeakersEqual(a, b) {
   return (a || '').toLowerCase() === (b || '').toLowerCase();
 }
 
+// Role → color class map for the revision overlay. The revised role keeps a
+// reserved class; other roles cycle through the palette in first-appearance
+// order (colors repeat when roles outnumber palette entries). Keys are
+// lowercase speaker names; classes color the name header only, never the lines.
+export const ROLE_PALETTE_SIZE = 6;
+export function buildRoleColorMap(speakers, focusRole) {
+  const map = new Map();
+  let ci = 0;
+  for (const sp of speakers || []) {
+    const key = (sp || '').toLowerCase();
+    if (!key || map.has(key)) continue;
+    map.set(key, sceneSpeakersEqual(sp, focusRole) ? 'tr-role-mine' : `tr-role-c${ci++ % ROLE_PALETTE_SIZE}`);
+  }
+  return map;
+}
+
 // Group consecutive lines by speaker (case-insensitive) for book-like layout:
 // the speaker's name is shown once above the group, outside the line boxes,
 // instead of repeated on every line. Direction lines (speaker null) group

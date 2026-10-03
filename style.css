@@ -10,6 +10,12 @@
   --pink: #ec4899;
   --green: #10b981;
   --yellow: #eab308;
+  --role-c0: oklch(0.72 0.15 55);
+  --role-c1: oklch(0.72 0.13 195);
+  --role-c2: oklch(0.75 0.14 145);
+  --role-c3: oklch(0.72 0.15 350);
+  --role-c4: oklch(0.70 0.15 25);
+  --role-c5: oklch(0.78 0.14 95);
   --red: #ef4444;
   --blue: #3b82f6;
   --purple: #a78bfa;
@@ -36,6 +42,12 @@
   --muted: #71717a;
   --accent: oklch(0.55 0.18 264);
   --accent-dim: oklch(0.55 0.18 264 / 0.1);
+  --role-c0: oklch(0.55 0.16 55);
+  --role-c1: oklch(0.55 0.14 195);
+  --role-c2: oklch(0.52 0.15 145);
+  --role-c3: oklch(0.55 0.16 350);
+  --role-c4: oklch(0.52 0.16 25);
+  --role-c5: oklch(0.55 0.15 95);
   --dropdown-bg: rgb(245,245,247);
   --settings-bg: rgb(255,255,255);
   --settings-sidebar-bg: rgb(247,247,249);
@@ -1471,7 +1483,16 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .tr-role-badge { display:inline-block; font-size:0.72rem; font-weight:600; color:var(--accent); background:rgba(100,108,255,0.1); border:1px solid rgba(100,108,255,0.3); border-radius:20px; padding:1px 8px; margin-left:6px; vertical-align:1px; }
 .tr-speaker { font-size:0.72rem; font-weight:700; letter-spacing:0.08em; color:var(--muted); text-transform:uppercase; }
 .tr-line-group { display:flex; flex-direction:column; gap:4px; }
-.tr-group-speaker { font-size:0.72rem; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); text-align:center; }
+.tr-group-speaker { font-size:0.72rem; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); }
+.tr-spk-left { text-align:left; }
+.tr-spk-right { text-align:right; }
+.tr-role-mine { color:var(--accent); }
+.tr-role-c0 { color:var(--role-c0); }
+.tr-role-c1 { color:var(--role-c1); }
+.tr-role-c2 { color:var(--role-c2); }
+.tr-role-c3 { color:var(--role-c3); }
+.tr-role-c4 { color:var(--role-c4); }
+.tr-role-c5 { color:var(--role-c5); }
 .tr-reveal-dir { font-style:italic; color:var(--muted); text-align:center; padding:4px 0; }
 .tr-inline-dir { font-style:italic; opacity:0.65; }
 .tr-line-shown { background:var(--surface); color:var(--text); border:1px solid var(--border); opacity:0.85; cursor:default; }

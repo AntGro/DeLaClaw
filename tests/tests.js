@@ -3529,6 +3529,39 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(dir.lines[0].speaker === null, 'direction with NAME: stays a direction');
     });
 
+    test('scene revision: one color per role', async () => {
+      const { buildRoleColorMap, ROLE_PALETTE_SIZE } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      assert(ROLE_PALETTE_SIZE === 6, 'palette size');
+      const map = buildRoleColorMap(['RODRIGUE', 'CHIMÈNE', 'SOSTHÈNE'], 'rodrigue');
+      assert(map.get('rodrigue') === 'tr-role-mine', 'revised role keeps the reserved class');
+      assert(map.get('chimène') === 'tr-role-c0', 'first other role gets c0');
+      assert(map.get('sosthène') === 'tr-role-c1', 'second other role gets c1');
+      // Palette cycles when roles outnumber entries.
+      const many = buildRoleColorMap(
+        ['ME', 'A', 'B', 'C', 'D', 'E', 'F', 'G'], 'me');
+      assert(many.get('g') === 'tr-role-c0', 'colors repeat past the palette size');
+      assert(many.get('me') === 'tr-role-mine', 'reserved class unaffected by cycling');
+      // Case-insensitive dedupe; nulls skipped.
+      const dup = buildRoleColorMap(['Rodrigue', 'RODRIGUE', null, ''], 'x');
+      assert(dup.size === 1 && dup.get('rodrigue') === 'tr-role-c0', 'dedupe');
+      // Overlay wires color + alignment into the group header.
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('buildRoleColorMap(parseSceneContent(text.content).speakers, text.focus_role)'),
+        'color map must come from the full-text speaker order (stable across chunks)');
+      assert(flashJs.includes("tr-group-speaker ${colorCls} ${isMine ? 'tr-spk-left' : 'tr-spk-right'}"),
+        'header must carry the role color and kind alignment (mine left, cues right)');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      for (let i = 0; i < 6; i++) {
+        assert(css.includes(`--role-c${i}:`), `missing --role-c${i} variable`);
+        assert(css.includes(`.tr-role-c${i} {`), `missing .tr-role-c${i} class`);
+      }
+      assert(/\[data-theme="light"\][\s\S]*--role-c0:/.test(css),
+        'palette must have light-theme values');
+      assert(css.includes('.tr-role-mine'), 'missing reserved .tr-role-mine class');
+      assert(css.includes('.tr-spk-left') && css.includes('.tr-spk-right'), 'missing alignment classes');
+    });
+
     test('scene revision: book-like speaker groups', async () => {
       const { groupLinesBySpeaker } =
         await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
@@ -3547,7 +3580,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const flashJs = jsFiles['flashcards.js'];
       assert(flashJs.includes('groupLinesBySpeaker(chunkLines)'),
         'lines container must group consecutive same-speaker lines');
-      assert(flashJs.includes("`<div class=\"tr-group-speaker\">${esc(group.speaker)}</div>`"),
+      assert(flashJs.includes('tr-group-speaker ${colorCls}'),
         'each dialogue group must show the speaker name once, outside the line boxes');
       assert(!flashJs.includes('tr-reveal-speaker'),
         'per-line speaker divs must be gone (name lives on the group header)');

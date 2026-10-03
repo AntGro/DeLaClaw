@@ -4,7 +4,7 @@ import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } fr
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
-import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneSpeakersEqual, groupLinesBySpeaker } from './scene-parse.js';
+import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap } from './scene-parse.js';
 
 // ===================================================================
 // FLASHCARDS — Spaced Repetition (Algo-style intervals)
@@ -1815,6 +1815,9 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
       })
     : rawChunk.map((line, idx) => ({ idx, kind: 'mine', speaker: null, plain: line, html: esc(line || '\u00A0') }));
   trOverlayLines = chunkLines;
+  const roleColorMap = sceneMode
+    ? buildRoleColorMap(parseSceneContent(text.content).speakers, text.focus_role)
+    : new Map();
   const myLineCount = chunkLines.filter(l => l.kind === 'mine').length;
 
   // Compute context: preceding lines
@@ -1853,14 +1856,21 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
         ${contextHtml}
       </div>
       <div class="tr-lines-container" id="trLinesContainer">
-        ${groupLinesBySpeaker(chunkLines).map(group => `
+        ${groupLinesBySpeaker(chunkLines).map(group => {
+          let header = '';
+          if (group.speaker) {
+            const isMine = sceneSpeakersEqual(group.speaker, text.focus_role);
+            const colorCls = isMine ? 'tr-role-mine' : (roleColorMap.get(group.speaker.toLowerCase()) || '');
+            header = `<div class="tr-group-speaker ${colorCls} ${isMine ? 'tr-spk-left' : 'tr-spk-right'}">${esc(group.speaker)}</div>`;
+          }
+          return `
           <div class="tr-line-group"${group.speaker ? ` data-speaker="${esc(group.speaker)}"` : ''}>
-            ${group.speaker ? `<div class="tr-group-speaker">${esc(group.speaker)}</div>` : ''}
+            ${header}
             ${group.lines.map(line => {
               const bullets = '• '.repeat(Math.max(1, Math.ceil(((line.plain || ' ').length) / 6)));
               return `<div class="tr-line tr-line-masked${line.idx === 0 ? ' tr-line-next' : ''}" data-line-idx="${line.idx}" data-kind="${line.kind}" data-action="handle-line-click">${bullets}</div>`;
             }).join('')}
-          </div>`).join('')}
+          </div>`; }).join('')}
       </div>
       <div class="tr-hint" id="trHint">${t('text_revision.tap_to_reveal')}</div>
       <div class="tr-submit-section" id="trSubmitSection" style="display:none;">

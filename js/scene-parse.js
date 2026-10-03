@@ -11,8 +11,16 @@
 // Lines outside <...> blocks are ignored here; callers treat them as
 // directions or flag them in the parse preview.
 
-// Speaker names are uppercase (accents, digits, spaces, hyphens, apostrophes).
-const SPEAKER_RE = /^([A-ZÀ-Þ][A-ZÀ-Þ0-9'’\- ]+?)\s*[:.]\s*/;
+// Speaker cues are matched case-insensitively (accents, digits, spaces,
+// hyphens, apostrophes). The angle-bracket block format already marks the
+// line as structured, so uppercase is a convention, not a requirement.
+// Display keeps the name as written; identity compares case-insensitively.
+const SPEAKER_RE = /^([A-ZÀ-Þ][A-ZÀ-Þ0-9'’\- ]+?)\s*[:.]\s*/i;
+
+// Speaker identity for matching focus_role etc. Null-safe.
+export function sceneSpeakersEqual(a, b) {
+  return (a || '').toLowerCase() === (b || '').toLowerCase();
+}
 const BLOCK_RE = /<([\s\S]*?)>/g;
 const INLINE_DIR_RE = /\*\*([\s\S]*?)\*\*/g;
 
@@ -55,7 +63,8 @@ export function parseSceneContent(content) {
     const sp = body.match(SPEAKER_RE);
     if (sp) {
       const speaker = sp[1].trim();
-      if (!seen.has(speaker)) { seen.add(speaker); speakers.push(speaker); }
+      const key = speaker.toLowerCase();
+      if (!seen.has(key)) { seen.add(key); speakers.push(speaker); }
       for (const ln of body.slice(sp[0].length).split('\n')) {
         lines.push({ speaker, segments: parseInlineDirs(ln), unparsed: false });
       }

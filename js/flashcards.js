@@ -4,7 +4,7 @@ import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } fr
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
-import { parseSceneContent, splitSceneIntoChunks, sceneLineText } from './scene-parse.js';
+import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneSpeakersEqual } from './scene-parse.js';
 
 // ===================================================================
 // FLASHCARDS — Spaced Repetition (Algo-style intervals)
@@ -1437,7 +1437,7 @@ function chunkHasRoleLines(tx, chunkIndex) {
   if (!tx.focus_role) return true;
   const chunks = getTextChunks(tx);
   const ch = chunks[chunkIndex];
-  return !!ch && ch.some(ln => ln.speaker === tx.focus_role);
+  return !!ch && ch.some(ln => sceneSpeakersEqual(ln.speaker, tx.focus_role));
 }
 
 // Rendered HTML for a parsed scene line: direction spans dimmed italic.
@@ -1642,7 +1642,7 @@ window.saveEditText = async function() {
   const updates = { deck, title, author: author || null, content, deck_id: deckId, focus_role: role };
   if (state.db.connected) {
     await state.db.from('texts').update(updates).eq('id', id);
-    if ((tx?.focus_role || null) !== role) {
+    if (!sceneSpeakersEqual(tx?.focus_role, role)) {
       // Role change flips the parsing mode: drop chunk progress so the
       // auto-repair regenerates it against the new chunking.
       await state.db.from('text_line_progress').delete().eq('text_id', id);
@@ -1806,7 +1806,7 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
   // lines behave as the user's own (today's behavior, unchanged).
   const chunkLines = sceneMode
     ? rawChunk.map(ln => {
-        const kind = ln.speaker === text.focus_role ? 'mine' : (ln.speaker ? 'cue' : 'dir');
+        const kind = sceneSpeakersEqual(ln.speaker, text.focus_role) ? 'mine' : (ln.speaker ? 'cue' : 'dir');
         const content = renderSceneLineHtml(ln) || '\u00A0';
         // Theatrical typesetting on reveal: the speaker's name on its own line
         // (cues and the revised role alike); standalone directions centered.

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-03T09:23:59.079Z from 40 modules (v2.10.23). Total LOC 30705. Do not hand-edit.
+> Generated 2026-10-03T09:33:12.337Z from 40 modules (v2.10.24). Total LOC 30714. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -48,8 +48,8 @@
 | rest | 162 | x |  | main.js | - |
 | sharing-interface | 135 | - |  | sharing.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
+| scene-parse | 104 | - |  | flashcards.js | - |
 | sharing | 100 | - | sharing-drive,sharing-interface | - | - |
-| scene-parse | 95 | - |  | flashcards.js | - |
 | sharing-mutation-queue | 83 | - |  | sharing-drive.js | - |
 | sharing-envelope | 67 | - |  | sharing-drive.js,sharing-ui.js | - |
 | drive-backup-policy | 67 | - | ../migrations/version-compare.js,./../migrations/version-compare | drive.js | - |

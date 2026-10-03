@@ -3507,6 +3507,28 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'all text-revision pickers must skip chunks without the role\'s lines');
     });
 
+    test('scene parser: speaker cues are case-insensitive', async () => {
+      const { parseSceneContent, sceneSpeakersEqual } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const mixed = parseSceneContent('<Rodrigue:\nA line.\n>');
+      assert(mixed.unparsedBlocks === 0, 'mixed-case speaker must parse');
+      assert(mixed.lines[0].speaker === 'Rodrigue', 'display keeps the name as written');
+      assert(JSON.stringify(mixed.speakers) === JSON.stringify(['Rodrigue']), 'speaker list');
+      const lower = parseSceneContent('<rodrigue: hi.>');
+      assert(lower.unparsedBlocks === 0, 'lowercase speaker must parse');
+      // Case variants dedupe to one speaker entry.
+      const both = parseSceneContent('<RODRIGUE: a.>\n<rodrigue: b.>');
+      assert(JSON.stringify(both.speakers) === JSON.stringify(['RODRIGUE']), 'speaker dedupe');
+      // Identity helper.
+      assert(sceneSpeakersEqual('RODRIGUE', 'rodrigue'), 'role match must be case-insensitive');
+      assert(sceneSpeakersEqual(null, null), 'null role equals null');
+      assert(!sceneSpeakersEqual('RODRIGUE', 'CHIMÈNE'), 'different speakers differ');
+      assert(!sceneSpeakersEqual(null, 'RODRIGUE'), 'null speaker never matches a role');
+      // Direction blocks still win over speaker-looking content.
+      const dir = parseSceneContent("<**Elle sort. SOSTHÈNE: observe.**>");
+      assert(dir.lines[0].speaker === null, 'direction with NAME: stays a direction');
+    });
+
     test('scene revision: revealed lines use theatrical typesetting', () => {
       const flashJs = jsFiles['flashcards.js'];
       assert(flashJs.includes("html = `<div class='tr-reveal-speaker'>${esc(name)}</div>${content}`"),

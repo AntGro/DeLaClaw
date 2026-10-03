@@ -1805,12 +1805,17 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
   // Normalize to line objects: scene lines carry speaker/segments, plain
   // lines behave as the user's own (today's behavior, unchanged).
   const chunkLines = sceneMode
-    ? rawChunk.map(ln => ({
-        kind: ln.speaker === text.focus_role ? 'mine' : (ln.speaker ? 'cue' : 'dir'),
-        speaker: ln.speaker,
-        plain: sceneLineText(ln),
-        html: renderSceneLineHtml(ln) || '\u00A0',
-      }))
+    ? rawChunk.map(ln => {
+        const kind = ln.speaker === text.focus_role ? 'mine' : (ln.speaker ? 'cue' : 'dir');
+        // Cue lines keep their speaker label after reveal, as when masked.
+        const speakerTag = kind === 'cue' ? `<span class='tr-speaker'>${esc(ln.speaker)}:</span> ` : '';
+        return {
+          kind,
+          speaker: ln.speaker,
+          plain: sceneLineText(ln),
+          html: speakerTag + (renderSceneLineHtml(ln) || '\u00A0'),
+        };
+      })
     : rawChunk.map(line => ({ kind: 'mine', speaker: null, plain: line, html: esc(line || '\u00A0') }));
   trOverlayLines = chunkLines;
   const myLineCount = chunkLines.filter(l => l.kind === 'mine').length;

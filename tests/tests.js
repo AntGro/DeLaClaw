@@ -3507,6 +3507,14 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'all text-revision pickers must skip chunks without the role\'s lines');
     });
 
+    test('scene revision: revealed cue lines keep their speaker label', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/const speakerTag = kind === 'cue' \? `<span class='tr-speaker'>/.test(flashJs),
+        'cue line HTML must keep the speaker label after reveal');
+      assert(/html: speakerTag \+ \(renderSceneLineHtml\(ln\)/.test(flashJs),
+        'revealed cue HTML must prepend the speaker tag to the line content');
+    });
+
     test('free practice: revise button samples a chunk when nothing is due', () => {
       const flashJs = jsFiles['flashcards.js'];
       assert(/if \(pool\.length === 0\) \{ startFreePractice\(textId\); return; \}/.test(flashJs),

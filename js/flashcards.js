@@ -596,7 +596,7 @@ function renderTextDeck(deckId, q) {
       </div>
     </div>
     <div class="task-list">
-      ${texts.length > 0 ? texts.map(tx => renderTextItem(tx, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-text" data-deck="${esc(deckId)}">${lucideIcon('plus', 16)} ${t('flashcards.add_text')}</button></div>`}
+      ${texts.length > 0 ? texts.map(tx => renderTextItem(tx, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-text" data-deck="${esc(deckId)}">${lucideIcon('plus', 16)} ${t('text_revision.add_text')}</button></div>`}
     </div>
   </div>`;
 }
@@ -1100,7 +1100,7 @@ window.saveNewFlashDeck = async function() {
   }
 
   closeAddFlashDeckModal();
-  showToast(t('toast.created'), 'success');
+  showToast(t('toast.added'), 'success');
   await refreshFlashcards();
 };
 

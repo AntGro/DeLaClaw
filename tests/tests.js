@@ -3507,6 +3507,27 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'all text-revision pickers must skip chunks without the role\'s lines');
     });
 
+    test('i18n: every t() key used in js/ resolves (no raw keys in UI)', async () => {
+      // Browser shims for the i18n module top-level code.
+      if (!globalThis.localStorage) globalThis.localStorage = { getItem: () => 'en', setItem: () => {} };
+      if (!globalThis.document) globalThis.document = { documentElement: {} };
+      const { t } = await import(pathToFileURL(path.join(JS_DIR, 'i18n.js')).href);
+      const used = new Set();
+      const dynamicProbes = { 'habits.day_': 'habits.day_mon', 'habits.freq_': 'habits.freq_first' };
+      for (const [name, src] of Object.entries(jsFiles)) {
+        for (const m of src.matchAll(/t\(\s*['"]([\w.]+)['"]/g)) {
+          const prev = src[m.index - 1];
+          if (prev && /[\w$]/.test(prev)) continue; // e.g. split('.') — not a t() call
+          const key = m[1];
+          if (!key.includes('.')) continue;
+          used.add(`${name}:${dynamicProbes[key] || key}`);
+        }
+      }
+      const missing = [...used].filter(entry => t(entry.split(':')[1]) === entry.split(':')[1]);
+      assert(missing.length === 0,
+        `unresolved i18n keys (UI would show the raw key): ${missing.join(', ')}`);
+    });
+
     test('new-deck modal persists the selected deck type', () => {
       const flashJs = jsFiles['flashcards.js'];
       assert(/deck_type: type/.test(flashJs),

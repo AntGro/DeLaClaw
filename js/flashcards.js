@@ -99,6 +99,8 @@ let sessionDeck = null;
 let trSessionActive = false;
 let trSessionDeck = null;
 let trSessionTextId = null;
+let trFreePractice = false;      // extra practice: revision without scheduling updates
+let trFreePracticeLastChunk = null; // chunk_index just practiced (excluded from re-sampling)
 
 // ── Deck table state ──
 // Decks live in the flashcard_decks DB table. Loaded into maps for fast lookup.
@@ -1718,7 +1720,7 @@ function startTextPracticeForText(textId) {
     }
   }
 
-  if (pool.length === 0) { showToast(t('text_revision.no_chunks_due')); return; }
+  if (pool.length === 0) { startFreePractice(textId); return; }
   // New chunks wait until nothing is due: no new material while
   // unmastered chunks are pending.
   const due = pool.filter(p => p.chunk.last_review);
@@ -1753,7 +1755,40 @@ window.startTextPracticeForText = startTextPracticeForText;
 
 let trOverlayLines = []; // parsed line objects for the open revision overlay
 
-function showTextPracticeOverlay(text, chunk) {
+// Free practice: nothing is due, so sample the stalest chunk and let the
+// user revise without touching scheduling (no FSRS update, no DB write).
+function startFreePractice(textId, excludeChunkIndex = null) {
+  const tx = allTexts.find(t => t.id === textId);
+  if (!tx) return;
+  const nowStr = new Date().toISOString();
+  const eligible = ch => ch.text_id === textId && chunkHasRoleLines(tx, ch.chunk_index);
+  let candidates = allChunkProgress.filter(ch => eligible(ch) && ch.chunk_index !== excludeChunkIndex);
+  if (candidates.length === 0) {
+    // Single-chunk text (or everything excluded): allow repeating the chunk.
+    candidates = allChunkProgress.filter(eligible);
+  }
+  if (candidates.length === 0) { showToast(t('text_revision.no_chunks_due')); return; }
+  candidates.sort((a, b) => {
+    const rA = a.last_review && a.stability ? retrievability(a.stability, a.last_review, nowStr) : -1;
+    const rB = b.last_review && b.stability ? retrievability(b.stability, b.last_review, nowStr) : -1;
+    return rA - rB;
+  });
+  const picked = candidates[0];
+  trSessionActive = true;
+  trSessionDeck = deckIdForText(tx);
+  trSessionTextId = tx.id;
+  trFreePracticeLastChunk = picked.chunk_index;
+  showTextPracticeOverlay(tx, picked, { freePractice: true });
+}
+window.startFreePractice = startFreePractice;
+
+window.continueFreePractice = function() {
+  if (!trSessionTextId) { endTextPractice(); return; }
+  startFreePractice(trSessionTextId, trFreePracticeLastChunk);
+};
+
+function showTextPracticeOverlay(text, chunk, opts = {}) {
+  trFreePractice = !!opts.freePractice;
   let overlay = document.getElementById('practiceOverlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -1807,7 +1842,7 @@ function showTextPracticeOverlay(text, chunk) {
     <div class="practice-header">
       ${practiceHeaderLogo()}
       <div class="practice-progress-bar"><div class="practice-progress-fill" style="width:100%;"></div></div>
-      <div class="practice-meta"><span class="practice-meta-text">${esc(text.title)}${authorStr}</span></div>
+      <div class="practice-meta"><span class="practice-meta-text">${esc(text.title)}${authorStr}</span>${trFreePractice ? ` <span class="tr-practice-badge">${t('text_revision.free_practice')}</span>` : ''}</div>
       <button class="practice-close" data-action="end-text-practice">X</button>
     </div>
     <div class="tr-practice-area">
@@ -1880,6 +1915,12 @@ window.submitTextReview = async function(chunkId, totalLines) {
   let knownCount = 0;
   lineEls.forEach(el => { if (el.classList.contains('tr-line-known')) knownCount++; });
 
+  if (trFreePractice) {
+    // Extra practice only: report the score, leave scheduling untouched.
+    showFreePracticeSummary(knownCount, totalLines);
+    return;
+  }
+
   const ratio = totalLines > 0 ? knownCount / totalLines : 0;
   let rating;
   if (ratio >= 1) rating = 3; // Good (perfect)
@@ -1901,6 +1942,27 @@ window.submitTextReview = async function(chunkId, totalLines) {
   // Show summary
   showTextPracticeSummary(knownCount, totalLines, rating);
 };
+
+function showFreePracticeSummary(known, total) {
+  const overlay = document.getElementById('practiceOverlay');
+  if (!overlay) return;
+  const pct = total > 0 ? Math.round((known / total) * 100) : 0;
+  overlay.innerHTML = `
+    <div class="practice-summary">
+      ${practiceSummaryLogo()}
+      <div class="practice-summary-emoji">${pct >= 80 ? lucideIcon('trophy', 32) : pct >= 50 ? lucideIcon('flame', 32) : lucideIcon('book-open', 32)}</div>
+      <h2>${t('text_revision.free_practice_done')}</h2>
+      <div class="practice-summary-stats">
+        <div class="practice-summary-stat"><span class="practice-stat-val">${known}/${total}</span><span class="practice-stat-lbl">${t('text_revision.lines_known')}</span></div>
+        <div class="practice-summary-stat"><span class="practice-stat-val">${pct}%</span><span class="practice-stat-lbl">${t('flashcards.accuracy')}</span></div>
+      </div>
+      <div class="tr-free-note">${t('text_revision.free_practice_note')}</div>
+      <div class="practice-summary-actions">
+        <button class="btn practice-continue-btn" data-action="continue-free-practice">${t('text_revision.free_practice_another')}</button>
+        <button class="btn practice-done-btn" data-action="end-text-practice">${t('common.close')}</button>
+      </div>
+    </div>`;
+}
 
 function showTextPracticeSummary(known, total, rating) {
   const overlay = document.getElementById('practiceOverlay');
@@ -2001,6 +2063,8 @@ window.continueTextSameText = function() {
 };
 
 window.endTextPractice = function() {
+  trFreePractice = false;
+  trFreePracticeLastChunk = null;
   const overlay = document.getElementById('practiceOverlay');
   if (overlay) overlay.style.display = 'none';
   document.body.style.overflow = '';

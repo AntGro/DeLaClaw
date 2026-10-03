@@ -77,6 +77,7 @@ User jobs:
 - Scene parsing lives in `js/scene-parse.js` (pure, no imports): `parseSceneContent`, `splitSceneIntoChunks`, `sceneLineText`, `parseInlineDirs`
 - Chunking goes through `getTextChunks(tx)` everywhere (chunk generation, auto-repair, overlay, import) so `chunk_index` stays aligned with `text_line_progress` rows in both modes
 - Revision: all lines masked, revealed in order; only the role's lines toggle known/failed and count toward the rating — cues/directions reveal neutrally. Pickers skip chunks holding none of the role's lines. Changing `focus_role` resets that text's chunk progress (auto-repair regenerates it).
+- **Free practice**: the per-text revise button with nothing due samples the stalest chunk (role lines only) and revises without touching scheduling — no FSRS update, no DB write, no rating shown; the overlay carries a Practice badge and the summary states scheduling was untouched. Scoped to per-text revise; deck-wide revise and flashcards keep the caught-up notice.
 
 ### Import
 - AI-assisted import modal: generates JSON conversion prompt for both flashcards and texts

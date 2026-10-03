@@ -450,6 +450,9 @@ const T = {
       scene_warn_role_missing: 'This role has no lines in the text',
       scene_warn_no_blocks: 'No <...> blocks found',
       role_badge_prefix: 'as ',
+      free_practice: 'Practice', free_practice_done: 'Practice Complete',
+      free_practice_note: 'Scheduling untouched — this was extra practice.',
+      free_practice_another: 'Practice another',
     },
     // ── Schema / Migration banner ──
     schema: {
@@ -1167,6 +1170,9 @@ const T = {
       scene_warn_role_missing: "Ce rôle n'a aucune réplique dans le texte",
       scene_warn_no_blocks: 'Aucun bloc <...> trouvé',
       role_badge_prefix: 'rôle : ',
+      free_practice: 'Entraînement', free_practice_done: 'Entraînement terminé',
+      free_practice_note: 'Planification inchangée — entraînement libre.',
+      free_practice_another: 'Encore un',
     },
     schema: {
       banner_critical: 'Base de données v{dbVer} trop ancienne — DeLaClaw risque de ne pas fonctionner.',
@@ -1882,6 +1888,9 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       scene_warn_role_missing: 'Este papel no tiene réplicas en el texto',
       scene_warn_no_blocks: 'Sin bloques <...> encontrados',
       role_badge_prefix: 'papel: ',
+      free_practice: 'Práctica', free_practice_done: 'Práctica completada',
+      free_practice_note: 'Planificación intacta — práctica libre.',
+      free_practice_another: 'Otra más',
     },
     schema: {
       banner_critical: 'Base de datos v{dbVer} demasiado antigua — DeLaClaw puede no funcionar correctamente.',

@@ -3507,6 +3507,37 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'all text-revision pickers must skip chunks without the role\'s lines');
     });
 
+    test('free practice: revise button samples a chunk when nothing is due', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/if \(pool\.length === 0\) \{ startFreePractice\(textId\); return; \}/.test(flashJs),
+        'per-text revise with empty pool must start free practice instead of a toast');
+      assert(/showTextPracticeOverlay\(tx, picked, \{ freePractice: true \}\)/.test(flashJs),
+        'free practice must open the overlay flagged as free practice');
+    });
+
+    test('free practice: submit skips scheduling updates', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const submitStart = flashJs.indexOf('window.submitTextReview = async function');
+      const submitBody = flashJs.slice(submitStart, flashJs.indexOf('window.showTextPracticeSummary', submitStart));
+      const freeIdx = submitBody.indexOf('if (trFreePractice)');
+      const fsrsIdx = submitBody.indexOf('fsrsUpdate');
+      assert(freeIdx !== -1 && fsrsIdx !== -1 && freeIdx < fsrsIdx,
+        'submitTextReview must branch to the free-practice summary before any FSRS update');
+      assert(/showFreePracticeSummary\(knownCount, totalLines\);\s*return;/.test(submitBody),
+        'free practice submit must not fall through to the scheduling path');
+    });
+
+    test('free practice summary shows no rating and states scheduling is untouched', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const fnStart = flashJs.indexOf('function showFreePracticeSummary');
+      const fnBody = flashJs.slice(fnStart, flashJs.indexOf('function showTextPracticeSummary', fnStart));
+      assert(!fnBody.includes('ratingLabels'), 'free practice summary must not show a scheduling rating');
+      assert(fnBody.includes("t('text_revision.free_practice_note')"),
+        'free practice summary must state scheduling was untouched');
+      assert(fnBody.includes("data-action=\"continue-free-practice\""),
+        'free practice summary must offer another free-practice chunk');
+    });
+
     test('practice overlay scrolls tall content (safe centering)', () => {
       const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
       const overlayBlock = css.match(/\.practice-overlay \{[^}]*\}/)[0];

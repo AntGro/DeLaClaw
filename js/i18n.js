@@ -453,6 +453,7 @@ const T = {
       free_practice: 'Practice', free_practice_done: 'Practice Complete',
       free_practice_note: 'Scheduling untouched — this was extra practice.',
       free_practice_another: 'Practice another',
+      stage_directions: 'Stage directions',
     },
     // ── Schema / Migration banner ──
     schema: {
@@ -1173,6 +1174,7 @@ const T = {
       free_practice: 'Entraînement', free_practice_done: 'Entraînement terminé',
       free_practice_note: 'Planification inchangée — entraînement libre.',
       free_practice_another: 'Encore un',
+      stage_directions: 'Didascalies',
     },
     schema: {
       banner_critical: 'Base de données v{dbVer} trop ancienne — DeLaClaw risque de ne pas fonctionner.',
@@ -1891,6 +1893,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       free_practice: 'Práctica', free_practice_done: 'Práctica completada',
       free_practice_note: 'Planificación intacta — práctica libre.',
       free_practice_another: 'Otra más',
+      stage_directions: 'Acotaciones',
     },
     schema: {
       banner_critical: 'Base de datos v{dbVer} demasiado antigua — DeLaClaw puede no funcionar correctamente.',

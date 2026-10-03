@@ -3562,6 +3562,19 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(css.includes('.tr-spk-left') && css.includes('.tr-spk-right'), 'missing alignment classes');
     });
 
+    test('scene revision: didascalies get a localized header', async () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("t('text_revision.stage_directions')"),
+        'direction groups must show a localized didascalies header');
+      assert(flashJs.includes('tr-group-speaker tr-role-dir tr-spk-center'),
+        'didascalies header must be centered and muted like a role header');
+      assert(flashJs.includes("group.lines[0].kind === 'dir'"),
+        'plain-text lines (kind mine, no speaker) must not get a didascalies header');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.tr-role-dir'), 'missing .tr-role-dir CSS');
+      assert(css.includes('.tr-spk-center'), 'missing .tr-spk-center CSS');
+    });
+
     test('scene revision: book-like speaker groups', async () => {
       const { groupLinesBySpeaker } =
         await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);

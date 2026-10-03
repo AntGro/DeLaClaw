@@ -1862,6 +1862,10 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
             const isMine = sceneSpeakersEqual(group.speaker, text.focus_role);
             const colorCls = isMine ? 'tr-role-mine' : (roleColorMap.get(group.speaker.toLowerCase()) || '');
             header = `<div class="tr-group-speaker ${colorCls} ${isMine ? 'tr-spk-left' : 'tr-spk-right'}">${esc(group.speaker)}</div>`;
+          } else if (group.lines[0] && group.lines[0].kind === 'dir') {
+            // Didascalies get a header like the roles: centered, muted, localized.
+            // (Plain-text lines have no speaker but kind 'mine', so no header.)
+            header = `<div class="tr-group-speaker tr-role-dir tr-spk-center">${t('text_revision.stage_directions')}</div>`;
           }
           return `
           <div class="tr-line-group"${group.speaker ? ` data-speaker="${esc(group.speaker)}"` : ''}>

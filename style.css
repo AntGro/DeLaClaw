@@ -1470,7 +1470,8 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 /* Scene (role-based) text revision */
 .tr-role-badge { display:inline-block; font-size:0.72rem; font-weight:600; color:var(--accent); background:rgba(100,108,255,0.1); border:1px solid rgba(100,108,255,0.3); border-radius:20px; padding:1px 8px; margin-left:6px; vertical-align:1px; }
 .tr-speaker { font-size:0.72rem; font-weight:700; letter-spacing:0.08em; color:var(--muted); text-transform:uppercase; }
-.tr-reveal-speaker { font-size:0.72rem; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+.tr-line-group { display:flex; flex-direction:column; gap:4px; }
+.tr-group-speaker { font-size:0.72rem; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); text-align:center; }
 .tr-reveal-dir { font-style:italic; color:var(--muted); text-align:center; padding:4px 0; }
 .tr-inline-dir { font-style:italic; opacity:0.65; }
 .tr-line-shown { background:var(--surface); color:var(--text); border:1px solid var(--border); opacity:0.85; cursor:default; }

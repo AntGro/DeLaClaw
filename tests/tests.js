@@ -3529,16 +3529,30 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(dir.lines[0].speaker === null, 'direction with NAME: stays a direction');
     });
 
-    test('scene revision: revealed lines use theatrical typesetting', () => {
+    test('scene revision: book-like speaker groups', async () => {
+      const { groupLinesBySpeaker } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const lines = [
+        { speaker: 'RODRIGUE' }, { speaker: 'RODRIGUE' }, { speaker: 'rodrigue' },
+        { speaker: 'CHIMÈNE' },
+        { speaker: null }, { speaker: null },
+        { speaker: 'RODRIGUE' },
+      ];
+      const groups = groupLinesBySpeaker(lines);
+      assert(groups.length === 4, 'consecutive same-speaker lines group together (case-insensitive)');
+      assert(groups[0].lines.length === 3 && groups[0].speaker === 'RODRIGUE', 'first group keeps first-appearance name');
+      assert(groups[2].speaker === null && groups[2].lines.length === 2, 'directions group together');
+      assert(groups[3].speaker === 'RODRIGUE', 'non-consecutive same speaker starts a new group');
+      // Overlay renders one header per group, outside the line boxes.
       const flashJs = jsFiles['flashcards.js'];
-      assert(flashJs.includes("html = `<div class='tr-reveal-speaker'>${esc(name)}</div>${content}`"),
-        'revealed dialogue lines must show the speaker name on its own line');
-      assert(flashJs.includes("const name = kind === 'mine' ? text.focus_role : ln.speaker;"),
-        'the speaker line must cover both cue lines and the revised role');
-      assert(flashJs.includes("html = `<div class='tr-reveal-dir'>${content}</div>`"),
-        'standalone directions must get their own reveal style');
+      assert(flashJs.includes('groupLinesBySpeaker(chunkLines)'),
+        'lines container must group consecutive same-speaker lines');
+      assert(flashJs.includes("`<div class=\"tr-group-speaker\">${esc(group.speaker)}</div>`"),
+        'each dialogue group must show the speaker name once, outside the line boxes');
+      assert(!flashJs.includes('tr-reveal-speaker'),
+        'per-line speaker divs must be gone (name lives on the group header)');
       const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
-      assert(css.includes('.tr-reveal-speaker'), 'missing .tr-reveal-speaker CSS');
+      assert(css.includes('.tr-group-speaker'), 'missing .tr-group-speaker CSS');
       assert(css.includes('.tr-reveal-dir'), 'missing .tr-reveal-dir CSS');
     });
 

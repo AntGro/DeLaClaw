@@ -21,6 +21,23 @@ const SPEAKER_RE = /^([A-ZÀ-Þ][A-ZÀ-Þ0-9'’\- ]+?)\s*[:.]\s*/i;
 export function sceneSpeakersEqual(a, b) {
   return (a || '').toLowerCase() === (b || '').toLowerCase();
 }
+
+// Group consecutive lines by speaker (case-insensitive) for book-like layout:
+// the speaker's name is shown once above the group, outside the line boxes,
+// instead of repeated on every line. Direction lines (speaker null) group
+// together. Returns [{ speaker, lines }]; callers keep their own line index.
+export function groupLinesBySpeaker(lines) {
+  const groups = [];
+  for (const ln of lines) {
+    const last = groups[groups.length - 1];
+    if (last && sceneSpeakersEqual(last.speaker, ln.speaker)) {
+      last.lines.push(ln);
+    } else {
+      groups.push({ speaker: ln.speaker, lines: [ln] });
+    }
+  }
+  return groups;
+}
 const BLOCK_RE = /<([\s\S]*?)>/g;
 const INLINE_DIR_RE = /\*\*([\s\S]*?)\*\*/g;
 

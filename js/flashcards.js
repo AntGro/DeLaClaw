@@ -4,7 +4,7 @@ import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } fr
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
-import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneSpeakersEqual } from './scene-parse.js';
+import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneSpeakersEqual, groupLinesBySpeaker } from './scene-parse.js';
 
 // ===================================================================
 // FLASHCARDS — Spaced Repetition (Algo-style intervals)
@@ -1805,21 +1805,15 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
   // Normalize to line objects: scene lines carry speaker/segments, plain
   // lines behave as the user's own (today's behavior, unchanged).
   const chunkLines = sceneMode
-    ? rawChunk.map(ln => {
+    ? rawChunk.map((ln, idx) => {
         const kind = sceneSpeakersEqual(ln.speaker, text.focus_role) ? 'mine' : (ln.speaker ? 'cue' : 'dir');
         const content = renderSceneLineHtml(ln) || '\u00A0';
-        // Theatrical typesetting on reveal: the speaker's name on its own line
-        // (cues and the revised role alike); standalone directions centered.
-        let html;
-        if (kind === 'dir') {
-          html = `<div class='tr-reveal-dir'>${content}</div>`;
-        } else {
-          const name = kind === 'mine' ? text.focus_role : ln.speaker;
-          html = `<div class='tr-reveal-speaker'>${esc(name)}</div>${content}`;
-        }
-        return { kind, speaker: ln.speaker, plain: sceneLineText(ln), html };
+        // The speaker's name is shown once per group, outside the line boxes
+        // (see the lines container below); standalone directions stay centered.
+        const html = kind === 'dir' ? `<div class='tr-reveal-dir'>${content}</div>` : content;
+        return { idx, kind, speaker: ln.speaker, plain: sceneLineText(ln), html };
       })
-    : rawChunk.map(line => ({ kind: 'mine', speaker: null, plain: line, html: esc(line || '\u00A0') }));
+    : rawChunk.map((line, idx) => ({ idx, kind: 'mine', speaker: null, plain: line, html: esc(line || '\u00A0') }));
   trOverlayLines = chunkLines;
   const myLineCount = chunkLines.filter(l => l.kind === 'mine').length;
 
@@ -1859,11 +1853,14 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
         ${contextHtml}
       </div>
       <div class="tr-lines-container" id="trLinesContainer">
-        ${chunkLines.map((line, i) => {
-          const bullets = '• '.repeat(Math.max(1, Math.ceil(((line.plain || ' ').length) / 6)));
-          const speakerTag = line.kind === 'cue' ? `<span class='tr-speaker'>${esc(line.speaker)}:</span> ` : '';
-          return `<div class="tr-line tr-line-masked${i === 0 ? ' tr-line-next' : ''}" data-line-idx="${i}" data-kind="${line.kind}" data-action="handle-line-click">${speakerTag}${bullets}</div>`;
-        }).join('')}
+        ${groupLinesBySpeaker(chunkLines).map(group => `
+          <div class="tr-line-group"${group.speaker ? ` data-speaker="${esc(group.speaker)}"` : ''}>
+            ${group.speaker ? `<div class="tr-group-speaker">${esc(group.speaker)}</div>` : ''}
+            ${group.lines.map(line => {
+              const bullets = '• '.repeat(Math.max(1, Math.ceil(((line.plain || ' ').length) / 6)));
+              return `<div class="tr-line tr-line-masked${line.idx === 0 ? ' tr-line-next' : ''}" data-line-idx="${line.idx}" data-kind="${line.kind}" data-action="handle-line-click">${bullets}</div>`;
+            }).join('')}
+          </div>`).join('')}
       </div>
       <div class="tr-hint" id="trHint">${t('text_revision.tap_to_reveal')}</div>
       <div class="tr-submit-section" id="trSubmitSection" style="display:none;">

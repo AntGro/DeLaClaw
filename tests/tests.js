@@ -3473,6 +3473,62 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'poll discovery must purge joined rows hit by definite access loss');
     });
 
+    test('scene parser: direction with NAME: is not read as dialogue', () => {
+      const src = fs.readFileSync(path.join(JS_DIR, 'scene-parse.js'), 'utf-8');
+      assert(src.includes('checked FIRST') || /startsWith\('\\*\\*'\)/.test(src),
+        'scene-parse.js must check the ** direction wrapper before any speaker prefix');
+    });
+
+    test('scene mode: role field, preview, and focus_role persistence', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('id="newTextRole"') && flashJs.includes('id="editTextRole"'),
+        'add/edit text modals must have a role field');
+      assert(flashJs.includes('updateScenePreview'),
+        'text modals must have a live scene parse preview');
+      assert((flashJs.match(/focus_role: role/g) || []).length >= 2,
+        'add/edit text saves must persist focus_role');
+      assert(/delete\(\)\.eq\('text_id', id\)/.test(flashJs),
+        'changing focus_role must reset chunk progress');
+    });
+
+    test('scene revision: only own lines are evaluated', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("data-kind=\"${line.kind}\"") || flashJs.includes('data-kind="${line.kind}"'),
+        'revision lines must carry their kind (mine/cue/dir)');
+      assert(/const myLineCount = chunkLines\.filter\(l => l\.kind === 'mine'\)\.length/.test(flashJs),
+        'submit must count only the role\'s own lines');
+      assert(flashJs.includes("if (kind !== 'mine') return;"),
+        'cue/direction lines must not toggle known/failed');
+    });
+
+    test('scene pickers skip chunks with none of the role\'s lines', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert((flashJs.match(/chunkHasRoleLines\(/g) || []).length >= 3,
+        'all text-revision pickers must skip chunks without the role\'s lines');
+    });
+
+    test('new-deck modal persists the selected deck type', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/deck_type: type/.test(flashJs),
+        'saveNewFlashDeck must persist deck_type');
+      assert(/if \(row\?\.deck_type === 'text' \|\| row\?\.deck_type === 'flashcard'\) return row\.deck_type;/.test(flashJs),
+        'getDeckType must prefer the stored deck_type');
+    });
+
+    test('migrations add focus_role and deck_type (2.10.18)', () => {
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(local.includes('2.10.18') && local.includes('ADD COLUMN focus_role') && local.includes('ADD COLUMN deck_type'),
+        'local migration 2.10.18 must add focus_role and deck_type');
+      assert(drive.includes('2.10.18') && drive.includes('focus_role') && drive.includes('deck_type'),
+        'drive migration 2.10.18 must ensure focus_role and deck_type');
+      assert(schema.includes('focus_role TEXT') && schema.includes('deck_type TEXT'),
+        'base schema must include focus_role and deck_type');
+      const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
+      assert(sw.includes('js/scene-parse.js'), 'sw.js must precache js/scene-parse.js');
+    });
+
     test('text revision holds new chunks until nothing is due', () => {
       const flashJs = jsFiles['flashcards.js'];
       const gates = flashJs.match(/const due = (?:pool\.filter\(p => p\.chunk\.last_review\)|chunks\.filter\(ch => ch\.last_review\));\s*\n\s*const candidates = due\.length > 0 \? due : (?:pool|chunks);/g) || [];

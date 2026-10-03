@@ -444,6 +444,12 @@ const T = {
       lines_known: 'Lines known', rating: 'Rating',
       continue_same_text: 'Same text', continue_another: 'Another chunk',
       revise_this: 'Revise this text',
+      my_role_label: 'My role (optional)', my_role_placeholder: 'e.g. RODRIGUE — leave empty for plain text',
+      scene_format_hint: 'Scene format: <ROLE: ...> blocks, <**direction**> for stage directions, **...** for inline directions',
+      scene_warn_unparsed: 'Some <...> blocks were not understood — check the format',
+      scene_warn_role_missing: 'This role has no lines in the text',
+      scene_warn_no_blocks: 'No <...> blocks found',
+      role_badge_prefix: 'as ',
     },
     // ── Schema / Migration banner ──
     schema: {
@@ -1155,6 +1161,12 @@ const T = {
       lines_known: 'Lignes connues', rating: 'Note',
       continue_same_text: 'Même texte', continue_another: 'Autre extrait',
       revise_this: 'Réviser ce texte',
+      my_role_label: 'Mon rôle (optionnel)', my_role_placeholder: 'ex. RODRIGUE — vide pour un texte simple',
+      scene_format_hint: 'Format scène : blocs <RÔLE : ...>, <**didascalie**> pour les didascalies, **...** pour les didascalies dans une réplique',
+      scene_warn_unparsed: "Certains blocs <...> n'ont pas été compris — vérifiez le format",
+      scene_warn_role_missing: "Ce rôle n'a aucune réplique dans le texte",
+      scene_warn_no_blocks: 'Aucun bloc <...> trouvé',
+      role_badge_prefix: 'rôle : ',
     },
     schema: {
       banner_critical: 'Base de données v{dbVer} trop ancienne — DeLaClaw risque de ne pas fonctionner.',
@@ -1864,6 +1876,12 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       lines_known: 'Líneas conocidas', rating: 'Nota',
       continue_same_text: 'Mismo texto', continue_another: 'Otro fragmento',
       revise_this: 'Revisar este texto',
+      my_role_label: 'Mi papel (opcional)', my_role_placeholder: 'ej. RODRIGO — vacío para texto simple',
+      scene_format_hint: 'Formato de escena: bloques <PAPEL: ...>, <**acotación**> para acotaciones, **...** para acotaciones dentro de una réplica',
+      scene_warn_unparsed: 'Algunos bloques <...> no se entendieron — revisa el formato',
+      scene_warn_role_missing: 'Este papel no tiene réplicas en el texto',
+      scene_warn_no_blocks: 'Sin bloques <...> encontrados',
+      role_badge_prefix: 'papel: ',
     },
     schema: {
       banner_critical: 'Base de datos v{dbVer} demasiado antigua — DeLaClaw puede no funcionar correctamente.',

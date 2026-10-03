@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS flashcard_decks (
   color TEXT,
   sort_order INTEGER DEFAULT 0,
   is_protected INTEGER DEFAULT 0,
+  deck_type TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
@@ -142,6 +143,7 @@ CREATE TABLE IF NOT EXISTS texts (
   content TEXT NOT NULL,
   lines_per_chunk INTEGER NOT NULL DEFAULT 4,
   context_lines INTEGER NOT NULL DEFAULT 3,
+  focus_role TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );

@@ -4,6 +4,7 @@ import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } fr
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
+import { parseSceneContent, splitSceneIntoChunks, sceneLineText } from './scene-parse.js';
 
 // ===================================================================
 // FLASHCARDS — Spaced Repetition (Algo-style intervals)
@@ -172,7 +173,7 @@ async function refreshFlashcards() {
     if (!tx.content) continue;
     const hasChunks = allChunkProgress.some(ch => ch.text_id === tx.id);
     if (!hasChunks) {
-      const generated = splitTextIntoChunks(tx.content, tx.lines_per_chunk || 4);
+      const generated = getTextChunks(tx);
       const rows = generated.map((_, idx) => ({ text_id: tx.id, chunk_index: idx }));
       if (rows.length > 0 && state.db.connected) {
         try {
@@ -188,8 +189,11 @@ async function refreshFlashcards() {
 
 // ── Deck Nav Buttons ──
 // ── Deck Type helpers ──
-// A deck is either 'flashcard' or 'text', inferred from which table has data for it.
+// A deck is either 'flashcard' or 'text', stored on the deck row at creation.
+// Legacy rows without a stored type fall back to inferring from content.
 function getDeckType(deckId) {
+  const row = _deckMap.get(deckId);
+  if (row?.deck_type === 'text' || row?.deck_type === 'flashcard') return row.deck_type;
   const hasCards = allCards.some(c => deckIdForCard(c) === deckId);
   const hasTexts = allTexts.some(tx => deckIdForText(tx) === deckId);
   // If somehow both (shouldn't happen), prefer flashcard
@@ -1086,15 +1090,15 @@ window.saveNewFlashDeck = async function() {
   }
 
   // Create the deck row in DB first
+  const type = document.getElementById('newDeckType').value === 'text' ? 'text' : 'flashcard';
   if (state.db.connected) {
     const shortname = document.getElementById('newDeckShortname').value.trim() || null;
     const color = document.getElementById('newDeckColor').value;
     const sortOrder = Math.max(0, ...Array.from(_deckMap.values()).map(d => d.sort_order || 0)) + 1;
-    await state.db.from('flashcard_decks').insert({ name, shortname, color, sort_order: sortOrder });
+    await state.db.from('flashcard_decks').insert({ name, shortname, color, sort_order: sortOrder, deck_type: type });
     await loadFlashcardDecks();
   }
 
-  const type = document.getElementById('newDeckType').value;
   closeAddFlashDeckModal();
   showToast(t('toast.created'), 'success');
   await refreshFlashcards();
@@ -1379,7 +1383,7 @@ function renderTextItem(tx, color) {
     <div class="todo-row">
       <div class="tr-text-info">
         <span class="todo-text"><strong>${esc(titleTrunc)}</strong><span class="tr-author">${authorStr}</span></span>
-        <span class="tr-meta">${lineCount} lines ${lucideIcon('layers', 12)} ${masteredChunks}/${totalChunks} chunks${dueChunks > 0 ? ` <span class="tr-due-badge">${dueChunks} due</span>` : ''}</span>
+        <span class="tr-meta">${lineCount} lines ${lucideIcon('layers', 12)} ${masteredChunks}/${totalChunks} chunks${dueChunks > 0 ? ` <span class="tr-due-badge">${dueChunks} due</span>` : ''}${tx.focus_role ? ` <span class="tr-role-badge">${t('text_revision.role_badge_prefix')}${esc(tx.focus_role)}</span>` : ''}</span>
         ${progressBar}
       </div>
       <div class="todo-actions">
@@ -1414,6 +1418,35 @@ function splitTextIntoChunks(content, linesPerChunk) {
   return chunks;
 }
 
+// Unified chunk access: scene texts (focus_role set) chunk parsed content
+// lines; plain texts chunk raw lines as before. Chunk indexes stay aligned
+// with text_line_progress rows in both modes.
+function getTextChunks(tx) {
+  const perChunk = tx.lines_per_chunk || 4;
+  if (tx.focus_role) {
+    return splitSceneIntoChunks(parseSceneContent(tx.content).lines, perChunk);
+  }
+  return splitTextIntoChunks(tx.content, perChunk);
+}
+
+// In scene mode, chunks holding none of the role's lines carry nothing to
+// learn and are skipped by the revision pickers.
+function chunkHasRoleLines(tx, chunkIndex) {
+  if (!tx.focus_role) return true;
+  const chunks = getTextChunks(tx);
+  const ch = chunks[chunkIndex];
+  return !!ch && ch.some(ln => ln.speaker === tx.focus_role);
+}
+
+// Rendered HTML for a parsed scene line: direction spans dimmed italic.
+function renderSceneLineHtml(line) {
+  return line.segments.map(sg =>
+    sg.kind === 'dir'
+      ? `<span class='tr-inline-dir'>${esc(sg.text)}</span>`
+      : esc(sg.text)
+  ).join('');
+}
+
 // ── Add Text Modal ──
 window.openAddTextModal = function(deck) {
   closeAllFlashModals();
@@ -1426,7 +1459,16 @@ window.openAddTextModal = function(deck) {
       <label>${t('text_revision.author_label')}</label>
       <input type="text" id="newTextAuthor" placeholder="${t('text_revision.author_placeholder')}">
       <label>${t('text_revision.content_label')}</label>
-      <textarea id="newTextContent" rows="10" placeholder="${t('text_revision.content_placeholder')}"></textarea>
+      <textarea id="newTextContent" rows="10" placeholder="${t('text_revision.content_placeholder')}" data-action="update-scene-preview"></textarea>
+      <div class="tr-modal-row">
+        <div class="tr-modal-field">
+          <label>${t('text_revision.my_role_label')}</label>
+          <input type="text" id="newTextRole" list="newTextRoleList" placeholder="${t('text_revision.my_role_placeholder')}" data-action="update-scene-preview" autocomplete="off">
+          <datalist id="newTextRoleList"></datalist>
+        </div>
+      </div>
+      <div class="tr-format-hint">${t('text_revision.scene_format_hint')}</div>
+      <div class="tr-scene-preview" id="newTextScenePreview"></div>
       <div class="tr-modal-row">
         <div class="tr-modal-field">
           <label>${t('text_revision.lines_per_chunk')}</label>
@@ -1458,6 +1500,7 @@ window.saveNewText = async function() {
   const content = document.getElementById('newTextContent').value;
   const linesPerChunk = parseInt(document.getElementById('newTextLinesPerChunk').value) || 4;
   const contextLines = parseInt(document.getElementById('newTextContextLines').value) || 3;
+  const role = document.getElementById('newTextRole').value.trim() || null;
 
   if (!title) { showToast(t('toast.name_required')); return; }
   if (!content.trim()) { showToast(t('toast.content_required')); return; }
@@ -1469,14 +1512,15 @@ window.saveNewText = async function() {
 
   // Insert text
   const { data: inserted } = await state.db.from('texts').insert({
-    deck, title, author, content, lines_per_chunk: linesPerChunk, context_lines: contextLines, deck_id: deckId || null
+    deck, title, author, content, lines_per_chunk: linesPerChunk, context_lines: contextLines, deck_id: deckId || null,
+    focus_role: role
   }).select('*');
 
   if (!inserted || inserted.length === 0) { showToast(t('toast.failed_to_add')); return; }
   const textRow = inserted[0];
 
   // Generate chunk progress rows
-  const chunks = splitTextIntoChunks(content, linesPerChunk);
+  const chunks = getTextChunks({ content, lines_per_chunk: linesPerChunk, focus_role: role });
   const chunkRows = chunks.map((_, idx) => ({ text_id: textRow.id, chunk_index: idx }));
   if (chunkRows.length > 0) {
     await state.db.from('text_line_progress').insert(chunkRows);
@@ -1502,6 +1546,44 @@ window.deleteText = function(id) {
   });
 };
 
+// Live parse preview for the scene role field (add/edit text modals).
+window.updateScenePreview = function(el) {
+  if (!el) return;
+  const overlay = el.closest('.modal-overlay');
+  const isAdd = overlay && overlay.id === 'addTextModal';
+  const pfx = isAdd ? 'newText' : 'editText';
+  const contentEl = document.getElementById(pfx + 'Content');
+  const roleEl = document.getElementById(pfx + 'Role');
+  const listEl = document.getElementById(pfx + 'RoleList');
+  const prevEl = document.getElementById(pfx + 'ScenePreview');
+  if (!contentEl || !prevEl) return;
+  const content = contentEl.value;
+  const role = (roleEl ? roleEl.value : '').trim();
+  const hasBlocks = content.includes('<') && content.includes('>');
+  if (!role && !hasBlocks) {
+    prevEl.innerHTML = '';
+    if (listEl) listEl.innerHTML = '';
+    return;
+  }
+  const { lines, speakers, unparsedBlocks } = parseSceneContent(content);
+  if (listEl) listEl.innerHTML = speakers.map(sp => `<option value="${esc(sp)}"></option>`).join('');
+  const warnings = [];
+  if (unparsedBlocks > 0) warnings.push(t('text_revision.scene_warn_unparsed'));
+  if (role && !speakers.includes(role)) warnings.push(t('text_revision.scene_warn_role_missing'));
+  if (role && lines.length === 0) warnings.push(t('text_revision.scene_warn_no_blocks'));
+  const shown = lines.slice(0, 30);
+  const body = shown.map(ln => {
+    const text = esc(sceneLineText(ln) || '\u00A0');
+    if (ln.unparsed) return `<div class="tr-sprev-line tr-sprev-warn">${text}</div>`;
+    if (!ln.speaker) return `<div class="tr-sprev-line tr-sprev-dir">${text}</div>`;
+    const mine = role && ln.speaker === role;
+    return `<div class="tr-sprev-line${mine ? ' tr-sprev-mine' : ''}"><span class="tr-sprev-speaker">${esc(ln.speaker)}:</span> ${text}</div>`;
+  }).join('');
+  const more = lines.length > shown.length ? `<div class="tr-sprev-more">+${lines.length - shown.length}</div>` : '';
+  const warnHtml = warnings.map(w => `<div class="tr-sprev-warn">${esc(w)}</div>`).join('');
+  prevEl.innerHTML = warnHtml + body + more;
+};
+
 window.openEditTextModal = function(id) {
   const tx = allTexts.find(t => t.id === id);
   if (!tx) return;
@@ -1520,7 +1602,16 @@ window.openEditTextModal = function(id) {
       <label>${t('text_revision.author_label')}</label>
       <input type="text" id="editTextAuthor" value="${esc(tx.author || '')}">
       <label>${t('text_revision.content_label')}</label>
-      <textarea id="editTextContent" rows="10" style="font-family:monospace;font-size:0.85rem;">${esc(tx.content)}</textarea>
+      <textarea id="editTextContent" rows="10" style="font-family:monospace;font-size:0.85rem;" data-action="update-scene-preview">${esc(tx.content)}</textarea>
+      <div class="tr-modal-row">
+        <div class="tr-modal-field">
+          <label>${t('text_revision.my_role_label')}</label>
+          <input type="text" id="editTextRole" list="editTextRoleList" placeholder="${t('text_revision.my_role_placeholder')}" value="${esc(tx.focus_role || '')}" data-action="update-scene-preview" autocomplete="off">
+          <datalist id="editTextRoleList"></datalist>
+        </div>
+      </div>
+      <div class="tr-format-hint">${t('text_revision.scene_format_hint')}</div>
+      <div class="tr-scene-preview" id="editTextScenePreview"></div>
       <div class="modal-actions">
         <button class="modal-cancel" data-action="close-edit-text">${t('common.cancel')}</button>
         <button class="modal-save" data-action="save-edit-text">${t('common.save')}</button>
@@ -1528,6 +1619,7 @@ window.openEditTextModal = function(id) {
     </div>
   </div>`;
   document.body.insertAdjacentHTML('beforeend', html);
+  updateScenePreview(document.getElementById('editTextContent'));
 };
 
 window.closeEditTextModal = function() {
@@ -1536,6 +1628,7 @@ window.closeEditTextModal = function() {
 
 window.saveEditText = async function() {
   const id = document.getElementById('editTextId').value;
+  const tx = allTexts.find(t => t.id === id);
   const deckId = document.getElementById('editTextDeck').value.trim();
   const deckRow = _deckMap.get(deckId);
   const deck = deckRow?.name ?? deckId;
@@ -1543,8 +1636,16 @@ window.saveEditText = async function() {
   const author = document.getElementById('editTextAuthor').value.trim();
   const content = document.getElementById('editTextContent').value;
   if (!title || !content.trim()) { showToast('Title and content are required'); return; }
-  const updates = { deck, title, author: author || null, content, deck_id: deckId };
-  if (state.db.connected) await state.db.from('texts').update(updates).eq('id', id);
+  const role = document.getElementById('editTextRole').value.trim() || null;
+  const updates = { deck, title, author: author || null, content, deck_id: deckId, focus_role: role };
+  if (state.db.connected) {
+    await state.db.from('texts').update(updates).eq('id', id);
+    if ((tx?.focus_role || null) !== role) {
+      // Role change flips the parsing mode: drop chunk progress so the
+      // auto-repair regenerates it against the new chunking.
+      await state.db.from('text_line_progress').delete().eq('text_id', id);
+    }
+  }
   closeEditTextModal();
   await refreshFlashcards();
   showToast(t('text_revision.text_updated'));
@@ -1564,6 +1665,7 @@ function startTextPractice(deckFilter, anchorEl) {
     const chunks = allChunkProgress.filter(ch => ch.text_id === tx.id);
     for (const ch of chunks) {
       if (!ch.last_review || !ch.next_review || new Date(ch.next_review) <= now) {
+        if (!chunkHasRoleLines(tx, ch.chunk_index)) continue;
         pool.push({ chunk: ch, text: tx });
       }
     }
@@ -1611,6 +1713,7 @@ function startTextPracticeForText(textId) {
   const pool = [];
   for (const ch of chunks) {
     if (!ch.last_review || !ch.next_review || new Date(ch.next_review) <= now) {
+      if (!chunkHasRoleLines(tx, ch.chunk_index)) continue;
       pool.push({ chunk: ch, text: tx });
     }
   }
@@ -1648,6 +1751,8 @@ function startTextPracticeForText(textId) {
 }
 window.startTextPracticeForText = startTextPracticeForText;
 
+let trOverlayLines = []; // parsed line objects for the open revision overlay
+
 function showTextPracticeOverlay(text, chunk) {
   let overlay = document.getElementById('practiceOverlay');
   if (!overlay) {
@@ -1659,24 +1764,44 @@ function showTextPracticeOverlay(text, chunk) {
   overlay.style.display = 'flex';
   document.body.style.overflow = 'hidden';
 
-  const allChunks = splitTextIntoChunks(text.content, text.lines_per_chunk);
-  const chunkLines = (allChunks[chunk.chunk_index] || '').split('\n');
-  const allLines = text.content.split('\n');
+  const sceneMode = !!text.focus_role;
+  const allChunks = getTextChunks(text);
+  const rawChunk = allChunks[chunk.chunk_index] || [];
+  // Normalize to line objects: scene lines carry speaker/segments, plain
+  // lines behave as the user's own (today's behavior, unchanged).
+  const chunkLines = sceneMode
+    ? rawChunk.map(ln => ({
+        kind: ln.speaker === text.focus_role ? 'mine' : (ln.speaker ? 'cue' : 'dir'),
+        speaker: ln.speaker,
+        plain: sceneLineText(ln),
+        html: renderSceneLineHtml(ln) || '\u00A0',
+      }))
+    : rawChunk.map(line => ({ kind: 'mine', speaker: null, plain: line, html: esc(line || '\u00A0') }));
+  trOverlayLines = chunkLines;
+  const myLineCount = chunkLines.filter(l => l.kind === 'mine').length;
 
   // Compute context: preceding lines
   let contextLines = [];
   if (chunk.chunk_index === 0) {
     contextLines = null; // beginning of text
   } else {
-    let precedingContent = allChunks.slice(0, chunk.chunk_index).join('\n');
-    let precedingLines = precedingContent.split('\n');
-    contextLines = precedingLines.slice(-text.context_lines);
+    const preceding = [];
+    for (const c of allChunks.slice(0, chunk.chunk_index)) {
+      if (sceneMode) { for (const ln of c) preceding.push(ln); }
+      else { for (const s of c.split('\n')) preceding.push(s); }
+    }
+    contextLines = preceding.slice(-text.context_lines);
   }
 
   const authorStr = text.author ? ` — ${esc(text.author)}` : '';
   const contextHtml = contextLines === null
     ? `<div class="tr-context-marker">${t('text_revision.beginning')}</div>`
-    : contextLines.map(l => `<div class="tr-context-line">${esc(l || '\u00A0')}</div>`).join('');
+    : contextLines.map(l => {
+        if (!sceneMode) return `<div class="tr-context-line">${esc(l || '\u00A0')}</div>`;
+        const sp = l.speaker ? `<span class='tr-speaker'>${esc(l.speaker)}:</span> ` : '';
+        const cls = l.speaker ? 'tr-context-line' : 'tr-context-line tr-context-dir';
+        return `<div class="${cls}">${sp}${esc(sceneLineText(l) || '\u00A0')}</div>`;
+      }).join('');
 
   overlay.innerHTML = `
     <div class="practice-header">
@@ -1691,11 +1816,15 @@ function showTextPracticeOverlay(text, chunk) {
         ${contextHtml}
       </div>
       <div class="tr-lines-container" id="trLinesContainer">
-        ${chunkLines.map((line, i) => `<div class="tr-line tr-line-masked${i === 0 ? ' tr-line-next' : ''}" data-line-idx="${i}" data-text="${esc(line || '\u00A0')}" data-action="handle-line-click">${'• '.repeat(Math.max(1, Math.ceil((line || ' ').length / 6)))}</div>`).join('')}
+        ${chunkLines.map((line, i) => {
+          const bullets = '• '.repeat(Math.max(1, Math.ceil(((line.plain || ' ').length) / 6)));
+          const speakerTag = line.kind === 'cue' ? `<span class='tr-speaker'>${esc(line.speaker)}:</span> ` : '';
+          return `<div class="tr-line tr-line-masked${i === 0 ? ' tr-line-next' : ''}" data-line-idx="${i}" data-kind="${line.kind}" data-action="handle-line-click">${speakerTag}${bullets}</div>`;
+        }).join('')}
       </div>
       <div class="tr-hint" id="trHint">${t('text_revision.tap_to_reveal')}</div>
       <div class="tr-submit-section" id="trSubmitSection" style="display:none;">
-        <button class="btn practice-done-btn" data-action="submit-text-review" data-id="${esc(chunk.id)}" data-lines="${chunkLines.length}">${t('text_revision.submit')}</button>
+        <button class="btn practice-done-btn" data-action="submit-text-review" data-id="${esc(chunk.id)}" data-lines="${myLineCount}">${t('text_revision.submit')}</button>
       </div>
     </div>`;
   initMarquee();
@@ -1705,6 +1834,7 @@ window.handleLineClick = function(el) {
   const idx = parseInt(el.dataset.lineIdx, 10);
   const container = document.getElementById('trLinesContainer');
   const lines = container.querySelectorAll('.tr-line');
+  const kind = el.dataset.kind || 'mine';
 
   if (el.classList.contains('tr-line-masked')) {
     // Only allow revealing the next unmasked line in order
@@ -1714,10 +1844,16 @@ window.handleLineClick = function(el) {
     }
     if (idx !== nextMaskedIdx) return; // can only reveal in order
 
-    // Reveal as known
+    const lineObj = trOverlayLines[idx];
     el.classList.remove('tr-line-masked', 'tr-line-next');
-    el.classList.add('tr-line-known');
-    el.innerHTML = el.dataset.text;
+    if (kind === 'mine') {
+      // Own line: reveal as known (toggleable to failed below)
+      el.classList.add('tr-line-known');
+    } else {
+      // Cue / direction: revealed neutrally, never evaluated
+      el.classList.add('tr-line-shown');
+    }
+    el.innerHTML = lineObj ? lineObj.html : '';
 
     // Mark next masked line as the active target
     const nextMasked = container.querySelector('.tr-line-masked');
@@ -1732,7 +1868,8 @@ window.handleLineClick = function(el) {
       document.getElementById('trSubmitSection').style.display = 'block';
     }
   } else {
-    // Toggle between known and failed
+    // Toggle between known and failed (own lines only)
+    if (kind !== 'mine') return;
     el.classList.toggle('tr-line-known');
     el.classList.toggle('tr-line-failed');
   }
@@ -1832,7 +1969,8 @@ window.continueTextSameText = function() {
 
   const chunks = allChunkProgress.filter(ch =>
     ch.text_id === trSessionTextId &&
-    (!ch.last_review || !ch.next_review || new Date(ch.next_review) <= now)
+    (!ch.last_review || !ch.next_review || new Date(ch.next_review) <= now) &&
+    chunkHasRoleLines(text, ch.chunk_index)
   );
   if (chunks.length === 0) { showToast(t('text_revision.no_chunks_due')); endTextPractice(); return; }
   // New chunks wait until nothing is due: no new material while
@@ -2458,7 +2596,7 @@ window.openImportModal = async function() {
           }).select('*');
           if (inserted && inserted.length > 0) {
             const textRow = inserted[0];
-            const chunks = splitTextIntoChunks(item.content, linesPerChunk);
+            const chunks = getTextChunks({ content: item.content, lines_per_chunk: linesPerChunk });
             const chunkRows = chunks.map((_, idx) => ({ text_id: textRow.id, chunk_index: idx }));
             if (chunkRows.length > 0) await state.db.from('text_line_progress').insert(chunkRows);
           }

@@ -1467,6 +1467,23 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .tr-hint { text-align:center; font-size:0.8rem; color:var(--muted); margin-top:12px; font-style:italic; }
 .tr-submit-section { margin-top:16px; text-align:center; }
 
+/* Scene (role-based) text revision */
+.tr-role-badge { display:inline-block; font-size:0.72rem; font-weight:600; color:var(--accent); background:rgba(100,108,255,0.1); border:1px solid rgba(100,108,255,0.3); border-radius:20px; padding:1px 8px; margin-left:6px; vertical-align:1px; }
+.tr-speaker { font-size:0.72rem; font-weight:700; letter-spacing:0.08em; color:var(--muted); text-transform:uppercase; }
+.tr-inline-dir { font-style:italic; opacity:0.65; }
+.tr-line-shown { background:var(--surface); color:var(--text); border:1px solid var(--border); opacity:0.85; cursor:default; }
+.tr-context-dir { opacity:0.55; }
+.tr-format-hint { font-size:0.75rem; color:var(--muted); font-style:italic; margin:6px 0 4px; }
+.tr-scene-preview { max-height:220px; overflow-y:auto; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px; font-size:0.85rem; line-height:1.6; }
+.tr-scene-preview:empty { display:none; }
+.tr-sprev-line { padding:2px 0; border-bottom:1px dashed var(--border); }
+.tr-sprev-line:last-child { border-bottom:none; }
+.tr-sprev-speaker { font-size:0.7rem; font-weight:700; letter-spacing:0.06em; color:var(--accent); text-transform:uppercase; margin-right:6px; }
+.tr-sprev-dir { color:var(--muted); font-style:italic; }
+.tr-sprev-mine { background:rgba(34,197,94,0.07); border-radius:4px; }
+.tr-sprev-warn { color:#f59e0b; }
+.tr-sprev-more { color:var(--muted); font-size:0.75rem; padding-top:4px; }
+
 /* ═══════ Practice Overlay ═══════ */
 .practice-overlay {
   position:fixed; inset:0; z-index:9999;

@@ -355,6 +355,10 @@
       }, 150);
       return;
     }
+    switch (action) {
+      case 'update-scene-preview': callWindow('updateScenePreview', [el]); break;
+      default: break;
+    }
   }
   function handleKeydown(e) {
     var el = getActionEl(e.target);

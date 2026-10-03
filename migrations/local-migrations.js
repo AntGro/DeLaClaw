@@ -500,4 +500,10 @@ export const LOCAL_MIGRATIONS = {
     DROP TABLE IF EXISTS vestiaire;
     DROP TABLE IF EXISTS vestiaire_categories;
   `,
+  '2.10.18': `
+    -- Scene (role-based) text revision: optional focus role per text
+    ALTER TABLE texts ADD COLUMN focus_role TEXT;
+    -- Persist deck type at creation (new-deck modal choice was dropped)
+    ALTER TABLE flashcard_decks ADD COLUMN deck_type TEXT;
+  `,
 };

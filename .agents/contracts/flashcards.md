@@ -72,6 +72,11 @@ User jobs:
 ### Texts
 - `text_line_progress` tracks per-line revision for long texts
 - Text practice: chunked display, line-by-line click-to-reveal, chunk review submission
+- **Deck type is stored** (`flashcard_decks.deck_type`): the new-deck modal choice is persisted at creation; legacy rows without a stored type fall back to inferring from content (cards → flashcard, texts → text, empty → flashcard)
+- **Scene mode** (role-based text revision): `texts.focus_role` holds the role being learned (null = plain text). Scene content uses `<...>` blocks — `<ROLE: ...>` dialogue (may span lines), `<**...**>` direction (the `**` wrapper is mandatory and checked before any speaker prefix, so a direction containing `NAME:` is never read as dialogue), `**...**` for inline directions. Lines outside blocks are ignored by the parser.
+- Scene parsing lives in `js/scene-parse.js` (pure, no imports): `parseSceneContent`, `splitSceneIntoChunks`, `sceneLineText`, `parseInlineDirs`
+- Chunking goes through `getTextChunks(tx)` everywhere (chunk generation, auto-repair, overlay, import) so `chunk_index` stays aligned with `text_line_progress` rows in both modes
+- Revision: all lines masked, revealed in order; only the role's lines toggle known/failed and count toward the rating — cues/directions reveal neutrally. Pickers skip chunks holding none of the role's lines. Changing `focus_role` resets that text's chunk progress (auto-repair regenerates it).
 
 ### Import
 - AI-assisted import modal: generates JSON conversion prompt for both flashcards and texts

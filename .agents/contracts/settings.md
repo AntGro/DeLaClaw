@@ -38,7 +38,7 @@ Cross-cutting app configuration — theme, language, backend picker, sharing man
 ### Settings Table
 - Key-value store: `schema_version`, archived project IDs, `gcal_sync_enabled`, `gcal_calendar_id`, `gcal_sync_habits`, `gcal_sync_todos`, `gcal_sync_birthdays`
 - `loadSettings()` reads at startup into `state.settings`
-- `schema_version` checked against `VERSION` `latest_compat` / `latest_compat_deprec` for compatibility banners
+- `schema_version` bumped by each migration; pending migrations run automatically when it is behind
 
 ### Category Tables
 - `todo_categories`, `habit_categories`, `flashcard_decks` — each has a protected default row (`name=''`, `is_protected=1`) guarded by `protect_category_row()` trigger

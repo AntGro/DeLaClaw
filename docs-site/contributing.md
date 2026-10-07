@@ -120,7 +120,7 @@ All changes land on `dev` first, which auto-deploys to [dev.delaclaw.pages.dev](
 
 - All tests pass
 - Preview on [dev.delaclaw.pages.dev](https://dev.delaclaw.pages.dev) looks correct
-- `VERSION` has the right `latest`, `latest_compat`, and `latest_compat_deprec`
+- `VERSION` has the right `latest`
 - If DB schema changed: migration entries exist for Local (`local-migrations.js`) and Drive (`drive-migrations.js`), and `server/schema.sql` is updated. See [MIGRATION_GUIDE.md](/migrations/MIGRATION_GUIDE.md)
 - i18n: all new strings present in EN, FR, ES
 - No hardcoded dark-mode colors — all via CSS variables

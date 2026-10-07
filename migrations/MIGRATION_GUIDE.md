@@ -11,18 +11,9 @@ DeLaClaw uses a **single version number** for both the app and the database sche
 
 `X.Y.Z` (semantic versioning) — e.g. `1.939.0`, `1.939.1`, `2.0.0`. Patch increments on every commit, minor on features, major on breaking schema changes. Legacy two-part versions (`X.YYY`, e.g. `1.939`) are treated as `X.YYY.0` when compared.
 
-### Compatibility Fields (VERSION file)
-
-| Field | Meaning |
-|---|---|
-| `latest` | Current app version — bumped on every commit |
-| `latest_compat` | Minimum DB version for full feature support |
-| `latest_compat_deprec` | Minimum DB version that won't break the app |
-
-The app checks `schema_version` at startup and shows:
-- **Red banner** if DB < `latest_compat_deprec` — app may not work
-- **Amber banner** if DB < `latest_compat` — some features unavailable
-- Nothing if DB >= `latest_compat`
+The `VERSION` file carries `latest` (current app version, bumped on every
+commit). DB compatibility is handled by the migrations themselves, which run
+automatically when `schema_version` is behind.
 
 ---
 
@@ -79,8 +70,7 @@ Demo mode is truly schemaless with no migration mechanism — data doesn't persi
 
 1. Write the schema change
 2. Bump `latest` in `VERSION` to match
-3. If the migration adds required schema, bump `latest_compat` (or `latest_compat_deprec` if breaking)
-4. Update `server/schema.sql` to include the change for new installs
+3. Update `server/schema.sql` to include the change for new installs
 5. If the new field is used in app code, ensure it handles `undefined` / missing values for Drive and Demo backends
 6. If adding a new CHECK constraint, update `CHECK_CONSTRAINTS` in `js/adapters/demo.js` (Demo ↔ SQLite parity is enforced by tests)
 7. If the change is structural (new table, renamed field, table split), add a matching entry in `migrations/drive-migrations.js`

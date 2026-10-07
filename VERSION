@@ -2,23 +2,12 @@
 #
 # Format: X.Y.Z (semantic versioning) — e.g. 1.939.0, 1.939.1, 2.0.0
 #
-# latest              — app version: patch bumped on every commit,
-#                       minor on features, major on breaking schema changes
-# latest_compat       — minimum DB version for full feature support
-# latest_compat_deprec — minimum DB version that won't break the app (some features may be missing)
+# latest — app version: patch bumped on every commit,
+#          minor on features, major on breaking schema changes
 #
 # DB version is stored in the `settings` table (key = 'schema_version') and
 # bumped by each migration that alters the schema.
 #
 # Legacy two-part versions (X.YYY, e.g. 1.939) are treated as X.YYY.0
 # when compared — no data migration needed for existing installs.
-#
-# Invariant: latest_compat_deprec <= latest_compat <= latest
-#
-# Banner behaviour:
-#   DB < latest_compat_deprec  →  RED    "Database too old — DeLaClaw may not work."
-#   DB < latest_compat         →  AMBER  "Some features unavailable — run migrations for full support."
-#   DB >= latest_compat        →  (none)
-latest=2.10.43
-latest_compat=1.809.0
-latest_compat_deprec=1.300.0
+latest=2.10.44

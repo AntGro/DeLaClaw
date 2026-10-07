@@ -149,20 +149,17 @@ The `VERSION` file at the repo root is the single source of truth:
 
 ```
 latest=1.016
-latest_compat=1.000
-latest_compat_deprec=1.000
 ```
 
 The pre-commit hook (`.githooks/pre-commit`):
 1. Verifies `VERSION` is staged and `latest` has increased
-2. Validates the `latest_compat_deprec <= latest_compat <= latest` invariant
-3. Regenerates `js/version.js` with exported constants
-4. Updates `CACHE_VERSION` in `sw.js`
-5. Regenerates `.agents/CODEMAP.json` and `.agents/CODEMAP.md` from source
-6. Stages all generated files
-7. Prints an impact hint from CODEMAP `dependents` to help fill the `Checked:` trailer
+2. Regenerates `js/version.js` with the exported `APP_VERSION` constant
+3. Updates `CACHE_VERSION` in `sw.js`
+4. Regenerates `.agents/CODEMAP.json` and `.agents/CODEMAP.md` from source
+5. Stages all generated files
+6. Prints an impact hint from CODEMAP `dependents` to help fill the `Checked:` trailer
 
-Schema version is stored in the `settings` table (`key = 'schema_version'`). The app compares it against `latest_compat` and `latest_compat_deprec` at startup, showing a warning banner if the database is behind.
+Schema version is stored in the `settings` table (`key = 'schema_version'`). Pending migrations from `migrations/` run automatically on startup (Local) or on connect (Drive) when it is behind.
 
 ## File structure
 

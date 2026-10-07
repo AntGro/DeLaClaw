@@ -2589,15 +2589,10 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     assert(sorted.join(',') === '1.809,1.809.0,1.939.1,2.0.0', `sort order wrong: ${sorted.join(',')}`);
   });
 
-  test('VERSION file uses X.Y.Z format with correct ordering', () => {
+  test('VERSION file uses X.Y.Z format', () => {
     const vtxt = fs.readFileSync(path.join(__dirname, '..', 'VERSION'), 'utf8');
-    const get = (k) => vtxt.match(new RegExp(`^${k}=([^\\s]+)`, 'm'))[1];
-    for (const k of ['latest', 'latest_compat', 'latest_compat_deprec']) {
-      assert(/^[0-9]+\.[0-9]+\.[0-9]+$/.test(get(k)), `${k} must be X.Y.Z, got '${get(k)}'`);
-    }
-    const toInt = (v) => v.split('.').reduce((a, n) => a * 1000 + parseInt(n, 10), 0);
-    assert(toInt(get('latest_compat_deprec')) <= toInt(get('latest_compat')), 'deprec <= compat');
-    assert(toInt(get('latest_compat')) <= toInt(get('latest')), 'compat <= latest');
+    const latest = vtxt.match(/^latest=([^\s]+)/m)[1];
+    assert(/^[0-9]+\.[0-9]+\.[0-9]+$/.test(latest), `latest must be X.Y.Z, got '${latest}'`);
   });
 
   test('pre-commit hook enforces X.Y.Z format', () => {

@@ -18,8 +18,8 @@ if ! git diff --cached --name-only | grep -q '^VERSION$'; then
   echo "  VERSION file not updated." >&2
   echo "" >&2
   echo "  Before committing, bump 'latest' in VERSION." >&2
-  echo "  If this commit changes the DB schema, also" >&2
-  echo "  update latest_compat / latest_compat_deprec." >&2
+  echo "  If this commit changes the DB schema, also add" >&2
+  echo "  migration entries (local + drive)." >&2
   echo "══════════════════════════════════════════════════" >&2
   echo "" >&2
   exit 1

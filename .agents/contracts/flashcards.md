@@ -72,7 +72,7 @@ User jobs:
 ### Texts
 - `text_line_progress` tracks per-line revision for long texts
 - Text practice: chunked display, line-by-line click-to-reveal, chunk review submission
-- **Deck type is stored** (`flashcard_decks.deck_type`): the new-deck modal choice is persisted at creation; legacy rows without a stored type fall back to inferring from content (cards → flashcard, texts → text, empty → flashcard)
+- **Deck type is stored** (`flashcard_decks.deck_type`): the new-deck modal choice is persisted at creation; legacy rows without a stored type fall back to inferring from content (cards → flashcard, texts → text, empty → flashcard). The edit modals only list same-type decks and never `__shared__` (`deckOptionsForEdit`): a card in a text deck would be invisible since buckets render by deck type.
 - **Scene mode** (role-based text revision): `texts.focus_role` holds the role being learned (null = plain text). Scene content uses `<...>` blocks — `<ROLE: ...>` dialogue (may span lines), `<**...**>` direction (the `**` wrapper is mandatory and checked before any speaker prefix, so a direction containing `NAME:` is never read as dialogue), `**...**` for inline directions. Lines outside blocks are ignored by the parser. Speaker cues are case-insensitive (`<Rodrigue:` works); the name displays as written and role matching ignores case.
 - Scene parsing lives in `js/scene-parse.js` (pure, no imports): `parseSceneContent`, `splitSceneIntoChunks`, `sceneLineText`, `parseInlineDirs`
 - Chunking goes through `getTextChunks(tx)` everywhere (chunk generation, auto-repair, overlay, import) so `chunk_index` stays aligned with `text_line_progress` rows in both modes

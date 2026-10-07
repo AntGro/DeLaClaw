@@ -222,6 +222,17 @@ function getDeckType(deckId) {
   return 'flashcard'; // default
 }
 
+// Deck options for the edit modals: only same-type decks, never __shared__.
+// A card in a text deck (or a text in a flashcard deck) would be invisible,
+// since deck buckets render by deck type — so cross-type moves are excluded.
+function deckOptionsForEdit(type, currentDeckId) {
+  return [..._deckMap.values()]
+    .filter(d => d.id !== _sharedDeckId && getDeckType(d.id) === type)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map(d => `<option value="${esc(d.id)}" ${d.id === currentDeckId ? 'selected' : ''}>${esc(d.name || t('common.category_default'))}</option>`)
+    .join('');
+}
+
 // __shared__ deck is shown only when it has items
 function hasSharedDeckItems() {
   return allCards.some(c => deckIdForCard(c) === _sharedDeckId) || allTexts.some(tx => deckIdForText(tx) === _sharedDeckId);
@@ -999,8 +1010,7 @@ window.openEditFlashcardModal = function(id) {
   if (!card) return;
   closeAllFlashModals();
   const currentDeckId = deckIdForCard(card);
-  const sortedDecks = [..._deckMap.values()].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  const deckOptions = sortedDecks.map(d => `<option value="${esc(d.id)}" ${d.id === currentDeckId ? 'selected' : ''}>${esc(d.name || t('common.category_default'))}</option>`).join('');
+  const deckOptions = deckOptionsForEdit('flashcard', currentDeckId);
   const html = `<div class="modal-overlay" id="editFlashcardModal" style="display:flex;" data-action="close-edit-flashcard" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('pencil', 18, '#f59e0b')} ${t('flashcards.edit_card')}</h2>
@@ -1611,8 +1621,7 @@ window.openEditTextModal = function(id) {
   if (!tx) return;
   closeAllFlashModals();
   const currentDeckId = deckIdForText(tx);
-  const sortedDecks = [..._deckMap.values()].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  const deckOptions = sortedDecks.map(d => `<option value="${esc(d.id)}" ${d.id === currentDeckId ? 'selected' : ''}>${esc(d.name || t('common.category_default'))}</option>`).join('');
+  const deckOptions = deckOptionsForEdit('text', currentDeckId);
   const html = `<div class="modal-overlay" id="editTextModal" style="display:flex;" data-action="close-edit-text" data-overlay-close="true">
     <div class="modal modal-wide">
       <h2>${lucideIcon('pencil', 18, '#f59e0b')} ${t('text_revision.edit_text')}</h2>

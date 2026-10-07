@@ -3950,6 +3950,18 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'free practice submit must not fall through to the scheduling path');
     });
 
+    test('edit modals: deck list excludes wrong-type decks and __shared__', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/function deckOptionsForEdit\(type, currentDeckId\)/.test(flashJs),
+        'a shared deck-options helper must exist for the edit modals');
+      assert(flashJs.includes(".filter(d => d.id !== _sharedDeckId && getDeckType(d.id) === type)"),
+        'edit deck options must exclude __shared__ and wrong-type decks');
+      assert(/openEditFlashcardModal[\s\S]{0,400}deckOptionsForEdit\('flashcard'/.test(flashJs),
+        'card edit modal must offer only flashcard decks');
+      assert(/openEditTextModal[\s\S]{0,400}deckOptionsForEdit\('text'/.test(flashJs),
+        'text edit modal must offer only text decks');
+    });
+
     test('free practice summary shows no rating and states scheduling is untouched', () => {
       const flashJs = jsFiles['flashcards.js'];
       const fnStart = flashJs.indexOf('function showFreePracticeSummary');

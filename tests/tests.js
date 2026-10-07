@@ -3934,6 +3934,8 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'per-text revise with empty pool must start free practice instead of a toast');
       assert(/showTextPracticeOverlay\(tx, picked, \{ freePractice: true \}\)/.test(flashJs),
         'free practice must open the overlay flagged as free practice');
+      assert(/const picked = candidates\[Math\.floor\(Math\.random\(\) \* candidates\.length\)\];/.test(flashJs),
+        'free practice must sample randomly, not always pick the stalest chunk');
     });
 
     test('free practice: submit skips scheduling updates', () => {

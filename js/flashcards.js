@@ -1787,12 +1787,11 @@ window.startTextPracticeForText = startTextPracticeForText;
 
 let trOverlayLines = []; // parsed line objects for the open revision overlay
 
-// Free practice: nothing is due, so sample the stalest chunk and let the
+// Free practice: nothing is due, so sample a random chunk and let the
 // user revise without touching scheduling (no FSRS update, no DB write).
 function startFreePractice(textId, excludeChunkIndex = null) {
   const tx = allTexts.find(t => t.id === textId);
   if (!tx) return;
-  const nowStr = new Date().toISOString();
   const eligible = ch => ch.text_id === textId && chunkHasRoleLines(tx, ch.chunk_index);
   let candidates = allChunkProgress.filter(ch => eligible(ch) && ch.chunk_index !== excludeChunkIndex);
   if (candidates.length === 0) {
@@ -1800,12 +1799,9 @@ function startFreePractice(textId, excludeChunkIndex = null) {
     candidates = allChunkProgress.filter(eligible);
   }
   if (candidates.length === 0) { showToast(t('text_revision.no_chunks_due')); return; }
-  candidates.sort((a, b) => {
-    const rA = a.last_review && a.stability ? retrievability(a.stability, a.last_review, nowStr) : -1;
-    const rB = b.last_review && b.stability ? retrievability(b.stability, b.last_review, nowStr) : -1;
-    return rA - rB;
-  });
-  const picked = candidates[0];
+  // Random sample (never the just-practiced chunk): repeated clicks revise
+  // different chunks instead of always returning the stalest one.
+  const picked = candidates[Math.floor(Math.random() * candidates.length)];
   trSessionActive = true;
   trSessionDeck = deckIdForText(tx);
   trSessionTextId = tx.id;

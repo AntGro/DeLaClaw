@@ -38,25 +38,41 @@ export function isTextChunkingStale(tx, { content, blocks_per_chunk, focus_role 
   return !sceneSpeakersEqual(tx.focus_role, focus_role);
 }
 
+// Revert every updated field to its pre-edit value. Never throws: a
+// failed rollback is reported, not propagated.
+async function rollbackTextEdit(db, id, tx, updates) {
+  try {
+    const rollback = {};
+    for (const k of Object.keys(updates)) rollback[k] = tx[k];
+    const { error } = await db.from('texts').update(rollback).eq('id', id);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 // Persist a text edit: update the row, then drop chunk progress when any
 // chunking input changed so auto-repair regenerates it. Checks both
 // mutations for adapter errors ({ data, error } shape) and converts thrown
 // errors into { ok: false }: a failed text update never triggers progress
-// deletion, and a failed deletion rolls the text back to its pre-edit
-// values so progress still matches content (a failed delete must not
-// leave the tuple split). Takes db as a parameter for testability.
+// deletion, and a failed deletion — whether returned as { error } or
+// thrown — rolls the text back to its pre-edit values so progress still
+// matches content (a failed delete must not leave the tuple split).
+// Takes db as a parameter for testability.
 export async function persistTextEdit(db, id, tx, updates, newChunking) {
   try {
     const { error: updateError } = await db.from('texts').update(updates).eq('id', id);
     if (updateError) return { ok: false, error: updateError, rolledBack: false };
     if (isTextChunkingStale(tx, newChunking)) {
-      const { error: deleteError } = await db.from('text_line_progress').delete().eq('text_id', id);
+      let deleteError = null;
+      try {
+        ({ error: deleteError } = await db.from('text_line_progress').delete().eq('text_id', id));
+      } catch (error) {
+        deleteError = error;
+      }
       if (deleteError) {
-        // Revert every updated field to its pre-edit value.
-        const rollback = {};
-        for (const k of Object.keys(updates)) rollback[k] = tx[k];
-        const { error: rollbackError } = await db.from('texts').update(rollback).eq('id', id);
-        return { ok: false, error: deleteError, rolledBack: !rollbackError };
+        const rolledBack = await rollbackTextEdit(db, id, tx, updates);
+        return { ok: false, error: deleteError, rolledBack };
       }
     }
     return { ok: true, error: null, rolledBack: false };

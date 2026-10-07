@@ -168,24 +168,36 @@ async function refreshFlashcards() {
   allDrafts = await fetchAll(() => state.db.from('flashcard_notes').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: false }));
   try {
     allTexts = await fetchAll(() => state.db.from('texts').select('*').order('created_at'));
+  } catch (e) { allTexts = []; }
+  // A failed progress read must never be mistaken for an empty progress
+  // table: auto-repair only runs when the read actually succeeded, so a
+  // transient backend error can't trigger blank inserts that would wipe
+  // real FSRS state.
+  let progressReadOk = false;
+  try {
     allChunkProgress = await fetchAll(() => state.db.from('text_line_progress').select('*').order('chunk_index'));
-  } catch (e) { allTexts = []; allChunkProgress = []; }
+    progressReadOk = true;
+  } catch (e) { allChunkProgress = []; }
   // Auto-repair: progress rows must match the current chunking. Regenerate
   // when missing entirely or when the count mismatches (partial insert, or
   // chunking changed without invalidation) — stale rows are dropped first.
-  for (const tx of allTexts) {
+  // Backend mutations are error-checked: in-memory state is only touched
+  // after successful writes, otherwise the next load retries.
+  if (progressReadOk) for (const tx of allTexts) {
     if (!tx.content) continue;
     const existing = allChunkProgress.filter(ch => ch.text_id === tx.id);
     const chunkCount = getTextChunks(tx).length;
     if (existing.length !== chunkCount) {
       try {
         if (existing.length > 0 && state.db.connected) {
-          await state.db.from('text_line_progress').delete().eq('text_id', tx.id);
+          const { error: delError } = await state.db.from('text_line_progress').delete().eq('text_id', tx.id);
+          if (delError) throw delError;
           allChunkProgress = allChunkProgress.filter(ch => ch.text_id !== tx.id);
         }
         const rows = Array.from({ length: chunkCount }, (_, idx) => ({ text_id: tx.id, chunk_index: idx }));
         if (rows.length > 0 && state.db.connected) {
-          const { data: inserted } = await state.db.from('text_line_progress').insert(rows).select('*');
+          const { data: inserted, error: insError } = await state.db.from('text_line_progress').insert(rows).select('*');
+          if (insError) throw insError;
           if (inserted) allChunkProgress.push(...inserted);
         }
       } catch (_) { /* silent — will retry next load */ }

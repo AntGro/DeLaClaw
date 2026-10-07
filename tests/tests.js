@@ -3630,15 +3630,22 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(rollbackCall.includes('"blocks_per_chunk":4'),
         'rollback restores the previous chunking setting');
       // 6. Delete fails and rollback fails: not ok, not rolled back.
+      // (stateful fake: the initial update succeeds so the delete — and
+      // then the rollback — are actually reached.)
+      let updateCalls = 0;
       const failDb = {
         from: () => ({
-          update: () => ({ eq: async () => ({ data: null, error: { message: 'down' } }) }),
+          update: () => ({ eq: async () => (++updateCalls === 1
+            ? { data: null, error: null }
+            : { data: null, error: { message: 'down' } }) }),
           delete: () => ({ eq: async () => ({ data: null, error: { message: 'down' } }) }),
         }),
       };
-      res = await persistTextEdit(failDb, 't1', fullTx, updates, stale);
-      assert(!res.ok && !res.rolledBack, 'double failure is not ok and not rolled back');
-      // 7. Adapter throws: converted to { ok: false }, no delete attempted.
+      res = await persistTextEdit(failDb, 't1', fullTx,
+        { content: 'b', title: 'T2', blocks_per_chunk: 6 }, stale);
+      assert(!res.ok && !res.rolledBack, 'failed delete + failed rollback is not ok and not rolled back');
+      assert(updateCalls === 2, 'rollback was attempted after the failed delete');
+      // 7. Update throws: converted to { ok: false }, no delete attempted.
       const throwDb = {
         from: () => ({
           update: () => ({ eq: async () => { throw new Error('transport'); } }),
@@ -3647,6 +3654,36 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       };
       res = await persistTextEdit(throwDb, 't1', tx, updates, stale);
       assert(!res.ok, 'thrown error is not ok');
+      // 8. Delete throws (update succeeded): same rollback path as a
+      // returned { error } — the tuple must not be left split.
+      const deleteThrowDb = {
+        calls: [],
+        from: (table) => ({
+          update: (body) => ({ eq: async () => {
+            deleteThrowDb.calls.push('update:' + table + ':' + JSON.stringify(body || {}));
+            return { data: null, error: null };
+          } }),
+          delete: () => ({ eq: async () => { throw new Error('transport'); } }),
+        }),
+      };
+      res = await persistTextEdit(deleteThrowDb, 't1', fullTx,
+        { content: 'b', title: 'T2', blocks_per_chunk: 6 }, stale);
+      assert(!res.ok && res.rolledBack, 'thrown delete rolls back like a returned error');
+      const rbCalls = deleteThrowDb.calls.filter(c => c.startsWith('update:texts:'));
+      assert(rbCalls.length === 2 && rbCalls[1].includes('"content":"a"'),
+        'rollback restores pre-edit values after a thrown delete');
+    });
+
+    test('auto-repair: no healing on failed progress read; writes are error-checked', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('let progressReadOk = false;'),
+        'progress read success must be tracked separately from the texts read');
+      assert(flashJs.includes('if (progressReadOk) for (const tx of allTexts)'),
+        'auto-repair must not run when the progress read failed');
+      assert(flashJs.includes('if (delError) throw delError;'),
+        'repair must not drop in-memory rows when the backend delete failed');
+      assert(flashJs.includes('if (insError) throw insError;'),
+        'repair must not stage inserted rows when the backend insert failed');
     });
 
     test('scene revision: masked bubbles hide content length; leading cues auto-reveal', async () => {

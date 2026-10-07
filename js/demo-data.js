@@ -6,6 +6,7 @@
 // ===================================================================
 
 import { computeNextDue } from './habits.js';
+import { parseSceneContent, splitSceneIntoChunks } from './scene-parse.js';
 const _now = new Date();
 const _todayStr = _now.toISOString().slice(0, 10);
 const d = (offset) => {
@@ -457,7 +458,7 @@ export function getDemoData(lang) {
   const poem = poems[lang] || poems.en;
   data.texts = [{
     id: 'demo-text-001', deck: poem.deck, title: poem.title, author: poem.author,
-    content: poem.content, lines_per_chunk: 4, context_lines: 1,
+    content: poem.content, blocks_per_chunk: 4, context_blocks: 1,
     created_at: d(-20), updated_at: d(-3),
   }];
   // Generate chunk progress for the poem
@@ -475,11 +476,87 @@ export function getDemoData(lang) {
   if (chunk.length > 0) { poemChunks.push(ci); }
   data.text_line_progress = poemChunks.map(idx => ({
     id: `demo-tlp-${idx}`, text_id: 'demo-text-001', chunk_index: idx,
-    strength: idx === 0 ? 5 : idx === 1 ? 3 : 0,
+    stability: idx === 0 ? 5 : idx === 1 ? 3 : 0,
+    difficulty: 5,
+    last_review: idx <= 1 ? d(-2) : null,
     next_review: idx === 0 ? dateOnly(7) : idx === 1 ? dateOnly(1) : null,
-    last_reviewed: idx <= 1 ? d(-2) : null,
+    review_count: idx <= 1 ? 1 : 0,
     created_at: d(-20), updated_at: d(-2),
   }));
+  // Sample scene for role-based text revision (scene mode).
+  const scenes = {
+    en: {
+      title: 'The Audition', author: 'Demo', deck: 'Theatre', focus_role: 'ELENA',
+      content: `<**A bare stage. A single spotlight. ELENA waits center stage.**>
+<ELENA:
+**nervously** Is anyone there?
+I was told the audition starts at noon.
+>
+<MARCUS: **from the dark** You're early. **He steps into the light.**>
+<ELENA: Oh! **She laughs.** I thought I'd missed it.>
+<**The DIRECTOR: coughs from the wings.**>
+<DIRECTOR: **briskly** Places, please. We begin with the letter scene.>
+<MARCUS:
+Then let's begin.
+**gently** Take a breath, and speak your first line.
+>
+<ELENA: **steady now** I am ready.>`,
+    },
+    fr: {
+      title: "L'Audition", author: 'Demo', deck: 'Théâtre', focus_role: 'LÉA',
+      content: `<**Une scène nue. Un seul projecteur. LÉA attend au centre.**>
+<LÉA:
+**nerveusement** Il y a quelqu'un ?
+On m'a dit que l'audition commence à midi.
+>
+<PAUL: **depuis l'ombre** Vous êtes en avance. **Il entre dans la lumière.**>
+<LÉA: Oh ! **Elle rit.** Je croyais l'avoir manquée.>
+<**La METTEUSE EN SCÈNE : tousse depuis les coulisses.**>
+<METTEUSE EN SCÈNE: **vivement** En place, s'il vous plaît. On commence par la scène de la lettre.>
+<PAUL:
+Alors commençons.
+**doucement** Respirez un bon coup, et dites votre première réplique.
+>
+<LÉA: **désormais assurée** Je suis prête.>`,
+    },
+    es: {
+      title: 'La audición', author: 'Demo', deck: 'Teatro', focus_role: 'SOFÍA',
+      content: `<**Un escenario vacío. Un solo foco. SOFÍA espera en el centro.**>
+<SOFÍA:
+**nerviosa** ¿Hay alguien ahí?
+Me dijeron que la audición empieza al mediodía.
+>
+<DIEGO: **desde la oscuridad** Llegas temprano. **Entra en la luz.**>
+<SOFÍA: ¡Ah! **Se ríe.** Creí haberla perdido.>
+<**La DIRECTORA: tose entre bambalinas.**>
+<DIRECTORA: **enérgica** En sus marcas. Empezamos con la escena de la carta.>
+<DIEGO:
+Entonces empecemos.
+**con dulzura** Respira hondo y di tu primera réplica.
+>
+<SOFÍA: **ya serena** Estoy lista.>`,
+    },
+  };
+  const scene = scenes[lang] || scenes.en;
+  data.texts.push({
+    id: 'demo-text-002', deck: scene.deck, title: scene.title, author: scene.author,
+    content: scene.content, blocks_per_chunk: 4, context_blocks: 1,
+    focus_role: scene.focus_role,
+    created_at: d(-15), updated_at: d(-2),
+  });
+  // Chunk progress via the real scene parser so chunk_index matches the app.
+  const sceneChunks = splitSceneIntoChunks(parseSceneContent(scene.content).lines, 4);
+  sceneChunks.forEach((_, idx) => {
+    data.text_line_progress.push({
+      id: `demo-tlp-scene-${idx}`, text_id: 'demo-text-002', chunk_index: idx,
+      stability: idx === 0 ? 6 : idx === 1 ? 3 : 0,
+      difficulty: 5,
+      last_review: idx <= 1 ? d(-2) : null,
+      next_review: idx === 0 ? dateOnly(6) : idx === 1 ? dateOnly(1) : null,
+      review_count: idx <= 1 ? 1 : 0,
+      created_at: d(-15), updated_at: d(-2),
+    });
+  });
   data.prompts = [];
 
   return data;

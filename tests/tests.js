@@ -1613,6 +1613,55 @@ test('no migration touches the schema_version settings entry', () => {
     'a migration references schema_version in code — the runner owns the version stamp');
 });
 
+test('local migration 2.10.43 renames the text chunking columns', async () => {
+  // Runs the real SQL against an old-schema texts table. Needs bun:sqlite;
+  // skipped under plain node.
+  let Database;
+  try {
+    ({ Database } = await import('bun:sqlite'));
+  } catch {
+    console.log('  (skip: bun:sqlite unavailable)');
+    return;
+  }
+  const { LOCAL_MIGRATIONS } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'local-migrations.js')).href);
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE texts (
+    id TEXT PRIMARY KEY, lines_per_chunk INTEGER NOT NULL DEFAULT 4,
+    context_lines INTEGER NOT NULL DEFAULT 3)`);
+  db.exec(`INSERT INTO texts (id, lines_per_chunk, context_lines)
+    VALUES ('t1', 6, 2), ('t2', 4, 3)`);
+  db.exec(LOCAL_MIGRATIONS['2.10.43']);
+  const cols = db.prepare('PRAGMA table_info(texts)').all().map(c => c.name);
+  assert(cols.includes('blocks_per_chunk') && cols.includes('context_blocks'),
+    'new columns must exist');
+  assert(!cols.includes('lines_per_chunk') && !cols.includes('context_lines'),
+    'old columns must be gone');
+  const rows = db.prepare('SELECT blocks_per_chunk, context_blocks FROM texts ORDER BY id').all();
+  assert(rows[0].blocks_per_chunk === 6 && rows[0].context_blocks === 2,
+    'values must survive the rename');
+  assert(rows[1].blocks_per_chunk === 4 && rows[1].context_blocks === 3,
+    'defaults must survive the rename');
+  db.close();
+});
+
+test('drive migration 2.10.43 renames the text chunking keys', async () => {
+  const { DRIVE_MIGRATIONS } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+  const store = { texts: [
+    { id: 't1', lines_per_chunk: 6, context_lines: 2, title: 'x' },
+    { id: 't2', title: 'y' },
+  ]};
+  await DRIVE_MIGRATIONS['2.10.43'](store);
+  const [r1, r2] = store.texts;
+  assert(r1.blocks_per_chunk === 6 && r1.context_blocks === 2,
+    'values must move to the new keys');
+  assert(!('lines_per_chunk' in r1) && !('context_lines' in r1),
+    'old keys must be gone');
+  assert(!('blocks_per_chunk' in r2) && !('context_blocks' in r2),
+    'rows without old keys must be untouched');
+});
+
 test('sharing i18n keys used in code exist in every locale', () => {
   // Regression: t('sharing.name_updated') showed the raw key in English because
   // the string existed in fr/es but was missing from en. Every sharing.* key
@@ -3471,6 +3520,493 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'poll discovery must announce newly loaded groups');
       assert(/isDefiniteAccessLoss\(err\)\) \{[\s\S]*?await this\.handleStaleGroup\(row\.id\)/.test(pollBody),
         'poll discovery must purge joined rows hit by definite access loss');
+    });
+
+    test('scene parser: direction with NAME: is not read as dialogue', () => {
+      const src = fs.readFileSync(path.join(JS_DIR, 'scene-parse.js'), 'utf-8');
+      assert(src.includes('checked FIRST') || /startsWith\('\\*\\*'\)/.test(src),
+        'scene-parse.js must check the ** direction wrapper before any speaker prefix');
+    });
+
+    test('scene mode: role field, preview, and focus_role persistence', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('id="newTextRole"') && flashJs.includes('id="editTextRole"'),
+        'add/edit text modals must have a role field');
+      assert(flashJs.includes('updateScenePreview'),
+        'text modals must have a live scene parse preview');
+      assert((flashJs.match(/focus_role: role/g) || []).length >= 2,
+        'add/edit text saves must persist focus_role');
+      const sceneParseJs = fs.readFileSync(path.join(JS_DIR, 'scene-parse.js'), 'utf-8');
+      assert(/delete\(\)\.eq\('text_id', id\)/.test(sceneParseJs),
+        'changing focus_role must reset chunk progress (via persistTextEdit)');
+    });
+
+    test('scene revision: only own lines are evaluated', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("data-kind=\"${line.kind}\"") || flashJs.includes('data-kind="${line.kind}"'),
+        'revision lines must carry their kind (mine/cue/dir)');
+      assert(/const myLineCount = chunkLines\.filter\(l => l\.kind === 'mine'\)\.length/.test(flashJs),
+        'submit must count only the role\'s own lines');
+      assert(flashJs.includes("if (kind !== 'mine') return;"),
+        'cue/direction lines must not toggle known/failed');
+    });
+
+    test('scene pickers skip chunks with none of the role\'s lines', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert((flashJs.match(/chunkHasRoleLines\(/g) || []).length >= 3,
+        'all text-revision pickers must skip chunks without the role\'s lines');
+    });
+
+    test('chunk progress invalidated on any chunking-input change', async () => {
+      const { isTextChunkingStale, sceneSpeakersEqual } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const tx = { content: 'line1\nline2', blocks_per_chunk: 4, focus_role: 'RODRIGUE' };
+      const same = { content: 'line1\nline2', blocks_per_chunk: 4, focus_role: 'RODRIGUE' };
+      assert(!isTextChunkingStale(tx, same), 'unchanged tuple keeps progress');
+      assert(!isTextChunkingStale(tx, { ...same, focus_role: 'rodrigue' }),
+        'case-only role change keeps progress');
+      assert(isTextChunkingStale(tx, { ...same, content: 'line1\nline2\nline3' }),
+        'content change invalidates progress');
+      assert(isTextChunkingStale(tx, { ...same, blocks_per_chunk: 8 }),
+        'blocks_per_chunk change invalidates progress');
+      assert(isTextChunkingStale(tx, { ...same, focus_role: 'CHIMÈNE' }),
+        'role change invalidates progress');
+      assert(!isTextChunkingStale({ content: 'a' }, { content: 'a' }),
+        'missing blocks_per_chunk defaults to 4 on both sides');
+      assert(!isTextChunkingStale(null, same), 'null text is not stale');
+      // Unicode normalization: NFD pasted from another source still matches NFC.
+      const nfc = 'LÉA', nfd = 'LÉA'.normalize('NFD');
+      assert(nfc !== nfd, 'test precondition: forms differ');
+      assert(sceneSpeakersEqual(nfc, nfd), 'role matching must normalize Unicode');
+      assert(sceneSpeakersEqual('  RODRIGUE ', 'rodrigue'), 'role matching trims');
+      // saveEditText must persist via the error-checked helper.
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('persistTextEdit(state.db, id, tx, updates,'),
+        'saveEditText must persist via persistTextEdit');
+      assert(flashJs.includes("showToast(t('toast.failed_to_save'), 'error')"),
+        'saveEditText must toast on persist failure');
+    });
+
+    test('persistTextEdit: adapter errors abort safely', async () => {
+      const { persistTextEdit } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const tx = { id: 't1', content: 'a', blocks_per_chunk: 4, focus_role: 'R' };
+      const updates = { content: 'b' };
+      const stale = { content: 'b', blocks_per_chunk: 4, focus_role: 'R' };
+      const fresh = { content: 'a', blocks_per_chunk: 4, focus_role: 'R' };
+      const makeDb = ({ updateError = null, deleteError = null, calls = [] } = {}) => ({
+        calls,
+        from: (table) => ({
+          update: (body) => ({ eq: async () => { calls.push('update:' + table + ':' + JSON.stringify(body || {})); return { data: null, error: updateError }; } }),
+          delete: () => ({ eq: async () => { calls.push('delete:' + table); return { data: null, error: deleteError }; } }),
+        }),
+      });
+      // 1. Failed text update: no progress deletion, not ok.
+      let db = makeDb({ updateError: { message: 'boom' } });
+      let res = await persistTextEdit(db, 't1', tx, updates, stale);
+      assert(!res.ok, 'failed update is not ok');
+      assert(!db.calls.some(c => c.startsWith('delete:')), 'no delete after failed update');
+      // 2. Update ok, stale, delete fails: not ok, delete was attempted.
+      db = makeDb({ deleteError: { message: 'boom' } });
+      res = await persistTextEdit(db, 't1', tx, updates, stale);
+      assert(!res.ok, 'failed delete is not ok');
+      assert(db.calls.includes('delete:text_line_progress'), 'delete attempted');
+      // 3. Update ok, stale, delete ok: ok.
+      db = makeDb();
+      res = await persistTextEdit(db, 't1', tx, updates, stale);
+      assert(res.ok, 'stale chunking with successful mutations is ok');
+      assert(db.calls.includes('delete:text_line_progress'), 'stale progress deleted');
+      // 4. Update ok, chunking unchanged: ok, no delete.
+      db = makeDb();
+      res = await persistTextEdit(db, 't1', tx, { content: 'a' }, fresh);
+      assert(res.ok, 'unchanged chunking is ok');
+      assert(!db.calls.some(c => c.startsWith('delete:')), 'no delete when chunking unchanged');
+      // 5. Delete fails: text rolled back to pre-edit values, tuple stays consistent.
+      db = makeDb({ deleteError: { message: 'boom' } });
+      const fullTx = { id: 't1', deck: 'D', title: 'T', author: 'A', content: 'a',
+        deck_id: 'd1', blocks_per_chunk: 4, focus_role: 'R' };
+      res = await persistTextEdit(db, 't1', fullTx,
+        { content: 'b', title: 'T2', blocks_per_chunk: 6 }, stale);
+      assert(!res.ok && res.rolledBack, 'failed delete rolls back');
+      const textUpdates = db.calls.filter(c => c.startsWith('update:texts:'));
+      const rollbackCall = textUpdates[textUpdates.length - 1];
+      assert(rollbackCall && rollbackCall.includes('"content":"a"') && rollbackCall.includes('"title":"T"'),
+        'rollback restores pre-edit values');
+      assert(rollbackCall.includes('"blocks_per_chunk":4'),
+        'rollback restores the previous chunking setting');
+      // 6. Delete fails and rollback fails: not ok, not rolled back.
+      const failDb = {
+        from: () => ({
+          update: () => ({ eq: async () => ({ data: null, error: { message: 'down' } }) }),
+          delete: () => ({ eq: async () => ({ data: null, error: { message: 'down' } }) }),
+        }),
+      };
+      res = await persistTextEdit(failDb, 't1', fullTx, updates, stale);
+      assert(!res.ok && !res.rolledBack, 'double failure is not ok and not rolled back');
+      // 7. Adapter throws: converted to { ok: false }, no delete attempted.
+      const throwDb = {
+        from: () => ({
+          update: () => ({ eq: async () => { throw new Error('transport'); } }),
+          delete: () => ({ eq: async () => { throw new Error('unreached'); } }),
+        }),
+      };
+      res = await persistTextEdit(throwDb, 't1', tx, updates, stale);
+      assert(!res.ok, 'thrown error is not ok');
+    });
+
+    test('scene revision: masked bubbles hide content length; leading cues auto-reveal', async () => {
+      const { leadingRevealCount } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      assert(leadingRevealCount(['cue', 'dir', 'mine', 'cue']) === 2,
+        'leading cues/directions before the first own line auto-reveal');
+      assert(leadingRevealCount(['mine', 'cue']) === 0,
+        'no auto-reveal when the chunk opens with the own line');
+      assert(leadingRevealCount(['cue', 'dir']) === 0,
+        'no auto-reveal without an own line');
+      assert(leadingRevealCount([]) === 0, 'empty chunk');
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('leadingRevealCount(chunkLines.map(l => l.kind))'),
+        'overlay must auto-reveal leading cues/directions');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(/\.tr-scene \.tr-line\.tr-line-masked \{[^}]*width:\s*85%/.test(css),
+        'masked bubbles must render at max width (no content-length hint)');
+    });
+
+    test('plain-text revision: chunk string split into lines', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("typeof rawChunk === 'string' ? rawChunk.split('\\n') : rawChunk"),
+        'plain-text chunks are joined strings and must be split back into lines');
+    });
+
+    test('edit text modal: lines-per-chunk and context lines are editable', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('id="editTextBlocksPerChunk"'),
+        'edit modal must expose blocks-per-chunk');
+      assert(flashJs.includes('id="editTextContextBlocks"'),
+        'edit modal must expose context blocks');
+      const i18nJs = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      assert(i18nJs.includes("blocks_per_chunk: 'Blocks per chunk'"),
+        'EN label must say blocks, not lines');
+      assert(!i18nJs.includes("'Lines per chunk'") && !i18nJs.includes("'Context lines'"),
+        'old EN labels must be gone');
+      assert(flashJs.includes('blocks_per_chunk: blocksPerChunk, context_blocks: contextBlocks };'),
+        'saveEditText must persist both settings');
+      assert(flashJs.includes('{ content, blocks_per_chunk: blocksPerChunk, focus_role: role });'),
+        'a changed blocks-per-chunk must invalidate chunk progress');
+    });
+
+    test('text revision: progress bar fills as blocks are revealed', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('function updateTextPracticeProgress()'),
+        'text revision must drive the header progress bar from revealed lines');
+      assert(!flashJs.includes('<div class="practice-progress-fill" style="width:100%;"></div>\n      <div class="practice-meta"><span class="practice-meta-text">${esc(text.title)}'),
+        'text revision bar must not be hardcoded full');
+      assert(flashJs.includes('  }\n  updateTextPracticeProgress();\n}'),
+        'progress must update on overlay open (after auto-reveal)');
+      assert(flashJs.includes("    updateTextPracticeProgress();\n  } else {"),
+        'progress must update on each tap-to-reveal');
+    });
+
+    test('scene revision: chat-bubble layout for theatrical lines', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("tr-lines-container${sceneMode ? ' tr-scene' : ''}"),
+        'lines container must flag scene mode for the bubble layout');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(/\.tr-scene \.tr-line \{[^}]*width:\s*fit-content/.test(css),
+        'scene lines must shrink to fit their content');
+      assert(/\.tr-scene \.tr-line \{[^}]*max-width:\s*85%/.test(css),
+        'scene bubbles must be capped below full width');
+      assert(css.includes('.tr-scene .tr-line[data-kind="mine"] { align-self:flex-start; }'),
+        'own role lines must anchor left');
+      assert(css.includes('.tr-scene .tr-line[data-kind="cue"] { align-self:flex-end; }'),
+        'other role lines must anchor right');
+      assert(css.includes('.tr-scene .tr-line[data-kind="dir"] { align-self:center; }'),
+        'didascalies must anchor center');
+      assert(/\.tr-reveal-dir \{[^}]*text-align:\s*left/.test(css),
+        'didascalies text must be left-aligned inside the bubble');
+    });
+
+    test('auto-repair heals count-mismatched chunk progress', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('existing.length !== chunkCount'),
+        'auto-repair must detect count-mismatched progress, not just missing progress');
+      assert(flashJs.includes("await state.db.from('text_line_progress').delete().eq('text_id', tx.id);"),
+        'auto-repair must drop stale rows before regenerating');
+    });
+
+    test('scene parser: one block is one unit, inner newlines preserved', async () => {
+      const { parseSceneContent, sceneLineText, splitSceneIntoChunks } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      // Multi-line dialogue block -> single unit, newline inside.
+      let r = parseSceneContent('<A: line1\nline2>');
+      assert(r.lines.length === 1, 'one block must be one unit');
+      assert(r.lines[0].speaker === 'A', 'single-character speaker must parse');
+      assert(sceneLineText(r.lines[0]) === 'line1\nline2', 'inner newline preserved');
+      assert(r.unparsedBlocks === 0, 'no unparsed warning');
+      // Explicit split via several entries.
+      r = parseSceneContent('<A: line1>\n<A: line2>');
+      assert(r.lines.length === 2, 'two entries must be two units');
+      assert(r.lines.every(l => l.speaker === 'A'), 'both keep the speaker');
+      // Direction blocks: same rule, one unit.
+      r = parseSceneContent('<**dir one\ndir two**>');
+      assert(r.lines.length === 1 && r.lines[0].speaker === null, 'multi-line direction is one unit');
+      assert(sceneLineText(r.lines[0]) === 'dir one\ndir two', 'direction newlines preserved');
+      // Chunking counts blocks, not physical lines.
+      r = parseSceneContent('<A: a\nb>\n<B: c>');
+      assert(splitSceneIntoChunks(r.lines, 2).length === 1, 'two blocks fit one chunk of 2');
+      // Inline directions still parse inside multi-line blocks.
+      r = parseSceneContent('<A: **softly** hi\n**loud** bye>');
+      assert(r.lines[0].segments.filter(s => s.kind === 'dir').length === 2, 'inline dirs survive');
+    });
+
+    test('scene revision: block newlines render as breaks (revealed, mask, preview)', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("const br = t => esc(t).replace(/\\n/g, '<br>');"),
+        'revealed block HTML must turn inner newlines into breaks');
+      assert(flashJs.includes(".split('\\n')") && flashJs.includes(".join('<br>');"),
+        'masked bullets must follow the block line structure');
+    });
+
+    test('scene parser: NFD speaker cues parse (NFC-normalized)', async () => {
+      const { parseSceneContent } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const nfdName = 'LÉA'.normalize('NFD');
+      const r = parseSceneContent('<' + nfdName + ':\nUne ligne.\n>');
+      assert(r.unparsedBlocks === 0, 'NFD speaker cue must parse');
+      assert(r.lines[0].speaker === 'LÉA', 'speaker normalized to NFC');
+    });
+
+    test('scene parser: speaker cues are case-insensitive', async () => {
+      const { parseSceneContent, sceneSpeakersEqual } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const mixed = parseSceneContent('<Rodrigue:\nA line.\n>');
+      assert(mixed.unparsedBlocks === 0, 'mixed-case speaker must parse');
+      assert(mixed.lines[0].speaker === 'Rodrigue', 'display keeps the name as written');
+      assert(JSON.stringify(mixed.speakers) === JSON.stringify(['Rodrigue']), 'speaker list');
+      const lower = parseSceneContent('<rodrigue: hi.>');
+      assert(lower.unparsedBlocks === 0, 'lowercase speaker must parse');
+      // Case variants dedupe to one speaker entry.
+      const both = parseSceneContent('<RODRIGUE: a.>\n<rodrigue: b.>');
+      assert(JSON.stringify(both.speakers) === JSON.stringify(['RODRIGUE']), 'speaker dedupe');
+      // Identity helper.
+      assert(sceneSpeakersEqual('RODRIGUE', 'rodrigue'), 'role match must be case-insensitive');
+      assert(sceneSpeakersEqual(null, null), 'null role equals null');
+      assert(!sceneSpeakersEqual('RODRIGUE', 'CHIMÈNE'), 'different speakers differ');
+      assert(!sceneSpeakersEqual(null, 'RODRIGUE'), 'null speaker never matches a role');
+      // Direction blocks still win over speaker-looking content.
+      const dir = parseSceneContent("<**Elle sort. SOSTHÈNE: observe.**>");
+      assert(dir.lines[0].speaker === null, 'direction with NAME: stays a direction');
+    });
+
+    test('scene revision: one color per role', async () => {
+      const { buildRoleColorMap, ROLE_PALETTE_SIZE } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      assert(ROLE_PALETTE_SIZE === 6, 'palette size');
+      const map = buildRoleColorMap(['RODRIGUE', 'CHIMÈNE', 'SOSTHÈNE'], 'rodrigue');
+      assert(map.get('rodrigue') === 'tr-role-mine', 'revised role keeps the reserved class');
+      assert(map.get('chimène') === 'tr-role-c0', 'first other role gets c0');
+      assert(map.get('sosthène') === 'tr-role-c1', 'second other role gets c1');
+      // Palette cycles when roles outnumber entries.
+      const many = buildRoleColorMap(
+        ['ME', 'A', 'B', 'C', 'D', 'E', 'F', 'G'], 'me');
+      assert(many.get('g') === 'tr-role-c0', 'colors repeat past the palette size');
+      assert(many.get('me') === 'tr-role-mine', 'reserved class unaffected by cycling');
+      // Case-insensitive dedupe; nulls skipped.
+      const dup = buildRoleColorMap(['Rodrigue', 'RODRIGUE', null, ''], 'x');
+      assert(dup.size === 1 && dup.get('rodrigue') === 'tr-role-c0', 'dedupe');
+      // Overlay wires color + alignment into the group header.
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('buildRoleColorMap(parseSceneContent(text.content).speakers, text.focus_role)'),
+        'color map must come from the full-text speaker order (stable across chunks)');
+      assert(flashJs.includes("tr-group-speaker ${colorCls} ${isMine ? 'tr-spk-left' : 'tr-spk-right'}"),
+        'header must carry the role color and kind alignment (mine left, cues right)');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      for (let i = 0; i < 6; i++) {
+        assert(css.includes(`--role-c${i}:`), `missing --role-c${i} variable`);
+        assert(css.includes(`.tr-role-c${i} {`), `missing .tr-role-c${i} class`);
+      }
+      assert(/\[data-theme="light"\][\s\S]*--role-c0:/.test(css),
+        'palette must have light-theme values');
+      assert(css.includes('.tr-role-mine'), 'missing reserved .tr-role-mine class');
+      assert(css.includes('.tr-spk-left') && css.includes('.tr-spk-right'), 'missing alignment classes');
+    });
+
+    test('demo data: sample scene with roles for scene mode', () => {
+      const demoJs = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
+      assert(demoJs.includes('demo-text-002'), 'demo must include a sample scene text');
+      assert(/focus_role: scene\.focus_role/.test(demoJs),
+        'sample scene text must set focus_role');
+      assert(demoJs.includes('<**'), 'sample scene must use direction blocks');
+      assert(/<[A-ZÀ-Þ][^>]*:/.test(demoJs), 'sample scene must use dialogue blocks');
+      assert(demoJs.includes('splitSceneIntoChunks(parseSceneContent(scene.content)'),
+        'scene chunk progress must use the real parser so chunk_index matches the app');
+      assert(!demoJs.includes('strength:'), 'demo progress must not use the stale strength field');
+      assert(!demoJs.includes('last_reviewed'), 'demo progress must not use the stale last_reviewed field');
+      assert(demoJs.includes("import { parseSceneContent, splitSceneIntoChunks } from './scene-parse.js';"),
+        'demo-data must import the scene parser');
+    });
+
+    test('scene revision: multi-line didascalies render as a single block', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('Didascalies are a single reveal unit'),
+        'overlay must merge consecutive direction lines');
+      assert(flashJs.includes("openDirParts.join('<br>')"),
+        'merged direction block must join its lines');
+      assert(flashJs.includes('entry.idx = chunkLines.length'),
+        'merged entries must re-sequence their line index');
+    });
+
+    test('scene revision: didascalies get a localized header', async () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("t('text_revision.stage_directions')"),
+        'direction groups must show a localized didascalies header');
+      assert(flashJs.includes('tr-group-speaker tr-role-dir tr-spk-center'),
+        'didascalies header must be centered and muted like a role header');
+      assert(flashJs.includes("group.lines[0].kind === 'dir'"),
+        'plain-text lines (kind mine, no speaker) must not get a didascalies header');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.tr-role-dir'), 'missing .tr-role-dir CSS');
+      assert(css.includes('.tr-spk-center'), 'missing .tr-spk-center CSS');
+    });
+
+    test('scene revision: book-like speaker groups', async () => {
+      const { groupLinesBySpeaker } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const lines = [
+        { speaker: 'RODRIGUE' }, { speaker: 'RODRIGUE' }, { speaker: 'rodrigue' },
+        { speaker: 'CHIMÈNE' },
+        { speaker: null }, { speaker: null },
+        { speaker: 'RODRIGUE' },
+      ];
+      const groups = groupLinesBySpeaker(lines);
+      assert(groups.length === 4, 'consecutive same-speaker lines group together (case-insensitive)');
+      assert(groups[0].lines.length === 3 && groups[0].speaker === 'RODRIGUE', 'first group keeps first-appearance name');
+      assert(groups[2].speaker === null && groups[2].lines.length === 2, 'directions group together');
+      assert(groups[3].speaker === 'RODRIGUE', 'non-consecutive same speaker starts a new group');
+      // Overlay renders one header per group, outside the line boxes.
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('groupLinesBySpeaker(chunkLines)'),
+        'lines container must group consecutive same-speaker lines');
+      assert(flashJs.includes('tr-group-speaker ${colorCls}'),
+        'each dialogue group must show the speaker name once, outside the line boxes');
+      assert(!flashJs.includes('tr-reveal-speaker'),
+        'per-line speaker divs must be gone (name lives on the group header)');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.tr-group-speaker'), 'missing .tr-group-speaker CSS');
+      assert(css.includes('.tr-reveal-dir'), 'missing .tr-reveal-dir CSS');
+    });
+
+    test('free practice: revise button samples a chunk when nothing is due', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/if \(pool\.length === 0\) \{ startFreePractice\(textId\); return; \}/.test(flashJs),
+        'per-text revise with empty pool must start free practice instead of a toast');
+      assert(/showTextPracticeOverlay\(tx, picked, \{ freePractice: true \}\)/.test(flashJs),
+        'free practice must open the overlay flagged as free practice');
+    });
+
+    test('free practice: submit skips scheduling updates', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const submitStart = flashJs.indexOf('window.submitTextReview = async function');
+      const submitBody = flashJs.slice(submitStart, flashJs.indexOf('window.showTextPracticeSummary', submitStart));
+      const freeIdx = submitBody.indexOf('if (trFreePractice)');
+      const fsrsIdx = submitBody.indexOf('fsrsUpdate');
+      assert(freeIdx !== -1 && fsrsIdx !== -1 && freeIdx < fsrsIdx,
+        'submitTextReview must branch to the free-practice summary before any FSRS update');
+      assert(/showFreePracticeSummary\(knownCount, totalLines\);\s*return;/.test(submitBody),
+        'free practice submit must not fall through to the scheduling path');
+    });
+
+    test('free practice summary shows no rating and states scheduling is untouched', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const fnStart = flashJs.indexOf('function showFreePracticeSummary');
+      const fnBody = flashJs.slice(fnStart, flashJs.indexOf('function showTextPracticeSummary', fnStart));
+      assert(!fnBody.includes('ratingLabels'), 'free practice summary must not show a scheduling rating');
+      assert(fnBody.includes("t('text_revision.free_practice_note')"),
+        'free practice summary must state scheduling was untouched');
+      assert(fnBody.includes("data-action=\"continue-free-practice\""),
+        'free practice summary must offer another free-practice chunk');
+    });
+
+    test('practice overlay scrolls tall content (safe centering)', () => {
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      const overlayBlock = css.match(/\.practice-overlay \{[^}]*\}/)[0];
+      assert(overlayBlock.includes('overflow-y:auto'),
+        '.practice-overlay must scroll when content exceeds the viewport');
+      assert(!/justify-content:\s*center/.test(overlayBlock),
+        '.practice-overlay must not use justify-content:center (pushes overflowing content off-screen)');
+      assert(css.includes('.practice-overlay > :not(.practice-header)'),
+        'overlay content must use auto margins for safe vertical centering');
+      const headerBlock = css.match(/\.practice-header \{[^}]*\}/)[0];
+      assert(headerBlock.includes('position:sticky'),
+        '.practice-header must be in-flow sticky, not absolute, so tall content starts below it');
+      assert(!headerBlock.includes('position:absolute'),
+        '.practice-header must not overlap scrolled content');
+    });
+
+    test('i18n: every t() key used in js/ resolves (no raw keys in UI)', async () => {
+      // Browser shims for the i18n module top-level code.
+      if (!globalThis.localStorage) globalThis.localStorage = { getItem: () => 'en', setItem: () => {} };
+      if (!globalThis.document) globalThis.document = { documentElement: {} };
+      const { t } = await import(pathToFileURL(path.join(JS_DIR, 'i18n.js')).href);
+      const used = new Set();
+      const dynamicProbes = { 'habits.day_': 'habits.day_mon', 'habits.freq_': 'habits.freq_first' };
+      for (const [name, src] of Object.entries(jsFiles)) {
+        for (const m of src.matchAll(/t\(\s*['"]([\w.]+)['"]/g)) {
+          const prev = src[m.index - 1];
+          if (prev && /[\w$]/.test(prev)) continue; // e.g. split('.') — not a t() call
+          const key = m[1];
+          if (!key.includes('.')) continue;
+          used.add(`${name}:${dynamicProbes[key] || key}`);
+        }
+      }
+      const missing = [...used].filter(entry => t(entry.split(':')[1]) === entry.split(':')[1]);
+      assert(missing.length === 0,
+        `unresolved i18n keys (UI would show the raw key): ${missing.join(', ')}`);
+    });
+
+    test('new-deck modal persists the selected deck type', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/deck_type: type/.test(flashJs),
+        'saveNewFlashDeck must persist deck_type');
+      assert(/if \(row\?\.deck_type === 'text' \|\| row\?\.deck_type === 'flashcard'\) return row\.deck_type;/.test(flashJs),
+        'getDeckType must prefer the stored deck_type');
+    });
+
+    test('migrations add focus_role and deck_type (2.10.18)', () => {
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(local.includes('2.10.18') && local.includes('ADD COLUMN focus_role') && local.includes('ADD COLUMN deck_type'),
+        'local migration 2.10.18 must add focus_role and deck_type');
+      assert(drive.includes('2.10.18') && drive.includes('focus_role') && drive.includes('deck_type'),
+        'drive migration 2.10.18 must ensure focus_role and deck_type');
+      assert(schema.includes('focus_role TEXT') && schema.includes('deck_type TEXT'),
+        'base schema must include focus_role and deck_type');
+      const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
+      assert(sw.includes('js/scene-parse.js'), 'sw.js must precache js/scene-parse.js');
+    });
+
+    test('text revision holds new chunks until nothing is due', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const gates = flashJs.match(/const due = (?:pool\.filter\(p => p\.chunk\.last_review\)|chunks\.filter\(ch => ch\.last_review\));\s*\n\s*const candidates = due\.length > 0 \? due : (?:pool|chunks);/g) || [];
+      assert(gates.length === 3,
+        `all three text-revision pickers must gate new chunks behind due ones (found ${gates.length})`);
+    });
+
+    test('text revision breaks ties by chunk order, not randomly', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(!/const picked = tied\[Math\.floor\(Math\.random\(\) \* tied\.length\)\]/.test(flashJs),
+        'random tie-break must be gone from text-revision picking');
+      assert(flashJs.includes('a.chunk.chunk_index - b.chunk.chunk_index'),
+        'tied chunks must break by chunk order so a text is learned following its flow');
+      assert((flashJs.match(/const picked = tied\[0\];/g) || []).length === 3,
+        'all three text-revision pickers must take the first tied chunk');
+    });
+
+    test('flashcard practice holds new cards until nothing is due', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/const fresh = dueCount > 0 \? \[\] : pool\.filter\(c => !c\.last_review\)/.test(flashJs),
+        'practice session must not introduce new cards while due cards remain');
     });
 
     test('sharing poll is single-flight', () => {

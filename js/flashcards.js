@@ -4,6 +4,7 @@ import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } fr
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
+import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap, persistTextEdit, leadingRevealCount } from './scene-parse.js';
 
 // ===================================================================
 // FLASHCARDS — Spaced Repetition (Algo-style intervals)
@@ -98,6 +99,8 @@ let sessionDeck = null;
 let trSessionActive = false;
 let trSessionDeck = null;
 let trSessionTextId = null;
+let trFreePractice = false;      // extra practice: revision without scheduling updates
+let trFreePracticeLastChunk = null; // chunk_index just practiced (excluded from re-sampling)
 
 // ── Deck table state ──
 // Decks live in the flashcard_decks DB table. Loaded into maps for fast lookup.
@@ -167,19 +170,25 @@ async function refreshFlashcards() {
     allTexts = await fetchAll(() => state.db.from('texts').select('*').order('created_at'));
     allChunkProgress = await fetchAll(() => state.db.from('text_line_progress').select('*').order('chunk_index'));
   } catch (e) { allTexts = []; allChunkProgress = []; }
-  // Auto-repair: generate missing chunk progress rows for texts with content
+  // Auto-repair: progress rows must match the current chunking. Regenerate
+  // when missing entirely or when the count mismatches (partial insert, or
+  // chunking changed without invalidation) — stale rows are dropped first.
   for (const tx of allTexts) {
     if (!tx.content) continue;
-    const hasChunks = allChunkProgress.some(ch => ch.text_id === tx.id);
-    if (!hasChunks) {
-      const generated = splitTextIntoChunks(tx.content, tx.lines_per_chunk || 4);
-      const rows = generated.map((_, idx) => ({ text_id: tx.id, chunk_index: idx }));
-      if (rows.length > 0 && state.db.connected) {
-        try {
+    const existing = allChunkProgress.filter(ch => ch.text_id === tx.id);
+    const chunkCount = getTextChunks(tx).length;
+    if (existing.length !== chunkCount) {
+      try {
+        if (existing.length > 0 && state.db.connected) {
+          await state.db.from('text_line_progress').delete().eq('text_id', tx.id);
+          allChunkProgress = allChunkProgress.filter(ch => ch.text_id !== tx.id);
+        }
+        const rows = Array.from({ length: chunkCount }, (_, idx) => ({ text_id: tx.id, chunk_index: idx }));
+        if (rows.length > 0 && state.db.connected) {
           const { data: inserted } = await state.db.from('text_line_progress').insert(rows).select('*');
           if (inserted) allChunkProgress.push(...inserted);
-        } catch (_) { /* silent — will retry next load */ }
-      }
+        }
+      } catch (_) { /* silent — will retry next load */ }
     }
   }
   // Decks already loaded via loadFlashcardDecks() above
@@ -188,8 +197,11 @@ async function refreshFlashcards() {
 
 // ── Deck Nav Buttons ──
 // ── Deck Type helpers ──
-// A deck is either 'flashcard' or 'text', inferred from which table has data for it.
+// A deck is either 'flashcard' or 'text', stored on the deck row at creation.
+// Legacy rows without a stored type fall back to inferring from content.
 function getDeckType(deckId) {
+  const row = _deckMap.get(deckId);
+  if (row?.deck_type === 'text' || row?.deck_type === 'flashcard') return row.deck_type;
   const hasCards = allCards.some(c => deckIdForCard(c) === deckId);
   const hasTexts = allTexts.some(tx => deckIdForText(tx) === deckId);
   // If somehow both (shouldn't happen), prefer flashcard
@@ -592,7 +604,7 @@ function renderTextDeck(deckId, q) {
       </div>
     </div>
     <div class="task-list">
-      ${texts.length > 0 ? texts.map(tx => renderTextItem(tx, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-text" data-deck="${esc(deckId)}">${lucideIcon('plus', 16)} ${t('flashcards.add_text')}</button></div>`}
+      ${texts.length > 0 ? texts.map(tx => renderTextItem(tx, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-text" data-deck="${esc(deckId)}">${lucideIcon('plus', 16)} ${t('text_revision.add_text')}</button></div>`}
     </div>
   </div>`;
 }
@@ -1086,17 +1098,17 @@ window.saveNewFlashDeck = async function() {
   }
 
   // Create the deck row in DB first
+  const type = document.getElementById('newDeckType').value === 'text' ? 'text' : 'flashcard';
   if (state.db.connected) {
     const shortname = document.getElementById('newDeckShortname').value.trim() || null;
     const color = document.getElementById('newDeckColor').value;
     const sortOrder = Math.max(0, ...Array.from(_deckMap.values()).map(d => d.sort_order || 0)) + 1;
-    await state.db.from('flashcard_decks').insert({ name, shortname, color, sort_order: sortOrder });
+    await state.db.from('flashcard_decks').insert({ name, shortname, color, sort_order: sortOrder, deck_type: type });
     await loadFlashcardDecks();
   }
 
-  const type = document.getElementById('newDeckType').value;
   closeAddFlashDeckModal();
-  showToast(t('toast.created'), 'success');
+  showToast(t('toast.added'), 'success');
   await refreshFlashcards();
 };
 
@@ -1119,7 +1131,10 @@ function startPractice(deckFilter, anchorEl) {
   const failed = pool.filter(c => c.last_review && c.stability > 0 && c.stability <= 2);
   const overdue = pool.filter(c => c.last_review && c.stability > 2)
     .sort((a, b) => new Date(a.next_review || 0) - new Date(b.next_review || 0));
-  const fresh = pool.filter(c => !c.last_review).sort(() => Math.random() - 0.5);
+  // New cards wait until nothing is due: no new material while
+  // unmastered cards are pending.
+  const dueCount = pool.filter(c => c.last_review).length;
+  const fresh = dueCount > 0 ? [] : pool.filter(c => !c.last_review).sort(() => Math.random() - 0.5);
 
   let selected = [];
   for (const group of [failed, overdue, fresh]) {
@@ -1376,7 +1391,7 @@ function renderTextItem(tx, color) {
     <div class="todo-row">
       <div class="tr-text-info">
         <span class="todo-text"><strong>${esc(titleTrunc)}</strong><span class="tr-author">${authorStr}</span></span>
-        <span class="tr-meta">${lineCount} lines ${lucideIcon('layers', 12)} ${masteredChunks}/${totalChunks} chunks${dueChunks > 0 ? ` <span class="tr-due-badge">${dueChunks} due</span>` : ''}</span>
+        <span class="tr-meta">${lineCount} lines ${lucideIcon('layers', 12)} ${masteredChunks}/${totalChunks} chunks${dueChunks > 0 ? ` <span class="tr-due-badge">${dueChunks} due</span>` : ''}${tx.focus_role ? ` <span class="tr-role-badge">${t('text_revision.role_badge_prefix')}${esc(tx.focus_role)}</span>` : ''}</span>
         ${progressBar}
       </div>
       <div class="todo-actions">
@@ -1411,6 +1426,37 @@ function splitTextIntoChunks(content, linesPerChunk) {
   return chunks;
 }
 
+// Unified chunk access: scene texts (focus_role set) chunk parsed content
+// lines; plain texts chunk raw lines as before. Chunk indexes stay aligned
+// with text_line_progress rows in both modes.
+function getTextChunks(tx) {
+  const perChunk = tx.blocks_per_chunk || 4;
+  if (tx.focus_role) {
+    return splitSceneIntoChunks(parseSceneContent(tx.content).lines, perChunk);
+  }
+  return splitTextIntoChunks(tx.content, perChunk);
+}
+
+// In scene mode, chunks holding none of the role's lines carry nothing to
+// learn and are skipped by the revision pickers.
+function chunkHasRoleLines(tx, chunkIndex) {
+  if (!tx.focus_role) return true;
+  const chunks = getTextChunks(tx);
+  const ch = chunks[chunkIndex];
+  return !!ch && ch.some(ln => sceneSpeakersEqual(ln.speaker, tx.focus_role));
+}
+
+// Rendered HTML for a parsed scene line: direction spans dimmed italic.
+// A block may span lines: inner newlines render as breaks inside the bubble.
+function renderSceneLineHtml(line) {
+  const br = t => esc(t).replace(/\n/g, '<br>');
+  return line.segments.map(sg =>
+    sg.kind === 'dir'
+      ? `<span class='tr-inline-dir'>${br(sg.text)}</span>`
+      : br(sg.text)
+  ).join('');
+}
+
 // ── Add Text Modal ──
 window.openAddTextModal = function(deck) {
   closeAllFlashModals();
@@ -1423,15 +1469,24 @@ window.openAddTextModal = function(deck) {
       <label>${t('text_revision.author_label')}</label>
       <input type="text" id="newTextAuthor" placeholder="${t('text_revision.author_placeholder')}">
       <label>${t('text_revision.content_label')}</label>
-      <textarea id="newTextContent" rows="10" placeholder="${t('text_revision.content_placeholder')}"></textarea>
+      <textarea id="newTextContent" rows="10" placeholder="${t('text_revision.content_placeholder')}" data-action="update-scene-preview"></textarea>
       <div class="tr-modal-row">
         <div class="tr-modal-field">
-          <label>${t('text_revision.lines_per_chunk')}</label>
-          <input type="number" id="newTextLinesPerChunk" value="4" min="1" max="20">
+          <label>${t('text_revision.my_role_label')}</label>
+          <input type="text" id="newTextRole" list="newTextRoleList" placeholder="${t('text_revision.my_role_placeholder')}" data-action="update-scene-preview" autocomplete="off">
+          <datalist id="newTextRoleList"></datalist>
+        </div>
+      </div>
+      <div class="tr-format-hint">${t('text_revision.scene_format_hint')}</div>
+      <div class="tr-scene-preview" id="newTextScenePreview"></div>
+      <div class="tr-modal-row">
+        <div class="tr-modal-field">
+          <label>${t('text_revision.blocks_per_chunk')}</label>
+          <input type="number" id="newTextBlocksPerChunk" value="4" min="1" max="20">
         </div>
         <div class="tr-modal-field">
-          <label>${t('text_revision.context_lines')}</label>
-          <input type="number" id="newTextContextLines" value="3" min="0" max="10">
+          <label>${t('text_revision.context_blocks')}</label>
+          <input type="number" id="newTextContextBlocks" value="3" min="0" max="10">
         </div>
       </div>
       <div class="modal-actions">
@@ -1453,8 +1508,9 @@ window.saveNewText = async function() {
   const title = document.getElementById('newTextTitle').value.trim();
   const author = document.getElementById('newTextAuthor').value.trim() || null;
   const content = document.getElementById('newTextContent').value;
-  const linesPerChunk = parseInt(document.getElementById('newTextLinesPerChunk').value) || 4;
-  const contextLines = parseInt(document.getElementById('newTextContextLines').value) || 3;
+  const blocksPerChunk = parseInt(document.getElementById('newTextBlocksPerChunk').value) || 4;
+  const contextBlocks = parseInt(document.getElementById('newTextContextBlocks').value) || 3;
+  const role = document.getElementById('newTextRole').value.trim() || null;
 
   if (!title) { showToast(t('toast.name_required')); return; }
   if (!content.trim()) { showToast(t('toast.content_required')); return; }
@@ -1466,14 +1522,15 @@ window.saveNewText = async function() {
 
   // Insert text
   const { data: inserted } = await state.db.from('texts').insert({
-    deck, title, author, content, lines_per_chunk: linesPerChunk, context_lines: contextLines, deck_id: deckId || null
+    deck, title, author, content, blocks_per_chunk: blocksPerChunk, context_blocks: contextBlocks, deck_id: deckId || null,
+    focus_role: role
   }).select('*');
 
   if (!inserted || inserted.length === 0) { showToast(t('toast.failed_to_add')); return; }
   const textRow = inserted[0];
 
   // Generate chunk progress rows
-  const chunks = splitTextIntoChunks(content, linesPerChunk);
+  const chunks = getTextChunks({ content, blocks_per_chunk: blocksPerChunk, focus_role: role });
   const chunkRows = chunks.map((_, idx) => ({ text_id: textRow.id, chunk_index: idx }));
   if (chunkRows.length > 0) {
     await state.db.from('text_line_progress').insert(chunkRows);
@@ -1499,6 +1556,44 @@ window.deleteText = function(id) {
   });
 };
 
+// Live parse preview for the scene role field (add/edit text modals).
+window.updateScenePreview = function(el) {
+  if (!el) return;
+  const overlay = el.closest('.modal-overlay');
+  const isAdd = overlay && overlay.id === 'addTextModal';
+  const pfx = isAdd ? 'newText' : 'editText';
+  const contentEl = document.getElementById(pfx + 'Content');
+  const roleEl = document.getElementById(pfx + 'Role');
+  const listEl = document.getElementById(pfx + 'RoleList');
+  const prevEl = document.getElementById(pfx + 'ScenePreview');
+  if (!contentEl || !prevEl) return;
+  const content = contentEl.value;
+  const role = (roleEl ? roleEl.value : '').trim();
+  const hasBlocks = content.includes('<') && content.includes('>');
+  if (!role && !hasBlocks) {
+    prevEl.innerHTML = '';
+    if (listEl) listEl.innerHTML = '';
+    return;
+  }
+  const { lines, speakers, unparsedBlocks } = parseSceneContent(content);
+  if (listEl) listEl.innerHTML = speakers.map(sp => `<option value="${esc(sp)}"></option>`).join('');
+  const warnings = [];
+  if (unparsedBlocks > 0) warnings.push(t('text_revision.scene_warn_unparsed'));
+  if (role && !speakers.includes(role)) warnings.push(t('text_revision.scene_warn_role_missing'));
+  if (role && lines.length === 0) warnings.push(t('text_revision.scene_warn_no_blocks'));
+  const shown = lines.slice(0, 30);
+  const body = shown.map(ln => {
+    const text = esc(sceneLineText(ln) || '\u00A0').replace(/\n/g, '<br>');
+    if (ln.unparsed) return `<div class="tr-sprev-line tr-sprev-warn">${text}</div>`;
+    if (!ln.speaker) return `<div class="tr-sprev-line tr-sprev-dir">${text}</div>`;
+    const mine = role && ln.speaker === role;
+    return `<div class="tr-sprev-line${mine ? ' tr-sprev-mine' : ''}"><span class="tr-sprev-speaker">${esc(ln.speaker)}:</span> ${text}</div>`;
+  }).join('');
+  const more = lines.length > shown.length ? `<div class="tr-sprev-more">+${lines.length - shown.length}</div>` : '';
+  const warnHtml = warnings.map(w => `<div class="tr-sprev-warn">${esc(w)}</div>`).join('');
+  prevEl.innerHTML = warnHtml + body + more;
+};
+
 window.openEditTextModal = function(id) {
   const tx = allTexts.find(t => t.id === id);
   if (!tx) return;
@@ -1517,7 +1612,26 @@ window.openEditTextModal = function(id) {
       <label>${t('text_revision.author_label')}</label>
       <input type="text" id="editTextAuthor" value="${esc(tx.author || '')}">
       <label>${t('text_revision.content_label')}</label>
-      <textarea id="editTextContent" rows="10" style="font-family:monospace;font-size:0.85rem;">${esc(tx.content)}</textarea>
+      <textarea id="editTextContent" rows="10" style="font-family:monospace;font-size:0.85rem;" data-action="update-scene-preview">${esc(tx.content)}</textarea>
+      <div class="tr-modal-row">
+        <div class="tr-modal-field">
+          <label>${t('text_revision.my_role_label')}</label>
+          <input type="text" id="editTextRole" list="editTextRoleList" placeholder="${t('text_revision.my_role_placeholder')}" value="${esc(tx.focus_role || '')}" data-action="update-scene-preview" autocomplete="off">
+          <datalist id="editTextRoleList"></datalist>
+        </div>
+      </div>
+      <div class="tr-format-hint">${t('text_revision.scene_format_hint')}</div>
+      <div class="tr-scene-preview" id="editTextScenePreview"></div>
+      <div class="tr-modal-row">
+        <div class="tr-modal-field">
+          <label>${t('text_revision.blocks_per_chunk')}</label>
+          <input type="number" id="editTextBlocksPerChunk" value="${tx.blocks_per_chunk ?? 4}" min="1" max="20">
+        </div>
+        <div class="tr-modal-field">
+          <label>${t('text_revision.context_blocks')}</label>
+          <input type="number" id="editTextContextBlocks" value="${tx.context_blocks ?? 3}" min="0" max="10">
+        </div>
+      </div>
       <div class="modal-actions">
         <button class="modal-cancel" data-action="close-edit-text">${t('common.cancel')}</button>
         <button class="modal-save" data-action="save-edit-text">${t('common.save')}</button>
@@ -1525,6 +1639,7 @@ window.openEditTextModal = function(id) {
     </div>
   </div>`;
   document.body.insertAdjacentHTML('beforeend', html);
+  updateScenePreview(document.getElementById('editTextContent'));
 };
 
 window.closeEditTextModal = function() {
@@ -1533,6 +1648,7 @@ window.closeEditTextModal = function() {
 
 window.saveEditText = async function() {
   const id = document.getElementById('editTextId').value;
+  const tx = allTexts.find(t => t.id === id);
   const deckId = document.getElementById('editTextDeck').value.trim();
   const deckRow = _deckMap.get(deckId);
   const deck = deckRow?.name ?? deckId;
@@ -1540,8 +1656,18 @@ window.saveEditText = async function() {
   const author = document.getElementById('editTextAuthor').value.trim();
   const content = document.getElementById('editTextContent').value;
   if (!title || !content.trim()) { showToast('Title and content are required'); return; }
-  const updates = { deck, title, author: author || null, content, deck_id: deckId };
-  if (state.db.connected) await state.db.from('texts').update(updates).eq('id', id);
+  const role = document.getElementById('editTextRole').value.trim() || null;
+  const blocksPerChunk = Math.max(1, parseInt(document.getElementById('editTextBlocksPerChunk').value, 10) || 4);
+  const contextBlocks = Math.max(0, parseInt(document.getElementById('editTextContextBlocks').value, 10) || 0);
+  const updates = { deck, title, author: author || null, content, deck_id: deckId, focus_role: role,
+    blocks_per_chunk: blocksPerChunk, context_blocks: contextBlocks };
+  if (state.db.connected) {
+    // A changed blocks-per-chunk invalidates chunk progress via
+    // isTextChunkingStale, so auto-repair regenerates it.
+    const { ok } = await persistTextEdit(state.db, id, tx, updates,
+      { content, blocks_per_chunk: blocksPerChunk, focus_role: role });
+    if (!ok) { showToast(t('toast.failed_to_save'), 'error'); return; }
+  }
   closeEditTextModal();
   await refreshFlashcards();
   showToast(t('text_revision.text_updated'));
@@ -1561,32 +1687,38 @@ function startTextPractice(deckFilter, anchorEl) {
     const chunks = allChunkProgress.filter(ch => ch.text_id === tx.id);
     for (const ch of chunks) {
       if (!ch.last_review || !ch.next_review || new Date(ch.next_review) <= now) {
+        if (!chunkHasRoleLines(tx, ch.chunk_index)) continue;
         pool.push({ chunk: ch, text: tx });
       }
     }
   }
 
   if (pool.length === 0) { showAllCaughtUp('texts', anchorEl); return; }
+  // New chunks wait until nothing is due: no new material while
+  // unmastered chunks are pending.
+  const due = pool.filter(p => p.chunk.last_review);
+  const candidates = due.length > 0 ? due : pool;
 
-  // Pick the single most due chunk (one revision per session)
-  // Among chunks with the same priority, pick randomly
+  // Pick the single most due chunk (one revision per session).
+  // Ties break by chunk order so a text is learned following its flow.
   const nowStr = now.toISOString();
-  pool.sort((a, b) => {
+  candidates.sort((a, b) => {
     const rA = a.chunk.last_review && a.chunk.stability ? retrievability(a.chunk.stability, a.chunk.last_review, nowStr) : -1;
     const rB = b.chunk.last_review && b.chunk.stability ? retrievability(b.chunk.stability, b.chunk.last_review, nowStr) : -1;
     return rA - rB;
   });
 
-  // Find all chunks tied at the lowest retrievability
-  const lowestR = pool[0].chunk.last_review && pool[0].chunk.stability
-    ? retrievability(pool[0].chunk.stability, pool[0].chunk.last_review, nowStr) : -1;
-  const tied = pool.filter(p => {
+  const lowestR = candidates[0].chunk.last_review && candidates[0].chunk.stability
+    ? retrievability(candidates[0].chunk.stability, candidates[0].chunk.last_review, nowStr) : -1;
+  const tied = candidates.filter(p => {
     const r = p.chunk.last_review && p.chunk.stability
       ? retrievability(p.chunk.stability, p.chunk.last_review, nowStr) : -1;
     return Math.abs(r - lowestR) < 0.01;
   });
+  tied.sort((a, b) => (a.chunk.chunk_index - b.chunk.chunk_index) ||
+    (a.text.id < b.text.id ? -1 : a.text.id > b.text.id ? 1 : 0));
 
-  const picked = tied[Math.floor(Math.random() * tied.length)];
+  const picked = tied[0];
   trSessionActive = true;
   trSessionDeck = deckFilter || null;
   trSessionTextId = picked.text.id;
@@ -1603,28 +1735,37 @@ function startTextPracticeForText(textId) {
   const pool = [];
   for (const ch of chunks) {
     if (!ch.last_review || !ch.next_review || new Date(ch.next_review) <= now) {
+      if (!chunkHasRoleLines(tx, ch.chunk_index)) continue;
       pool.push({ chunk: ch, text: tx });
     }
   }
 
-  if (pool.length === 0) { showToast(t('text_revision.no_chunks_due')); return; }
+  if (pool.length === 0) { startFreePractice(textId); return; }
+  // New chunks wait until nothing is due: no new material while
+  // unmastered chunks are pending.
+  const due = pool.filter(p => p.chunk.last_review);
+  const candidates = due.length > 0 ? due : pool;
 
+  // Pick the single most due chunk (one revision per session).
+  // Ties break by chunk order so a text is learned following its flow.
   const nowStr = now.toISOString();
-  pool.sort((a, b) => {
+  candidates.sort((a, b) => {
     const rA = a.chunk.last_review && a.chunk.stability ? retrievability(a.chunk.stability, a.chunk.last_review, nowStr) : -1;
     const rB = b.chunk.last_review && b.chunk.stability ? retrievability(b.chunk.stability, b.chunk.last_review, nowStr) : -1;
     return rA - rB;
   });
 
-  const lowestR = pool[0].chunk.last_review && pool[0].chunk.stability
-    ? retrievability(pool[0].chunk.stability, pool[0].chunk.last_review, nowStr) : -1;
-  const tied = pool.filter(p => {
+  const lowestR = candidates[0].chunk.last_review && candidates[0].chunk.stability
+    ? retrievability(candidates[0].chunk.stability, candidates[0].chunk.last_review, nowStr) : -1;
+  const tied = candidates.filter(p => {
     const r = p.chunk.last_review && p.chunk.stability
       ? retrievability(p.chunk.stability, p.chunk.last_review, nowStr) : -1;
     return Math.abs(r - lowestR) < 0.01;
   });
+  tied.sort((a, b) => (a.chunk.chunk_index - b.chunk.chunk_index) ||
+    (a.text.id < b.text.id ? -1 : a.text.id > b.text.id ? 1 : 0));
 
-  const picked = tied[Math.floor(Math.random() * tied.length)];
+  const picked = tied[0];
   trSessionActive = true;
   trSessionDeck = deckIdForText(tx);
   trSessionTextId = picked.text.id;
@@ -1632,7 +1773,42 @@ function startTextPracticeForText(textId) {
 }
 window.startTextPracticeForText = startTextPracticeForText;
 
-function showTextPracticeOverlay(text, chunk) {
+let trOverlayLines = []; // parsed line objects for the open revision overlay
+
+// Free practice: nothing is due, so sample the stalest chunk and let the
+// user revise without touching scheduling (no FSRS update, no DB write).
+function startFreePractice(textId, excludeChunkIndex = null) {
+  const tx = allTexts.find(t => t.id === textId);
+  if (!tx) return;
+  const nowStr = new Date().toISOString();
+  const eligible = ch => ch.text_id === textId && chunkHasRoleLines(tx, ch.chunk_index);
+  let candidates = allChunkProgress.filter(ch => eligible(ch) && ch.chunk_index !== excludeChunkIndex);
+  if (candidates.length === 0) {
+    // Single-chunk text (or everything excluded): allow repeating the chunk.
+    candidates = allChunkProgress.filter(eligible);
+  }
+  if (candidates.length === 0) { showToast(t('text_revision.no_chunks_due')); return; }
+  candidates.sort((a, b) => {
+    const rA = a.last_review && a.stability ? retrievability(a.stability, a.last_review, nowStr) : -1;
+    const rB = b.last_review && b.stability ? retrievability(b.stability, b.last_review, nowStr) : -1;
+    return rA - rB;
+  });
+  const picked = candidates[0];
+  trSessionActive = true;
+  trSessionDeck = deckIdForText(tx);
+  trSessionTextId = tx.id;
+  trFreePracticeLastChunk = picked.chunk_index;
+  showTextPracticeOverlay(tx, picked, { freePractice: true });
+}
+window.startFreePractice = startFreePractice;
+
+window.continueFreePractice = function() {
+  if (!trSessionTextId) { endTextPractice(); return; }
+  startFreePractice(trSessionTextId, trFreePracticeLastChunk);
+};
+
+function showTextPracticeOverlay(text, chunk, opts = {}) {
+  trFreePractice = !!opts.freePractice;
   let overlay = document.getElementById('practiceOverlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -1643,30 +1819,78 @@ function showTextPracticeOverlay(text, chunk) {
   overlay.style.display = 'flex';
   document.body.style.overflow = 'hidden';
 
-  const allChunks = splitTextIntoChunks(text.content, text.lines_per_chunk);
-  const chunkLines = (allChunks[chunk.chunk_index] || '').split('\n');
-  const allLines = text.content.split('\n');
+  const sceneMode = !!text.focus_role;
+  const allChunks = getTextChunks(text);
+  const rawChunk = allChunks[chunk.chunk_index] || [];
+  // Normalize to line objects: scene lines carry speaker/segments, plain
+  // lines behave as the user's own (today's behavior, unchanged).
+  // Didascalies are a single reveal unit: consecutive direction lines merge
+  // into one block, even when spanning several lines.
+  const chunkLines = [];
+  const pushLine = (entry) => { entry.idx = chunkLines.length; chunkLines.push(entry); return entry; };
+  if (sceneMode) {
+    let openDir = null;
+    let openDirParts = [];
+    for (const ln of rawChunk) {
+      const kind = sceneSpeakersEqual(ln.speaker, text.focus_role) ? 'mine' : (ln.speaker ? 'cue' : 'dir');
+      const content = renderSceneLineHtml(ln) || '\u00A0';
+      if (kind === 'dir') {
+        if (openDir) {
+          openDir.plain += '\n' + sceneLineText(ln);
+          openDirParts.push(content);
+          openDir.html = `<div class='tr-reveal-dir'>${openDirParts.join('<br>')}</div>`;
+        } else {
+          openDirParts = [content];
+          // The speaker's name is shown once per group, outside the line boxes
+          // (see the lines container below); directions stay centered.
+          openDir = pushLine({ kind, speaker: null, plain: sceneLineText(ln),
+            html: `<div class='tr-reveal-dir'>${content}</div>` });
+        }
+      } else {
+        openDir = null;
+        pushLine({ kind, speaker: ln.speaker, plain: sceneLineText(ln), html: content });
+      }
+    }
+  } else {
+    // Plain-text chunks are joined strings; split back into lines
+    // (iterating the string would yield one "line" per character).
+    const rawLines = typeof rawChunk === 'string' ? rawChunk.split('\n') : rawChunk;
+    for (const line of rawLines) pushLine({ kind: 'mine', speaker: null, plain: line, html: esc(line || '\u00A0') });
+  }
+  trOverlayLines = chunkLines;
+  const roleColorMap = sceneMode
+    ? buildRoleColorMap(parseSceneContent(text.content).speakers, text.focus_role)
+    : new Map();
+  const myLineCount = chunkLines.filter(l => l.kind === 'mine').length;
 
   // Compute context: preceding lines
-  let contextLines = [];
+  let contextBlocks = [];
   if (chunk.chunk_index === 0) {
-    contextLines = null; // beginning of text
+    contextBlocks = null; // beginning of text
   } else {
-    let precedingContent = allChunks.slice(0, chunk.chunk_index).join('\n');
-    let precedingLines = precedingContent.split('\n');
-    contextLines = precedingLines.slice(-text.context_lines);
+    const preceding = [];
+    for (const c of allChunks.slice(0, chunk.chunk_index)) {
+      if (sceneMode) { for (const ln of c) preceding.push(ln); }
+      else { for (const s of c.split('\n')) preceding.push(s); }
+    }
+    contextBlocks = preceding.slice(-text.context_blocks);
   }
 
   const authorStr = text.author ? ` — ${esc(text.author)}` : '';
-  const contextHtml = contextLines === null
+  const contextHtml = contextBlocks === null
     ? `<div class="tr-context-marker">${t('text_revision.beginning')}</div>`
-    : contextLines.map(l => `<div class="tr-context-line">${esc(l || '\u00A0')}</div>`).join('');
+    : contextBlocks.map(l => {
+        if (!sceneMode) return `<div class="tr-context-line">${esc(l || '\u00A0')}</div>`;
+        const sp = l.speaker ? `<span class='tr-speaker'>${esc(l.speaker)}:</span> ` : '';
+        const cls = l.speaker ? 'tr-context-line' : 'tr-context-line tr-context-dir';
+        return `<div class="${cls}">${sp}${esc(sceneLineText(l) || '\u00A0').replace(/\n/g, '<br>')}</div>`;
+      }).join('');
 
   overlay.innerHTML = `
     <div class="practice-header">
       ${practiceHeaderLogo()}
-      <div class="practice-progress-bar"><div class="practice-progress-fill" style="width:100%;"></div></div>
-      <div class="practice-meta"><span class="practice-meta-text">${esc(text.title)}${authorStr}</span></div>
+      <div class="practice-progress-bar"><div class="practice-progress-fill" style="width:0%;"></div></div>
+      <div class="practice-meta"><span class="practice-meta-text">${esc(text.title)}${authorStr}</span>${trFreePractice ? ` <span class="tr-practice-badge">${t('text_revision.free_practice')}</span>` : ''}</div>
       <button class="practice-close" data-action="end-text-practice">X</button>
     </div>
     <div class="tr-practice-area">
@@ -1674,21 +1898,69 @@ function showTextPracticeOverlay(text, chunk) {
         <div class="tr-context-label">${esc(text.title)}${authorStr}</div>
         ${contextHtml}
       </div>
-      <div class="tr-lines-container" id="trLinesContainer">
-        ${chunkLines.map((line, i) => `<div class="tr-line tr-line-masked${i === 0 ? ' tr-line-next' : ''}" data-line-idx="${i}" data-text="${esc(line || '\u00A0')}" data-action="handle-line-click">${'• '.repeat(Math.max(1, Math.ceil((line || ' ').length / 6)))}</div>`).join('')}
+      <div class="tr-lines-container${sceneMode ? ' tr-scene' : ''}" id="trLinesContainer">
+        ${groupLinesBySpeaker(chunkLines).map(group => {
+          let header = '';
+          if (group.speaker) {
+            const isMine = sceneSpeakersEqual(group.speaker, text.focus_role);
+            const colorCls = isMine ? 'tr-role-mine' : (roleColorMap.get(group.speaker.toLowerCase()) || '');
+            header = `<div class="tr-group-speaker ${colorCls} ${isMine ? 'tr-spk-left' : 'tr-spk-right'}">${esc(group.speaker)}</div>`;
+          } else if (group.lines[0] && group.lines[0].kind === 'dir') {
+            // Didascalies get a header like the roles: centered, muted, localized.
+            // (Plain-text lines have no speaker but kind 'mine', so no header.)
+            header = `<div class="tr-group-speaker tr-role-dir tr-spk-center">${t('text_revision.stage_directions')}</div>`;
+          }
+          return `
+          <div class="tr-line-group"${group.speaker ? ` data-speaker="${esc(group.speaker)}"` : ''}>
+            ${header}
+            ${group.lines.map(line => {
+              const bullets = (line.plain || '').split('\n')
+                .map(part => '• '.repeat(Math.max(1, Math.ceil(part.length / 6))))
+                .join('<br>');
+              return `<div class="tr-line tr-line-masked${line.idx === 0 ? ' tr-line-next' : ''}" data-line-idx="${line.idx}" data-kind="${line.kind}" data-action="handle-line-click">${bullets}</div>`;
+            }).join('')}
+          </div>`; }).join('')}
       </div>
       <div class="tr-hint" id="trHint">${t('text_revision.tap_to_reveal')}</div>
       <div class="tr-submit-section" id="trSubmitSection" style="display:none;">
-        <button class="btn practice-done-btn" data-action="submit-text-review" data-id="${esc(chunk.id)}" data-lines="${chunkLines.length}">${t('text_revision.submit')}</button>
+        <button class="btn practice-done-btn" data-action="submit-text-review" data-id="${esc(chunk.id)}" data-lines="${myLineCount}">${t('text_revision.submit')}</button>
       </div>
     </div>`;
   initMarquee();
+
+  // Auto-reveal leading cues/directions up to the first line of the
+  // revised role (no-op when the chunk opens with the role's line).
+  const autoReveal = leadingRevealCount(chunkLines.map(l => l.kind));
+  if (autoReveal > 0) {
+    const container = document.getElementById('trLinesContainer');
+    const lines = container.querySelectorAll('.tr-line');
+    for (let i = 0; i < autoReveal; i++) {
+      const el = lines[i];
+      el.classList.remove('tr-line-masked', 'tr-line-next');
+      el.classList.add('tr-line-shown');
+      const lineObj = trOverlayLines[parseInt(el.dataset.lineIdx, 10)];
+      el.innerHTML = lineObj ? lineObj.html : '';
+    }
+    lines[autoReveal].classList.add('tr-line-next');
+  }
+  updateTextPracticeProgress();
+}
+
+// Progress bar for text revision: fills as blocks are revealed.
+function updateTextPracticeProgress() {
+  const container = document.getElementById('trLinesContainer');
+  const fill = document.querySelector('#practiceOverlay .practice-header .practice-progress-fill');
+  if (!container || !fill) return;
+  const total = container.querySelectorAll('.tr-line').length;
+  const masked = container.querySelectorAll('.tr-line-masked').length;
+  fill.style.width = (total > 0 ? Math.round(((total - masked) / total) * 100) : 100) + '%';
 }
 
 window.handleLineClick = function(el) {
   const idx = parseInt(el.dataset.lineIdx, 10);
   const container = document.getElementById('trLinesContainer');
   const lines = container.querySelectorAll('.tr-line');
+  const kind = el.dataset.kind || 'mine';
 
   if (el.classList.contains('tr-line-masked')) {
     // Only allow revealing the next unmasked line in order
@@ -1698,10 +1970,16 @@ window.handleLineClick = function(el) {
     }
     if (idx !== nextMaskedIdx) return; // can only reveal in order
 
-    // Reveal as known
+    const lineObj = trOverlayLines[idx];
     el.classList.remove('tr-line-masked', 'tr-line-next');
-    el.classList.add('tr-line-known');
-    el.innerHTML = el.dataset.text;
+    if (kind === 'mine') {
+      // Own line: reveal as known (toggleable to failed below)
+      el.classList.add('tr-line-known');
+    } else {
+      // Cue / direction: revealed neutrally, never evaluated
+      el.classList.add('tr-line-shown');
+    }
+    el.innerHTML = lineObj ? lineObj.html : '';
 
     // Mark next masked line as the active target
     const nextMasked = container.querySelector('.tr-line-masked');
@@ -1715,8 +1993,10 @@ window.handleLineClick = function(el) {
       document.getElementById('trHint').style.display = 'none';
       document.getElementById('trSubmitSection').style.display = 'block';
     }
+    updateTextPracticeProgress();
   } else {
-    // Toggle between known and failed
+    // Toggle between known and failed (own lines only)
+    if (kind !== 'mine') return;
     el.classList.toggle('tr-line-known');
     el.classList.toggle('tr-line-failed');
   }
@@ -1726,6 +2006,12 @@ window.submitTextReview = async function(chunkId, totalLines) {
   const lineEls = document.querySelectorAll('#trLinesContainer .tr-line');
   let knownCount = 0;
   lineEls.forEach(el => { if (el.classList.contains('tr-line-known')) knownCount++; });
+
+  if (trFreePractice) {
+    // Extra practice only: report the score, leave scheduling untouched.
+    showFreePracticeSummary(knownCount, totalLines);
+    return;
+  }
 
   const ratio = totalLines > 0 ? knownCount / totalLines : 0;
   let rating;
@@ -1748,6 +2034,27 @@ window.submitTextReview = async function(chunkId, totalLines) {
   // Show summary
   showTextPracticeSummary(knownCount, totalLines, rating);
 };
+
+function showFreePracticeSummary(known, total) {
+  const overlay = document.getElementById('practiceOverlay');
+  if (!overlay) return;
+  const pct = total > 0 ? Math.round((known / total) * 100) : 0;
+  overlay.innerHTML = `
+    <div class="practice-summary">
+      ${practiceSummaryLogo()}
+      <div class="practice-summary-emoji">${pct >= 80 ? lucideIcon('trophy', 32) : pct >= 50 ? lucideIcon('flame', 32) : lucideIcon('book-open', 32)}</div>
+      <h2>${t('text_revision.free_practice_done')}</h2>
+      <div class="practice-summary-stats">
+        <div class="practice-summary-stat"><span class="practice-stat-val">${known}/${total}</span><span class="practice-stat-lbl">${t('text_revision.lines_known')}</span></div>
+        <div class="practice-summary-stat"><span class="practice-stat-val">${pct}%</span><span class="practice-stat-lbl">${t('flashcards.accuracy')}</span></div>
+      </div>
+      <div class="tr-free-note">${t('text_revision.free_practice_note')}</div>
+      <div class="practice-summary-actions">
+        <button class="btn practice-continue-btn" data-action="continue-free-practice">${t('text_revision.free_practice_another')}</button>
+        <button class="btn practice-done-btn" data-action="end-text-practice">${t('common.close')}</button>
+      </div>
+    </div>`;
+}
 
 function showTextPracticeSummary(known, total, rating) {
   const overlay = document.getElementById('practiceOverlay');
@@ -1816,31 +2123,40 @@ window.continueTextSameText = function() {
 
   const chunks = allChunkProgress.filter(ch =>
     ch.text_id === trSessionTextId &&
-    (!ch.last_review || !ch.next_review || new Date(ch.next_review) <= now)
+    (!ch.last_review || !ch.next_review || new Date(ch.next_review) <= now) &&
+    chunkHasRoleLines(text, ch.chunk_index)
   );
   if (chunks.length === 0) { showToast(t('text_revision.no_chunks_due')); endTextPractice(); return; }
+  // New chunks wait until nothing is due: no new material while
+  // unmastered chunks are pending.
+  const due = chunks.filter(ch => ch.last_review);
+  const candidates = due.length > 0 ? due : chunks;
 
+  // Pick the single most due chunk.
+  // Ties break by chunk order so a text is learned following its flow.
   const nowStr = now.toISOString();
-  chunks.sort((a, b) => {
+  candidates.sort((a, b) => {
     const rA = a.last_review && a.stability ? retrievability(a.stability, a.last_review, nowStr) : -1;
     const rB = b.last_review && b.stability ? retrievability(b.stability, b.last_review, nowStr) : -1;
     return rA - rB;
   });
 
-  // Find all chunks tied at the lowest retrievability
-  const lowestR = chunks[0].last_review && chunks[0].stability
-    ? retrievability(chunks[0].stability, chunks[0].last_review, nowStr) : -1;
-  const tied = chunks.filter(ch => {
+  const lowestR = candidates[0].last_review && candidates[0].stability
+    ? retrievability(candidates[0].stability, candidates[0].last_review, nowStr) : -1;
+  const tied = candidates.filter(ch => {
     const r = ch.last_review && ch.stability
       ? retrievability(ch.stability, ch.last_review, nowStr) : -1;
     return Math.abs(r - lowestR) < 0.01;
   });
+  tied.sort((a, b) => a.chunk_index - b.chunk_index);
 
-  const picked = tied[Math.floor(Math.random() * tied.length)];
+  const picked = tied[0];
   showTextPracticeOverlay(text, picked);
 };
 
 window.endTextPractice = function() {
+  trFreePractice = false;
+  trFreePracticeLastChunk = null;
   const overlay = document.getElementById('practiceOverlay');
   if (overlay) overlay.style.display = 'none';
   document.body.style.overflow = '';
@@ -2429,14 +2745,14 @@ window.openImportModal = async function() {
     try {
       if (type === 'text') {
         for (const item of selectedItems) {
-          const linesPerChunk = 4;
+          const blocksPerChunk = 4;
           const { data: inserted } = await state.db.from('texts').insert({
             deck: deckName, title: item.title, author: item.author || null,
-            content: item.content, lines_per_chunk: linesPerChunk, context_lines: 3, deck_id: deckId
+            content: item.content, blocks_per_chunk: blocksPerChunk, context_blocks: 3, deck_id: deckId
           }).select('*');
           if (inserted && inserted.length > 0) {
             const textRow = inserted[0];
-            const chunks = splitTextIntoChunks(item.content, linesPerChunk);
+            const chunks = getTextChunks({ content: item.content, blocks_per_chunk: blocksPerChunk });
             const chunkRows = chunks.map((_, idx) => ({ text_id: textRow.id, chunk_index: idx }));
             if (chunkRows.length > 0) await state.db.from('text_line_progress').insert(chunkRows);
           }

@@ -10,6 +10,12 @@
   --pink: #ec4899;
   --green: #10b981;
   --yellow: #eab308;
+  --role-c0: oklch(0.72 0.15 55);
+  --role-c1: oklch(0.72 0.13 195);
+  --role-c2: oklch(0.75 0.14 145);
+  --role-c3: oklch(0.72 0.15 350);
+  --role-c4: oklch(0.70 0.15 25);
+  --role-c5: oklch(0.78 0.14 95);
   --red: #ef4444;
   --blue: #3b82f6;
   --purple: #a78bfa;
@@ -36,6 +42,12 @@
   --muted: #71717a;
   --accent: oklch(0.55 0.18 264);
   --accent-dim: oklch(0.55 0.18 264 / 0.1);
+  --role-c0: oklch(0.55 0.16 55);
+  --role-c1: oklch(0.55 0.14 195);
+  --role-c2: oklch(0.52 0.15 145);
+  --role-c3: oklch(0.55 0.16 350);
+  --role-c4: oklch(0.52 0.16 25);
+  --role-c5: oklch(0.55 0.15 95);
   --dropdown-bg: rgb(245,245,247);
   --settings-bg: rgb(255,255,255);
   --settings-sidebar-bg: rgb(247,247,249);
@@ -1453,7 +1465,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .tr-modal-field input[type="number"] { width:100%; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:0.88rem; }
 .tr-practice-btn { margin-left:2px; }
 /* Text practice overlay */
-.tr-practice-area { width:100%; max-width:560px; display:flex; flex-direction:column; gap:20px; }
+.tr-practice-area { width:100%; max-width:800px; display:flex; flex-direction:column; gap:20px; }
 .tr-context-section { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px 20px; }
 .tr-context-label { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); margin-bottom:8px; }
 .tr-context-marker { font-size:0.85rem; color:var(--muted); font-style:italic; }
@@ -1467,12 +1479,60 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .tr-hint { text-align:center; font-size:0.8rem; color:var(--muted); margin-top:12px; font-style:italic; }
 .tr-submit-section { margin-top:16px; text-align:center; }
 
+/* Scene (role-based) text revision */
+.tr-role-badge { display:inline-block; font-size:0.72rem; font-weight:600; color:var(--accent); background:rgba(100,108,255,0.1); border:1px solid rgba(100,108,255,0.3); border-radius:20px; padding:1px 8px; margin-left:6px; vertical-align:1px; }
+.tr-speaker { font-size:0.72rem; font-weight:700; letter-spacing:0.08em; color:var(--muted); text-transform:uppercase; }
+.tr-line-group { display:flex; flex-direction:column; gap:4px; }
+.tr-scene .tr-line { width:fit-content; max-width:85%; }
+.tr-scene .tr-line[data-kind="mine"] { align-self:flex-start; }
+.tr-scene .tr-line[data-kind="cue"] { align-self:flex-end; }
+.tr-scene .tr-line[data-kind="dir"] { align-self:center; }
+.tr-scene .tr-line.tr-line-masked { width:85%; }
+.tr-group-speaker { font-size:0.72rem; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); }
+.tr-spk-left { text-align:left; }
+.tr-spk-right { text-align:right; }
+.tr-spk-center { text-align:center; }
+.tr-role-dir { color:var(--muted); }
+.tr-role-mine { color:var(--accent); }
+.tr-role-c0 { color:var(--role-c0); }
+.tr-role-c1 { color:var(--role-c1); }
+.tr-role-c2 { color:var(--role-c2); }
+.tr-role-c3 { color:var(--role-c3); }
+.tr-role-c4 { color:var(--role-c4); }
+.tr-role-c5 { color:var(--role-c5); }
+.tr-reveal-dir { font-style:italic; color:var(--muted); text-align:left; padding:4px 0; }
+.tr-inline-dir { font-style:italic; opacity:0.65; }
+.tr-line-shown { background:var(--surface); color:var(--text); border:1px solid var(--border); opacity:0.85; cursor:default; }
+.tr-context-dir { opacity:0.55; }
+.tr-format-hint { font-size:0.75rem; color:var(--muted); font-style:italic; margin:6px 0 4px; }
+.tr-scene-preview { max-height:220px; overflow-y:auto; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px; font-size:0.85rem; line-height:1.6; }
+.tr-scene-preview:empty { display:none; }
+.tr-sprev-line { padding:2px 0; border-bottom:1px dashed var(--border); }
+.tr-sprev-line:last-child { border-bottom:none; }
+.tr-sprev-speaker { font-size:0.7rem; font-weight:700; letter-spacing:0.06em; color:var(--accent); text-transform:uppercase; margin-right:6px; }
+.tr-sprev-dir { color:var(--muted); font-style:italic; }
+.tr-sprev-mine { background:rgba(34,197,94,0.07); border-radius:4px; }
+.tr-sprev-warn { color:#f59e0b; }
+.tr-sprev-more { color:var(--muted); font-size:0.75rem; padding-top:4px; }
+.tr-practice-badge { display:inline-block; font-size:0.68rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--accent); background:rgba(100,108,255,0.12); border:1px solid rgba(100,108,255,0.35); border-radius:20px; padding:1px 8px; margin-left:8px; vertical-align:1px; }
+.tr-free-note { text-align:center; font-size:0.8rem; color:var(--muted); font-style:italic; margin:4px 0 8px; }
+
 /* ═══════ Practice Overlay ═══════ */
 .practice-overlay {
   position:fixed; inset:0; z-index:9999;
   background:var(--bg);
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-  padding:20px; box-sizing:border-box;
+  display:flex; flex-direction:column; align-items:center;
+  padding:0 20px 20px; box-sizing:border-box;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+}
+/* Safe centering: content is vertically centered when it fits, top-aligned
+   and scrollable when it overflows (plain justify-content:center would push
+   the top off-screen with no way to scroll back). */
+.practice-overlay > :not(.practice-header) {
+  margin-top:auto;
+  margin-bottom:auto;
+  flex-shrink:0;
 }
 .practice-header-logo {
   width:24px; height:24px; flex-shrink:0; color:var(--muted); opacity:0.5;
@@ -1487,7 +1547,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
   width:40px; height:40px; margin:0 auto 8px; display:block; color:var(--muted); opacity:0.35;
 }
 
-.practice-header { position:absolute; top:0; left:0; right:0; padding:16px 20px; display:flex; align-items:center; gap:12px; }
+.practice-header { position:sticky; top:0; z-index:2; flex-shrink:0; align-self:stretch; background:var(--bg); padding:16px 20px; display:flex; align-items:center; gap:12px; }
 .practice-progress-bar { flex:1; height:6px; border-radius:3px; background:var(--border); overflow:hidden; }
 .practice-progress-fill { height:100%; background:var(--accent); border-radius:3px; transition:width 0.3s; }
 .practice-meta { font-size:0.8rem; color:var(--muted); overflow:hidden; min-width:0; flex-shrink:1; }

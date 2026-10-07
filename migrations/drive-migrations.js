@@ -309,4 +309,27 @@ export const DRIVE_MIGRATIONS = {
     delete store.vestiaire;
     delete store.vestiaire_categories;
   },
+  '2.10.18': async (store) => {
+    // 2.10.18: scene (role-based) text revision — ensure focus_role exists
+    for (const row of (store.texts || [])) {
+      if (row.focus_role == null) row.focus_role = null;
+    }
+    // 2.10.18: persist deck type at creation (new-deck modal choice was dropped)
+    for (const row of (store.flashcard_decks || [])) {
+      if (row.deck_type == null) row.deck_type = null;
+    }
+  },
+  '2.10.43': async (store) => {
+    // 2.10.43: block nomenclature — rename text chunking settings
+    for (const row of (store.texts || [])) {
+      if ('lines_per_chunk' in row) {
+        row.blocks_per_chunk = row.lines_per_chunk;
+        delete row.lines_per_chunk;
+      }
+      if ('context_lines' in row) {
+        row.context_blocks = row.context_lines;
+        delete row.context_lines;
+      }
+    }
+  },
 };

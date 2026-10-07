@@ -195,6 +195,7 @@
       case 'handle-line-click': if (window.handleLineClick) window.handleLineClick(el); else { var idx = el.dataset.lineIdx || el.dataset.line || el.dataset.index; callWindow('handleLineClick', [parseInt(idx||'0',10)]); } break;
       case 'submit-text-review': callWindow('submitTextReview', [getId(el), parseInt(el.dataset.lines || '0', 10)]); break;
       case 'continue-text-same-text': callWindow('continueTextSameText', []); break;
+      case 'continue-free-practice': callWindow('continueFreePractice', []); break;
       case 'archive-project': callWindow('archiveProject', [getId(el)]); break;
       case 'unarchive-project': callWindow('unarchiveProject', [getId(el)]); break;
       case 'delete-project': callWindow('deleteProject', [getId(el)]); break;
@@ -354,6 +355,10 @@
         }
       }, 150);
       return;
+    }
+    switch (action) {
+      case 'update-scene-preview': callWindow('updateScenePreview', [el]); break;
+      default: break;
     }
   }
   function handleKeydown(e) {

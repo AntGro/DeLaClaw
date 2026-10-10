@@ -214,10 +214,12 @@ CREATE TABLE IF NOT EXISTS list_items (
 );
 
 CREATE TABLE IF NOT EXISTS daily_visits (
-  visit_date TEXT NOT NULL,
-  owner_id TEXT,
-  created_at TEXT DEFAULT (datetime('now')),
-  PRIMARY KEY (visit_date, owner_id)
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  num_active_days INTEGER NOT NULL DEFAULT 0,
+  current_streak INTEGER NOT NULL DEFAULT 0,
+  max_streak INTEGER NOT NULL DEFAULT 0,
+  last_connection_date TEXT
 );
 
 -- ── Indexes for owner_id and shared_id — avoid full scans as tables grow ──

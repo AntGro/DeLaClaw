@@ -15,6 +15,7 @@
 // Use `ctx` only when the migration needs to create/delete/rename
 // Drive files themselves (like the legacy format conversion below).
 //
+import { toLocalDateString, prevDay } from '../js/daily-visits.js';
 // After each migration:
 //   1. schema_version is bumped in the in-memory settings (never by the
 //      migration itself — see rule 5 below)
@@ -331,5 +332,24 @@ export const DRIVE_MIGRATIONS = {
         delete row.context_lines;
       }
     }
+  },
+  '2.11.1': async (store) => {
+    // 2.11.1: daily_visits becomes a single aggregate row. Per-date history
+    // on Drive was broken (composite onConflict overwrote the single row),
+    // so this is a best-effort seed: distinct dates counted, trailing
+    // consecutive run bootstraps both streaks (self-corrects on next connect).
+    const dates = [...new Set((store.daily_visits || []).map(r => r.visit_date).filter(Boolean))].sort();
+    const maxDate = dates.length ? dates[dates.length - 1] : null;
+    const set = new Set(dates);
+    let trailing = 0;
+    for (let d = maxDate; d && set.has(d); d = prevDay(d)) trailing++;
+    store.daily_visits = [{
+      id: 'singleton',
+      created_at: dates.length ? dates[0] : toLocalDateString(new Date()),
+      num_active_days: dates.length,
+      current_streak: trailing,
+      max_streak: trailing,
+      last_connection_date: maxDate,
+    }];
   },
 };

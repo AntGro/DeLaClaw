@@ -515,7 +515,8 @@ export const LOCAL_MIGRATIONS = {
     -- daily_visits: replace per-date rows with a single aggregate row.
     -- current_streak is seeded from the trailing consecutive run ending at
     -- the latest recorded visit (it self-corrects on the next connect);
-    -- max_streak is bootstrapped from the same run and only grows from here.
+    -- max_streak is the longest consecutive run anywhere in the history
+    -- (gaps-and-islands: consecutive dates share julianday(d) - row_number).
     CREATE TABLE IF NOT EXISTS daily_visits_new (
       id TEXT PRIMARY KEY,
       created_at TEXT NOT NULL,
@@ -530,13 +531,20 @@ export const LOCAL_MIGRATIONS = {
            SELECT COUNT(*) FROM dates, mx
            WHERE julianday(mx.m) - julianday(dates.d)
                = (SELECT COUNT(*) - 1 FROM dates d2 WHERE d2.d BETWEEN dates.d AND mx.m)
+         ),
+         islands(maxlen) AS (
+           SELECT MAX(len) FROM (
+             SELECT COUNT(*) AS len FROM (
+               SELECT julianday(d) - ROW_NUMBER() OVER (ORDER BY d) AS grp FROM dates
+             ) GROUP BY grp
+           )
          )
     INSERT INTO daily_visits_new (id, created_at, num_active_days, current_streak, max_streak, last_connection_date)
       SELECT 'singleton',
              COALESCE((SELECT MIN(d) FROM dates), date('now')),
              (SELECT COUNT(*) FROM dates),
              COALESCE((SELECT n FROM trailing), 0),
-             COALESCE((SELECT n FROM trailing), 0),
+             COALESCE((SELECT maxlen FROM islands), 0),
              (SELECT m FROM mx);
     DROP TABLE daily_visits;
     ALTER TABLE daily_visits_new RENAME TO daily_visits;

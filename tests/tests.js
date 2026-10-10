@@ -4100,14 +4100,15 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(row.created_at === '2026-10-08', 'created_at must be the earliest visit');
       assert(row.num_active_days === 3, 'must count distinct visit dates');
       assert(row.last_connection_date === '2026-10-11', 'last must be the latest visit');
-      assert(row.current_streak === 1 && row.max_streak === 1,
-        'trailing run ending 10-11 is just that day (10-10 missing)');
+      assert(row.current_streak === 1 && row.max_streak === 2,
+        `trailing run is 1 but longest run is 2 (10-08, 10-09); got current=${row.current_streak} max=${row.max_streak}`);
 
       const consec = { daily_visits: [
         { visit_date: '2026-10-09' }, { visit_date: '2026-10-10' }, { visit_date: '2026-10-11' },
       ]};
       await DRIVE_MIGRATIONS['2.11.1'](consec);
       assert(consec.daily_visits[0].current_streak === 3, 'consecutive dates must seed a 3-day trailing run');
+      assert(consec.daily_visits[0].max_streak === 3, 'longest run must equal the trailing run here');
 
       const empty = { daily_visits: [] };
       await DRIVE_MIGRATIONS['2.11.1'](empty);
@@ -4145,9 +4146,27 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(row.created_at === '2026-10-05', `created_at must be earliest visit, got ${row.created_at}`);
       assert(row.num_active_days === 4, `must count distinct dates, got ${row.num_active_days}`);
       assert(row.last_connection_date === '2026-10-11', 'last must be the latest visit');
-      assert(row.current_streak === 1 && row.max_streak === 1,
+      assert(row.current_streak === 1,
         `trailing run ending 10-11 is 1 (10-10 missing), got ${row.current_streak}`);
+      assert(row.max_streak === 2,
+        `longest run anywhere is 2 (10-08, 10-09), got ${row.max_streak}`);
       db.close();
+
+      // The reported case: a 10-day run, a gap, then 2 consecutive visits.
+      const db2 = new Database(':memory:');
+      db2.exec(`CREATE TABLE daily_visits (
+        visit_date TEXT NOT NULL, owner_id TEXT, created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (visit_date, owner_id))`);
+      const vals = [];
+      for (let d = 1; d <= 10; d++) vals.push(`('2026-09-${String(d).padStart(2, '0')}')`);
+      vals.push(`('2026-09-15')`, `('2026-09-16')`);
+      db2.exec(`INSERT INTO daily_visits (visit_date) VALUES ${vals.join(',')}`);
+      db2.exec(LOCAL_MIGRATIONS['2.11.1']);
+      const [r2] = db2.prepare('SELECT current_streak, max_streak, num_active_days FROM daily_visits').all();
+      assert(r2.current_streak === 2, `trailing run must be 2, got ${r2.current_streak}`);
+      assert(r2.max_streak === 10, `historical max must be 10, got ${r2.max_streak}`);
+      assert(r2.num_active_days === 12, `must count 12 distinct dates, got ${r2.num_active_days}`);
+      db2.close();
     });
 
     test('main: sharing-changed not re-broadcast for local item mutations', () => {

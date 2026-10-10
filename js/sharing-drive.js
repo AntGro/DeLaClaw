@@ -386,7 +386,8 @@ async function migrateItemsJson(tok, folderId, entry) {
  *   persistence, ETag handling and cross-device polling come from the Drive
  *   adapter instead of bespoke file code.
  */
-export function createDriveSharing(getToken, personalFolderId, capabilities = {}, db = null) {
+export function createDriveSharing(getToken, personalFolderId, capabilities = {}, db = null, opts = {}) {
+  const onSyncActivity = opts.onSyncActivity;
   let _user   = null;            // { email, name, photo }
   let _rootId  = null;           // DeLaClaw-Shared folder id (own)
   const _groups = new Map();     // groupId → GroupEntry
@@ -991,6 +992,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   const SHARED_FLUSH_DEBOUNCE_MS = 2000;
   const _sharedDirty = new Set();       // "groupId:type" with unflushed staged changes
   const _sharedFlushTimers = new Map(); // key -> timeout id
+  function hasPendingUploads() {
+    return _sharedDirty.size > 0 || _sharedFlushing.size > 0 || _sharedFlushTimers.size > 0;
+  }
+  // Tell the host (sync bar) that sharing upload state changed.
+  function notifySyncActivity(active, error) {
+    if (typeof onSyncActivity === 'function') onSyncActivity(active, error);
+  }
   const _sharedFlushing = new Set();    // key with an upload in flight
   const _sharedWaiters = new Map();     // key -> [{ resolve, reject }] for the next flush
 
@@ -1001,8 +1009,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     if (_sharedFlushTimers.has(key)) return;
     _sharedFlushTimers.set(key, setTimeout(() => {
       _sharedFlushTimers.delete(key);
+      notifySyncActivity();
       _runSharedFlush(groupId, type);
     }, SHARED_FLUSH_DEBOUNCE_MS));
+    notifySyncActivity();
   }
 
   /**
@@ -1034,6 +1044,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     _sharedWaiters.delete(key);
     if (!waiters.length) return;
     _sharedFlushing.add(key);
+    notifySyncActivity(true);
     try {
       await saveTypedItems(groupId, type);
       _sharedDirty.delete(key);
@@ -1047,6 +1058,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       for (const w of waiters) w.reject(err);
     } finally {
       _sharedFlushing.delete(key);
+      notifySyncActivity(false);
     }
     if ((_sharedWaiters.get(key) || []).length) _armSharedFlush(groupId, type);
   }
@@ -1700,8 +1712,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           if (cur) Object.assign(cur, changes, { updated_at: stagedAt });
         },
       });
-      await _mutationQueue.runSerialized(mkey, entry, () => scheduleSharedFlush(groupId, key));
+      // Emit at staging time (not post-flush): the debounced upload lands
+      // seconds later, and a late emit would round-trip through
+      // sharing-changed -> sync -> refresh, tearing down in-flight edits.
       emit('item-updated', { groupId, item });
+      await _mutationQueue.runSerialized(mkey, entry, () => scheduleSharedFlush(groupId, key));
       return item;
     },
 
@@ -1808,8 +1823,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           if (cur) Object.assign(cur, changes, { updated_at: stagedAt });
         },
       });
-      await _mutationQueue.runSerialized(mkey, entry, () => scheduleSharedFlush(groupId, 'habits'));
+      // Emit at staging time (not post-flush): the debounced upload lands
+      // seconds later, and a late emit would round-trip through
+      // sharing-changed -> sync -> refresh, tearing down in-flight edits.
       emit('item-updated', { groupId, item });
+      await _mutationQueue.runSerialized(mkey, entry, () => scheduleSharedFlush(groupId, 'habits'));
       return item;
     },
 
@@ -1842,7 +1860,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     /**
      * Add a completion to a shared habit on Drive.
      */
-    async addSharedHabitCompletion(groupId, sharedId, completion, { onStaged } = {}) {
+    async addSharedHabitCompletion(groupId, sharedId, completion, { onStaged, next_due } = {}) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
       const items = e.typeData.habits || [];
@@ -1850,10 +1868,14 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (!item) throw new Error(`Shared habit ${sharedId} not found`);
       if (!item.completions) item.completions = [];
       const prevCompletions = item.completions.slice();
+      const prevNextDue = item.next_due;
       const prevUpdatedAt = item.updated_at;
       const stagedAt = new Date().toISOString();
       const mkey = _mutationKey(groupId, 'habits', sharedId);
       item.completions.push(completion);
+      // Optional: publish the recomputed next_due in the same staged mutation
+      // so the whole Done lands in one debounced upload instead of two.
+      if (next_due !== undefined) item.next_due = next_due;
       item.updated_at = stagedAt;
       if (typeof onStaged === 'function') onStaged(item);
       const entry = _mutationQueue.enqueue(mkey, {
@@ -1861,6 +1883,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           const cur = (e.typeData.habits || []).find(h => h.id === sharedId);
           if (cur) {
             cur.completions = prevCompletions;
+            cur.next_due = prevNextDue;
             cur.updated_at = prevUpdatedAt;
           }
         },
@@ -1868,12 +1891,16 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           const cur = (e.typeData.habits || []).find(h => h.id === sharedId);
           if (cur) {
             cur.completions.push(completion);
+            if (next_due !== undefined) cur.next_due = next_due;
             cur.updated_at = stagedAt;
           }
         },
       });
-      await _mutationQueue.runSerialized(mkey, entry, () => scheduleSharedFlush(groupId, 'habits'));
+      // Emit at staging time (not post-flush): the debounced upload lands
+      // seconds later, and a late emit would round-trip through
+      // sharing-changed -> sync -> refresh, tearing down in-flight edits.
       emit('item-updated', { groupId, item });
+      await _mutationQueue.runSerialized(mkey, entry, () => scheduleSharedFlush(groupId, 'habits'));
       return item;
     },
 
@@ -2191,6 +2218,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       _listeners.push(fn);
       return () => { _listeners = _listeners.filter(f => f !== fn); };
     },
+
+    /** True while a sharing upload is staged/debounced/in-flight (sync bar). */
+    hasPendingUploads,
 
     // ─── Link join ───
 

@@ -1073,6 +1073,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     error: 'Sync error — retrying'
   };
 
+  let _sharingAdapter = null;
   function updateSyncBarState() {
     const bar = ensureSyncBar();
     bar.classList.remove('synced', 'pending', 'active', 'error');
@@ -1080,7 +1081,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       bar.classList.add('active');
       bar.title = SYNC_TITLES.active;
       if (_syncErrorTimeout) { clearTimeout(_syncErrorTimeout); _syncErrorTimeout = null; }
-    } else if (dirtyTables.size > 0 || Object.keys(saveTimers).length > 0) {
+    } else if (dirtyTables.size > 0 || Object.keys(saveTimers).length > 0 || _sharingAdapter?.hasPendingUploads?.()) {
       bar.classList.add('pending');
       bar.title = SYNC_TITLES.pending;
       if (_syncErrorTimeout) { clearTimeout(_syncErrorTimeout); _syncErrorTimeout = null; }
@@ -1288,6 +1289,11 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
     /** Expose token getter for sharing module. */
     getToken,
+    /** Sync-bar controls for the sharing adapter's debounced uploads. */
+    syncStart,
+    syncEnd,
+    notifySharingState: () => updateSyncBarState(),
+    setSharingAdapter(sharing) { _sharingAdapter = sharing; },
 
     /** Force a prompted re-auth that includes the Calendar scope.
      *  Requests only calendar.app.created incrementally;

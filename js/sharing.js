@@ -76,6 +76,7 @@ export async function createSharing(backendType, config = {}) {
         config.personalFolderId,
         config.capabilities,
         config.db,
+        { onSyncActivity: config.onSyncActivity },
       );
       break;
     }

@@ -1516,8 +1516,8 @@ test('groups is a Drive personal table, not a bespoke sharing file', () => {
     'sharing-drive.js must read/write group rows through db.from(\'groups\')');
   assert(drive.includes(".upsert(entry, { onConflict: 'id' })"),
     'join must upsert the pointer keyed on the row id so the Drive 412 merge stays a union');
-  assert(drive.includes('createDriveSharing(getToken, personalFolderId, capabilities = {}, db = null)'),
-    'createDriveSharing must accept the db proxy as a 4th parameter');
+  assert(drive.includes('createDriveSharing(getToken, personalFolderId, capabilities = {}, db = null, opts = {})'),
+    'createDriveSharing must accept the db proxy as a 4th parameter and opts (onSyncActivity) as a 5th');
 
   const factory = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
   assert(factory.includes('config.db,'),
@@ -3310,7 +3310,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         ['addSharedHabitCompletion', 'async forceSave('],
       ]) {
         const body = methodBody(name, endMarker);
-        assert(body.includes('{ onStaged } = {}'), `${name} must accept the onStaged option`);
+        assert(/\{ onStaged[^}]*\} = \{\}/.test(body), `${name} must accept the onStaged option`);
         assert(/typeof onStaged === 'function'/.test(body), `${name}: onStaged must be optional (guarded call)`);
         assert(body.includes('_mutationQueue.runSerialized(mkey, entry,') || /catch \(err\)/.test(body),
           `${name}: a failed upload must roll the staging back`);
@@ -3948,6 +3948,172 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'submitTextReview must branch to the free-practice summary before any FSRS update');
       assert(/showFreePracticeSummary\(knownCount, totalLines\);\s*return;/.test(submitBody),
         'free practice submit must not fall through to the scheduling path');
+    });
+
+    test('shared chains: no success-path re-render (failure still refreshes)', () => {
+      const habits = jsFiles['habits.js'];
+      // The optimistic refresh already shows the published values (the
+      // pending id makes refreshHabits trust the local recompute), so a
+      // second full re-render on success would tear down in-flight edits
+      // and drags. Success handlers must only release the pending id.
+      const successRerenders = (habits.match(/\(\) => \{ _pendingSharedNextDue\.delete\(habit\.shared_id\); refreshHabits\(\); \},/g) || []).length;
+      assert(successRerenders === 0, `no shared chain may re-render on success, found ${successRerenders}`);
+      // ...while every failure handler must still refresh to roll the
+      // optimistic staging back.
+      const failureRerenders = (habits.match(/_pendingSharedNextDue\.release\(habit\.shared_id\);\s*(?:console\.warn\([^;]*;\s*)?(?:await )?refreshHabits\(\);/g) || []).length;
+      assert(failureRerenders >= 6, `expected 6 failure-path re-renders (done, inline last-done, edit modal, inline frequency edit, delete completion, edit completion date), found ${failureRerenders}`);
+    });
+
+    test('shared frequency edit: next_due renders immediately', () => {
+      const habits = jsFiles['habits.js'];
+      assert(habits.includes("pendingSharedNextDue as _pendingSharedNextDue") && habits.includes("from './pending-next-due.js'"),
+        'in-flight shared next_due publishes must be tracked via the refcount module');
+      assert(habits.includes('!_pendingSharedNextDue.has(habit.shared_id)'),
+        'refreshHabits must trust the locally recomputed next_due while a publish is in flight');
+      // The pending id must be registered BEFORE the recompute await: a
+      // refresh racing the awaits must not clobber the fresh local value.
+      assert(/_pendingSharedNextDue\.add\(habit\.shared_id\);\s*try\s*\{\s*newNextDue = await updateHabitNextDue\(habitId, updates\.frequency_rule/.test(habits),
+        'the inline frequency-edit chain must register the pending id before awaiting the recompute');
+      // ...and released if the recompute itself throws, so the id is never stranded.
+      assert(/catch \(e\) \{\s*_pendingSharedNextDue\.release\(habit\.shared_id\);\s*throw e;\s*\}/.test(habits),
+        'a throwing recompute must release the pending id');
+    });
+
+    test('shared completion delete/date-edit: next_due immediate', () => {
+      const habits = jsFiles['habits.js'];
+      const adds = (habits.match(/_pendingSharedNextDue\.add\(habit\.shared_id\);/g) || []).length;
+      assert(adds >= 6, `expected in-flight next_due marking in 6 paths (done, inline last-done, edit modal, inline frequency edit, delete completion, edit completion date), found ${adds}`);
+    });
+
+    test('pending-next-due: overlapping mutations share one marker per habit', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'pending-next-due.js')).href);
+      assert(typeof mod.createPendingNextDue === 'function', 'factory must be exported');
+      assert(mod.pendingSharedNextDue, 'habits-view singleton must be exported');
+      const t = mod.createPendingNextDue();
+      // Interleaving: A adds, B adds, A releases -> marker still held for B.
+      t.add('h1'); t.add('h1'); t.release('h1');
+      assert(t.has('h1'), 'releasing one of two overlapping mutations must keep the marker');
+      t.release('h1');
+      assert(!t.has('h1'), 'releasing the last mutation must free the marker');
+      // Releasing an id with no outstanding mutations is a harmless no-op.
+      t.release('never-added');
+      assert(!t.has('never-added'), 'releasing an unknown id must not create state');
+      // Ids are independent.
+      t.add('h1'); t.add('h2'); t.release('h1');
+      assert(!t.has('h1') && t.has('h2'), 'markers must be independent per habit id');
+    });
+
+    test('main: sharing-changed not re-broadcast for local item mutations', () => {
+      const main = jsFiles['main.js'];
+      // Local item-* mutations are rendered optimistically by their callers;
+      // re-broadcasting them as sharing-changed would round-trip through
+      // syncShared* -> refresh* and tear down in-flight inline edits/drags.
+      // Only remote changes (poll's items-changed) and structural events
+      // may trigger the re-sync.
+      assert(/if \(!event\.startsWith\('item-'\)\)\s*document\.dispatchEvent\(new CustomEvent\('sharing-changed'\)\)/.test(main),
+        'onUpdate must filter item-* events before dispatching sharing-changed');
+    });
+
+    test('sharing-drive: item-updated emits at staging time, not post-flush', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      // Every item-updated emit must precede the debounced-flush await in its
+      // method. A post-flush emit fires ~2s later and round-trips through
+      // sharing-changed -> syncShared* -> refresh*, tearing down in-flight
+      // inline edits and drags (the emit is redundant with the caller's
+      // optimistic refresh; at staging time the 500ms refresh cooldown
+      // absorbs it).
+      const emits = [...drive.matchAll(/emit\('item-updated', \{ groupId, item \}\);/g)];
+      assert(emits.length === 3, `expected 3 item-updated emits, found ${emits.length}`);
+      for (const m of emits) {
+        // The flush await must come AFTER the emit (staging-time emit), never
+        // before it: find the nearest runSerialized await on each side.
+        const before = drive.slice(Math.max(0, m.index - 400), m.index);
+        const after = drive.slice(m.index, m.index + 400);
+        assert(!/await _mutationQueue\.runSerialized/.test(before),
+          'item-updated must be emitted at staging time, before the flush await');
+        assert(/await _mutationQueue\.runSerialized/.test(after),
+          'item-updated emit must be followed by the flush await in the same method');
+      }
+    });
+
+    test('habits view uses the shared refcount module, not a local Set', () => {
+      const habits = jsFiles['habits.js'];
+      assert(habits.includes("from './pending-next-due.js'"),
+        'habits.js must import the pending-next-due module');
+      assert(!/_pendingSharedNextDue = new Set\(\)/.test(habits),
+        'habits.js must not keep a local Set: overlapping mutations would release each other\u2019s marker');
+    });
+
+    test('shared done / last-done / modal: pending id registered before the recompute', () => {
+      const habits = jsFiles['habits.js'];
+      // Done path: add precedes the local recompute await.
+      assert(/_pendingSharedNextDue\.add\(habit\.shared_id\);\s*let newNextDue;\s*let completion;\s*try\s*\{\s*newNextDue = await updateHabitNextDue\(habitId, habit\.frequency_rule, now\)/.test(habits),
+        'markHabitDone must register the pending id before recomputing next_due');
+      // Inline last-done and edit modal: add precedes the preview-based recompute.
+      assert(/const effLatest = previewLastDoneLatest\([^)]*\);\s*_pendingSharedNextDue\.add\(habit\.shared_id\);\s*let newNextDue;/.test(habits),
+        'inline last-done and edit modal must register the pending id around the preview-based recompute');
+    });
+
+    test('previewLastDoneLatest mirrors the staging logic', () => {
+      const habits = jsFiles['habits.js'];
+      assert(/function previewLastDoneLatest\(completions, newIso\)/.test(habits),
+        'previewLastDoneLatest must be defined');
+      assert(habits.includes('const plan = planLastDoneEdit(completions, newIso);'),
+        'the preview must plan from the same pure function as the staging path');
+      assert(/latestHabitCompletion\(result\)\?\.completed_at \|\| null;/.test(habits),
+        'the preview must return the planned latest completion');
+      const uses = (habits.match(/previewLastDoneLatest\(sh\?\.completions \|\| \[\],/g) || []).length;
+      assert(uses >= 2, `expected previewLastDoneLatest used in 2 paths (inline last-done, edit modal), found ${uses}`);
+    });
+
+    test('manual last-done edit: honest recompute, no min() pinning', () => {
+      const habits = jsFiles['habits.js'];
+      assert(!habits.includes('nextDue = currentNextDue;'),
+        'the manual-edit path must not pin next_due to its old value when the recomputed date is later');
+      assert(habits.includes('next_due is always f(rule,'),
+        'updateHabitNextDue must document the honest-recompute contract');
+    });
+
+    test('shared next_due publish: no stale closure on habit.next_due', () => {
+      const habits = jsFiles['habits.js'];
+      // Every background chain must publish updateHabitNextDue's return
+      // value: a captured `habit` object goes stale when a refresh replaces
+      // state.allHabits (optimistic refresh mid-chain, or a poll racing an
+      // edit session), which would publish the pre-edit due date.
+      // The six chains publish the recomputed next_due folded into their main
+      // mutation (single debounced upload): Done via addSharedHabitCompletion
+      // opts, last-done via setSharedHabitLastDone opts, freq via sharedUpdates,
+      // delete/date-edit via the completions update.
+      const pubs = (habits.match(/next_due: newNextDue/g) || []).length;
+      assert(pubs >= 6, `expected 6 next_due publishes from the recompute return value (done, inline last-done, edit modal, inline frequency edit, delete completion, edit completion date), found ${pubs}`);
+      // In the six mutation chains, the publish must use the recompute's return
+      // value (newNextDue), never habit.next_due off a possibly-stale closure.
+      const stale = (habits.match(/(updateSharedHabit|addSharedHabitCompletion)\([^;]*?next_due: habit\.next_due/g) || []).length;
+      assert(stale === 0, `no shared publish may read next_due off a captured habit object, found ${stale}`);
+      const retvals = (habits.match(/newNextDue = await updateHabitNextDue/g) || []).length;
+      assert(retvals >= 6, `expected 6 captures of the recompute return value, found ${retvals}`);
+    });
+
+    test('syncSharedHabits cleanup: two consecutive misses before pointer delete', () => {
+      const habits = jsFiles['habits.js'];
+      assert(habits.includes('const _syncMissStrikes = new Map();'),
+        'a strike map must track consecutive shared-storage misses');
+      assert(/strikes < 2\)/.test(habits) || habits.includes('strikes < 2'),
+        'pointer cleanup must require two consecutive misses, never deleting on a single transient empty read');
+    });
+
+    test('formatHabitRelative: future dates clamp to today, never "-1d ago"', () => {
+      const habits = jsFiles['habits.js'];
+      assert(/const diffDays = Math\.max\(0, Math\.floor\(diffMs/.test(habits),
+        'formatHabitRelative must clamp future dates: a same-day date picked before noon is stamped at noon local, and Math.floor of the negative fraction is -1');
+    });
+
+    test('computeNextDue: no today-clamp — stale habits stay overdue', () => {
+      const habits = jsFiles['habits.js'];
+      assert(!habits.includes('< today ? localDateStr(today)'),
+        'computeNextDue must not clamp past due dates to today; the overdue UI state exists for exactly this');
+      assert(habits.includes('a habit neglected for more than one period is overdue'),
+        'computeNextDue must document that past dates are intentional');
     });
 
     test('edit modals: deck list excludes wrong-type decks and __shared__', () => {

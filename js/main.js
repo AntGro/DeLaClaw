@@ -1189,7 +1189,14 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
           openJoinPicker: (folderId) => state.driveAdapter.openSharedFolderPicker(folderId),
         },
         db: state.db,
+        // Drive the sync bar for sharing uploads too (pending -> uploading -> synced)
+        onSyncActivity: (active, error) => {
+          if (active === true) state.driveAdapter.syncStart();
+          else if (active === false) state.driveAdapter.syncEnd(error || false);
+          state.driveAdapter.notifySharingState();
+        },
       });
+      state.driveAdapter.setSharingAdapter?.(state.sharing);
       loadInitialSharing('sharing');
       // Ledger reconciliation: heal items whose calendar event was created
       // but whose gcal_sync entry was lost (or never written) before the
@@ -1197,7 +1204,12 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       try { await reconcileCalendarLedger(); } catch (e) { console.warn('Calendar ledger reconciliation:', e); }
       state.sharing.startPolling();
       state.sharing.onUpdate((event, detail) => {
-        document.dispatchEvent(new CustomEvent('sharing-changed'));
+        // Local item mutations (item-*) are already rendered optimistically
+        // by their callers; re-broadcasting them as sharing-changed would
+        // round-trip through syncShared* -> refresh* and tear down in-flight
+        // inline edits and drags. Only remote changes (poll's items-changed)
+        // and structural events need the re-sync.
+        if (!event.startsWith('item-')) document.dispatchEvent(new CustomEvent('sharing-changed'));
         if (event === 'member-joined' && detail?.member) {
           const name = detail.member.display_name || '';
           showToast(t('sharing.member_joined', name, detail.group?.name || ''), 'success');

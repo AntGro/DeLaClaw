@@ -3,6 +3,7 @@ import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } fr
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder, bulkSortOrder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
+import { pendingSharedNextDue as _pendingSharedNextDue } from './pending-next-due.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
 
 // ===================================================================
@@ -147,6 +148,9 @@ function localDateStr(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+// Returns the next due date after lastDoneDate, which may be in the past:
+// a habit neglected for more than one period is overdue, and the UI has a
+// dedicated overdue state for exactly that (never clamp to today here).
 function computeNextDue(frequencyRule, lastDoneDate) {
   if (!frequencyRule || !isStructuredRule(frequencyRule)) return null;
   const today = new Date(); today.setHours(0,0,0,0);
@@ -164,7 +168,7 @@ function computeNextDue(frequencyRule, lastDoneDate) {
     if (noHistory) return localDateStr(today);
     const n = parseInt(frequencyRule.split(':')[1], 10) || 1;
     const next = new Date(baseDay); next.setDate(next.getDate() + n);
-    return next < today ? localDateStr(today) : localDateStr(next);
+    return localDateStr(next);
   }
 
   if (frequencyRule.startsWith('every_N_weeks:')) {
@@ -176,7 +180,7 @@ function computeNextDue(frequencyRule, lastDoneDate) {
       // Pure interval: N weeks from last done (or today if new)
       if (noHistory) return localDateStr(today);
       const next = new Date(baseDay); next.setDate(next.getDate() + n * 7);
-      return next < today ? localDateStr(today) : localDateStr(next);
+      return localDateStr(next);
     }
 
     const days = daysStr.split(',');
@@ -184,7 +188,7 @@ function computeNextDue(frequencyRule, lastDoneDate) {
     if (dayIndices.length === 0) {
       if (noHistory) return localDateStr(today);
       const next = new Date(baseDay); next.setDate(next.getDate() + n * 7);
-      return next < today ? localDateStr(today) : localDateStr(next);
+      return localDateStr(next);
     }
 
     if (n === 1) {
@@ -192,7 +196,7 @@ function computeNextDue(frequencyRule, lastDoneDate) {
       for (let offset = 1; offset <= 7; offset++) {
         const candidate = new Date(baseDay); candidate.setDate(candidate.getDate() + offset);
         if (dayIndices.includes(candidate.getDay())) {
-          return candidate < today ? localDateStr(today) : localDateStr(candidate);
+          return localDateStr(candidate);
         }
       }
       return null;
@@ -203,7 +207,7 @@ function computeNextDue(frequencyRule, lastDoneDate) {
     for (let offset = 1; offset <= 7 - isoDow; offset++) {
       const candidate = new Date(baseDay); candidate.setDate(candidate.getDate() + offset);
       if (dayIndices.includes(candidate.getDay())) {
-        return candidate < today ? localDateStr(today) : localDateStr(candidate);
+        return localDateStr(candidate);
       }
     }
     // No more matching days this week — jump to Nth week after
@@ -213,7 +217,7 @@ function computeNextDue(frequencyRule, lastDoneDate) {
     for (let offset = 0; offset < 7; offset++) {
       const candidate = new Date(nextWeekMon); candidate.setDate(candidate.getDate() + offset);
       if (dayIndices.includes(candidate.getDay())) {
-        return candidate < today ? localDateStr(today) : localDateStr(candidate);
+        return localDateStr(candidate);
       }
     }
     return null;
@@ -229,7 +233,7 @@ function computeNextDue(frequencyRule, lastDoneDate) {
       if (!dom || dom < 1 || dom > 31) return null;
       let next = new Date(baseDay.getFullYear(), baseDay.getMonth(), dom);
       if (next <= baseDay) next = new Date(baseDay.getFullYear(), baseDay.getMonth() + n, dom);
-      return next < today ? localDateStr(today) : localDateStr(next);
+      return localDateStr(next);
     }
 
     // Weekday mode: every_N_months:N:first|last:Days
@@ -265,7 +269,7 @@ function computeNextDue(frequencyRule, lastDoneDate) {
       }
       if (candidates.length === 0) return null;
       const next = candidates[0];
-      return next < today ? localDateStr(today) : localDateStr(next);
+      return localDateStr(next);
     }
 
     return null;
@@ -277,7 +281,7 @@ function computeNextDue(frequencyRule, lastDoneDate) {
     if (!mm || !dd) return null;
     let next = new Date(baseDay.getFullYear(), mm - 1, dd);
     if (next <= baseDay) next = new Date(baseDay.getFullYear() + 1, mm - 1, dd);
-    return next < today ? localDateStr(today) : localDateStr(next);
+    return localDateStr(next);
   }
 
   return null;
@@ -358,13 +362,14 @@ async function updateHabitNextDue(habitId, frequencyRule, lastDoneDate, { earlyG
   const habit = state.allHabits.find(h => String(h.id) === String(habitId));
   const currentNextDue = normalizeHabitNextDue(habit?.next_due);
 
+  // Manual edits (earlyGuard: false) recompute honestly from the asserted
+  // last-done date — no min(), no skip. next_due is always f(rule,
+  // last_done): a backdate can move it earlier (even overdue), and asserting
+  // a recent completion moves it forward. There is no double-advance: edits
+  // rewrite the latest completion, they never append one.
   if (earlyGuard) {
     if (nextDue && currentNextDue && nextDue <= currentNextDue) {
       nextDue = normalizeHabitNextDue(computeNextDue(frequencyRule, currentNextDue));
-    }
-  } else {
-    if (nextDue && currentNextDue && nextDue > currentNextDue) {
-      nextDue = currentNextDue;
     }
   }
 
@@ -693,9 +698,12 @@ async function refreshHabits() {
           // Re-sort after injection
           state.allHabitCompletions.sort((a, b) => b.completed_at.localeCompare(a.completed_at));
         }
-        // Read next_due from shared storage — no local recomputation
+        // Read next_due from shared storage — no local recomputation — unless
+        // we have a next_due publish in flight for this habit: shared storage
+        // is then stale by construction and the local row (just recomputed)
+        // is newer.
         const sharedNextDue = sh.next_due != null ? normalizeHabitNextDue(sh.next_due) : null;
-        if (sharedNextDue !== normalizeHabitNextDue(habit.next_due)) {
+        if (sharedNextDue !== normalizeHabitNextDue(habit.next_due) && !_pendingSharedNextDue.has(habit.shared_id)) {
           const { error } = await state.db.from('habits').update({ next_due: sharedNextDue }).eq('id', habit.id);
           if (!error) habit.next_due = sharedNextDue;
         }
@@ -802,6 +810,23 @@ function planLastDoneEdit(completions, newIso) {
   return { kept, toDelete, updateId: latestKept?.id || null, needsInsert: !latestKept };
 }
 
+// Preview the latest completion ISO a last-done edit would produce, without
+// staging anything. Mirrors setSharedHabitLastDone's apply logic so a local
+// next_due recompute can run BEFORE the shared uploads (immediate UI).
+function previewLastDoneLatest(completions, newIso) {
+  const plan = planLastDoneEdit(completions, newIso);
+  const result = [...plan.kept];
+  if (newIso) {
+    if (plan.updateId) {
+      const c = result.find(c => c.id === plan.updateId);
+      if (c) c.completed_at = newIso;
+    } else if (plan.needsInsert) {
+      result.push({ completed_at: newIso });
+    }
+  }
+  return latestHabitCompletion(result)?.completed_at || null;
+}
+
 async function setSharedHabitLastDone(habit, newIso, opts = {}) {
   const sh = getSharedHabitForLocalHabit(habit);
   if (!sh) throw new Error('Shared habit not found');
@@ -825,7 +850,10 @@ async function setSharedHabitLastDone(habit, newIso, opts = {}) {
   }
 
   const nextCompletions = sortHabitCompletionList(result);
-  await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions }, opts);
+  // Fold an optional next_due into the same staged mutation (one upload).
+  const changes = { completions: nextCompletions };
+  if (opts.next_due !== undefined) changes.next_due = opts.next_due;
+  await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, changes, opts);
   return latestHabitCompletion(nextCompletions)?.completed_at || null;
 }
 
@@ -1191,7 +1219,10 @@ function renderHabitItem(habit) {
 function formatHabitRelative(d) {
   const now = new Date();
   const diffMs = now - d;
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  // A date picked for "today" is stamped at noon local time, so before noon
+  // it reads as a few hours in the future — clamp to today, never "-1d ago"
+  // (Math.floor of a negative fraction is -1).
+  const diffDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
   if (diffDays === 0) return t('habits.today');
   if (diffDays === 1) return t('habits.yesterday');
   if (diffDays < 7) return t('habits.days_ago', diffDays);
@@ -1508,39 +1539,65 @@ function editHabitInline(habitId, itemEl) {
       if (Object.keys(updates).length > 0) {
         // Background upload promise for shared flows (null for personal).
         let sharedUpload = null;
+        const sharedUpdates = {};
         if (habit.shared_id && habit.shared_group_id && state.sharing) {
           if (updates.category_id !== undefined) {
             const { error } = await state.db.from('habits').update({ category: updates.category, category_id: updates.category_id }).eq('id', habitId);
             if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
           }
-          const sharedUpdates = {};
           if (updates.name !== undefined) sharedUpdates.name = updates.name;
           if (updates.frequency_rule !== undefined) sharedUpdates.frequency_rule = updates.frequency_rule;
-          // Optimistic: upload in the background. A failure rolls the in-memory
-          // shared item back (adapter) and refreshes the view.
-          sharedUpload = Object.keys(sharedUpdates).length > 0
-            ? state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, sharedUpdates)
-            : Promise.resolve();
         } else {
           const { error } = await state.db.from('habits').update(updates).eq('id', habitId);
           if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
         }
         Object.assign(habit, updates);
-        if (updates.frequency_rule) {
+        let newNextDue = null;
+        if (updates.frequency_rule && habit.shared_id) {
           const lastDone = getHabitLastDone(habitId);
-          await updateHabitNextDue(habitId, updates.frequency_rule, lastDone, { earlyGuard: false });
+          // Register before the recompute: a refresh racing the awaits below
+          // must not overwrite the fresh local value with stale shared
+          // storage. Removed on settlement below — and here if the recompute
+          // itself throws, so the id is never stranded.
+          _pendingSharedNextDue.add(habit.shared_id);
+          try {
+            newNextDue = await updateHabitNextDue(habitId, updates.frequency_rule, lastDone, { earlyGuard: false });
+          } catch (e) {
+            _pendingSharedNextDue.release(habit.shared_id);
+            throw e;
+          }
+          // Fold the recomputed next_due into the same staged mutation so the
+          // whole edit lands in one debounced upload, not two.
+          sharedUpdates.next_due = newNextDue;
+        }
+        if (habit.shared_id) {
+          // Optimistic: upload in the background. A failure rolls the in-memory
+          // shared item back (adapter) and refreshes the view.
+          sharedUpload = Object.keys(sharedUpdates).length > 0
+            ? state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, sharedUpdates)
+            : Promise.resolve();
         }
         if (sharedUpload) {
-          // Chain the next_due publish after the main update (etag order),
-          // with a single failure handler for the whole background chain.
-          const full = updates.frequency_rule
-            ? sharedUpload.then(() => state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due }))
-            : sharedUpload;
-          full.catch(e => {
-            console.warn('Failed to update shared habit:', e);
-            refreshHabits();
-            showToast(t('toast.update_failed'), 'error');
-          });
+          // Publish the recompute's return value, not habit.next_due: the
+          // closure's habit object can go stale if a refresh replaces
+          // state.allHabits before this callback runs.
+          sharedUpload.then(
+            () => {
+              // Release the pending id. No re-render: the optimistic refresh
+              // already shows the published values — a second full render
+              // here would tear down in-flight edits and drags.
+              _pendingSharedNextDue.release(habit.shared_id);
+            },
+            e => {
+              _pendingSharedNextDue.release(habit.shared_id);
+              console.warn('Failed to update shared habit:', e);
+              refreshHabits();
+              showToast(t('toast.update_failed'), 'error');
+            }
+          );
+        } else {
+          // No shared upload to settle the pending id — release it here.
+          _pendingSharedNextDue.release(habit.shared_id);
         }
         showToast(t('habits.habit_updated'), 'success');
       }
@@ -1598,6 +1655,20 @@ async function saveEditHabit() {
 
   if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
     await state.db.from('habits').update({ category: catName, category_id: catId }).eq('id', id);
+    // Recompute next_due locally NOW so the list behind the modal shows the
+    // new date immediately (see _pendingSharedNextDue) — not only once the
+    // debounced uploads land. previewLastDoneLatest mirrors the staging
+    // logic exactly, including the clear-date case. Never strand the id.
+    const sh = getSharedHabitForLocalHabit(habit);
+    const effLatest = previewLastDoneLatest(sh?.completions || [], lastDoneVal ? habitDateInputToIso(lastDoneVal) : null);
+    _pendingSharedNextDue.add(habit.shared_id);
+    let newNextDue;
+    try {
+      newNextDue = await updateHabitNextDue(id, freq, effLatest, { earlyGuard: false });
+    } catch (e) {
+      _pendingSharedNextDue.release(habit.shared_id);
+      throw e;
+    }
     // Optimistic: close the modal on local staging; the shared uploads run in
     // the background. A failure rolls the in-memory shared state back (adapter)
     // and refreshes the view.
@@ -1607,17 +1678,26 @@ async function saveEditHabit() {
         frequency_rule: freq,
       });
       if (lastDoneVal !== prevDateStr) {
-        latestForNextDue = await setSharedHabitLastDone(habit, lastDoneVal ? habitDateInputToIso(lastDoneVal) : null);
+        await setSharedHabitLastDone(habit, lastDoneVal ? habitDateInputToIso(lastDoneVal) : null, { next_due: newNextDue });
+      } else {
+        // Publish the locally recomputed next_due so other members read it directly.
+        await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: newNextDue });
       }
-      await updateHabitNextDue(id, freq, latestForNextDue, { earlyGuard: false });
-      // Publish next_due so other members read it directly
-      await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
     })();
-    upload.catch(e => {
-      console.warn('Failed to update shared habit:', e);
-      refreshHabits();
-      showToast(t('toast.update_failed'), 'error');
-    });
+    upload.then(
+      () => {
+        // Release the pending id. No re-render: the optimistic refresh
+        // already shows the published values — a second full render
+        // here would tear down in-flight edits and drags.
+        _pendingSharedNextDue.release(habit.shared_id);
+      },
+      e => {
+        _pendingSharedNextDue.release(habit.shared_id);
+        console.warn('Failed to update shared habit:', e);
+        refreshHabits();
+        showToast(t('toast.update_failed'), 'error');
+      }
+    );
   } else {
     const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: catName, category_id: catId }).eq('id', id);
     if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
@@ -1690,6 +1770,12 @@ async function promoteHabit(habitId) {
 // HABIT DONE FLOW — per-id guard: disable button until fulfilled (core principle)
 // ===================================================================
 const _pendingHabitDones = new Set();
+// In-flight next_due publishes, tracked per shared habit id (see
+// pending-next-due.js). While an id is present, refreshHabits trusts the
+// locally recomputed next_due over shared storage (stale until the publish
+// lands), so the new due date renders immediately instead of trailing the
+// background upload by seconds. Reference-counted: overlapping mutations on
+// the same habit must not release each other's marker.
 
 async function markHabitDone(habitId, btnEl) {
   if (!habitId) return;
@@ -1708,24 +1794,44 @@ async function markHabitDone(habitId, btnEl) {
     const now = new Date().toISOString();
 
     if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-      // Optimistic: refresh on staging; the uploads run in the background.
-      // A failure rolls the in-memory completion back (adapter) and refreshes.
-      const completion = {
-        id: crypto.randomUUID(),
-        completed_at: now,
-        completed_by: await getSharedHabitCompletionActor(habit.shared_group_id),
-      };
+      // Recompute next_due locally BEFORE staging: the optimistic refresh
+      // below must render the new due date immediately (see
+      // _pendingSharedNextDue) — not only once the debounced uploads land.
+      // The whole pre-upload section is under the cleanup guarantee: a
+      // throwing recompute OR actor lookup releases the marker, so it is
+      // never stranded with no upload to settle it.
+      _pendingSharedNextDue.add(habit.shared_id);
+      let newNextDue;
+      let completion;
+      try {
+        newNextDue = await updateHabitNextDue(habitId, habit.frequency_rule, now);
+        // Optimistic: refresh on staging; the uploads run in the background.
+        // A failure rolls the in-memory completion back (adapter) and refreshes.
+        completion = {
+          id: crypto.randomUUID(),
+          completed_at: now,
+          completed_by: await getSharedHabitCompletionActor(habit.shared_group_id),
+        };
+      } catch (e) {
+        _pendingSharedNextDue.release(habit.shared_id);
+        throw e;
+      }
       let onStaged;
       const staged = new Promise(resolve => { onStaged = resolve; });
       const upload = (async () => {
-        await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion, { onStaged });
-        await updateHabitNextDue(habitId, habit.frequency_rule, now);
-        // Publish next_due so other members read it directly
-        await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+        // Publish the locally recomputed next_due in the same staged mutation
+        // so other members read it directly — one debounced upload, not two.
+        await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion, { onStaged, next_due: newNextDue });
       })();
       upload.then(
-        () => {},
+        () => {
+          // Release the pending id. No re-render: the optimistic refresh
+          // already shows the published values — a second full render
+          // here would tear down in-flight edits and drags.
+          _pendingSharedNextDue.release(habit.shared_id);
+        },
         async (e) => {
+          _pendingSharedNextDue.release(habit.shared_id);
           console.warn('Failed to push shared habit completion:', e);
           await refreshHabits();
           showToast(t('habits.failed_record'), 'error');
@@ -1784,20 +1890,38 @@ function editHabitLastDone(habitId, event, triggerEl) {
     try {
       let latestForNextDue = newIso;
       if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
+        // Recompute next_due locally BEFORE staging so the optimistic
+        // refresh renders the new date immediately (see
+        // _pendingSharedNextDue) — not only once the debounced uploads land.
+        // previewLastDoneLatest mirrors the staging logic exactly (clear,
+        // rewrite and future-completion pruning). Never strand the id.
+        const sh = getSharedHabitForLocalHabit(habit);
+        const effLatest = previewLastDoneLatest(sh?.completions || [], newIso);
+        _pendingSharedNextDue.add(habit.shared_id);
+        let newNextDue;
+        try {
+          newNextDue = await updateHabitNextDue(habitId, habit.frequency_rule, effLatest, { earlyGuard: false });
+        } catch (e) {
+          _pendingSharedNextDue.release(habit.shared_id);
+          throw e;
+        }
         // Optimistic: refresh on staging; the shared uploads run in the
         // background. A failure rolls the in-memory state back (adapter)
         // and refreshes the view.
         let onStaged;
         const staged = new Promise(resolve => { onStaged = resolve; });
         const upload = (async () => {
-          latestForNextDue = await setSharedHabitLastDone(habit, newIso, { onStaged });
-          await updateHabitNextDue(habitId, habit.frequency_rule, latestForNextDue, { earlyGuard: false });
-          // Publish next_due so other members read it directly
-          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+          latestForNextDue = await setSharedHabitLastDone(habit, newIso, { onStaged, next_due: newNextDue });
         })();
         upload.then(
-          () => {},
+          () => {
+            // Release the pending id. No re-render: the optimistic refresh
+            // already shows the published values — a second full render
+            // here would tear down in-flight edits and drags.
+            _pendingSharedNextDue.release(habit.shared_id);
+          },
           (e) => {
+            _pendingSharedNextDue.release(habit.shared_id);
             console.warn('Failed to update habit completion:', e);
             refreshHabits();
             showToast(t('toast.failed_to_update'), 'error');
@@ -1898,19 +2022,41 @@ async function deleteHabitCompletion(compId) {
             : [...sh.completions];
           // Recompute next_due from new latest completion (or null if none left)
           const latest = nextCompletions.length ? nextCompletions[nextCompletions.length - 1].completed_at : null;
-          await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
+          // Register before the recompute (see _pendingSharedNextDue): a
+          // refresh racing the awaits must not clobber the fresh local
+          // value. Never strand the id if the recompute throws.
+          _pendingSharedNextDue.add(habit.shared_id);
+          let newNextDue;
+          try {
+            newNextDue = await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
+          } catch (e) {
+            _pendingSharedNextDue.release(habit.shared_id);
+            throw e;
+          }
           // The uploads run in the background: a failure rolls the in-memory
           // shared item back (adapter) and refreshes the view.
           const upload = (async () => {
-            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions });
-            // Publish next_due so other members read it directly
-            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+            // Publish the recompute's return value, not habit.next_due: the
+            // closure's habit object can go stale if a refresh replaces
+            // state.allHabits before this runs.
+            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions, next_due: newNextDue });
           })();
-          upload.catch(e => {
-            console.warn('Failed to delete shared habit completion:', e);
-            refreshHabits();
-            showToast(t('toast.failed_to_delete'), 'error');
-          });
+          upload.then(
+            // No success re-render (see below): the failure branch still
+            // refreshes to roll the optimistic staging back.
+            () => {
+              // Release the pending id. No re-render: the optimistic refresh
+              // already shows the published values — a second full render
+              // here would tear down in-flight edits and drags.
+              _pendingSharedNextDue.release(habit.shared_id);
+            },
+            e => {
+              _pendingSharedNextDue.release(habit.shared_id);
+              console.warn('Failed to delete shared habit completion:', e);
+              refreshHabits();
+              showToast(t('toast.failed_to_delete'), 'error');
+            }
+          );
         }
       } else {
         // ─── Normal: delete from local DB ───
@@ -1978,19 +2124,39 @@ async function saveHabitCompletion(compId) {
         c === sharedComp ? { ...c, completed_at: newDate } : c);
       // Recompute next_due from latest completion
       const latest = nextCompletions[nextCompletions.length - 1]?.completed_at || null;
-      await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
+      // Register before the recompute (see _pendingSharedNextDue); never
+      // strand the id if the recompute throws.
+      _pendingSharedNextDue.add(habit.shared_id);
+      let newNextDue;
+      try {
+        newNextDue = await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
+      } catch (e) {
+        _pendingSharedNextDue.release(habit.shared_id);
+        throw e;
+      }
       // The uploads run in the background: a failure rolls the in-memory
       // shared item back (adapter) and refreshes the view.
       const upload = (async () => {
-        await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions });
-        // Publish next_due so other members read it directly
-        await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: habit.next_due });
+        // Publish the recompute's return value, not habit.next_due (stale
+        // closure — see markHabitDone).
+        await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions, next_due: newNextDue });
       })();
-      upload.catch(e => {
-        console.warn('Failed to update shared habit completion:', e);
-        refreshHabits();
-        showToast(t('toast.failed_to_update'), 'error');
-      });
+      upload.then(
+        // No success re-render (see below): the failure branch still
+        // refreshes to roll the optimistic staging back.
+        () => {
+          // Release the pending id. No re-render: the optimistic refresh
+          // already shows the published values — a second full render
+          // here would tear down in-flight edits and drags.
+          _pendingSharedNextDue.release(habit.shared_id);
+        },
+        e => {
+          _pendingSharedNextDue.release(habit.shared_id);
+          console.warn('Failed to update shared habit completion:', e);
+          refreshHabits();
+          showToast(t('toast.failed_to_update'), 'error');
+        }
+      );
     }
   } else {
     // ─── Normal: update in local DB ───
@@ -2521,6 +2687,12 @@ function sharedHabitCalFingerprint(sh) {
 }
 let _bulkShareInProgress = new Set();
 const _pendingShare = new Set();
+// Consecutive syncs in which a shared habit was missing from shared storage.
+// The pointer cleanup only deletes after two consecutive misses: a single
+// empty read is treated as transient (in-flight flush, momentary read skew)
+// and must never wipe local pointers.
+const _syncMissStrikes = new Map();
+
 async function syncSharedHabits() {
   if (_syncingHabits) return false;
   _syncingHabits = true;
@@ -2613,9 +2785,18 @@ async function _doSyncSharedHabits() {
 
   // Clean up pointers for removed shared habits
   for (const local of localShared) {
+    const strikeKey = local.shared_group_id + ':' + local.shared_id;
     if (!driveSharedIds.has(local.shared_id)) {
       const group = state.sharing.getAllGroups().find(g => g.id === local.shared_group_id);
       if (group) {
+        // Require two consecutive misses before deleting: a single empty
+        // read (transient skew around a flush) must never wipe pointers.
+        const strikes = (_syncMissStrikes.get(strikeKey) || 0) + 1;
+        if (strikes < 2) {
+          _syncMissStrikes.set(strikeKey, strikes);
+          continue;
+        }
+        _syncMissStrikes.delete(strikeKey);
         // Group exists but item gone from remote → delete local pointer
         await state.db.from('habits').delete().eq('id', local.id);
         _sharedHabitSeenAt.delete(local.shared_id);
@@ -2625,6 +2806,9 @@ async function _doSyncSharedHabits() {
         // pointers were already purged. Leave the pointer; the next sync
         // re-evaluates it.
       }
+    } else {
+      // Seen — clear any pending strike.
+      _syncMissStrikes.delete(strikeKey);
     }
   }
 

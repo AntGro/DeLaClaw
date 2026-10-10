@@ -10,4 +10,4 @@
 #
 # Legacy two-part versions (X.YYY, e.g. 1.939) are treated as X.YYY.0
 # when compared — no data migration needed for existing installs.
-latest=2.10.68
+latest=2.11.0

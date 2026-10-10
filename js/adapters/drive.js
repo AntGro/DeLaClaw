@@ -266,11 +266,11 @@ async function findOrCreateFolder(token) {
   return (await create.json()).id;
 }
 
-/** List all files in the environment's Drive folder with id, name, modifiedTime */
+/** List all files in the environment's Drive folder with id, name, size, modifiedTime */
 async function listFolderFiles(token, folderId) {
   const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
   const resp = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&pageSize=100`,
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,size,modifiedTime)&pageSize=100`,
     { headers: { 'Authorization': `Bearer ${token}` } }
   );
   if (!resp.ok) throw new Error(`Failed to list Drive folder: ${resp.status}`);
@@ -505,13 +505,13 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       const fileInfo = filesByName.get(fileName);
       if (fileInfo) {
         const { data, etag } = await downloadFile(token, fileInfo.id);
-        fileMeta[table] = { fileId: fileInfo.id, etag, modifiedTime: fileInfo.modifiedTime };
+        fileMeta[table] = { fileId: fileInfo.id, etag, modifiedTime: fileInfo.modifiedTime, size: Number(fileInfo.size || 0) };
         initialData[table] = Array.isArray(data) ? data : [];
         loaded++;
         emit('loading', t('menu.drive_loading_table', table), loaded, total);
       } else {
         initialData[table] = [];
-        fileMeta[table] = { fileId: null, etag: null, modifiedTime: null };
+        fileMeta[table] = { fileId: null, etag: null, modifiedTime: null, size: 0 };
       }
     });
     await Promise.all(readPromises);
@@ -915,6 +915,8 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             fileId: result.id || meta.fileId,
             etag: result.etag,
             modifiedTime: new Date().toISOString(),
+            // Exact stored byte length: uploadFile sends JSON.stringify(data, null, 2)
+            size: new TextEncoder().encode(JSON.stringify(localData, null, 2)).length,
           };
           if (useIntents) acknowledgeIntents(intents, captured);
         } catch (err) {
@@ -1028,11 +1030,11 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             console.log('[drive-poll] settings overwritten, gcal keys: old=%o new=%o', oldGcal, newGcal);
           }
           inner._store[tableName] = reconciled;
-          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime, size: Number(file.size || 0) };
           if (adapter._onExternalChange) adapter._onExternalChange(tableName);
         } else {
           // Same data (our own flush reflected back) — update metadata only
-          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime, size: Number(file.size || 0) };
         }
       }));
       } catch (e) { _err = true; throw e; }
@@ -1286,6 +1288,11 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     get calendarScopeGranted() { return _calendarScopeGranted; },
     get driveFolderId() { return folderId; },
     get driveFileMeta() { return { ...fileMeta }; },
+
+    /** Real stored byte total of the personal Drive folder (from file listings). */
+    get drivePersonalBytes() {
+      return Object.values(fileMeta).reduce((n, m) => n + (Number(m?.size) || 0), 0);
+    },
 
     /** Expose token getter for sharing module. */
     getToken,

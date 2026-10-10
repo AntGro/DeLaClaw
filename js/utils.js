@@ -465,20 +465,30 @@ function updateFooterStats(viewCountsGetter) {
         });
     }
   }
-  // Estimate data size for Google Drive from in-memory store
-  if (state.driveMode && state.driveAdapter && state.driveAdapter._store) {
+  // Real stored byte total for Google Drive: personal folder + owned group
+  // folders (joined groups live on their creator's Drive and are excluded).
+  // Refreshed from file listings at startup, on each Drive poll, and after
+  // every upload — no in-memory estimation.
+  if (state.driveMode && state.driveAdapter) {
+    const el = document.getElementById('dbSizeMb');
+    if (!el) return;
+    const personal = state.driveAdapter.drivePersonalBytes;
+    const owned = typeof state.sharing?.getOwnedGroupsBytes === 'function'
+      ? state.sharing.getOwnedGroupsBytes() : 0;
+    const fmtBytes = (b) => b < 1024 * 1024 ? '<1MB' : `${Math.round(b / (1024 * 1024))} MB`;
+    if (typeof personal === 'number') {
+      const totalBytes = personal + (typeof owned === 'number' ? owned : 0);
+      el.textContent = fmtBytes(totalBytes);
+      return;
+    }
+    // Fallback: estimate from in-memory store (adapter predates byte tracking)
     try {
       const store = state.driveAdapter._store;
       let totalBytes = 0;
       for (const table of Object.keys(store)) {
         totalBytes += new Blob([JSON.stringify(store[table])]).size;
       }
-      const el = document.getElementById('dbSizeMb');
-      if (el) {
-        el.textContent = totalBytes < 1024 * 1024
-          ? `~${Math.max(1, Math.round(totalBytes / 1024))} KB`
-          : `~${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
-      }
+      el.textContent = `~${fmtBytes(totalBytes)}`;
     } catch { /* non-critical */ }
   }
 }

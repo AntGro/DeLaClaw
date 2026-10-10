@@ -164,7 +164,7 @@ async function driveListChildren(token, folderId, mime) {
 async function driveFindFile(token, folderId, fileName) {
   const q = `name='${fileName}' and '${folderId}' in parents and trashed=false`;
   const res = await driveGet(token,
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=1`);
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,size,modifiedTime)&pageSize=1`);
   const { files } = await res.json();
   return files?.[0] ?? null;
 }
@@ -254,12 +254,14 @@ async function driveUpload(token, folderId, fileId, fileName, data, etag) {
   if (!res.ok) throw new Error(`Drive upload ${res.status}: ${await res.text()}`);
 
   const result = await res.json();
-  return { id: result.id, etag: res.headers.get('ETag'), modifiedTime: result.modifiedTime };
+  // Exact stored byte length of the uploaded payload
+  const size = new TextEncoder().encode(json).length;
+  return { id: result.id, etag: res.headers.get('ETag'), modifiedTime: result.modifiedTime, size };
 }
 
 async function driveFileMeta(token, fileId) {
   const res = await driveGet(token,
-    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime`);
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime,size`);
   return res.json();
 }
 
@@ -349,10 +351,10 @@ async function migrateItemsJson(tok, folderId, entry) {
           const meta = entry.typeMeta[type] || {};
           if (!meta.fileId) {
             const existing = await driveFindFile(tok, folderId, fileName);
-            if (existing) meta.fileId = existing.id;
+            if (existing) { meta.fileId = existing.id; meta.size = Number(existing.size || 0); }
           }
           const r = await driveUpload(tok, folderId, meta.fileId, fileName, entry.typeData[type]);
-          entry.typeMeta[type] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+          entry.typeMeta[type] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime, size: r.size };
         }
       }
     }
@@ -856,6 +858,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       }
     }
     const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta, joinedViaLink: true });
+    entry.owned = false; // joined group: files live on the creator's Drive, excluded from storage figure
     if (opts.cache !== false) _groups.set(groupId, entry);
     return entry;
   }
@@ -912,7 +915,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     let gMeta = {};
     if (gResult) {
       group = gResult.data;
-      gMeta = { fileId: gFile.id, etag: gResult.etag, modifiedTime: gFile.modifiedTime };
+      gMeta = { fileId: gFile.id, etag: gResult.etag, modifiedTime: gFile.modifiedTime, size: Number(gFile.size || 0) };
     }
 
     const typeData = {};
@@ -922,7 +925,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       const r = typeResults[i];
       if (r) {
         typeData[type] = Array.isArray(r.data) ? r.data : [];
-        typeMeta[type] = { fileId: r.file.id, etag: r.etag, modifiedTime: r.file.modifiedTime };
+        typeMeta[type] = { fileId: r.file.id, etag: r.etag, modifiedTime: r.file.modifiedTime, size: Number(r.file.size || 0) };
       } else {
         // File absent (not failed — a failed download throws above).
         typeData[type] = [];
@@ -931,6 +934,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     }
 
     const entry = await normalizeEntry({ folderId, group, typeData, typeMeta, gMeta });
+    entry.owned = owned; // owned=true only for the user's own groups: their files live on the user's own Drive
     _groups.set(groupId, entry);
 
     // Creator-only hygiene: reap folder writer grants with no member row
@@ -956,7 +960,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (gFile) {
         const { data, etag } = await driveDownload(tok, gFile.id);
         const remoteGroup = await normalizeGroup(data || {}, groupId);
-        e.gMeta = { fileId: gFile.id, etag, modifiedTime: gFile.modifiedTime };
+        e.gMeta = { fileId: gFile.id, etag, modifiedTime: gFile.modifiedTime, size: Number(gFile.size || 0) };
         e.group.members = mergeMemberLists(e.group.members, remoteGroup.members || [], memberIntentsFor(e));
       }
     }
@@ -969,7 +973,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     try {
       const r = await driveUpload(tok, e.folderId, e.gMeta.fileId, 'group.json', e.group, e.gMeta.etag);
-      e.gMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+      e.gMeta = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime, size: r.size };
       acknowledgeIntents(memberIntents, capturedMemberIntents);
     } catch (err) {
       if (err.code === 412 && retries < MAX_RETRIES) {
@@ -1112,7 +1116,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     try {
       const r = await driveUpload(tok, e.folderId, meta.fileId, fileName, payload, meta.etag);
-      e.typeMeta[type] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+      e.typeMeta[type] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime, size: r.size };
       acknowledgeIntents(intents, captured);
     } catch (err) {
       if (err.code === 412 && retries < MAX_RETRIES) {
@@ -1202,7 +1206,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           const { key } = allFiles[i];
           const r = results[i];
           if (ITEM_TYPES.includes(key)) {
-            typeMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime };
+            typeMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime, size: r.size };
             typeData[key] = [];
           }
           // Extra files are created on Drive but not tracked in memory (unused for now)
@@ -1217,7 +1221,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           typeData,
           typeMeta,
           typeIntents,
-          gMeta: { fileId: gRes.id, etag: gRes.etag, modifiedTime: gRes.modifiedTime },
+          gMeta: { fileId: gRes.id, etag: gRes.etag, modifiedTime: gRes.modifiedTime, size: gRes.size },
+          owned: true,
         };
         // Record the created group in the groups table (kind 'created') BEFORE
         // it exists in memory or in the UX: loadAll discovers own groups from
@@ -1360,6 +1365,21 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     getAllGroups() {
       return Array.from(_groups.values()).map(e => publicGroup(e));
+    },
+
+    /**
+     * Real stored byte total of the user's OWN group folders on Drive.
+     * Only entries with owned=true are counted: joined groups live on the
+     * creator's Drive, not the user's, so they are excluded.
+     */
+    getOwnedGroupsBytes() {
+      let total = 0;
+      for (const e of _groups.values()) {
+        if (!e.owned) continue;
+        total += Number(e.gMeta?.size || 0);
+        for (const type of ITEM_TYPES) total += Number(e.typeMeta?.[type]?.size || 0);
+      }
+      return total;
     },
 
     /** Groups whose load failed transiently in the last loadAll() run.
@@ -2088,7 +2108,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
                   if (file) {
                     const { data, etag } = await driveDownload(tok, file.id);
                     e.typeData[type] = reconcileItems(e.typeData[type] || [], Array.isArray(data) ? data : [], intentStateFor(e, type));
-                    e.typeMeta[type] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+                    e.typeMeta[type] = { fileId: file.id, etag, modifiedTime: file.modifiedTime, size: Number(file.size || 0) };
                     changed = true;
                   }
                 } catch (err) { console.warn(`sharing poll discover ${type} ${groupId}:`, err); }
@@ -2103,6 +2123,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
                     e.typeData[type] = reconcileItems(e.typeData[type] || [], remote, intentStateFor(e, type));
                     e.typeMeta[type].etag = etag;
                     e.typeMeta[type].modifiedTime = fileMeta.modifiedTime;
+                    e.typeMeta[type].size = Number(fileMeta.size || 0);
                     changed = true;
                     emit('items-changed', { groupId, type, items: e.typeData[type] });
                   }
@@ -2140,6 +2161,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
                     if (nameChanged) await _updateGroupRowName(groupId, normalizedGroup.name);
                     e.gMeta.etag = etag;
                     e.gMeta.modifiedTime = meta.modifiedTime;
+                    e.gMeta.size = Number(meta.size || 0);
                     changed = true;
                     emit('group-changed', { groupId, group: e.group });
                     for (const m of freshJoins) emit('member-joined', { groupId, group: e.group, member: m });
@@ -2169,6 +2191,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           if (staleGroupIds.length) {
             for (const gid of staleGroupIds) {
               await this.handleStaleGroup(gid);
+
             }
             changed = true;
           }

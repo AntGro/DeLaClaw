@@ -3159,6 +3159,24 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
     const main = jsFiles['main.js'];
 
+    test('forceSave only flushes dirty types, never re-uploads clean data', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      const m = drive.match(/async forceSave\(\) \{([\s\S]*?)\n    \},/);
+      assert(m, 'forceSave must exist');
+      const body = m[1];
+      // group.json mutations save immediately (never debounced), so forceSave
+      // must not re-upload it — otherwise Disconnect takes ~10s+ with zero
+      // pending changes.
+      assert(!body.includes('saveGroup('),
+        'forceSave must not unconditionally re-upload group.json');
+      // Clean type data must not be re-uploaded either; only dirty types
+      // (or types with waiters) are flushed.
+      assert(!body.includes('saveTypedItems('),
+        'forceSave must not re-upload clean type files');
+      assert(body.includes('_sharedDirty.has(key)'),
+        'forceSave must gate flushes on the dirty set');
+    });
+
     test('getOwnedGroupsBytes includes extra_* file sizes', () => {
       const drive = jsFiles['sharing-drive.js'];
       // createGroup must record the extra files' upload sizes (they are

@@ -2000,9 +2000,12 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     /** Force-save all groups and their items to Drive. */
     async forceSave() {
+      // Flush only what is actually dirty. group.json mutations (join, leave,
+      // rename) save immediately via saveGroup — never debounced — so there
+      // is nothing to flush for them here. Re-uploading clean files would
+      // make Disconnect take ~10s+ with zero pending changes.
       for (const [groupId, e] of _groups) {
         if (e.joinedViaLink) continue; // can't write to someone else's group.json as non-owner
-        await saveGroup(groupId);
         for (const type of ITEM_TYPES) {
           const key = _sharedFlushKey(groupId, type);
           // Cancel any pending debounce and flush dirty types now; the
@@ -2013,8 +2016,6 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           }
           if (_sharedDirty.has(key) || (_sharedWaiters.get(key) || []).length) {
             await _runSharedFlush(groupId, type);
-          } else if (e.typeData[type]?.length) {
-            await saveTypedItems(groupId, type);
           }
         }
       }

@@ -22,6 +22,7 @@ import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthda
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals, syncSharedListItems } from './lists.js';
 import { renderGroups } from './groups.js';
+import { VISIT_ROW_ID, toLocalDateString, nextVisitRow } from './daily-visits.js';
 import './sharing-ui.js'; // side effects: window.* sharing actions
 import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
@@ -2327,16 +2328,21 @@ async function loadSettings() {
 }
 
 // ── Daily Visit Tracking ──
+// Single-row aggregate in daily_visits (see js/daily-visits.js): one row
+// counts active days and tracks the current/max streak. Reconnecting the
+// same day, or with the local clock moved backwards, is a no-op.
 async function recordDailyVisit() {
   if (state.demoMode || !state.db?.connected) return;
   try {
-    const d = new Date();
-    const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    try {
-      await state.db.from('daily_visits').upsert({ visit_date: today }, { onConflict: 'visit_date,owner_id' });
-    } catch {
-      // fallback for pre-1.398 DBs with old PK
-      await state.db.from('daily_visits').upsert({ visit_date: today }, { onConflict: 'visit_date' });
+    const today = toLocalDateString(new Date());
+    const { data: rows } = await state.db.from('daily_visits').select('*').limit(1);
+    const row = rows?.[0] || null;
+    const next = nextVisitRow(row, today);
+    if (!next) return;
+    if (row) {
+      await state.db.from('daily_visits').update(next).eq('id', VISIT_ROW_ID);
+    } else {
+      await state.db.from('daily_visits').insert(next);
     }
   } catch (e) { console.warn('Could not record visit:', e.message); }
 }
@@ -2353,30 +2359,11 @@ async function loadUsageStats() {
     const { data: settingsData } = await state.db.from('settings').select('value').eq('key', 'db_created_at').single();
     const dbCreated = settingsData?.value ? new Date(JSON.parse(settingsData.value)) : null;
 
-    // Load all visits
-    const { data: visits } = await state.db.from('daily_visits').select('visit_date').order('visit_date', { ascending: false });
-    const totalDays = visits ? visits.length : 0;
-
-    // Compute streak
-    let streak = 0;
-    if (visits && visits.length > 0) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const sorted = visits.map(v => v.visit_date).sort().reverse();
-      // Allow streak to start from today or yesterday
-      const latest = new Date(sorted[0] + 'T00:00:00');
-      const diffToday = Math.round((today - latest) / 86400000);
-      if (diffToday <= 1) {
-        streak = 1;
-        for (let i = 1; i < sorted.length; i++) {
-          const curr = new Date(sorted[i] + 'T00:00:00');
-          const prev = new Date(sorted[i - 1] + 'T00:00:00');
-          const gap = Math.round((prev - curr) / 86400000);
-          if (gap === 1) streak++;
-          else break;
-        }
-      }
-    }
+    // Load the aggregate visit row (single row; see js/daily-visits.js)
+    const { data: visitRows } = await state.db.from('daily_visits').select('*').limit(1);
+    const visitRow = visitRows?.[0] || null;
+    const totalDays = visitRow?.num_active_days ?? 0;
+    const streak = visitRow?.current_streak ?? 0;
 
     // DB age in calendar days (midnight-normalised to avoid sub-24h rounding)
     let dbAgeDays = null;

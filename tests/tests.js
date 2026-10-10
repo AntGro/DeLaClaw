@@ -4006,6 +4006,118 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(!t.has('h1') && t.has('h2'), 'markers must be independent per habit id');
     });
 
+    test('daily-visits: pure row transition', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'daily-visits.js')).href);
+      const { nextVisitRow, nextDay, toLocalDateString, VISIT_ROW_ID } = mod;
+      assert(VISIT_ROW_ID === 'singleton', 'singleton id must be stable');
+
+      // First ever visit initializes the row: streak starts at 1.
+      const init = nextVisitRow(null, '2026-10-11');
+      assert(init.current_streak === 1 && init.num_active_days === 1 && init.max_streak === 1,
+        'init must start streak and counts at 1');
+      assert(init.created_at === '2026-10-11' && init.last_connection_date === '2026-10-11',
+        'init must stamp today');
+
+      // Same-day reconnect and clock-back are no-ops.
+      assert(nextVisitRow(init, '2026-10-11') === null, 'same-day reconnect must change nothing');
+      assert(nextVisitRow(init, '2026-10-10') === null, 'clock moved back must change nothing');
+
+      // Consecutive day: streak and count increment, last advances.
+      const d2 = nextVisitRow(init, '2026-10-12');
+      assert(d2.current_streak === 2 && d2.num_active_days === 2 && d2.last_connection_date === '2026-10-12',
+        'consecutive day must extend the streak');
+      assert(d2.max_streak === 2, 'max streak must follow a new high');
+      assert(d2.created_at === '2026-10-11', 'created_at must never move');
+
+      // Gap: streak resets to 1, count still increments, max preserved.
+      const d3 = nextVisitRow(d2, '2026-10-15');
+      assert(d3.current_streak === 1 && d3.num_active_days === 3,
+        'a missed day must reset the streak but keep counting days');
+      assert(d3.max_streak === 2, 'max streak must survive a reset');
+
+      // Legacy row without last_connection_date initializes in place.
+      const seeded = nextVisitRow({ id: 'singleton', created_at: '2026-09-01', num_active_days: 0, current_streak: 0, max_streak: 0, last_connection_date: null }, '2026-10-11');
+      assert(seeded.current_streak === 1 && seeded.num_active_days === 1 && seeded.created_at === '2026-09-01',
+        'migration-seeded row must initialize on first connect, keeping created_at');
+
+      // Date helpers: month boundary and local formatting.
+      assert(nextDay('2026-01-31') === '2026-02-01', 'nextDay must cross month boundaries');
+      assert(nextDay('2024-02-28') === '2024-02-29', 'nextDay must handle leap years');
+      const local = toLocalDateString(new Date(2026, 9, 11, 23, 59));
+      assert(local === '2026-10-11', `toLocalDateString must use device-local date, got ${local}`);
+    });
+
+    test('main: visit tracking uses the aggregate row, not per-date upserts', () => {
+      const main = jsFiles['main.js'];
+      assert(main.includes("from './daily-visits.js'"), 'main.js must import the daily-visits module');
+      assert(main.includes('nextVisitRow('), 'recordDailyVisit must go through the pure transition');
+      assert(!main.includes("upsert({ visit_date: today }"), 'per-date visit upsert must be gone');
+    });
+
+    test('drive migration 2.11.1 collapses visit dates into the aggregate row', async () => {
+      const { DRIVE_MIGRATIONS } =
+        await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+      const store = { daily_visits: [
+        { visit_date: '2026-10-08', owner_id: null },
+        { visit_date: '2026-10-09', owner_id: null },
+        { visit_date: '2026-10-11', owner_id: null },
+      ]};
+      await DRIVE_MIGRATIONS['2.11.1'](store);
+      const [row] = store.daily_visits;
+      assert(row.id === 'singleton', 'must write the singleton row');
+      assert(row.created_at === '2026-10-08', 'created_at must be the earliest visit');
+      assert(row.num_active_days === 3, 'must count distinct visit dates');
+      assert(row.last_connection_date === '2026-10-11', 'last must be the latest visit');
+      assert(row.current_streak === 1 && row.max_streak === 1,
+        'trailing run ending 10-11 is just that day (10-10 missing)');
+
+      const consec = { daily_visits: [
+        { visit_date: '2026-10-09' }, { visit_date: '2026-10-10' }, { visit_date: '2026-10-11' },
+      ]};
+      await DRIVE_MIGRATIONS['2.11.1'](consec);
+      assert(consec.daily_visits[0].current_streak === 3, 'consecutive dates must seed a 3-day trailing run');
+
+      const empty = { daily_visits: [] };
+      await DRIVE_MIGRATIONS['2.11.1'](empty);
+      const [e] = empty.daily_visits;
+      assert(e.num_active_days === 0 && e.last_connection_date === null && e.current_streak === 0,
+        'empty history must seed a zeroed row for recordDailyVisit to initialize');
+    });
+
+    test('local migration 2.11.1 reshapes daily_visits into the aggregate row', async () => {
+      // Runs the real SQL against the old-schema table. Needs bun:sqlite;
+      // skipped under plain node.
+      let Database;
+      try {
+        ({ Database } = await import('bun:sqlite'));
+      } catch {
+        console.log('  (skip: bun:sqlite unavailable)');
+        return;
+      }
+      const { LOCAL_MIGRATIONS } =
+        await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'local-migrations.js')).href);
+      const db = new Database(':memory:');
+      db.exec(`CREATE TABLE daily_visits (
+        visit_date TEXT NOT NULL, owner_id TEXT, created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (visit_date, owner_id))`);
+      db.exec(`INSERT INTO daily_visits (visit_date) VALUES
+        ('2026-10-05'), ('2026-10-08'), ('2026-10-09'), ('2026-10-11')`);
+      db.exec(LOCAL_MIGRATIONS['2.11.1']);
+      const cols = db.prepare('PRAGMA table_info(daily_visits)').all().map(c => c.name);
+      for (const c of ['id', 'created_at', 'num_active_days', 'current_streak', 'max_streak', 'last_connection_date']) {
+        assert(cols.includes(c), `new column ${c} must exist`);
+      }
+      assert(!cols.includes('visit_date'), 'old visit_date column must be gone');
+      const [row] = db.prepare('SELECT * FROM daily_visits').all();
+      assert(row.id === 'singleton', 'must write the singleton row');
+      assert(row.created_at === '2026-10-05', `created_at must be earliest visit, got ${row.created_at}`);
+      assert(row.num_active_days === 4, `must count distinct dates, got ${row.num_active_days}`);
+      assert(row.last_connection_date === '2026-10-11', 'last must be the latest visit');
+      assert(row.current_streak === 1 && row.max_streak === 1,
+        `trailing run ending 10-11 is 1 (10-10 missing), got ${row.current_streak}`);
+      db.close();
+    });
+
     test('main: sharing-changed not re-broadcast for local item mutations', () => {
       const main = jsFiles['main.js'];
       // Local item-* mutations are rendered optimistically by their callers;

@@ -511,4 +511,34 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE texts RENAME COLUMN lines_per_chunk TO blocks_per_chunk;
     ALTER TABLE texts RENAME COLUMN context_lines TO context_blocks;
   `,
+  '2.11.1': `
+    -- daily_visits: replace per-date rows with a single aggregate row.
+    -- current_streak is seeded from the trailing consecutive run ending at
+    -- the latest recorded visit (it self-corrects on the next connect);
+    -- max_streak is bootstrapped from the same run and only grows from here.
+    CREATE TABLE IF NOT EXISTS daily_visits_new (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      num_active_days INTEGER NOT NULL DEFAULT 0,
+      current_streak INTEGER NOT NULL DEFAULT 0,
+      max_streak INTEGER NOT NULL DEFAULT 0,
+      last_connection_date TEXT
+    );
+    WITH dates(d) AS (SELECT DISTINCT visit_date FROM daily_visits),
+         mx(m) AS (SELECT MAX(visit_date) FROM daily_visits),
+         trailing(n) AS (
+           SELECT COUNT(*) FROM dates, mx
+           WHERE julianday(mx.m) - julianday(dates.d)
+               = (SELECT COUNT(*) - 1 FROM dates d2 WHERE d2.d BETWEEN dates.d AND mx.m)
+         )
+    INSERT INTO daily_visits_new (id, created_at, num_active_days, current_streak, max_streak, last_connection_date)
+      SELECT 'singleton',
+             COALESCE((SELECT MIN(d) FROM dates), date('now')),
+             (SELECT COUNT(*) FROM dates),
+             COALESCE((SELECT n FROM trailing), 0),
+             COALESCE((SELECT n FROM trailing), 0),
+             (SELECT m FROM mx);
+    DROP TABLE daily_visits;
+    ALTER TABLE daily_visits_new RENAME TO daily_visits;
+  `,
 };

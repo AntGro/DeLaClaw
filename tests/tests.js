@@ -4033,6 +4033,20 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(/next_due: newNextDue/.test(body), 'the combined mutation must publish the recomputed next_due');
     });
 
+    test('saveEditHabit: no undeclared identifiers in the shared mutation', () => {
+      const habits = jsFiles['habits.js'];
+      const start = habits.indexOf('async function saveEditHabit() {');
+      assert(start >= 0, 'saveEditHabit must exist');
+      const nextFn = habits.indexOf('\nasync function ', start + 100);
+      const body = habits.slice(start, nextFn >= 0 ? nextFn : undefined);
+      // The single updateSharedHabit call must not reference onStaged (removed:
+      // the modal never awaited the staging promise, so the callback was dead).
+      // An undeclared identifier here would throw ReferenceError at runtime,
+      // silently breaking shared habit saves.
+      assert(!body.includes('onStaged'),
+        'saveEditHabit must not reference the removed onStaged staging callback');
+    });
+
     test('sharing-drive: item-updated emits at staging time, not post-flush', () => {
       const drive = jsFiles['sharing-drive.js'];
       // Every item-updated emit must precede the debounced-flush await in its

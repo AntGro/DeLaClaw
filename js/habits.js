@@ -1683,7 +1683,7 @@ async function saveEditHabit() {
       if (lastDoneVal !== prevDateStr) {
         changes.completions = await computeSharedLastDoneCompletions(habit, lastDoneVal ? habitDateInputToIso(lastDoneVal) : null);
       }
-      await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, changes, { onStaged });
+      await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, changes);
     })();
     upload.then(
       () => {

@@ -3159,6 +3159,20 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
     const main = jsFiles['main.js'];
 
+    test('getOwnedGroupsBytes includes extra_* file sizes', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      // createGroup must record the extra files' upload sizes (they are
+      // created on Drive as empty arrays, so their bytes are real).
+      assert(/typeMeta\[key\] = \{ fileId: r\.id, size: r\.size \}/.test(drive),
+        'createGroup must track extra file sizes in typeMeta');
+      // The byte total must sum group.json + item types + extra files for
+      // owned groups (joined groups live on the creator's Drive).
+      const m = drive.match(/getOwnedGroupsBytes\(\) \{([\s\S]*?)\n    \},/);
+      assert(m, 'getOwnedGroupsBytes must exist');
+      assert(m[1].includes('EXTRA_FILES'),
+        'owned-group byte total must include the extra_* files, not just group.json and item types');
+    });
+
     test('required file set is group + item types + extras (16 files)', () => {
       const m = drive.match(/const REQUIRED_GROUP_FILES = \[(.*?)\];/s);
       assert(m, 'REQUIRED_GROUP_FILES declaration must be parseable');

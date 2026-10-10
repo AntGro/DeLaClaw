@@ -1208,8 +1208,11 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           if (ITEM_TYPES.includes(key)) {
             typeMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime, size: r.size };
             typeData[key] = [];
+          } else {
+            // Extra files are unused for now, but their bytes count toward
+            // the owned-group storage total.
+            typeMeta[key] = { fileId: r.id, size: r.size };
           }
-          // Extra files are created on Drive but not tracked in memory (unused for now)
         }
 
         const typeIntents = {};
@@ -1377,7 +1380,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       for (const e of _groups.values()) {
         if (!e.owned) continue;
         total += Number(e.gMeta?.size || 0);
-        for (const type of ITEM_TYPES) total += Number(e.typeMeta?.[type]?.size || 0);
+        for (const key of [...ITEM_TYPES, ...EXTRA_FILES]) total += Number(e.typeMeta?.[key]?.size || 0);
       }
       return total;
     },

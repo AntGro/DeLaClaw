@@ -1994,17 +1994,20 @@ test('Edit habit modal includes last-done date field', () => {
 
 test('Shared habit last-done edits write to shared completions and can clear latest completion', () => {
   const habitsJs = jsFiles['habits.js'];
-  const helperStart = habitsJs.indexOf('async function setSharedHabitLastDone');
-  const helperEnd = habitsJs.indexOf('async function setLocalHabitLastDone', helperStart);
-  assert(helperStart !== -1 && helperEnd !== -1, 'habits.js: setSharedHabitLastDone helper not found');
+  const helperStart = habitsJs.indexOf('async function computeSharedLastDoneCompletions');
+  const helperEnd = habitsJs.indexOf('async function setSharedHabitLastDone', helperStart);
+  assert(helperStart !== -1 && helperEnd !== -1, 'habits.js: computeSharedLastDoneCompletions helper not found');
   const helper = habitsJs.slice(helperStart, helperEnd);
-  assert(helper.includes('state.sharing.updateSharedHabit') && helper.includes('nextCompletions'),
+  assert(helper.includes('planLastDoneEdit'),
+    'habits.js: computeSharedLastDoneCompletions must use planLastDoneEdit for decision logic');
+  const setterStart = habitsJs.indexOf('async function setSharedHabitLastDone');
+  const setterEnd = habitsJs.indexOf('async function setLocalHabitLastDone', setterStart);
+  const setter = habitsJs.slice(setterStart, setterEnd);
+  assert(setter.includes('state.sharing.updateSharedHabit') && setter.includes('nextCompletions'),
     'habits.js: shared last-done edits must rewrite shared completions, not only local completions');
-  // planLastDoneEdit handles the null case (clear latest) — verify it exists and is used
+  // planLastDoneEdit handles the null case (clear latest) — verify it exists
   const planFn = habitsJs.includes('function planLastDoneEdit');
   assert(planFn, 'habits.js: planLastDoneEdit pure helper must exist');
-  assert(helper.includes('planLastDoneEdit'),
-    'habits.js: setSharedHabitLastDone must use planLastDoneEdit for decision logic');
 
   const saveStart = habitsJs.indexOf('async function saveEditHabit');
   const saveEnd = habitsJs.indexOf('async function deleteHabit', saveStart);
@@ -4014,6 +4017,22 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'onUpdate must filter item-* events before dispatching sharing-changed');
     });
 
+    test('saveEditHabit: single shared mutation regardless of last-done change', () => {
+      const habits = jsFiles['habits.js'];
+      // Extract saveEditHabit body and count shared uploads: the modal must
+      // fold name, frequency, completions and next_due into ONE staged
+      // mutation (one debounced upload), whether or not the last-done date
+      // changed. A second upload would double the debounce-to-green time.
+      const start = habits.indexOf('async function saveEditHabit() {');
+      assert(start >= 0, 'saveEditHabit must exist');
+      const nextFn = habits.indexOf('\nasync function ', start + 100);
+      const body = habits.slice(start, nextFn >= 0 ? nextFn : undefined);
+      const uploads = (body.match(/state\.sharing\.updateSharedHabit/g) || []).length;
+      assert(uploads === 1, `saveEditHabit must stage exactly one shared mutation, found ${uploads}`);
+      // The single mutation must carry next_due in all cases.
+      assert(/next_due: newNextDue/.test(body), 'the combined mutation must publish the recomputed next_due');
+    });
+
     test('sharing-drive: item-updated emits at staging time, not post-flush', () => {
       const drive = jsFiles['sharing-drive.js'];
       // Every item-updated emit must precede the debounced-flush await in its
@@ -4085,7 +4104,8 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // opts, last-done via setSharedHabitLastDone opts, freq via sharedUpdates,
       // delete/date-edit via the completions update.
       const pubs = (habits.match(/next_due: newNextDue/g) || []).length;
-      assert(pubs >= 6, `expected 6 next_due publishes from the recompute return value (done, inline last-done, edit modal, inline frequency edit, delete completion, edit completion date), found ${pubs}`);
+      const assignPubs = (habits.match(/\.next_due = newNextDue/g) || []).length;
+      assert(pubs + assignPubs >= 6, `expected 6 next_due publishes from the recompute return value (done, inline last-done, edit modal, inline frequency edit, delete completion, edit completion date), found ${pubs + assignPubs}`);
       // In the six mutation chains, the publish must use the recompute's return
       // value (newNextDue), never habit.next_due off a possibly-stale closure.
       const stale = (habits.match(/(updateSharedHabit|addSharedHabitCompletion)\([^;]*?next_due: habit\.next_due/g) || []).length;

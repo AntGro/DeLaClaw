@@ -827,7 +827,7 @@ function previewLastDoneLatest(completions, newIso) {
   return latestHabitCompletion(result)?.completed_at || null;
 }
 
-async function setSharedHabitLastDone(habit, newIso, opts = {}) {
+async function computeSharedLastDoneCompletions(habit, newIso) {
   const sh = getSharedHabitForLocalHabit(habit);
   if (!sh) throw new Error('Shared habit not found');
 
@@ -849,7 +849,11 @@ async function setSharedHabitLastDone(habit, newIso, opts = {}) {
     }
   }
 
-  const nextCompletions = sortHabitCompletionList(result);
+  return sortHabitCompletionList(result);
+}
+
+async function setSharedHabitLastDone(habit, newIso, opts = {}) {
+  const nextCompletions = await computeSharedLastDoneCompletions(habit, newIso);
   // Fold an optional next_due into the same staged mutation (one upload).
   const changes = { completions: nextCompletions };
   if (opts.next_due !== undefined) changes.next_due = opts.next_due;
@@ -1673,16 +1677,13 @@ async function saveEditHabit() {
     // the background. A failure rolls the in-memory shared state back (adapter)
     // and refreshes the view.
     const upload = (async () => {
-      await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, {
-        name,
-        frequency_rule: freq,
-      });
+      // Single staged mutation: name, frequency, completions (if last-done
+      // changed) and the recomputed next_due land in one debounced upload.
+      const changes = { name, frequency_rule: freq, next_due: newNextDue };
       if (lastDoneVal !== prevDateStr) {
-        await setSharedHabitLastDone(habit, lastDoneVal ? habitDateInputToIso(lastDoneVal) : null, { next_due: newNextDue });
-      } else {
-        // Publish the locally recomputed next_due so other members read it directly.
-        await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { next_due: newNextDue });
+        changes.completions = await computeSharedLastDoneCompletions(habit, lastDoneVal ? habitDateInputToIso(lastDoneVal) : null);
       }
+      await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, changes, { onStaged });
     })();
     upload.then(
       () => {

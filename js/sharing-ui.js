@@ -2,7 +2,7 @@
 // SHARING UI — Group tab card, share popovers, completion modal
 // ===================================================================
 //
-// Renders the sharing settings pane (groups, invite codes, trusted
+// Renders the Group tab (groups, invite codes, trusted
 // contacts) and provides helpers for share badges, share-to-group
 // popovers, and multi-assignee completion modals used by
 // todos.js, habits.js, lists.js.
@@ -151,7 +151,7 @@ export async function sharingGroupCardHtml(group) {
   return html;
 }
 
-/** Render the full sharing settings pane content. */
+/** Render the full Group tab content. */
 // ── Actions (exposed on window) ─────────────────────────────────
 
 async function sharingCreateGroup() {

@@ -186,7 +186,7 @@ js/
   sharing-interface.js     Sharing adapter interface contract
   sharing-drive.js         Google Drive sharing adapter (per-table JSON)
   sharing-envelope.js      DLC1 invite-code encode/decode
-  sharing-ui.js            Sharing UI: settings pane, share popovers, completion modal
+  sharing-ui.js            Sharing UI: Group tab, share popovers, completion modal
   delegation.js            Cross-module action delegation for shared items
   welcome.js               Today dashboard
   projects.js              Project boards + task management

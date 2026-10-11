@@ -388,7 +388,7 @@ Tables tracked in `BACKUP_TABLES` (import order):
 | `list_items` | Items within lists | `lists.id` |
 | `settings` | App settings (key/value) | — |
 | `prompts` | AI prompts (global + per-project) | — |
-| `daily_visits` | Daily visit log | — |
+| `daily_visits` | Visit statistics (active days, streaks) | — |
 | `sharing_groups` | Shared group definitions | — |
 | `sharing_members` | Group membership | `sharing_groups.id` |
 | `sharing_items` | Shared items (TODOs, habits, list items) | `sharing_groups.id` |

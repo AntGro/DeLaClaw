@@ -42,7 +42,7 @@ Sharing is entirely opt-in. If you do not enable sharing, no data is exchanged w
 
 The hosted version at `delaclaw.com` includes **Cloudflare Web Analytics**, a privacy-focused analytics service that collects aggregate page-view metrics (no cookies, no client-side state, no personal data, no cross-site tracking). See [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/). If you self-host DeLaClaw, no analytics script is included unless you add one yourself.
 
-DeLaClaw also records a `daily_visits` table in your own database (one row per day you open the app) to power the usage statistics shown in Settings. This data stays entirely in your chosen backend — it is never sent to any external service.
+DeLaClaw also keeps a `daily_visits` record in your own database — a single row counting the days you opened the app, your current day streak, your longest streak, and the dates of your first and most recent visit — to power the usage statistics shown in Settings. This data stays entirely in your chosen backend — it is never sent to any external service.
 
 ## What is stored in your browser
 

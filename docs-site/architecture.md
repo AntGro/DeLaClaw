@@ -112,7 +112,7 @@ The canonical table list lives in `server/schema.sql` (SQLite base schema).
 | `list_items` | Items within lists | `list_id` -> `lists.id` |
 | `settings` | Key-value store (schema version, preferences) | -- |
 | `prompts` | AI prompt templates | -- |
-| `daily_visits` | Login/visit tracking | -- |
+| `daily_visits` | Visit statistics (active days, streaks) | -- |
 | `groups` | Groups the user has joined (encrypted tokens) + name records for groups they created | -- |
 | `sharing_groups` | Shared group definitions | -- |
 | `sharing_members` | Group membership | `group_id` -> `sharing_groups.id` |

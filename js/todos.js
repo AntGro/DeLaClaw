@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs, isMobileUA } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -1904,12 +1904,13 @@ window.showTodoGeneralCard = function() {
 window.filterTodos = function(e) { todoSearchQuery = e.target.value; renderTodos(); };
 window.renderTodos = renderTodos;
 
+
 // ===================================================================
 // TODO BATCH IMPORT
 // ===================================================================
-// Modal mirroring the Memory page import (flashcards.js): two entry paths
-// ("Convert existing" via an LLM prompt, "Upload existing" via pasted or
-// uploaded JSON), then a shared parse → review → batch-create flow.
+// Thin wrapper over the shared import shell (js/batch-import.js): builds
+// the TODO-specific config (prompt, validation, fields, creation) and
+// hands the modal mechanics to openBatchImportModal.
 // Per-item "category" names are created on confirm when they don't exist;
 // "group_id" must be a group the user belongs to (names aren't unique).
 // Calendar events come free: the Drive adapter marks every insert dirty and
@@ -1943,470 +1944,92 @@ Output ONLY valid JSON, no markdown fences, no commentary.
 Paste your text below and I will convert it:`;
 }
 
-/** ISO string → local 'YYYY-MM-DDTHH:mm' for datetime-local inputs. */
-function isoToLocalInput(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  const p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 window.openTodoImportModal = async function() {
+  const { openBatchImportModal, ensureImportCategories, chunkedBatchInsert } = await import('./batch-import.js');
   const { parseTodoImportJSON, validateTodoImportItem, TODO_IMPORT_PRIORITIES } = await import('./todo-import.js');
-  const { LLM_SERVICES } = await import('./demo-chooser.js');
 
   const cats = Array.from(_todoCatMap.values())
-    .filter(c => c.name !== SHARED_CATEGORY && c.name !== '')
+    .filter(c => c.name !== SHARED_CATEGORY)
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 
-  const isMobile = isMobileUA();
-  const serviceButtons = LLM_SERVICES.map(s => {
-    const href = isMobile && s.appUrl ? s.appUrl : s.url;
-    return `<a href="${href}" target="_blank" rel="noopener" class="dc-llm-btn">${s.svg}<span>${s.name}</span></a>`;
-  }).join('');
+  const groups = (state.sharing && state.sharing.isReady()) ? state.sharing.getAllGroups() : [];
 
-  const catChecks = `<label class="import-cat-check"><input type="checkbox" data-cat-name="General" checked> ${esc(t('common.category_default'))}</label>`
-    + cats.map(c => `<label class="import-cat-check"><input type="checkbox" data-cat-name="${esc(c.name)}" checked> ${esc(c.name)}</label>`).join('');
-  const catDatalist = cats.map(c => `<option value="${esc(c.name)}">`).join('');
+  await openBatchImportModal({
+    modalId: 'importTodoModal',
+    title: t('todos.import_title'),
+    subtitle: t('todos.import_subtitle'),
+    convertTitle: t('todos.import_convert_title'),
+    convertDesc: t('todos.import_convert_desc'),
+    uploadTitle: t('todos.import_upload_title'),
+    uploadDesc: t('todos.import_upload_desc'),
+    categoriesLabel: t('todos.import_categories_label'),
+    selectAll: t('todos.import_select_all'),
+    deselectAll: t('todos.import_deselect_all'),
+    step1: t('todos.import_step1'),
+    copy: t('todos.import_copy'),
+    copied: t('todos.import_copied'),
+    step2: t('todos.import_step2'),
+    step3: t('todos.import_step3'),
+    pastePlaceholder: t('todos.import_paste_placeholder'),
+    uploadFile: t('todos.import_upload_file'),
+    review: t('todos.import_review'),
+    back: t('todos.import_back'),
+    backToPaste: t('todos.import_back_to_paste'),
+    ready: n => t('todos.import_ready', n),
+    andMore: n => t('todos.import_and_more', n),
+    reviewHeader: n => t('todos.import_review_header', n),
+    selectedCount: (a, b) => t('todos.import_selected_count', a, b),
+    confirm: n => t('todos.import_confirm', n),
+    importing: t('todos.import_importing'),
+    success: n => t('todos.import_success', n),
+    failedPrefix: t('todos.import_failed'),
+    newCategory: t('todos.import_new_category'),
 
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay visible';
-  overlay.id = 'importTodoModal';
+    categories: [{ name: '', display: t('common.category_default') },
+      ...cats.map(c => ({ name: c.name, display: c.name }))],
+    promptDefaultCategory: 'General',
+    groups: groups.map(g => ({ id: g.id, name: g.name })),
+    sharingReady: !!(state.sharing && state.sharing.isReady()),
 
-  overlay.innerHTML = `
-    <div class="dc-container">
-      <div class="dc-header">
-        <h2>${lucideIcon('upload', 20, 'var(--accent)')} ${t('todos.import_title')}</h2>
-        <p class="dc-subtitle">${t('todos.import_subtitle')}</p>
-      </div>
-
-      <div id="todoImportOptions" class="dc-options">
-        <button class="dc-card" id="todoImportConvertCard">
-          <div class="dc-card-icon">${lucideIcon('file-text', 28)}</div>
-          <div class="dc-card-title">${t('todos.import_convert_title')}</div>
-          <div class="dc-card-desc">${t('todos.import_convert_desc')}</div>
-        </button>
-        <button class="dc-card" id="todoImportUploadCard">
-          <div class="dc-card-icon">${lucideIcon('upload', 28)}</div>
-          <div class="dc-card-title">${t('todos.import_upload_title')}</div>
-          <div class="dc-card-desc">${t('todos.import_upload_desc')}</div>
-        </button>
-      </div>
-
-      <div class="dc-custom-flow" id="todoImportConvertFlow" style="display:none">
-        <div>
-          <div class="import-config-label">${t('todos.import_categories_label')}
-            <button class="import-review-toggle" id="todoImportCatToggle">${t('todos.import_deselect_all')}</button>
-          </div>
-          <div class="import-cat-list" id="todoImportCatList">${catChecks}</div>
-        </div>
-
-        <div class="dc-step">
-          <div class="dc-step-header"><span class="dc-step-num">1</span><span>${t('todos.import_step1')}</span></div>
-          <div class="dc-prompt-box">
-            <textarea class="dc-prompt-text" id="todoImportPromptText" rows="6" spellcheck="false"></textarea>
-            <button class="dc-copy-btn" id="todoImportCopyBtn">
-              <span class="import-copy-icon">${lucideIcon('copy', 15)}</span>
-              <span id="todoImportCopyLabel">${t('todos.import_copy')}</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="dc-step">
-          <div class="dc-step-header"><span class="dc-step-num">2</span><span>${t('todos.import_step2')}</span></div>
-          <div class="dc-llm-links">${serviceButtons}</div>
-        </div>
-
-        <div class="dc-step">
-          <div class="dc-step-header"><span class="dc-step-num">3</span><span>${t('todos.import_step3')}</span></div>
-          <textarea class="dc-paste-area" id="todoImportConvertPaste" rows="8" placeholder="${t('todos.import_paste_placeholder')}"></textarea>
-          <div id="todoImportConvertPreview" class="import-preview" style="display:none"></div>
-          <div class="dc-error" id="todoImportConvertError" style="display:none"></div>
-          <div class="dc-flow-actions">
-            <button class="dc-btn-secondary" id="todoImportConvertBack">${t('todos.import_back')}</button>
-            <button class="dc-btn-primary" id="todoImportConvertReview" disabled>${lucideIcon('eye', 15)} ${t('todos.import_review')}</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="dc-custom-flow" id="todoImportUploadFlow" style="display:none">
-        <div class="dc-step">
-          <div class="dc-step-header"><span class="dc-step-num">1</span><span>${t('todos.import_step3')}</span></div>
-          <textarea class="dc-paste-area" id="todoImportUploadPaste" rows="8" placeholder="${t('todos.import_paste_placeholder')}"></textarea>
-          <label class="import-file-row">${t('todos.import_upload_file')}: <input type="file" id="todoImportFile" accept=".json,application/json"></label>
-          <div id="todoImportUploadPreview" class="import-preview" style="display:none"></div>
-          <div class="dc-error" id="todoImportUploadError" style="display:none"></div>
-          <div class="dc-flow-actions">
-            <button class="dc-btn-secondary" id="todoImportUploadBack">${t('todos.import_back')}</button>
-            <button class="dc-btn-primary" id="todoImportUploadReview" disabled>${lucideIcon('eye', 15)} ${t('todos.import_review')}</button>
-          </div>
-        </div>
-      </div>
-
-      <div id="todoImportReviewStep" style="display:none">
-        <div id="todoImportReviewContainer" class="import-review"></div>
-        <div class="dc-error" id="todoImportReviewError" style="display:none"></div>
-        <div class="dc-flow-actions">
-          <button class="dc-btn-secondary" id="todoImportReviewBack">${t('todos.import_back_to_paste')}</button>
-          <button class="dc-btn-primary" id="todoImportConfirm" disabled>${lucideIcon('check', 15)} ${t('todos.import_review')}</button>
-        </div>
-      </div>
-      <datalist id="todoImportCatData">${catDatalist}</datalist>
-    </div>
-  `;
-
-  document.body.appendChild(overlay);
-
-  // DOM refs
-  const optionsDiv = overlay.querySelector('#todoImportOptions');
-  const convertFlow = overlay.querySelector('#todoImportConvertFlow');
-  const uploadFlow = overlay.querySelector('#todoImportUploadFlow');
-  const reviewStep = overlay.querySelector('#todoImportReviewStep');
-  const reviewContainer = overlay.querySelector('#todoImportReviewContainer');
-  const reviewError = overlay.querySelector('#todoImportReviewError');
-  const reviewBackBtn = overlay.querySelector('#todoImportReviewBack');
-  const confirmBtn = overlay.querySelector('#todoImportConfirm');
-
-  let importMode = null; // 'convert' | 'upload'
-  let parsedRaw = [];    // raw objects from parseTodoImportJSON
-  let parsedItems = [];  // normalized items (revalidated on edit)
-  let itemErrors = [];   // per-item [{field, message}]
-  let itemStates = [];   // {included} per item
-
-  function importCtx() {
-    const categoryNames = Array.from(_todoCatMap.values())
-      .filter(c => c.name !== SHARED_CATEGORY)
-      .map(c => c.name);
-    const groups = (state.sharing && state.sharing.isReady()) ? state.sharing.getAllGroups() : [];
-    return {
-      categoryNames,
-      groupById: new Map(groups.map(g => [g.id, g.name])),
-      sharingReady: !!(state.sharing && state.sharing.isReady()),
-    };
-  }
-
-  function revalidateAll() {
-    const ctx = importCtx();
-    parsedItems = [];
-    itemErrors = [];
-    parsedRaw.forEach((raw, i) => {
-      const { item, errors } = validateTodoImportItem(raw, i, ctx);
-      parsedItems.push(item);
-      itemErrors.push(errors);
-    });
-  }
-
-  function selectedCatNames() {
-    return Array.from(overlay.querySelectorAll('#todoImportCatList input[type="checkbox"]:checked'))
-      .map(cb => cb.dataset.catName);
-  }
-  function updatePrompt() {
-    const groups = (state.sharing && state.sharing.isReady()) ? state.sharing.getAllGroups() : [];
-    overlay.querySelector('#todoImportPromptText').value = buildTodoImportPrompt(selectedCatNames(), groups);
-  }
-
-  function showFlow(mode) {
-    importMode = mode;
-    optionsDiv.style.display = 'none';
-    overlay.querySelector('.dc-subtitle').style.display = 'none';
-    (mode === 'convert' ? convertFlow : uploadFlow).style.display = '';
-    if (mode === 'convert') updatePrompt();
-  }
-  function backToOptions() {
-    convertFlow.style.display = 'none';
-    uploadFlow.style.display = 'none';
-    optionsDiv.style.display = '';
-    overlay.querySelector('.dc-subtitle').style.display = '';
-    importMode = null;
-  }
-
-  overlay.querySelector('#todoImportConvertCard').addEventListener('click', () => showFlow('convert'));
-  overlay.querySelector('#todoImportUploadCard').addEventListener('click', () => showFlow('upload'));
-
-  // Category checkboxes → regenerate prompt + toggle label
-  const catToggle = overlay.querySelector('#todoImportCatToggle');
-  overlay.querySelectorAll('#todoImportCatList input[type="checkbox"]').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const all = overlay.querySelectorAll('#todoImportCatList input[type="checkbox"]');
-      const checked = overlay.querySelectorAll('#todoImportCatList input[type="checkbox"]:checked');
-      catToggle.textContent = checked.length === all.length ? t('todos.import_deselect_all') : t('todos.import_select_all');
-      updatePrompt();
-    });
-  });
-  if (catToggle) catToggle.addEventListener('click', () => {
-    const all = Array.from(overlay.querySelectorAll('#todoImportCatList input[type="checkbox"]'));
-    const turnOn = all.some(cb => !cb.checked);
-    all.forEach(cb => { cb.checked = turnOn; });
-    catToggle.textContent = turnOn ? t('todos.import_deselect_all') : t('todos.import_select_all');
-    updatePrompt();
-  });
-
-  // Copy prompt
-  overlay.querySelector('#todoImportCopyBtn').addEventListener('click', async () => {
-    const label = overlay.querySelector('#todoImportCopyLabel');
-    const icon = overlay.querySelector('#todoImportCopyBtn .import-copy-icon');
-    try {
-      await navigator.clipboard.writeText(overlay.querySelector('#todoImportPromptText').value);
-      label.textContent = t('todos.import_copied');
-      icon.innerHTML = lucideIcon('clipboard-check', 15);
-      setTimeout(() => {
-        label.textContent = t('todos.import_copy');
-        icon.innerHTML = lucideIcon('copy', 15);
-      }, 2000);
-    } catch {
-      overlay.querySelector('#todoImportPromptText').select();
-    }
-  });
-
-  // Paste → parse/validate → preview (shared by both flows)
-  function bindPaste(pasteId, previewId, errorId, reviewId) {
-    const pasteArea = overlay.querySelector('#' + pasteId);
-    const previewDiv = overlay.querySelector('#' + previewId);
-    const errorDiv = overlay.querySelector('#' + errorId);
-    const reviewBtn = overlay.querySelector('#' + reviewId);
-    pasteArea.addEventListener('input', () => {
-      const raw = pasteArea.value.trim();
-      errorDiv.style.display = 'none';
-      previewDiv.style.display = 'none';
-      if (!raw) { reviewBtn.disabled = true; return; }
-      try {
-        parsedRaw = parseTodoImportJSON(raw);
-        revalidateAll();
-        itemStates = parsedItems.map((_, i) => ({ included: itemErrors[i].length === 0 }));
-        reviewBtn.disabled = false;
-        const sample = parsedItems.slice(0, 3).map((it, i) => {
-          const nc = (it.categoryIsNew && it.category) ? ` <span class="import-badge new-cat">${t('todos.import_new_category')}</span>` : '';
-          const grp = it.groupName ? ` <span class="import-badge">${esc(it.groupName)}</span>` : '';
-          const firstErr = itemErrors[i][0];
-          const errHtml = firstErr ? `<div class="import-item-errors"><span>${esc(firstErr.message)}</span></div>` : '';
-          return `<div class="import-preview-item">${lucideIcon('check-square', 14, 'var(--muted)')} <strong>${esc(it.title || '—')}</strong>${it.category ? ` <span class="import-preview-cat">${esc(it.category)}</span>` : ''}${nc}${grp}</div>${errHtml}`;
-        }).join('');
-        previewDiv.innerHTML = `<div class="import-preview-header">${t('todos.import_ready', parsedItems.length)}</div>${sample}${parsedItems.length > 3 ? `<div class="import-preview-more">${t('todos.import_and_more', parsedItems.length - 3)}</div>` : ''}`;
-        previewDiv.style.display = '';
-      } catch (e) {
-        reviewBtn.disabled = true;
-        errorDiv.textContent = e.message;
-        errorDiv.style.display = '';
+    buildPrompt: buildTodoImportPrompt,
+    parse: parseTodoImportJSON,
+    validate: validateTodoImportItem,
+    getTitle: it => it.title,
+    fields: [
+      { key: 'title', label: t('todos.import_field_title'), type: 'text' },
+      { key: 'priority', label: t('todos.import_field_priority'), type: 'select', options: TODO_IMPORT_PRIORITIES },
+      { key: 'due_date', label: t('todos.import_field_due'), type: 'datetime' },
+      { key: 'snooze_until', label: t('todos.import_field_snooze'), type: 'datetime' },
+      { key: 'category', label: t('todos.import_field_category'), type: 'datalist',
+        options: ['General', ...cats.map(c => c.name)] },
+      { key: 'group_id', label: t('todos.import_field_group'), type: 'grouplist' },
+    ],
+    previewMeta: (it) => {
+      const nc = (it.categoryIsNew && it.category) ? ` <span class="import-badge new-cat">${t('todos.import_new_category')}</span>` : '';
+      const grp = it.groupName ? ` <span class="import-badge">${esc(it.groupName)}</span>` : '';
+      const cat = it.category ? ` <span class="import-preview-cat">${esc(it.category)}</span>` : '';
+      return `${cat}${nc}${grp}`;
+    },
+    reviewBadges: (it, errors) => {
+      let html = '';
+      if (it.categoryIsNew && it.category) html += `<span class="import-badge new-cat">${t('todos.import_new_category')}: ${esc(it.category)}</span>`;
+      if (errors.length > 0) {
+        html += `<div class="import-item-errors">${errors.map(e => `<span>${esc(e.message)}</span>`).join('')}</div>`;
       }
-    });
-    return { pasteArea, reviewBtn };
-  }
+      return html;
+    },
 
-  const convertPaste = bindPaste('todoImportConvertPaste', 'todoImportConvertPreview', 'todoImportConvertError', 'todoImportConvertReview');
-  const uploadPaste = bindPaste('todoImportUploadPaste', 'todoImportUploadPreview', 'todoImportUploadError', 'todoImportUploadReview');
+    ensureCategories: (names) => ensureImportCategories(names, {
+      table: 'todo_categories', getMap: () => _todoCatMap, reload: loadTodoCategories,
+    }),
 
-  // File upload → fills the paste area
-  overlay.querySelector('#todoImportFile').addEventListener('change', (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      uploadPaste.pasteArea.value = String(reader.result || '');
-      uploadPaste.pasteArea.dispatchEvent(new Event('input', { bubbles: true }));
-    };
-    reader.readAsText(f);
-  });
-
-  overlay.querySelector('#todoImportConvertBack').addEventListener('click', backToOptions);
-  overlay.querySelector('#todoImportUploadBack').addEventListener('click', backToOptions);
-
-  // --- Review step ---
-  function validSelectedCount() {
-    return parsedItems.filter((_, i) => itemStates[i].included && itemErrors[i].length === 0).length;
-  }
-  function updateConfirmBtn() {
-    const n = validSelectedCount();
-    confirmBtn.innerHTML = `${lucideIcon('check', 15)} ${t('todos.import_confirm', n)}`;
-    confirmBtn.disabled = n === 0;
-  }
-  function updateReviewCount() {
-    const el = reviewContainer.querySelector('.import-review-count');
-    if (el) el.textContent = t('todos.import_selected_count', validSelectedCount(), parsedItems.length);
-  }
-
-  function renderItemBadges(i) {
-    const badgeBox = reviewContainer.querySelector(`[data-badges="${i}"]`);
-    if (!badgeBox) return;
-    const it = parsedItems[i];
-    let html = '';
-    if (it.categoryIsNew && it.category) html += `<span class="import-badge new-cat">${t('todos.import_new_category')}: ${esc(it.category)}</span>`;
-    if (itemErrors[i].length > 0) {
-      html += `<div class="import-item-errors">${itemErrors[i].map(e => `<span>${esc(e.message)}</span>`).join('')}</div>`;
-    }
-    badgeBox.innerHTML = html;
-  }
-
-  function renderReview() {
-    const total = parsedItems.length;
-    // Group picker: names shown, ids stored (JSON still refers to group ids).
-    const groups = [...importCtx().groupById.entries()].map(([id, name]) => ({ id, name }));
-    const groupOpts = (it) => {
-      let opts = '<option value="">—</option>' + groups.map(g =>
-        `<option value="${esc(g.id)}"${g.id === it.group_id ? ' selected' : ''}>${esc(g.name)}</option>`).join('');
-      if (it.group_id && !it.groupName) {
-        opts += `<option value="${esc(it.group_id)}" selected>${esc(it.group_id)}</option>`;
-      }
-      return opts;
-    };
-    let html = `<div class="import-review-toolbar">
-      <div class="import-review-toolbar-left">
-        <strong>${t('todos.import_review_header', total)}</strong>
-        <button class="import-review-toggle" id="todoImportToggleAll">${t('todos.import_deselect_all')}</button>
-      </div>
-      <span class="import-review-count">${t('todos.import_selected_count', total, total)}</span>
-    </div><div class="import-review-list">`;
-
-    const prioOpts = (sel) => TODO_IMPORT_PRIORITIES.map(p =>
-      `<option value="${p}"${p === sel ? ' selected' : ''}>${p}</option>`).join('');
-
-    parsedItems.forEach((it, i) => {
-      const checked = itemStates[i].included ? 'checked' : '';
-      const excluded = itemStates[i].included ? '' : ' excluded';
-      html += `<div class="import-review-card${excluded}" data-idx="${i}">
-        <span class="import-review-num">${i + 1}</span>
-        <input type="checkbox" class="import-review-check" data-idx="${i}" ${checked}>
-        <div class="import-review-fields">
-          <div class="import-review-field">
-            <span class="import-review-field-label wide">${t('todos.import_field_title')}</span>
-            <input class="import-review-field-input" data-idx="${i}" data-field="title" value="${esc(it.title)}">
-          </div>
-          <div class="import-review-field">
-            <span class="import-review-field-label wide">${t('todos.import_field_priority')}</span>
-            <select class="import-review-field-input" data-idx="${i}" data-field="priority">${prioOpts(it.priority)}</select>
-          </div>
-          <div class="import-review-field">
-            <span class="import-review-field-label wide">${t('todos.import_field_due')}</span>
-            <input type="datetime-local" class="import-review-field-input" data-idx="${i}" data-field="due_date" value="${isoToLocalInput(it.due_date)}">
-          </div>
-          <div class="import-review-field">
-            <span class="import-review-field-label wide">${t('todos.import_field_snooze')}</span>
-            <input type="datetime-local" class="import-review-field-input" data-idx="${i}" data-field="snooze_until" value="${isoToLocalInput(it.snooze_until)}">
-          </div>
-          <div class="import-review-field">
-            <span class="import-review-field-label wide">${t('todos.import_field_category')}</span>
-            <input class="import-review-field-input" data-idx="${i}" data-field="category" list="todoImportCatData" value="${esc(it.category)}">
-          </div>
-          <div class="import-review-field">
-            <span class="import-review-field-label wide">${t('todos.import_field_group')}</span>
-            <select class="import-review-field-input" data-idx="${i}" data-field="group_id">${groupOpts(it)}</select>
-          </div>
-          <div class="import-review-badges" data-badges="${i}"></div>
-        </div>
-      </div>`;
-    });
-    html += '</div>';
-    reviewContainer.innerHTML = html;
-    parsedItems.forEach((_, i) => renderItemBadges(i));
-    updateConfirmBtn();
-
-    const toggleBtn = reviewContainer.querySelector('#todoImportToggleAll');
-    toggleBtn.addEventListener('click', () => {
-      const allIncluded = itemStates.every(s => s.included);
-      const newState = !allIncluded;
-      itemStates.forEach(s => { s.included = newState; });
-      reviewContainer.querySelectorAll('.import-review-check').forEach(cb => { cb.checked = newState; });
-      reviewContainer.querySelectorAll('.import-review-card').forEach(card => card.classList.toggle('excluded', !newState));
-      toggleBtn.textContent = newState ? t('todos.import_deselect_all') : t('todos.import_select_all');
-      updateConfirmBtn();
-      updateReviewCount();
-    });
-
-    reviewContainer.querySelectorAll('.import-review-check').forEach(cb => {
-      cb.addEventListener('change', () => {
-        const idx = parseInt(cb.dataset.idx, 10);
-        itemStates[idx].included = cb.checked;
-        reviewContainer.querySelector(`.import-review-card[data-idx="${idx}"]`).classList.toggle('excluded', !cb.checked);
-        const allIncluded = itemStates.every(s => s.included);
-        toggleBtn.textContent = allIncluded ? t('todos.import_deselect_all') : t('todos.import_select_all');
-        updateConfirmBtn();
-        updateReviewCount();
-      });
-    });
-
-    reviewContainer.querySelectorAll('.import-review-field-input').forEach(input => {
-      input.addEventListener('input', () => {
-        const idx = parseInt(input.dataset.idx, 10);
-        const field = input.dataset.field;
-        parsedRaw[idx][field] = input.value;
-        const { item, errors } = validateTodoImportItem(parsedRaw[idx], idx, importCtx());
-        parsedItems[idx] = item;
-        itemErrors[idx] = errors;
-        if (errors.length === 0 && !itemStates[idx].included) {
-          itemStates[idx].included = true;
-          reviewContainer.querySelector(`.import-review-check[data-idx="${idx}"]`).checked = true;
-          reviewContainer.querySelector(`.import-review-card[data-idx="${idx}"]`).classList.remove('excluded');
-        }
-        renderItemBadges(idx);
-        updateConfirmBtn();
-        updateReviewCount();
-      });
-    });
-  }
-
-  function openReview() {
-    try {
-      parsedRaw = parseTodoImportJSON(
-        (importMode === 'convert' ? convertPaste : uploadPaste).pasteArea.value);
-    } catch (e) {
-      return;
-    }
-    revalidateAll();
-    itemStates = parsedItems.map((_, i) => ({ included: itemErrors[i].length === 0 }));
-    convertFlow.style.display = 'none';
-    uploadFlow.style.display = 'none';
-    reviewStep.style.display = '';
-    reviewError.style.display = 'none';
-    renderReview();
-  }
-  convertPaste.reviewBtn.addEventListener('click', openReview);
-  uploadPaste.reviewBtn.addEventListener('click', openReview);
-
-  reviewBackBtn.addEventListener('click', () => {
-    reviewStep.style.display = 'none';
-    reviewError.style.display = 'none';
-    (importMode === 'convert' ? convertFlow : uploadFlow).style.display = '';
-  });
-
-  // --- Confirm: create missing categories, batch-insert personal, stage shared ---
-  confirmBtn.addEventListener('click', async () => {
-    if (!state.db.connected) { showToast('Not connected', 'error'); return; }
-    const idxs = parsedItems
-      .map((_, i) => i)
-      .filter(i => itemStates[i].included && itemErrors[i].length === 0);
-    if (idxs.length === 0) return;
-    confirmBtn.disabled = true;
-    confirmBtn.classList.add('is-pending');
-    confirmBtn.textContent = t('todos.import_importing');
-
-    try {
-      // 1. Create categories that don't exist yet (dedupe case-insensitively)
-      const needed = new Map(); // lower-name → display name
-      for (const i of idxs) {
-        const it = parsedItems[i];
-        if (it.categoryIsNew && it.category) {
-          const l = it.category.toLowerCase();
-          if (!needed.has(l)) needed.set(l, it.category);
-        }
-      }
-      for (const name of needed.values()) {
-        const exists = Array.from(_todoCatMap.values()).some(c => c.name.toLowerCase() === name.toLowerCase());
-        if (exists) continue;
-        const color = nextPaletteColor(_todoCatMap);
-        const sortOrder = Math.max(0, ...Array.from(_todoCatMap.values()).map(c => c.sort_order || 0)) + 1;
-        const { error } = await state.db.from('todo_categories').insert({ name, shortname: null, color, sort_order: sortOrder });
-        if (error) throw new Error(error.message);
-      }
-      if (needed.size > 0) await loadTodoCategories();
-
+    createItems: async (validItems, catMap) => {
       const resolveCat = (name) => {
         if (!name) return { id: _defaultCatId, name: '' };
-        const row = Array.from(_todoCatMap.values())
-          .find(c => c.name !== SHARED_CATEGORY && c.name.toLowerCase() === name.toLowerCase());
-        return row ? { id: row.id, name: row.name } : { id: _defaultCatId, name: '' };
+        const hit = catMap.get(name.toLowerCase());
+        return hit ? { id: hit.id, name: hit.name } : { id: _defaultCatId, name: '' };
       };
-
-      // 2. sort_order cursors: new TODOs go on top of their category (contract)
+      // sort_order cursors: new TODOs go on top of their category (contract)
       const orderCursor = new Map();
       const nextOrder = (catId) => {
         if (!orderCursor.has(catId)) {
@@ -2418,11 +2041,9 @@ window.openTodoImportModal = async function() {
         return v;
       };
 
-      // 3. Split personal vs shared
       const personalRows = [];
       const sharedItems = [];
-      for (const i of idxs) {
-        const it = parsedItems[i];
+      for (const it of validItems) {
         const { id: catId, name: catName } = resolveCat(it.category);
         if (it.group_id) sharedItems.push({ ...it, catId, catName });
         else personalRows.push({
@@ -2433,16 +2054,13 @@ window.openTodoImportModal = async function() {
         });
       }
 
-      // 4. Personal: batch insert (chunks of 100, like backup restore).
-      //    The Drive adapter marks each insert dirty → the debounced flush
-      //    runs syncTable('todos'), creating calendar events for due dates.
-      for (let i = 0; i < personalRows.length; i += 100) {
-        const { error } = await state.db.from('todos').insert(personalRows.slice(i, i + 100));
-        if (error) throw new Error(error.message);
-      }
+      // Personal: batch insert (chunks of 100, like backup restore).
+      // The Drive adapter marks each insert dirty → the debounced flush
+      // runs syncTable('todos'), creating calendar events for due dates.
+      await chunkedBatchInsert('todos', personalRows);
 
-      // 5. Shared: stage in group memory + local pointer row
-      //    (same pattern as shareExistingTodo; the sharing poll uploads).
+      // Shared: stage in group memory + local pointer row
+      // (same pattern as shareExistingTodo; the sharing poll uploads).
       for (const it of sharedItems) {
         const sharedId = crypto.randomUUID();
         const payload = {
@@ -2456,7 +2074,7 @@ window.openTodoImportModal = async function() {
         await Promise.race([stagedP, upload.then(() => {}, () => {})]);
         if (!wasStaged) throw new Error(`Could not stage "${it.title}" in the group`);
         const { error: ptrErr } = await state.db.from('todos').insert({
-          text: '', priority: 'normal', done: false,
+          text: '', priority: 'normal', done: 0,
           category: it.catName, category_id: it.catId,
           sort_order: nextOrder(it.catId),
           shared_id: sharedId, shared_group_id: it.group_id,
@@ -2471,21 +2089,8 @@ window.openTodoImportModal = async function() {
           showToast(`${t('todos.import_failed')} "${it.title}"`, 'error');
         });
       }
+    },
 
-      overlay.remove();
-      await refreshTodos();
-      showToast(t('todos.import_success', idxs.length), 'success');
-    } catch (e) {
-      reviewError.textContent = t('todos.import_failed') + e.message;
-      reviewError.style.display = '';
-      confirmBtn.disabled = false;
-      confirmBtn.classList.remove('is-pending');
-      updateConfirmBtn();
-    }
-  });
-
-  // Dismiss by clicking overlay
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.remove();
+    afterCreate: refreshTodos,
   });
 };

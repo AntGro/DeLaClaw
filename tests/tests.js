@@ -4105,6 +4105,68 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(r.item.category === 'General' && !r.item.categoryIsNew, 'real "General" category must win');
     });
 
+    test('habit-import: validate frequency/category/group', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'habit-import.js')).href);
+      const { parseHabitImportJSON, validateHabitImportItem } = mod;
+      const ctx = { categoryNames: ['Health', ''], groupById: new Map([['g1', 'Family']]), sharingReady: true };
+
+      // valid structured frequencies, incl. legacy normalization
+      const cases = [
+        ['every_N_days:1', 'every_N_days:1'],
+        ['every_N_weeks:1:Mon,Wed,Fri', 'every_N_weeks:1:Mon,Wed,Fri'],
+        ['every_N_months:1:15', 'every_N_months:1:15'],
+        ['yearly:06-15', 'yearly:06-15'],
+        ['daily', 'every_N_days:1'],
+        ['weekly:Fri', 'every_N_weeks:1:Fri'],
+        ['weekly:', 'every_N_weeks:1:'], // pure interval: every week, no set day
+        ['monthly:15', 'every_N_months:1:15'],
+      ];
+      for (const [input, expected] of cases) {
+        const r = validateHabitImportItem({ name: 'H', frequency: input }, 0, ctx);
+        assert(r.errors.length === 0, `"${input}" must validate: ` + JSON.stringify(r.errors));
+        assert(r.item.frequency_rule === expected, `"${input}" must normalize to "${expected}", got "${r.item.frequency_rule}"`);
+      }
+
+      // invalid frequencies (unrecognized, degenerate, or impossible dates)
+      for (const bad of ['sometimes', 'every_X_days:1', 42,
+        'every_N_days:0', 'every_N_weeks:1:Mondey', 'every_N_months:1:',
+        'every_N_months:1:32', 'every_N_months:1:second:Mon', 'yearly:13-01',
+        'yearly:02-30', 'yearly:6-15']) {
+        const r = validateHabitImportItem({ name: 'H', frequency: bad }, 0, ctx);
+        assert(r.errors.some(e => e.field === 'frequency'), `"${bad}" must error on frequency`);
+      }
+      // Feb 29 is allowed (leap years exist)
+      const leap = validateHabitImportItem({ name: 'H', frequency: 'yearly:02-29' }, 0, ctx);
+      assert(leap.errors.length === 0 && leap.item.frequency_rule === 'yearly:02-29', 'yearly:02-29 must validate');
+      let r = validateHabitImportItem({ name: 'H' }, 0, ctx);
+      assert(r.errors.some(e => e.field === 'frequency'), 'missing frequency must error');
+
+      // name required
+      r = validateHabitImportItem({ name: '  ', frequency: 'every_N_days:1' }, 0, ctx);
+      assert(r.errors.some(e => e.field === 'name'), 'blank name must error');
+
+      // category: existing / new / default-bucket display name
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', category: 'health' }, 0, ctx);
+      assert(r.item.category === 'Health' && !r.item.categoryIsNew, 'matches existing case-insensitively');
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', category: 'NewCat' }, 0, ctx);
+      assert(r.item.categoryIsNew, 'unknown category flagged new');
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', category: 'General' }, 0, ctx);
+      assert(r.item.category === '' && !r.item.categoryIsNew, '"General" maps to the default bucket');
+
+      // group: resolved / unknown / sharing off
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', group_id: 'g1' }, 0, ctx);
+      assert(r.item.group_id === 'g1' && r.item.groupName === 'Family', 'group resolved');
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', group_id: 'zz' }, 0, ctx);
+      assert(r.errors.some(e => e.field === 'group_id'), 'unknown group must error');
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', group_id: 'g1' }, 0, { ...ctx, sharingReady: false });
+      assert(r.errors.some(e => e.field === 'group_id'), 'group without sharing must error');
+
+      // parse rejects junk like the todo parser
+      let threw = false;
+      try { parseHabitImportJSON('[]'); } catch { threw = true; }
+      assert(threw, 'empty array must be rejected');
+    });
+
     test('daily-visits: pure row transition', async () => {
       const mod = await import(pathToFileURL(path.join(JS_DIR, 'daily-visits.js')).href);
       const { nextVisitRow, nextDay, toLocalDateString, VISIT_ROW_ID } = mod;

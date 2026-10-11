@@ -117,31 +117,11 @@ async function saveEditHabitCategory() {
 // ===================================================================
 // NEXT_DUE — structured rules computed client-side, custom rules by heartbeat
 // ===================================================================
-// Structured frequency_rule formats:
-//   daily, every_N_days:X, weekly:Mon,Wed,Fri, every_N_weeks:2:Mon,
-//   monthly:1, monthly_weekday:first:Mon, every_N_months:3:1, yearly:MM-DD
-// Custom (free-text) rules → next_due = null → heartbeat handles them.
+// Structured frequency_rule formats live in js/frequency-rule.js (single
+// source of truth, re-exported below); local helpers follow.
 
-const STRUCTURED_PREFIXES = ['every_N_days:', 'every_N_weeks:', 'every_N_months:', 'yearly:'];
-const DOW_KEYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const DOW_JS   = [1, 2, 3, 4, 5, 6, 0]; // JS getDay(): Sun=0
-
-function isStructuredRule(rule) {
-  if (!rule) return false;
-  return STRUCTURED_PREFIXES.some(p => rule === p.replace(/:$/, '') || rule.startsWith(p));
-}
-
-/** Convert legacy frequency_rule formats to the consolidated format.
- *  daily → every_N_days:1, weekly:X → every_N_weeks:1:X,
- *  monthly:X → every_N_months:1:X, monthly_weekday:X:Y → every_N_months:1:X:Y */
-function normalizeFrequencyRule(rule) {
-  if (!rule) return rule;
-  if (rule === 'daily') return 'every_N_days:1';
-  if (rule.startsWith('weekly:')) return 'every_N_weeks:1:' + rule.slice(7);
-  if (rule.startsWith('monthly_weekday:')) return 'every_N_months:1:' + rule.slice(16);
-  if (rule.startsWith('monthly:') && !rule.startsWith('monthly_weekday:')) return 'every_N_months:1:' + rule.slice(8);
-  return rule;
-}
+import { STRUCTURED_PREFIXES, DOW_KEYS, DOW_JS, isStructuredRule, normalizeFrequencyRule } from './frequency-rule.js';
+// (re-exported in the export list at the bottom of this file)
 
 /** Format a Date as YYYY-MM-DD in local time (not UTC). */
 function localDateStr(d) {
@@ -3182,3 +3162,189 @@ window.setHabitViewMode = setHabitViewMode;
 window.navigateHabitCalendar = navigateHabitCalendar;
 window.navigateHabitCalendarToday = navigateHabitCalendarToday;
 window.toggleHabitCalScale = toggleHabitCalScale;
+
+// ===================================================================
+// HABIT BATCH IMPORT
+// ===================================================================
+// Thin wrapper over the shared import shell (js/batch-import.js), mirroring
+// the TODO import: Convert via LLM prompt / Upload JSON → paste → review →
+// create. Per-item "category" names are created on confirm when missing;
+// "group_id" must be a group the user belongs to (names aren't unique).
+// next_due is computed purely from the frequency rule (same as new habits);
+// calendar events come free via the Drive adapter's dirty marking.
+
+function buildHabitImportPrompt(selectedCatNames, groups) {
+  const catLine = selectedCatNames.length > 0
+    ? `- "category": assign each habit to exactly one of these categories: ${selectedCatNames.map(n => `"${n}"`).join(', ')}. If none fits, you may propose a new category name.`
+    : `- "category": a category name for the habit (a short label like "Health" or "Learning").`;
+  const groupLine = (groups && groups.length > 0)
+    ? `- "group_id": only for habits shared with a group; use one of these group ids: ${groups.map(g => `"${g.name}" → "${g.id}"`).join(', ')}. Omit otherwise.`
+    : `- "group_id": only for habits shared with a group; omit otherwise (optional)`;
+  return `Convert the following text into habits for DeLaClaw, a personal task manager (delaclaw.com).
+
+Output a JSON array of objects, each with:
+- "name": string (required, the habit)
+- "frequency": string (required) — one of:
+  - "every_N_days:N" (e.g. "every_N_days:1" for daily, "every_N_days:2" for every 2 days)
+  - "every_N_weeks:N:Day1,Day2" (e.g. "every_N_weeks:1:Mon,Wed,Fri"; days: Mon Tue Wed Thu Fri Sat Sun)
+  - "every_N_months:N:D" (e.g. "every_N_months:1:15" for monthly on the 15th)
+  - "yearly:MM-DD" (e.g. "yearly:06-15")
+${catLine}
+${groupLine}
+
+Example:
+[
+  { "name": "Read 20 pages", "frequency": "every_N_days:1", "category": "General" },
+  { "name": "Gym", "frequency": "every_N_weeks:1:Mon,Wed,Fri", "category": "Health" }
+]
+
+Output ONLY valid JSON, no markdown fences, no commentary.
+
+Paste your text below and I will convert it:`;
+}
+
+const HABIT_IMPORT_FREQ_EXAMPLES = [
+  'every_N_days:1',
+  'every_N_weeks:1:Mon,Wed,Fri',
+  'every_N_months:1:1',
+  'yearly:01-01',
+];
+
+window.openHabitImportModal = async function() {
+  const { openBatchImportModal, ensureImportCategories, chunkedBatchInsert } = await import('./batch-import.js');
+  const { parseHabitImportJSON, validateHabitImportItem } = await import('./habit-import.js');
+
+  const cats = Array.from(_habitCatMap.values())
+    .filter(c => c.name !== SHARED_CATEGORY)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+  const groups = (state.sharing && state.sharing.isReady()) ? state.sharing.getAllGroups() : [];
+
+  await openBatchImportModal({
+    modalId: 'importHabitModal',
+    title: t('habits.import_title'),
+    subtitle: t('habits.import_subtitle'),
+    convertTitle: t('habits.import_convert_title'),
+    convertDesc: t('habits.import_convert_desc'),
+    uploadTitle: t('habits.import_upload_title'),
+    uploadDesc: t('habits.import_upload_desc'),
+    categoriesLabel: t('habits.import_categories_label'),
+    selectAll: t('habits.import_select_all'),
+    deselectAll: t('habits.import_deselect_all'),
+    step1: t('habits.import_step1'),
+    copy: t('habits.import_copy'),
+    copied: t('habits.import_copied'),
+    step2: t('habits.import_step2'),
+    step3: t('habits.import_step3'),
+    pastePlaceholder: t('habits.import_paste_placeholder'),
+    uploadFile: t('habits.import_upload_file'),
+    review: t('habits.import_review'),
+    back: t('habits.import_back'),
+    backToPaste: t('habits.import_back_to_paste'),
+    ready: n => t('habits.import_ready', n),
+    andMore: n => t('habits.import_and_more', n),
+    reviewHeader: n => t('habits.import_review_header', n),
+    selectedCount: (a, b) => t('habits.import_selected_count', a, b),
+    confirm: n => t('habits.import_confirm', n),
+    importing: t('habits.import_importing'),
+    success: n => t('habits.import_success', n),
+    failedPrefix: t('habits.import_failed'),
+    newCategory: t('habits.import_new_category'),
+
+    categories: [{ name: '', display: t('common.category_default') },
+      ...cats.map(c => ({ name: c.name, display: c.name }))],
+    promptDefaultCategory: 'General',
+    groups: groups.map(g => ({ id: g.id, name: g.name })),
+    sharingReady: !!(state.sharing && state.sharing.isReady()),
+
+    buildPrompt: buildHabitImportPrompt,
+    parse: parseHabitImportJSON,
+    validate: validateHabitImportItem,
+    getTitle: it => it.name,
+    fields: [
+      { key: 'name', label: t('habits.import_field_name'), type: 'text' },
+      { key: 'frequency_rule', label: t('habits.import_field_frequency'), type: 'datalist', options: HABIT_IMPORT_FREQ_EXAMPLES },
+      { key: 'category', label: t('habits.import_field_category'), type: 'datalist',
+        options: ['General', ...cats.map(c => c.name)] },
+      { key: 'group_id', label: t('habits.import_field_group'), type: 'grouplist' },
+    ],
+    previewMeta: (it) => {
+      const nc = (it.categoryIsNew && it.category) ? ` <span class="import-badge new-cat">${t('habits.import_new_category')}</span>` : '';
+      const grp = it.groupName ? ` <span class="import-badge">${esc(it.groupName)}</span>` : '';
+      const freq = it.frequency_rule ? ` <span class="import-preview-cat">${esc(it.frequency_rule)}</span>` : '';
+      const cat = it.category ? ` <span class="import-preview-cat">${esc(it.category)}</span>` : '';
+      return `${freq}${cat}${nc}${grp}`;
+    },
+    reviewBadges: (it, errors) => {
+      let html = '';
+      if (it.categoryIsNew && it.category) html += `<span class="import-badge new-cat">${t('habits.import_new_category')}: ${esc(it.category)}</span>`;
+      if (errors.length > 0) {
+        html += `<div class="import-item-errors">${errors.map(e => `<span>${esc(e.message)}</span>`).join('')}</div>`;
+      }
+      return html;
+    },
+
+    ensureCategories: (names) => ensureImportCategories(names, {
+      table: 'habit_categories', getMap: () => _habitCatMap, reload: loadHabitCategories,
+    }),
+
+    createItems: async (validItems, catMap) => {
+      const resolveCat = (name) => {
+        if (!name) return { id: _defaultHabitCatId, name: '' };
+        const hit = catMap.get(name.toLowerCase());
+        return hit ? { id: hit.id, name: hit.name } : { id: _defaultHabitCatId, name: '' };
+      };
+
+      const personalRows = [];
+      const sharedItems = [];
+      for (const it of validItems) {
+        const { id: catId, name: catName } = resolveCat(it.category);
+        // next_due computed purely — a new habit has no history to guard.
+        const nextDue = it.frequency_rule ? normalizeHabitNextDue(computeNextDue(it.frequency_rule, null)) : null;
+        if (it.group_id) sharedItems.push({ ...it, catId, catName, nextDue });
+        else personalRows.push({
+          name: it.name, frequency_rule: it.frequency_rule,
+          category: catName, category_id: catId, is_draft: 0, next_due: nextDue,
+        });
+      }
+
+      await chunkedBatchInsert('habits', personalRows);
+
+      // Shared: same two-step as manual shared-habit creation
+      // (addSharedHabit staged in memory + local pointer row).
+      for (const it of sharedItems) {
+        const sharedId = crypto.randomUUID();
+        const actor = await getSharedHabitCompletionActor(it.group_id);
+        const now = new Date().toISOString();
+        const sharedItem = {
+          id: sharedId, item_type: 'habit', name: it.name,
+          frequency_rule: it.frequency_rule, creator_category: it.catName,
+          created_by: actor, created_at: now, updated_at: now,
+          completions: [],
+        };
+        if (it.nextDue != null) sharedItem.next_due = it.nextDue;
+        let onStaged;
+        let wasStaged = false;
+        const stagedP = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+        const upload = state.sharing.addSharedHabit(it.group_id, sharedItem, { onStaged });
+        await Promise.race([stagedP, upload.then(() => {}, () => {})]);
+        if (!wasStaged) throw new Error(`Could not stage "${it.name}" in the group`);
+        const { data, error: ptrErr } = await state.db.from('habits').insert({
+          name: '', frequency_rule: '', category: it.catName, category_id: it.catId, is_draft: 0,
+          shared_id: sharedId, shared_group_id: it.group_id, next_due: it.nextDue,
+        }).select().single();
+        if (ptrErr) {
+          state.sharing.deleteSharedHabit(it.group_id, sharedId).catch(() => {});
+          throw new Error(ptrErr.message);
+        }
+        upload.then(() => {}, async () => {
+          if (data?.id) await state.db.from('habits').delete().eq('id', data.id);
+          await refreshHabits();
+          showToast(`${t('habits.import_failed')} "${it.name}"`, 'error');
+        });
+      }
+    },
+
+    afterCreate: refreshHabits,
+  });
+};

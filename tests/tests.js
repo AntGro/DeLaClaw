@@ -4092,6 +4092,17 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // validate: group_id without sharing
       r = validateTodoImportItem({ title: 'X', group_id: 'g1' }, 4, { ...ctx, sharingReady: false });
       assert(r.errors.some(e => e.field === 'group_id'), 'group_id without sharing must error');
+
+      // validate: default bucket display names map to the default bucket (never created)
+      for (const name of ['General', 'general', 'GENERAL', 'Général']) {
+        r = validateTodoImportItem({ title: 'X', category: name }, 5, ctx);
+        assert(r.errors.length === 0 && r.item.category === '' && !r.item.categoryIsNew,
+          `"${name}" must map to the default bucket, got ${JSON.stringify(r.item)}`);
+      }
+      // validate: a real category named "General" wins over the default bucket
+      const ctxReal = { ...ctx, categoryNames: ['Admin', 'General'] };
+      r = validateTodoImportItem({ title: 'X', category: 'general' }, 6, ctxReal);
+      assert(r.item.category === 'General' && !r.item.categoryIsNew, 'real "General" category must win');
     });
 
     test('daily-visits: pure row transition', async () => {

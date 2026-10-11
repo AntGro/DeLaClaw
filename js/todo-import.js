@@ -10,6 +10,13 @@
 export const TODO_IMPORT_PRIORITIES = ['urgent', 'high', 'medium', 'low', 'normal'];
 
 /**
+ * Display names of the default bucket (lowercased). The import prompt is
+ * English ("General"); the app may display it localized ("Général").
+ * These never become new categories — they map to the default bucket.
+ */
+export const DEFAULT_CATEGORY_NAMES = ['general', 'général'];
+
+/**
  * Parse the raw pasted/uploaded text into an array of raw item objects.
  * Strips markdown fences (LLMs love them). Throws an Error on any problem.
  */
@@ -111,16 +118,28 @@ export function validateTodoImportItem(raw, index, ctx) {
   }
 
   // — category (name; created on confirm when unknown) —
+  // A real category match wins (case-insensitive); the default bucket's
+  // display name ("General"/"Général") maps to the default bucket ('');
+  // anything else is flagged as new and created on confirm.
   let category = '';
+  let categoryIsNew = false;
   if (raw.category !== undefined && raw.category !== null && String(raw.category).trim() !== '') {
     if (typeof raw.category !== 'string') {
       err('category', '"category" must be a string (category name)');
     } else {
-      category = raw.category.trim();
+      const name = raw.category.trim();
+      const lower = name.toLowerCase();
+      const realMatch = (ctx.categoryNames || []).find(n => n !== '' && n.toLowerCase() === lower);
+      if (realMatch) {
+        category = realMatch;
+      } else if (DEFAULT_CATEGORY_NAMES.includes(lower)) {
+        category = ''; // default bucket
+      } else {
+        category = name;
+        categoryIsNew = true;
+      }
     }
   }
-  const lower = category.toLowerCase();
-  const categoryIsNew = category !== '' && !(ctx.categoryNames || []).some(n => n.toLowerCase() === lower);
 
   // — group_id (must be a group the user belongs to) —
   let group_id = null;

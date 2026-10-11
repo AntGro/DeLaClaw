@@ -1922,7 +1922,7 @@ function buildTodoImportPrompt(selectedCatNames, groups) {
   const groupLine = (groups && groups.length > 0)
     ? `- "group_id": only for TODOs shared with a group; use one of these group ids: ${groups.map(g => `"${g.name}" → "${g.id}"`).join(', ')}. Omit otherwise.`
     : `- "group_id": only for TODOs shared with a group; omit otherwise (optional)`;
-  return `Convert the following text into TODOs for a task manager.
+  return `Convert the following text into TODOs for DeLaClaw, a personal task manager (delaclaw.com).
 
 Output a JSON array of objects, each with:
 - "title": string (required, the task)
@@ -1966,9 +1966,8 @@ window.openTodoImportModal = async function() {
     return `<a href="${href}" target="_blank" rel="noopener" class="dc-llm-btn">${s.svg}<span>${s.name}</span></a>`;
   }).join('');
 
-  const catChecks = cats.length > 0
-    ? cats.map(c => `<label class="import-cat-check"><input type="checkbox" data-cat-name="${esc(c.name)}" checked> ${esc(c.name === '' ? t('common.category_default') : c.name)}</label>`).join('')
-    : `<span class="import-cat-empty">${t('todos.import_no_categories')}</span>`;
+  const catChecks = `<label class="import-cat-check"><input type="checkbox" data-cat-name="General" checked> ${esc(t('common.category_default'))}</label>`
+    + cats.map(c => `<label class="import-cat-check"><input type="checkbox" data-cat-name="${esc(c.name)}" checked> ${esc(c.name)}</label>`).join('');
   const catDatalist = cats.map(c => `<option value="${esc(c.name)}">`).join('');
 
   const overlay = document.createElement('div');
@@ -2232,7 +2231,6 @@ window.openTodoImportModal = async function() {
     const it = parsedItems[i];
     let html = '';
     if (it.categoryIsNew && it.category) html += `<span class="import-badge new-cat">${t('todos.import_new_category')}: ${esc(it.category)}</span>`;
-    if (it.groupName) html += `<span class="import-badge">${lucideIcon('users', 12)} ${esc(it.groupName)}</span>`;
     if (itemErrors[i].length > 0) {
       html += `<div class="import-item-errors">${itemErrors[i].map(e => `<span>${esc(e.message)}</span>`).join('')}</div>`;
     }
@@ -2241,6 +2239,16 @@ window.openTodoImportModal = async function() {
 
   function renderReview() {
     const total = parsedItems.length;
+    // Group picker: names shown, ids stored (JSON still refers to group ids).
+    const groups = [...importCtx().groupById.entries()].map(([id, name]) => ({ id, name }));
+    const groupOpts = (it) => {
+      let opts = '<option value="">—</option>' + groups.map(g =>
+        `<option value="${esc(g.id)}"${g.id === it.group_id ? ' selected' : ''}>${esc(g.name)}</option>`).join('');
+      if (it.group_id && !it.groupName) {
+        opts += `<option value="${esc(it.group_id)}" selected>${esc(it.group_id)}</option>`;
+      }
+      return opts;
+    };
     let html = `<div class="import-review-toolbar">
       <div class="import-review-toolbar-left">
         <strong>${t('todos.import_review_header', total)}</strong>
@@ -2281,7 +2289,7 @@ window.openTodoImportModal = async function() {
           </div>
           <div class="import-review-field">
             <span class="import-review-field-label wide">${t('todos.import_field_group')}</span>
-            <input class="import-review-field-input" data-idx="${i}" data-field="group_id" value="${esc(it.group_id || '')}" placeholder="${it.groupName ? esc(it.groupName) : ''}">
+            <select class="import-review-field-input" data-idx="${i}" data-field="group_id">${groupOpts(it)}</select>
           </div>
           <div class="import-review-badges" data-badges="${i}"></div>
         </div>

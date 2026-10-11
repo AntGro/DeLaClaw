@@ -278,8 +278,7 @@ const T = {
       import_new_category: 'New category',
       import_field_title: 'Title', import_field_priority: 'Priority',
       import_field_due: 'Due date', import_field_snooze: 'Snooze until',
-      import_field_category: 'Category', import_field_group: 'Group ID',
-      import_no_categories: 'No categories yet — new ones will be created from the import.',
+      import_field_category: 'Category', import_field_group: 'Group',
     },
     // ── Habits ──
     habits: {
@@ -1030,8 +1029,7 @@ const T = {
       import_new_category: 'Nouvelle catégorie',
       import_field_title: 'Titre', import_field_priority: 'Priorité',
       import_field_due: 'Échéance', import_field_snooze: 'Report',
-      import_field_category: 'Catégorie', import_field_group: 'Groupe (ID)',
-      import_no_categories: 'Aucune catégorie pour l’instant — elles seront créées depuis l’import.',
+      import_field_category: 'Catégorie', import_field_group: 'Groupe',
     },
     habits: {
       add_habit: 'Ajouter une habitude', edit_habit: 'Modifier la habitude', edit_category: 'Modifier la catégorie', habit_history: 'Historique',
@@ -1774,8 +1772,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       import_new_category: 'Nueva categoría',
       import_field_title: 'Título', import_field_priority: 'Prioridad',
       import_field_due: 'Vencimiento', import_field_snooze: 'Posponer',
-      import_field_category: 'Categoría', import_field_group: 'Grupo (ID)',
-      import_no_categories: 'Aún no hay categorías — se crearán desde la importación.',
+      import_field_category: 'Categoría', import_field_group: 'Grupo',
     },
     habits: {
       add_habit: 'Añadir tarea', edit_habit: 'Editar tarea', edit_category: 'Editar categoría', habit_history: 'Historial',

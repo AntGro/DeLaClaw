@@ -4038,6 +4038,62 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(!t.has('h1') && t.has('h2'), 'markers must be independent per habit id');
     });
 
+    test('todo-import: parse/validate/normalize', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'todo-import.js')).href);
+      const { parseTodoImportJSON, normalizeTodoImportDate, validateTodoImportItem, TODO_IMPORT_PRIORITIES } = mod;
+      assert(TODO_IMPORT_PRIORITIES.includes('normal') && TODO_IMPORT_PRIORITIES.length === 5, 'five priorities');
+
+      // parse: fences stripped, non-array/empty rejected
+      const fenced = '```json\n[{"title":"A"}]\n```';
+      assert(parseTodoImportJSON(fenced).length === 1, 'markdown fences must be stripped');
+      for (const bad of ['not json', '{"a":1}', '[]', '[42]']) {
+        let threw = false;
+        try { parseTodoImportJSON(bad); } catch { threw = true; }
+        assert(threw, `must reject ${bad}`);
+      }
+
+      // dates: YYYY-MM-DD = local midnight; ISO passes through; junk rejected
+      const iso = normalizeTodoImportDate('2026-10-15', 'due_date');
+      const d = new Date(2026, 9, 15);
+      assert(iso === d.toISOString(), 'YYYY-MM-DD must normalize to local-midnight ISO');
+      assert(normalizeTodoImportDate(null, 'due_date') === null, 'empty → null');
+      assert(normalizeTodoImportDate('', 'due_date') === null, 'empty string → null');
+      assert(normalizeTodoImportDate('2026-10-15T18:30', 'due_date') === new Date('2026-10-15T18:30').toISOString(), 'ISO datetime passes through');
+      for (const bad of ['2026-13-01', '2026-02-30', 'tomorrow', 42]) {
+        let threw = false;
+        try { normalizeTodoImportDate(bad, 'due_date'); } catch { threw = true; }
+        assert(threw, `must reject date ${JSON.stringify(bad)}`);
+      }
+
+      // validate: full item
+      const ctx = { categoryNames: ['Admin', 'Groceries'], groupById: new Map([['g1', 'Family']]), sharingReady: true };
+      let r = validateTodoImportItem(
+        { title: ' Renew passport ', priority: 'HIGH', due_date: '2026-11-02', snooze_until: '2026-10-20T09:00', category: 'admin', group_id: 'g1' },
+        0, ctx);
+      assert(r.errors.length === 0, 'valid item must have no errors: ' + JSON.stringify(r.errors));
+      assert(r.item.title === 'Renew passport', 'title trimmed');
+      assert(r.item.priority === 'high', 'priority lowercased');
+      assert(r.item.categoryIsNew === false, '"admin" matches existing "Admin" case-insensitively');
+      assert(r.item.groupName === 'Family', 'group name resolved');
+
+      // validate: new category detected, defaults applied
+      r = validateTodoImportItem({ title: 'X' }, 1, ctx);
+      assert(r.errors.length === 0 && r.item.priority === 'normal' && r.item.category === '' && !r.item.categoryIsNew, 'defaults');
+      r = validateTodoImportItem({ title: 'X', category: 'Brand new' }, 2, ctx);
+      assert(r.item.categoryIsNew, 'unknown category flagged as new');
+
+      // validate: errors collected per field
+      r = validateTodoImportItem(
+        { title: '  ', priority: 'whenever', due_date: 'nope', category: 42, group_id: 'zzz' },
+        3, ctx);
+      const fields = r.errors.map(e => e.field).sort();
+      assert(fields.join(',') === 'category,due_date,group_id,priority,title', `all bad fields reported, got ${fields}`);
+
+      // validate: group_id without sharing
+      r = validateTodoImportItem({ title: 'X', group_id: 'g1' }, 4, { ...ctx, sharingReady: false });
+      assert(r.errors.some(e => e.field === 'group_id'), 'group_id without sharing must error');
+    });
+
     test('daily-visits: pure row transition', async () => {
       const mod = await import(pathToFileURL(path.join(JS_DIR, 'daily-visits.js')).href);
       const { nextVisitRow, nextDay, toLocalDateString, VISIT_ROW_ID } = mod;

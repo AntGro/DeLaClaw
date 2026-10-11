@@ -1911,6 +1911,21 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .import-review-field-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(100,108,255,0.1);}
 .import-review-num{color:var(--muted);font-size:0.75rem;flex-shrink:0;margin-top:4px;min-width:18px;text-align:right;}
 
+/* ─── TODO batch import ─── */
+.import-cat-list{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;}
+.import-cat-check{display:inline-flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--text);cursor:pointer;}
+.import-cat-check input{accent-color:var(--accent);cursor:pointer;}
+.import-cat-empty{font-size:0.8rem;color:var(--muted);}
+.import-badge{display:inline-flex;align-items:center;gap:4px;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);white-space:nowrap;}
+.import-badge.new-cat{background:color-mix(in srgb,#22c55e 14%,transparent);color:#22c55e;}
+.import-preview-cat{font-size:0.72rem;color:var(--muted);border:1px solid var(--border);border-radius:10px;padding:1px 8px;white-space:nowrap;}
+.import-review-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+.import-item-errors{display:flex;flex-direction:column;gap:2px;margin-top:6px;font-size:0.76rem;color:#ef4444;line-height:1.4;}
+.import-file-row{display:flex;align-items:center;gap:8px;font-size:0.82rem;color:var(--muted);}
+.import-file-row input{font-size:0.8rem;color:var(--text);}
+.import-review-field-label.wide{width:78px;}
+
+
 
 /* ─── Welcome Calendar Widget ─── */
 .welcome-calendar-strip{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:6px;}

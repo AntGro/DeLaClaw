@@ -1,6 +1,6 @@
 // Service Worker for DeLaClaw (PWA)
 // CACHE_VERSION is updated by the pre-commit hook from VERSION file
-const CACHE_VERSION = 'dlc-2.11.6';
+const CACHE_VERSION = 'dlc-2.12.0';
 
 
 const PRECACHE_URLS = [
@@ -48,6 +48,7 @@ const PRECACHE_URLS = [
   'js/sharing-ui.js',
   'js/state.js',
   'js/storm3d.js',
+  'js/todo-import.js',
   'js/todos.js',
   'js/utils.js',
   'js/version.js',

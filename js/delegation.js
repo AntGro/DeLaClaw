@@ -70,6 +70,7 @@
       case 'open-add-flash-deck': callWindow('openAddFlashDeckModal', []); break;
       case 'open-add-list': callWindow('openAddListModal', []); break;
       case 'open-import': callWindow('openImportModal', []); break;
+      case 'open-todo-import': callWindow('openTodoImportModal', []); break;
       case 'start-practice': callWindow('startPractice', [el.dataset.deck || el.dataset.scope || '__all', el]); break;
       case 'start-text-practice': callWindow('startTextPractice', [el.dataset.deck || el.dataset.scope || '__all', el]); break;
       case 'toggle-search': callWindow('toggleSearch', [el]); break;

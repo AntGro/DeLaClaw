@@ -3178,7 +3178,7 @@ function updateViewFooterStats() {
       ];
     },
     habits: () => {
-      const overdue = state.allHabits.filter(c => c.next_due && new Date(c.next_due) < new Date()).length;
+      const overdue = state.allHabits.filter(c => c.next_due && String(c.next_due).slice(0, 10) < toLocalDateString(new Date())).length;
       return [
         `${icon('repeat')} Habits: ${state.allHabits.length}`,
         `${icon('alert-triangle')} Overdue: ${overdue}`,

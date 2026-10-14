@@ -12,6 +12,24 @@ export function toDateStr(y, m, d) {
 }
 
 /**
+ * Parse a date value as a local calendar date.
+ * A date-only string ('YYYY-MM-DD') is NOT parsed with `new Date()`:
+ * that treats it as UTC midnight, which is the previous local day in
+ * every timezone west of UTC. Date-only strings are built from their
+ * parts instead. Anything else (a full timestamp) keeps the normal
+ * parse, which converts the instant to local time correctly.
+ * Shared by every reader of date-only fields (e.g. habit next_due).
+ */
+export function parseLocalDate(value) {
+  const s = String(value ?? '');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  return new Date(s);
+}
+
+/**
  * Month grid: array of weeks; each week is 7 { date, inMonth } cells,
  * Monday-first, including leading/trailing days from adjacent months.
  * year: full year, month: 0-based.

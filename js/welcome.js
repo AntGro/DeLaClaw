@@ -10,6 +10,7 @@ import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, form
 import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCategories } from './todos.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
+import { parseLocalDate } from './calendar-pure.js';
 
 // ── Local data cache ──
 let wTodos = [];
@@ -407,14 +408,14 @@ function renderWelcomeCalendar(allBirthdays, allHabits, todayStart) {
     // Find habits due on this day
     const habitsOnDay = allHabits.filter(h => {
       if (h.is_draft || !h.next_due) return false;
-      const dueDay = startOfDay(new Date(h.next_due));
+      const dueDay = startOfDay(parseLocalDate(h.next_due));
       return dueDay.getTime() === dayStart.getTime();
     });
 
     // For overdue habits, show them on today
     const overdueOnDay = isToday ? allHabits.filter(h => {
       if (h.is_draft || !h.next_due) return false;
-      const dueDay = startOfDay(new Date(h.next_due));
+      const dueDay = startOfDay(parseLocalDate(h.next_due));
       return dueDay < todayStart;
     }) : [];
 
@@ -498,9 +499,9 @@ function renderWelcome() {
   const habitsDue = wHabits.filter(c => {
     if (c.is_draft) return false;
     if (!c.next_due) return false;
-    return startOfDay(new Date(c.next_due)) <= todayStart;
+    return startOfDay(parseLocalDate(c.next_due)) <= todayStart;
   });
-  habitsDue.sort((a, b) => new Date(a.next_due) - new Date(b.next_due));
+  habitsDue.sort((a, b) => String(a.next_due).slice(0, 10).localeCompare(String(b.next_due).slice(0, 10))); // date-only strings sort chronologically
 
   // ── 3. Flashcards ──
   const dueCards = wFlashcards.filter(c => c.last_review && (!c.next_review || new Date(c.next_review) <= now));
@@ -545,7 +546,7 @@ function renderWelcome() {
   const todoPending = wTodos.filter(td => !td.done).length;
   html += `<button class="category-nav-btn" style="--cat-color:#22c55e" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-todos" title="${esc(t('welcome.focus_todos'))}">${lucideIcon('list-checks', 12, '#22c55e')} ${esc(t('welcome.focus_todos'))}${todoPending > 0 ? ' (' + todoPending + ')' : ''}</button>`;
   // Habits bucket
-  const habitsDueNavCount = wHabits.filter(c => !c.is_draft && c.next_due && startOfDay(new Date(c.next_due)) <= todayStart).length;
+  const habitsDueNavCount = wHabits.filter(c => !c.is_draft && c.next_due && startOfDay(parseLocalDate(c.next_due)) <= todayStart).length;
   html += `<button class="category-nav-btn" style="--cat-color:#ec4899" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-habits" title="${esc(t('welcome.habits_due'))}">${lucideIcon('repeat', 12, '#ec4899')} ${esc(t('welcome.habits_due'))}${habitsDueNavCount > 0 ? ' (' + habitsDueNavCount + ')' : ''}</button>`;
   // Flashcards bucket
   const fcDueNav = wFlashcards.filter(c => c.last_review && (!c.next_review || new Date(c.next_review) <= now)).length;

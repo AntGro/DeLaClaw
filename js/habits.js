@@ -116,6 +116,7 @@ async function saveEditHabitCategory() {
 // source of truth, re-exported below); local helpers follow.
 
 import { STRUCTURED_PREFIXES, DOW_KEYS, DOW_JS, isStructuredRule, normalizeFrequencyRule } from './frequency-rule.js';
+import { parseLocalDate } from './calendar-pure.js';
 // (re-exported in the export list at the bottom of this file)
 
 /** Format a Date as YYYY-MM-DD in local time (not UTC). */
@@ -136,7 +137,11 @@ function computeNextDue(frequencyRule, lastDoneDate) {
   const noHistory = !lastDoneDate;
   const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
 
-  const base = noHistory ? yesterday : new Date(lastDoneDate);
+  // lastDoneDate may be a full timestamp (marking done — parsed as an
+  // instant, converted to the local day) or a date-only string (a stored
+  // next_due, a picked last-done date, a Calendar expansion cursor —
+  // parsed as that local calendar date, never as UTC midnight).
+  const base = noHistory ? yesterday : parseLocalDate(lastDoneDate);
   const baseDay = new Date(base.getFullYear(), base.getMonth(), base.getDate());
 
   if (frequencyRule.startsWith('every_N_days:')) {
@@ -865,7 +870,7 @@ async function setLocalHabitLastDone(habitId, newIso) {
 function habitDueStatus(habit) {
   if (!habit.next_due) return 'no-date';
   const now = new Date();
-  const due = new Date(habit.next_due);
+  const due = parseLocalDate(habit.next_due);
   // Compare calendar dates, not timestamps
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
@@ -879,7 +884,7 @@ function habitDueStatus(habit) {
 
 function formatHabitDue(habit) {
   if (!habit.next_due) return `<span class="habit-due no-date">${t('habits.awaiting_schedule')}</span>`;
-  const due = new Date(habit.next_due);
+  const due = parseLocalDate(habit.next_due);
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
@@ -916,7 +921,8 @@ function getFilteredHabitsForCategory(catId) {
       if (!a.next_due && !b.next_due) return 0;
       if (!a.next_due) return 1;
       if (!b.next_due) return -1;
-      return new Date(a.next_due) - new Date(b.next_due);
+      // Date-only strings sort chronologically as plain strings.
+      return String(a.next_due).slice(0, 10).localeCompare(String(b.next_due).slice(0, 10));
     });
   } else if (sortBy === 'name') {
     filtered.sort((a, b) => a.name.localeCompare(b.name));
@@ -1430,7 +1436,7 @@ async function saveNewHabit() {
     if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
     if (lastDoneVal && data?.id) {
-      await state.db.from('habit_completions').insert({ habit_id: data.id, completed_at: new Date(lastDoneVal).toISOString() });
+      await state.db.from('habit_completions').insert({ habit_id: data.id, completed_at: habitDateInputToIso(lastDoneVal) });
     }
     if (data?.id) {
       await updateHabitNextDue(data.id, freq, lastDoneVal || null);

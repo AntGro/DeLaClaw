@@ -426,7 +426,9 @@ export function getDemoData(lang) {
       const completions = data.habit_completions
         .filter(c => c.habit_id === habit.id)
         .sort((a, b) => b.completed_at.localeCompare(a.completed_at));
-      const lastDone = completions.length > 0 ? completions[0].completed_at.slice(0, 10) : null;
+      // Pass the full timestamp: slicing it would hand computeNextDue the
+      // UTC calendar date, which is not the local day the habit was done.
+      const lastDone = completions.length > 0 ? completions[0].completed_at : null;
       habit.next_due = computeNextDue(habit.frequency_rule, lastDone);
     }
   }

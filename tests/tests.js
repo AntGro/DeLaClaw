@@ -4540,6 +4540,39 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'computeNextDue must document that past dates are intentional');
     });
 
+    test('parseLocalDate: date-only strings parse as that local calendar day (west-of-UTC)', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      assert(typeof mod.parseLocalDate === 'function', 'calendar-pure must export parseLocalDate');
+      const d = mod.parseLocalDate('2026-10-14');
+      assert(d.getFullYear() === 2026 && d.getMonth() === 9 && d.getDate() === 14,
+        'date-only 2026-10-14 must be local Oct 14 in every timezone (new Date() gives Oct 13 west of UTC), got ' + d.toString());
+      const ts = mod.parseLocalDate('2026-10-14T02:21:33.000Z');
+      assert(ts.getTime() === Date.parse('2026-10-14T02:21:33.000Z'),
+        'full timestamps must keep the normal instant parse');
+    });
+
+    test('next_due: no raw new Date() parse of date-only values remains', () => {
+      const habits = jsFiles['habits.js'];
+      const welcome = jsFiles['welcome.js'];
+      const main = jsFiles['main.js'];
+      const demo = jsFiles['demo-data.js'];
+      assert(habits.includes('parseLocalDate(lastDoneDate)'),
+        'computeNextDue must parse its base through parseLocalDate');
+      assert(!habits.includes('new Date(lastDoneDate)'),
+        'computeNextDue must not raw-parse a possibly date-only lastDoneDate (UTC-midnight shift west of UTC)');
+      assert(!habits.includes('new Date(habit.next_due)'),
+        'habitDueStatus/formatHabitDue must parse next_due through parseLocalDate');
+      assert(!habits.includes('completed_at: new Date(lastDoneVal)'),
+        'new-habit completion must be stamped via habitDateInputToIso (local noon), not a raw date-only parse');
+      assert(!welcome.includes('new Date(h.next_due)') && !welcome.includes('new Date(c.next_due)')
+        && !welcome.includes('new Date(a.next_due)') && !welcome.includes('new Date(b.next_due)'),
+        'welcome must not raw-parse a date-only next_due');
+      assert(!main.includes('new Date(c.next_due)'),
+        'main overdue count must not raw-parse a date-only next_due');
+      assert(!demo.includes('completed_at.slice(0, 10)'),
+        'demo seeding must pass the full completion timestamp to computeNextDue, not its UTC date slice');
+    });
+
     test('edit modals: deck list excludes wrong-type decks and __shared__', () => {
       const flashJs = jsFiles['flashcards.js'];
       assert(/function deckOptionsForEdit\(type, currentDeckId\)/.test(flashJs),

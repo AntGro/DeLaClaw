@@ -4096,7 +4096,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('calendar-pure: month grid, habit expansion, birthdays', async () => {
       const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
-      const { toDateStr, getMonthGrid, expandHabitOccurrences, birthdayInMonth, toggleShow, addDays, getWeekDates } = mod;
+      const { toDateStr, getMonthGrid, expandHabitOccurrences, birthdayInMonth, birthdaysInRange, toggleShow, addDays, getWeekDates } = mod;
 
       assert(toDateStr(2026, 9, 5) === '2026-10-05', 'toDateStr pads correctly');
 
@@ -4163,6 +4163,28 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(b && b.date === '2026-03-01', 'Feb 29 lands on Mar 1 (matches app overflow)');
       b = birthdayInMonth('not-a-date', 2026, 9);
       assert(b === null, 'garbage birthday is null');
+
+      // Birthdays across a range (regression: occurrences must depend on
+      // the range only, never on a view's anchor month)
+      let bs = birthdaysInRange('1990-03-22', '2026-01-01', '2026-12-31');
+      assert(bs.length === 1 && bs[0].date === '2026-03-22' && bs[0].turningAge === 36,
+        'full-year range finds a March birthday');
+      bs = birthdaysInRange('1990-10-02', '2026-09-28', '2026-10-04');
+      assert(bs.length === 1 && bs[0].date === '2026-10-02',
+        'week crossing a month boundary finds the next-month birthday');
+      bs = birthdaysInRange('1990-09-30', '2026-09-28', '2026-10-04');
+      assert(bs.length === 1 && bs[0].date === '2026-09-30',
+        'week crossing a month boundary finds the first-month birthday');
+      bs = birthdaysInRange('1990-09-15', '2026-09-28', '2026-10-04');
+      assert(bs.length === 0, 'birthday outside the range is excluded');
+      bs = birthdaysInRange('1990-10-15', '2026-10-15', '2026-10-15');
+      assert(bs.length === 1 && bs[0].date === '2026-10-15', 'single-day range');
+      bs = birthdaysInRange('2000-02-29', '2026-01-01', '2026-12-31');
+      assert(bs.length === 1 && bs[0].date === '2026-03-01',
+        'Feb 29 lands on Mar 1 across a full-year range (non-leap)');
+      bs = birthdaysInRange('2000-02-29', '2024-01-01', '2024-12-31');
+      assert(bs.length === 1 && bs[0].date === '2024-02-29',
+        'Feb 29 stays Feb 29 across a full-year range (leap)');
 
       // Filter toggles
       const show = { todo: true, habit: true, birthday: true };

@@ -75,6 +75,9 @@ User jobs:
 - Occurrence math (`birthdayInMonth`, `js/calendar-pure.js`): JS Date overflow
   semantics (Feb 29 → Mar 1 on non-leap years), matching the old
   `getNextBirthday()` behavior used by Welcome
+- Calendar views collect birthdays via `birthdaysInRange(birthday, start, end)`:
+  occurrences depend only on the requested range (every month it spans),
+  never on the view's anchor month
 - Avatar crop persists at 384px resolution, centered
 - `refreshBirthdays()` re-renders the calendar when it is the current view
 

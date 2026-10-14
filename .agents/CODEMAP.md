@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-14T02:14:54.933Z from 49 modules (v2.17.0). Total LOC 32889. Do not hand-edit.
+> Generated 2026-10-14T02:28:22.818Z from 49 modules (v2.17.1). Total LOC 32907. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -34,7 +34,7 @@
 | item-utils | 1209 | - | db,i18n,icons,utils | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
 | calendar-sync | 1198 | birthdays,gcal_sync,habits,settings,todos | drive-folders,habits,i18n,icons | main.js | - |
 | utils | 911 | flashcards,x | i18n,icons,state,version | - | esc:7,window:6 |
-| calendar | 647 | - | calendar-pure,habits,i18n,icons | main.js | esc:17,window:8 |
+| calendar | 646 | - | calendar-pure,habits,i18n,icons | main.js | esc:17,window:8 |
 | batch-import | 538 | - | icons,import-pure,state,utils | - | esc:13 |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 451 | - | habits,i18n,icons,utils | - | - |
@@ -50,10 +50,10 @@
 | storm3d | 185 | - |  | hero.js | - |
 | rest | 162 | x |  | main.js | - |
 | habit-import | 143 | - | frequency-rule,import-pure | - | - |
+| calendar-pure | 141 | - |  | calendar.js | - |
 | sharing-interface | 135 | - |  | sharing.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
 | import-pure | 130 | - |  | batch-import.js,habit-import.js,todo-import.js | - |
-| calendar-pure | 122 | - |  | calendar.js | - |
 | sharing | 101 | - | sharing-drive,sharing-interface | - | - |
 | todo-import | 92 | - | import-pure | - | - |
 | sharing-mutation-queue | 83 | - |  | sharing-drive.js | - |

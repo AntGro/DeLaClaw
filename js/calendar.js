@@ -12,7 +12,7 @@ import { sharedBadge } from './sharing-ui.js';
 import { t, getLang } from './i18n.js';
 import { getTodos, catIdForTodo, getCategoryColor, getCatDisplayName } from './todos.js';
 import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatDisplayName } from './habits.js';
-import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdayInMonth, toggleShow, addDays, getWeekDates } from './calendar-pure.js';
+import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates } from './calendar-pure.js';
 
 let calYear;
 let calMonth; // 0-based
@@ -110,11 +110,10 @@ function collectRangeEvents(start, end) {
     for (const d of occ) push(d, { ...hBase });
   }
 
-  // Birthdays: yearly occurrence in the visible month
+  // Birthdays: yearly occurrence in every month the range spans
   for (const b of state.allBirthdays || []) {
     if (!calShow.birthday) break;
-    const occ = birthdayInMonth(b.birthday, calYear, calMonth);
-    if (occ) {
+    for (const occ of birthdaysInRange(b.birthday, start, end)) {
       push(occ.date, {
         type: 'birthday', id: b.id, title: b.name || '',
         sub: t('calendar.turns', occ.turningAge), avatar: b.avatar_url || null,

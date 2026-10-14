@@ -91,6 +91,25 @@ export function birthdayInMonth(birthdayStr, year, month) {
 }
 
 /**
+ * All birthday occurrences within [start, end] ('YYYY-MM-DD' strings):
+ * [{ date, turningAge }]. Iterates every month the range spans — the
+ * occurrence depends only on the range, never on a view's anchor month
+ * (a year range or a week crossing a month boundary must see them all).
+ */
+export function birthdaysInRange(birthdayStr, start, end) {
+  const out = [];
+  const [sy, sm] = start.split('-').map(Number);
+  const [ey, em] = end.split('-').map(Number);
+  const count = (ey - sy) * 12 + (em - sm) + 1;
+  for (let i = 0; i < count; i++) {
+    const total = (sm - 1) + i;
+    const occ = birthdayInMonth(birthdayStr, sy + Math.floor(total / 12), total % 12);
+    if (occ && occ.date >= start && occ.date <= end) out.push(occ);
+  }
+  return out;
+}
+
+/**
  * Toggle one key of a { todo, habit, birthday } visibility map.
  * Returns the same object reference when the type is unknown.
  */

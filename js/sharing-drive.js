@@ -1890,7 +1890,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     /**
      * Add a completion to a shared habit on Drive.
      */
-    async addSharedHabitCompletion(groupId, sharedId, completion, { onStaged, next_due } = {}) {
+    async addSharedHabitCompletion(groupId, sharedId, completion, { onStaged, next_due, is_finished } = {}) {
       const e = _groups.get(groupId);
       if (!e) throw new Error(`Group ${groupId} not loaded`);
       const items = e.typeData.habits || [];
@@ -1899,6 +1899,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       if (!item.completions) item.completions = [];
       const prevCompletions = item.completions.slice();
       const prevNextDue = item.next_due;
+      const prevFinished = item.is_finished;
       const prevUpdatedAt = item.updated_at;
       const stagedAt = new Date().toISOString();
       const mkey = _mutationKey(groupId, 'habits', sharedId);
@@ -1906,6 +1907,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       // Optional: publish the recomputed next_due in the same staged mutation
       // so the whole Done lands in one debounced upload instead of two.
       if (next_due !== undefined) item.next_due = next_due;
+      if (is_finished !== undefined) item.is_finished = is_finished;
       item.updated_at = stagedAt;
       if (typeof onStaged === 'function') onStaged(item);
       const entry = _mutationQueue.enqueue(mkey, {
@@ -1914,6 +1916,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           if (cur) {
             cur.completions = prevCompletions;
             cur.next_due = prevNextDue;
+            cur.is_finished = prevFinished;
             cur.updated_at = prevUpdatedAt;
           }
         },
@@ -1922,6 +1925,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           if (cur) {
             cur.completions.push(completion);
             if (next_due !== undefined) cur.next_due = next_due;
+            if (is_finished !== undefined) cur.is_finished = is_finished;
             cur.updated_at = stagedAt;
           }
         },

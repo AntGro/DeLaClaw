@@ -80,6 +80,15 @@ User jobs:
 - `promoteHabit()` converts draft → active (sets `is_draft = false`), then `next_due` is computed normally
 - Drafts are excluded from calendar view and Welcome aggregation
 
+### End Date & Finished Habits
+- Optional `end_date` (local `YYYY-MM-DD`, same convention as `next_due`): the last day an occurrence may be due. An occurrence exactly ON the end date is still due; only a recomputed next due **strictly after** it finishes the habit (`habitFinishedFor()` — pure string comparison)
+- Finishing is a **state, not a deletion**: `is_finished` set, `next_due` cleared, completion history kept, "Finished" badge instead of the due label, no Done button; manual delete unchanged. Finished habits stay in their category (and sink to the bottom via the null `next_due` sort)
+- Enforced **only** in `updateHabitNextDue()` (the single recompute choke point): completion, creation, last-done/frequency/end-date edits all finish — and revive — through it. Extending or clearing the end date revives the habit with an honestly recomputed `next_due`. Callers changing the end date in the same save pass it as the `endDate` option; shared chains publish the outcome via the `out` option (`out.isFinished`), never from a captured habit object
+- A habit whose final occurrence is never marked done stays overdue past its end date — finishing is triggered by recompute, not by the calendar
+- Free-text rules never auto-finish: their `next_due` is externally resolved, so the recompute preserves their previous finished state
+- Shared habits: `end_date` / `is_finished` are shared-canonical fields on the shared item, exactly like `frequency_rule` — all six mutation chains publish them in the same staged mutation as `next_due`, pointers mirror them from shared storage, and share/unshare/copy carry them across
+- Finished habits are excluded wherever drafts are (Welcome, Calendar, counts); since their `next_due` is null, due counts and calendar-sync exclude them by construction. Calendar expansion additionally caps occurrences at `end_date` for still-active habits (`expandHabitOccurrences`)
+
 ### Last-Done Editing
 - **`planLastDoneEdit` pure helper:** shared decision logic for editing last-done date. Both `setLocalHabitLastDone` (DB operations) and `setSharedHabitLastDone` (shared storage array) delegate to it. Returns `{ kept, toDelete, updateId, needsInsert }`
 - **Last-done edit deletes future completions:** setting last-done to date X removes all completions after X and ensures one exists on X. The "last done" display always reflects the latest remaining completion

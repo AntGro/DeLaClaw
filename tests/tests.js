@@ -4490,7 +4490,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     test('shared done / last-done / modal: pending id registered before the recompute', () => {
       const habits = jsFiles['habits.js'];
       // Done path: add precedes the local recompute await.
-      assert(/_pendingSharedNextDue\.add\(habit\.shared_id\);\s*let newNextDue;\s*let completion;\s*try\s*\{\s*newNextDue = await updateHabitNextDue\(habitId, habit\.frequency_rule, now\)/.test(habits),
+      assert(/_pendingSharedNextDue\.add\(habit\.shared_id\);\s*let newNextDue;\s*let completion;\s*try\s*\{\s*newNextDue = await updateHabitNextDue\(habitId, habit\.frequency_rule, now, \{ out: fin \}\)/.test(habits),
         'markHabitDone must register the pending id before recomputing next_due');
       // Inline last-done and edit modal: add precedes the preview-based recompute.
       assert(/const effLatest = previewLastDoneLatest\([^)]*\);\s*_pendingSharedNextDue\.add\(habit\.shared_id\);\s*let newNextDue;/.test(habits),
@@ -4591,6 +4591,89 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'main overdue count must not raw-parse a date-only next_due');
       assert(!demo.includes('completed_at.slice(0, 10)'),
         'demo seeding must pass the full completion timestamp to computeNextDue, not its UTC date slice');
+    });
+
+    test('habit end date: habitFinishedFor is strict (on the end date still due)', () => {
+      const habits = jsFiles['habits.js'];
+      const m = habits.match(/function habitFinishedFor\(computedNextDue, endDate\) \{([\s\S]*?)\n\}/);
+      assert(m, 'habitFinishedFor must exist in habits.js');
+      const habitFinishedFor = new Function('computedNextDue', 'endDate', m[1]);
+      assert(habitFinishedFor('2026-11-02', '2026-11-01') === true,
+        'next due strictly past the end date must finish the habit');
+      assert(habitFinishedFor('2026-11-01', '2026-11-01') === false,
+        'an occurrence exactly on the end date is still due, not finished');
+      assert(habitFinishedFor('2026-10-15', '2026-11-01') === false,
+        'next due before the end date stays active');
+      assert(habitFinishedFor(null, '2026-11-01') === false,
+        'no computed next due (free-text rule) never auto-finishes');
+      assert(habitFinishedFor('2026-11-02', null) === false,
+        'no end date never finishes');
+    });
+
+    test('habit end date: finish/revive enforced in updateHabitNextDue, published by all shared chains', () => {
+      const habits = jsFiles['habits.js'];
+      // The recompute choke point derives the finished state, clears
+      // next_due on finish, and writes both fields in one update.
+      const fn = habits.match(/async function updateHabitNextDue[\s\S]*?\n\}/);
+      assert(fn, 'updateHabitNextDue must exist');
+      assert(fn[0].includes('habitFinishedFor(nextDue, effEndDate)'),
+        'updateHabitNextDue must derive finished from the recomputed next due + end date');
+      assert(fn[0].includes('if (isFinished) nextDue = null;'),
+        'a finished habit must have next_due cleared');
+      assert(fn[0].includes("update({ next_due: nextDue, is_finished: isFinished ? 1 : 0 })"),
+        'the recompute must persist next_due and is_finished together');
+      assert(fn[0].includes('out.isFinished = isFinished'),
+        'the recompute must report the outcome via out for shared publishes');
+      // All six shared chains publish is_finished from the recompute outcome.
+      const pubs = (habits.match(/fin\.isFinished \? 1 : 0/g) || []).length;
+      assert(pubs >= 6,
+        `all six shared chains (Done, inline last-done, edit modal, inline frequency edit, completion delete, completion date edit) must publish is_finished from the recompute outcome, found ${pubs}`);
+      assert(habits.includes('is_finished: fin.isFinished ? 1 : 0 })'),
+        'markHabitDone must publish is_finished through addSharedHabitCompletion opts');
+      // Render: finished badge, no Done button, ends line while active.
+      assert(habits.includes("const isFinished = !isDraft && !!habit.is_finished;"),
+        'renderHabitItem must derive the finished state (drafts take precedence)');
+      assert(habits.includes("!isDraft && !isFinished ? `<button data-habit-id="),
+        'finished habits must not render a Done button');
+      assert(habits.includes("t('habits.finished')") && habits.includes("t('habits.ends_on'"),
+        'render must show the Finished badge and the Ends line');
+      // Modals carry the field both ways.
+      assert(habits.includes('id="newHabitEndDate"') && habits.includes('id="editHabitEndDate"'),
+        'add and edit modals must include an end date input');
+      assert(habits.includes("endDateVal = document.getElementById('editHabitEndDate')?.value || null"),
+        'edit save must read the end date');
+    });
+
+    test('habit end date: Calendar expansion caps at end_date; finished habits skipped', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      const step = (rule, last) => {
+        // daily stepper over date-only strings, in UTC for determinism
+        const d = new Date(last + 'T12:00:00Z');
+        d.setUTCDate(d.getUTCDate() + 1);
+        return d.toISOString().slice(0, 10);
+      };
+      const occ = mod.expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:1', next_due: '2026-10-13', end_date: '2026-10-15' },
+        '2026-10-01', '2026-10-31', step);
+      assert(JSON.stringify(occ) === JSON.stringify(['2026-10-13', '2026-10-14', '2026-10-15']),
+        'occurrences must stop at the end date (inclusive), got ' + occ.join(','));
+      const cal = jsFiles['calendar.js'];
+      assert(cal.includes('if (h.is_finished) continue;'),
+        'Calendar must skip finished habits entirely');
+      assert(cal.includes('next_due: h.next_due, end_date: h.end_date'),
+        'Calendar must pass end_date into the expansion');
+    });
+
+    test('migrations add habit end_date and is_finished (2.18.0)', () => {
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(local.includes("'2.18.0'") && local.includes('ADD COLUMN end_date') && local.includes('ADD COLUMN is_finished'),
+        'local migration 2.18.0 must add end_date and is_finished');
+      assert(drive.includes("'2.18.0'") && drive.includes('end_date') && drive.includes('is_finished'),
+        'drive migration 2.18.0 must ensure end_date and is_finished');
+      assert(schema.includes('end_date TEXT') && schema.includes('is_finished INTEGER DEFAULT 0'),
+        'base schema must include end_date and is_finished');
     });
 
     test('edit modals: deck list excludes wrong-type decks and __shared__', () => {

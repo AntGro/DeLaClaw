@@ -335,8 +335,16 @@ function normalizeHabitNextDue(value) {
   return value ? String(value).slice(0, 10) : null;
 }
 
-async function updateHabitNextDue(habitId, frequencyRule, lastDoneDate, { earlyGuard = true } = {}) {
-  let nextDue = isStructuredRule(frequencyRule)
+// A habit finishes when its recomputed next due date falls strictly past
+// its end date (an occurrence exactly ON the end date is still due).
+// Pure date-string comparison — both values are local YYYY-MM-DD.
+function habitFinishedFor(computedNextDue, endDate) {
+  return !!(computedNextDue && endDate && computedNextDue > endDate);
+}
+
+async function updateHabitNextDue(habitId, frequencyRule, lastDoneDate, { earlyGuard = true, endDate, out } = {}) {
+  const structured = isStructuredRule(frequencyRule);
+  let nextDue = structured
     ? normalizeHabitNextDue(computeNextDue(frequencyRule, lastDoneDate))
     : null;
   const habit = state.allHabits.find(h => String(h.id) === String(habitId));
@@ -353,14 +361,30 @@ async function updateHabitNextDue(habitId, frequencyRule, lastDoneDate, { earlyG
     }
   }
 
-  if (habit && currentNextDue === nextDue) return nextDue;
+  // End date: a structured habit whose recomputed next due falls strictly
+  // past its end date is finished — next_due is cleared and is_finished set,
+  // here at the single recompute choke point so completion, creation and
+  // every edit path agree. Extending or clearing the end date revives the
+  // habit (the recompute then lands on or before it). Free-text rules keep
+  // their previous finished state: their next due is resolved externally,
+  // so the app cannot decide they are finished. `endDate` overrides the
+  // stored value when the caller is changing it in the same save; `out`,
+  // when given, receives the outcome so shared chains can publish it from
+  // this recompute, never from a captured habit object.
+  const effEndDate = normalizeHabitNextDue(endDate !== undefined ? endDate : habit?.end_date);
+  const isFinished = structured ? habitFinishedFor(nextDue, effEndDate) : !!habit?.is_finished;
+  if (isFinished) nextDue = null;
+  if (out) out.isFinished = isFinished;
 
-  const { error } = await state.db.from('habits').update({ next_due: nextDue }).eq('id', habitId);
+  if (habit && currentNextDue === nextDue && !!habit.is_finished === isFinished) return nextDue;
+
+  const { error } = await state.db.from('habits').update({ next_due: nextDue, is_finished: isFinished ? 1 : 0 }).eq('id', habitId);
   if (error) {
     console.warn(nextDue ? 'Failed to update next_due:' : 'Failed to clear next_due:', error.message);
     return nextDue;
   }
   if (habit) habit.next_due = nextDue;
+  if (habit) habit.is_finished = isFinished ? 1 : 0;
   return nextDue;
 }
 
@@ -656,6 +680,13 @@ async function refreshHabits() {
         habit.name = sh.name;
         habit.frequency_rule = sh.frequency_rule || '';
         habit.is_draft = 0;
+        // The pointer row's stored end fields, captured before the mirror
+        // below overwrites them — the row sync further down compares the
+        // shared values against these, not against the mirrored ones.
+        habit._rowEndDate = habit.end_date || null;
+        habit._rowFinished = habit.is_finished ? 1 : 0;
+        habit.end_date = sh.end_date || null;
+        habit.is_finished = sh.is_finished ? 1 : 0;
         habit._shared = sh; // keep reference for completions/metadata
         // Inject shared completions into allHabitCompletions
         if (sh.completions?.length) {
@@ -681,11 +712,17 @@ async function refreshHabits() {
         // Read next_due from shared storage — no local recomputation — unless
         // we have a next_due publish in flight for this habit: shared storage
         // is then stale by construction and the local row (just recomputed)
-        // is newer.
+        // is newer. end_date / is_finished mirror from shared storage in the
+        // same write (they only change alongside a next_due publish).
         const sharedNextDue = sh.next_due != null ? normalizeHabitNextDue(sh.next_due) : null;
-        if (sharedNextDue !== normalizeHabitNextDue(habit.next_due) && !_pendingSharedNextDue.has(habit.shared_id)) {
-          const { error } = await state.db.from('habits').update({ next_due: sharedNextDue }).eq('id', habit.id);
-          if (!error) habit.next_due = sharedNextDue;
+        const sharedFinished = sh.is_finished ? 1 : 0;
+        const sharedEndDate = sh.end_date || null;
+        if ((sharedNextDue !== normalizeHabitNextDue(habit.next_due)
+             || sharedFinished !== habit._rowFinished
+             || sharedEndDate !== habit._rowEndDate)
+            && !_pendingSharedNextDue.has(habit.shared_id)) {
+          const { error } = await state.db.from('habits').update({ next_due: sharedNextDue, is_finished: sharedFinished, end_date: sharedEndDate }).eq('id', habit.id);
+          if (!error) { habit.next_due = sharedNextDue; habit.is_finished = sharedFinished; habit.end_date = sharedEndDate; }
         }
       }
     }
@@ -837,6 +874,7 @@ async function setSharedHabitLastDone(habit, newIso, opts = {}) {
   // Fold an optional next_due into the same staged mutation (one upload).
   const changes = { completions: nextCompletions };
   if (opts.next_due !== undefined) changes.next_due = opts.next_due;
+  if (opts.is_finished !== undefined) changes.is_finished = opts.is_finished;
   await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, changes, opts);
   return latestHabitCompletion(nextCompletions)?.completed_at || null;
 }
@@ -1154,8 +1192,12 @@ function renderHabitItem(habit) {
   const lastDone = getHabitLastDone(habit.id);
   const completionCount = getHabitCompletionCount(habit.id);
   const isDraft = habit.is_draft;
-  const status = isDraft ? 'draft' : habitDueStatus(habit);
-  const dueHtml = isDraft ? `<span class="habit-due draft">${lucideIcon("file-text",16)} ${t('habits.draft')}</span>` : formatHabitDue(habit);
+  const isFinished = !isDraft && !!habit.is_finished;
+  const status = isFinished ? 'finished' : isDraft ? 'draft' : habitDueStatus(habit);
+  const dueHtml = isFinished ? `<span class="habit-due finished">${lucideIcon("flag",16)} ${t('habits.finished')}</span>` : isDraft ? `<span class="habit-due draft">${lucideIcon("file-text",16)} ${t('habits.draft')}</span>` : formatHabitDue(habit);
+  const endsHtml = !isFinished && !isDraft && habit.end_date
+    ? `<span class="habit-ends">${t('habits.ends_on', parseLocalDate(habit.end_date).toLocaleDateString(getLang(), { month: 'short', day: 'numeric', year: 'numeric' }))}</span>`
+    : '';
 
   const lastDoneStr = lastDone
     ? `${t('habits.last_done')}: ${lastDone.toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })} (${formatHabitRelative(lastDone)})`
@@ -1180,7 +1222,7 @@ function renderHabitItem(habit) {
       </div>
       <div class="habit-actions">
         ${promoteBtn}
-        ${!isDraft ? `<button data-habit-id="${esc(habit.id)}" data-action="mark-habit-done" data-id="${esc(habit.id)}" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
+        ${!isDraft && !isFinished ? `<button data-habit-id="${esc(habit.id)}" data-action="mark-habit-done" data-id="${esc(habit.id)}" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
         <button data-action="open-habit-history" data-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list",16)} ${completionCount}</button>
         ${!isShared && !isDraft && state.sharing ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         ${isShared && !isDraft && _myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="unshare-habit" data-id="${esc(habit.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
@@ -1192,6 +1234,7 @@ function renderHabitItem(habit) {
     </div>
     <div class="habit-meta">
       ${dueHtml}
+      ${endsHtml}
       ${!isDraft ? `<span class="habit-last-done habit-last-done-editable" data-action="edit-habit-last-done" data-id="${esc(habit.id)}" title="${t('habits.click_to_edit_last_done')}">${lastDoneStr}</span>` : ''}
     </div>
   </div>`;
@@ -1215,11 +1258,11 @@ function formatHabitRelative(d) {
 // HABIT CRUD
 // ===================================================================
 function addHabitModalHTML() {
-  return `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><textarea id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="1000" data-action="save-new-habit-on-enter" rows="1" style="resize:none;overflow:hidden;"></textarea><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><div id="newHabitGroupRow" style="display:none"><label>${t('sharing.group')}</label><select id="newHabitGroup"><option value="">${t('sharing.no_group')}</option></select></div><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit">${t("common.create")}</button></div></div>`;
+  return `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><textarea id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="1000" data-action="save-new-habit-on-enter" rows="1" style="resize:none;overflow:hidden;"></textarea><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><div id="newHabitGroupRow" style="display:none"><label>${t('sharing.group')}</label><select id="newHabitGroup"><option value="">${t('sharing.no_group')}</option></select></div><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label>${t('habits.end_date_optional')}</label><input type="date" id="newHabitEndDate"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit">${t("common.create")}</button></div></div>`;
 }
 
 function editHabitModalHTML() {
-  return `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><textarea id="editHabitName" maxlength="1000" rows="1" style="resize:none;overflow:hidden;"></textarea><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-modal" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
+  return `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><textarea id="editHabitName" maxlength="1000" rows="1" style="resize:none;overflow:hidden;"></textarea><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><label id="editHabitEndDateLabel">${t('habits.end_date_optional')}</label><input type="date" id="editHabitEndDate"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-modal" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
 }
 
 function habitHistoryModalHTML() {
@@ -1352,6 +1395,7 @@ async function saveNewHabit() {
   const catRow = _habitCatMap.get(catId);
   const catName = catRow?.name ?? '';
   const lastDoneVal = document.getElementById('newHabitLastDone').value;
+  const endDateVal = document.getElementById('newHabitEndDate')?.value || '';
   const isDraft = document.getElementById('newHabitDraft').checked;
   const groupId = document.getElementById('newHabitGroup')?.value || '';
 
@@ -1362,9 +1406,12 @@ async function saveNewHabit() {
     // ─── Shared habit: canonical shared data + local pointer (optimistic) ───
     const sharedId = crypto.randomUUID();
     // Compute next_due purely — a new habit has no existing next_due to guard.
-    const nextDue = isStructuredRule(freq)
+    let nextDue = isStructuredRule(freq)
       ? normalizeHabitNextDue(computeNextDue(freq, lastDoneVal || null))
       : null;
+    // End date: a first due strictly past it means the habit starts finished.
+    const startsFinished = habitFinishedFor(nextDue, endDateVal || null);
+    if (startsFinished) nextDue = null;
     const actor = await getSharedHabitCompletionActor(groupId);
     const sharedItem = {
       id: sharedId,
@@ -1377,6 +1424,8 @@ async function saveNewHabit() {
       updated_at: new Date().toISOString(),
       completions: [],
     };
+    if (endDateVal) sharedItem.end_date = endDateVal;
+    if (startsFinished) sharedItem.is_finished = 1;
     if (nextDue != null) sharedItem.next_due = nextDue;
     if (lastDoneVal) {
       sharedItem.completions.push({
@@ -1414,6 +1463,7 @@ async function saveNewHabit() {
       const { data, error } = await state.db.from('habits').insert({
         name: '', frequency_rule: '', category: catName, category_id: catId, is_draft: 0,
         shared_id: sharedId, shared_group_id: groupId, next_due: nextDue,
+        end_date: endDateVal || null, is_finished: startsFinished ? 1 : 0,
       }).select().single();
       if (error) {
         // Back out the staged shared item — it hasn't uploaded yet.
@@ -1432,6 +1482,7 @@ async function saveNewHabit() {
     // ─── Normal (non-shared) habit ───
     const { data, error } = await state.db.from('habits').insert({
       name, frequency_rule: freq, category: catName, category_id: catId, is_draft: isDraft,
+      end_date: endDateVal || null,
     }).select().single();
     if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
@@ -1439,7 +1490,7 @@ async function saveNewHabit() {
       await state.db.from('habit_completions').insert({ habit_id: data.id, completed_at: habitDateInputToIso(lastDoneVal) });
     }
     if (data?.id) {
-      await updateHabitNextDue(data.id, freq, lastDoneVal || null);
+      await updateHabitNextDue(data.id, freq, lastDoneVal || null, { endDate: endDateVal || null });
     }
 
   closeAddHabitModal();
@@ -1540,9 +1591,10 @@ function editHabitInline(habitId, itemEl) {
           // must not overwrite the fresh local value with stale shared
           // storage. Removed on settlement below — and here if the recompute
           // itself throws, so the id is never stranded.
+          const fin = {};
           _pendingSharedNextDue.add(habit.shared_id);
           try {
-            newNextDue = await updateHabitNextDue(habitId, updates.frequency_rule, lastDone, { earlyGuard: false });
+            newNextDue = await updateHabitNextDue(habitId, updates.frequency_rule, lastDone, { earlyGuard: false, out: fin });
           } catch (e) {
             _pendingSharedNextDue.release(habit.shared_id);
             throw e;
@@ -1550,6 +1602,7 @@ function editHabitInline(habitId, itemEl) {
           // Fold the recomputed next_due into the same staged mutation so the
           // whole edit lands in one debounced upload, not two.
           sharedUpdates.next_due = newNextDue;
+          sharedUpdates.is_finished = fin.isFinished ? 1 : 0;
         }
         if (habit.shared_id) {
           // Optimistic: upload in the background. A failure rolls the in-memory
@@ -1607,6 +1660,8 @@ function openEditHabitModal(habitId) {
     lastDoneInput.value = lastDone ? localDateStr(lastDone) : '';
     lastDoneInput.max = localDateStr(new Date());
   }
+  const endDateInput = document.getElementById('editHabitEndDate');
+  if (endDateInput) endDateInput.value = habit.end_date || '';
   const catColor = getHabitCatColor(catIdForHabit(habit));
   modal.style.setProperty('--cat-color', catColor);
   modal.classList.add('visible');
@@ -1625,6 +1680,7 @@ async function saveEditHabit() {
   const catRow = _habitCatMap.get(catId);
   const catName = catRow?.name ?? '';
   const lastDoneVal = document.getElementById('editHabitLastDone').value;
+  const endDateVal = document.getElementById('editHabitEndDate')?.value || null;
   const habit = state.allHabits.find(c => c.id === id);
 
   if (!name) { showToast(t('habits.enter_habit_name'), 'error'); return; }
@@ -1635,7 +1691,7 @@ async function saveEditHabit() {
   let latestForNextDue = lastDoneVal ? habitDateInputToIso(lastDoneVal) : (prevLastDone?.toISOString() || null);
 
   if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-    await state.db.from('habits').update({ category: catName, category_id: catId }).eq('id', id);
+    await state.db.from('habits').update({ category: catName, category_id: catId, end_date: endDateVal }).eq('id', id);
     // Recompute next_due locally NOW so the list behind the modal shows the
     // new date immediately (see _pendingSharedNextDue) — not only once the
     // debounced uploads land. previewLastDoneLatest mirrors the staging
@@ -1644,8 +1700,9 @@ async function saveEditHabit() {
     const effLatest = previewLastDoneLatest(sh?.completions || [], lastDoneVal ? habitDateInputToIso(lastDoneVal) : null);
     _pendingSharedNextDue.add(habit.shared_id);
     let newNextDue;
+    const fin = {};
     try {
-      newNextDue = await updateHabitNextDue(id, freq, effLatest, { earlyGuard: false });
+      newNextDue = await updateHabitNextDue(id, freq, effLatest, { earlyGuard: false, endDate: endDateVal, out: fin });
     } catch (e) {
       _pendingSharedNextDue.release(habit.shared_id);
       throw e;
@@ -1656,7 +1713,9 @@ async function saveEditHabit() {
     const upload = (async () => {
       // Single staged mutation: name, frequency, completions (if last-done
       // changed) and the recomputed next_due land in one debounced upload.
-      const changes = { name, frequency_rule: freq, next_due: newNextDue };
+      // end_date / is_finished ride the same mutation — the finished state is
+      // the recompute's outcome (fin), never the captured habit object.
+      const changes = { name, frequency_rule: freq, next_due: newNextDue, end_date: endDateVal, is_finished: fin.isFinished ? 1 : 0 };
       if (lastDoneVal !== prevDateStr) {
         changes.completions = await computeSharedLastDoneCompletions(habit, lastDoneVal ? habitDateInputToIso(lastDoneVal) : null);
       }
@@ -1677,8 +1736,9 @@ async function saveEditHabit() {
       }
     );
   } else {
-    const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: catName, category_id: catId }).eq('id', id);
+    const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: catName, category_id: catId, end_date: endDateVal }).eq('id', id);
     if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+    if (habit) habit.end_date = endDateVal;
 
     if (lastDoneVal !== prevDateStr) {
       try {
@@ -1689,7 +1749,7 @@ async function saveEditHabit() {
         return;
       }
     }
-    await updateHabitNextDue(id, freq, latestForNextDue, { earlyGuard: false });
+    await updateHabitNextDue(id, freq, latestForNextDue, { earlyGuard: false, endDate: endDateVal });
   }
 
   closeEditHabitModal();
@@ -1778,11 +1838,12 @@ async function markHabitDone(habitId, btnEl) {
       // The whole pre-upload section is under the cleanup guarantee: a
       // throwing recompute OR actor lookup releases the marker, so it is
       // never stranded with no upload to settle it.
+      const fin = {};
       _pendingSharedNextDue.add(habit.shared_id);
       let newNextDue;
       let completion;
       try {
-        newNextDue = await updateHabitNextDue(habitId, habit.frequency_rule, now);
+        newNextDue = await updateHabitNextDue(habitId, habit.frequency_rule, now, { out: fin });
         // Optimistic: refresh on staging; the uploads run in the background.
         // A failure rolls the in-memory completion back (adapter) and refreshes.
         completion = {
@@ -1799,7 +1860,7 @@ async function markHabitDone(habitId, btnEl) {
       const upload = (async () => {
         // Publish the locally recomputed next_due in the same staged mutation
         // so other members read it directly — one debounced upload, not two.
-        await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion, { onStaged, next_due: newNextDue });
+        await state.sharing.addSharedHabitCompletion(habit.shared_group_id, habit.shared_id, completion, { onStaged, next_due: newNextDue, is_finished: fin.isFinished ? 1 : 0 });
       })();
       upload.then(
         () => {
@@ -1877,8 +1938,9 @@ function editHabitLastDone(habitId, event, triggerEl) {
         const effLatest = previewLastDoneLatest(sh?.completions || [], newIso);
         _pendingSharedNextDue.add(habit.shared_id);
         let newNextDue;
+        const fin = {};
         try {
-          newNextDue = await updateHabitNextDue(habitId, habit.frequency_rule, effLatest, { earlyGuard: false });
+          newNextDue = await updateHabitNextDue(habitId, habit.frequency_rule, effLatest, { earlyGuard: false, out: fin });
         } catch (e) {
           _pendingSharedNextDue.release(habit.shared_id);
           throw e;
@@ -1889,7 +1951,7 @@ function editHabitLastDone(habitId, event, triggerEl) {
         let onStaged;
         const staged = new Promise(resolve => { onStaged = resolve; });
         const upload = (async () => {
-          latestForNextDue = await setSharedHabitLastDone(habit, newIso, { onStaged, next_due: newNextDue });
+          latestForNextDue = await setSharedHabitLastDone(habit, newIso, { onStaged, next_due: newNextDue, is_finished: fin.isFinished ? 1 : 0 });
         })();
         upload.then(
           () => {
@@ -2005,8 +2067,9 @@ async function deleteHabitCompletion(compId) {
           // value. Never strand the id if the recompute throws.
           _pendingSharedNextDue.add(habit.shared_id);
           let newNextDue;
+          const fin = {};
           try {
-            newNextDue = await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
+            newNextDue = await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false, out: fin });
           } catch (e) {
             _pendingSharedNextDue.release(habit.shared_id);
             throw e;
@@ -2017,7 +2080,7 @@ async function deleteHabitCompletion(compId) {
             // Publish the recompute's return value, not habit.next_due: the
             // closure's habit object can go stale if a refresh replaces
             // state.allHabits before this runs.
-            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions, next_due: newNextDue });
+            await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions, next_due: newNextDue, is_finished: fin.isFinished ? 1 : 0 });
           })();
           upload.then(
             // No success re-render (see below): the failure branch still
@@ -2106,8 +2169,9 @@ async function saveHabitCompletion(compId) {
       // strand the id if the recompute throws.
       _pendingSharedNextDue.add(habit.shared_id);
       let newNextDue;
+      const fin = {};
       try {
-        newNextDue = await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false });
+        newNextDue = await updateHabitNextDue(habit.id, habit.frequency_rule, latest, { earlyGuard: false, out: fin });
       } catch (e) {
         _pendingSharedNextDue.release(habit.shared_id);
         throw e;
@@ -2117,7 +2181,7 @@ async function saveHabitCompletion(compId) {
       const upload = (async () => {
         // Publish the recompute's return value, not habit.next_due (stale
         // closure — see markHabitDone).
-        await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions, next_due: newNextDue });
+        await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { completions: nextCompletions, next_due: newNextDue, is_finished: fin.isFinished ? 1 : 0 });
       })();
       upload.then(
         // No success re-render (see below): the failure branch still
@@ -2428,7 +2492,7 @@ document.addEventListener('input', e => {
   }
 });
 
-export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, initHabitHoverDelay, isStructuredRule, normalizeFrequencyRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName, computeNextDue };
+export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, habitFinishedFor, initHabitHoverDelay, isStructuredRule, normalizeFrequencyRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName, computeNextDue };
 
 window.setHabitFilter = setHabitFilter;
 window.openAddHabitModal = openAddHabitModal;
@@ -2458,9 +2522,13 @@ async function shareExistingHabit(id, el) {
           completed_by: actor,
         }));
       const lastDone = localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null;
-      const nextDue = isStructuredRule(habit.frequency_rule)
+      let nextDue = isStructuredRule(habit.frequency_rule)
         ? normalizeHabitNextDue(computeNextDue(habit.frequency_rule, lastDone))
         : null;
+      // The end date travels with the habit; a recomputed due past it means
+      // the shared copy starts finished, like the personal one was.
+      const sharedFinished = habitFinishedFor(nextDue, habit.end_date || null);
+      if (sharedFinished) nextDue = null;
       const sharedItem = {
         id: sharedId,
         item_type: 'habit',
@@ -2472,6 +2540,8 @@ async function shareExistingHabit(id, el) {
         updated_at: new Date().toISOString(),
         completions: localCompletions,
       };
+      if (habit.end_date) sharedItem.end_date = habit.end_date;
+      if (sharedFinished) sharedItem.is_finished = 1;
       if (nextDue != null) sharedItem.next_due = nextDue;
       // 1. Stage the shared item in memory first: this marks the created
       // intent and the dirty type, so the poll skips it and the
@@ -2510,6 +2580,7 @@ async function shareExistingHabit(id, el) {
         name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
         category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
         shared_id: sharedId, shared_group_id: groupId, next_due: nextDue,
+        end_date: habit.end_date || null, is_finished: sharedFinished ? 1 : 0,
       }).select().single();
       if (ptrErr) {
         // Back out the staged shared item — it hasn't uploaded yet.
@@ -2563,9 +2634,11 @@ async function bulkShareHabitCategory(catId, el) {
               .filter(c => c.habit_id === habit.id)
               .map(c => ({ id: crypto.randomUUID(), completed_at: c.completed_at, completed_by: actor }));
             const lastDone = localCompletions.length ? localCompletions[localCompletions.length - 1].completed_at : null;
-            const nextDue = isStructuredRule(habit.frequency_rule)
+            let nextDue = isStructuredRule(habit.frequency_rule)
               ? normalizeHabitNextDue(computeNextDue(habit.frequency_rule, lastDone))
               : null;
+            const sharedFinished = habitFinishedFor(nextDue, habit.end_date || null);
+            if (sharedFinished) nextDue = null;
             const sharedItem = {
               id: sharedId, item_type: 'habit',
               name: habit.name, frequency_rule: habit.frequency_rule,
@@ -2575,6 +2648,8 @@ async function bulkShareHabitCategory(catId, el) {
               updated_at: new Date().toISOString(),
               completions: localCompletions,
             };
+            if (habit.end_date) sharedItem.end_date = habit.end_date;
+            if (sharedFinished) sharedItem.is_finished = 1;
             if (nextDue != null) sharedItem.next_due = nextDue;
             // Snapshots for rollback — taken before the local deletes below.
             const personalHabit = { ...habit };
@@ -2594,6 +2669,7 @@ async function bulkShareHabitCategory(catId, el) {
               category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
               created_at: habit.created_at || new Date().toISOString(),
               shared_id: sharedId, shared_group_id: groupId, next_due: nextDue,
+              end_date: habit.end_date || null, is_finished: sharedFinished ? 1 : 0,
             }).select().single();
             if (ptrErr) {
               // Back out the staged shared item — it hasn't uploaded yet.
@@ -2668,6 +2744,8 @@ async function unshareHabit(id, el) {
           category_id: habit.category_id || _defaultHabitCatId,
           is_draft: 0,
           next_due: habit.next_due || null,
+          end_date: habit.end_date || null,
+          is_finished: habit.is_finished ? 1 : 0,
         }).select().single();
         if (insErr) { showToast(insErr.message, 'error'); return; }
         // 2. Recreate completions locally
@@ -2734,6 +2812,8 @@ async function copyHabitToPersonal(id, el) {
       category_id: targetCatId,
       is_draft: 0,
       next_due: habit.next_due || null,
+      end_date: habit.end_date || null,
+      is_finished: habit.is_finished ? 1 : 0,
     }).select().single();
     if (insErr) { showToast(insErr.message, 'error'); return; }
     // Copy completions

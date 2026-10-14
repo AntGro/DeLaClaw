@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS habits (
   category_id TEXT REFERENCES habit_categories(id) ON DELETE CASCADE,
   is_draft INTEGER DEFAULT 0,
   next_due TEXT,
+  end_date TEXT,
+  is_finished INTEGER DEFAULT 0,
   shared_id TEXT,
   shared_group_id TEXT,
   owner_id TEXT,

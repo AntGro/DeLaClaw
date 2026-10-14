@@ -89,6 +89,7 @@ function collectRangeEvents(start, end) {
   for (const h of state.allHabits || []) {
     if (!calShow.habit) break;
     if (h.is_draft) continue;
+    if (h.is_finished) continue;
     const rule = normalizeFrequencyRule(h.frequency_rule || '');
     const hCatId = catIdForHabit(h);
     const hBase = {
@@ -99,11 +100,11 @@ function collectRangeEvents(start, end) {
     };
     if (rule && !isStructuredRule(rule)) {
       const d = (h.next_due || '').slice(0, 10);
-      if (d >= start && d <= end) push(d, { ...hBase });
+      if (d && d >= start && d <= end && !(h.end_date && d > h.end_date)) push(d, { ...hBase });
       continue;
     }
     const occ = expandHabitOccurrences(
-      { frequency_rule: rule, next_due: h.next_due },
+      { frequency_rule: rule, next_due: h.next_due, end_date: h.end_date },
       start, end,
       (r, lastDone) => computeNextDue(r, lastDone),
     );

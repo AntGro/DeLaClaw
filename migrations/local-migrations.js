@@ -549,4 +549,10 @@ export const LOCAL_MIGRATIONS = {
     DROP TABLE daily_visits;
     ALTER TABLE daily_visits_new RENAME TO daily_visits;
   `,
+  '2.18.0': `
+    -- Habit end date: optional end_date (local YYYY-MM-DD) + is_finished
+    -- state, set when the recomputed next_due falls strictly past end_date.
+    ALTER TABLE habits ADD COLUMN end_date TEXT;
+    ALTER TABLE habits ADD COLUMN is_finished INTEGER DEFAULT 0;
+  `,
 };

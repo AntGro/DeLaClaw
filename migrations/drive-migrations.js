@@ -360,4 +360,12 @@ export const DRIVE_MIGRATIONS = {
       last_connection_date: maxDate,
     }];
   },
+  '2.18.0': async (store) => {
+    // 2.18.0: habit end date — ensure the additive fields exist with their
+    // defaults on existing rows (no end date, not finished).
+    for (const row of (store.habits || [])) {
+      if (row.end_date == null) row.end_date = null;
+      if (row.is_finished == null) row.is_finished = 0;
+    }
+  },
 };

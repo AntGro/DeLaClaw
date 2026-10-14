@@ -63,9 +63,14 @@ export function getMonthGrid(year, month) {
 export function expandHabitOccurrences(habit, monthStart, monthEnd, nextDueFn) {
   const out = [];
   const rule = habit.frequency_rule || '';
+  // End date: no occurrence is ever shown strictly past it (an occurrence
+  // exactly on the end date still counts). The range end is capped, so
+  // stepping also stops there instead of walking to monthEnd.
+  const endDate = (habit.end_date || '').slice(0, 10);
+  const limit = endDate && endDate < monthEnd ? endDate : monthEnd;
   if (!rule) {
     const nd = (habit.next_due || '').slice(0, 10);
-    if (nd && nd >= monthStart && nd <= monthEnd) out.push(nd);
+    if (nd && nd >= monthStart && nd <= limit) out.push(nd);
     return out;
   }
   let cursor = (habit.next_due || '').slice(0, 10) || null;
@@ -87,7 +92,7 @@ export function expandHabitOccurrences(habit, monthStart, monthEnd, nextDueFn) {
     if (!step()) { cursor = null; break; }
   }
   guard = 0;
-  while (cursor && cursor <= monthEnd && guard++ < 500) {
+  while (cursor && cursor <= limit && guard++ < 500) {
     if (cursor >= monthStart) out.push(cursor);
     if (!step()) break;
   }

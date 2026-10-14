@@ -251,7 +251,7 @@ bun run server.js</pre>
       <button class="view-tab active" id="tabProjects" data-action="switch-view" data-view="projects"><span data-icon="layout-grid" data-size="18" data-color="currentColor"></span> <span class="tab-label">Projects</span></button>
       <button class="view-tab" id="tabTodos" data-action="switch-view" data-view="todos"><span data-icon="list-checks" data-size="18" data-color="currentColor"></span> <span class="tab-label">TODOs</span></button>
       <button class="view-tab" id="tabHabits" data-action="switch-view" data-view="habits"><span data-icon="repeat" data-size="18" data-color="currentColor"></span> <span class="tab-label">Habits</span></button>
-      <button class="view-tab" id="tabBirthdays" data-action="switch-view" data-view="birthdays"><span data-icon="cake" data-size="18" data-color="currentColor"></span> <span class="tab-label">Birthdays</span></button>
+      <button class="view-tab" id="tabCalendar" data-action="switch-view" data-view="calendar"><span data-icon="calendar" data-size="18" data-color="currentColor"></span> <span class="tab-label">Calendar</span></button>
       <button class="view-tab" id="tabFlashcards" data-action="switch-view" data-view="flashcards"><span data-icon="brain" data-size="18" data-color="currentColor"></span> <span class="tab-label">Memory</span></button>
       <button class="view-tab" id="tabLists" data-action="switch-view" data-view="lists"><span data-icon="list" data-size="18" data-color="currentColor"></span> <span class="tab-label">Lists</span></button>
       <button class="view-tab" id="tabGroups" data-action="switch-view" data-view="groups"><span data-icon="users" data-size="18" data-color="currentColor"></span> <span class="tab-label">Group</span></button>
@@ -361,10 +361,6 @@ bun run server.js</pre>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <div class="habit-view-toggle" id="habitViewToggle">
-          <button class="active" data-view="list" data-action="set-habit-view-mode" data-view="list"><span data-icon="list" data-size="14"></span></button>
-          <button data-view="calendar" data-action="set-habit-view-mode" data-view="calendar"><span data-icon="calendar" data-size="14"></span></button>
-        </div>
         <button class="btn" data-action="open-add-habit" title="Add habit"><span data-icon="plus" data-size="16"></span></button>
         <button class="btn" data-action="open-habit-import" title="Import"><span data-icon="upload" data-size="16"></span></button>
         <button class="btn" data-action="open-add-habit-category" title="Add category"><span data-icon="folder-plus" data-size="16"></span></button>
@@ -377,36 +373,49 @@ bun run server.js</pre>
     <div class="category-nav-buttons" id="habitNavButtons"></div>
     <div class="main-content">
       <div class="project-grid" id="habitCategoryGrid"></div>
-      <div class="habit-calendar-container" id="habitCalendarContainer" style="display:none;"></div>
     </div>
   </div>
 
   <!-- ===== BIRTHDAYS VIEW ===== -->
-  <div id="birthdaysView" style="display:none;">
+  <div id="calendarView" style="display:none;">
     <div class="page-toolbar">
       <div class="page-toolbar-left">
-        <div class="page-filters" id="birthdayFilters">
-          <button class="filter-btn active" data-filter="all" data-action="set-birthday-filter" data-filter="all">All</button>
-          <button class="filter-btn" data-filter="upcoming" data-action="set-birthday-filter" data-filter="upcoming">Upcoming</button>
-          <button class="filter-btn" data-filter="this-month" data-action="set-birthday-filter" data-filter="this-month">This Month</button>
-          <select id="birthdaySortBy" class="page-sort" data-action="sort-birthdays">
-            <option value="upcoming">Next birthday</option>
-            <option value="name">Name</option>
-            <option value="age">Age</option>
-          </select>
+        <button class="btn" data-action="calendar-prev" title="Previous month"><span data-icon="chevron-left" data-size="16"></span></button>
+        <button class="btn btn-labeled" id="calendarTodayBtn" data-action="calendar-today"><span class="btn-label">Today</span></button>
+        <button class="btn" data-action="calendar-next" title="Next month"><span data-icon="chevron-right" data-size="16"></span></button>
+        <div class="calendar-add-wrap">
+          <span class="calendar-month-label" id="calendarMonthLabel"></span>
+          <div class="calendar-add-menu" id="calendarPickerMenu" style="display:none" role="menu"></div>
+        </div>
+        <div class="calendar-add-wrap">
+          <button class="btn" data-action="toggle-calendar-add" data-menu="calendarViewMenu" title="View" aria-expanded="false" aria-haspopup="true"><span data-icon="calendar-days" data-size="16"></span></button>
+          <div class="calendar-add-menu" id="calendarViewMenu" style="display:none" role="menu">
+            <button data-action="set-calendar-view" data-view="day" role="menuitemradio" aria-checked="false"><span id="calendarViewDay">Day</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
+            <button data-action="set-calendar-view" data-view="week" role="menuitemradio" aria-checked="false"><span id="calendarViewWeek">Week</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
+            <button data-action="set-calendar-view" data-view="month" class="active" role="menuitemradio" aria-checked="true"><span id="calendarViewMonth">Month</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
+            <button data-action="set-calendar-view" data-view="year" role="menuitemradio" aria-checked="false"><span id="calendarViewYear">Year</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
+          </div>
+        </div>
+        <div class="calendar-add-wrap">
+          <button class="btn" data-action="toggle-calendar-add" data-menu="calendarFilterMenu" title="Filter" aria-expanded="false" aria-haspopup="true"><span data-icon="funnel" data-size="16"></span></button>
+          <div class="calendar-add-menu" id="calendarFilterMenu" style="display:none" role="menu">
+            <button data-action="toggle-calendar-filter" data-filter="todo" class="active" role="menuitemcheckbox" aria-checked="true"><i class="cal-swatch cal-todo"></i><span id="calendarFilterTodos">TODOs</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
+            <button data-action="toggle-calendar-filter" data-filter="habit" class="active" role="menuitemcheckbox" aria-checked="true"><i class="cal-swatch cal-habit"></i><span id="calendarFilterHabits">Habits</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
+            <button data-action="toggle-calendar-filter" data-filter="birthday" class="active" role="menuitemcheckbox" aria-checked="true"><i class="cal-swatch cal-birthday"></i><span id="calendarFilterBirthdays">Birthdays</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
+          </div>
         </div>
       </div>
       <div class="page-toolbar-right">
-        <button class="btn" data-action="open-add-birthday" title="Add birthday"><span data-icon="plus" data-size="16"></span></button>
-        <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search birthdays…" data-action="filter-birthdays"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+        <div class="calendar-add-wrap">
+          <button class="btn" id="calendarAddBtn" data-action="toggle-calendar-add" data-menu="calendarAddMenu" title="Add" aria-expanded="false" aria-haspopup="true"><span data-icon="plus" data-size="16"></span></button>
+          <div class="calendar-add-menu" id="calendarAddMenu" style="display:none" role="menu">
+            <button data-action="open-add-birthday" role="menuitem"><span data-icon="cake" data-size="15"></span> <span id="calendarAddBirthdayLabel">Birthday</span></button>
+          </div>
         </div>
       </div>
     </div>
-    <div class="category-nav-buttons" id="birthdayNavButtons"></div>
     <div class="main-content">
-      <div class="project-grid" id="birthdayGrid"></div>
+      <div class="calendar-grid" id="calendarGrid"></div>
     </div>
   </div>
 

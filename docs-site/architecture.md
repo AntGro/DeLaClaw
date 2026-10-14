@@ -193,7 +193,8 @@ js/
   todos.js                 TODO management
   habits.js                Habit tracking
   flashcards.js            Flashcard SRS + text memorization
-  birthdays.js             Birthday tracker
+  birthdays.js             Birthday data + CRUD modals (no page; surfaces on Calendar)
+  calendar.js              Calendar page (todos, habits, birthdays month grid)
   lists.js                 Checklists
   i18n.js                  Translation strings (en/fr/es)
   icons.js                 Lucide icon rendering + path data

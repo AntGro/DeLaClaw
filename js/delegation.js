@@ -45,13 +45,10 @@
       case 'set-project-filter': callWindow('setProjectFilter', [el.dataset.filter]); break;
       case 'set-todo-filter': callWindow('setTodoFilter', [el.dataset.filter]); break;
       case 'set-habit-filter': callWindow('setHabitFilter', [el.dataset.filter]); break;
-      case 'set-birthday-filter': callWindow('setBirthdayFilter', [el.dataset.filter]); break;
       case 'set-flashcard-filter': callWindow('setFlashcardFilter', [el.dataset.filter]); break;
-      case 'set-habit-view-mode': callWindow('setHabitViewMode', [el.dataset.view]); break;
       case 'sort-projects': callWindow('renderProjectGrid', []); break;
       case 'sort-todos': callWindow('renderTodos', []); break;
       case 'sort-habits': callWindow('renderHabits', []); break;
-      case 'sort-birthdays': callWindow('renderBirthdays', []); break;
       case 'sort-flashcards': callWindow('renderFlashcards', []); break;
       case 'sort-lists': callWindow('renderLists', []); break;
       case 'handle-model-change': callWindow('handleModelChange', []); break;
@@ -66,7 +63,7 @@
       case 'unshare-habit': callWindow('unshareHabit', [getId(el), el]); break;
       case 'copy-habit-to-personal': callWindow('copyHabitToPersonal', [getId(el), el]); break;
       case 'open-add-habit-category': callWindow('openAddHabitCategoryModal', []); break;
-      case 'open-add-birthday': callWindow('openAddBirthdayModal', []); break;
+      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('closeCalendarDay', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
       case 'open-add-flash-deck': callWindow('openAddFlashDeckModal', []); break;
       case 'open-add-list': callWindow('openAddListModal', []); break;
       case 'open-import': callWindow('openImportModal', []); break;
@@ -149,9 +146,6 @@
       case 'delete-habit-completion': callWindow('deleteHabitCompletion', [el.dataset.id||getId(el)]); break;
       case 'save-habit-completion': callWindow('saveHabitCompletion', [el.dataset.id||getId(el)]); break;
       case 'cancel-edit-completion': callWindow('cancelEditCompletion', [el.dataset.id||getId(el)]); break;
-      case 'navigate-habit-calendar': callWindow('navigateHabitCalendar', [parseInt(el.dataset.delta||'0',10)]); break;
-      case 'navigate-habit-calendar-today': callWindow('navigateHabitCalendarToday', []); break;
-      case 'toggle-habit-cal-scale': callWindow('toggleHabitCalScale', []); break;
       case 'navigate-to-flash-deck': callWindow('navigateToFlashDeck', [el.dataset.deck||getId(el)]); break;
       case 'quick-add-draft': callWindow('quickAddDraft', []); break;
       case 'update-proposed-deck': callWindow('updateProposedDeck', [getId(el), el.value||el.dataset.deck]); break;
@@ -217,9 +211,41 @@
       case 'delete-all-archived-tasks': callWindow('deleteAllArchivedTasks', []); break;
       case 'approve-task-and-close': { var atId = el.dataset.taskId||getId(el); var atSt = el.dataset.status; if (window.updateTaskStatus) window.updateTaskStatus(atId, atSt, el); callWindow('closeRevisionModal', []); } break;
       case 'close-and-open-revision': { var coId = el.dataset.taskId||getId(el); var coSt = el.dataset.status; if (window.updateTaskStatus) window.updateTaskStatus(coId, coSt, el); callWindow('closeRevisionModal', []); if (window.openRevisionModal) setTimeout(function(){ window.openRevisionModal(coId); }, 120); } break;
-      case 'open-add-birthday': callWindow('openAddBirthdayModal', []); break;
-      case 'navigate-to-birthday-section': callWindow('navigateToBirthdaySection', [el.dataset.key||el.dataset.category||getCat(el)]); break;
+      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('closeCalendarDay', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
       case 'handle-avatar-click': callWindow('handleAvatarClick', [getId(el)]); break;
+      case 'calendar-prev': callWindow('calendarNav', [-1]); break;
+      case 'calendar-next': callWindow('calendarNav', [1]); break;
+      case 'calendar-today': callWindow('calendarToday', []); break;
+      case 'toggle-calendar-filter': callWindow('toggleCalendarFilter', [el.dataset.filter]); break;
+      case 'open-welcome-birthday': callWindow('openCalendarDate', [el.dataset.date]); break;
+      case 'set-calendar-view': callWindow('closeCalendarAddMenu', []); callWindow('setCalendarView', [el.dataset.view, el.dataset]); break;
+      case 'open-calendar-picker': callWindow('openCalendarPicker', [el.dataset.picker, el]); break;
+      case 'pick-calendar-month': callWindow('pickCalendarMonth', [el.dataset.month]); break;
+      case 'pick-calendar-year': callWindow('pickCalendarYear', [el.dataset.year]); break;
+      case 'open-calendar-day': callWindow('openCalendarDay', [el.dataset.date]); break;
+      case 'close-calendar-day': callWindow('closeCalendarDay', []); break;
+      case 'toggle-calendar-add': callWindow('toggleCalendarAddMenu', [el]); break;
+      case 'edit-birthday-avatar': callWindow('handleAvatarClick', [el.dataset.id]); break;
+      case 'calendar-birthday-edit': callWindow('closeCalendarDay', []); callWindow('openEditBirthdayModal', [el.dataset.id]); break;
+      case 'calendar-toggle-todo': {
+        var ctDone = el.dataset.done === 'true';
+        var ctDate = el.dataset.date;
+        Promise.resolve(window.toggleTodo ? window.toggleTodo(el.dataset.todoId, ctDone, el) : null)
+          .catch(function(){}).then(function() {
+            if (window.renderCalendar) window.renderCalendar();
+            if (window.renderCalendarDayPanel) window.renderCalendarDayPanel(ctDate);
+          });
+        break;
+      }
+      case 'calendar-habit-done': {
+        var chDate = el.dataset.date;
+        Promise.resolve(window.markHabitDone ? window.markHabitDone(el.dataset.habitId, el) : null)
+          .catch(function(){}).then(function() {
+            if (window.renderCalendar) window.renderCalendar();
+            if (window.renderCalendarDayPanel) window.renderCalendarDayPanel(chDate);
+          });
+        break;
+      }
       case 'open-edit-birthday': callWindow('openEditBirthdayModal', [getId(el)]); break;
       case 'delete-birthday': callWindow('deleteBirthday', [getId(el)]); break;
       case 'pick-new-birthday-avatar': callWindow('pickNewBirthdayAvatar', []); break;
@@ -311,11 +337,11 @@
       case 'sort-projects': callWindow('renderProjectGrid', []); break;
       case 'sort-todos': callWindow('renderTodos', []); break;
       case 'sort-habits': callWindow('renderHabits', []); break;
-      case 'sort-birthdays': callWindow('renderBirthdays', []); break;
       case 'sort-flashcards': callWindow('renderFlashcards', []); break;
       case 'sort-lists': callWindow('renderLists', []); break;
       case 'handle-model-change': callWindow('handleModelChange', []); break;
       case 'update-next-sibling-category': { var nxt = el.nextElementSibling; if (nxt && nxt.dataset) nxt.dataset.category = el.value; } break;
+      case 'pick-calendar-day': callWindow('pickCalendarDay', [el.value]); break;
       case 'update-proposed-deck': callWindow('updateProposedDeck', [el.dataset.id||el.dataset.todoId, el.value]); break;
       default: break;
     }
@@ -334,7 +360,6 @@
           case 'filter-projects': callWindow('filterProjects', [e]); break;
           case 'filter-todos': callWindow('filterTodos', [e]); break;
           case 'filter-habits': callWindow('filterHabits', [e]); break;
-          case 'filter-birthdays': callWindow('filterBirthdays', [e]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [e]); break;
           case 'filter-lists': callWindow('filterLists', [e]); break;
           default: break;
@@ -350,7 +375,6 @@
           case 'filter-projects': callWindow('filterProjects', [fakeEvt]); break;
           case 'filter-todos': callWindow('filterTodos', [fakeEvt]); break;
           case 'filter-habits': callWindow('filterHabits', [fakeEvt]); break;
-          case 'filter-birthdays': callWindow('filterBirthdays', [fakeEvt]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [fakeEvt]); break;
           case 'filter-lists': callWindow('filterLists', [fakeEvt]); break;
           default: break;

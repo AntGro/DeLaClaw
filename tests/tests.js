@@ -561,16 +561,6 @@ test('Flashcard items use border-left color from retrievability (no strength bar
 // ===================================================================
 // 15. Birthday hover actions use correct rowSelector
 // ===================================================================
-test('Birthday hover delay uses .birthday-info as rowSelector (not .birthday-card)', () => {
-  const birthJs = jsFiles['birthdays.js'];
-  const hoverCall = birthJs.match(/initItemHoverDelay\([\s\S]*?rowSelector:\s*'([^']+)'/);
-  assert(hoverCall, 'initItemHoverDelay should be called for birthdays');
-  assert(hoverCall[1] === '.birthday-info', 
-    `rowSelector should be '.birthday-info' (got '${hoverCall[1]}') — querySelector doesn't match self`);
-});
-
-
-// ===================================================================
 // 17. All lucideIcon() calls reference icons defined in LUCIDE_PATHS
 // ===================================================================
 test('All lucideIcon() calls reference defined icons', () => {
@@ -618,7 +608,7 @@ test('No ondblclick HTML attributes in JS files (use initItemHoverDelay onDblCli
 // 19. Double-click edit: all initItemHoverDelay calls include onDblClick
 // ===================================================================
 test('All initItemHoverDelay calls include onDblClick callback', () => {
-  const pages = ['projects.js', 'todos.js', 'habits.js', 'birthdays.js', 'flashcards.js'];
+  const pages = ['projects.js', 'todos.js', 'habits.js', 'flashcards.js'];
   for (const file of pages) {
     const content = jsFiles[file];
     if (!content) continue;
@@ -643,7 +633,6 @@ test('Double-click onDblClick triggers inline edit (not modal) on all pages', ()
     'projects.js': { dblClickFn: 'promptEditTask', mustUse: 'inlineEditText' },
     'todos.js': { dblClickFn: 'editTodoInline', mustUse: 'inlineEditText' },
     'habits.js': { dblClickFn: 'editHabitInline', mustUse: 'inlineEditText' },
-    'birthdays.js': { dblClickFn: 'editBirthdayInline', mustUse: 'inlineEditText' },
     'flashcards.js': { dblClickFn: 'editFlashcardInline', mustUse: 'inlineEditText' },
   };
   for (const [file, { dblClickFn, mustUse }] of Object.entries(inlinePages)) {
@@ -4103,6 +4092,93 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const ctxReal = { ...ctx, categoryNames: ['Admin', 'General'] };
       r = validateTodoImportItem({ title: 'X', category: 'general' }, 6, ctxReal);
       assert(r.item.category === 'General' && !r.item.categoryIsNew, 'real "General" category must win');
+    });
+
+    test('calendar-pure: month grid, habit expansion, birthdays', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      const { toDateStr, getMonthGrid, expandHabitOccurrences, birthdayInMonth, toggleShow, addDays, getWeekDates } = mod;
+
+      assert(toDateStr(2026, 9, 5) === '2026-10-05', 'toDateStr pads correctly');
+
+      // October 2026: Oct 1 is a Thursday → grid starts Mon Sep 28, 5 weeks
+      const oct = getMonthGrid(2026, 9);
+      assert(oct.length === 5, 'Oct 2026 has 5 weeks, got ' + oct.length);
+      assert(oct[0][0].date === '2026-09-28' && !oct[0][0].inMonth, 'starts Mon Sep 28 (outside)');
+      assert(oct[0][3].date === '2026-10-01' && oct[0][3].inMonth, 'Oct 1 is Thursday of week 1');
+      assert(oct[4][6].date === '2026-11-01' && !oct[4][6].inMonth, 'ends Sun Nov 1 (outside)');
+      for (const w of oct) assert(w.length === 7, 'every week has 7 days');
+
+      // February 2026 (non-leap): Feb 1 is a Sunday → starts Mon Jan 26, 5 weeks
+      const feb = getMonthGrid(2026, 1);
+      assert(feb.length === 5, 'Feb 2026 has 5 weeks, got ' + feb.length);
+      assert(feb[0][0].date === '2026-01-26', 'starts Mon Jan 26');
+      assert(feb[4][5].date === '2026-02-28' && feb[4][5].inMonth, 'Sat Feb 28 in month');
+      assert(feb[4][6].date === '2026-03-01' && !feb[4][6].inMonth, 'ends Sun Mar 1 (outside)');
+
+      // Habit expansion with an injected next-due function (every 2 days)
+      const every2 = (rule, last) => {
+        const base = last ? new Date(last + 'T00:00:00') : new Date(2026, 8, 30);
+        base.setDate(base.getDate() + 2);
+        const p = n => String(n).padStart(2, '0');
+        return `${base.getFullYear()}-${p(base.getMonth() + 1)}-${p(base.getDate())}`;
+      };
+      let occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-01' }, '2026-10-01', '2026-10-31', every2);
+      assert(occ.length === 16 && occ[0] === '2026-10-01' && occ[15] === '2026-10-31',
+        'every-2-days across October: ' + occ.length + ' occurrences');
+
+      // Stale next_due fast-forwards into the month
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-09-01' }, '2026-10-01', '2026-10-31', every2);
+      assert(occ[0] === '2026-10-01', 'fast-forward lands on Oct 1, got ' + occ[0]);
+
+      // No next_due: starts from the function's first occurrence
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: null }, '2026-10-01', '2026-10-31', every2);
+      assert(occ[0] === '2026-10-02', 'null next_due seeds from fn, got ' + occ[0]);
+
+      // Free-text rule: single pin on next_due when in range
+      occ = expandHabitOccurrences(
+        { frequency_rule: '', next_due: '2026-10-15' }, '2026-10-01', '2026-10-31', every2);
+      assert(occ.length === 1 && occ[0] === '2026-10-15', 'free-text pins next_due');
+      occ = expandHabitOccurrences(
+        { frequency_rule: '', next_due: '2026-11-15' }, '2026-10-01', '2026-10-31', every2);
+      assert(occ.length === 0, 'out-of-range next_due gives nothing');
+
+      // Non-progressing function terminates
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'x', next_due: '2026-10-01' }, '2026-10-01', '2026-10-31', () => '2026-10-01');
+      assert(occ.length === 1, 'stalled nextDueFn terminates');
+
+      // Birthdays
+      let b = birthdayInMonth('1990-10-15', 2026, 9);
+      assert(b && b.date === '2026-10-15' && b.turningAge === 36, 'birthday in month');
+      b = birthdayInMonth('1990-10-15', 2026, 8);
+      assert(b === null, 'birthday in another month is null');
+      b = birthdayInMonth('2000-02-29', 2024, 1);
+      assert(b && b.date === '2024-02-29', 'Feb 29 on leap year');
+      b = birthdayInMonth('2000-02-29', 2026, 1);
+      assert(b === null, 'Feb 29 overflows out of Feb on non-leap years');
+      b = birthdayInMonth('2000-02-29', 2026, 2);
+      assert(b && b.date === '2026-03-01', 'Feb 29 lands on Mar 1 (matches app overflow)');
+      b = birthdayInMonth('not-a-date', 2026, 9);
+      assert(b === null, 'garbage birthday is null');
+
+      // Filter toggles
+      const show = { todo: true, habit: true, birthday: true };
+      const off = toggleShow(show, 'habit');
+      assert(off.habit === false && off.todo === true && show.habit === true, 'toggleShow flips one key immutably');
+      assert(toggleShow(show, 'nope') === show, 'unknown filter type returns same reference');
+
+      // Week helpers
+      assert(addDays('2026-10-15', 1) === '2026-10-16', 'addDays forward');
+      assert(addDays('2026-10-15', -15) === '2026-09-30', 'addDays backward across month');
+      assert(addDays('2026-12-31', 1) === '2027-01-01', 'addDays across year');
+      const week = getWeekDates('2026-10-15'); // a Thursday
+      assert(week.length === 7 && week[0] === '2026-10-12' && week[6] === '2026-10-18',
+        'week of Oct 15 2026 is Mon 12 – Sun 18, got ' + week[0] + '…' + week[6]);
+      const weekSun = getWeekDates('2026-10-18'); // a Sunday
+      assert(weekSun[0] === '2026-10-12', 'Sunday belongs to the same Mon-first week');
     });
 
     test('habit-import: validate frequency/category/group', async () => {

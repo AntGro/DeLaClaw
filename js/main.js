@@ -18,7 +18,8 @@ import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveTogg
 const SETTINGS_PANES = ['general', 'calendar', 'data', 'stats', 'agents', 'account'];
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
 import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
-import { refreshBirthdays, renderBirthdays, initBirthdayModals } from './birthdays.js';
+import { refreshBirthdays, initBirthdayModals } from './birthdays.js';
+import { renderCalendar } from './calendar.js';
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals, syncSharedListItems } from './lists.js';
 import { renderGroups } from './groups.js';
@@ -1039,7 +1040,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
 
   // Restore view early (before async refreshes) to avoid flash
   applyTabVisibility();
-  const validViews = ['welcome', 'projects', 'todos', 'habits', 'birthdays', 'flashcards', 'lists', 'groups'];
+  const validViews = ['welcome', 'projects', 'todos', 'habits', 'calendar', 'flashcards', 'lists', 'groups'];
   const rawHash = location.hash.replace('#', '');
   const isSettingsHash = location.hash === '#settings' || location.hash.startsWith('#settings/');
   const hashView = validViews.includes(rawHash) ? rawHash : null;
@@ -1072,6 +1073,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       return;
     }
     const raw = hash.replace('#', '');
+    if (raw === 'birthdays') { location.hash = '#calendar'; return; } // birthdays page → calendar
     const h = validViews.includes(raw) ? raw : 'welcome';
     if (h !== state.currentView) switchView(h);
   });
@@ -1673,7 +1675,7 @@ function reRenderCurrentView() {
   else if (view === 'projects') refreshAll();
   else if (view === 'todos') renderTodos();
   else if (view === 'habits') renderHabits();
-  else if (view === 'birthdays') renderBirthdays();
+  else if (view === 'calendar') renderCalendar();
   else if (view === 'flashcards') renderFlashcards();
   else if (view === 'lists') renderLists();
   else if (view === 'groups') renderGroups();
@@ -1682,7 +1684,7 @@ function reRenderCurrentView() {
 function updateStaticLabels() {
   // Nav tabs
   const tabLabels = { tabWelcome: 'nav.today', tabProjects: 'nav.projects', tabTodos: 'nav.todos', tabHabits: 'nav.habits',
-    tabBirthdays: 'nav.birthdays', tabFlashcards: 'nav.flashcards', tabLists: 'nav.lists', tabGroups: 'nav.groups' };
+    tabCalendar: 'nav.calendar', tabFlashcards: 'nav.flashcards', tabLists: 'nav.lists', tabGroups: 'nav.groups' };
   for (const [id, key] of Object.entries(tabLabels)) {
     const el = document.getElementById(id);
     if (el) {
@@ -1702,7 +1704,6 @@ function updateStaticLabels() {
     'projectsView': 'common.search',
     'todosView': 'common.search',
     'habitsView': 'common.search',
-    'birthdaysView': 'common.search',
     'flashcardsView': 'flashcards.search_placeholder',
     'listsView': 'lists.search_placeholder',
   };
@@ -1754,13 +1755,6 @@ function updateStaticLabels() {
   if (listsSort) {
     listsSort.options[0].text = t('lists.sort_manual');
     listsSort.options[1].text = t('lists.sort_name');
-  }
-  // Birthday sort
-  const birthdaySort = document.getElementById('birthdaySortBy');
-  if (birthdaySort) {
-    birthdaySort.options[0].text = t('birthdays.sort_upcoming');
-    birthdaySort.options[1].text = t('birthdays.sort_name');
-    birthdaySort.options[2].text = t('birthdays.sort_age');
   }
   // Setup Guide
   const guideEl = document.getElementById('gateGuideLink');
@@ -1889,6 +1883,25 @@ function updateStaticLabels() {
   if (flashPracticeBtn) {
     const lbl = flashPracticeBtn.querySelector('.btn-label');
     if (lbl) lbl.textContent = t('flashcards.type_flashcard');
+  }
+  // Calendar toolbar labels
+  const calTodayBtn = document.getElementById('calendarTodayBtn');
+  if (calTodayBtn) {
+    const lbl = calTodayBtn.querySelector('.btn-label');
+    if (lbl) lbl.textContent = t('calendar.today');
+  }
+  const calAddBirthday = document.getElementById('calendarAddBirthdayLabel');
+  if (calAddBirthday) calAddBirthday.textContent = t('birthdays.add_birthday');
+  const calFT = document.getElementById('calendarFilterTodos');
+  if (calFT) calFT.textContent = t('calendar.todos');
+  const calFH = document.getElementById('calendarFilterHabits');
+  if (calFH) calFH.textContent = t('calendar.habits');
+  const calFB = document.getElementById('calendarFilterBirthdays');
+  if (calFB) calFB.textContent = t('calendar.birthdays');
+  const viewLabels = { calendarViewDay: 'calendar.day', calendarViewWeek: 'calendar.week', calendarViewMonth: 'calendar.month', calendarViewYear: 'calendar.year' };
+  for (const [id, key] of Object.entries(viewLabels)) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = t(key);
   }
   const flashTextBtn = document.getElementById('flashcardTextPracticeAllBtn');
   if (flashTextBtn) {
@@ -2079,7 +2092,7 @@ const ALL_TABS = [
   { key: 'projects', tabId: 'tabProjects', icon: 'layout-grid', color: '#6366f1', labelKey: 'nav.projects' },
   { key: 'todos', tabId: 'tabTodos', icon: 'list-checks', color: '#22c55e', labelKey: 'nav.todos' },
   { key: 'habits', tabId: 'tabHabits', icon: 'repeat', color: '#ec4899', labelKey: 'nav.habits' },
-  { key: 'birthdays', tabId: 'tabBirthdays', icon: 'cake', color: '#f97316', labelKey: 'nav.birthdays' },
+  { key: 'calendar', tabId: 'tabCalendar', icon: 'calendar', color: '#f97316', labelKey: 'nav.calendar' },
   { key: 'flashcards', tabId: 'tabFlashcards', icon: 'brain', color: '#06b6d4', labelKey: 'nav.flashcards' },
   { key: 'lists', tabId: 'tabLists', icon: 'list', color: '#14b8a6', labelKey: 'nav.lists' },
   { key: 'groups', tabId: 'tabGroups', icon: 'users', color: '#a855f7', labelKey: 'nav.groups' },
@@ -3068,7 +3081,7 @@ function switchView(view, skipHash) {
   const projectsView = document.getElementById('projectsView');
   const todosView = document.getElementById('todosView');
   const habitsView = document.getElementById('habitsView');
-  const birthdaysView = document.getElementById('birthdaysView');
+  const calendarView = document.getElementById('calendarView');
   const flashcardsView = document.getElementById('flashcardsView');
   const listsView = document.getElementById('listsView');
   const groupsView = document.getElementById('groupsView');
@@ -3076,7 +3089,7 @@ function switchView(view, skipHash) {
   const tabProjects = document.getElementById('tabProjects');
   const tabTodos = document.getElementById('tabTodos');
   const tabHabits = document.getElementById('tabHabits');
-  const tabBirthdays = document.getElementById('tabBirthdays');
+  const tabCalendar = document.getElementById('tabCalendar');
   const tabFlashcards = document.getElementById('tabFlashcards');
   const tabLists = document.getElementById('tabLists');
   const tabGroups = document.getElementById('tabGroups');
@@ -3086,7 +3099,7 @@ function switchView(view, skipHash) {
   projectsView.style.display = 'none';
   todosView.style.display = 'none';
   if (habitsView) habitsView.style.display = 'none';
-  if (birthdaysView) birthdaysView.style.display = 'none';
+  if (calendarView) calendarView.style.display = 'none';
   if (flashcardsView) flashcardsView.style.display = 'none';
   if (listsView) listsView.style.display = 'none';
   if (groupsView) groupsView.style.display = 'none';
@@ -3094,7 +3107,7 @@ function switchView(view, skipHash) {
   tabProjects.classList.remove('active');
   tabTodos.classList.remove('active');
   if (tabHabits) tabHabits.classList.remove('active');
-  if (tabBirthdays) tabBirthdays.classList.remove('active');
+  if (tabCalendar) tabCalendar.classList.remove('active');
   if (tabFlashcards) tabFlashcards.classList.remove('active');
   if (tabLists) tabLists.classList.remove('active');
   if (tabGroups) tabGroups.classList.remove('active');
@@ -3116,10 +3129,10 @@ function switchView(view, skipHash) {
     if (habitsView) habitsView.style.display = '';
     if (tabHabits) tabHabits.classList.add('active');
     renderHabits();
-  } else if (view === 'birthdays') {
-    if (birthdaysView) birthdaysView.style.display = '';
-    if (tabBirthdays) tabBirthdays.classList.add('active');
-    renderBirthdays();
+  } else if (view === 'calendar') {
+    if (calendarView) calendarView.style.display = '';
+    if (tabCalendar) tabCalendar.classList.add('active');
+    renderCalendar();
   } else if (view === 'flashcards') {
     if (flashcardsView) flashcardsView.style.display = '';
     if (tabFlashcards) tabFlashcards.classList.add('active');

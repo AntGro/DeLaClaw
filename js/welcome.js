@@ -737,7 +737,10 @@ function renderWelcome() {
       const avatarHtml = b.avatar_url
         ? `<img src="${b.avatar_url}" alt="${esc(b.name)}" class="welcome-birthday-avatar-img">`
         : lucideIcon('user', 16);
-      html += `<div class="welcome-item" data-action="switch-view" data-view="birthdays">`;
+      const occDate = new Date(todayStart);
+      occDate.setDate(occDate.getDate() + b.daysUntil);
+      const occStr = occDate.getFullYear() + '-' + String(occDate.getMonth() + 1).padStart(2, '0') + '-' + String(occDate.getDate()).padStart(2, '0');
+      html += `<div class="welcome-item" data-action="open-welcome-birthday" data-date="${occStr}">`;
       html += `<div class="welcome-item-main">`;
       html += `<span class="welcome-birthday-avatar${b.daysUntil === 0 ? ' birthday-today-avatar' : ''}">${avatarHtml}</span>`;
       html += `<span class="welcome-item-text">${esc(b.name)}</span>`;

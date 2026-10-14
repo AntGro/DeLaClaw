@@ -3178,14 +3178,34 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(m, 'getOwnedGroupsBytes must exist');
       assert(m[1].includes('EXTRA_FILES'),
         'owned-group byte total must include the extra_* files, not just group.json and item types');
+      assert(m[1].includes('RESERVED_FILES'),
+        'owned-group byte total must include the reserved messages/games files');
     });
 
-    test('required file set is group + item types + extras (16 files)', () => {
+    test('required file set is group + item types + extras + reserved (16 files)', () => {
       const m = drive.match(/const REQUIRED_GROUP_FILES = \[(.*?)\];/s);
       assert(m, 'REQUIRED_GROUP_FILES declaration must be parseable');
       assert(m[1].includes("'group'") && m[1].includes('ITEM_TYPES') &&
-             m[1].includes('EXTRA_FILES'),
-        'required set must be group + item types + extras');
+             m[1].includes('EXTRA_FILES') && m[1].includes('RESERVED_FILES'),
+        'required set must be group + item types + extras + reserved files');
+    });
+
+    test('group files: extra_11/extra_12 replaced by messages.json and games.json', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      // Only 10 numbered extras remain; the last two placeholder slots are
+      // the named files reserved for future features, created empty.
+      assert(/const EXTRA_COUNT\s+= 10;/.test(drive),
+        'EXTRA_COUNT must be 10 (extra_1..extra_10)');
+      const r = drive.match(/const RESERVED_FILES\s+= \[(.*?)\];/s);
+      assert(r && r[1].includes("'messages'") && r[1].includes("'games'"),
+        "RESERVED_FILES must be ['messages', 'games']");
+      assert(drive.includes('...RESERVED_FILES.map(name => ({ key: name, name: `${name}.json` }))'),
+        'createGroup must create messages.json and games.json empty at group creation');
+      // The full set stays 16 keys: group + 3 item types + 10 extras + 2 reserved.
+      const keys = ['group', 'todos', 'habits', 'lists',
+        ...Array.from({ length: 10 }, (_, i) => `extra_${i + 1}`), 'messages', 'games'];
+      assert(keys.length === 16 && !keys.includes('extra_11') && !keys.includes('extra_12'),
+        'file set must be 16 files with no extra_11/extra_12');
     });
 
     test('removeUser deletes the member row and revokes access', () => {

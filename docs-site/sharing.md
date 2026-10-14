@@ -24,7 +24,7 @@ flowchart TB
             direction TB
             GJ["group.json<br/>members, creator, name"]
             ITEMS["todos/habits/lists.json<br/>item files (plain JSON arrays)"]
-            EXTRA["extra_1..12.json<br/>future placeholders"]
+            EXTRA["extra_1..10.json · messages.json · games.json<br/>future placeholders"]
         end
         PA -->|"direct file read/write"| SHARED
         PB -->|"shared folder read/write"| SHARED
@@ -71,7 +71,7 @@ flowchart LR
     subgraph CD["Creator's Drive"]
         direction TB
         CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · groups.json"]
-        CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · extra_1..12.json"]
+        CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · extra_1..10.json<br/>messages.json · games.json"]
     end
     subgraph JD["Joiner's Drive"]
         direction TB
@@ -83,7 +83,8 @@ _Folder names shown for production (`delaclaw.com`); dev and preview builds use 
 
 - `group.json` — members (hashed IDs + pseudos), creator, name
 - `todos.json` / `habits.json` / `lists.json` — item files: plain JSON arrays of item objects
-- `extra_1..12.json` — empty placeholders, pre-authorize future item types (avoids sending every member back through the Drive Picker)
+- `extra_1..10.json` — empty placeholders, pre-authorize future item types (avoids sending every member back through the Drive Picker)
+- `messages.json` / `games.json` — empty named placeholders, reserved for future features (group messages, games); no sync logic yet
 
 - **Invite code**: `DLC1.<base64url({v:1, b:'googledrive', f:<folderId>})>` — one group-level code, no per-member tokens.
 - **Access control**: Drive folder permissions (writer) plus the trusted-contacts allowlist; `group.json` holds the member list. No RPC layer, no token hashing.
@@ -142,7 +143,7 @@ sequenceDiagram
         CA->>CP: error toast, create modal unlocked
     end
     end
-    CA->>SF: upload item files<br/>(todos/habits/lists.json)<br/>+ 12 empty extra_N.json placeholders<br/>then group.json LAST (its presence marks creation complete)
+    CA->>SF: upload item files<br/>(todos/habits/lists.json)<br/>+ 10 empty extra_N.json placeholders<br/>+ empty messages.json / games.json<br/>then group.json LAST (its presence marks creation complete)
     rect rgb(253, 237, 236)
     opt Item-file or group.json upload fails
         SF-->>CA: Error
@@ -202,7 +203,7 @@ sequenceDiagram
     end
     alt Direct path — joiner already has Drive folder access
         JA->>SF: list files directly (no Picker)
-        JA->>JA: gate: all required files present<br/>(group, item types, extra_*)
+        JA->>JA: gate: all required files present<br/>(group, item types, extra_*, messages, games)
         rect rgb(253, 237, 236)
         opt File set incomplete
             JA->>JA: silent fallback to Picker path<br/>nothing rendered

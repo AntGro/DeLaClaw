@@ -84,12 +84,17 @@ const { sharedRoot: SHARED_ROOT_NAME, groupPrefix: GROUP_PREFIX } =
 const POLL_MS          = 15_000;      // 15s — faster than personal (30s)
 const MAX_RETRIES      = 2;
 const ITEM_TYPES       = ['todos', 'habits', 'lists'];
-const EXTRA_COUNT      = 12;
+const EXTRA_COUNT      = 10;
 const EXTRA_FILES      = Array.from({ length: EXTRA_COUNT }, (_, i) => `extra_${i + 1}`);
+// Named placeholder files for future features (group messages, games).
+// Created empty at group creation, exactly like the extra_* files, and part
+// of the required set so every member's grant covers them from day one —
+// no sync logic reads or writes them yet.
+const RESERVED_FILES   = ['messages', 'games'];
 // The complete file set a group folder must contain. Joining is gated on ALL of
 // these: the pending → 'joined' flip only happens when the joiner has access to
 // every file, so a partial grant (e.g. group.json alone) can never half-join.
-const REQUIRED_GROUP_FILES = ['group', ...ITEM_TYPES, ...EXTRA_FILES];
+const REQUIRED_GROUP_FILES = ['group', ...ITEM_TYPES, ...EXTRA_FILES, ...RESERVED_FILES];
 // group.json is written LAST during createGroup: its presence marks creation as
 // complete. The created row in the groups table is only written afterwards,
 // so a row always points at a fully created group.
@@ -415,7 +420,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
   // memory by the Drive adapter at connect. _groupRows is a read cache,
   // refreshed from the table after every mutation and at each poll.
   // Joined rows (kind 'joined') are pointers to another user's shared folder:
-  //   { id, kind: 'joined', folder_id, name, file_ids: { group, todos, habits, lists, extra_1..extra_12 }, member_id, joined_at, updated_at }
+  //   { id, kind: 'joined', folder_id, name, file_ids: { group, todos, habits, lists, extra_1..extra_10, messages, games }, member_id, joined_at, updated_at }
   // Created rows (kind 'created') record groups this user created: the group
   // itself is discovered by scanning Drive, the row only stores { id,
   // kind: 'created', name, created_at, updatedAt } so skipped/deleted notices
@@ -1179,11 +1184,13 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           created_at: new Date().toISOString(),
         };
 
-        // Create empty per-type files + reserved extras in parallel, reporting
-        // per-file progress as each upload resolves.
+        // Create empty per-type files + placeholder files (extra_*,
+        // messages, games) in parallel, reporting per-file progress as
+        // each upload resolves.
         const allFiles = [
           ...ITEM_TYPES.map(type => ({ key: type, name: `${type}.json` })),
           ...EXTRA_FILES.map(name => ({ key: name, name: `${name}.json` })),
+          ...RESERVED_FILES.map(name => ({ key: name, name: `${name}.json` })),
         ];
         const totalFiles = allFiles.length;
         let doneFiles = 0;
@@ -1209,8 +1216,8 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
             typeMeta[key] = { fileId: r.id, etag: r.etag, modifiedTime: r.modifiedTime, size: r.size };
             typeData[key] = [];
           } else {
-            // Extra files are unused for now, but their bytes count toward
-            // the owned-group storage total.
+            // Placeholder files (extra_*, messages, games) are unused for
+            // now, but their bytes count toward the owned-group storage total.
             typeMeta[key] = { fileId: r.id, size: r.size };
           }
         }
@@ -1380,7 +1387,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       for (const e of _groups.values()) {
         if (!e.owned) continue;
         total += Number(e.gMeta?.size || 0);
-        for (const key of [...ITEM_TYPES, ...EXTRA_FILES]) total += Number(e.typeMeta?.[key]?.size || 0);
+        for (const key of [...ITEM_TYPES, ...EXTRA_FILES, ...RESERVED_FILES]) total += Number(e.typeMeta?.[key]?.size || 0);
       }
       return total;
     },
@@ -2279,7 +2286,7 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
     /** Join a shared group using explicit file IDs (from Picker or direct access).
      *  Requires a matching pending invite (by email hash) — Drive access alone is not enough.
      *  @param {string} folderId — the shared subfolder ID
-     *  @param {Object} fileIds — Drive file IDs keyed by every getRequiredGroupFiles() entry (group, todos, habits, lists, the 12 extra_* placeholders)
+     *  @param {Object} fileIds — Drive file IDs keyed by every getRequiredGroupFiles() entry (group, todos, habits, lists, the extra_* placeholders, messages, games)
      *  @param {Object} [opts] — { display_name } pseudo chosen by the joiner */
     async joinWithFileIds(folderId, fileIds, opts = {}) {
       // Gate the join on the full file set: flipping to 'joined' with only a

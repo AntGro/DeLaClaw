@@ -917,8 +917,9 @@ test('editHabitInline updates shared habits through sharing API', () => {
     'habits.js: editHabitInline must update shared habits through updateSharedHabit');
   assert(!fn.includes('creator_category'),
     'habits.js: editHabitInline must not rewrite creator_category when local deck changes');
-  assert(fn.includes("state.db.from('habits').update({ category: updates.category, category_id: updates.category_id })"),
-    'habits.js: editHabitInline must update only the local category pointer for shared habits');
+  assert(fn.includes('localUpdates.category = updates.category') && fn.includes('localUpdates.end_date = updates.end_date')
+      && fn.includes("state.db.from('habits').update(localUpdates)"),
+    'habits.js: editHabitInline must update only the local pointer fields (category, end_date) for shared habits');
 
   const sharedBranch = fn.slice(fn.indexOf('if (habit.shared_id'), fn.indexOf('} else {', fn.indexOf('if (habit.shared_id')));
   assert(!/state\.db\.from\(['"]habits['"]\)\.update\(updates\)/.test(sharedBranch),
@@ -4662,6 +4663,43 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'Calendar must skip finished habits entirely');
       assert(cal.includes('next_due: h.next_due, end_date: h.end_date'),
         'Calendar must pass end_date into the expansion');
+    });
+
+    test('habit end date: inline edit can set, modify and clear it (personal + shared)', () => {
+      const habits = jsFiles['habits.js'];
+      // The inline editor gains an end-date row next to frequency/category,
+      // prefilled from the habit, reported by collectExtra (null = cleared).
+      assert(habits.includes("endInput.value = habit.end_date || '';"),
+        'inline edit must prefill the end date input from the habit');
+      assert(habits.includes('end_date: endInput.value || null,'),
+        'collectExtra must report the end date (null when the input is cleared)');
+      assert(habits.includes('if ((extra.end_date || null) !== (habit.end_date || null)) updates.end_date = extra.end_date || null;'),
+        'saveFn must diff the end date against the stored one');
+      // A frequency OR end-date change recomputes for both kinds; the shared
+      // chain publishes end_date + the recompute outcome in one mutation.
+      assert(habits.includes('const needsRecompute = updates.frequency_rule !== undefined || updates.end_date !== undefined;'),
+        'inline save must recompute when frequency or end date changes');
+      assert(habits.includes('if (updates.end_date !== undefined) sharedUpdates.end_date = updates.end_date;'),
+        'shared inline edit must publish the new end date');
+      assert(habits.includes('endDate: updates.end_date, out: fin });'),
+        'shared inline recompute must pass the end-date override and capture the finished outcome');
+      assert(habits.includes('endDate: updates.end_date });'),
+        'personal inline recompute must pass the end-date override');
+    });
+
+    test('habit end date: backup save/load carry whole habit rows (no field allowlist)', () => {
+      const main = jsFiles['main.js'];
+      // Save: generateBackupJSON exports select('*') per table, habits
+      // included — end_date / is_finished ride along with every other field.
+      assert(main.includes("'habits'") && /backup\[table\] = await fetchAll\(\(\) => state\.db\.from\(table\)\.select\('\*'\)\)/.test(main),
+        'backup save must export full habit rows via select(*)');
+      // Load: restore inserts rows wholesale, stripping only owner_id.
+      assert(main.includes('const { owner_id, ...rest } = r;'),
+        'backup restore must strip only owner_id, keeping end_date / is_finished');
+      // In-memory adapters are reseeded with the backup rows as-is and then
+      // run pending migrations, which default the fields on old backups.
+      assert(main.includes('inMemAdapter.reseed(reseedData);') && main.includes('inMemAdapter.runPendingMigrations()'),
+        'restore must reseed rows as-is, then run migrations (2.18.0 defaults end_date/is_finished on pre-feature backups)');
     });
 
     test('migrations add habit end_date and is_finished (2.18.0)', () => {

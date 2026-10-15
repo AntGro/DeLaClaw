@@ -1545,8 +1545,22 @@ function editHabitInline(habitId, itemEl) {
   catRow.appendChild(catLabel);
   catRow.appendChild(catSelect);
 
+  // End date row — empty means no end date (clearing the input removes it)
+  const endRow = document.createElement('div');
+  endRow.className = 'inline-edit-row';
+  const endLabel = document.createElement('label');
+  endLabel.className = 'inline-edit-label';
+  endLabel.textContent = t('habits.end_date_optional');
+  const endInput = document.createElement('input');
+  endInput.type = 'date';
+  endInput.className = 'inline-edit-input';
+  endInput.value = habit.end_date || '';
+  endRow.appendChild(endLabel);
+  endRow.appendChild(endInput);
+
   extras.appendChild(freqRow);
   extras.appendChild(catRow);
+  extras.appendChild(endRow);
 
   inlineEditText(nameEl, habit.name, {
     maxLength: 1000,
@@ -1555,6 +1569,7 @@ function editHabitInline(habitId, itemEl) {
     collectExtra: () => ({
       frequency_rule: getFrequencyFromPicker(freqContainer),
       category_id: catSelect.value || _defaultHabitCatId,
+      end_date: endInput.value || null,
     }),
     saveFn: async (newName, extra) => {
       const updates = {};
@@ -1567,25 +1582,37 @@ function editHabitInline(habitId, itemEl) {
           updates.category_id = extra.category_id;
           updates.category = newCatRow?.name ?? '';
         }
+        // End date: the input always reports a value (null when cleared),
+        // so a difference against the stored one is a real change.
+        if ((extra.end_date || null) !== (habit.end_date || null)) updates.end_date = extra.end_date || null;
       }
       if (Object.keys(updates).length > 0) {
         // Background upload promise for shared flows (null for personal).
         let sharedUpload = null;
         const sharedUpdates = {};
         if (habit.shared_id && habit.shared_group_id && state.sharing) {
-          if (updates.category_id !== undefined) {
-            const { error } = await state.db.from('habits').update({ category: updates.category, category_id: updates.category_id }).eq('id', habitId);
+          const localUpdates = {};
+          if (updates.category_id !== undefined) { localUpdates.category = updates.category; localUpdates.category_id = updates.category_id; }
+          if (updates.end_date !== undefined) localUpdates.end_date = updates.end_date;
+          if (Object.keys(localUpdates).length > 0) {
+            const { error } = await state.db.from('habits').update(localUpdates).eq('id', habitId);
             if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
           }
           if (updates.name !== undefined) sharedUpdates.name = updates.name;
           if (updates.frequency_rule !== undefined) sharedUpdates.frequency_rule = updates.frequency_rule;
+          if (updates.end_date !== undefined) sharedUpdates.end_date = updates.end_date;
         } else {
           const { error } = await state.db.from('habits').update(updates).eq('id', habitId);
           if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
         }
         Object.assign(habit, updates);
+        // A frequency or end-date change moves the schedule: recompute
+        // honestly (earlyGuard: false) — for personal habits too (the
+        // v2.10.49–66 shared-immediacy refactor narrowed this to shared
+        // only, which silently dropped the personal recompute).
+        const needsRecompute = updates.frequency_rule !== undefined || updates.end_date !== undefined;
         let newNextDue = null;
-        if (updates.frequency_rule && habit.shared_id) {
+        if (needsRecompute && habit.shared_id) {
           const lastDone = getHabitLastDone(habitId);
           // Register before the recompute: a refresh racing the awaits below
           // must not overwrite the fresh local value with stale shared
@@ -1594,7 +1621,7 @@ function editHabitInline(habitId, itemEl) {
           const fin = {};
           _pendingSharedNextDue.add(habit.shared_id);
           try {
-            newNextDue = await updateHabitNextDue(habitId, updates.frequency_rule, lastDone, { earlyGuard: false, out: fin });
+            newNextDue = await updateHabitNextDue(habitId, updates.frequency_rule || habit.frequency_rule, lastDone, { earlyGuard: false, endDate: updates.end_date, out: fin });
           } catch (e) {
             _pendingSharedNextDue.release(habit.shared_id);
             throw e;
@@ -1603,6 +1630,9 @@ function editHabitInline(habitId, itemEl) {
           // whole edit lands in one debounced upload, not two.
           sharedUpdates.next_due = newNextDue;
           sharedUpdates.is_finished = fin.isFinished ? 1 : 0;
+        } else if (needsRecompute) {
+          const lastDone = getHabitLastDone(habitId);
+          await updateHabitNextDue(habitId, updates.frequency_rule || habit.frequency_rule, lastDone, { earlyGuard: false, endDate: updates.end_date });
         }
         if (habit.shared_id) {
           // Optimistic: upload in the background. A failure rolls the in-memory

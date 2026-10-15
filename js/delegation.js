@@ -112,6 +112,11 @@
       case 'toggle-todo': { var done = el.dataset.done === 'true'; callWindow('toggleTodo', [getId(el) || el.dataset.todoId, done, el]); } break;
       case 'open-snooze-modal': callWindow('openSnoozeModal', [getId(el)]); break;
       case 'unsnooze-todo': callWindow('unsnoozeTodo', [getId(el), el]); break;
+      case 'open-habit-snooze-modal': callWindow('openHabitSnoozeModal', [getId(el)]); break;
+      case 'unsnooze-habit': callWindow('unsnoozeHabit', [getId(el), el]); break;
+      case 'habit-snooze-for': callWindow('habitSnoozeFor', [parseInt(el.dataset.amount||'0',10), el.dataset.unit]); break;
+      case 'close-habit-snooze-modal': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeHabitSnoozeModal', []); break;
+      case 'submit-habit-snooze': callWindow('submitHabitSnooze', []); break;
       case 'edit-todo-inline': callWindow('editTodoInline', [getId(el)]); break;
       case 'delete-todo': callWindow('deleteTodo', [getId(el)]); break;
       case 'set-todo-priority': callWindow('setTodoPriority', [getId(el), el.dataset.priority]); break;

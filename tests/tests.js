@@ -4654,8 +4654,8 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // Render: finished badge, no Done button, ends line while active.
       assert(habits.includes("const isFinished = !isDraft && !!habit.is_finished;"),
         'renderHabitItem must derive the finished state (drafts take precedence)');
-      assert(habits.includes("!isDraft && !isFinished ? `<button data-habit-id="),
-        'finished habits must not render a Done button');
+      assert(habits.includes("!isDraft && !isFinished && !isSnoozed ? `<button data-habit-id="),
+        'finished (and snoozed) habits must not render a Done button');
       assert(habits.includes("t('habits.finished')") && habits.includes("t('habits.ends_on'"),
         'render must show the Finished badge and the Ends line');
       // Modals carry the field both ways.
@@ -4720,6 +4720,78 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // run pending migrations, which default the fields on old backups.
       assert(main.includes('inMemAdapter.reseed(reseedData);') && main.includes('inMemAdapter.runPendingMigrations()'),
         'restore must reseed rows as-is, then run migrations (2.18.0 defaults end_date/is_finished on pre-feature backups)');
+    });
+
+    test('habit snooze: isHabitSnoozed wakes on the snooze date (defer semantics)', async () => {
+      const { isHabitSnoozed } =
+        await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      assert(isHabitSnoozed({ snoozed_until: '2026-10-20' }, '2026-10-14') === true,
+        'snoozed while the wake date is ahead');
+      assert(isHabitSnoozed({ snoozed_until: '2026-10-20' }, '2026-10-20') === false,
+        'the habit wakes ON the snooze date');
+      assert(isHabitSnoozed({ snoozed_until: '2026-10-20' }, '2026-10-21') === false,
+        'an expired snooze is inactive (the habit is simply overdue — defer, not skip)');
+      assert(isHabitSnoozed({ snoozed_until: null }, '2026-10-14') === false, 'no snooze set');
+      assert(isHabitSnoozed({}, '2026-10-14') === false, 'field absent (pre-migration row)');
+      assert(isHabitSnoozed(null, '2026-10-14') === false, 'null habit is safe');
+    });
+
+    test('habit snooze: card, modal, group-wide publish and surface exclusions', () => {
+      const habits = jsFiles['habits.js'];
+      const welcome = jsFiles['welcome.js'];
+      const main = jsFiles['main.js'];
+      const calendar = jsFiles['calendar.js'];
+      const sync = jsFiles['calendar-sync.js'];
+      // Card: snoozed habits show the badge state, no Done, an unsnooze
+      // button; active habits get the snooze (moon) button.
+      assert(habits.includes('data-action="open-habit-snooze-modal"'), 'card must offer snooze');
+      assert(habits.includes('data-action="unsnooze-habit"'), 'snoozed card must offer unsnooze');
+      assert(habits.includes("if (isHabitSnoozed(habit, habitTodayStr())) return 'snoozed';"),
+        'habitDueStatus must report snoozed so filters and badges agree');
+      // Modal with presets + custom date, future dates only.
+      assert(habits.includes('function habitSnoozeModalHTML()'), 'snooze modal must exist');
+      assert(habits.includes('data-action="habit-snooze-for"') && habits.includes('id="habitSnoozeCustomDate"'),
+        'snooze modal must offer presets and a custom date');
+      assert(habits.includes("if (val <= habitTodayStr()) { showToast(t('habits.snooze_future_date'), 'error'); return; }"),
+        'a custom snooze date must be in the future');
+      // Group-wide for shared habits (like TODO snooze): published on the
+      // shared item, mirrored onto pointers, pointer row synced separately.
+      assert(habits.includes("state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { snoozed_until: snoozedUntil })"),
+        'shared snooze must publish snoozed_until on the shared item');
+      assert(habits.includes('habit.snoozed_until = sh.snoozed_until || null;'),
+        'refreshHabits must mirror snoozed_until from the shared item');
+      assert(habits.includes("await state.db.from('habits').update({ snoozed_until: sharedSnoozedUntil }).eq('id', habit.id);"),
+        'refreshHabits must sync snoozed_until onto the pointer row');
+      // Snoozing never moves next_due (defer): the apply path writes only
+      // snoozed_until.
+      const applyStart = habits.indexOf('async function applyHabitSnooze');
+      const applyBlock = habits.slice(applyStart, habits.indexOf('function habitSnoozeFor', applyStart));
+      assert(!applyBlock.includes('next_due'), 'applyHabitSnooze must not touch next_due');
+      // Surfaces: Welcome list + mini calendar, footer overdue count,
+      // Calendar page window filter, Google Calendar sync gates.
+      assert(welcome.includes('if (isHabitSnoozed(c, todayStr)) return false;'), 'Welcome due list must exclude snoozed habits');
+      assert(welcome.includes('if (isHabitSnoozed(h, calTodayStr)) return false;'), 'Welcome mini calendar must exclude snoozed habits');
+      assert(main.includes('!isHabitSnoozed(c, todayLocal)'), 'overdue count must exclude snoozed habits');
+      assert(calendar.includes('!(snoozed && d < h.snoozed_until)'), 'Calendar page must hide occurrences inside the snooze window');
+      assert(sync.includes('snoozed_until: sh.snoozed_until || null,'), 'calendar sync must resolve snoozed_until for shared habits');
+      assert(sync.includes('!isHabitSnoozed(item, toLocalDateStr(new Date()))') && sync.includes('!isHabitSnoozed(r.item, toLocalDateStr(new Date()))'),
+        'calendar sync eligibility must exclude actively snoozed habits (so their events are removed)');
+      // Demo seed shows the state.
+      const demo = fs.readFileSync(path.join(__dirname, '..', 'js', 'demo-data.js'), 'utf-8');
+      assert((demo.match(/snoozed_until: dateOnly\(6\)/g) || []).length === 3,
+        'demo Water the plants habit must be snoozed in all three languages');
+    });
+
+    test('migrations add habit snoozed_until (2.19.0)', () => {
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(schema.includes('snoozed_until TEXT'),
+        'schema.sql habits table must include snoozed_until');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'2.19.0'") && local.includes('ALTER TABLE habits ADD COLUMN snoozed_until TEXT'),
+        'local migration 2.19.0 must add snoozed_until');
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(drive.includes("'2.19.0'") && drive.includes('row.snoozed_until === undefined'),
+        'drive migration 2.19.0 must default snoozed_until while preserving set values');
     });
 
     test('migrations add habit end_date and is_finished (2.18.0)', () => {

@@ -555,4 +555,10 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE habits ADD COLUMN end_date TEXT;
     ALTER TABLE habits ADD COLUMN is_finished INTEGER DEFAULT 0;
   `,
+  '2.19.0': `
+    -- Habit snooze: optional snoozed_until (local YYYY-MM-DD). The habit is
+    -- hidden from due surfaces strictly before that date and wakes on it;
+    -- next_due is never moved (defer, not skip).
+    ALTER TABLE habits ADD COLUMN snoozed_until TEXT;
+  `,
 };

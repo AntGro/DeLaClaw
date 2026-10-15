@@ -19,6 +19,7 @@ import { lucideIcon } from './icons.js';
 import { getTodoCategories } from './todos.js';
 import { getHabitCategories } from './habits.js';
 import { driveFolderSuffix, currentHostname } from './drive-folders.js';
+import { isHabitSnoozed } from './calendar-pure.js';
 
 const CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
 
@@ -242,7 +243,7 @@ async function getSyncableItems(itemType) {
     const { data: habits } = await state.db.from('habits').select('*');
     for (const h of (habits || [])) {
       const item = resolveRow('habit', h);
-      if (item?.next_due) items.push({ id: item.id, item });
+      if (item?.next_due && !isHabitSnoozed(item, toLocalDateStr(new Date()))) items.push({ id: item.id, item });
     }
   } else if (itemType === 'todo') {
     const { data: todos } = await state.db.from('todos').select('*');
@@ -312,6 +313,9 @@ function nextDay(dateStr) {
 
 function habitToEvent(habit) {
   if (!habit.next_due) return null;
+  // Actively snoozed habits produce no event (they return on the wake date,
+  // overdue — the sync then recreates the event at the stored next_due).
+  if (isHabitSnoozed(habit, toLocalDateStr(new Date()))) return null;
   const date = localDateStr(habit.next_due); // YYYY-MM-DD, local time
   // Shared habits: [Habit][category][group name]; personal: [Habit][category]
   // The category is the member's own (local pointer row), not the creator's.
@@ -688,6 +692,7 @@ function resolveSharedRow(itemType, row) {
       ...row,
       name: sh.name || '',
       next_due: sh.next_due || null,
+      snoozed_until: sh.snoozed_until || null,
       frequency_rule: sh.frequency_rule || '',
       _sharedCategory: sh.creator_category || '',
       _sharedGroupName: groupName,
@@ -708,7 +713,7 @@ async function getActiveItemFromDb(itemType, itemId) {
     const r = resolveSharedRow('habit', h);
     if (r.status === 'deferred') return SHARED_NOT_READY;
     if (r.status === 'gone') return null;
-    return (r.item.next_due) ? r.item : null;
+    return (r.item.next_due && !isHabitSnoozed(r.item, toLocalDateStr(new Date()))) ? r.item : null;
   } else if (itemType === 'todo') {
     const { data } = await state.db.from('todos').select('*').eq('id', itemId);
     const td = data?.[0];

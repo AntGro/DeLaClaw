@@ -140,3 +140,10 @@ User jobs:
 ## References
 - `CODEMAP.json:features[habits]`
 - Entry: `js/habits.js`
+
+## Snooze (v2.19.0)
+
+- A habit can be snoozed until a local date (`snoozed_until`, YYYY-MM-DD, same convention as `next_due`/`end_date`). It is snoozed strictly before that date and wakes ON it (`isHabitSnoozed()` in `js/calendar-pure.js`). Date-based only — no indefinite pause.
+- Snoozing NEVER touches `frequency_rule`, last done, completions, or `next_due`: **defer, not skip** (owner's call). A due date that passes during the window is simply overdue on return; the user marks it done or edits last-done to advance. By construction the snooze cannot interact with the end-date finish rule — do not add skip/advance logic.
+- While actively snoozed the habit is excluded from every due surface, exactly like drafts/finished: Habits page due filters (`habitDueStatus()` returns `'snoozed'`), Welcome due list and mini-calendar, the footer overdue count, Calendar page occurrences inside the window (occurrences on/after the wake date show), and Google Calendar sync (eligibility gates exclude it, so any existing event is removed by the normal orphan/targeted delete paths). The card stays in its category with a "Snoozed until …" line, no Done button, and an unsnooze (moon-off) button; changing the date means unsnooze first, then re-snooze (same rule as TODOs).
+- Shared habits: snooze is **group-wide**, like TODO snooze — the value lives on the shared item, `applyHabitSnooze()` publishes it via `updateSharedHabit`, and `refreshHabits` mirrors it onto pointers with its own row-sync comparison (independent of the next_due publish guard). Share/copy/unshare/bulk-share carry it across.

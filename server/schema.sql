@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS habits (
   next_due TEXT,
   end_date TEXT,
   is_finished INTEGER DEFAULT 0,
+  snoozed_until TEXT,
   shared_id TEXT,
   shared_group_id TEXT,
   owner_id TEXT,

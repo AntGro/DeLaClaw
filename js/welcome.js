@@ -10,7 +10,7 @@ import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, form
 import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCategories } from './todos.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
-import { parseLocalDate } from './calendar-pure.js';
+import { parseLocalDate, isHabitSnoozed, toDateStr } from './calendar-pure.js';
 
 // ── Local data cache ──
 let wTodos = [];
@@ -406,8 +406,10 @@ function renderWelcomeCalendar(allBirthdays, allHabits, todayStart) {
     });
 
     // Find habits due on this day
+    const calTodayStr = toDateStr(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate());
     const habitsOnDay = allHabits.filter(h => {
       if (h.is_draft || !h.next_due) return false;
+      if (isHabitSnoozed(h, calTodayStr)) return false;
       const dueDay = startOfDay(parseLocalDate(h.next_due));
       return dueDay.getTime() === dayStart.getTime();
     });
@@ -415,6 +417,7 @@ function renderWelcomeCalendar(allBirthdays, allHabits, todayStart) {
     // For overdue habits, show them on today
     const overdueOnDay = isToday ? allHabits.filter(h => {
       if (h.is_draft || !h.next_due) return false;
+      if (isHabitSnoozed(h, calTodayStr)) return false;
       const dueDay = startOfDay(parseLocalDate(h.next_due));
       return dueDay < todayStart;
     }) : [];
@@ -496,9 +499,11 @@ function renderWelcome() {
   });
 
   // ── 2. Habits due ──
+  const todayStr = toDateStr(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate());
   const habitsDue = wHabits.filter(c => {
     if (c.is_draft) return false;
     if (!c.next_due) return false;
+    if (isHabitSnoozed(c, todayStr)) return false;
     return startOfDay(parseLocalDate(c.next_due)) <= todayStart;
   });
   habitsDue.sort((a, b) => String(a.next_due).slice(0, 10).localeCompare(String(b.next_due).slice(0, 10))); // date-only strings sort chronologically

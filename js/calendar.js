@@ -12,7 +12,7 @@ import { sharedBadge } from './sharing-ui.js';
 import { t, getLang } from './i18n.js';
 import { getTodos, catIdForTodo, getCategoryColor, getCatDisplayName } from './todos.js';
 import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatDisplayName } from './habits.js';
-import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates } from './calendar-pure.js';
+import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates, isHabitSnoozed } from './calendar-pure.js';
 
 let calYear;
 let calMonth; // 0-based
@@ -98,9 +98,13 @@ function collectRangeEvents(start, end) {
       next_due: (h.next_due || '').slice(0, 10) || null,
       shared_id: h.shared_id || null, shared_group_id: h.shared_group_id || null,
     };
+    // While a snooze is active, occurrences inside the window are hidden;
+    // occurrences on/after the wake date show normally (the habit wakes
+    // that day, overdue if its due date passed during the window).
+    const snoozed = isHabitSnoozed(h, todayStr());
     if (rule && !isStructuredRule(rule)) {
       const d = (h.next_due || '').slice(0, 10);
-      if (d && d >= start && d <= end && !(h.end_date && d > h.end_date)) push(d, { ...hBase });
+      if (d && d >= start && d <= end && !(h.end_date && d > h.end_date) && !(snoozed && d < h.snoozed_until)) push(d, { ...hBase });
       continue;
     }
     const occ = expandHabitOccurrences(
@@ -108,7 +112,7 @@ function collectRangeEvents(start, end) {
       start, end,
       (r, lastDone) => computeNextDue(r, lastDone),
     );
-    for (const d of occ) push(d, { ...hBase });
+    for (const d of occ) { if (snoozed && d < h.snoozed_until) continue; push(d, { ...hBase }); }
   }
 
   // Birthdays: yearly occurrence in every month the range spans

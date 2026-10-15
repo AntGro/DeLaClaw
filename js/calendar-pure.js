@@ -20,6 +20,15 @@ export function toDateStr(y, m, d) {
  * parse, which converts the instant to local time correctly.
  * Shared by every reader of date-only fields (e.g. habit next_due).
  */
+// A habit is snoozed while its snooze date is still ahead: `snoozed_until`
+// is a local YYYY-MM-DD date (same convention as `next_due` / `end_date`)
+// and the habit wakes ON that date — snoozed strictly before it. Snoozing
+// never moves `next_due`: when the snooze ends, a habit whose due date
+// passed during the window is simply overdue (defer, not skip).
+export function isHabitSnoozed(habit, todayStr) {
+  return !!(habit && habit.snoozed_until && todayStr && habit.snoozed_until > todayStr);
+}
+
 export function parseLocalDate(value) {
   const s = String(value ?? '');
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {

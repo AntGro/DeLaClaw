@@ -24,6 +24,7 @@ import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardC
 import { refreshLists, renderLists, initListModals, syncSharedListItems } from './lists.js';
 import { renderGroups } from './groups.js';
 import { VISIT_ROW_ID, toLocalDateString, nextVisitRow } from './daily-visits.js';
+import { isHabitSnoozed } from './calendar-pure.js';
 import './sharing-ui.js'; // side effects: window.* sharing actions
 import { renderAgentsPane, applyAgentsI18n } from './agents-ui.js';
 import { refreshWelcome, renderWelcome } from './welcome.js';
@@ -662,7 +663,7 @@ document.addEventListener('DOMContentLoaded', () => {
     'promoteHabit',
     'saveNewList', 'saveEditList',
     'addTask', 'saveNewProject', 'saveEditProject', 'submitRevision',
-    'saveNewCategory', 'saveEditCategory', 'snoozeFor', 'submitSnooze', 'addTodoToCategory',
+    'saveNewCategory', 'saveEditCategory', 'snoozeFor', 'submitSnooze', 'habitSnoozeFor', 'submitHabitSnooze', 'addTodoToCategory',
     'executeConfirmAction',
     'quickAddDraft', 'quickAddListItem',
     'saveGlobalPrompt', 'saveProjectPrompt',
@@ -3178,7 +3179,8 @@ function updateViewFooterStats() {
       ];
     },
     habits: () => {
-      const overdue = state.allHabits.filter(c => c.next_due && String(c.next_due).slice(0, 10) < toLocalDateString(new Date())).length;
+      const todayLocal = toLocalDateString(new Date());
+      const overdue = state.allHabits.filter(c => c.next_due && String(c.next_due).slice(0, 10) < todayLocal && !isHabitSnoozed(c, todayLocal)).length;
       return [
         `${icon('repeat')} Habits: ${state.allHabits.length}`,
         `${icon('alert-triangle')} Overdue: ${overdue}`,

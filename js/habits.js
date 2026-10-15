@@ -116,7 +116,7 @@ async function saveEditHabitCategory() {
 // source of truth, re-exported below); local helpers follow.
 
 import { STRUCTURED_PREFIXES, DOW_KEYS, DOW_JS, isStructuredRule, normalizeFrequencyRule } from './frequency-rule.js';
-import { parseLocalDate } from './calendar-pure.js';
+import { parseLocalDate, isHabitSnoozed, toDateStr } from './calendar-pure.js';
 // (re-exported in the export list at the bottom of this file)
 
 /** Format a Date as YYYY-MM-DD in local time (not UTC). */
@@ -685,8 +685,10 @@ async function refreshHabits() {
         // shared values against these, not against the mirrored ones.
         habit._rowEndDate = habit.end_date || null;
         habit._rowFinished = habit.is_finished ? 1 : 0;
+        habit._rowSnoozedUntil = habit.snoozed_until || null;
         habit.end_date = sh.end_date || null;
         habit.is_finished = sh.is_finished ? 1 : 0;
+        habit.snoozed_until = sh.snoozed_until || null;
         habit._shared = sh; // keep reference for completions/metadata
         // Inject shared completions into allHabitCompletions
         if (sh.completions?.length) {
@@ -717,12 +719,19 @@ async function refreshHabits() {
         const sharedNextDue = sh.next_due != null ? normalizeHabitNextDue(sh.next_due) : null;
         const sharedFinished = sh.is_finished ? 1 : 0;
         const sharedEndDate = sh.end_date || null;
+        const sharedSnoozedUntil = sh.snoozed_until || null;
         if ((sharedNextDue !== normalizeHabitNextDue(habit.next_due)
              || sharedFinished !== habit._rowFinished
              || sharedEndDate !== habit._rowEndDate)
             && !_pendingSharedNextDue.has(habit.shared_id)) {
           const { error } = await state.db.from('habits').update({ next_due: sharedNextDue, is_finished: sharedFinished, end_date: sharedEndDate }).eq('id', habit.id);
           if (!error) { habit.next_due = sharedNextDue; habit.is_finished = sharedFinished; habit.end_date = sharedEndDate; }
+        }
+        // Snooze is group-wide but changes independently of next_due
+        // publishes, so it syncs to the pointer row on its own comparison.
+        if (sharedSnoozedUntil !== habit._rowSnoozedUntil) {
+          const { error } = await state.db.from('habits').update({ snoozed_until: sharedSnoozedUntil }).eq('id', habit.id);
+          if (!error) habit.snoozed_until = sharedSnoozedUntil;
         }
       }
     }
@@ -905,7 +914,15 @@ async function setLocalHabitLastDone(habitId, newIso) {
   return latestHabitCompletion(plan.kept)?.completed_at || null;
 }
 
+// Local today as YYYY-MM-DD (date-only convention; never toISOString,
+// which is UTC and shifts the day west of UTC).
+export function habitTodayStr() {
+  const n = new Date();
+  return toDateStr(n.getFullYear(), n.getMonth(), n.getDate());
+}
+
 function habitDueStatus(habit) {
+  if (isHabitSnoozed(habit, habitTodayStr())) return 'snoozed';
   if (!habit.next_due) return 'no-date';
   const now = new Date();
   const due = parseLocalDate(habit.next_due);
@@ -921,6 +938,9 @@ function habitDueStatus(habit) {
 }
 
 function formatHabitDue(habit) {
+  if (isHabitSnoozed(habit, habitTodayStr())) {
+    return `<span class="habit-due snoozed">${lucideIcon("moon",16)} ${t('habits.snoozed_until', parseLocalDate(habit.snoozed_until).toLocaleDateString(getLang(), { month: 'short', day: 'numeric', year: 'numeric' }))}</span>`;
+  }
   if (!habit.next_due) return `<span class="habit-due no-date">${t('habits.awaiting_schedule')}</span>`;
   const due = parseLocalDate(habit.next_due);
   const now = new Date();
@@ -1193,6 +1213,7 @@ function renderHabitItem(habit) {
   const completionCount = getHabitCompletionCount(habit.id);
   const isDraft = habit.is_draft;
   const isFinished = !isDraft && !!habit.is_finished;
+  const isSnoozed = !isDraft && !isFinished && isHabitSnoozed(habit, habitTodayStr());
   const status = isFinished ? 'finished' : isDraft ? 'draft' : habitDueStatus(habit);
   const dueHtml = isFinished ? `<span class="habit-due finished">${lucideIcon("flag",16)} ${t('habits.finished')}</span>` : isDraft ? `<span class="habit-due draft">${lucideIcon("file-text",16)} ${t('habits.draft')}</span>` : formatHabitDue(habit);
   const endsHtml = !isFinished && !isDraft && habit.end_date
@@ -1222,7 +1243,9 @@ function renderHabitItem(habit) {
       </div>
       <div class="habit-actions">
         ${promoteBtn}
-        ${!isDraft && !isFinished ? `<button data-habit-id="${esc(habit.id)}" data-action="mark-habit-done" data-id="${esc(habit.id)}" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
+        ${!isDraft && !isFinished && !isSnoozed ? `<button data-habit-id="${esc(habit.id)}" data-action="mark-habit-done" data-id="${esc(habit.id)}" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
+        ${!isDraft && !isFinished && !isSnoozed ? `<button data-action="open-habit-snooze-modal" data-id="${esc(habit.id)}" title="${t('habits.snooze')}">${lucideIcon("moon",16)}</button>` : ''}
+        ${isSnoozed ? `<button data-action="unsnooze-habit" data-id="${esc(habit.id)}" title="${t('habits.unsnooze')}">${lucideIcon("moon-off",16)}</button>` : ''}
         <button data-action="open-habit-history" data-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list",16)} ${completionCount}</button>
         ${!isShared && !isDraft && state.sharing ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         ${isShared && !isDraft && _myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="unshare-habit" data-id="${esc(habit.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
@@ -1265,6 +1288,10 @@ function editHabitModalHTML() {
   return `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><textarea id="editHabitName" maxlength="1000" rows="1" style="resize:none;overflow:hidden;"></textarea><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><label id="editHabitEndDateLabel">${t('habits.end_date_optional')}</label><input type="date" id="editHabitEndDate"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-modal" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
 }
 
+function habitSnoozeModalHTML() {
+  return `<div class="modal snooze-modal"><h2>${lucideIcon("moon",20)} ${t('habits.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('habits.snooze_hint')}</p><div class="snooze-options"><button data-action="habit-snooze-for" data-amount="1" data-unit="d">${t('habits.snooze_tomorrow')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="w">${t('habits.snooze_1w')}</button><button data-action="habit-snooze-for" data-amount="2" data-unit="w">${t('habits.snooze_2w')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="M">${t('habits.snooze_1m')}</button></div><label style="margin-top:12px;">${t('habits.snooze_custom')}</label><input type="date" id="habitSnoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="habitSnoozeId"><div class="modal-actions"><button class="modal-cancel" data-action="close-habit-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-habit-snooze">${t('habits.snooze')}</button></div></div>`;
+}
+
 function habitHistoryModalHTML() {
   return `<div class="modal habit-history-modal"><h2>` + lucideIcon("clipboard-list",20) + ` ${t('habits.habit_history')}</h2><p id="habitHistoryName" style="font-size:0.88rem;color:var(--muted);margin-bottom:12px;"></p><div id="habitHistoryList"></div><div class="modal-actions"><button class="modal-cancel" data-action="close-habit-history-modal">${t('common.close')}</button></div></div>`;
 }
@@ -1297,6 +1324,12 @@ function initHabitModals() {
   m3.className = 'modal-overlay'; m3.id = 'habitHistoryModal';
   m3.innerHTML = habitHistoryModalHTML();
   app.appendChild(m3);
+
+  // Habit Snooze Modal
+  const mSnooze = document.createElement('div');
+  mSnooze.className = 'modal-overlay'; mSnooze.id = 'habitSnoozeModal';
+  mSnooze.innerHTML = habitSnoozeModalHTML();
+  app.appendChild(mSnooze);
 
   // Add Habit Category Modal
   const m5 = document.createElement('div');
@@ -2571,6 +2604,7 @@ async function shareExistingHabit(id, el) {
         completions: localCompletions,
       };
       if (habit.end_date) sharedItem.end_date = habit.end_date;
+      if (habit.snoozed_until) sharedItem.snoozed_until = habit.snoozed_until;
       if (sharedFinished) sharedItem.is_finished = 1;
       if (nextDue != null) sharedItem.next_due = nextDue;
       // 1. Stage the shared item in memory first: this marks the created
@@ -2611,6 +2645,7 @@ async function shareExistingHabit(id, el) {
         category_id: habit.category_id || _defaultHabitCatId, is_draft: 0,
         shared_id: sharedId, shared_group_id: groupId, next_due: nextDue,
         end_date: habit.end_date || null, is_finished: sharedFinished ? 1 : 0,
+        snoozed_until: habit.snoozed_until || null,
       }).select().single();
       if (ptrErr) {
         // Back out the staged shared item — it hasn't uploaded yet.
@@ -2679,6 +2714,7 @@ async function bulkShareHabitCategory(catId, el) {
               completions: localCompletions,
             };
             if (habit.end_date) sharedItem.end_date = habit.end_date;
+            if (habit.snoozed_until) sharedItem.snoozed_until = habit.snoozed_until;
             if (sharedFinished) sharedItem.is_finished = 1;
             if (nextDue != null) sharedItem.next_due = nextDue;
             // Snapshots for rollback — taken before the local deletes below.
@@ -2700,6 +2736,7 @@ async function bulkShareHabitCategory(catId, el) {
               created_at: habit.created_at || new Date().toISOString(),
               shared_id: sharedId, shared_group_id: groupId, next_due: nextDue,
               end_date: habit.end_date || null, is_finished: sharedFinished ? 1 : 0,
+              snoozed_until: habit.snoozed_until || null,
             }).select().single();
             if (ptrErr) {
               // Back out the staged shared item — it hasn't uploaded yet.
@@ -2775,6 +2812,7 @@ async function unshareHabit(id, el) {
           is_draft: 0,
           next_due: habit.next_due || null,
           end_date: habit.end_date || null,
+          snoozed_until: habit.snoozed_until || null,
           is_finished: habit.is_finished ? 1 : 0,
         }).select().single();
         if (insErr) { showToast(insErr.message, 'error'); return; }
@@ -2843,6 +2881,7 @@ async function copyHabitToPersonal(id, el) {
       is_draft: 0,
       next_due: habit.next_due || null,
       end_date: habit.end_date || null,
+      snoozed_until: habit.snoozed_until || null,
       is_finished: habit.is_finished ? 1 : 0,
     }).select().single();
     if (insErr) { showToast(insErr.message, 'error'); return; }
@@ -2863,6 +2902,96 @@ async function copyHabitToPersonal(id, el) {
     if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
   }
 }
+// ── Habit snooze ──
+// Snoozing hides the habit from every due surface until the chosen date
+// (it wakes ON that date) without touching its frequency, last done, or
+// next_due: a due date that passes during the window is simply overdue on
+// return (defer, not skip — by design, so the snooze can never interact
+// with the end-date finish rule). Group-wide for shared habits, like TODO
+// snooze: the value lives on the shared item and every member's pointer
+// mirrors it.
+function openHabitSnoozeModal(habitId) {
+  const modal = document.getElementById('habitSnoozeModal');
+  if (!modal) return;
+  modal.innerHTML = habitSnoozeModalHTML();
+  document.getElementById('habitSnoozeId').value = habitId;
+  document.getElementById('habitSnoozeCustomDate').value = '';
+  modal.classList.add('visible');
+}
+
+function closeHabitSnoozeModal() {
+  document.getElementById('habitSnoozeModal')?.classList.remove('visible');
+}
+
+async function applyHabitSnooze(habitId, snoozedUntil) {
+  const habit = state.allHabits.find(h => h.id === habitId);
+  if (!habit) return;
+  // Disable the modal's buttons while the write is in flight.
+  const btns = document.querySelectorAll('#habitSnoozeModal button');
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    if (habit.shared_id && habit.shared_group_id && state.sharing) {
+      // Group-wide: publish first (the adapter applies it to the shared
+      // item in memory immediately), then persist the pointer row.
+      habit.snoozed_until = snoozedUntil;
+      const upload = state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { snoozed_until: snoozedUntil });
+      const { error } = await state.db.from('habits').update({ snoozed_until: snoozedUntil }).eq('id', habitId);
+      if (error) throw error;
+      await upload;
+    } else {
+      const { error } = await state.db.from('habits').update({ snoozed_until: snoozedUntil }).eq('id', habitId);
+      if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
+      habit.snoozed_until = snoozedUntil;
+    }
+  } catch (e) {
+    console.warn('Failed to snooze habit:', e);
+    showToast(t('toast.update_failed'), 'error');
+    refreshHabits();
+    return;
+  } finally {
+    btns.forEach(b => { b.disabled = false; });
+  }
+  closeHabitSnoozeModal();
+  refreshHabits();
+  if (snoozedUntil) {
+    showToast(t('habits.snoozed_until', parseLocalDate(snoozedUntil).toLocaleDateString(getLang(), { month: 'short', day: 'numeric', year: 'numeric' })), 'success');
+  } else {
+    showToast(t('habits.unsnoozed'), 'success');
+  }
+}
+
+function habitSnoozeFor(amount, unit) {
+  const habitId = document.getElementById('habitSnoozeId')?.value;
+  if (!habitId) return;
+  const target = new Date();
+  if (unit === 'd') target.setDate(target.getDate() + amount);
+  else if (unit === 'w') target.setDate(target.getDate() + amount * 7);
+  else if (unit === 'M') target.setMonth(target.getMonth() + amount);
+  applyHabitSnooze(habitId, toDateStr(target.getFullYear(), target.getMonth(), target.getDate()));
+}
+
+function submitHabitSnooze() {
+  const habitId = document.getElementById('habitSnoozeId')?.value;
+  const val = document.getElementById('habitSnoozeCustomDate')?.value;
+  if (!habitId || !val) return;
+  if (val <= habitTodayStr()) { showToast(t('habits.snooze_future_date'), 'error'); return; }
+  applyHabitSnooze(habitId, val);
+}
+
+async function unsnoozeHabit(habitId, el) {
+  const btn = el instanceof HTMLElement ? el : null;
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  try {
+    await applyHabitSnooze(habitId, null);
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+  }
+}
+window.openHabitSnoozeModal = openHabitSnoozeModal;
+window.closeHabitSnoozeModal = closeHabitSnoozeModal;
+window.habitSnoozeFor = habitSnoozeFor;
+window.submitHabitSnooze = submitHabitSnooze;
+window.unsnoozeHabit = unsnoozeHabit;
 window.copyHabitToPersonal = copyHabitToPersonal;
 window.closeAddHabitModal = closeAddHabitModal;
 window.saveNewHabit = saveNewHabit;

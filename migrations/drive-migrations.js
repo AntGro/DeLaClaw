@@ -368,4 +368,11 @@ export const DRIVE_MIGRATIONS = {
       if (row.is_finished == null) row.is_finished = 0;
     }
   },
+  '2.19.0': async (store) => {
+    // 2.19.0: habit snooze — ensure the additive field exists (null = not
+    // snoozed) on existing rows, preserving any snooze already set.
+    for (const row of (store.habits || [])) {
+      if (row.snoozed_until === undefined) row.snoozed_until = null;
+    }
+  },
 };

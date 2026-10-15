@@ -4752,6 +4752,28 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(habits.includes('function habitSnoozeModalHTML()'), 'snooze modal must exist');
       assert(habits.includes('data-action="habit-snooze-for"') && habits.includes('id="habitSnoozeCustomDate"'),
         'snooze modal must offer presets and a custom date');
+      // The custom date field is a real date field: constrained width,
+      // prefilled (+1 week) so iOS shows date segments instead of a blank
+      // box, and min = tomorrow.
+      assert(habits.includes('class="snooze-date-input"'), 'custom date input must use the constrained date-field class');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(/\.snooze-date-input\{[^}]*width:\s*230px/.test(css), 'date field must not sprawl full modal width');
+      assert(habits.includes("custom.value = toDateStr(in7.getFullYear(), in7.getMonth(), in7.getDate());"),
+        'custom date must be prefilled with +1 week');
+      assert(habits.includes('custom.min = toDateStr(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate());'),
+        'custom date must not allow today or the past');
+      // Welcome focus habits carry the same snooze + share actions as the
+      // Habits page cards (same data-actions, so delegation routes them to
+      // the same handlers; refreshHabits re-renders Welcome via
+      // 'habits-changed').
+      assert(welcome.includes('data-action="open-habit-snooze-modal" data-id="${esc(habit.id)}"'),
+        'Welcome habit items must offer snooze');
+      assert(welcome.includes('data-action="share-existing-habit" data-id="${esc(habit.id)}"'),
+        'Welcome habit items must offer share');
+      assert(welcome.includes('data-action="unshare-habit" data-id="${esc(habit.id)}"') && welcome.includes('data-action="copy-habit-to-personal" data-id="${esc(habit.id)}"'),
+        'Welcome habit items must offer unshare / copy-to-personal like the Habits page');
+      assert(welcome.includes('isMyCreatedSharedHabit(habit.shared_id)'),
+        'Welcome must use the creator check for unshare vs copy');
       assert(habits.includes("if (val <= habitTodayStr()) { showToast(t('habits.snooze_future_date'), 'error'); return; }"),
         'a custom snooze date must be in the future');
       // Group-wide for shared habits (like TODO snooze): published on the

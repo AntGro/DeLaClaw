@@ -23,6 +23,9 @@ let _habitCatByName = new Map(); // name → row (backward compat)
 let _defaultHabitCatId = null;   // protected General row
 let _sharedHabitCatId = null;    // protected __shared__ row
 const _myCreatedSharedHabitIds = new Set(); // shared_ids where current user is creator
+// Whether the current user created the given shared habit (drives the
+// unshare vs copy-to-personal choice on habit cards, Habits page + Welcome).
+function isMyCreatedSharedHabit(sharedId) { return _myCreatedSharedHabitIds.has(sharedId); }
 
 async function loadHabitCategories() {
   const { data, error } = await state.db.from('habit_categories').select('*').order('sort_order', { ascending: true });
@@ -1289,7 +1292,7 @@ function editHabitModalHTML() {
 }
 
 function habitSnoozeModalHTML() {
-  return `<div class="modal snooze-modal"><h2>${lucideIcon("moon",20)} ${t('habits.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('habits.snooze_hint')}</p><div class="snooze-options"><button data-action="habit-snooze-for" data-amount="1" data-unit="d">${t('habits.snooze_tomorrow')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="w">${t('habits.snooze_1w')}</button><button data-action="habit-snooze-for" data-amount="2" data-unit="w">${t('habits.snooze_2w')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="M">${t('habits.snooze_1m')}</button></div><label style="margin-top:12px;">${t('habits.snooze_custom')}</label><input type="date" id="habitSnoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="habitSnoozeId"><div class="modal-actions"><button class="modal-cancel" data-action="close-habit-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-habit-snooze">${t('habits.snooze')}</button></div></div>`;
+  return `<div class="modal snooze-modal"><h2>${lucideIcon("moon",20)} ${t('habits.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('habits.snooze_hint')}</p><div class="snooze-options"><button data-action="habit-snooze-for" data-amount="1" data-unit="d">${t('habits.snooze_tomorrow')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="w">${t('habits.snooze_1w')}</button><button data-action="habit-snooze-for" data-amount="2" data-unit="w">${t('habits.snooze_2w')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="M">${t('habits.snooze_1m')}</button></div><label style="margin-top:12px;">${t('habits.snooze_custom')}</label><input type="date" id="habitSnoozeCustomDate" class="snooze-date-input"><input type="hidden" id="habitSnoozeId"><div class="modal-actions"><button class="modal-cancel" data-action="close-habit-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-habit-snooze">${t('habits.snooze')}</button></div></div>`;
 }
 
 function habitHistoryModalHTML() {
@@ -2555,7 +2558,7 @@ document.addEventListener('input', e => {
   }
 });
 
-export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, habitFinishedFor, initHabitHoverDelay, isStructuredRule, normalizeFrequencyRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName, computeNextDue };
+export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, habitFinishedFor, initHabitHoverDelay, isStructuredRule, normalizeFrequencyRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName, computeNextDue, isMyCreatedSharedHabit };
 
 window.setHabitFilter = setHabitFilter;
 window.openAddHabitModal = openAddHabitModal;
@@ -2915,7 +2918,14 @@ function openHabitSnoozeModal(habitId) {
   if (!modal) return;
   modal.innerHTML = habitSnoozeModalHTML();
   document.getElementById('habitSnoozeId').value = habitId;
-  document.getElementById('habitSnoozeCustomDate').value = '';
+  // Prefill the custom date (+1 week) so the field shows an actual date —
+  // an empty date input renders as a blank box on iOS — and don't allow
+  // picking today or the past (a snooze must wake in the future).
+  const custom = document.getElementById('habitSnoozeCustomDate');
+  const in7 = new Date(); in7.setDate(in7.getDate() + 7);
+  custom.value = toDateStr(in7.getFullYear(), in7.getMonth(), in7.getDate());
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+  custom.min = toDateStr(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate());
   modal.classList.add('visible');
 }
 

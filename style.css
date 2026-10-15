@@ -1264,6 +1264,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .snooze-options button:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px);}
 .snooze-options button:disabled,.snooze-modal .modal-save:disabled{opacity:0.5;pointer-events:none;cursor:wait;}
 .snooze-modal input[type="datetime-local"],.snooze-modal input[type="date"]{padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.86rem;outline:none;font-family:inherit;transition:border-color 0.2s,box-shadow 0.2s;}
+.snooze-modal input[type="date"].snooze-date-input{display:block;width:230px;max-width:100%;min-height:42px;margin-top:4px;}
 .snooze-modal input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(100,108,255,0.1);}
 
 /* ===== TODO INLINE EDIT DEADLINE ===== */

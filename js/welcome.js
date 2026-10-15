@@ -6,7 +6,7 @@ import { t, getLang } from './i18n.js';
 import state, { SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
-import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCategories } from './habits.js';
+import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCategories, isMyCreatedSharedHabit } from './habits.js';
 import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCategories } from './todos.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
@@ -339,7 +339,11 @@ function renderFocusHabitItem(habit) {
       </div>
       <div class="habit-actions">
         <button data-habit-id="${esc(habit.id)}" data-action="welcome-mark-habit-done" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check", 16)}</button>
+        <button data-action="open-habit-snooze-modal" data-id="${esc(habit.id)}" title="${t('habits.snooze')}">${lucideIcon("moon", 16)}</button>
         <button data-action="welcome-open-habit-history" data-habit-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list", 16)} ${completionCount}</button>
+        ${!isShared && state.sharing ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
+        ${isShared && isMyCreatedSharedHabit(habit.shared_id) ? `<button data-action="unshare-habit" data-id="${esc(habit.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
+        ${isShared && !isMyCreatedSharedHabit(habit.shared_id) ? `<button data-action="copy-habit-to-personal" data-id="${esc(habit.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
         <button data-action="edit-habit-inline" data-habit-id="${esc(habit.id)}" title="${t('common.edit')}">${lucideIcon("pencil", 16)}</button>
         <button data-action="copy-item-link" data-link-type="habit" data-id="${esc(habit.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link", 16)}</button>
         <button data-action="welcome-delete-habit" data-habit-id="${esc(habit.id)}" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>

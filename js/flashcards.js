@@ -4,7 +4,7 @@ import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } fr
 import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
-import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap, persistTextEdit, leadingRevealCount } from './scene-parse.js';
+import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap, persistTextEdit, leadingRevealCount, trailingRevealCount } from './scene-parse.js';
 
 // ===================================================================
 // FLASHCARDS — Spaced Repetition (Algo-style intervals)
@@ -1997,6 +1997,23 @@ window.handleLineClick = function(el) {
       el.classList.add('tr-line-shown');
     }
     el.innerHTML = lineObj ? lineObj.html : '';
+
+    if (kind === 'mine') {
+      // Revealing an own line also reveals everything that follows it up
+      // to the next own line: cues and directions are not practised, so
+      // there is nothing to recall in them — tapping through them one by
+      // one (several blocks of the same other role included) only slows
+      // the rehearsal down. They reveal neutrally, like a manual tap.
+      const follow = trailingRevealCount(trOverlayLines.map(l => l.kind), idx);
+      for (let j = idx + 1; j <= idx + follow; j++) {
+        const fel = lines[j];
+        if (!fel || !fel.classList.contains('tr-line-masked')) break;
+        fel.classList.remove('tr-line-masked', 'tr-line-next');
+        fel.classList.add('tr-line-shown');
+        const fObj = trOverlayLines[parseInt(fel.dataset.lineIdx, 10)];
+        fel.innerHTML = fObj ? fObj.html : '';
+      }
+    }
 
     // Mark next masked line as the active target
     const nextMasked = container.querySelector('.tr-line-masked');

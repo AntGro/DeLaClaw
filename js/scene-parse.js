@@ -106,6 +106,19 @@ export function leadingRevealCount(kinds) {
   return idx > 0 ? idx : 0;
 }
 
+// Trailing auto-reveal count: the number of consecutive lines after index
+// `idx` that are NOT the revised role's ('cue' / 'dir'). When the user
+// reveals one of their own lines, these following lines are revealed
+// automatically with it — they are never practised, so making the user tap
+// through them one by one only slows the rehearsal. The run stops at the
+// next own line (which stays masked, to be recalled) — consecutive blocks
+// of other roles, even the same role several blocks in a row, all count.
+export function trailingRevealCount(kinds, idx) {
+  let n = 0;
+  for (let i = idx + 1; i < kinds.length && kinds[i] !== 'mine'; i++) n++;
+  return n;
+}
+
 // Group consecutive lines by speaker (case-insensitive) for book-like layout:
 // the speaker's name is shown once above the group, outside the line boxes,
 // instead of repeated on every line. Direction lines (speaker null) group

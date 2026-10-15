@@ -3749,6 +3749,26 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'masked bubbles must render at max width (no content-length hint)');
     });
 
+    test('scene revision: revealing an own line auto-reveals following cues/directions', async () => {
+      const { trailingRevealCount } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      assert(trailingRevealCount(['mine', 'cue', 'dir', 'mine'], 0) === 2,
+        'cue + direction after an own line auto-reveal');
+      assert(trailingRevealCount(['mine', 'cue', 'cue', 'cue', 'mine'], 0) === 3,
+        'several consecutive blocks of another role all auto-reveal');
+      assert(trailingRevealCount(['mine', 'mine', 'cue'], 0) === 0,
+        'the next own line stays masked (nothing auto-reveals)');
+      assert(trailingRevealCount(['cue', 'mine', 'cue', 'dir'], 1) === 2,
+        'the cascade runs to the end of the chunk when no own line follows');
+      assert(trailingRevealCount(['mine'], 0) === 0, 'own line is last');
+      assert(trailingRevealCount([], 0) === 0, 'empty chunk');
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('trailingRevealCount(trOverlayLines.map(l => l.kind), idx)'),
+        'line click must compute the trailing auto-reveal from the line kinds');
+      assert(/if \(kind === 'mine'\) \{\s*\n\s*\/\/ Revealing an own line also reveals/.test(flashJs),
+        'the cascade must trigger only when an own line is revealed');
+    });
+
     test('plain-text revision: chunk string split into lines', () => {
       const flashJs = jsFiles['flashcards.js'];
       assert(flashJs.includes("typeof rawChunk === 'string' ? rawChunk.split('\\n') : rawChunk"),

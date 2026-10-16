@@ -561,4 +561,10 @@ export const LOCAL_MIGRATIONS = {
     -- next_due is never moved (defer, not skip).
     ALTER TABLE habits ADD COLUMN snoozed_until TEXT;
   `,
+  '2.20.0': `
+    -- Automatic habits: is_auto on habits (validates itself on schedule)
+    -- and on habit_completions (marks roll-generated completions).
+    ALTER TABLE habits ADD COLUMN is_auto INTEGER DEFAULT 0;
+    ALTER TABLE habit_completions ADD COLUMN is_auto INTEGER DEFAULT 0;
+  `,
 };

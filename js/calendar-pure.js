@@ -20,6 +20,40 @@ export function toDateStr(y, m, d) {
  * parse, which converts the instant to local time correctly.
  * Shared by every reader of date-only fields (e.g. habit next_due).
  */
+/**
+ * Plan the auto-validation roll for an automatic habit: every occurrence
+ * strictly before `todayStr` that has not been validated yet (the stored
+ * next_due is the oldest unvalidated one) is due to be recorded as an
+ * automatic completion, stepping with the same nextDueFn the Calendar
+ * expansion uses so the two can never disagree. Returns null when there
+ * is nothing to do (next due is today or later — today's occurrence is
+ * NOT pre-validated, it shows as due today and rolls tomorrow).
+ * Otherwise { missed: ['YYYY-MM-DD', ...], nextDue, finished } where
+ * nextDue is the first occurrence on/after today, and finished applies
+ * the end-date rule to it (strictly past end_date → finished, nextDue
+ * null). Occurrences past end_date are never recorded.
+ */
+export function planAutoRoll(habit, todayStr, nextDueFn) {
+  const rule = habit.frequency_rule || '';
+  const start = (habit.next_due || '').slice(0, 10);
+  if (!rule || !start || start >= todayStr) return null;
+  const endDate = (habit.end_date || '').slice(0, 10);
+  const missed = [];
+  let cursor = start;
+  let guard = 0;
+  while (cursor && cursor < todayStr && guard++ < 1000) {
+    if (endDate && cursor > endDate) break;
+    missed.push(cursor);
+    const n = nextDueFn(rule, cursor);
+    const ns = n ? String(n).slice(0, 10) : null;
+    if (!ns || ns <= cursor) { cursor = null; break; }
+    cursor = ns;
+  }
+  const finished = !!(endDate && cursor && cursor > endDate);
+  if (!missed.length && !finished) return null;
+  return { missed, nextDue: finished ? null : cursor, finished };
+}
+
 // A habit is snoozed while its snooze date is still ahead: `snoozed_until`
 // is a local YYYY-MM-DD date (same convention as `next_due` / `end_date`)
 // and the habit wakes ON that date — snoozed strictly before it. Snoozing

@@ -6,7 +6,7 @@ import { t, getLang } from './i18n.js';
 import state, { SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
-import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCategories, isMyCreatedSharedHabit } from './habits.js';
+import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCategories, isMyCreatedSharedHabit, isAutoHabit } from './habits.js';
 import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCategories } from './todos.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
@@ -508,6 +508,7 @@ function renderWelcome() {
     if (c.is_draft) return false;
     if (!c.next_due) return false;
     if (isHabitSnoozed(c, todayStr)) return false;
+    if (isAutoHabit(c)) return false; // validates itself — nothing to do
     return startOfDay(parseLocalDate(c.next_due)) <= todayStart;
   });
   habitsDue.sort((a, b) => String(a.next_due).slice(0, 10).localeCompare(String(b.next_due).slice(0, 10))); // date-only strings sort chronologically

@@ -124,7 +124,7 @@ function en() {
     { id: 'demo-habit-006', name: 'Weekly meal prep', frequency_rule: 'every_N_weeks:1:Sun', category: 'Health', is_draft: false, next_due: null, sort_order: 5, created_at: d(-35), updated_at: d(-7) },
     { id: 'demo-habit-007', name: 'Journal', frequency_rule: 'every_N_days:2', category: '', is_draft: false, next_due: null, sort_order: 6, created_at: d(-90), updated_at: d(-2) },
     { id: 'demo-habit-008', name: 'Deep clean bathroom', frequency_rule: 'every_N_weeks:2', category: 'Home', is_draft: false, next_due: null, sort_order: 7, created_at: d(-56), updated_at: d(-9) },
-    { id: 'demo-habit-009', name: 'Budget review', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, end_date: dateOnly(75), sort_order: 8, created_at: d(-120), updated_at: d(-18) },
+    { id: 'demo-habit-009', name: 'Budget review', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, end_date: dateOnly(75), is_auto: 1, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
     { id: 'demo-habit-010', name: 'Quarterly goals check-in', frequency_rule: 'every_N_months:3:first:Mon', category: 'Wellbeing', is_draft: false, next_due: null, sort_order: 9, created_at: d(-180), updated_at: d(-60) },
     { id: 'demo-habit-011', name: 'Dentist appointment', frequency_rule: 'yearly:03-15', category: 'Health', is_draft: false, next_due: null, sort_order: 10, created_at: d(-365), updated_at: d(-150) },
   ];
@@ -239,7 +239,7 @@ function fr() {
     { id: 'demo-habit-006', name: 'Meal prep du dimanche', frequency_rule: 'every_N_weeks:1:Sun', category: 'Santé', is_draft: false, next_due: null, sort_order: 5, created_at: d(-35), updated_at: d(-7) },
     { id: 'demo-habit-007', name: 'Journal', frequency_rule: 'every_N_days:2', category: '', is_draft: false, next_due: null, sort_order: 6, created_at: d(-90), updated_at: d(-2) },
     { id: 'demo-habit-008', name: 'Grand ménage salle de bain', frequency_rule: 'every_N_weeks:2', category: 'Maison', is_draft: false, next_due: null, sort_order: 7, created_at: d(-56), updated_at: d(-9) },
-    { id: 'demo-habit-009', name: 'Revue du budget', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, end_date: dateOnly(75), sort_order: 8, created_at: d(-120), updated_at: d(-18) },
+    { id: 'demo-habit-009', name: 'Revue du budget', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, end_date: dateOnly(75), is_auto: 1, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
     { id: 'demo-habit-010', name: 'Bilan trimestriel des objectifs', frequency_rule: 'every_N_months:3:first:Mon', category: 'Bien-être', is_draft: false, next_due: null, sort_order: 9, created_at: d(-180), updated_at: d(-60) },
     { id: 'demo-habit-011', name: 'Rendez-vous dentiste', frequency_rule: 'yearly:03-15', category: 'Santé', is_draft: false, next_due: null, sort_order: 10, created_at: d(-365), updated_at: d(-150) },
   ];
@@ -350,7 +350,7 @@ function es() {
     { id: 'demo-habit-006', name: 'Meal prep semanal', frequency_rule: 'every_N_weeks:1:Sun', category: 'Salud', is_draft: false, next_due: null, sort_order: 5, created_at: d(-35), updated_at: d(-7) },
     { id: 'demo-habit-007', name: 'Diario', frequency_rule: 'every_N_days:2', category: '', is_draft: false, next_due: null, sort_order: 6, created_at: d(-90), updated_at: d(-2) },
     { id: 'demo-habit-008', name: 'Limpieza a fondo del baño', frequency_rule: 'every_N_weeks:2', category: 'Hogar', is_draft: false, next_due: null, sort_order: 7, created_at: d(-56), updated_at: d(-9) },
-    { id: 'demo-habit-009', name: 'Revisión del presupuesto', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, end_date: dateOnly(75), sort_order: 8, created_at: d(-120), updated_at: d(-18) },
+    { id: 'demo-habit-009', name: 'Revisión del presupuesto', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, end_date: dateOnly(75), is_auto: 1, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
     { id: 'demo-habit-010', name: 'Revisión trimestral de objetivos', frequency_rule: 'every_N_months:3:first:Mon', category: 'Bienestar', is_draft: false, next_due: null, sort_order: 9, created_at: d(-180), updated_at: d(-60) },
     { id: 'demo-habit-011', name: 'Cita con el dentista', frequency_rule: 'yearly:03-15', category: 'Salud', is_draft: false, next_due: null, sort_order: 10, created_at: d(-365), updated_at: d(-150) },
   ];

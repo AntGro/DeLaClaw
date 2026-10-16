@@ -4654,8 +4654,8 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // Render: finished badge, no Done button, ends line while active.
       assert(habits.includes("const isFinished = !isDraft && !!habit.is_finished;"),
         'renderHabitItem must derive the finished state (drafts take precedence)');
-      assert(habits.includes("!isDraft && !isFinished && !isSnoozed ? `<button data-habit-id="),
-        'finished (and snoozed) habits must not render a Done button');
+      assert(habits.includes("!isDraft && !isFinished && !isSnoozed && !isAuto ? `<button data-habit-id="),
+        'finished (and snoozed, and automatic) habits must not render a Done button');
       assert(habits.includes("t('habits.finished')") && habits.includes("t('habits.ends_on'"),
         'render must show the Finished badge and the Ends line');
       // Modals carry the field both ways.
@@ -4720,6 +4720,74 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // run pending migrations, which default the fields on old backups.
       assert(main.includes('inMemAdapter.reseed(reseedData);') && main.includes('inMemAdapter.runPendingMigrations()'),
         'restore must reseed rows as-is, then run migrations (2.18.0 defaults end_date/is_finished on pre-feature backups)');
+    });
+
+    test('automatic habits: planAutoRoll steps missed occurrences and applies the end-date rule', async () => {
+      const { planAutoRoll } =
+        await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      const step = (rule, cursor) => {
+        // Deterministic stepper standing in for computeNextDue (verified
+        // against the real one separately): monthly on the 1st, daily.
+        if (rule === 'monthly') {
+          const [y, m] = cursor.split('-').map(Number);
+          const nm = m === 12 ? 1 : m + 1, ny = m === 12 ? y + 1 : y;
+          return `${ny}-${String(nm).padStart(2, '0')}-01`;
+        }
+        const d = new Date(cursor + 'T12:00:00');
+        d.setDate(d.getDate() + 1);
+        return d.toISOString().slice(0, 10);
+      };
+      const TODAY = '2026-10-15';
+      let plan = planAutoRoll({ frequency_rule: 'monthly', next_due: '2026-10-01' }, TODAY, step);
+      assert(JSON.stringify(plan) === JSON.stringify({ missed: ['2026-10-01'], nextDue: '2026-11-01', finished: false }),
+        'one missed monthly occurrence must be validated, next due steps forward');
+      plan = planAutoRoll({ frequency_rule: 'daily', next_due: '2026-10-12' }, TODAY, step);
+      assert(JSON.stringify(plan.missed) === JSON.stringify(['2026-10-12', '2026-10-13', '2026-10-14']) && plan.nextDue === '2026-10-15',
+        'daily catch-up must validate every missed day and stop at today');
+      assert(planAutoRoll({ frequency_rule: 'daily', next_due: '2026-10-15' }, TODAY, step) === null,
+        "today's occurrence must NOT be pre-validated");
+      plan = planAutoRoll({ frequency_rule: 'monthly', next_due: '2026-10-01', end_date: '2026-10-01' }, TODAY, step);
+      assert(plan.finished === true && plan.nextDue === null && plan.missed.length === 1,
+        'an automatic habit must finish itself after its final occurrence');
+      plan = planAutoRoll({ frequency_rule: 'monthly', next_due: '2026-09-01', end_date: '2026-08-15' }, TODAY, step);
+      assert(plan.finished === true && plan.missed.length === 0,
+        'an occurrence past the end date must never be validated');
+    });
+
+    test('automatic habits: storage, roll wiring and UI gating', () => {
+      const habits = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const pure = fs.readFileSync(path.join(JS_DIR, 'calendar-pure.js'), 'utf-8');
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(schema.includes('is_auto INTEGER DEFAULT 0'), 'schema: is_auto on habits + habit_completions');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(local.includes("'2.20.0'") && local.includes('ALTER TABLE habits ADD COLUMN is_auto INTEGER DEFAULT 0')
+        && local.includes('ALTER TABLE habit_completions ADD COLUMN is_auto INTEGER DEFAULT 0'),
+        'local migration 2.20.0 must add is_auto to both tables');
+      assert(drive.includes("'2.20.0'") && drive.includes('row.is_auto == null'),
+        'drive migration 2.20.0 must default is_auto on habit + completion rows');
+      assert(/export function planAutoRoll\(habit, todayStr, nextDueFn\)/.test(pure), 'planAutoRoll must be a pure exported helper');
+      assert(habits.includes('await rollAutoHabits();'), 'refreshHabits must run the roll before rendering');
+      assert(habits.includes('if (!isAutoHabit(habit) || habit.is_finished) continue;'), 'roll must skip non-auto and finished habits');
+      assert(habits.includes('if (isHabitSnoozed(habit, todayStr)) continue;'), 'roll must leave snoozed habits alone (catch-up on wake)');
+      assert(habits.includes('_rollingAutoHabits'), 'roll must be re-entrancy guarded');
+      assert(habits.includes('auto: 1,') && habits.includes('is_auto: c.auto ? 1 : 0'),
+        'shared auto completions must carry auto:1 and be injected with is_auto');
+      assert(/export function isAutoHabit\(habit\)/.test(habits)
+        && habits.includes("habit.is_auto && !habit.is_draft && isStructuredRule(habit.frequency_rule || '')"),
+        'isAutoHabit must require the flag, a non-draft and a structured rule');
+      assert(habits.includes('id="newHabitAuto"') && habits.includes('id="editHabitAuto"'), 'add/edit modals must offer the Automatic toggle');
+      assert(habits.includes("class=\"habit-auto-badge\""), 'card must show the Auto badge');
+      assert(habits.includes('!isSnoozed && !isAuto ? `<button data-action="open-habit-snooze-modal"'), 'automatic habits must not offer snooze');
+      assert(habits.includes('const autoStr = comp.is_auto'), 'history must mark auto completions');
+      const welcome = fs.readFileSync(path.join(JS_DIR, 'welcome.js'), 'utf-8');
+      assert(welcome.includes('if (isAutoHabit(c)) return false;'), 'Welcome due list must exclude automatic habits');
+      const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+      assert(cal.includes('is_auto: isAutoHabit(h)') && cal.includes('if (ev.is_auto) {'),
+        'Calendar day panel must not offer Done for automatic habits');
+      assert(habits.includes('if (isAuto) sharedItem.is_auto = 1;'), 'shared creation must publish is_auto');
+      assert(habits.includes('is_auto: autoVal };') || habits.includes('is_auto: autoVal }'), 'edit modal shared chain must publish is_auto');
+      assert(habits.includes('habit._rowAuto = habit.is_auto ? 1 : 0;'), 'refresh must capture the pointer is_auto for row sync');
     });
 
     test('habit snooze: isHabitSnoozed wakes on the snooze date (defer semantics)', async () => {

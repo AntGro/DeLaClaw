@@ -375,4 +375,14 @@ export const DRIVE_MIGRATIONS = {
       if (row.snoozed_until === undefined) row.snoozed_until = null;
     }
   },
+  '2.20.0': async (store) => {
+    // 2.20.0: automatic habits — default is_auto to 0 on habit rows and
+    // on completion rows, preserving any value already set.
+    for (const row of (store.habits || [])) {
+      if (row.is_auto == null) row.is_auto = 0;
+    }
+    for (const row of (store.habit_completions || [])) {
+      if (row.is_auto == null) row.is_auto = 0;
+    }
+  },
 };

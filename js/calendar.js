@@ -11,7 +11,7 @@ import { lucideIcon } from './icons.js';
 import { sharedBadge } from './sharing-ui.js';
 import { t, getLang } from './i18n.js';
 import { getTodos, catIdForTodo, getCategoryColor, getCatDisplayName } from './todos.js';
-import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatDisplayName } from './habits.js';
+import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatDisplayName, isAutoHabit } from './habits.js';
 import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates, isHabitSnoozed } from './calendar-pure.js';
 
 let calYear;
@@ -97,6 +97,7 @@ function collectRangeEvents(start, end) {
       catId: hCatId, catColor: getHabitCategoryColor(hCatId), catName: getHabitCatDisplayName(hCatId),
       next_due: (h.next_due || '').slice(0, 10) || null,
       shared_id: h.shared_id || null, shared_group_id: h.shared_group_id || null,
+      is_auto: isAutoHabit(h),
     };
     // While a snooze is active, occurrences inside the window are hidden;
     // occurrences on/after the wake date show normally (the habit wakes
@@ -525,6 +526,13 @@ function dayPanelRow(ev, dateStr) {
   // Only the next due occurrence can be marked done: completing a future
   // occurrence would complete the current next_due instead (markHabitDone
   // always completes the habit's current due date).
+  // Automatic habits validate themselves — no Done button, just the badge.
+  if (ev.is_auto) {
+    return `<div class="cal-row">
+      <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong></span>
+      <span class="habit-auto-badge">${lucideIcon('bot', 12)} ${t('habits.auto_badge')}</span>
+    </div>`;
+  }
   const isNextDue = ev.next_due && dateStr === ev.next_due;
   const doneAttrs = isNextDue
     ? `title="${t('common.done')}"`

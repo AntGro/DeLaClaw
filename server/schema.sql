@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS habits (
   end_date TEXT,
   is_finished INTEGER DEFAULT 0,
   snoozed_until TEXT,
+  is_auto INTEGER DEFAULT 0,
   shared_id TEXT,
   shared_group_id TEXT,
   owner_id TEXT,
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS habit_completions (
   habit_id TEXT REFERENCES habits(id) ON DELETE CASCADE,
   completed_at TEXT,
   completed_by TEXT,
+  is_auto INTEGER DEFAULT 0,
   owner_id TEXT,
   note TEXT,
   created_at TEXT DEFAULT (datetime('now'))

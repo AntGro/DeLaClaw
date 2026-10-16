@@ -119,7 +119,7 @@ async function saveEditHabitCategory() {
 // source of truth, re-exported below); local helpers follow.
 
 import { STRUCTURED_PREFIXES, DOW_KEYS, DOW_JS, isStructuredRule, normalizeFrequencyRule } from './frequency-rule.js';
-import { parseLocalDate, isHabitSnoozed, toDateStr } from './calendar-pure.js';
+import { parseLocalDate, isHabitSnoozed, toDateStr, planAutoRoll } from './calendar-pure.js';
 // (re-exported in the export list at the bottom of this file)
 
 /** Format a Date as YYYY-MM-DD in local time (not UTC). */
@@ -689,9 +689,11 @@ async function refreshHabits() {
         habit._rowEndDate = habit.end_date || null;
         habit._rowFinished = habit.is_finished ? 1 : 0;
         habit._rowSnoozedUntil = habit.snoozed_until || null;
+        habit._rowAuto = habit.is_auto ? 1 : 0;
         habit.end_date = sh.end_date || null;
         habit.is_finished = sh.is_finished ? 1 : 0;
         habit.snoozed_until = sh.snoozed_until || null;
+        habit.is_auto = sh.is_auto ? 1 : 0;
         habit._shared = sh; // keep reference for completions/metadata
         // Inject shared completions into allHabitCompletions
         if (sh.completions?.length) {
@@ -707,6 +709,7 @@ async function refreshHabits() {
                 completed_at: c.completed_at,
                 completed_by: c.completed_by || '',
                 note: null,
+                is_auto: c.auto ? 1 : 0,
                 _shared: true,
               });
             }
@@ -736,6 +739,13 @@ async function refreshHabits() {
           const { error } = await state.db.from('habits').update({ snoozed_until: sharedSnoozedUntil }).eq('id', habit.id);
           if (!error) habit.snoozed_until = sharedSnoozedUntil;
         }
+        // Same for is_auto: it changes via the edit modal, independently
+        // of next_due publishes.
+        const sharedAuto = sh.is_auto ? 1 : 0;
+        if (sharedAuto !== habit._rowAuto) {
+          const { error } = await state.db.from('habits').update({ is_auto: sharedAuto }).eq('id', habit.id);
+          if (!error) habit.is_auto = sharedAuto;
+        }
       }
     }
 
@@ -758,6 +768,10 @@ async function refreshHabits() {
     state.allHabits = state.allHabits.filter(h => !h.shared_id || h._shared);
   }
 
+  // Automatic habits validate themselves: record any missed occurrences
+  // and step next_due forward before anything renders.
+  await rollAutoHabits();
+
   _lastRefreshHabits = Date.now();
 
   // Categories already loaded via loadHabitCategories() above
@@ -765,6 +779,76 @@ async function refreshHabits() {
     renderHabits();
   }
   document.dispatchEvent(new CustomEvent('habits-changed'));
+}
+
+// ── Automatic habits: validate missed occurrences ──
+// For each automatic habit whose stored next_due has fallen behind today,
+// record one automatic completion per missed occurrence and step next_due
+// to the first occurrence on/after today (planAutoRoll also applies the
+// end-date finish rule, so an automatic habit with an end date finishes
+// itself after its final occurrence). Today's occurrence is NOT
+// pre-validated. Actively snoozed habits are left alone; on wake the roll
+// catches up. Re-entrancy: a shared roll stages adapter mutations whose
+// events can trigger a nested refresh — the guard set keeps the nested
+// roll out, and the outer roll's writes are the final word.
+const _rollingAutoHabits = new Set();
+async function rollAutoHabits() {
+  const todayStr = habitTodayStr();
+  for (const habit of state.allHabits) {
+    if (!isAutoHabit(habit) || habit.is_finished) continue;
+    if (isHabitSnoozed(habit, todayStr)) continue;
+    if (_rollingAutoHabits.has(habit.id)) continue;
+    const plan = planAutoRoll(habit, todayStr, (r, lastDone) => computeNextDue(r, lastDone));
+    if (!plan) continue;
+    _rollingAutoHabits.add(habit.id);
+    try {
+      const autoComps = plan.missed.map(dstr => ({
+        id: crypto.randomUUID(),
+        completed_at: habitDateInputToIso(dstr),
+        completed_by: '',
+        auto: 1,
+      }));
+      if (habit.shared_id && habit.shared_group_id && state.sharing) {
+        for (let i = 0; i < autoComps.length; i++) {
+          const isLast = i === autoComps.length - 1;
+          await state.sharing.addSharedHabitCompletion(
+            habit.shared_group_id, habit.shared_id, autoComps[i],
+            isLast ? { next_due: plan.nextDue, is_finished: plan.finished ? 1 : 0 } : {});
+        }
+        if (autoComps.length === 0) {
+          // Finish-only roll: the stored next_due is already past the end
+          // date, with no occurrence left to validate.
+          await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id,
+            { next_due: plan.nextDue, is_finished: plan.finished ? 1 : 0 });
+        }
+        const { error } = await state.db.from('habits')
+          .update({ next_due: plan.nextDue, is_finished: plan.finished ? 1 : 0 }).eq('id', habit.id);
+        if (error) throw error;
+        for (const c of autoComps) {
+          state.allHabitCompletions.push({ id: c.id, habit_id: habit.id, completed_at: c.completed_at, completed_by: '', note: null, is_auto: 1, _shared: true });
+        }
+      } else {
+        if (autoComps.length > 0) {
+          const rows = autoComps.map(c => ({ id: c.id, habit_id: habit.id, completed_at: c.completed_at, is_auto: 1 }));
+          const { error } = await state.db.from('habit_completions').insert(rows);
+          if (error) throw error;
+          for (const r of rows) state.allHabitCompletions.push({ ...r, completed_by: '' });
+        }
+        const { error } = await state.db.from('habits')
+          .update({ next_due: plan.nextDue, is_finished: plan.finished ? 1 : 0 }).eq('id', habit.id);
+        if (error) throw error;
+      }
+      if (autoComps.length > 0) {
+        state.allHabitCompletions.sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
+      }
+      habit.next_due = plan.nextDue;
+      habit.is_finished = plan.finished ? 1 : 0;
+    } catch (e) {
+      console.warn('Auto-validation roll failed for habit', habit.id, e);
+    } finally {
+      _rollingAutoHabits.delete(habit.id);
+    }
+  }
 }
 
 function getHabitLastDone(habitId) {
@@ -922,6 +1006,13 @@ async function setLocalHabitLastDone(habitId, newIso) {
 export function habitTodayStr() {
   const n = new Date();
   return toDateStr(n.getFullYear(), n.getMonth(), n.getDate());
+}
+
+// An automatic habit validates itself on schedule: no Done, no snooze.
+// Only structured rules can be stepped occurrence by occurrence, so a
+// free-text rule is never automatic in effect, whatever the flag says.
+export function isAutoHabit(habit) {
+  return !!(habit && habit.is_auto && !habit.is_draft && isStructuredRule(habit.frequency_rule || ''));
 }
 
 function habitDueStatus(habit) {
@@ -1217,6 +1308,7 @@ function renderHabitItem(habit) {
   const isDraft = habit.is_draft;
   const isFinished = !isDraft && !!habit.is_finished;
   const isSnoozed = !isDraft && !isFinished && isHabitSnoozed(habit, habitTodayStr());
+  const isAuto = isAutoHabit(habit);
   const status = isFinished ? 'finished' : isDraft ? 'draft' : habitDueStatus(habit);
   const dueHtml = isFinished ? `<span class="habit-due finished">${lucideIcon("flag",16)} ${t('habits.finished')}</span>` : isDraft ? `<span class="habit-due draft">${lucideIcon("file-text",16)} ${t('habits.draft')}</span>` : formatHabitDue(habit);
   const endsHtml = !isFinished && !isDraft && habit.end_date
@@ -1246,8 +1338,8 @@ function renderHabitItem(habit) {
       </div>
       <div class="habit-actions">
         ${promoteBtn}
-        ${!isDraft && !isFinished && !isSnoozed ? `<button data-habit-id="${esc(habit.id)}" data-action="mark-habit-done" data-id="${esc(habit.id)}" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
-        ${!isDraft && !isFinished && !isSnoozed ? `<button data-action="open-habit-snooze-modal" data-id="${esc(habit.id)}" title="${t('habits.snooze')}">${lucideIcon("moon",16)}</button>` : ''}
+        ${!isDraft && !isFinished && !isSnoozed && !isAuto ? `<button data-habit-id="${esc(habit.id)}" data-action="mark-habit-done" data-id="${esc(habit.id)}" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check",16)}</button>` : ''}
+        ${!isDraft && !isFinished && !isSnoozed && !isAuto ? `<button data-action="open-habit-snooze-modal" data-id="${esc(habit.id)}" title="${t('habits.snooze')}">${lucideIcon("moon",16)}</button>` : ''}
         ${isSnoozed ? `<button data-action="unsnooze-habit" data-id="${esc(habit.id)}" title="${t('habits.unsnooze')}">${lucideIcon("moon-off",16)}</button>` : ''}
         <button data-action="open-habit-history" data-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list",16)} ${completionCount}</button>
         ${!isShared && !isDraft && state.sharing ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
@@ -1260,6 +1352,7 @@ function renderHabitItem(habit) {
     </div>
     <div class="habit-meta">
       ${dueHtml}
+      ${isAuto && !isFinished ? `<span class="habit-auto-badge">${lucideIcon("bot",12)} ${t('habits.auto_badge')}</span>` : ''}
       ${endsHtml}
       ${!isDraft ? `<span class="habit-last-done habit-last-done-editable" data-action="edit-habit-last-done" data-id="${esc(habit.id)}" title="${t('habits.click_to_edit_last_done')}">${lastDoneStr}</span>` : ''}
     </div>
@@ -1284,11 +1377,11 @@ function formatHabitRelative(d) {
 // HABIT CRUD
 // ===================================================================
 function addHabitModalHTML() {
-  return `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><textarea id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="1000" data-action="save-new-habit-on-enter" rows="1" style="resize:none;overflow:hidden;"></textarea><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><div id="newHabitGroupRow" style="display:none"><label>${t('sharing.group')}</label><select id="newHabitGroup"><option value="">${t('sharing.no_group')}</option></select></div><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label>${t('habits.end_date_optional')}</label><input type="date" id="newHabitEndDate"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit">${t("common.create")}</button></div></div>`;
+  return `<div class="modal"><h2>` + lucideIcon("repeat",20) + ` ${t('habits.add_habit')}</h2><label>${t('common.name')}</label><textarea id="newHabitName" placeholder="${t('habits.habit_placeholder')}" maxlength="1000" data-action="save-new-habit-on-enter" rows="1" style="resize:none;overflow:hidden;"></textarea><label>${t('habits.frequency_rule_label')}</label><div id="newHabitFreqPicker"></div><label>${t('common.category')}</label><select id="newHabitCategory"></select><div id="newHabitGroupRow" style="display:none"><label>${t('sharing.group')}</label><select id="newHabitGroup"><option value="">${t('sharing.no_group')}</option></select></div><label>${t('habits.last_done_optional')}</label><input type="date" id="newHabitLastDone"><label>${t('habits.end_date_optional')}</label><input type="date" id="newHabitEndDate"><label class="habit-draft-toggle"><input type="checkbox" id="newHabitDraft"><span>${t("habits.save_as_draft")} (${t("habits.draft_no_due")})</span></label><label class="habit-draft-toggle"><input type="checkbox" id="newHabitAuto"><span>${t("habits.auto_toggle")}</span></label><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit">${t("common.create")}</button></div></div>`;
 }
 
 function editHabitModalHTML() {
-  return `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><textarea id="editHabitName" maxlength="1000" rows="1" style="resize:none;overflow:hidden;"></textarea><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><label id="editHabitEndDateLabel">${t('habits.end_date_optional')}</label><input type="date" id="editHabitEndDate"><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-modal" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
+  return `<div class="modal"><h2 id="editHabitTitle">` + lucideIcon("pencil",20) + ` ${t('habits.edit_habit')}</h2><input type="hidden" id="editHabitId"><label id="editHabitNameLabel">${t('common.name')}</label><textarea id="editHabitName" maxlength="1000" rows="1" style="resize:none;overflow:hidden;"></textarea><label id="editHabitFreqLabel">${t('habits.frequency_rule')}</label><div id="editHabitFreqPicker"></div><label id="editHabitCategoryLabel">${t('common.category')}</label><select id="editHabitCategory"></select><label id="editHabitLastDoneLabel">${t('habits.last_done_optional')}</label><input type="date" id="editHabitLastDone"><label id="editHabitEndDateLabel">${t('habits.end_date_optional')}</label><input type="date" id="editHabitEndDate"><label class="habit-draft-toggle"><input type="checkbox" id="editHabitAuto"><span>${t("habits.auto_toggle")}</span></label><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-modal" id="editHabitCancelBtn">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit" id="editHabitSaveBtn">${t('common.save')}</button></div></div>`;
 }
 
 function habitSnoozeModalHTML() {
@@ -1359,6 +1452,7 @@ function openAddHabitModal(opts = {}) {
   if (name) setTimeout(() => autoResizeTextarea(nameEl), 0);
   document.getElementById('newHabitLastDone').value = '';
   document.getElementById('newHabitDraft').checked = false;
+  const newAutoEl = document.getElementById('newHabitAuto'); if (newAutoEl) newAutoEl.checked = false;
   buildFrequencyPicker(document.getElementById('newHabitFreqPicker'), '');
   populateHabitCategorySelect('newHabitCategory');
   document.getElementById('newHabitCategory').value = catId;
@@ -1433,6 +1527,7 @@ async function saveNewHabit() {
   const lastDoneVal = document.getElementById('newHabitLastDone').value;
   const endDateVal = document.getElementById('newHabitEndDate')?.value || '';
   const isDraft = document.getElementById('newHabitDraft').checked;
+  const isAuto = document.getElementById('newHabitAuto')?.checked ? 1 : 0;
   const groupId = document.getElementById('newHabitGroup')?.value || '';
 
   if (!name) { showToast(t('habits.enter_habit_name'), 'error'); return; }
@@ -1462,6 +1557,7 @@ async function saveNewHabit() {
     };
     if (endDateVal) sharedItem.end_date = endDateVal;
     if (startsFinished) sharedItem.is_finished = 1;
+    if (isAuto) sharedItem.is_auto = 1;
     if (nextDue != null) sharedItem.next_due = nextDue;
     if (lastDoneVal) {
       sharedItem.completions.push({
@@ -1499,7 +1595,7 @@ async function saveNewHabit() {
       const { data, error } = await state.db.from('habits').insert({
         name: '', frequency_rule: '', category: catName, category_id: catId, is_draft: 0,
         shared_id: sharedId, shared_group_id: groupId, next_due: nextDue,
-        end_date: endDateVal || null, is_finished: startsFinished ? 1 : 0,
+        end_date: endDateVal || null, is_finished: startsFinished ? 1 : 0, is_auto: isAuto,
       }).select().single();
       if (error) {
         // Back out the staged shared item — it hasn't uploaded yet.
@@ -1518,7 +1614,7 @@ async function saveNewHabit() {
     // ─── Normal (non-shared) habit ───
     const { data, error } = await state.db.from('habits').insert({
       name, frequency_rule: freq, category: catName, category_id: catId, is_draft: isDraft,
-      end_date: endDateVal || null,
+      end_date: endDateVal || null, is_auto: isAuto,
     }).select().single();
     if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
@@ -1728,6 +1824,8 @@ function openEditHabitModal(habitId) {
   }
   const endDateInput = document.getElementById('editHabitEndDate');
   if (endDateInput) endDateInput.value = habit.end_date || '';
+  const autoInput = document.getElementById('editHabitAuto');
+  if (autoInput) autoInput.checked = !!habit.is_auto;
   const catColor = getHabitCatColor(catIdForHabit(habit));
   modal.style.setProperty('--cat-color', catColor);
   modal.classList.add('visible');
@@ -1747,6 +1845,7 @@ async function saveEditHabit() {
   const catName = catRow?.name ?? '';
   const lastDoneVal = document.getElementById('editHabitLastDone').value;
   const endDateVal = document.getElementById('editHabitEndDate')?.value || null;
+  const autoVal = document.getElementById('editHabitAuto')?.checked ? 1 : 0;
   const habit = state.allHabits.find(c => c.id === id);
 
   if (!name) { showToast(t('habits.enter_habit_name'), 'error'); return; }
@@ -1757,7 +1856,7 @@ async function saveEditHabit() {
   let latestForNextDue = lastDoneVal ? habitDateInputToIso(lastDoneVal) : (prevLastDone?.toISOString() || null);
 
   if (habit?.shared_id && habit?.shared_group_id && state.sharing) {
-    await state.db.from('habits').update({ category: catName, category_id: catId, end_date: endDateVal }).eq('id', id);
+    await state.db.from('habits').update({ category: catName, category_id: catId, end_date: endDateVal, is_auto: autoVal }).eq('id', id);
     // Recompute next_due locally NOW so the list behind the modal shows the
     // new date immediately (see _pendingSharedNextDue) — not only once the
     // debounced uploads land. previewLastDoneLatest mirrors the staging
@@ -1781,7 +1880,7 @@ async function saveEditHabit() {
       // changed) and the recomputed next_due land in one debounced upload.
       // end_date / is_finished ride the same mutation — the finished state is
       // the recompute's outcome (fin), never the captured habit object.
-      const changes = { name, frequency_rule: freq, next_due: newNextDue, end_date: endDateVal, is_finished: fin.isFinished ? 1 : 0 };
+      const changes = { name, frequency_rule: freq, next_due: newNextDue, end_date: endDateVal, is_finished: fin.isFinished ? 1 : 0, is_auto: autoVal };
       if (lastDoneVal !== prevDateStr) {
         changes.completions = await computeSharedLastDoneCompletions(habit, lastDoneVal ? habitDateInputToIso(lastDoneVal) : null);
       }
@@ -1802,9 +1901,9 @@ async function saveEditHabit() {
       }
     );
   } else {
-    const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: catName, category_id: catId, end_date: endDateVal }).eq('id', id);
+    const { error } = await state.db.from('habits').update({ name, frequency_rule: freq, category: catName, category_id: catId, end_date: endDateVal, is_auto: autoVal }).eq('id', id);
     if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
-    if (habit) habit.end_date = endDateVal;
+    if (habit) { habit.end_date = endDateVal; habit.is_auto = autoVal; }
 
     if (lastDoneVal !== prevDateStr) {
       try {
@@ -2094,13 +2193,17 @@ function renderHabitHistoryList(habitId, habit) {
       const d = new Date(comp.completed_at);
       const dateStr = d.toLocaleDateString(getLang(), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
       const noteStr = comp.note ? ` — <em>${esc(comp.note)}</em>` : '';
-      return `<div class="habit-history-item" data-comp-id="${comp.id}">
-        <span class="habit-history-date">${lucideIcon("circle-check",16)} ${dateStr}</span>
-        ${noteStr}
+      // Automatic validations are read-only: editing or deleting one would
+      // fight the roll, which re-validates from the schedule.
+      const autoStr = comp.is_auto ? ` <span class="habit-auto-badge">${lucideIcon("bot",12)} ${t('habits.auto_badge')}</span>` : '';
+      const actionsStr = comp.is_auto ? '' : `
         <span class="habit-history-actions">
           <button data-action="edit-habit-completion" data-id="${esc(comp.id)}" title="${t('common.edit')}" class="habit-hist-btn">${lucideIcon("pencil",14,"#f59e0b")}</button>
           <button data-action="delete-habit-completion" data-id="${esc(comp.id)}" title="${t('common.delete')}" class="habit-hist-btn">${lucideIcon("trash-2",14,"#ef4444")}</button>
-        </span>
+        </span>`;
+      return `<div class="habit-history-item" data-comp-id="${comp.id}">
+        <span class="habit-history-date">${lucideIcon("circle-check",16)} ${dateStr}</span>${autoStr}
+        ${noteStr}${actionsStr}
       </div>`;
     }).join('');
     document.getElementById('habitHistoryList').innerHTML = items;
@@ -2608,6 +2711,7 @@ async function shareExistingHabit(id, el) {
       };
       if (habit.end_date) sharedItem.end_date = habit.end_date;
       if (habit.snoozed_until) sharedItem.snoozed_until = habit.snoozed_until;
+      if (habit.is_auto) sharedItem.is_auto = 1;
       if (sharedFinished) sharedItem.is_finished = 1;
       if (nextDue != null) sharedItem.next_due = nextDue;
       // 1. Stage the shared item in memory first: this marks the created
@@ -2649,6 +2753,7 @@ async function shareExistingHabit(id, el) {
         shared_id: sharedId, shared_group_id: groupId, next_due: nextDue,
         end_date: habit.end_date || null, is_finished: sharedFinished ? 1 : 0,
         snoozed_until: habit.snoozed_until || null,
+        is_auto: habit.is_auto ? 1 : 0,
       }).select().single();
       if (ptrErr) {
         // Back out the staged shared item — it hasn't uploaded yet.
@@ -2718,6 +2823,7 @@ async function bulkShareHabitCategory(catId, el) {
             };
             if (habit.end_date) sharedItem.end_date = habit.end_date;
             if (habit.snoozed_until) sharedItem.snoozed_until = habit.snoozed_until;
+            if (habit.is_auto) sharedItem.is_auto = 1;
             if (sharedFinished) sharedItem.is_finished = 1;
             if (nextDue != null) sharedItem.next_due = nextDue;
             // Snapshots for rollback — taken before the local deletes below.
@@ -2740,6 +2846,7 @@ async function bulkShareHabitCategory(catId, el) {
               shared_id: sharedId, shared_group_id: groupId, next_due: nextDue,
               end_date: habit.end_date || null, is_finished: sharedFinished ? 1 : 0,
               snoozed_until: habit.snoozed_until || null,
+              is_auto: habit.is_auto ? 1 : 0,
             }).select().single();
             if (ptrErr) {
               // Back out the staged shared item — it hasn't uploaded yet.
@@ -2816,6 +2923,7 @@ async function unshareHabit(id, el) {
           next_due: habit.next_due || null,
           end_date: habit.end_date || null,
           snoozed_until: habit.snoozed_until || null,
+          is_auto: habit.is_auto ? 1 : 0,
           is_finished: habit.is_finished ? 1 : 0,
         }).select().single();
         if (insErr) { showToast(insErr.message, 'error'); return; }
@@ -2885,6 +2993,7 @@ async function copyHabitToPersonal(id, el) {
       next_due: habit.next_due || null,
       end_date: habit.end_date || null,
       snoozed_until: habit.snoozed_until || null,
+      is_auto: habit.is_auto ? 1 : 0,
       is_finished: habit.is_finished ? 1 : 0,
     }).select().single();
     if (insErr) { showToast(insErr.message, 'error'); return; }

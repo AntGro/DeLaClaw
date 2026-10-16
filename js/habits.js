@@ -1352,7 +1352,7 @@ function renderHabitItem(habit) {
     </div>
     <div class="habit-meta">
       ${dueHtml}
-      ${isAuto && !isFinished ? `<span class="habit-auto-badge">${lucideIcon("bot",12)} ${t('habits.auto_badge')}</span>` : ''}
+      ${isAuto && !isFinished ? `<span class="habit-auto-badge">${lucideIcon("zap",12)} ${t('habits.auto_badge')}</span>` : ''}
       ${endsHtml}
       ${!isDraft ? `<span class="habit-last-done habit-last-done-editable" data-action="edit-habit-last-done" data-id="${esc(habit.id)}" title="${t('habits.click_to_edit_last_done')}">${lastDoneStr}</span>` : ''}
     </div>
@@ -2195,7 +2195,7 @@ function renderHabitHistoryList(habitId, habit) {
       const noteStr = comp.note ? ` — <em>${esc(comp.note)}</em>` : '';
       // Automatic validations are read-only: editing or deleting one would
       // fight the roll, which re-validates from the schedule.
-      const autoStr = comp.is_auto ? ` <span class="habit-auto-badge">${lucideIcon("bot",12)} ${t('habits.auto_badge')}</span>` : '';
+      const autoStr = comp.is_auto ? ` <span class="habit-auto-badge">${lucideIcon("zap",12)} ${t('habits.auto_badge')}</span>` : '';
       const actionsStr = comp.is_auto ? '' : `
         <span class="habit-history-actions">
           <button data-action="edit-habit-completion" data-id="${esc(comp.id)}" title="${t('common.edit')}" class="habit-hist-btn">${lucideIcon("pencil",14,"#f59e0b")}</button>

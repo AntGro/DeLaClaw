@@ -530,7 +530,7 @@ function dayPanelRow(ev, dateStr) {
   if (ev.is_auto) {
     return `<div class="cal-row">
       <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong></span>
-      <span class="habit-auto-badge">${lucideIcon('bot', 12)} ${t('habits.auto_badge')}</span>
+      <span class="habit-auto-badge">${lucideIcon('zap', 12)} ${t('habits.auto_badge')}</span>
     </div>`;
   }
   const isNextDue = ev.next_due && dateStr === ev.next_due;

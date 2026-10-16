@@ -4790,6 +4790,27 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(habits.includes('habit._rowAuto = habit.is_auto ? 1 : 0;'), 'refresh must capture the pointer is_auto for row sync');
     });
 
+    test('habit early validation asks for confirmation before completing', () => {
+      const habits = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      // The guard lives in the markHabitDone wrapper — the single funnel
+      // for the Habits page, Welcome and Calendar Done buttons — and only
+      // the confirmed path runs the real completion body.
+      assert(habits.includes('async function markHabitDone(habitId, btnEl) {'), 'markHabitDone wrapper must exist');
+      assert(habits.includes('async function markHabitDoneNow(habitId, btnEl) {'), 'the completion body must live in markHabitDoneNow');
+      assert(habits.includes("if (habit && dueStr && dueStr > habitTodayStr()) {"),
+        'the confirm must trigger only when the due date is in the future');
+      assert(habits.includes("t('habits.early_done_title')") && habits.includes("t('habits.early_done_msg', dueDate)"),
+        'the confirm must use the early-done copy with the localized due date');
+      assert(habits.includes('() => markHabitDoneNow(habitId, btnEl)'),
+        'only the confirm callback may run the completion');
+      assert(habits.includes("variant: 'neutral'"), 'the confirm must use the neutral (non-destructive) variant');
+      // Cancel/close runs nothing: showConfirmAction close path only calls
+      // the confirm callback on execute — nothing else to pin here beyond
+      // the wrapper returning before markHabitDoneNow when unconfirmed.
+      assert(/if \(habit && dueStr && dueStr > habitTodayStr\(\)\) \{[\s\S]{0,900\}return;\s*\}\s*return markHabitDoneNow/.test(habits),
+        'an unconfirmed early validation must not fall through to the completion');
+    });
+
     test('habit snooze: isHabitSnoozed wakes on the snooze date (defer semantics)', async () => {
       const { isHabitSnoozed } =
         await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);

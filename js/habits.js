@@ -1983,6 +1983,31 @@ const _pendingHabitDones = new Set();
 async function markHabitDone(habitId, btnEl) {
   if (!habitId) return;
   if (_pendingHabitDones.has(habitId)) return;
+  // Early validation: the habit is not due yet (its due date is in the
+  // future). Completing it now advances the schedule — for anchored rules
+  // the imminent occurrence is skipped — so confirm first: a misclick must
+  // not silently move the schedule. Due today or overdue completes in one
+  // click, as before. Every Done entry point (Habits page, Welcome,
+  // Calendar) funnels through here, so the guard covers them all.
+  const habit = state.allHabits.find(c => c.id === habitId);
+  const dueStr = (habit?.next_due || '').slice(0, 10);
+  if (habit && dueStr && dueStr > habitTodayStr()) {
+    const dueDate = parseLocalDate(dueStr).toLocaleDateString(getLang(), { weekday: 'short', month: 'short', day: 'numeric' });
+    showConfirmAction(
+      t('habits.early_done_title'),
+      t('habits.early_done_msg', dueDate),
+      () => markHabitDoneNow(habitId, btnEl),
+      null,
+      { btnText: t('habits.mark_done'), variant: 'neutral', iconSvg: lucideIcon('circle-check', 28), btnIconSvg: lucideIcon('circle-check', 15) }
+    );
+    return;
+  }
+  return markHabitDoneNow(habitId, btnEl);
+}
+
+async function markHabitDoneNow(habitId, btnEl) {
+  if (!habitId) return;
+  if (_pendingHabitDones.has(habitId)) return;
   _pendingHabitDones.add(habitId);
 
   // Disable all matching buttons (safety across views)

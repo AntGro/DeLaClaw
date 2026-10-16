@@ -6,6 +6,7 @@ import { showToast, isTouchDevice } from './utils.js';
 import { t } from './i18n.js';
 import { lucideIcon } from './icons.js';
 import db from './db.js';
+import state from './state.js';
 
 // ===================================================================
 // SHARED DRAG STATE
@@ -322,6 +323,7 @@ export function initItemDragDrop(container, {
     item.addEventListener('dragstart', e => e.preventDefault(), sig);
 
     item.addEventListener('pointerdown', e => {
+      if (state.readOnlyMode) return; // read-only: no drag / move
       if (e.target.closest(excludeSelector)) return;
       if (dragState) return;
       if (e.button !== 0) return;
@@ -559,6 +561,7 @@ export async function reorderItems({
   tableName,
   reinitFn,
 }) {
+  if (state.readOnlyMode) return; // read-only: no reorder (also skips the optimistic in-memory sort_order update)
   // Diff: only PATCH items whose sort_order actually changed
   const updates = [];
   orderedIds.forEach((id, i) => {
@@ -582,6 +585,7 @@ export async function reorderItems({
 // BULK SORT ORDER — single RPC when available, parallel PATCHes fallback
 // ===================================================================
 export async function bulkSortOrder(tableName, updates) {
+  if (state.readOnlyMode) return; // read-only backstop (adapter rejects too)
   if (updates.length === 0) return;
   await db.bulkSortOrder(tableName, updates);
 }
@@ -692,6 +696,7 @@ let _inlineEditRefreshTimer = null;
 let _datePickerJustClosed = false;
 
 export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refreshFn, extraEl, onStart, onFinish, collectExtra, multiline, containerEl }) {
+  if (state.readOnlyMode) return; // read-only: no inline editing
   if (spanEl.dataset.editing) return;
 
   // Cancel any other active inline edit first (discard + restore span)
@@ -1000,6 +1005,7 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = 
     btn.addEventListener('contextmenu', e => { if (activated) e.preventDefault(); });
 
     btn.addEventListener('pointerdown', e => {
+      if (state.readOnlyMode) return; // read-only: no nav reorder
       if (dragState) return;
       if (e.button !== 0) return;
       startX = e.clientX;

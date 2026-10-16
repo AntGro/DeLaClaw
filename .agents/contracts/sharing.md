@@ -112,6 +112,7 @@ No RPC layer — both users read/write the shared folder directly via the Drive 
 ## Adapter & Backend
 - Adapter pattern: `sharing.js` factory creates adapter and validates via `SHARING_INTERFACE`
 - All view code (`todos.js`, `habits.js`, `lists.js`) talks to `state.sharing` abstraction, never directly to Drive
+- **Read-only cache adapter (`createSharing('cache', { snapshot })`):** main.js mirrors the Drive adapter's public state (groups via `getAllGroups()`, per-group item files via `getItems()`, current user + per-group member ids) into the offline cache after the initial load, after uploads land, and after remote/structural changes. When Drive auth is lost, a cold-start read-only boot initializes sharing from that blob: reads resolve with the live adapter's shapes, every mutation rejects with the shared `read_only` error, there is no polling and no sync intents — the blob is replaced wholesale on the next successful online sync. Without a blob (older snapshot), the read-only boot drops the content-less shared pointer rows instead
 
 ## Cross-Feature Edges
 - **todos.js:** `syncSharedTodos()` merges shared items into `state.allTodos`; shared badge via `sharedBadge()`

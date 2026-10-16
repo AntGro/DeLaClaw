@@ -5927,6 +5927,283 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   }
 
   // ===================================================================
+  // DRIVE READ-ONLY FALLBACK — cache snapshot + mutation gates
+  // ===================================================================
+  {
+    const { pathToFileURL } = require('url');
+    // Browser shims for the i18n/state module top-level code.
+    if (!globalThis.localStorage) globalThis.localStorage = { getItem: () => 'en', setItem: () => {}, removeItem: () => {} };
+    if (!globalThis.document) globalThis.document = { documentElement: {} };
+
+    // Minimal in-memory IndexedDB: only the surface offline-cache.js uses
+    // (open + upgrade, one store, put/get/getAllKeys, tx.oncomplete).
+    if (!globalThis.indexedDB) {
+      const stores = new Map();
+      const makeDb = (data) => ({
+        createObjectStore() { return {}; },
+        transaction() {
+          let completeFn = null;
+          const tx = {
+            onerror: null, error: null,
+            objectStore() {
+              return {
+                put(value, key) { data.set(key, value); return {}; },
+                get(key) {
+                  const r = {};
+                  queueMicrotask(() => { r.result = data.get(key); if (r.onsuccess) r.onsuccess(); });
+                  return r;
+                },
+                getAllKeys() {
+                  const r = {};
+                  queueMicrotask(() => { r.result = [...data.keys()]; if (r.onsuccess) r.onsuccess(); });
+                  return r;
+                },
+              };
+            },
+          };
+          Object.defineProperty(tx, 'oncomplete', {
+            set(fn) { completeFn = fn; queueMicrotask(() => { if (completeFn) completeFn(); }); },
+            get() { return completeFn; },
+          });
+          return tx;
+        },
+      });
+      globalThis.indexedDB = {
+        open(name) {
+          const req = {};
+          queueMicrotask(() => {
+            const isNew = !stores.has(name);
+            if (isNew) stores.set(name, new Map());
+            req.result = makeDb(stores.get(name));
+            if (isNew && req.onupgradeneeded) req.onupgradeneeded();
+            if (req.onsuccess) req.onsuccess();
+          });
+          return req;
+        },
+      };
+    }
+
+    const demo = await import(pathToFileURL(path.join(JS_DIR, 'adapters/demo.js')).href);
+    const oc = await import(pathToFileURL(path.join(JS_DIR, 'adapters/offline-cache.js')).href);
+    const execB = (builder) => {
+      let out, err;
+      builder.then(r => { out = r; }, e => { err = e; });
+      if (err) throw err;
+      return out;
+    };
+
+    test('readonly adapter: selects pass, mutations rejected with read_only, store untouched', async () => {
+      const adapter = oc.wrapReadOnlyAdapter(demo.createDemoAdapter({
+        todos: [{ id: 'a', text: 'x' }],
+        settings: [{ key: 'schema_version', value: '9.9.9' }],
+      }));
+      const before = execB(adapter.from('todos').select('*'));
+      assert(before.data.length === 1 && before.data[0].id === 'a', 'select must serve cached rows');
+
+      for (const [label, build] of [
+        ['insert', () => adapter.from('todos').insert({ id: 'b', text: 'y' })],
+        ['update', () => adapter.from('todos').update({ text: 'z' }).eq('id', 'a')],
+        ['upsert', () => adapter.from('todos').upsert({ id: 'a', text: 'z' })],
+        ['delete', () => adapter.from('todos').delete().eq('id', 'a')],
+      ]) {
+        const res = execB(build());
+        assert(res.error && res.error.code === 'read_only', `${label} must be rejected with code read_only, got ${JSON.stringify(res)}`);
+      }
+      const after = execB(adapter.from('todos').select('*'));
+      assert(after.data.length === 1 && after.data[0].text === 'x', 'store must be untouched by rejected mutations');
+
+      let bulkErr = null;
+      try { await adapter.bulkSortOrder('todos', [{ id: 'a', sort_order: 3 }]); } catch (e) { bulkErr = e; }
+      assert(bulkErr && bulkErr.code === 'read_only', 'bulkSortOrder must throw read_only');
+      let reseedErr = null;
+      try { adapter.reseed({ todos: [] }); } catch (e) { reseedErr = e; }
+      assert(reseedErr && reseedErr.code === 'read_only', 'reseed must throw read_only');
+      assert(execB(adapter.from('todos').select('*')).data.length === 1, 'reseed must not replace the store');
+    });
+
+    test('cache snapshot: round-trip via driveCacheScope, STRIP + EXCLUDE honoured, unknown scope is null', async () => {
+      const scope = oc.driveCacheScope('user@example.com');
+      assert(scope === 'drive:user@example.com', 'scope must be drive:<email>');
+      await oc.cacheSnapshot(scope, {
+        todos: [{ id: 'a', text: 'x' }],
+        settings: [{ key: 'schema_version', value: '9.9.9' }],
+        birthdays: [{ id: 'b1', name: 'X', avatar_url: 'data:image/png;base64,AAAA' }],
+        prompts: [{ key: 'global', text: 'secret-ish' }],
+      });
+      const snap = await oc.loadCacheSnapshot(scope);
+      assert(snap && snap.tables.todos.length === 1 && snap.tables.todos[0].text === 'x', 'snapshot must round-trip todos');
+      assert(snap.tables.settings.some(r => r.key === 'schema_version'), 'snapshot must keep the schema marker');
+      assert(!('avatar_url' in snap.tables.birthdays[0]), 'birthdays avatar_url must be stripped from the cache');
+      assert(!('prompts' in snap.tables), 'prompts table must be excluded from the cache');
+      assert(snap.latestTs > 0, 'snapshot must carry a latest sync timestamp');
+      const none = await oc.loadCacheSnapshot(oc.driveCacheScope('nobody@example.com'));
+      assert(none === null, 'never-populated scope must load as null');
+    });
+
+    const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+    test('drive: read-only gate + cache write-through + auth-state callback are wired', () => {
+      assert(driveSrc.includes("readOnlyMode && builder._method !== 'GET'"),
+        'drive from() must reject mutations while readOnlyMode is on');
+      assert(driveSrc.includes('snapshotTableToCache(table, localData)'),
+        'flush success must mirror the uploaded table into the offline cache');
+      assert(driveSrc.includes('snapshotAllToCache();'),
+        'initial load must snapshot all tables into the offline cache');
+      assert(driveSrc.includes('snapshotTableToCache(tableName, reconciled)'),
+        'poll reconciliation must refresh the cached table');
+      assert(driveSrc.includes('onAuthStateChange(cb)') && driveSrc.includes('noteTokenDead()') && driveSrc.includes('noteTokenAlive()'),
+        'drive adapter must report token death/recovery to main.js');
+      assert(driveSrc.includes('export function getStoredDriveEmail') && driveSrc.includes('export function requestDriveToken'),
+        'drive.js must export the stored email + a prompted token request for the cold-start fallback');
+    });
+
+    const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+    test('main: cold-start auth failure boots read-only from the cache snapshot', () => {
+      assert(mainSrc.includes('isDriveAuthError(e)') && mainSrc.includes('loadCacheSnapshot(driveCacheScope(getStoredDriveEmail()))'),
+        'connect() must classify auth errors and load the Drive cache snapshot');
+      assert(mainSrc.includes('wrapReadOnlyAdapter(createDemoAdapter(snap.tables))'),
+        'cold-start fallback must serve the snapshot through the read-only wrapper');
+      assert(mainSrc.includes("some(r => r.key === 'schema_version')"),
+        'fallback must require a real (schema-marked) snapshot, not an empty cache');
+      assert(mainSrc.includes('enterReadOnlyMode') && mainSrc.includes('exitReadOnlyMode') && mainSrc.includes('window.notifyReadOnly'),
+        'main.js must own enter/exit read-only and expose the delegation toast hook');
+      assert(mainSrc.includes('if (state.readOnlyMode) { showToast'),
+        'guard() must refuse modal saves in read-only mode');
+      assert(mainSrc.includes('filter(r => !r.shared_id)') && mainSrc.includes('if (!readOnlySharingBlob)'),
+        'cold-start snapshot must drop content-less shared pointer rows only when no sharing blob was cached');
+    });
+
+    test('sharing snapshot: blob round-trips as the __sharing__ pseudo-table', async () => {
+      const scope = oc.driveCacheScope('sharer@example.com');
+      const blob = { v: 1, groups: [{ id: 'g1', name: 'Family' }], itemsByGroup: {}, currentUser: null, currentMemberIds: {} };
+      await oc.cacheSharingSnapshot(scope, blob);
+      const snap = await oc.loadCacheSnapshot(scope);
+      assert(snap && snap.tables.__sharing__?.[0]?.groups?.[0]?.name === 'Family',
+        'the sharing blob must come back from loadCacheSnapshot for the read-only boot');
+      await oc.cacheSharingSnapshot(scope, null);
+      const snap2 = await oc.loadCacheSnapshot(scope);
+      assert(snap2.tables.__sharing__?.[0]?.groups?.[0]?.name === 'Family', 'a null blob must not clear the stored snapshot');
+    });
+
+    test('cache sharing: reads resolve from the blob, mutations reject read_only', async () => {
+      // sharing.js re-exports sharing-drive.js, whose utils.js chain
+      // registers document/window listeners at module load.
+      if (globalThis.document && !globalThis.document.addEventListener) globalThis.document.addEventListener = () => {};
+      if (!globalThis.window) globalThis.window = { addEventListener: () => {} };
+      else if (!globalThis.window.addEventListener) globalThis.window.addEventListener = () => {};
+      const { createSharing } = await import(pathToFileURL(path.join(JS_DIR, 'sharing.js')).href);
+      const blob = {
+        v: 1,
+        groups: [{ id: 'g1', name: 'Family', backendType: 'googledrive', created_by: 'm1', folderId: 'fold1',
+          members: [
+            { member_id: 'm1', role: 'creator', status: 'joined', display_name: 'Alice', invited_label: null, joined_at: '2026-01-01T00:00:00.000Z' },
+            { member_id: 'm2', role: 'member', status: 'joined', display_name: 'Bob', invited_label: null, joined_at: '2026-01-02T00:00:00.000Z' },
+          ] }],
+        itemsByGroup: { g1: {
+          todos: [{ id: 't1', item_type: 'todo', payload: { text: 'Shared task' }, done: false, created_by: 'm2', created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' }],
+          habits: [
+            { id: 'h1', item_type: 'habit', payload: { name: 'Shared habit' }, completions: [], done: false, created_by: 'm1', created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' },
+            { id: 'c1', item_type: 'habit_completion', parent_item_id: 'h1', payload: {}, done: true, created_by: 'm1', created_at: '2026-01-03T00:00:00.000Z', updated_at: '2026-01-03T00:00:00.000Z' },
+          ],
+          lists: [{ id: 'l1', item_type: 'list_item', payload: { text: 'Milk' }, done: false, created_by: 'm1', created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' }],
+        } },
+        currentUser: { display_name: 'Alice', backendUserId: 'googledrive' },
+        currentMemberIds: { g1: 'm1' },
+      };
+      const sharing = await createSharing('cache', { snapshot: blob });
+      assert((await sharing.loadAll()).length === 1, 'loadAll must return the cached groups');
+      assert(sharing.getAllGroups()[0].name === 'Family', 'getAllGroups must serve the blob groups');
+      const all = sharing.getAllSharedItems();
+      assert(all.length === 4 && all.every(i => i.group_id === 'g1' && i.group_name === 'Family'),
+        'getAllSharedItems must return every file item, group-annotated');
+      assert(sharing.getAllSharedTodos().length === 1 && sharing.getAllSharedTodos()[0].payload.text === 'Shared task',
+        'getAllSharedTodos must filter to todo items');
+      assert(sharing.getAllSharedHabits().length === 1 && sharing.getAllSharedHabits()[0].id === 'h1',
+        'getAllSharedHabits must return habits only, not their completions');
+      assert(sharing.getItems('g1', 'habit').length === 2, 'getItems must keep file semantics (habit + its completion)');
+      assert(sharing.getItems('g1').length === 4, 'getItems without a type must return all files');
+      assert(sharing.getCurrentMember('g1')?.member_id === 'm1' && sharing.getCurrentMember('g1')?.display_name === 'Alice',
+        'getCurrentMember must resolve my member row from currentMemberIds');
+      assert((await sharing.getCurrentMemberId('g1')) === 'm1', 'getCurrentMemberId must serve the blob map');
+      assert(sharing.getCurrentUser().display_name === 'Alice', 'getCurrentUser must serve the blob identity');
+      assert(typeof sharing.getInviteLink('g1') === 'string' && sharing.getInviteLink('g1').startsWith('DLC1.'),
+        'getInviteLink must encode the cached folderId');
+      assert(sharing.hasPendingCreate('g1', 't1') === false && (await sharing.poll()) === false,
+        'cache sharing must never report pending creates or poll changes');
+      for (const [label, call] of [
+        ['addItem', () => sharing.addItem('g1', {})],
+        ['deleteItem', () => sharing.deleteItem('g1', 't1')],
+        ['createGroup', () => sharing.createGroup('X')],
+        ['inviteUser', () => sharing.inviteUser('g1', 'a@b.c')],
+        ['addSharedHabit', () => sharing.addSharedHabit('g1', {})],
+        ['unjoinGroup', () => sharing.unjoinGroup('g1')],
+      ]) {
+        let err = null;
+        try { await call(); } catch (e) { err = e; }
+        assert(err && err.code === 'read_only', `${label} must reject with code read_only, got ${err && (err.code || err.message)}`);
+      }
+    });
+
+    test('main: sharing snapshot builder + cache sharing boot are wired', () => {
+      assert(mainSrc.includes('buildSharingCacheBlob') && mainSrc.includes('cacheSharingSnapshot(driveCacheScope(email), blob)'),
+        'main.js must build the sharing blob and store it in the Drive cache scope');
+      assert(mainSrc.includes('scheduleSharingCacheSnapshot()'),
+        'sharing uploads and remote changes must schedule a snapshot refresh');
+      assert(mainSrc.includes("createSharing('cache', { snapshot: readOnlySharingBlob })"),
+        'a read-only boot with a sharing blob must initialize cache sharing');
+      assert(mainSrc.includes('readOnlySharingBlob = snap.tables.__sharing__?.[0] || null'),
+        'the boot must extract the sharing blob from the loaded snapshot');
+    });
+
+    const sharingSrc = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+    test('sharing factory: cache backend is a validated read-only adapter', () => {
+      assert(sharingSrc.includes('createCachedSharing') && sharingSrc.includes("case 'cache':"),
+        'sharing.js must expose the cache backend built from the snapshot blob');
+    });
+
+    test('main: storage persistence is requested at boot', () => {
+      assert(mainSrc.includes('navigator.storage.persist') && mainSrc.includes('requestStoragePersistence();'),
+        'boot must ask the browser to exempt the SW cache + IndexedDB snapshots from eviction');
+    });
+
+    const delegationSrc = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+    test('delegation: read-only allowlist blocks mutations, keeps navigation', () => {
+      assert(delegationSrc.includes('READ_ONLY_ALLOWED') && delegationSrc.includes('function isReadOnly()'),
+        'delegation must gate data-actions in read-only mode');
+      assert(delegationSrc.includes("'close-and-open-revision'") ,
+        'the mutating close-and-open-revision action must be explicitly denied despite its close- prefix');
+      assert(delegationSrc.includes("isReadOnly() && !readOnlyAllows(action)"),
+        'click handler must consult the allowlist before dispatch');
+      for (const studyAction of ['start-practice', 'reveal-card', 'rate-card', 'continue-free-practice',
+        'start-text-practice', 'start-text-practice-for-text', 'handle-line-click', 'submit-text-review',
+        'continue-text-same-text']) {
+        assert(delegationSrc.includes(`'${studyAction}': 1`),
+          `study action ${studyAction} must be allowed in read-only mode (sessions run, ratings don't persist)`);
+      }
+    });
+
+    const flashcardsSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+    test('flashcards: study sessions advance in read-only mode without recording ratings', () => {
+      assert(flashcardsSrc.includes('if (!state.readOnlyMode) {\n      const now = new Date();\n      const updates = fsrsUpdate(card, rating, now);'),
+        'rateCard must skip the FSRS update (memory + DB) in read-only mode while still advancing the session');
+      assert(flashcardsSrc.includes('if (!state.readOnlyMode) {\n    const now = new Date();\n    const updates = fsrsUpdate(chunk, rating, now);'),
+        'submitTextReview must skip the FSRS update (memory + DB) in read-only mode while still showing the summary');
+    });
+
+    const itemUtilsSrc = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+    test('item-utils: drag, nav reorder, inline edit and reorder all refuse in read-only mode', () => {
+      const gates = (itemUtilsSrc.match(/state\.readOnlyMode/g) || []).length;
+      assert(gates >= 5, `item-utils must check state.readOnlyMode at drag/nav/inline-edit/reorder/bulkSortOrder (found ${gates})`);
+      assert(itemUtilsSrc.includes("import state from './state.js';"),
+        'item-utils must read the shared readOnlyMode flag');
+    });
+
+    const stateSrc = fs.readFileSync(path.join(JS_DIR, 'state.js'), 'utf-8');
+    test('state: readOnlyMode flag exists, default false', () => {
+      assert(stateSrc.includes('readOnlyMode: false'), 'state.js must carry readOnlyMode: false');
+    });
+  }
+
+  // ===================================================================
   // SUMMARY
   // ===================================================================
   await Promise.all(pendingAsyncTests);

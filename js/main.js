@@ -7,8 +7,8 @@ import { LOGOS, LABELS } from './backend-logos.js';
 import state, { IDEAS_KEY, THEME_KEY, CURRENT_VIEW_KEY, STAY_CONNECTED_KEY } from './state.js';
 import db from './db.js';
 import { createRestAdapter } from './adapters/rest.js';
-import { wrapWithOfflineCache } from './adapters/offline-cache.js';
-import { DRIVE_SCOPE_FILE, clearStoredDriveEmail } from './adapters/drive.js';
+import { wrapWithOfflineCache, loadCacheSnapshot, driveCacheScope, showReadOnlyBanner, hideReadOnlyBanner, wrapReadOnlyAdapter, cacheSharingSnapshot } from './adapters/offline-cache.js';
+import { DRIVE_SCOPE_FILE, clearStoredDriveEmail, getStoredDriveEmail } from './adapters/drive.js';
 import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, reconcileLedger as reconcileCalendarLedger, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
 import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
@@ -139,6 +139,7 @@ function setDemoCategoriesFromData(data) {
 function guard(fn) {
   let inFlight = false;
   return async function(...args) {
+    if (state.readOnlyMode) { showToast(t('toast.readonly_blocked'), 'info'); return; }
     if (inFlight) return;
     inFlight = true;
     // Find the triggering button for visual feedback
@@ -651,7 +652,20 @@ async function doLogin() {
   }
 }
 
+// Ask the browser to keep this origin's storage (service-worker cache +
+// IndexedDB snapshots, including the Drive read-only fallback) exempt
+// from eviction. Best-effort: unsupported browsers no-op, and browsers
+// grant persistence by their own heuristics (installed PWA, engagement).
+function requestStoragePersistence() {
+  if (!navigator.storage?.persist || !navigator.storage?.persisted) return;
+  navigator.storage.persisted()
+    .then(already => (already ? true : navigator.storage.persist()))
+    .then(granted => console.log('[DeLaClaw] storage persistence:', granted ? 'granted' : 'browser-managed'))
+    .catch(() => {});
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  requestStoragePersistence();
   // Wrap all save/add/submit actions with guard() to prevent double-fire
   const guardedNames = [
     'saveNewBirthday', 'saveEditBirthday', 'removeAvatar',
@@ -810,10 +824,97 @@ document.addEventListener('DOMContentLoaded', () => {
 // ===================================================================
 // UNLOCK & INIT APP
 // ===================================================================
+// ===================================================================
+// READ-ONLY MODE — Drive auth lost, cached data stays viewable.
+// Entered two ways: (1) cold start — createDriveAdapter could not
+// obtain a token but an offline-cache snapshot exists, so the app
+// boots from the snapshot on a mutation-rejecting adapter;
+// (2) mid-session — the Drive adapter reports its token dead.
+// Mutations are blocked at every layer: the adapter (from() gate),
+// delegation (read-action allowlist), item-utils (drag / inline
+// edit / reorder) and guard().
+// ===================================================================
+
+/** OAuth failures that mean "no token obtainable" (vs. Drive/API errors). */
+function isDriveAuthError(e) {
+  const m = String(e?.message || e || '');
+  return m.includes('could not obtain auth token') || m.includes('401') ||
+    ['google_not_loaded', 'drive_scope_denied', 'access_denied', 'popup_closed',
+     'popup_blocked_by_browser', 'popup_failed_to_open', 'interaction_required',
+     'unauthorized_client', 'invalid_client', 'idpiframe_initialization_failed',
+     'unknown'].includes(m);
+}
+
+let pendingReadOnlyBoot = null;
+
+function enterReadOnlyMode({ lastSyncTs = null, onSignIn = null } = {}) {
+  if (state.readOnlyMode) return;
+  state.readOnlyMode = true;
+  if (state.driveAdapter?.setReadOnly) state.driveAdapter.setReadOnly(true);
+  showReadOnlyBanner(lastSyncTs, onSignIn);
+}
+
+function exitReadOnlyMode() {
+  if (!state.readOnlyMode) return;
+  state.readOnlyMode = false;
+  if (state.driveAdapter?.setReadOnly) state.driveAdapter.setReadOnly(false);
+  hideReadOnlyBanner();
+}
+
+// Used by delegation.js (classic script, no imports) to explain a block.
+window.notifyReadOnly = () => showToast(t('toast.readonly_blocked'), 'info');
+
+// ── Sharing snapshot for the read-only cache ────────────────────
+// Mirror the live Drive sharing adapter's state (public groups, the
+// per-group item files, the current user + my member id per group)
+// into the offline cache, so a cold-start read-only boot can build a
+// 'cache' sharing adapter and resolve shared items. Refreshed after
+// the initial load, after sharing uploads land, and after remote /
+// structural sharing changes — i.e. it always mirrors what the live
+// adapter currently shows, the latest online version.
+async function buildSharingCacheBlob() {
+  const s = state.sharing;
+  if (!s?.getAllGroups) return null;
+  const groups = s.getAllGroups();
+  const itemsByGroup = {};
+  const currentMemberIds = {};
+  for (const g of groups) {
+    itemsByGroup[g.id] = {
+      todos: s.getItems(g.id, 'todo'),
+      habits: s.getItems(g.id, 'habit'),
+      lists: s.getItems(g.id, 'list_item'),
+    };
+    try { currentMemberIds[g.id] = await s.getCurrentMemberId(g.id); }
+    catch { currentMemberIds[g.id] = null; }
+  }
+  let currentUser = null;
+  try { currentUser = await s.getCurrentUser(); } catch { /* identity is optional in the blob */ }
+  return { v: 1, groups, itemsByGroup, currentUser, currentMemberIds };
+}
+
+async function snapshotSharingCache() {
+  try {
+    const email = getStoredDriveEmail();
+    if (!email || !state.driveMode) return;
+    const blob = await buildSharingCacheBlob();
+    if (blob) await cacheSharingSnapshot(driveCacheScope(email), blob);
+  } catch (e) { console.warn('sharing cache snapshot:', e); }
+}
+
+let _sharingSnapTimer = null;
+function scheduleSharingCacheSnapshot() {
+  if (_sharingSnapTimer) clearTimeout(_sharingSnapTimer);
+  _sharingSnapTimer = setTimeout(() => { _sharingSnapTimer = null; snapshotSharingCache(); }, 1000);
+}
+
 async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, { silentAuth = false } = {}) {
   // url/key kept for local REST backend configuration
 
   let initialSharingLoad = Promise.resolve();
+  // Set when this connect boots read-only from the offline cache and the
+  // snapshot carried a sharing blob — the init flow then builds a
+  // read-only 'cache' sharing adapter from it instead of Drive sharing.
+  let readOnlySharingBlob = null;
   const loadInitialSharing = (label = 'sharing') => {
     if (!state.sharing?.loadAll) {
       initialSharingLoad = Promise.resolve();
@@ -865,27 +966,88 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     const { createSharing } = await import('./sharing.js');
     state.sharing = await createSharing('demo');
   } else if (mode === 'googledrive') {
-    const { createDriveAdapter } = await import('./adapters/drive.js');
+    const { createDriveAdapter, getStoredDriveEmail, requestDriveToken } = await import('./adapters/drive.js');
     const errEl = document.getElementById('loginError');
     const progressEl = document.getElementById('driveProgress');
     const progressText = document.getElementById('driveProgressText');
     const progressFill = document.getElementById('driveProgressFill');
-    adapter = await createDriveAdapter(GOOGLE_CLIENT_ID, (ev) => {
-      if (!ev) return;
-      // Hide error text, show progress bar
-      if (errEl) errEl.textContent = '';
-      if (progressEl) progressEl.style.display = '';
-      if (progressText) progressText.textContent = ev.message || '';
-      if (progressFill && ev.total > 0) {
-        progressFill.style.width = `${Math.round((ev.progress / ev.total) * 100)}%`;
-      } else if (progressFill && !ev.total) {
-        // Indeterminate: pulse at 40%
-        progressFill.style.width = '40%';
+    let bootedReadOnly = false;
+    try {
+      adapter = await createDriveAdapter(GOOGLE_CLIENT_ID, (ev) => {
+        if (!ev) return;
+        // Hide error text, show progress bar
+        if (errEl) errEl.textContent = '';
+        if (progressEl) progressEl.style.display = '';
+        if (progressText) progressText.textContent = ev.message || '';
+        if (progressFill && ev.total > 0) {
+          progressFill.style.width = `${Math.round((ev.progress / ev.total) * 100)}%`;
+        } else if (progressFill && !ev.total) {
+          // Indeterminate: pulse at 40%
+          progressFill.style.width = '40%';
+        }
+        if (ev.status === 'ready' && progressEl) progressEl.style.display = 'none';
+      }, { silent: silentAuth });
+    } catch (e) {
+      // Auth unobtainable — fall back to the offline-cache snapshot (the
+      // latest online version) in read-only mode when a real one exists.
+      // The schema_version marker distinguishes a populated snapshot
+      // from an empty/never-synced cache.
+      if (!isDriveAuthError(e)) throw e;
+      const snap = await loadCacheSnapshot(driveCacheScope(getStoredDriveEmail())).catch(() => null);
+      const hasSchema = (snap?.tables?.settings || []).some(r => r.key === 'schema_version');
+      if (!snap || !hasSchema) throw e;
+      // Shared content rides its own snapshot blob (groups + group item
+      // files). When present, the init flow builds a read-only 'cache'
+      // sharing adapter from it and the pointer rows below resolve
+      // against it. When absent, the content-less pointer rows
+      // (text/name '') are dropped so shared items don't render as
+      // blank rows, matching the unresolved-pointer drop when sharing
+      // is initialized.
+      readOnlySharingBlob = snap.tables.__sharing__?.[0] || null;
+      delete snap.tables.__sharing__;
+      if (!readOnlySharingBlob) {
+        for (const tbl of ['todos', 'habits', 'list_items']) {
+          if (Array.isArray(snap.tables[tbl])) snap.tables[tbl] = snap.tables[tbl].filter(r => !r.shared_id);
+        }
       }
-      if (ev.status === 'ready' && progressEl) progressEl.style.display = 'none';
-    }, { silent: silentAuth });
-    state.driveAdapter = adapter;
-    state.driveMode = true;
+      const { createDemoAdapter } = await import('./adapters/demo.js');
+      adapter = wrapReadOnlyAdapter(createDemoAdapter(snap.tables));
+      bootedReadOnly = true;
+      if (progressEl) progressEl.style.display = 'none';
+      // Applied once the app shell is visible (end of connect). Sign-in
+      // obtains a fresh token, then reloads into a normal boot — the
+      // persisted token makes the silent reconnect succeed.
+      pendingReadOnlyBoot = {
+        lastSyncTs: snap.latestTs || null,
+        onSignIn: async () => {
+          try {
+            await requestDriveToken(GOOGLE_CLIENT_ID);
+            location.reload();
+          } catch (_) {
+            showToast(t('login.drive_reconnect_failed'), 'error');
+          }
+        },
+      };
+    }
+    if (!bootedReadOnly) {
+      state.driveAdapter = adapter;
+      state.driveMode = true;
+      // A successful sign-in ends any read-only state carried over from
+      // a previous connection in this page session.
+      if (state.readOnlyMode) exitReadOnlyMode();
+      // Mid-session auth loss → read-only; recovery → back to normal.
+      adapter.onAuthStateChange?.((alive) => {
+        if (alive) {
+          if (state.readOnlyMode) {
+            exitReadOnlyMode();
+            adapter.pollNow?.();
+            refreshAll().catch(() => {});
+          }
+        } else {
+          enterReadOnlyMode({ onSignIn: () => adapter.reauth() });
+        }
+      });
+    }
 
   } else if (mode === 'local') {
     adapter = createRestAdapter(url);
@@ -908,6 +1070,10 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     adapter = wrapWithOfflineCache(adapter, `local:${scopeRef}`);
   }
   db.setAdapter(adapter);
+
+  // Switching to a non-Drive backend ends any read-only state carried
+  // over from a previous Drive connection in this page session.
+  if (state.readOnlyMode && mode !== 'googledrive') exitReadOnlyMode();
 
   // Calendar event-ID migration gate (Drive mode only): the app shell stays
   // hidden until the gcal_sync ledger is migrated to deterministic event
@@ -961,6 +1127,14 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   document.getElementById('gateToolbar').style.display = 'none';
   hideHero();
   document.getElementById('app').classList.add('active');
+
+  // Cold-start read-only boot: the banner goes up only once the app
+  // shell is visible (it prepends to body and offsets the app layout).
+  if (pendingReadOnlyBoot) {
+    const boot = pendingReadOnlyBoot;
+    pendingReadOnlyBoot = null;
+    enterReadOnlyMode(boot);
+  }
 
   // The migration gate turns calendar sync off when the Calendar scope is
   // missing/revoked (instead of blocking the app forever) — tell the user
@@ -1198,10 +1372,14 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
           if (active === true) state.driveAdapter.syncStart();
           else if (active === false) state.driveAdapter.syncEnd(error || false);
           state.driveAdapter.notifySharingState();
+          // A landed sharing upload is new "latest online version" —
+          // refresh the read-only cache's sharing snapshot.
+          if (active === false && !error) scheduleSharingCacheSnapshot();
         },
       });
       state.driveAdapter.setSharingAdapter?.(state.sharing);
       loadInitialSharing('sharing');
+      initialSharingLoad.then(() => snapshotSharingCache());
       // Ledger reconciliation: heal items whose calendar event was created
       // but whose gcal_sync entry was lost (or never written) before the
       // sharing poll starts driving its own calendar syncs.
@@ -1214,6 +1392,11 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
         // inline edits and drags. Only remote changes (poll's items-changed)
         // and structural events need the re-sync.
         if (!event.startsWith('item-')) document.dispatchEvent(new CustomEvent('sharing-changed'));
+        // Remote / structural changes are new "latest online version" —
+        // refresh the read-only cache's sharing snapshot. (Local item-*
+        // events fire at staging time; their snapshot happens when the
+        // upload lands, via onSyncActivity above.)
+        if (!event.startsWith('item-')) scheduleSharingCacheSnapshot();
         if (event === 'member-joined' && detail?.member) {
           const name = detail.member.display_name || '';
           showToast(t('sharing.member_joined', name, detail.group?.name || ''), 'success');
@@ -1221,6 +1404,16 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       });
 
     } catch (e) { console.warn('sharing init:', e); state.sharingInitFailed = true; }
+  } else if (mode === 'googledrive' && readOnlySharingBlob) {
+    // Read-only boot: sharing resolves from the cached group snapshot —
+    // groups and shared items render, every mutation rejects. No Drive
+    // sharing, no polling, no calendar ledger work (needs a token).
+    state.sharingInitFailed = false;
+    try {
+      const { createSharing } = await import('./sharing.js');
+      state.sharing = await createSharing('cache', { snapshot: readOnlySharingBlob });
+      loadInitialSharing('sharing');
+    } catch (e) { console.warn('sharing cache init:', e); state.sharingInitFailed = true; }
   }
 
 

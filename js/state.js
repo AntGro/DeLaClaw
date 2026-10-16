@@ -18,6 +18,7 @@ const state = {
   dbSchemaVersion: '0.000',
   offlineMode: false,
   pausedMode: false,
+  readOnlyMode: false,   // Drive auth lost — cached data viewable, all mutations blocked
   sharing: null,
   authUser: null,
   tabVisibility: null,    // {key: bool} from settings DB

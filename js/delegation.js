@@ -22,6 +22,49 @@
     return false;
   }
 
+  // ── Read-only mode (Drive auth lost, cached data viewable) ──
+  // state is exposed by state.js as window.__dlc. In read-only mode only
+  // navigation / viewing actions are allowed through; every mutation is
+  // blocked here, and independently at the adapter layer.
+  function isReadOnly() {
+    return !!(window.__dlc && window.__dlc.readOnlyMode);
+  }
+  function notifyReadOnly() {
+    if (window.notifyReadOnly) window.notifyReadOnly();
+  }
+  var READ_ONLY_ALLOWED = {
+    'switch-view': 1, 'set-project-filter': 1, 'set-todo-filter': 1, 'set-habit-filter': 1,
+    'set-flashcard-filter': 1, 'sort-projects': 1, 'sort-todos': 1, 'sort-habits': 1,
+    'sort-flashcards': 1, 'sort-lists': 1, 'toggle-archived': 1, 'toggle-search': 1,
+    'clear-search': 1, 'switch-settings-pane': 1, 'toggle-theme': 1, 'export-backup': 1,
+    'navigate-to-category': 1, 'toggle-done-todos': 1, 'navigate-to-habit-category': 1,
+    'navigate-to-flash-deck': 1, 'open-habit-history': 1, 'navigate-to-project': 1,
+    'toggle-expand-project': 1, 'copy-project-title': 1, 'copy-item-link': 1,
+    'show-todo-general-card': 1, 'calendar-prev': 1, 'calendar-next': 1, 'calendar-today': 1,
+    'toggle-calendar-filter': 1, 'open-welcome-birthday': 1, 'set-calendar-view': 1,
+    'open-calendar-picker': 1, 'pick-calendar-month': 1, 'pick-calendar-year': 1,
+    'open-calendar-day': 1, 'toggle-calendar-add': 1, 'navigate-to-list': 1,
+    'sharing-copy-code': 1, 'sharing-copy-link': 1, 'sharing-copy-member-code': 1,
+    'sharing-copy-member-link': 1, 'sharing-copy-code-value': 1, 'sharing-copy-link-value': 1,
+    'groups-select': 1, 'groups-back': 1, 'welcome-open-habit-history': 1,
+    'scroll-to-welcome-bucket': 1, 'go-to-practice': 1, 'go-to-revise': 1,
+    'expand-meta': 1, 'collapse-meta': 1, 'dismiss-schema-banner': 1,
+    'end-practice': 1, 'end-text-practice': 1, 'overlay-close-settings': 1,
+    // Study sessions run in read-only mode: the session itself is
+    // view-only interaction, and rateCard / submitTextReview skip their
+    // FSRS persistence while readOnlyMode is on — ratings are never
+    // written or applied to the in-memory schedule.
+    'start-practice': 1, 'reveal-card': 1, 'rate-card': 1, 'continue-free-practice': 1,
+    'start-text-practice': 1, 'start-text-practice-for-text': 1, 'handle-line-click': 1,
+    'submit-text-review': 1, 'continue-text-same-text': 1
+  };
+  function readOnlyAllows(action) {
+    // 'close-and-open-revision' mutates (task status) despite its prefix.
+    if (action === 'close-and-open-revision') return false;
+    if (action.indexOf('close-') === 0) return true; // closing a modal/view is always safe
+    return !!READ_ONLY_ALLOWED[action];
+  }
+
   function handleClick(e) {
     var el = getActionEl(e.target);
     if (!el) return;
@@ -40,6 +83,7 @@
       if (el.select) el.select();
       return;
     }
+    if (isReadOnly() && !readOnlyAllows(action)) { notifyReadOnly(); return; }
     switch (action) {
       case 'switch-view': if (el.dataset.view) callWindow('switchView', [el.dataset.view]); break;
       case 'set-project-filter': callWindow('setProjectFilter', [el.dataset.filter]); break;
@@ -338,6 +382,8 @@
     if (!el) return;
     var action = el.dataset.action;
     if (!action) return;
+    // Read-only: only re-render sorts and calendar day picking are view-only.
+    if (isReadOnly() && ['sort-projects', 'sort-todos', 'sort-habits', 'sort-flashcards', 'sort-lists', 'pick-calendar-day'].indexOf(action) === -1) return;
     switch (action) {
       case 'sort-projects': callWindow('renderProjectGrid', []); break;
       case 'sort-todos': callWindow('renderTodos', []); break;
@@ -387,6 +433,7 @@
       }, 150);
       return;
     }
+    if (isReadOnly()) return; // non-filter inputs are edit flows (silent: fires per keystroke)
     switch (action) {
       case 'update-scene-preview': callWindow('updateScenePreview', [el]); break;
       default: break;
@@ -397,6 +444,11 @@
     if (!el) return;
     var action = el.dataset.action;
     if (!action) return;
+    // Read-only: every keydown-handled action is an add/save flow.
+    if (isReadOnly()) {
+      if (action.slice(-9) === '-on-enter' || ['add-todo-to-category', 'add-habit-from-input', 'handle-draft-input', 'task-input', 'quick-add-input', 'quick-add-list-item'].indexOf(action) !== -1) notifyReadOnly();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       switch (action) {
         case 'save-edit-category-on-enter': e.preventDefault(); callWindow('saveEditCategory', []); break;

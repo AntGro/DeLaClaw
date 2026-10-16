@@ -1277,14 +1277,19 @@ window.rateCard = async function(rating) {
   if (headerLogo) headerLogo.classList.add('spinning');
   try {
     const card = sessionQueue.shift();
-    const now = new Date();
-    const updates = fsrsUpdate(card, rating, now);
-    Object.assign(card, updates);
-    const idx = allCards.findIndex(c => c.id === card.id);
-    if (idx >= 0) Object.assign(allCards[idx], updates);
-    if (state.db.connected) await state.db.from('flashcards').update(updates).eq('id', card.id);
     sessionDone++;
     if (rating >= 3) sessionCorrect++;
+    // Read-only mode: the session still advances, but the rating is not
+    // recorded — no FSRS update in memory or in the DB, so the card
+    // stays due exactly as the last online version left it.
+    if (!state.readOnlyMode) {
+      const now = new Date();
+      const updates = fsrsUpdate(card, rating, now);
+      Object.assign(card, updates);
+      const idx = allCards.findIndex(c => c.id === card.id);
+      if (idx >= 0) Object.assign(allCards[idx], updates);
+      if (state.db.connected) await state.db.from('flashcards').update(updates).eq('id', card.id);
+    }
     showNextCard();
   } finally {
     _ratingInProgress = false;
@@ -2053,16 +2058,21 @@ window.submitTextReview = async function(chunkId, totalLines) {
   else if (ratio >= 0.5) rating = 2; // Hard (partial)
   else rating = 1; // Again (less than half)
 
-  // Apply FSRS update
+  // Apply FSRS update — except in read-only mode, where the review is
+  // session-local like free practice: the summary still shows the
+  // score and the rating it would have earned, but nothing is written
+  // or applied to the in-memory schedule.
   const chunk = allChunkProgress.find(ch => ch.id === chunkId);
   if (!chunk) { endTextPractice(); return; }
 
-  const now = new Date();
-  const updates = fsrsUpdate(chunk, rating, now);
-  Object.assign(chunk, updates);
+  if (!state.readOnlyMode) {
+    const now = new Date();
+    const updates = fsrsUpdate(chunk, rating, now);
+    Object.assign(chunk, updates);
 
-  if (state.db.connected) {
-    await state.db.from('text_line_progress').update(updates).eq('id', chunkId);
+    if (state.db.connected) {
+      await state.db.from('text_line_progress').update(updates).eq('id', chunkId);
+    }
   }
 
   // Show summary

@@ -31,6 +31,7 @@ import { compareVersions } from '../../migrations/version-compare.js';
 import { parseBackupVersion, newestBackupVersion, decideBackupAction } from './drive-backup-policy.js';
 import { t } from '../i18n.js';
 import { driveFolderNames, currentHostname } from '../drive-folders.js';
+import { cacheTableRows, cacheSnapshot, driveCacheScope, readOnlyError, makeReadOnlyError } from './offline-cache.js';
 
 export const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
 export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
@@ -145,8 +146,19 @@ function _waitUntilTabUsable() {
 // restarts, unlike sessionStorage) so re-auth can skip the account chooser.
 const _DRIVE_EMAIL_KEY = 'claw_drive_email';
 
-function getStoredDriveEmail() {
+export function getStoredDriveEmail() {
   try { return localStorage.getItem(_DRIVE_EMAIL_KEY) || ''; } catch { return ''; }
+}
+
+/**
+ * Obtain a fresh token via the prompted OAuth flow (user gesture required).
+ * The token is persisted to sessionStorage by the normal token path, so a
+ * caller can simply reload the page afterwards to boot normally. Used by
+ * the read-only banner's Sign-in button after a cold-start cache boot,
+ * where no adapter instance exists to re-auth through.
+ */
+export function requestDriveToken(clientId) {
+  return getGoogleAccessToken(clientId, true);
 }
 
 function storeDriveEmail(email) {
@@ -532,6 +544,30 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   const inner = createDemoAdapter(initialData);
 
+  // ── Read-only fallback state ──
+  // When the token is declared dead, the app switches to read-only mode:
+  // in-memory data stays viewable, mutations are rejected at from().
+  // authStateCb is registered by main.js: (alive: boolean) => void.
+  let authStateCb = null;
+  let readOnlyMode = false;
+
+  // ── Offline-cache snapshots ──
+  // Mirror every table confirmed on Drive into IndexedDB so a later cold
+  // start with unobtainable auth can boot read-only from the latest
+  // online version. Scoped by account email; skipped until it is known.
+  function snapshotTableToCache(table, rows) {
+    const email = getStoredDriveEmail();
+    if (!email) return;
+    cacheTableRows(driveCacheScope(email), table, rows).catch(() => {});
+  }
+  function snapshotAllToCache() {
+    const email = getStoredDriveEmail();
+    if (!email) return;
+    const snap = {};
+    for (const table of DRIVE_TABLES) snap[table] = inner._store[table] || [];
+    cacheSnapshot(driveCacheScope(email), snap).catch(() => {});
+  }
+
   // ── Token refresh helper ──
 
   let _tokenDead = false;
@@ -560,12 +596,25 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     );
   }
 
+  function noteTokenAlive() {
+    const wasDead = _tokenDead;
+    _tokenDead = false;
+    if (wasDead && authStateCb) authStateCb(true);
+  }
+
+  function noteTokenDead() {
+    if (_tokenDead) return;
+    _tokenDead = true;
+    if (authStateCb) authStateCb(false);
+    scheduleReauthWhenFree();
+  }
+
   async function proactiveReauth() {
     if (_reauthPending) return;
     _reauthPending = true;
     try {
       const tok = await getGoogleAccessToken(clientId, true);
-      if (tok) _tokenDead = false;
+      if (tok) noteTokenAlive();
     } catch {
       // User dismissed the popup — stay in dead state, retry next flush cycle
     } finally {
@@ -605,7 +654,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   async function getToken() {
     try {
       const tok = await getGoogleAccessToken(clientId, false);
-      if (tok) { _tokenDead = false; _silentFailStreak = 0; return tok; }
+      if (tok) { noteTokenAlive(); _silentFailStreak = 0; return tok; }
     } catch (err) {
       // Adapter destroyed while a refresh was deferred: stay dead quietly,
       // without feeding the silent-failure streak or triggering re-auth.
@@ -616,11 +665,8 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     // Only declare the token dead after consecutive silent failures — a single
     // transient failure must not escalate to a prompted sign-in popup.
     if (_silentFailStreak < MAX_SILENT_FAILURES) return _cachedToken;
-    // Silent refresh failed — token is dead
-    if (!_tokenDead) {
-      _tokenDead = true;
-      scheduleReauthWhenFree();
-    }
+    // Silent refresh failed — token is dead: switch the app to read-only
+    noteTokenDead();
     return _cachedToken;
   }
 
@@ -919,6 +965,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             size: new TextEncoder().encode(JSON.stringify(localData, null, 2)).length,
           };
           if (useIntents) acknowledgeIntents(intents, captured);
+          // The uploaded array is now the latest online version — mirror
+          // it into the offline cache for the read-only fallback.
+          snapshotTableToCache(table, localData);
         } catch (err) {
           if (err.code === 412 && retries < MAX_RETRIES) {
             console.warn(`Drive: ETag conflict on ${table}, merging (attempt ${retries + 1})`);
@@ -1030,6 +1079,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             console.log('[drive-poll] settings overwritten, gcal keys: old=%o new=%o', oldGcal, newGcal);
           }
           inner._store[tableName] = reconciled;
+          snapshotTableToCache(tableName, reconciled);
           fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime, size: Number(file.size || 0) };
           if (adapter._onExternalChange) adapter._onExternalChange(tableName);
         } else {
@@ -1122,6 +1172,13 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       builder._returnRow = true;
       const origThen = builder.then.bind(builder);
       builder.then = (resolve, reject) => {
+        // Read-only mode (token dead): reads hit the in-memory store as
+        // usual; mutations are rejected without touching the store, so
+        // nothing is queued for a flush that cannot succeed.
+        if (readOnlyMode && builder._method !== 'GET') {
+          resolve({ data: null, error: readOnlyError() });
+          return;
+        }
         // Snapshot pre-mutation ids so upserts can tell created rows from updated ones.
         const beforeIds = (builder._method === 'PUT' && INTENT_TABLES.has(table))
           ? new Set((inner._store[table] || []).map(r => r.id))
@@ -1161,11 +1218,13 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     rpc(fn, params) { return inner.rpc(fn, params); },
 
     async bulkSortOrder(table, updates) {
+      if (readOnlyMode) throw makeReadOnlyError();
       await inner.bulkSortOrder(table, updates);
       if (updates.length > 0) scheduleSave(table);
     },
 
     reseed(data) {
+      if (readOnlyMode) throw makeReadOnlyError();
       inner.reseed(data);
       for (const table of DRIVE_TABLES) scheduleSave(table);
     },
@@ -1296,6 +1355,13 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
     /** Expose token getter for sharing module. */
     getToken,
+    /** Read-only mode control — main.js drives it from auth state. */
+    setReadOnly(v) { readOnlyMode = !!v; },
+    get readOnly() { return readOnlyMode; },
+    /** Register the auth-state listener: cb(true) = token alive, cb(false) = token dead. */
+    onAuthStateChange(cb) { authStateCb = cb; },
+    /** Prompted re-auth for the read-only banner's Sign-in button. */
+    reauth() { return proactiveReauth(); },
     /** Sync-bar controls for the sharing adapter's debounced uploads. */
     syncStart,
     syncEnd,
@@ -1332,6 +1398,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
               _cachedClientId = clientId;
               _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
               _persistToken(_cachedToken, _tokenExpiry, clientId, granted);
+              noteTokenAlive();
               resolve(resp.access_token);
             }
           },
@@ -1398,6 +1465,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     pollNow() { pollForChanges().catch(() => {}); },
 
     destroy() {
+      authStateCb = null;
       stopPolling();
       for (const t of Object.keys(saveTimers)) clearTimeout(saveTimers[t]);
       if (_reauthVisibilityHandler) {
@@ -1467,6 +1535,10 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       clearDriveTokenCache(clientId);
     },
   };
+
+  // The just-loaded state is the latest online version — snapshot it
+  // into the offline cache before declaring ready.
+  snapshotAllToCache();
 
   startPolling();
 

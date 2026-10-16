@@ -4807,7 +4807,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // Cancel/close runs nothing: showConfirmAction close path only calls
       // the confirm callback on execute — nothing else to pin here beyond
       // the wrapper returning before markHabitDoneNow when unconfirmed.
-      assert(/if \(habit && dueStr && dueStr > habitTodayStr\(\)\) \{[\s\S]{0,900\}return;\s*\}\s*return markHabitDoneNow/.test(habits),
+      assert(habits.includes('    );\n    return;\n  }\n  return markHabitDoneNow(habitId, btnEl);'),
         'an unconfirmed early validation must not fall through to the completion');
     });
 

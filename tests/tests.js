@@ -6314,6 +6314,26 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
       assert(mainSrc.includes("select('*')") || mainSrc.includes('select("*")'), 'backup must stay whole-row');
     });
+
+    test('sections: demo data showcases nesting in all three languages', () => {
+      const demo = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
+      // TODO categories are derived from item category strings in demo
+      // mode, so the seed uses full paths (one section per language).
+      for (const p of ['Reading > Fiction', 'Lecture > Fiction', 'Lectura > Ficción']) {
+        assert(demo.includes(`category: '${p}'`), `demo todos must include the path category ${p}`);
+      }
+      // Lists carry explicit section/bucket rows, one section per language.
+      assert((demo.match(/kind: 'section'/g) || []).length === 3, 'demo lists must seed exactly one section per language');
+      assert((demo.match(/kind: 'bucket', parent_id: 'demo-list-006'/g) || []).length === 6,
+        'each demo section must hold two buckets');
+      // The demo category derivation in main.js must understand paths.
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes("buildCatRows(data.todos, 'category', 'todo_categories', true)"),
+        'demo todo categories must be built with path support');
+      assert(mainSrc.includes("buildCatRows(data.habits, 'category', 'habit_categories', true)"),
+        'demo habit categories must be built with path support');
+      assert(mainSrc.includes("kind === 'section' ? '#94a3b8'"), 'demo derivation must create section rows');
+    });
   }
 
   // ===================================================================

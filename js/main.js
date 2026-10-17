@@ -93,38 +93,80 @@ function setDemoCategoriesFromData(data) {
   if (!state.demoAdapter) return;
   const store = state.demoAdapter._store;
 
-  function buildCatRows(items, nameField, tableName) {
+  function buildCatRows(items, nameField, tableName, allowPaths = false) {
     const names = [...new Set((items || []).map(i => i[nameField]).filter(Boolean))];
+    const ts = new Date().toISOString();
     const rows = [
       // Protected default row (empty name, like real DB)
-      { id: `demo-cat-${tableName}-default`, name: '', shortname: null, color: GENERAL_CATEGORY_COLOR, sort_order: 0, is_protected: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      { id: `demo-cat-${tableName}-default`, name: '', shortname: null, color: GENERAL_CATEGORY_COLOR, sort_order: 0, is_protected: true, created_at: ts, updated_at: ts },
       // Protected __shared__ row
-      { id: `demo-cat-${tableName}-shared`, name: '__shared__', shortname: null, color: GENERAL_CATEGORY_COLOR, sort_order: 9999, is_protected: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      // User-defined categories from data
-      ...names.map((name, idx) => ({
-        id: `demo-cat-${tableName}-${idx}`,
-        name,
-        shortname: null,
-        color: DEFAULT_CATEGORY_PALETTE[idx % DEFAULT_CATEGORY_PALETTE.length],
-        sort_order: idx + 1,
-        is_protected: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })),
+      { id: `demo-cat-${tableName}-shared`, name: '__shared__', shortname: null, color: GENERAL_CATEGORY_COLOR, sort_order: 9999, is_protected: true, created_at: ts, updated_at: ts },
     ];
+    // Full-name → bucket-row id lookup for enriching items ('' and
+    // '__shared__' resolve to the protected rows).
+    const lookup = new Map([['', rows[0].id], ['__shared__', rows[1].id]]);
+    // sort_order is per sibling group: root rows count from 1 (as before),
+    // children of a section count from 0.
+    const sortCounters = new Map();
+    const nextSort = (parentId) => {
+      const key = parentId || '__root';
+      const v = sortCounters.get(key) ?? (parentId ? 0 : 1);
+      sortCounters.set(key, v + 1);
+      return v;
+    };
+    const pathRows = new Map(); // 'A>B' path key → section/bucket row
+    let paletteIdx = 0;
+    let pathIdx = 0;
+    const mkRow = (name, kind, parentId) => {
+      const row = {
+        id: null, name, shortname: null,
+        color: kind === 'section' ? '#94a3b8' : DEFAULT_CATEGORY_PALETTE[paletteIdx++ % DEFAULT_CATEGORY_PALETTE.length],
+        sort_order: nextSort(parentId), is_protected: false,
+        kind, parent_id: parentId, created_at: ts, updated_at: ts,
+      };
+      rows.push(row);
+      return row;
+    };
+    names.forEach((name, idx) => {
+      // Nested sections: a category given as a path ('Reading > Fiction')
+      // becomes a section chain plus a leaf bucket, so demo data can show
+      // the feature. Decks never take this path.
+      const segments = allowPaths ? name.split('>').map(s => s.trim()).filter(Boolean) : [name];
+      if (segments.length <= 1) {
+        const row = mkRow(name, 'bucket', null);
+        row.id = `demo-cat-${tableName}-${idx}`;
+        lookup.set(name, row.id);
+        return;
+      }
+      let parentId = null;
+      let key = '';
+      segments.forEach((seg, i) => {
+        key = key ? `${key}>${seg}` : seg;
+        const isLeaf = i === segments.length - 1;
+        let row = pathRows.get(key);
+        if (!row) {
+          row = mkRow(seg, isLeaf ? 'bucket' : 'section', parentId);
+          row.id = `demo-cat-${tableName}-p${pathIdx++}`;
+          pathRows.set(key, row);
+        }
+        if (isLeaf) lookup.set(name, row.id);
+        parentId = row.id;
+      });
+    });
     store[tableName] = rows;
-    // Build name→id lookup for enriching items
-    const lookup = new Map(rows.map(r => [r.name, r.id]));
     return lookup;
   }
 
-  const todoLookup = buildCatRows(data.todos, 'category', 'todo_categories');
-  const habitLookup = buildCatRows(data.habits, 'category', 'habit_categories');
+  const todoLookup = buildCatRows(data.todos, 'category', 'todo_categories', true);
+  const habitLookup = buildCatRows(data.habits, 'category', 'habit_categories', true);
   const deckLookup = buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks');
 
-  // Enrich items with category_id / deck_id (fall back to default row)
-  for (const t of (store.todos || [])) t.category_id = todoLookup.get(t.category) || todoLookup.get('') || null;
-  for (const h of (store.habits || [])) h.category_id = habitLookup.get(h.category) || habitLookup.get('') || null;
+  // Enrich items with category_id / deck_id (fall back to default row).
+  // A path category ('Reading > Fiction') resolves to its leaf bucket;
+  // the item's legacy category string becomes the leaf name.
+  const leafName = (name) => (typeof name === 'string' && name.includes('>')) ? name.split('>').pop().trim() : name;
+  for (const t of (store.todos || [])) { t.category_id = todoLookup.get(t.category) || todoLookup.get('') || null; t.category = leafName(t.category); }
+  for (const h of (store.habits || [])) { h.category_id = habitLookup.get(h.category) || habitLookup.get('') || null; h.category = leafName(h.category); }
   for (const f of (store.flashcards || [])) f.deck_id = deckLookup.get(f.deck) || deckLookup.get('') || null;
   for (const tx of (store.texts || [])) tx.deck_id = deckLookup.get(tx.deck) || deckLookup.get('') || null;
 }

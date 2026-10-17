@@ -2,6 +2,7 @@ import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { DEFAULT_CATEGORY_PALETTE } from './state.js';
 import { APP_VERSION } from './version.js';
+import { layoutLevel } from './sections-pure.js';
 
 // ===================================================================
 // UTILS
@@ -622,6 +623,64 @@ function balanceGrid(gridEl, { min = 400, max = 700, gap = 14 } = {}) {
 }
 
 // ===================================================================
+// Section Grid Layout — per-level even grid for nested sections.
+//
+// A level container's direct children carry data-node-kind
+// ('bucket' | 'section') and data-node-id. A section element contains
+// exactly one level container of its own (its direct child with class
+// 'section-level'). Layout is computed by sections-pure.layoutLevel:
+// blocks at this level share one width (container width / widest row,
+// clamped like balanceGrid), sections span the columns their footprint
+// needs and never split across rows. A section's own level is then laid
+// out capped at the span it was given, so a section is a true R×C
+// rectangle of this level's cells.
+// ===================================================================
+const _sectionGridObservers = new WeakMap();
+function _abstractDomNode(el) {
+  const node = { id: el.dataset.nodeId, kind: el.dataset.nodeKind === 'section' ? 'section' : 'bucket', children: [] };
+  if (node.kind === 'section') {
+    const inner = [...el.children].find(c => c.classList?.contains('section-level'));
+    if (inner) node.children = [...inner.children].filter(c => c.dataset?.nodeKind).map(_abstractDomNode);
+  }
+  return node;
+}
+function applySectionGrid(gridEl, { min = 400, max = 700, gap = 14 } = {}) {
+  if (!gridEl) return;
+  const applyContainer = (container, capOverride) => {
+    const els = [...container.children].filter(c => c.dataset?.nodeKind);
+    if (!els.length) { container.style.gridTemplateColumns = ''; return; }
+    const w = container.clientWidth;
+    if (!w) return;
+    const maxCols = capOverride != null
+      ? Math.max(1, capOverride)
+      : Math.max(1, Math.floor((w + gap) / (min + gap)));
+    const lay = layoutLevel(els.map(_abstractDomNode), maxCols);
+    const m = Math.max(1, lay.maxBlocks);
+    const colW = Math.min(max, (w - (m - 1) * gap) / m);
+    container.style.gridTemplateColumns = m <= 1 && !capOverride ? '1fr' : `repeat(${m}, ${colW}px)`;
+    els.forEach((el, i) => {
+      const p = lay.placements[i];
+      if (el.dataset.nodeKind === 'section' && p) {
+        el.style.gridColumn = `span ${p.cols}`;
+        el.dataset.spanCols = String(p.cols);
+      }
+    });
+    for (const el of els) {
+      if (el.dataset.nodeKind !== 'section') continue;
+      const inner = [...el.children].find(c => c.classList?.contains('section-level'));
+      if (inner) applyContainer(inner, Number(el.dataset.spanCols) || undefined);
+    }
+  };
+  const apply = () => applyContainer(gridEl, null);
+  apply();
+  if (!_sectionGridObservers.has(gridEl)) {
+    const ro = new ResizeObserver(apply);
+    ro.observe(gridEl);
+    _sectionGridObservers.set(gridEl, ro);
+  }
+}
+
+// ===================================================================
 // fetchAll — paginated read that defeats server-side row caps
 // ===================================================================
 // Some REST layers cap any unpaginated GET (PostgREST's default is
@@ -892,7 +951,7 @@ export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
   showConfirmAction, closeConfirmAction, executeConfirmAction, setConfirmActionProgress,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
-  isEditing, balanceGrid, fetchAll,
+  isEditing, balanceGrid, applySectionGrid, fetchAll,
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, isDesktopLike,
   backfillCategoryColors, nextPaletteColor,
   parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,

@@ -6,8 +6,9 @@ import { t, getLang } from './i18n.js';
 import state, { SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
-import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCategories, isMyCreatedSharedHabit, isAutoHabit } from './habits.js';
-import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCategories } from './todos.js';
+import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCatPath, getHabitCatOrderKey, getHabitCategories, isMyCreatedSharedHabit, isAutoHabit } from './habits.js';
+import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey, getTodoCategories } from './todos.js';
+import { compareOrderKeys } from './sections-pure.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
 import { parseLocalDate, isHabitSnoozed, toDateStr } from './calendar-pure.js';
@@ -577,15 +578,16 @@ function renderWelcome() {
   // Focus TODOs section
   html += `<div class="welcome-section" id="welcome-bucket-todos" style="--cat-color:#22c55e">`;
   html += `<div class="welcome-section-header">${lucideIcon('list-checks', 18)} <span>${esc(t('welcome.focus_todos'))}</span></div>`;
-  // Quick-add TODO with category selector — always show all categories
+  // Quick-add TODO with category selector — buckets only (never
+  // sections), in tree order, labelled by full path
   const todoCatIds = Array.from(getTodoCategories().values())
-    .filter(c => c.name !== SHARED_CATEGORY)
-    .sort((a, b) => a.sort_order - b.sort_order)
+    .filter(c => c.name !== SHARED_CATEGORY && c.kind !== 'section')
+    .sort((a, b) => compareOrderKeys(getTodoCatOrderKey(a.id), getTodoCatOrderKey(b.id)))
     .map(c => c.id);
   html += `<div class="welcome-quick-add">`;
   html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
   for (const catId of todoCatIds) {
-    const label = getCatDisplayName(catId);
+    const label = getTodoCatPath(catId);
     html += `<option value="${esc(catId)}">${esc(label)}</option>`;
   }
   html += `</select>`;
@@ -607,7 +609,7 @@ function renderWelcome() {
     const catKeys = Object.keys(todosByCategory);
     for (const catId of catKeys) {
       const catColor = getCategoryColor(catId);
-      const catName = getCatDisplayName(catId);
+      const catName = getTodoCatPath(catId);
       if (catKeys.length > 1 || catName) {
         html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(catName)}</div>`;
       }
@@ -624,13 +626,13 @@ function renderWelcome() {
   html += `<div class="welcome-section-header">${lucideIcon('repeat', 18)} <span>${esc(t('welcome.habits_due'))}</span></div>`;
   // Quick-add Habit (opens modal pre-filled with name + category)
   const habitCatIds = Array.from(getHabitCategories().values())
-    .filter(c => c.name !== SHARED_CATEGORY)
-    .sort((a, b) => a.sort_order - b.sort_order)
+    .filter(c => c.name !== SHARED_CATEGORY && c.kind !== 'section')
+    .sort((a, b) => compareOrderKeys(getHabitCatOrderKey(a.id), getHabitCatOrderKey(b.id)))
     .map(c => c.id);
   html += `<div class="welcome-quick-add">`;
   html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
   for (const catId of habitCatIds) {
-    const label = getHabitCatDisplayName(catId);
+    const label = getHabitCatPath(catId);
     html += `<option value="${esc(catId)}">${esc(label)}</option>`;
   }
   html += `</select>`;
@@ -651,7 +653,7 @@ function renderWelcome() {
     const habitCatKeys = Object.keys(habitsByCategory);
     for (const catId of habitCatKeys) {
       const catColor = getHabitCategoryColor(catId);
-      const catLabel = getHabitCatDisplayName(catId);
+      const catLabel = getHabitCatPath(catId);
       html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(catLabel)}</div>`;
       for (const ch of habitsByCategory[catId]) {
         html += renderFocusHabitItem(ch);

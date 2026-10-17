@@ -6204,6 +6204,119 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   }
 
   // ===================================================================
+  // NESTED SECTIONS (2.23.0)
+  // ===================================================================
+  {
+    test('sections-pure: tree, paths, order keys, sibling uniqueness', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const rows = [
+        { id: 'g', name: '', kind: 'bucket', parent_id: null, sort_order: 0, is_protected: 1 },
+        { id: 's1', name: 'Reading', kind: 'section', parent_id: null, sort_order: 1 },
+        { id: 'b1', name: 'Fiction', kind: 'bucket', parent_id: 's1', sort_order: 0 },
+        { id: 'b2', name: 'Essays', kind: 'bucket', parent_id: 's1', sort_order: 1 },
+        { id: 'b3', name: 'Cooking', kind: 'bucket', parent_id: null, sort_order: 2 },
+        { id: 'orphan', name: 'Orphan', kind: 'bucket', parent_id: 'missing', sort_order: 3 },
+        { id: 'underbucket', name: 'UB', kind: 'bucket', parent_id: 'b3', sort_order: 4 },
+      ];
+      const { roots, byId } = m.buildSectionTree(rows);
+      assert(roots.map(n => n.id).join(',') === 'g,s1,b3,orphan,underbucket',
+        'orphans and children of buckets degrade to the top level, got ' + roots.map(n => n.id));
+      assert(byId.get('s1').children.map(n => n.id).join(',') === 'b1,b2', 'section children sorted by sort_order');
+      assert(m.pathLabelOf(byId.get('b1'), byId) === 'Reading > Fiction', 'path label joins segments');
+      assert(JSON.stringify(m.orderKeyOf(byId.get('b1'), byId)) === '[1,0]', 'order key follows the path');
+      assert(m.compareOrderKeys([1, 0], [2]) < 0 && m.compareOrderKeys([1], [1, 0]) < 0, 'order keys compare lexicographically, prefix first');
+      assert(m.descendantBucketIds(byId.get('s1')).join(',') === 'b1,b2', 'descendant buckets of a section');
+      assert(m.resolveSectionPath(roots, ['Reading', 'Fiction'])?.id === 'b1', 'path resolution descends sections');
+      assert(m.resolveSectionPath(roots, ['Cooking', 'Fiction']) === null, 'cannot descend into a bucket');
+      assert(m.siblingNameTaken(rows, 's1', 'fiction', null) === true, 'sibling names are unique per parent (case-insensitive)');
+      assert(m.siblingNameTaken(rows, null, 'fiction', null) === false, 'the same name is free under another parent');
+      assert(m.siblingNameTaken(rows, 's1', 'reading', null) === false, 'a name used at another level does not collide');
+      assert(JSON.stringify(m.parseSectionPath(' A >  B > ')) === '["A","B"]', 'path parsing trims and drops empties');
+      // Legacy rows (no kind/parent_id) normalise to top-level buckets
+      const legacy = m.buildSectionTree([{ id: 'x', name: 'Flat', sort_order: 0 }]);
+      assert(legacy.roots.length === 1 && legacy.roots[0].kind === 'bucket' && legacy.roots[0].parentId === null,
+        'pre-feature rows are flat buckets');
+      // A parent cycle must not loop: both rows surface at the top level
+      const cyc = m.buildSectionTree([
+        { id: 'a', name: 'A', kind: 'section', parent_id: 'b', sort_order: 0 },
+        { id: 'b', name: 'B', kind: 'section', parent_id: 'a', sort_order: 1 },
+      ]);
+      assert(cyc.roots.length === 2, 'cycle degrades to top level');
+    });
+
+    test('sections-pure: layout rectangles, footprint choice, gap rule', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const bucket = (id) => ({ id, kind: 'bucket', children: [] });
+      const section = (id, n) => ({ id, kind: 'section', children: Array.from({ length: n }, (_, i) => bucket(id + i)) });
+      // 5 buckets, cap 3: smallest C with minimal rows is 3 (2 rows, 1 empty)
+      assert(m.footprintCols(section('S', 5), 3) === 3, 'footprint of 5 buckets under cap 3 is 3');
+      const lay = m.layoutLevel([section('S', 5)], 3);
+      assert(lay.placements[0].cols === 3 && lay.placements[0].rows === 2, 'section occupies a 3x2 rectangle');
+      assert(lay.maxBlocks === 3 && lay.rowCount === 2, 'level metrics follow the rectangle');
+      // A single-bucket section is exactly one block wide
+      assert(m.footprintCols(section('One', 1), 4) === 1, 'single-bucket section spans 1 block');
+      // 4 buckets, cap 3: C=2 gives 2 full rows — beats C=3 (2 rows, 2 empty)
+      assert(m.footprintCols(section('F', 4), 3) === 2, 'ties on rows break by fewest empty cells');
+      // Gap rule: two 2-wide sections under cap 3 — the second starts a new row
+      const gap = m.layoutLevel([section('A', 2), section('B', 2)], 3);
+      assert(gap.maxBlocks === 2 && gap.rowCount === 2, 'a section that does not fit starts a new row, leaving a gap');
+      // Strict order + buckets mix
+      const mixed = m.layoutLevel([bucket('x'), section('M', 2), bucket('y')], 3);
+      assert(mixed.placements.map(p => p.id).join(',') === 'x,M,y', 'placement preserves chip order');
+      // Deep nesting terminates and stays within the cap
+      const deep = { id: 'd0', kind: 'section', children: [{ id: 'd1', kind: 'section', children: [bucket('leaf')] }] };
+      const dl = m.layoutLevel([deep], 3);
+      assert(dl.placements[0].cols >= 1 && dl.placements[0].cols <= 3, 'nested sections lay out within the cap');
+    });
+
+    test('sections: schema + migrations carry kind/parent_id on all three tables', () => {
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      for (const table of ['todo_categories', 'habit_categories', 'lists']) {
+        const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS ${table}`);
+        assert(start >= 0, `schema.sql missing ${table}`);
+        const ddl = schema.slice(start, schema.indexOf(');', start));
+        assert(ddl.includes("kind TEXT DEFAULT 'bucket'"), `${table} must gain kind with bucket default`);
+        assert(ddl.includes('parent_id TEXT'), `${table} must gain parent_id`);
+        assert(!ddl.includes('parent_id TEXT REFERENCES'), `${table}.parent_id must stay a plain column (no FK)`);
+      }
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(drive.includes("'2.23.0'"), 'drive migrations must include 2.23.0');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'2.23.0'"), 'local migrations must include 2.23.0');
+      for (const table of ['todo_categories', 'habit_categories', 'lists']) {
+        assert(local.includes(`ALTER TABLE ${table} ADD COLUMN kind`), `local migration must add kind to ${table}`);
+        assert(local.includes(`ALTER TABLE ${table} ADD COLUMN parent_id`), `local migration must add parent_id to ${table}`);
+      }
+      const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
+      assert(sw.includes("'js/sections-pure.js'"), 'sw.js precache must include sections-pure.js');
+    });
+
+    test('sections: views render sections, bucket-only pickers, no calendar resync on section save', () => {
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      for (const [name, src] of [['todos.js', todosSrc], ['habits.js', habitsSrc], ['lists.js', listsSrc]]) {
+        assert(src.includes("data-node-kind=\"section\""), `${name} must render section blocks`);
+        assert(src.includes('applySectionGrid'), `${name} must use the per-level section grid layout`);
+        assert(src.includes('deleteSectionMoveUp') || src.includes('deleteHabitSectionMoveUp') || src.includes('deleteListSectionMoveUp'),
+          `${name} must offer move-up on section delete`);
+        assert(src.includes('deleteSectionSubtree') || src.includes('deleteHabitSectionSubtree') || src.includes('deleteListSectionSubtree'),
+          `${name} must offer subtree delete on section delete`);
+      }
+      // Section saves never mark a category renamed (Google Calendar stays
+      // bucket-only); bucket saves still do.
+      assert(todosSrc.includes('if (!isSection && (updates.shortname !== oldShortname'), 'todos: section rename must not resync calendar');
+      assert(habitsSrc.includes('if (!isSection && (updates.shortname !== oldShortname'), 'habits: section rename must not resync calendar');
+      // Welcome quick-add excludes sections
+      const welcomeSrc = fs.readFileSync(path.join(JS_DIR, 'welcome.js'), 'utf-8');
+      assert((welcomeSrc.match(/kind !== 'section'/g) || []).length >= 2, 'welcome quick-add must exclude sections for TODOs and Habits');
+      // Backup exports whole rows, so kind/parent_id travel with no change
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes("select('*')") || mainSrc.includes('select("*")'), 'backup must stay whole-row');
+    });
+  }
+
+  // ===================================================================
   // SUMMARY
   // ===================================================================
   await Promise.all(pendingAsyncTests);

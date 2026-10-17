@@ -86,3 +86,10 @@ User jobs:
 ## References
 - `CODEMAP.json:features[lists]`
 - Entry: `js/lists.js`
+
+## Nested Sections (v2.23.0)
+
+- The `lists` table itself holds both kinds: buckets (`kind='bucket'`, hold `list_items`) and sections (`kind='section'`, hold lists/sub-sections, never items). `parent_id` is a plain column, never a foreign key.
+- Same shared mechanism as TODOs/Habits: tree logic only in `js/sections-pure.js`, names unique per parent, per-group `sort_order`, path typing in add/edit creates or converts (items move to a `*` list on conversion).
+- The `__shared__` list is identified by name, is always a root bucket, and never enters a section; copy-to-personal fallbacks must skip section rows.
+- Section delete: move children up (at the section's position) or delete the subtree (items deleted per bucket first, sharing cleanup per bucket, as list delete).

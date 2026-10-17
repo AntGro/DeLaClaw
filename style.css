@@ -1171,6 +1171,19 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .category-nav-btn:hover{background:color-mix(in srgb,var(--cat-color,var(--accent)) 8%,var(--surface));}
 .category-nav-btn.nav-btn-dragging{box-shadow:0 2px 12px rgba(0,0,0,0.25);}
 
+/* ── Nested sections (TODOs / Habits / Lists) ── */
+.section-block{border:1px solid var(--border);border-radius:12px;padding:10px;background:color-mix(in srgb, var(--cat-color) 12%, transparent);display:flex;flex-direction:column;gap:10px;min-width:0;}
+.section-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:2px 4px 0;}
+.section-header-left{display:flex;align-items:baseline;gap:8px;min-width:0;}
+.section-name{font-size:1rem;font-weight:700;color:var(--text);margin:0;display:flex;align-items:center;gap:6px;}
+.section-name svg{color:color-mix(in srgb, var(--cat-color) 70%, var(--text));flex:none;}
+.section-stats{font-size:0.75rem;color:var(--muted);white-space:nowrap;}
+.section-header-actions{display:flex;align-items:center;gap:4px;opacity:0;transition:opacity 0.2s;}
+.section-block:hover .section-header-actions,.section-block:focus-within .section-header-actions{opacity:1;}
+.section-chips{padding:0 4px;justify-content:flex-start;}
+.section-level{display:grid;gap:14px;justify-content:center;align-items:start;}
+.section-level>.empty-msg{grid-column:1/-1;text-align:center;}
+
 
 .todo-cat-header{padding:14px 16px 0;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
 .todo-cat-header-left{display:flex;align-items:flex-start;gap:6px;}

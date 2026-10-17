@@ -154,3 +154,10 @@ User jobs:
 - Predicate `isAutoHabit()`: flag set + not a draft + structured rule. Free-text rules can never be automatic in effect.
 - The roll runs inside `refreshHabits` (`rollAutoHabits`, re-entrancy-guarded): for each automatic, unfinished, not-actively-snoozed habit, `planAutoRoll` (pure, `calendar-pure.js`) steps the stored `next_due` with the same `computeNextDue` the Calendar expansion uses — one auto completion per occurrence strictly before today; today's occurrence is NOT pre-validated. The end-date finish rule applies to the stepped next occurrence; occurrences past `end_date` are never recorded.
 - No Done and no snooze buttons for automatic habits (an already-set snooze still defers the roll; it catches up on wake). Excluded from the Welcome due list; shown on the Calendar (day panel shows the Auto badge instead of Done) and synced to Google Calendar via `next_due` as usual.
+
+## Nested Sections (v2.23.0)
+
+- Same mechanism as TODOs, on `habit_categories` (see the TODOs contract): `kind`/`parent_id`, tree logic only in `js/sections-pure.js`, names unique per parent, per-group `sort_order`, path typing creates/converts (items move to a `*` bucket on conversion).
+- `populateHabitCategorySelect` and every other item-facing picker list buckets only, in tree order, labelled by full path — a habit can never be assigned to a section.
+- Section rename/move never calls `markCategoryRenamed('habit_categories')`; bucket labels are the only ones that appear in Google Calendar titles.
+- Section delete: move children up or delete subtree (explicit per-habit deletion so calendar dirty tracking fires, sharing cleanup per bucket, as category delete).

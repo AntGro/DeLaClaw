@@ -116,3 +116,12 @@ User jobs:
 ## References
 - `CODEMAP.json:features[todos]`
 - Entry: `js/todos.js`, adapter: `js/adapters/`, icons: `js/icons.js`
+
+## Nested Sections (v2.23.0)
+
+- Categories are buckets (`kind='bucket'`, hold items) or sections (`kind='section'`, hold buckets/sub-sections, never items). `parent_id` is a plain column — never a foreign key — pointing at the containing section or null.
+- Tree/path/order logic lives ONLY in `js/sections-pure.js` (`buildSectionTree`, `pathLabelOf`, `orderKeyOf`, `layoutLevel`); bad parent links (missing, bucket parent, cycle) degrade to the top level.
+- Names are unique per parent across both kinds (case-insensitive); the same name is free under another parent. Item-facing pickers list buckets only, in tree order, labelled by full path.
+- Typing a path (`A > B`) in add/edit category name fields creates/convert sections along the way; converting a bucket moves its items into a new `*` bucket inside it. `*` is an ordinary bucket afterwards.
+- `sort_order` is per sibling group; chip drag reorders one group only. Section delete asks: move children up (inserted at the section's position) or delete the subtree (per-bucket sharing cleanup + explicit item deletion, as category delete).
+- Sections are purely local: never shared, no bulk-share on sections, and a section rename/move never calls `markCategoryRenamed` (Google Calendar titles are bucket-only).

@@ -370,7 +370,7 @@ function renderListSection(node, grouped, ancestorMatched = false) {
   }).join('');
   const childrenHtml = renderListLevel(node.children, grouped, ancestorMatched)
     || `<p class="empty-msg">${t('common.section_empty')}</p>`;
-  return `<div class="section-block" id="list-section-${esc(list.id)}" data-node-kind="section" data-node-id="${esc(list.id)}" style="--cat-color:${list.color || SECTION_DEFAULT_COLOR}">
+  return `<div class="section-block" id="list-section-${esc(list.id)}" data-list-id="${esc(list.id)}" data-node-kind="section" data-node-id="${esc(list.id)}" style="--cat-color:${list.color || SECTION_DEFAULT_COLOR}">
     <div class="section-header">
       <div class="section-header-left">
         <h3 class="section-name">${lucideIcon('folder', 16)} ${esc(list.name || '')}</h3>
@@ -378,6 +378,7 @@ function renderListSection(node, grouped, ancestorMatched = false) {
       </div>
       <div class="section-header-actions">
         <button class="archive-project-btn" data-action="open-add-list-in-section" data-id="${esc(list.id)}" title="${esc(t('lists.add_list'))}">${lucideIcon('folder-plus', 14)}</button>
+        <button class="archive-project-btn" data-action="copy-item-link" data-link-type="list" data-id="${esc(list.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
         <button class="archive-project-btn" data-action="open-edit-list" data-id="${esc(list.id)}" title="${t('lists.edit_list')}">${lucideIcon('pencil', 14)}</button>
         <button class="todo-cat-delete-btn" data-action="delete-list-section" data-id="${esc(list.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
       </div>

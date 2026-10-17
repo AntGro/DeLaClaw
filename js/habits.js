@@ -1309,6 +1309,7 @@ function renderHabitSection(node, ancestorMatched = false) {
       </div>
       <div class="section-header-actions">
         <button class="todo-cat-shortname-btn" data-action="open-add-habit-category-in-section" data-category="${esc(cat.id)}" title="${esc(t('habits.add_category'))}">${lucideIcon('folder-plus', 14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="copy-item-link" data-link-type="habitcat" data-id="${esc(cat.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
         <button class="todo-cat-shortname-btn" data-action="open-edit-habit-category-modal" data-category="${esc(cat.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 14)}</button>
         <button class="todo-cat-delete-btn" data-action="delete-habit-section" data-category="${esc(cat.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
       </div>

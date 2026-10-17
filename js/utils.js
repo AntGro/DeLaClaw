@@ -834,6 +834,7 @@ const DEEP_LINK_TYPE_MAP = {
   todo: 'todos', habit: 'habits', project: 'projects', task: 'projects',
   birthday: 'birthdays', flashcard: 'flashcards',
   list: 'lists', listitem: 'lists',
+  todocat: 'todos', habitcat: 'habits',
 };
 
 /** Parse a deep-link hash like #todo/abc123 → { type, id } or null */

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-17T10:19:15.380Z from 50 modules (v2.23.1). Total LOC 35603. Do not hand-edit.
+> Generated 2026-10-17T10:32:41.695Z from 50 modules (v2.23.2). Total LOC 35612. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -16,27 +16,27 @@
 |---------|-----|--------|-------|---------|------------|----|--------|-----|------|
 | birthdays | 562 | birthdays | allBirthdays,currentView,db,js | i18n,icons,state,utils | main.js | modal,btn,toast | - | 7 | 28 |
 | flashcards | 2937 | flashcard_decks,flashcard_notes,flashcards,text_line_progress,texts | currentView,db,js,readOnlyMode | i18n,icons,item-utils,logo,scene-parse,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,card-header,empty-state,toast | pendingSet | 91 | 152 |
-| habits | 3708 | habit_categories,habit_completions,habits | _historyHabitId,allHabitCompletions,allHabits,currentView,db,js,markCalDirty,sharing | calendar-pure,frequency-rule,i18n,icons,item-utils,pending-next-due,sections-pure,sharing-ui,state,utils | calendar-sync.js,calendar.js,demo-chooser.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 59 | 136 |
-| lists | 1842 | list_items,lists | allListItems,allLists,currentView,db,js,sharing | i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | pendingSet | 39 | 49 |
+| habits | 3709 | habit_categories,habit_completions,habits | _historyHabitId,allHabitCompletions,allHabits,currentView,db,js,markCalDirty,sharing | calendar-pure,frequency-rule,i18n,icons,item-utils,pending-next-due,sections-pure,sharing-ui,state,utils | calendar-sync.js,calendar.js,demo-chooser.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 60 | 136 |
+| lists | 1843 | list_items,lists | allListItems,allLists,currentView,db,js,sharing | i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | pendingSet | 41 | 49 |
 | projects | 1205 | projects,prompts,settings,tasks | PROJECTS,allTasks,archivedProjectIds,db,js,showArchived | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,btn,project-card,card-header,empty-state,toast | pendingSet | 37 | 62 |
-| todos | 2477 | todo_categories,todos | currentView,db,js,markCalDirty,sharing,syncCalendarTable | i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | calendar-sync.js,calendar.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 50 | 103 |
+| todos | 2478 | todo_categories,todos | currentView,db,js,markCalDirty,sharing,syncCalendarTable | i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | calendar-sync.js,calendar.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 51 | 103 |
 | welcome | 867 | - | PROJECTS,allBirthdays,allHabitCompletions,allHabits,archivedProjectIds,currentView,db,js | calendar-pure,flashcards,habits,i18n,icons,item-utils,sections-pure,sharing-ui,state,todos,utils | main.js | modal,app-header,btn | pendingSet | 83 | 47 |
 
 ## Core modules (43)
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 3958 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
+| main | 3960 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
 | sharing-drive | 2525 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
 | i18n | 2448 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,calendar.js | pendingSet |
 | drive | 1548 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | sharing-ui | 1235 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | calendar.js,groups.js,habits.js,lists.js | esc:38,guard+pendingSet,window:8 |
 | item-utils | 1215 | - | db,i18n,icons,state | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
 | calendar-sync | 1203 | birthdays,gcal_sync,habits,settings,todos | calendar-pure,drive-folders,habits,i18n | main.js | - |
-| utils | 970 | flashcards,x | i18n,icons,sections-pure,state | - | esc:7,window:6 |
+| utils | 971 | flashcards,x | i18n,icons,sections-pure,state | - | esc:7,window:6 |
 | calendar | 662 | - | calendar-pure,habits,i18n,icons | main.js | esc:17,window:8 |
 | batch-import | 559 | - | icons,import-pure,state,utils | - | esc:13 |
-| delegation | 487 | - |  | - | window:1 |
+| delegation | 490 | - |  | - | window:1 |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 451 | - | habits,i18n,icons,utils | - | - |
 | offline-cache | 439 | - | ./i18n,./state,i18n.js,state.js | drive.js,main.js,sharing.js | - |

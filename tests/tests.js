@@ -6334,6 +6334,37 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'demo habit categories must be built with path support');
       assert(mainSrc.includes("kind === 'section' ? '#94a3b8'"), 'demo derivation must create section rows');
     });
+
+    test('sections: section chips navigate via explicit delegation cases, sections have copy-link', () => {
+      // Section chips in TODOs/Habits carry data-category, which the
+      // delegation default fallback does NOT read (getId has no
+      // data-category) — without explicit cases the click silently
+      // passed the button element instead of the id and navigation
+      // never happened (live-test bug, Oct 17).
+      const delegation = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+      assert(delegation.includes("case 'navigate-to-todo-section': callWindow('navigateToTodoSection', [getCat(el)])"),
+        'delegation must route navigate-to-todo-section with getCat');
+      assert(delegation.includes("case 'navigate-to-habit-section': callWindow('navigateToHabitSection', [getCat(el)])"),
+        'delegation must route navigate-to-habit-section with getCat');
+      assert(delegation.includes("case 'navigate-to-list-section': callWindow('navigateToListSection'"),
+        'delegation must route navigate-to-list-section explicitly');
+      // Copy-link at section level in all three views, with deep links
+      // that resolve back to the section block.
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(todosSrc.includes('data-action="copy-item-link" data-link-type="todocat"'), 'todo section header must have a copy-link button');
+      assert(habitsSrc.includes('data-action="copy-item-link" data-link-type="habitcat"'), 'habit section header must have a copy-link button');
+      assert(listsSrc.includes('data-action="copy-item-link" data-link-type="list"'), 'list section header must have a copy-link button');
+      assert(listsSrc.includes('id="list-section-${esc(list.id)}" data-list-id="${esc(list.id)}"'),
+        'list section block must carry data-list-id so the list deep link finds it');
+      const utilsSrc = fs.readFileSync(path.join(JS_DIR, 'utils.js'), 'utf-8');
+      assert(utilsSrc.includes("todocat: 'todos'") && utilsSrc.includes("habitcat: 'habits'"),
+        'deep-link type map must know todocat/habitcat');
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes('todocat: `#todosView [data-node-id=') && mainSrc.includes('habitcat: `#habitsView [data-node-id='),
+        'findItemElement must resolve todocat/habitcat inside their views');
+    });
   }
 
   // ===================================================================

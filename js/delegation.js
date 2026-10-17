@@ -141,6 +141,7 @@
       case 'import-backup': callWindow('importBackup', []); break;
       case 'show-todo-general-card': callWindow('showTodoGeneralCard', []); break;
       case 'navigate-to-category': callWindow('navigateToCategory', [getCat(el)]); break;
+      case 'navigate-to-todo-section': callWindow('navigateToTodoSection', [getCat(el)]); break;
       case 'delete-category': callWindow('deleteCategory', [getCat(el)]); break;
       case 'delete-all-done': e.stopPropagation(); callWindow('deleteAllDoneTodos', [getCat(el)]); break;
       case 'toggle-done-todos': callWindow('toggleDoneTodos', [el.dataset.catId || getCat(el)]); break;
@@ -173,6 +174,7 @@
       case 'close-add-category-modal': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddCategoryModal', []); break;
       case 'open-add-habit-modal': callWindow('openAddHabitModal', []); break;
       case 'navigate-to-habit-category': callWindow('navigateToHabitCategory', [getCat(el)]); break;
+      case 'navigate-to-habit-section': callWindow('navigateToHabitSection', [getCat(el)]); break;
       case 'delete-habit-category': callWindow('deleteHabitCategory', [getCat(el)]); break;
       case 'open-edit-habit-category-modal': callWindow('openEditHabitCategoryModal', [getCat(el)]); break;
       case 'add-habit-from-input': { if (!(el.matches && el.matches('input, textarea'))) { var hInp = el.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.habit-add-input, .todo-cat-input'); if (hInp) callWindow('addHabitFromInput', [hInp]); } } break;
@@ -309,6 +311,7 @@
       case 'close-avatar-preview': callWindow('closeAvatarPreviewModal', []); break;
       case 'open-add-list': callWindow('openAddListModal', []); break;
       case 'navigate-to-list': callWindow('navigateToList', [el.dataset.listId||el.dataset.id||getId(el)]); break;
+      case 'navigate-to-list-section': callWindow('navigateToListSection', [el.dataset.listId||el.dataset.id||getId(el)]); break;
       case 'open-edit-list': callWindow('openEditListModal', [getId(el)]); break;
       case 'delete-list': callWindow('deleteList', [getId(el)]); break;
       case 'quick-add-list-item': callWindow('quickAddListItem', [el.dataset.listId||getId(el)]); break;

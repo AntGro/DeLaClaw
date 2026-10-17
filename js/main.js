@@ -3570,6 +3570,8 @@ function findItemElement(type, id) {
     flashcard: `[data-card-id="${eid}"]`,
     list: `[data-list-id="${eid}"]`,
     listitem: `[data-item-id="${eid}"]`,
+    todocat: `#todosView [data-node-id="${eid}"]`,
+    habitcat: `#habitsView [data-node-id="${eid}"]`,
   };
   const sel = selectors[type];
   return sel ? document.querySelector(sel) : null;

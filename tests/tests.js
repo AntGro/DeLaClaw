@@ -6322,10 +6322,23 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       for (const p of ['Reading > Fiction', 'Lecture > Fiction', 'Lectura > Ficción']) {
         assert(demo.includes(`category: '${p}'`), `demo todos must include the path category ${p}`);
       }
-      // Lists carry explicit section/bucket rows, one section per language.
-      assert((demo.match(/kind: 'section'/g) || []).length === 3, 'demo lists must seed exactly one section per language');
+      // Two-level paths: a subsection with buckets, next to direct buckets
+      for (const p of ['Reading > Non-Fiction > History', 'Lecture > Non-fiction > Histoire', 'Lectura > No ficción > Historia']) {
+        assert(demo.includes(`category: '${p}'`), `demo todos must include the two-level path ${p}`);
+      }
+      // Lists carry explicit section/bucket rows: an outer section and a
+      // subsection per language, the subsection holding two buckets.
+      assert((demo.match(/kind: 'section'/g) || []).length === 6, 'demo lists must seed two sections per language (outer + subsection)');
       assert((demo.match(/kind: 'bucket', parent_id: 'demo-list-006'/g) || []).length === 6,
-        'each demo section must hold two buckets');
+        'each demo outer section must hold two direct buckets');
+      assert((demo.match(/kind: 'bucket', parent_id: 'demo-list-009'/g) || []).length === 6,
+        'each demo subsection must hold two buckets');
+      // The personalised-demo generation prompt teaches sections too.
+      const chooser = fs.readFileSync(path.join(JS_DIR, 'demo-chooser.js'), 'utf-8');
+      assert(chooser.includes('"kind": "section"') && chooser.includes('r.parent_id'),
+        'demo chooser must document and resolve list sections');
+      assert((chooser.match(/Non-Fiction > History|Non-fiction > Histoire|No ficción > Historia/g) || []).length === 3,
+        'demo chooser prompt must show a two-level path example in all three languages');
       // The demo category derivation in main.js must understand paths.
       const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
       assert(mainSrc.includes("buildCatRows(data.todos, 'category', 'todo_categories', true)"),

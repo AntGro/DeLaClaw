@@ -122,6 +122,17 @@ The canonical table list lives in `server/schema.sql` (SQLite base schema).
 
 Each category/deck table has one protected default row (`name=''`, `is_protected=1`). A `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item foreign keys (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user-created category deletes all its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to group members.
 
+### Nested sections
+
+On the TODOs, Habits and Lists pages, category rows form a tree. Each row in `todo_categories`, `habit_categories` and `lists` carries:
+
+- `kind` — `'bucket'` (holds items) or `'section'` (holds buckets and sub-sections, never items directly)
+- `parent_id` — the containing section's id, or null at the top level. It is a plain column, deliberately **not** a foreign key, so backup restore never needs topological ordering.
+
+Users write nesting as a path in the category name (`Reading > Fiction`); the full path is derived from the parent chain, and each row stores only its own name segment. Names are unique per parent across both kinds, and `sort_order` is per sibling group. Converting a bucket into a section moves its items into a new `*` bucket inside it. Deleting a non-empty section offers two choices: move its children up one level, or delete the whole subtree.
+
+Sections are purely local: they are never shared to a group (sharing stays per bucket), and renaming or moving a section never affects Google Calendar sync, whose event titles use bucket names only. All tree, path and layout logic lives in `js/sections-pure.js`; every level is laid out as its own even grid of strictly rectangular blocks, with a section's width chosen bottom-up as the smallest that gives its minimal internal row count.
+
 ### CHECK constraints
 
 CHECK constraints are enforced at the database level:

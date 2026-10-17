@@ -6361,6 +6361,23 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'delegation must route navigate-to-habit-section with getCat');
       assert(delegation.includes("case 'navigate-to-list-section': callWindow('navigateToListSection'"),
         'delegation must route navigate-to-list-section explicitly');
+      // Same trap for the section entry actions: without explicit cases
+      // the add-in-section modal received the button element as the
+      // parent id (bucket landed at root, invisible inside the section)
+      // and section delete silently did nothing (live-test bug, Oct 17).
+      for (const [action, fn, getter] of [
+        ['open-add-category-in-section', 'openAddCategoryInSection', 'getCat'],
+        ['delete-section', 'deleteSection', 'getCat'],
+        ['open-add-habit-category-in-section', 'openAddHabitCategoryInSection', 'getCat'],
+        ['delete-habit-section', 'deleteHabitSection', 'getCat'],
+        ['open-add-list-in-section', 'openAddListInSection', null],
+        ['delete-list-section', 'deleteListSection', null],
+      ]) {
+        assert(delegation.includes(`case '${action}': callWindow('${fn}'`),
+          `delegation must route ${action} explicitly`);
+        if (getter) assert(delegation.includes(`case '${action}': callWindow('${fn}', [${getter}(el)])`),
+          `${action} must pass ${getter}(el)`);
+      }
       // Copy-link at section level in all three views, with deep links
       // that resolve back to the section block.
       const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-17T10:38:32.971Z from 50 modules (v2.23.3). Total LOC 35625. Do not hand-edit.
+> Generated 2026-10-17T11:12:35.991Z from 50 modules (v2.23.4). Total LOC 35631. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -36,7 +36,7 @@
 | utils | 971 | flashcards,x | i18n,icons,sections-pure,state | - | esc:7,window:6 |
 | calendar | 662 | - | calendar-pure,habits,i18n,icons | main.js | esc:17,window:8 |
 | batch-import | 559 | - | icons,import-pure,state,utils | - | esc:13 |
-| delegation | 490 | - |  | - | window:1 |
+| delegation | 496 | - |  | - | window:1 |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 464 | - | habits,i18n,icons,utils | - | - |
 | offline-cache | 439 | - | ./i18n,./state,i18n.js,state.js | drive.js,main.js,sharing.js | - |

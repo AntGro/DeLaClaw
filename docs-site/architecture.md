@@ -245,7 +245,7 @@ Language is stored in `localStorage` and can be changed in Settings. The `t()` f
 
 ## Drag-and-drop
 
-`js/item-utils.js` provides reusable drag-and-drop reordering via long-press (100ms threshold). Both category nav buttons and bucket items (TODOs, Projects, Lists, Flashcard drafts) share the same UX:
+`js/item-utils.js` provides reusable drag-and-drop reordering via long-press (150ms threshold). Both category nav buttons and bucket items (TODOs, Projects, Lists, Flashcard drafts) share the same UX:
 
 - **Activation**: long-press on touch/pointer (`LONG_PRESS_MS = 100`), not native HTML drag events
 - **Visual**: the real item follows the cursor/finger; a placeholder gap shows the drop position; siblings slide with FLIP animation. No visible drag handles — shadow-only to indicate float

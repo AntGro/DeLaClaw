@@ -14,7 +14,7 @@ import state from './state.js';
 export let isDragging = false;
 export function setDragging(v) { isDragging = v; }
 
-export const LONG_PRESS_MS = 100;
+export const LONG_PRESS_MS = 150;
 export const DRAG_THRESHOLD = 5;
 export const DRAG_CLONE_SELECTOR = '[data-drag-clone="true"]';
 export const DRAG_SOURCE_SELECTOR = '[data-drag-source="true"]';
@@ -1121,7 +1121,7 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds, cro
       });
       rowEl.offsetHeight; // force reflow before enabling transitions
       chips.forEach(b => {
-        if (b.style.transform) { b.style.transition = 'transform 0.15s ease'; b.style.transform = ''; }
+        if (b.style.transform) { b.style.transition = 'transform 0.25s ease'; b.style.transform = ''; }
       });
     };
 
@@ -1300,7 +1300,7 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds, cro
       container.offsetHeight; // force reflow before enabling transitions
       siblings.forEach(b => {
         if (b.style.transform) {
-          b.style.transition = 'transform 0.15s ease';
+          b.style.transition = 'transform 0.25s ease';
           b.style.transform = '';
         }
       });

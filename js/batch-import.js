@@ -25,10 +25,20 @@ import { parseImportArray } from './import-pure.js';
  * (shared pseudo-category excluded).
  * { table, getMap: () => Map(id → row), reload: async () => void }
  */
-export async function ensureImportCategories(names, { table, getMap, reload }) {
+export async function ensureImportCategories(names, { table, getMap, reload, getPathMap, ensurePath }) {
   const result = new Map();
   const indexMap = () => {
     result.clear();
+    if (getPathMap) {
+      // Nested sections: categories are identified by full path; only
+      // buckets can receive items. The entry name stays the bucket's own
+      // (last-segment) name for the item's legacy category string.
+      for (const [path, row] of getPathMap().entries()) {
+        if (row.name === SHARED_CATEGORY || row.kind === 'section') continue;
+        result.set(path, { id: row.id, name: row.name });
+      }
+      return;
+    }
     for (const row of getMap().values()) {
       if (row.name === SHARED_CATEGORY) continue;
       result.set(row.name.toLowerCase(), { id: row.id, name: row.name });
@@ -39,10 +49,21 @@ export async function ensureImportCategories(names, { table, getMap, reload }) {
   for (const name of names) {
     const l = name.toLowerCase();
     if (result.has(l)) continue;
+    if (ensurePath && name.includes('>')) {
+      // A new category given as a path: create/convert the section
+      // chain, then the bucket, via the view's own helper.
+      await ensurePath(name);
+      await reload();
+      indexMap();
+      created++;
+      continue;
+    }
     const catMap = getMap();
     const color = nextPaletteColor(catMap);
     const sortOrder = Math.max(0, ...Array.from(catMap.values()).map(c => c.sort_order || 0)) + 1;
-    const { error } = await state.db.from(table).insert({ name, shortname: null, color, sort_order: sortOrder });
+    const insert = { name, shortname: null, color, sort_order: sortOrder };
+    if (getPathMap) { insert.kind = 'bucket'; insert.parent_id = null; }
+    const { error } = await state.db.from(table).insert(insert);
     if (error) throw new Error(error.message);
     created++;
   }

@@ -1,6 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
+import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, orderKeyOf, compareOrderKeys } from './sections-pure.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -20,6 +21,9 @@ let _defaultCatId = null;       // protected General row
 let _sharedCatId = null;        // protected __shared__ row
 const _myCreatedSharedIds = new Set(); // shared_ids where current user is creator
 
+let _todoCatByPath = new Map(); // lowercase full path ('Reading > Fiction') → row
+let _todoTree = { roots: [], byId: new Map() };
+
 async function loadTodoCategories() {
   const { data, error } = await state.db.from('todo_categories').select('*').order('sort_order', { ascending: true });
   if (error) { console.warn('loadTodoCategories error:', error); return; }
@@ -28,12 +32,107 @@ async function loadTodoCategories() {
   _defaultCatId = null;
   _sharedCatId = null;
   for (const row of (data || [])) {
+    normalizeSectionFields(row);
     _todoCatMap.set(row.id, row);
     _todoCatByName.set(row.name, row);
     if (row.is_protected && row.name === SHARED_CATEGORY) _sharedCatId = row.id;
     else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultCatId = row.id;
   }
+  _todoTree = buildSectionTree([..._todoCatMap.values()]);
+  _todoCatByPath.clear();
+  for (const node of _todoTree.byId.values()) {
+    _todoCatByPath.set(pathLabelOf(node, _todoTree.byId).toLowerCase(), node.row);
+  }
   await backfillCategoryColors('todo_categories', _todoCatMap);
+}
+
+/** Full display path of a category ('Reading > Fiction'); buckets at the
+ *  top level and the special rows keep their plain display name. */
+function getTodoCatPath(catId) {
+  const node = _todoTree.byId.get(catId);
+  if (!node || !node.parentId) return getCatDisplayName(catId);
+  return pathLabelOf(node, _todoTree.byId);
+}
+
+/** Tree ordering key for a category (see sections-pure.orderKeyOf). */
+function getTodoCatOrderKey(catId) {
+  const node = _todoTree.byId.get(catId);
+  return node ? orderKeyOf(node, _todoTree.byId) : [0];
+}
+
+// ── Nested sections ────────────────────────────────────────────────
+// Sections and buckets share the todo_categories table (kind +
+// parent_id). All helpers below reload the category maps after each
+// write so callers always resolve rows by (parent, name) against fresh
+// state, on every adapter.
+const SECTION_DEFAULT_COLOR = '#3b82f6';
+
+function todoChildRow(parentId, name) {
+  const target = (name || '').trim().toLowerCase();
+  for (const node of _todoTree.byId.values()) {
+    if ((node.parentId || null) === (parentId || null) && (node.row.name || '').trim().toLowerCase() === target) return node.row;
+  }
+  return null;
+}
+
+function nextTodoSortOrder(parentId) {
+  let max = -1;
+  for (const node of _todoTree.byId.values()) {
+    if ((node.parentId || null) === (parentId || null)) max = Math.max(max, Number(node.row.sort_order) || 0);
+  }
+  return max + 1;
+}
+
+/** Convert a bucket row into a section: its items move to a new '*'
+ *  bucket inside it (items never sit directly at section level). */
+async function convertTodoBucketToSection(cat) {
+  const { error } = await state.db.from('todo_categories').insert({
+    name: '*', shortname: null, color: cat.color || SECTION_DEFAULT_COLOR,
+    sort_order: 0, kind: 'bucket', parent_id: cat.id,
+  });
+  if (error) throw error;
+  await loadTodoCategories();
+  const star = todoChildRow(cat.id, '*');
+  if (star) {
+    const { data: items } = await state.db.from('todos').select('id').eq('category_id', cat.id);
+    for (const item of (items || [])) {
+      await state.db.from('todos').update({ category_id: star.id, category: '*' }).eq('id', item.id);
+    }
+  }
+  await state.db.from('todo_categories').update({ kind: 'section' }).eq('id', cat.id);
+  await loadTodoCategories();
+}
+
+/**
+ * Walk path segments from a starting parent, creating sections where
+ * missing and converting buckets where one blocks the path. Returns the
+ * id of the deepest section (or the starting parent when segments is
+ * empty). Throws when a segment would place a row inside itself or one
+ * of its own descendants (guardId).
+ */
+async function ensureTodoSectionChain(segments, startParentId = null, guardId = null) {
+  let parentId = startParentId || null;
+  for (const seg of (segments || [])) {
+    let row = todoChildRow(parentId, seg);
+    if (row && guardId && (row.id === guardId || descendantsOf(_todoTree.byId.get(guardId) || { children: [] }).some(n => n.id === row.id))) {
+      throw new Error('section-cycle');
+    }
+    if (!row) {
+      const { error } = await state.db.from('todo_categories').insert({
+        name: seg, shortname: null, color: SECTION_DEFAULT_COLOR,
+        sort_order: nextTodoSortOrder(parentId), kind: 'section', parent_id: parentId,
+      });
+      if (error) throw error;
+      await loadTodoCategories();
+      row = todoChildRow(parentId, seg);
+      if (!row) throw new Error('section-create-failed');
+    } else if (!isSectionRow(row)) {
+      await convertTodoBucketToSection(row);
+      row = _todoCatMap.get(row.id);
+    }
+    parentId = row.id;
+  }
+  return parentId;
 }
 
 function getTodoCategories() { return _todoCatMap; }
@@ -75,6 +174,7 @@ function openEditCategoryModal(catId) {
   document.getElementById('editCategoryName').value = cat.name;
   document.getElementById('editCategoryShortname').value = cat.shortname || '';
   document.getElementById('editCategoryColor').value = cat.color || GENERAL_CATEGORY_COLOR;
+  populateTodoParentSelect(cat);
   modal.classList.add('visible');
   setTimeout(() => document.getElementById('editCategoryName').focus(), 50);
 }
@@ -87,23 +187,47 @@ async function saveEditCategory() {
   const catId = document.getElementById('editCategoryOldName').value;
   const cat = _todoCatMap.get(catId);
   if (!cat) return;
-  const newName = document.getElementById('editCategoryName').value.trim();
+  const rawName = document.getElementById('editCategoryName').value.trim();
   const shortname = document.getElementById('editCategoryShortname').value.trim();
   const color = document.getElementById('editCategoryColor').value;
-  if (!newName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
 
-  // Update the DB row directly — no need to rename strings on items since they reference by ID
+  // The parent picker chooses the parent; typing a path in the name
+  // field overrides it (the last segment becomes the row's own name).
+  let targetName = rawName;
+  let targetParentId = document.getElementById('editCategoryParent')?.value || null;
+  if (!cat.is_protected && rawName.includes('>')) {
+    const segments = parseSectionPath(rawName);
+    if (!segments.length) { showToast(t('toast.name_required'), 'error'); return; }
+    targetName = segments[segments.length - 1];
+    try {
+      targetParentId = await ensureTodoSectionChain(segments.slice(0, -1), null, catId);
+    } catch (e) {
+      showToast(t('toast.name_required'), 'error');
+      return;
+    }
+  }
+  if (!targetName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
+  if (cat.is_protected) targetParentId = null;
+  if (!cat.is_protected && siblingNameTaken([..._todoCatMap.values()], targetParentId, targetName, catId)) {
+    showToast(t('toast.name_required'), 'error');
+    return;
+  }
+
+  // Update the DB row directly — items reference categories by ID, and
+  // a section rename needs no descendant writes (paths are derived).
   const oldShortname = cat.shortname;
   const oldName = cat.name;
-  const updates = { shortname: shortname || null, color };
-  if (!cat.is_protected) updates.name = newName;
+  const isSection = isSectionRow(cat);
+  const updates = { shortname: shortname || null, color, parent_id: targetParentId };
+  if (!cat.is_protected) updates.name = targetName;
+  if (targetParentId !== (cat.parent_id || null)) updates.sort_order = nextTodoSortOrder(targetParentId);
   await state.db.from('todo_categories').update(updates).eq('id', catId);
-  Object.assign(cat, updates);
-  _todoCatByName.clear();
-  for (const row of _todoCatMap.values()) _todoCatByName.set(row.name, row);
+  await loadTodoCategories();
 
-  // Calendar: only resync items if the label used in event summaries changed
-  if (updates.shortname !== oldShortname || updates.name !== oldName) {
+  // Calendar: bucket labels appear in event summaries, so a bucket
+  // rename resyncs. Sections never appear there — renaming or moving a
+  // section must not touch the calendar.
+  if (!isSection && (updates.shortname !== oldShortname || updates.name !== oldName)) {
     window.markCategoryRenamed?.('todo_categories');
   }
 
@@ -248,27 +372,19 @@ function renderTodos() {
     return;
   }
 
-  // Build category ID list in sort order
-  const categoryIdList = catRows.map(c => c.id);
+  // Root-level nodes (buckets + sections) in tree order. The Shared deck
+  // is a synthetic root bucket, always first, never inside a section.
+  const rootNodes = _todoTree.roots.filter(n => n.id !== _sharedCatId);
+  const rootIds = rootNodes.map(n => n.id);
+  const hasSharedItems = allTodos.some(td => catIdForTodo(td) === _sharedCatId);
+  const toolbarIds = hasSharedItems && _sharedCatId ? [_sharedCatId, ...rootIds] : rootIds;
 
-  // Dynamically include the Shared deck if any received items exist
-  const hasSharedItems = allTodos.some(t => catIdForTodo(t) === _sharedCatId);
-  if (hasSharedItems && _sharedCatId) categoryIdList.unshift(_sharedCatId);
-
-  // Render category navigation buttons in toolbar
-  renderCategoryToolbarButtons(categoryIdList);
+  renderCategoryToolbarButtons(toolbarIds);
   initTodoNavBtnReorder();
 
   let html = '';
-  for (const catId of categoryIdList) {
-    // Skip empty categories when searching
-    if (todoSearchQuery) {
-      const matchingItems = getFilteredTodosForCategory(catId);
-      const catName = getCatDisplayName(catId);
-      if (matchingItems.length === 0 && !catName.toLowerCase().includes(todoSearchQuery.toLowerCase())) continue;
-    }
-    html += renderCategoryCard(catId);
-  }
+  if (hasSharedItems && _sharedCatId) html += renderCategoryCard(_sharedCatId);
+  html += renderTodoLevel(rootNodes, false);
 
   const scrollY = window.scrollY;
   const innerScrolls = captureInnerScrollPositions(grid);
@@ -277,8 +393,11 @@ function renderTodos() {
   restoreInnerScrollPositions(grid, innerScrolls);
   restoreTextInputs(grid, '.todo-cat-input', 'data-category', pendingInputs);
 
-  // Init drag-and-drop for each card (individual TODO items)
-  categoryIdList.forEach(catId => {
+  // Init drag-and-drop for each bucket card (individual TODO items)
+  const bucketIds = [];
+  if (hasSharedItems && _sharedCatId) bucketIds.push(_sharedCatId);
+  for (const node of _todoTree.byId.values()) if (node.kind === 'bucket' && node.id !== _sharedCatId) bucketIds.push(node.id);
+  bucketIds.forEach(catId => {
     const domId = categoryToDomId(catId);
     initTodoDragDropForCard(domId);
     const catCard = document.getElementById(domId);
@@ -287,8 +406,78 @@ function renderTodos() {
       if (list) initTodoHoverDelay(list);
     }
   });
+  // Chip reorder inside each section (sibling group only)
+  for (const node of _todoTree.byId.values()) {
+    if (node.kind === 'section') initTodoSectionNavBtnReorder(node.id);
+  }
 
-  balanceGrid(grid);
+  applySectionGrid(grid);
+}
+
+/** Is a tree node visible under the current search query? */
+function todoNodeSearchVisible(node, ancestorMatched) {
+  if (!todoSearchQuery) return true;
+  const q = todoSearchQuery.toLowerCase();
+  const name = (node.row.name || '').toLowerCase();
+  if (ancestorMatched || name.includes(q)) return true;
+  if (node.kind === 'bucket') {
+    return getFilteredTodosForCategory(node.id).length > 0;
+  }
+  return node.children.some(c => todoNodeSearchVisible(c, false));
+}
+
+function renderTodoLevel(nodes, ancestorMatched) {
+  let html = '';
+  for (const node of nodes) {
+    if (!todoNodeSearchVisible(node, ancestorMatched)) continue;
+    const matched = ancestorMatched || (todoSearchQuery && (node.row.name || '').toLowerCase().includes(todoSearchQuery.toLowerCase()));
+    html += node.kind === 'section' ? renderTodoSection(node, matched) : renderCategoryCard(node.id);
+  }
+  return html;
+}
+
+function renderTodoSection(node, ancestorMatched = false) {
+  const cat = node.row;
+  const bucketIds = descendantBucketIds(node);
+  const total = allTodos.filter(td => bucketIds.includes(catIdForTodo(td))).length;
+  const pending = allTodos.filter(td => bucketIds.includes(catIdForTodo(td)) && !td.done).length;
+  const chips = node.children.map(child => {
+    const childCat = child.row;
+    const isSec = child.kind === 'section';
+    const count = isSec
+      ? allTodos.filter(td => descendantBucketIds(child).includes(catIdForTodo(td))).length
+      : allTodos.filter(td => catIdForTodo(td) === child.id).length;
+    const label = isSec ? (childCat.shortname || childCat.name || '') : (childCat.shortname || getCatDisplayName(child.id));
+    const title = isSec ? (childCat.name || '') : getCatDisplayName(child.id);
+    const color = childCat.color || GENERAL_CATEGORY_COLOR;
+    const action = isSec ? 'navigate-to-todo-section' : 'navigate-to-category';
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="${action}" data-category="${esc(child.id)}" title="${esc(title)}">${esc(label)} (${count})</button>`;
+  }).join('');
+  const childrenHtml = renderTodoLevel(node.children, ancestorMatched)
+    || `<p class="empty-msg">${t('common.section_empty')}</p>`;
+  return `<div class="section-block" id="todo-section-${esc(cat.id)}" data-node-kind="section" data-node-id="${esc(cat.id)}" style="--cat-color:${cat.color || SECTION_DEFAULT_COLOR};--cat-on-color:${onColorFor(cat.color || SECTION_DEFAULT_COLOR)}">
+    <div class="section-header" data-action="toggle-section-chips">
+      <div class="section-header-left">
+        <h3 class="section-name">${lucideIcon('folder', 16)} ${esc(cat.name || '')}</h3>
+        <span class="section-stats">${pending} ${t('todos.pending').toLowerCase()} · ${total}</span>
+      </div>
+      <div class="section-header-actions">
+        <button class="todo-cat-shortname-btn" data-action="open-add-category-in-section" data-category="${esc(cat.id)}" title="${esc(t('todos.add_category'))}">${lucideIcon('folder-plus', 14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="copy-item-link" data-link-type="todocat" data-id="${esc(cat.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="open-edit-category-modal" data-category="${esc(cat.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 14)}</button>
+        <button class="todo-cat-delete-btn" data-action="delete-section" data-category="${esc(cat.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
+      </div>
+    </div>
+    <div class="category-nav-buttons section-chips${node.children.length > 1 ? '' : ' section-chips-collapsed'}" id="todoSectionChips-${esc(cat.id)}">${chips}</div>
+    <div class="section-level">${childrenHtml}</div>
+  </div>`;
+}
+
+function navigateToTodoSection(sectionId) {
+  const el = document.getElementById('todo-section-' + sectionId);
+  if (!el) return;
+  const cat = _todoCatMap.get(sectionId);
+  scrollToAndHighlight(el, cat?.color || SECTION_DEFAULT_COLOR);
 }
 
 function renderCategoryToolbarButtons(categoryIdList) {
@@ -298,11 +487,13 @@ function renderCategoryToolbarButtons(categoryIdList) {
     const cat = _todoCatMap.get(catId);
     if (!cat) return '';
     const isShared = cat.name === SHARED_CATEGORY;
+    const isSection = isSectionRow(cat);
     const name = getCatDisplayName(catId);
     const shortname = cat.shortname;
     const displayName = isShared ? t('sharing.shared') : (shortname || name);
     const color = cat.color || GENERAL_CATEGORY_COLOR;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-category" data-category="${esc(catId)}" title="Go to ${esc(name)}">${esc(displayName)}</button>`;
+    const action = isSection ? 'navigate-to-todo-section' : 'navigate-to-category';
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="${action}" data-category="${esc(catId)}" title="Go to ${esc(name)}">${esc(displayName)}</button>`;
   }).join('');
 }
 
@@ -413,7 +604,7 @@ function renderCategoryCard(catId) {
     </div>
     <div class="char-counter" id="todo-counter-${domId}"></div>`;
 
-  return `<div class="project-card" id="${domId}" data-category="${esc(catId)}" style="--cat-color:${catColor}">
+  return `<div class="project-card" id="${domId}" data-category="${esc(catId)}" data-node-kind="bucket" data-node-id="${esc(catId)}" style="--cat-color:${catColor};--cat-on-color:${onColorFor(catColor)}">
     <div class="todo-cat-header">
       <div class="todo-cat-header-left">
         ${catDragHandle}
@@ -893,7 +1084,12 @@ async function editTodoInline(id, itemEl) {
   catLabel.textContent = t('common.category');
   const catSelect = document.createElement('select');
   catSelect.className = 'inline-edit-input';
-  const catRows = Array.from(_todoCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
+  // Buckets only (a TODO can never sit in a section), tree order, full
+  // path labels so same-named buckets stay distinguishable.
+  const catRows = [..._todoTree.byId.values()]
+    .filter(n => n.kind === 'bucket' && n.id !== _sharedCatId)
+    .sort((a, b) => compareOrderKeys(orderKeyOf(a, _todoTree.byId), orderKeyOf(b, _todoTree.byId)))
+    .map(n => n.row);
   // Include Shared in dropdown if the todo is in the shared deck (so user can move it out)
   const todoCatId = catIdForTodo(todo);
   if (todoCatId === _sharedCatId) {
@@ -903,7 +1099,7 @@ async function editTodoInline(id, itemEl) {
   catRows.forEach(c => {
     const opt = document.createElement('option');
     opt.value = c.id;
-    opt.textContent = c.name === SHARED_CATEGORY ? t('sharing.shared') : (c.name === '' ? t('common.category_default') : c.name);
+    opt.textContent = c.name === SHARED_CATEGORY ? t('sharing.shared') : (c.name === '' ? t('common.category_default') : getTodoCatPath(c.id));
     if (c.id === todoCatId) opt.selected = true;
     catSelect.appendChild(opt);
   });
@@ -1006,7 +1202,9 @@ function editCategoryModalHTML() {
     <h2>${lucideIcon('pencil', 20)} ${t('todos.edit_category')}</h2>
     <input type="hidden" id="editCategoryOldName">
     <label>${t('todos.category_name')}</label>
-    <input type="text" id="editCategoryName" maxlength="40" data-action="save-edit-category-on-enter">
+    <input type="text" id="editCategoryName" maxlength="80" data-action="save-edit-category-on-enter">
+    <label>${t('common.section_parent')}</label>
+    <select id="editCategoryParent"></select>
     <div class="modal-row">
       <div class="modal-field">
         <label>${t('common.shortname')}</label>
@@ -1022,6 +1220,24 @@ function editCategoryModalHTML() {
       <button class="modal-save" data-action="save-edit-category">${t('common.save')}</button>
     </div>
   </div>`;
+}
+
+/** Fill the edit modal's parent picker: Root + section rows, excluding
+ *  the row being edited and its descendants (never move into itself). */
+function populateTodoParentSelect(currentRow) {
+  const sel = document.getElementById('editCategoryParent');
+  if (!sel) return;
+  const excluded = new Set();
+  if (currentRow) {
+    excluded.add(currentRow.id);
+    const node = _todoTree.byId.get(currentRow.id);
+    if (node) for (const d of descendantsOf(node)) excluded.add(d.id);
+  }
+  const sections = [..._todoTree.byId.values()]
+    .filter(n => n.kind === 'section' && !excluded.has(n.id) && !n.row.is_protected);
+  sel.innerHTML = `<option value="">${esc(t('common.section_root'))}</option>` + sections
+    .map(n => `<option value="${esc(n.id)}">${esc(pathLabelOf(n, _todoTree.byId))}</option>`).join('');
+  sel.value = currentRow?.parent_id || '';
 }
 
 function initTodoModals() {
@@ -1046,16 +1262,29 @@ function initTodoModals() {
   m3.dataset.overlayClose = 'true';
   m3.innerHTML = editCategoryModalHTML();
   app.appendChild(m3);
+
+  // Section Delete Choice Modal
+  const m4 = document.createElement('div');
+  m4.className = 'modal-overlay'; m4.id = 'deleteSectionModal';
+  m4.dataset.action = 'close-delete-section-modal';
+  m4.dataset.overlayClose = 'true';
+  m4.innerHTML = deleteSectionModalHTML();
+  app.appendChild(m4);
 }
 
-function openAddCategoryModal() {
+function openAddCategoryModal(parentId = null) {
   const modal = document.getElementById('addCategoryModal');
   modal.innerHTML = addCategoryModalHTML();
+  modal.dataset.parentId = parentId || '';
   document.getElementById('newCategoryName').value = '';
   document.getElementById('newCategoryShortname').value = '';
   document.getElementById('newCategoryColor').value = nextPaletteColor(_todoCatMap);
   modal.classList.add('visible');
   setTimeout(() => document.getElementById('newCategoryName').focus(), 100);
+}
+
+function openAddCategoryInSection(sectionId) {
+  openAddCategoryModal(sectionId);
 }
 
 function closeAddCategoryModal() {
@@ -1064,23 +1293,31 @@ function closeAddCategoryModal() {
 
 async function saveNewCategory() {
   const input = document.getElementById('newCategoryName');
-  const name = input.value.trim();
-  if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
+  const segments = parseSectionPath(input.value.trim());
+  if (!segments.length) { showToast(t('toast.enter_name'), 'error'); return; }
+  const modal = document.getElementById('addCategoryModal');
+  const startParentId = modal?.dataset.parentId || null;
+  const shortname = document.getElementById('newCategoryShortname').value.trim() || null;
+  const color = document.getElementById('newCategoryColor').value;
 
-  // Check for duplicates in existing categories
-  for (const cat of _todoCatMap.values()) {
-    if (cat.name.toLowerCase() === name.toLowerCase()) {
+  try {
+    // All but the last segment are sections (created / converted on the
+    // way); the last segment is the new bucket.
+    const parentId = await ensureTodoSectionChain(segments.slice(0, -1), startParentId);
+    const name = segments[segments.length - 1];
+    if (siblingNameTaken([..._todoCatMap.values()], parentId, name, null)) {
       showToast(t('toast.name_required'), 'error');
       return;
     }
+    const { error } = await state.db.from('todo_categories').insert({
+      name, shortname, color, sort_order: nextTodoSortOrder(parentId),
+      kind: 'bucket', parent_id: parentId,
+    });
+    if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
+  } catch (e) {
+    showToast(t('toast.failed_to_add') + ': ' + e.message, 'error');
+    return;
   }
-
-  const shortname = document.getElementById('newCategoryShortname').value.trim() || null;
-  const color = document.getElementById('newCategoryColor').value;
-  const sortOrder = Math.max(0, ...Array.from(_todoCatMap.values()).map(c => c.sort_order || 0)) + 1;
-
-  const { error } = await state.db.from('todo_categories').insert({ name, shortname, color, sort_order: sortOrder });
-  if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
   closeAddCategoryModal();
   showToast(t('toast.added'), 'success');
@@ -1131,6 +1368,116 @@ async function deleteCategory(catId) {
   });
 }
 
+
+// ── Section delete ─────────────────────────────────────────────────
+// Empty sections delete directly. A non-empty section asks first:
+// delete the whole subtree, or move its children up one level.
+let _pendingTodoSectionDelete = null;
+
+function deleteSection(sectionId) {
+  const node = _todoTree.byId.get(sectionId);
+  const cat = _todoCatMap.get(sectionId);
+  if (!node || !cat || !isSectionRow(cat) || cat.is_protected) return;
+  if (!node.children.length) {
+    showConfirmAction(t('common.delete'), t('common.section_delete_empty', cat.name), async () => {
+      await state.db.from('todo_categories').delete().eq('id', sectionId);
+      showToast(t('toast.deleted'), 'info');
+      await refreshTodos();
+    });
+    return;
+  }
+  _pendingTodoSectionDelete = sectionId;
+  const modal = document.getElementById('deleteSectionModal');
+  if (!modal) return;
+  modal.innerHTML = deleteSectionModalHTML();
+  document.getElementById('deleteSectionName').textContent = cat.name;
+  modal.classList.add('visible');
+}
+
+function deleteSectionModalHTML() {
+  return `<div class="modal">
+    <h2>${lucideIcon('folder', 20)} ${t('common.section_delete_title')}</h2>
+    <p>${t('common.section_delete_msg')} <strong id="deleteSectionName"></strong></p>
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-delete-section-modal">${t('common.cancel')}</button>
+      <button class="btn" data-action="delete-section-move-up">${t('common.section_delete_move_up')}</button>
+      <button class="modal-save" data-action="delete-section-subtree">${t('common.section_delete_subtree')}</button>
+    </div>
+  </div>`;
+}
+
+function closeDeleteSectionModal() {
+  _pendingTodoSectionDelete = null;
+  document.getElementById('deleteSectionModal')?.classList.remove('visible');
+}
+
+async function deleteSectionMoveUp() {
+  const sectionId = _pendingTodoSectionDelete;
+  if (!sectionId) return;
+  _pendingTodoSectionDelete = null;
+  document.getElementById('deleteSectionModal')?.classList.remove('visible');
+  const node = _todoTree.byId.get(sectionId);
+  if (!node) return;
+  const parentId = node.parentId || null;
+  const parentChildren = [..._todoTree.byId.values()]
+    .filter(n => (n.parentId || null) === parentId)
+    .sort((a, b) => (Number(a.row.sort_order) || 0) - (Number(b.row.sort_order) || 0));
+  const moving = [...node.children];
+  const movingIds = new Set(moving.map(n => n.id));
+  const rest = parentChildren.filter(n => n.id !== sectionId);
+  const at = Math.max(0, parentChildren.findIndex(n => n.id === sectionId));
+  const finalOrder = [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+  for (let i = 0; i < finalOrder.length; i++) {
+    const n = finalOrder[i];
+    const updates = { sort_order: i };
+    if (movingIds.has(n.id)) updates.parent_id = parentId;
+    if (Number(n.row.sort_order) !== i || updates.parent_id !== undefined) {
+      await state.db.from('todo_categories').update(updates).eq('id', n.id);
+    }
+  }
+  await state.db.from('todo_categories').delete().eq('id', sectionId);
+  showToast(t('toast.deleted'), 'info');
+  await refreshTodos();
+}
+
+async function deleteSectionSubtree() {
+  const sectionId = _pendingTodoSectionDelete;
+  if (!sectionId) return;
+  _pendingTodoSectionDelete = null;
+  document.getElementById('deleteSectionModal')?.classList.remove('visible');
+  const node = _todoTree.byId.get(sectionId);
+  if (!node) return;
+  const subtree = [node, ...descendantsOf(node)];
+  const bucketIds = subtree.filter(n => n.kind === 'bucket').map(n => n.id);
+  const sectionIds = subtree.filter(n => n.kind === 'section').map(n => n.id).reverse();
+  // Snapshots for the sharing-failure rollback, like deleteCategory.
+  const catRows = subtree.map(n => ({ ...n.row }));
+  const itemRows = [];
+  for (const bid of bucketIds) {
+    const { data } = await state.db.from('todos').select('*').eq('category_id', bid);
+    for (const r of (data || [])) itemRows.push(r);
+  }
+  // Explicit per-item deletion so calendar dirty tracking fires.
+  for (const item of itemRows) await state.db.from('todos').delete().eq('id', item.id);
+  for (const bid of bucketIds) await state.db.from('todo_categories').delete().eq('id', bid);
+  for (const sid of sectionIds) await state.db.from('todo_categories').delete().eq('id', sid);
+  showToast(t('toast.deleted'), 'info');
+  await refreshTodos();
+  if (state.sharing) {
+    const sharedItems = itemRows.filter(t2 => t2.shared_id && t2.shared_group_id);
+    if (sharedItems.length) {
+      (async () => {
+        for (const item of sharedItems) await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
+      })().catch(async (e) => {
+        console.warn('Failed to delete shared todos from Drive:', e);
+        for (const r of catRows) await state.db.from('todo_categories').insert(r);
+        for (const r of itemRows) await state.db.from('todos').insert(r);
+        await refreshTodos();
+        showToast(t('toast.delete_failed'), 'error');
+      });
+    }
+  }
+}
 
 // ===================================================================
 // SNOOZE MODAL
@@ -1325,29 +1672,74 @@ function initTodoDragDropForCard(catId) {
 // ===================================================================
 // NAV BUTTON REORDER
 // ===================================================================
+async function reorderTodoSiblings(orderedIds) {
+  const reorderable = orderedIds.filter(id => id !== _sharedCatId);
+  const updates = [];
+  reorderable.forEach((id, i) => {
+    const cat = _todoCatMap.get(id);
+    if (cat && Number(cat.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+  });
+  // Optimistic in-memory update (sort_order is per sibling group, so the
+  // index within the dragged chip row is the new order for that group)
+  reorderable.forEach((id, i) => { const cat = _todoCatMap.get(id); if (cat) cat.sort_order = i; });
+  await bulkSortOrder('todo_categories', updates);
+  await loadTodoCategories();
+  const grid = document.getElementById('todoCategoryGrid');
+  const snapshot = snapshotBuckets(grid);
+  renderTodos();
+  animateBucketsFromSnapshot(grid, snapshot, 600);
+  showToast(t('toast.reordered'), 'success');
+}
+
+/** Cross-section chip drag: drop a chip on another section's chips
+ *  row (insert at position) or on a section block (append), moving
+ *  the node — and its subtree, for a section — to the new parent. */
+function todoNavCrossDrop() {
+  return {
+    rootEl: document.getElementById('todosView'),
+    rowOwner: (rowEl) => rowEl.id === 'todoNavButtons' ? null
+      : rowEl.id.startsWith('todoSectionChips-') ? rowEl.id.slice('todoSectionChips-'.length) : undefined,
+    canDrop: (dragId, parentId) => {
+      const node = _todoTree.byId.get(dragId);
+      if (!node || (node.parentId || null) === (parentId || null)) return false;
+      return !planNodeMove([..._todoCatMap.values()], dragId, parentId, null).error;
+    },
+    onMove: (dragId, parentId, beforeId) => moveTodoNodeToParent(dragId, parentId, beforeId),
+  };
+}
+
+async function moveTodoNodeToParent(dragId, parentId, beforeId) {
+  const plan = planNodeMove([..._todoCatMap.values()], dragId, parentId, beforeId);
+  if (plan.error || !plan.updates?.length) return;
+  // Same FLIP glide as chip reordering: snapshot card positions at
+  // drop time, re-render, then animate every card from its old
+  // position to its new one.
+  const grid = document.getElementById('todoCategoryGrid');
+  const snapshot = snapshotBuckets(grid);
+  for (const u of plan.updates) {
+    await state.db.from('todo_categories').update({ parent_id: u.parent_id, sort_order: u.sort_order }).eq('id', u.id);
+  }
+  await refreshTodos();
+  animateBucketsFromSnapshot(grid, snapshot, 600);
+}
+
 function initTodoNavBtnReorder() {
   const skipIds = new Set();
   if (_sharedCatId) skipIds.add(_sharedCatId);
   initNavBtnReorder('todoNavButtons', {
     idAttr: 'category',
     skipIds,
-    async onReorder(orderedIds) {
-      const reorderable = orderedIds.filter(id => id !== _sharedCatId);
-      const updates = [];
-      reorderable.forEach((id, i) => {
-        const cat = _todoCatMap.get(id);
-        if (cat && Number(cat.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
-      });
-      // Optimistic in-memory update
-      reorderable.forEach((id, i) => { const cat = _todoCatMap.get(id); if (cat) cat.sort_order = i; });
-      await bulkSortOrder('todo_categories', updates);
-      await loadTodoCategories();
-      const grid = document.getElementById('todoCategoryGrid');
-      const snapshot = snapshotBuckets(grid);
-      renderTodos();
-      animateBucketsFromSnapshot(grid, snapshot, 600);
-      showToast(t('toast.reordered'), 'success');
-    },
+    onReorder: reorderTodoSiblings,
+    crossDrop: todoNavCrossDrop(),
+  });
+}
+
+function initTodoSectionNavBtnReorder(sectionId) {
+  initNavBtnReorder('todoSectionChips-' + sectionId, {
+    idAttr: 'category',
+    skipIds: new Set(),
+    onReorder: reorderTodoSiblings,
+    crossDrop: todoNavCrossDrop(),
   });
 }
 
@@ -1848,7 +2240,7 @@ document.addEventListener('input', e => {
   }
 });
 
-export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName };
+export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey };
 
 window.setTodoFilter = setTodoFilter;
 window.addTodoToCategory = addTodoToCategory;
@@ -1874,10 +2266,16 @@ window.snoozeFor = snoozeFor;
 window.submitSnooze = submitSnooze;
 window.unsnoozeTodo = unsnoozeTodo;
 window.openAddCategoryModal = openAddCategoryModal;
+window.openAddCategoryInSection = openAddCategoryInSection;
 window.closeAddCategoryModal = closeAddCategoryModal;
 window.saveNewCategory = saveNewCategory;
 window.deleteCategory = deleteCategory;
+window.deleteSection = deleteSection;
+window.closeDeleteSectionModal = closeDeleteSectionModal;
+window.deleteSectionMoveUp = deleteSectionMoveUp;
+window.deleteSectionSubtree = deleteSectionSubtree;
 window.navigateToCategory = navigateToCategory;
+window.navigateToTodoSection = navigateToTodoSection;
 window.updateTodoCharCounter = updateTodoCharCounter;
 window.openEditCategoryModal = openEditCategoryModal;
 window.closeEditCategoryModal = closeEditCategoryModal;
@@ -1899,7 +2297,7 @@ window.showTodoGeneralCard = function() {
     if (input) setTimeout(() => input.focus(), 100);
   }
   renderCategoryToolbarButtons([_defaultCatId]);
-  balanceGrid(grid);
+  applySectionGrid(grid);
 };
 window.filterTodos = function(e) { todoSearchQuery = e.target.value; renderTodos(); };
 window.renderTodos = renderTodos;
@@ -1948,9 +2346,10 @@ window.openTodoImportModal = async function() {
   const { openBatchImportModal, ensureImportCategories, chunkedBatchInsert } = await import('./batch-import.js');
   const { parseTodoImportJSON, validateTodoImportItem, TODO_IMPORT_PRIORITIES } = await import('./todo-import.js');
 
-  const cats = Array.from(_todoCatMap.values())
-    .filter(c => c.name !== SHARED_CATEGORY)
-    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const cats = [..._todoTree.byId.values()]
+    .filter(n => n.kind === 'bucket' && n.id !== _sharedCatId && n.row.name !== '')
+    .sort((a, b) => compareOrderKeys(orderKeyOf(a, _todoTree.byId), orderKeyOf(b, _todoTree.byId)))
+    .map(n => ({ ...n.row, _path: pathLabelOf(n, _todoTree.byId) }));
 
   const groups = (state.sharing && state.sharing.isReady()) ? state.sharing.getAllGroups() : [];
 
@@ -1986,7 +2385,7 @@ window.openTodoImportModal = async function() {
     newCategory: t('todos.import_new_category'),
 
     categories: [{ name: '', display: t('common.category_default') },
-      ...cats.map(c => ({ name: c.name, display: c.name }))],
+      ...cats.map(c => ({ name: c._path, display: c._path }))],
     promptDefaultCategory: 'General',
     groups: groups.map(g => ({ id: g.id, name: g.name })),
     sharingReady: !!(state.sharing && state.sharing.isReady()),
@@ -2001,7 +2400,7 @@ window.openTodoImportModal = async function() {
       { key: 'due_date', label: t('todos.import_field_due'), type: 'datetime' },
       { key: 'snooze_until', label: t('todos.import_field_snooze'), type: 'datetime' },
       { key: 'category', label: t('todos.import_field_category'), type: 'datalist',
-        options: ['General', ...cats.map(c => c.name)] },
+        options: ['General', ...cats.map(c => c._path)] },
       { key: 'group_id', label: t('todos.import_field_group'), type: 'grouplist' },
     ],
     previewMeta: (it) => {
@@ -2021,6 +2420,21 @@ window.openTodoImportModal = async function() {
 
     ensureCategories: (names) => ensureImportCategories(names, {
       table: 'todo_categories', getMap: () => _todoCatMap, reload: loadTodoCategories,
+      getPathMap: () => _todoCatByPath,
+      ensurePath: async (pathName) => {
+        const segments = parseSectionPath(pathName);
+        if (segments.length < 2) return;
+        const parentId = await ensureTodoSectionChain(segments.slice(0, -1));
+        const name = segments[segments.length - 1];
+        if (!todoChildRow(parentId, name)) {
+          const { error } = await state.db.from('todo_categories').insert({
+            name, shortname: null, color: nextPaletteColor(_todoCatMap),
+            sort_order: nextTodoSortOrder(parentId), kind: 'bucket', parent_id: parentId,
+          });
+          if (error) throw new Error(error.message);
+          await loadTodoCategories();
+        }
+      },
     }),
 
     createItems: async (validItems, catMap) => {

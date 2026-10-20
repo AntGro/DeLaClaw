@@ -1,6 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
+import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, orderKeyOf, compareOrderKeys } from './sections-pure.js';
 import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder, bulkSortOrder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { pendingSharedNextDue as _pendingSharedNextDue } from './pending-next-due.js';
@@ -27,6 +28,9 @@ const _myCreatedSharedHabitIds = new Set(); // shared_ids where current user is 
 // unshare vs copy-to-personal choice on habit cards, Habits page + Welcome).
 function isMyCreatedSharedHabit(sharedId) { return _myCreatedSharedHabitIds.has(sharedId); }
 
+let _habitCatByPath = new Map(); // lowercase full path → row
+let _habitTree = { roots: [], byId: new Map() };
+
 async function loadHabitCategories() {
   const { data, error } = await state.db.from('habit_categories').select('*').order('sort_order', { ascending: true });
   if (error) { console.warn('loadHabitCategories error:', error); return; }
@@ -35,12 +39,94 @@ async function loadHabitCategories() {
   _defaultHabitCatId = null;
   _sharedHabitCatId = null;
   for (const row of (data || [])) {
+    normalizeSectionFields(row);
     _habitCatMap.set(row.id, row);
     _habitCatByName.set(row.name, row);
     if (row.is_protected && row.name === SHARED_CATEGORY) _sharedHabitCatId = row.id;
     else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultHabitCatId = row.id;
   }
+  _habitTree = buildSectionTree([..._habitCatMap.values()]);
+  _habitCatByPath.clear();
+  for (const node of _habitTree.byId.values()) {
+    _habitCatByPath.set(pathLabelOf(node, _habitTree.byId).toLowerCase(), node.row);
+  }
   await backfillCategoryColors('habit_categories', _habitCatMap);
+}
+
+/** Full display path of a category; top-level rows keep their plain name. */
+function getHabitCatPath(catId) {
+  const node = _habitTree.byId.get(catId);
+  if (!node || !node.parentId) return getHabitCatDisplayName(catId);
+  return pathLabelOf(node, _habitTree.byId);
+}
+
+/** Tree ordering key for a category (see sections-pure.orderKeyOf). */
+function getHabitCatOrderKey(catId) {
+  const node = _habitTree.byId.get(catId);
+  return node ? orderKeyOf(node, _habitTree.byId) : [0];
+}
+
+// ── Nested sections (shared mechanism with TODOs/Lists) ────────────
+const SECTION_DEFAULT_COLOR = '#3b82f6';
+
+function habitChildRow(parentId, name) {
+  const target = (name || '').trim().toLowerCase();
+  for (const node of _habitTree.byId.values()) {
+    if ((node.parentId || null) === (parentId || null) && (node.row.name || '').trim().toLowerCase() === target) return node.row;
+  }
+  return null;
+}
+
+function nextHabitSortOrder(parentId) {
+  let max = -1;
+  for (const node of _habitTree.byId.values()) {
+    if ((node.parentId || null) === (parentId || null)) max = Math.max(max, Number(node.row.sort_order) || 0);
+  }
+  return max + 1;
+}
+
+/** Convert a bucket into a section: its habits move to a '*' bucket. */
+async function convertHabitBucketToSection(cat) {
+  const { error } = await state.db.from('habit_categories').insert({
+    name: '*', shortname: null, color: cat.color || SECTION_DEFAULT_COLOR,
+    sort_order: 0, kind: 'bucket', parent_id: cat.id,
+  });
+  if (error) throw error;
+  await loadHabitCategories();
+  const star = habitChildRow(cat.id, '*');
+  if (star) {
+    const { data: items } = await state.db.from('habits').select('id').eq('category_id', cat.id);
+    for (const item of (items || [])) {
+      await state.db.from('habits').update({ category_id: star.id, category: '*' }).eq('id', item.id);
+    }
+  }
+  await state.db.from('habit_categories').update({ kind: 'section' }).eq('id', cat.id);
+  await loadHabitCategories();
+}
+
+async function ensureHabitSectionChain(segments, startParentId = null, guardId = null) {
+  let parentId = startParentId || null;
+  for (const seg of (segments || [])) {
+    let row = habitChildRow(parentId, seg);
+    if (row && guardId && (row.id === guardId || descendantsOf(_habitTree.byId.get(guardId) || { children: [] }).some(n => n.id === row.id))) {
+      throw new Error('section-cycle');
+    }
+    if (!row) {
+      const { error } = await state.db.from('habit_categories').insert({
+        name: seg, shortname: null, color: SECTION_DEFAULT_COLOR,
+        sort_order: nextHabitSortOrder(parentId), kind: 'section', parent_id: parentId,
+      });
+      if (error) throw error;
+      await loadHabitCategories();
+      row = habitChildRow(parentId, seg);
+      if (!row) throw new Error('section-create-failed');
+    } else if (!isSectionRow(row)) {
+      await convertHabitBucketToSection(row);
+      row = _habitCatMap.get(row.id);
+    }
+    parentId = row.id;
+  }
+  return parentId;
 }
 
 function getHabitCategories() { return _habitCatMap; }
@@ -74,6 +160,7 @@ function openEditHabitCategoryModal(catId) {
   document.getElementById('editHabitCatName').value = cat.name;
   document.getElementById('editHabitCatShortname').value = cat.shortname || '';
   document.getElementById('editHabitCatColor').value = cat.color || GENERAL_CATEGORY_COLOR;
+  populateHabitParentSelect(cat);
   modal.classList.add('visible');
   setTimeout(() => document.getElementById('editHabitCatName').focus(), 50);
 }
@@ -86,23 +173,43 @@ async function saveEditHabitCategory() {
   const catId = document.getElementById('editHabitCatOldName').value;
   const cat = _habitCatMap.get(catId);
   if (!cat) return;
-  const newName = document.getElementById('editHabitCatName').value.trim();
+  const rawName = document.getElementById('editHabitCatName').value.trim();
   const shortname = document.getElementById('editHabitCatShortname').value.trim();
   const color = document.getElementById('editHabitCatColor').value;
-  if (!newName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
 
-  // Update the DB row directly
+  // Parent picker chooses the parent; a typed path overrides it.
+  let targetName = rawName;
+  let targetParentId = document.getElementById('editHabitCatParent')?.value || null;
+  if (!cat.is_protected && rawName.includes('>')) {
+    const segments = parseSectionPath(rawName);
+    if (!segments.length) { showToast(t('toast.name_required'), 'error'); return; }
+    targetName = segments[segments.length - 1];
+    try {
+      targetParentId = await ensureHabitSectionChain(segments.slice(0, -1), null, catId);
+    } catch (e) {
+      showToast(t('toast.name_required'), 'error');
+      return;
+    }
+  }
+  if (!targetName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
+  if (cat.is_protected) targetParentId = null;
+  if (!cat.is_protected && siblingNameTaken([..._habitCatMap.values()], targetParentId, targetName, catId)) {
+    showToast(t('toast.name_required'), 'error');
+    return;
+  }
+
   const oldShortname = cat.shortname;
   const oldName = cat.name;
-  const updates = { shortname: shortname || null, color };
-  if (!cat.is_protected) updates.name = newName;
+  const isSection = isSectionRow(cat);
+  const updates = { shortname: shortname || null, color, parent_id: targetParentId };
+  if (!cat.is_protected) updates.name = targetName;
+  if (targetParentId !== (cat.parent_id || null)) updates.sort_order = nextHabitSortOrder(targetParentId);
   await state.db.from('habit_categories').update(updates).eq('id', catId);
-  Object.assign(cat, updates);
-  _habitCatByName.clear();
-  for (const row of _habitCatMap.values()) _habitCatByName.set(row.name, row);
+  await loadHabitCategories();
 
-  // Calendar: only resync items if the label used in event summaries changed
-  if (updates.shortname !== oldShortname || updates.name !== oldName) {
+  // Calendar: bucket labels appear in event summaries; sections never
+  // do — a section rename/move must not resync the calendar.
+  if (!isSection && (updates.shortname !== oldShortname || updates.name !== oldName)) {
     window.markCategoryRenamed?.('habit_categories');
   }
 
@@ -1122,24 +1229,16 @@ function renderHabits() {
     return;
   }
 
-  // Build category ID list from DB table rows (sorted by sort_order)
-  const catRows = Array.from(_habitCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
-  const categoryIdList = catRows.map(c => c.id);
-
-  // Dynamically include the Shared deck if any received habits exist
+  // Root-level nodes (buckets + sections) in tree order; the Shared deck
+  // is a synthetic root bucket, always first, never inside a section.
+  const rootNodes = _habitTree.roots.filter(n => n.id !== _sharedHabitCatId);
+  const rootIds = rootNodes.map(n => n.id);
   const hasSharedItems = state.allHabits.some(c => catIdForHabit(c) === _sharedHabitCatId);
-  if (hasSharedItems && _sharedHabitCatId) categoryIdList.unshift(_sharedHabitCatId);
+  const toolbarIds = hasSharedItems && _sharedHabitCatId ? [_sharedHabitCatId, ...rootIds] : rootIds;
 
   let html = '';
-  for (const catId of categoryIdList) {
-    // Skip empty categories when searching
-    if (habitSearchQuery) {
-      const matchingItems = getFilteredHabitsForCategory(catId);
-      const catName = getHabitCatDisplayName(catId);
-      if (matchingItems.length === 0 && !catName.toLowerCase().includes(habitSearchQuery.toLowerCase())) continue;
-    }
-    html += renderHabitCategoryCard(catId);
-  }
+  if (hasSharedItems && _sharedHabitCatId) html += renderHabitCategoryCard(_sharedHabitCatId);
+  html += renderHabitLevel(rootNodes, false);
   const scrollY = window.scrollY;
   const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
@@ -1147,17 +1246,85 @@ function renderHabits() {
   restoreInnerScrollPositions(grid, innerScrolls);
   restoreTextInputs(grid, '.todo-cat-input', 'data-category', pendingInputs);
   initHabitHoverDelay(grid);
-  // Init cross-category drag (no within-category reorder)
-  for (const catId of categoryIdList) {
+  // Init cross-category drag (no within-category reorder) for every bucket
+  const bucketIds = [];
+  if (hasSharedItems && _sharedHabitCatId) bucketIds.push(_sharedHabitCatId);
+  for (const node of _habitTree.byId.values()) if (node.kind === 'bucket' && node.id !== _sharedHabitCatId) bucketIds.push(node.id);
+  for (const catId of bucketIds) {
     const card = grid.querySelector(`.project-card[data-category="${CSS.escape(catId)}"]`);
     if (card) {
       const listEl = card.querySelector('.habit-list');
       if (listEl) initHabitCrossDrag(catId, listEl);
     }
   }
-  renderHabitNavButtons(categoryIdList);
+  renderHabitNavButtons(toolbarIds);
   initHabitNavBtnReorder();
-  balanceGrid(grid);
+  for (const node of _habitTree.byId.values()) {
+    if (node.kind === 'section') initHabitSectionNavBtnReorder(node.id);
+  }
+  applySectionGrid(grid);
+}
+
+/** Is a tree node visible under the current search query? */
+function habitNodeSearchVisible(node, ancestorMatched) {
+  if (!habitSearchQuery) return true;
+  const q = habitSearchQuery.toLowerCase();
+  const name = (node.row.name || '').toLowerCase();
+  if (ancestorMatched || name.includes(q)) return true;
+  if (node.kind === 'bucket') return getFilteredHabitsForCategory(node.id).length > 0;
+  return node.children.some(c => habitNodeSearchVisible(c, false));
+}
+
+function renderHabitLevel(nodes, ancestorMatched) {
+  let html = '';
+  for (const node of nodes) {
+    if (!habitNodeSearchVisible(node, ancestorMatched)) continue;
+    const matched = ancestorMatched || (habitSearchQuery && (node.row.name || '').toLowerCase().includes(habitSearchQuery.toLowerCase()));
+    html += node.kind === 'section' ? renderHabitSection(node, matched) : renderHabitCategoryCard(node.id);
+  }
+  return html;
+}
+
+function renderHabitSection(node, ancestorMatched = false) {
+  const cat = node.row;
+  const bucketIds = descendantBucketIds(node);
+  const total = state.allHabits.filter(h => bucketIds.includes(catIdForHabit(h))).length;
+  const chips = node.children.map(child => {
+    const isSec = child.kind === 'section';
+    const count = isSec
+      ? state.allHabits.filter(h => descendantBucketIds(child).includes(catIdForHabit(h))).length
+      : state.allHabits.filter(h => catIdForHabit(h) === child.id).length;
+    const label = isSec ? (child.row.shortname || child.row.name || '') : (child.row.shortname || getHabitCatDisplayName(child.id));
+    const title = isSec ? (child.row.name || '') : getHabitCatDisplayName(child.id);
+    const color = child.row.color || GENERAL_CATEGORY_COLOR;
+    const action = isSec ? 'navigate-to-habit-section' : 'navigate-to-habit-category';
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="${action}" data-category="${esc(child.id)}" title="${esc(title)}">${esc(label)} (${count})</button>`;
+  }).join('');
+  const childrenHtml = renderHabitLevel(node.children, ancestorMatched)
+    || `<p class="empty-msg">${t('common.section_empty')}</p>`;
+  return `<div class="section-block" id="habit-section-${esc(cat.id)}" data-node-kind="section" data-node-id="${esc(cat.id)}" style="--cat-color:${cat.color || SECTION_DEFAULT_COLOR};--cat-on-color:${onColorFor(cat.color || SECTION_DEFAULT_COLOR)}">
+    <div class="section-header" data-action="toggle-section-chips">
+      <div class="section-header-left">
+        <h3 class="section-name">${lucideIcon('folder', 16)} ${esc(cat.name || '')}</h3>
+        <span class="section-stats">${total} habit${total !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="section-header-actions">
+        <button class="todo-cat-shortname-btn" data-action="open-add-habit-category-in-section" data-category="${esc(cat.id)}" title="${esc(t('habits.add_category'))}">${lucideIcon('folder-plus', 14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="copy-item-link" data-link-type="habitcat" data-id="${esc(cat.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="open-edit-habit-category-modal" data-category="${esc(cat.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 14)}</button>
+        <button class="todo-cat-delete-btn" data-action="delete-habit-section" data-category="${esc(cat.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
+      </div>
+    </div>
+    <div class="category-nav-buttons section-chips${node.children.length > 1 ? '' : ' section-chips-collapsed'}" id="habitSectionChips-${esc(cat.id)}">${chips}</div>
+    <div class="section-level">${childrenHtml}</div>
+  </div>`;
+}
+
+function navigateToHabitSection(sectionId) {
+  const el = document.getElementById('habit-section-' + sectionId);
+  if (!el) return;
+  const cat = _habitCatMap.get(sectionId);
+  scrollToAndHighlight(el, cat?.color || SECTION_DEFAULT_COLOR);
 }
 
 function initHabitHoverDelay(container) {
@@ -1204,11 +1371,15 @@ function renderHabitNavButtons(categoryIdList) {
   container.innerHTML = categoryIdList.map(catId => {
     const cat = _habitCatMap.get(catId);
     const isShared = cat?.name === SHARED_CATEGORY;
+    const isSection = isSectionRow(cat);
     const color = isShared ? '#a78bfa' : (cat?.color || GENERAL_CATEGORY_COLOR);
     const shortname = cat?.shortname || '';
     const displayName = isShared ? t('sharing.shared') : (shortname || cat?.name || t('common.category_default'));
-    const count = state.allHabits.filter(c => catIdForHabit(c) === catId).length;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-habit-category" data-category="${esc(catId)}" title="${esc(isShared ? t('sharing.shared') : (cat?.name || t('common.category_default')))}">${esc(displayName)} (${count})</button>`;
+    const count = isSection
+      ? state.allHabits.filter(c => descendantBucketIds(_habitTree.byId.get(catId) || { kind: 'section', children: [] }).includes(catIdForHabit(c))).length
+      : state.allHabits.filter(c => catIdForHabit(c) === catId).length;
+    const action = isSection ? 'navigate-to-habit-section' : 'navigate-to-habit-category';
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="${action}" data-category="${esc(catId)}" title="${esc(isShared ? t('sharing.shared') : (cat?.name || t('common.category_default')))}">${esc(displayName)} (${count})</button>`;
   }).join('');
 }
 
@@ -1219,28 +1390,68 @@ function navigateToHabitCategory(catId) {
   scrollToAndHighlight(card, color);
 }
 
+async function reorderHabitSiblings(orderedIds) {
+  const reorderable = orderedIds.filter(id => id !== _sharedHabitCatId);
+  const updates = [];
+  reorderable.forEach((id, i) => {
+    const cat = _habitCatMap.get(id);
+    if (cat && Number(cat.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+    if (cat) cat.sort_order = i;
+  });
+  await bulkSortOrder('habit_categories', updates);
+  await loadHabitCategories();
+  const grid = document.getElementById('habitCategoryGrid');
+  const snapshot = snapshotBuckets(grid);
+  renderHabits();
+  animateBucketsFromSnapshot(grid, snapshot, 600);
+  showToast(t('toast.reordered'), 'success');
+}
+
+/** Cross-section chip drag — see todoNavCrossDrop in todos.js. */
+function habitNavCrossDrop() {
+  return {
+    rootEl: document.getElementById('habitsView'),
+    rowOwner: (rowEl) => rowEl.id === 'habitNavButtons' ? null
+      : rowEl.id.startsWith('habitSectionChips-') ? rowEl.id.slice('habitSectionChips-'.length) : undefined,
+    canDrop: (dragId, parentId) => {
+      const node = _habitTree.byId.get(dragId);
+      if (!node || (node.parentId || null) === (parentId || null)) return false;
+      return !planNodeMove([..._habitCatMap.values()], dragId, parentId, null).error;
+    },
+    onMove: (dragId, parentId, beforeId) => moveHabitNodeToParent(dragId, parentId, beforeId),
+  };
+}
+
+async function moveHabitNodeToParent(dragId, parentId, beforeId) {
+  const plan = planNodeMove([..._habitCatMap.values()], dragId, parentId, beforeId);
+  if (plan.error || !plan.updates?.length) return;
+  // FLIP glide around the re-render — see moveTodoNodeToParent.
+  const grid = document.getElementById('habitCategoryGrid');
+  const snapshot = snapshotBuckets(grid);
+  for (const u of plan.updates) {
+    await state.db.from('habit_categories').update({ parent_id: u.parent_id, sort_order: u.sort_order }).eq('id', u.id);
+  }
+  await refreshHabits();
+  animateBucketsFromSnapshot(grid, snapshot, 600);
+}
+
 function initHabitNavBtnReorder() {
   const skipIds = new Set();
   if (_sharedHabitCatId) skipIds.add(_sharedHabitCatId);
   initNavBtnReorder('habitNavButtons', {
     idAttr: 'category',
     skipIds,
-    async onReorder(orderedIds) {
-      const reorderable = orderedIds.filter(id => id !== _sharedHabitCatId);
-      const updates = [];
-      reorderable.forEach((id, i) => {
-        const cat = _habitCatMap.get(id);
-        if (cat && Number(cat.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
-        if (cat) cat.sort_order = i;
-      });
-      await bulkSortOrder('habit_categories', updates);
-      await loadHabitCategories();
-      const grid = document.getElementById('habitCategoryGrid');
-      const snapshot = snapshotBuckets(grid);
-      renderHabits();
-      animateBucketsFromSnapshot(grid, snapshot, 600);
-      showToast(t('toast.reordered'), 'success');
-    },
+    onReorder: reorderHabitSiblings,
+    crossDrop: habitNavCrossDrop(),
+  });
+}
+
+function initHabitSectionNavBtnReorder(sectionId) {
+  initNavBtnReorder('habitSectionChips-' + sectionId, {
+    idAttr: 'category',
+    skipIds: new Set(),
+    onReorder: reorderHabitSiblings,
+    crossDrop: habitNavCrossDrop(),
   });
 }
 
@@ -1281,7 +1492,7 @@ function renderHabitCategoryCard(catId) {
       ${state.sharing ? `<button class="sharing-share-btn" data-action="share-habit-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
     </div>`;
 
-  return `<div class="project-card" data-category="${esc(catId)}" style="--cat-color:${catColor}">
+  return `<div class="project-card" data-category="${esc(catId)}" data-node-kind="bucket" data-node-id="${esc(catId)}" style="--cat-color:${catColor};--cat-on-color:${onColorFor(catColor)}">
     <div class="todo-cat-header">
       <div class="todo-cat-header-left">
         <div class="todo-cat-info">
@@ -1397,7 +1608,25 @@ function addHabitCategoryModalHTML() {
 }
 
 function editHabitCategoryModalHTML() {
-  return `<div class="modal"><h2>` + lucideIcon("pencil",20) + ` ${t('habits.edit_category')}</h2><input type="hidden" id="editHabitCatOldName"><label>${t('habits.category_name')}</label><input type="text" id="editHabitCatName" maxlength="40" data-action="save-edit-habit-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="editHabitCatShortname" maxlength="20" placeholder="${t('common.shortname_placeholder')}" data-action="save-edit-habit-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="editHabitCatColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit-category">${t('common.save')}</button></div></div>`;
+  return `<div class="modal"><h2>` + lucideIcon("pencil",20) + ` ${t('habits.edit_category')}</h2><input type="hidden" id="editHabitCatOldName"><label>${t('habits.category_name')}</label><input type="text" id="editHabitCatName" maxlength="80" data-action="save-edit-habit-category-on-enter"><label>${t('common.section_parent')}</label><select id="editHabitCatParent"></select><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="editHabitCatShortname" maxlength="20" placeholder="${t('common.shortname_placeholder')}" data-action="save-edit-habit-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="editHabitCatColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-edit-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-edit-habit-category">${t('common.save')}</button></div></div>`;
+}
+
+/** Fill the edit modal's parent picker: Root + sections, excluding the
+ *  row being edited and its descendants. */
+function populateHabitParentSelect(currentRow) {
+  const sel = document.getElementById('editHabitCatParent');
+  if (!sel) return;
+  const excluded = new Set();
+  if (currentRow) {
+    excluded.add(currentRow.id);
+    const node = _habitTree.byId.get(currentRow.id);
+    if (node) for (const d of descendantsOf(node)) excluded.add(d.id);
+  }
+  const sections = [..._habitTree.byId.values()]
+    .filter(n => n.kind === 'section' && !excluded.has(n.id) && !n.row.is_protected);
+  sel.innerHTML = `<option value="">${esc(t('common.section_root'))}</option>` + sections
+    .map(n => `<option value="${esc(n.id)}">${esc(pathLabelOf(n, _habitTree.byId))}</option>`).join('');
+  sel.value = currentRow?.parent_id || '';
 }
 
 function initHabitModals() {
@@ -1440,6 +1669,14 @@ function initHabitModals() {
   m6.dataset.overlayClose = 'true';
   m6.innerHTML = editHabitCategoryModalHTML();
   app.appendChild(m6);
+
+  // Section Delete Choice Modal
+  const m7 = document.createElement('div');
+  m7.className = 'modal-overlay'; m7.id = 'deleteHabitSectionModal';
+  m7.dataset.action = 'close-delete-habit-section-modal';
+  m7.dataset.overlayClose = 'true';
+  m7.innerHTML = deleteHabitSectionModalHTML();
+  app.appendChild(m7);
 }
 
 function openAddHabitModal(opts = {}) {
@@ -1499,12 +1736,16 @@ function shareHabitFromAdd(btn) {
 
 function populateHabitCategorySelect(selectId, currentCatId) {
   const sel = document.getElementById(selectId);
-  const catRows = Array.from(_habitCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
+  // Buckets only (items can never sit in a section), in tree order,
+  // labelled by full path so same-named buckets stay distinguishable.
+  const bucketNodes = [..._habitTree.byId.values()]
+    .filter(n => n.kind === 'bucket' && n.id !== _sharedHabitCatId)
+    .sort((a, b) => compareOrderKeys(orderKeyOf(a, _habitTree.byId), orderKeyOf(b, _habitTree.byId)));
   // Include Shared only if the habit being edited is already in __shared__
   const includeShared = currentCatId && currentCatId === _sharedHabitCatId;
-  sel.innerHTML = catRows.map(c => {
-    const label = c.is_protected ? t('common.category_default') : c.name;
-    return `<option value="${esc(c.id)}">${esc(label)}</option>`;
+  sel.innerHTML = bucketNodes.map(n => {
+    const label = n.row.is_protected ? t('common.category_default') : getHabitCatPath(n.id);
+    return `<option value="${esc(n.id)}">${esc(label)}</option>`;
   }).join('') + (includeShared ? `<option value="${esc(_sharedHabitCatId)}">${esc(t('sharing.shared'))}</option>` : '');
 }
 
@@ -2426,9 +2667,10 @@ function closeHabitHistoryModal() {
 // ===================================================================
 // HABIT CATEGORY MANAGEMENT
 // ===================================================================
-function openAddHabitCategoryModal() {
+function openAddHabitCategoryModal(parentId = null) {
   const modal = document.getElementById('addHabitCategoryModal');
   modal.innerHTML = addHabitCategoryModalHTML();
+  modal.dataset.parentId = parentId || '';
   document.getElementById('newHabitCategoryName').value = '';
   document.getElementById('newHabitCategoryShortname').value = '';
   document.getElementById('newHabitCategoryColor').value = nextPaletteColor(_habitCatMap);
@@ -2436,24 +2678,35 @@ function openAddHabitCategoryModal() {
   setTimeout(() => document.getElementById('newHabitCategoryName').focus(), 100);
 }
 
+function openAddHabitCategoryInSection(sectionId) {
+  openAddHabitCategoryModal(sectionId);
+}
+
 function closeAddHabitCategoryModal() {
   document.getElementById('addHabitCategoryModal').classList.remove('visible');
 }
 
 async function saveNewHabitCategory() {
-  const name = document.getElementById('newHabitCategoryName').value.trim();
-  if (!name) { showToast(t('habits.enter_habit_name'), 'error'); return; }
-  // Check for duplicates in DB table
-  for (const cat of _habitCatMap.values()) {
-    if (cat.name.toLowerCase() === name.toLowerCase()) {
-      showToast(t('habits.category_exists'), 'error'); return;
-    }
-  }
+  const segments = parseSectionPath(document.getElementById('newHabitCategoryName').value.trim());
+  if (!segments.length) { showToast(t('habits.enter_habit_name'), 'error'); return; }
+  const modal = document.getElementById('addHabitCategoryModal');
+  const startParentId = modal?.dataset.parentId || null;
   const shortname = document.getElementById('newHabitCategoryShortname').value.trim() || null;
   const color = document.getElementById('newHabitCategoryColor').value;
-  const sortOrder = Math.max(0, ...Array.from(_habitCatMap.values()).map(c => c.sort_order || 0)) + 1;
-  const { error } = await state.db.from('habit_categories').insert({ name, shortname, color, sort_order: sortOrder });
-  if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
+  let name = segments[segments.length - 1];
+  try {
+    const parentId = await ensureHabitSectionChain(segments.slice(0, -1), startParentId);
+    if (siblingNameTaken([..._habitCatMap.values()], parentId, name, null)) {
+      showToast(t('habits.category_exists'), 'error'); return;
+    }
+    const { error } = await state.db.from('habit_categories').insert({
+      name, shortname, color, sort_order: nextHabitSortOrder(parentId),
+      kind: 'bucket', parent_id: parentId,
+    });
+    if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
+  } catch (e) {
+    showToast(t('toast.failed_to_add') + ': ' + e.message, 'error'); return;
+  }
   await loadHabitCategories();
   closeAddHabitCategoryModal();
   showToast(t('habits.category_created', name), 'success');
@@ -2505,6 +2758,115 @@ async function deleteHabitCategory(catId) {
   });
 }
 
+
+// ── Section delete (Habits) ──────────────────────────────────────
+// Empty sections delete directly; non-empty sections ask: delete the
+// subtree, or move its children up one level.
+let _pendingHabitSectionDelete = null;
+
+function deleteHabitSection(sectionId) {
+  const node = _habitTree.byId.get(sectionId);
+  const cat = _habitCatMap.get(sectionId);
+  if (!node || !cat || !isSectionRow(cat) || cat.is_protected) return;
+  if (!node.children.length) {
+    showConfirmAction(t('common.delete'), t('common.section_delete_empty', cat.name), async () => {
+      await state.db.from('habit_categories').delete().eq('id', sectionId);
+      showToast(t('toast.deleted'), 'info');
+      await refreshHabits();
+    });
+    return;
+  }
+  _pendingHabitSectionDelete = sectionId;
+  const modal = document.getElementById('deleteHabitSectionModal');
+  if (!modal) return;
+  modal.innerHTML = deleteHabitSectionModalHTML();
+  document.getElementById('deleteHabitSectionName').textContent = cat.name;
+  modal.classList.add('visible');
+}
+
+function deleteHabitSectionModalHTML() {
+  return `<div class="modal">
+    <h2>${lucideIcon('folder', 20)} ${t('common.section_delete_title')}</h2>
+    <p>${t('common.section_delete_msg')} <strong id="deleteHabitSectionName"></strong></p>
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-delete-habit-section-modal">${t('common.cancel')}</button>
+      <button class="btn" data-action="delete-habit-section-move-up">${t('common.section_delete_move_up')}</button>
+      <button class="modal-save" data-action="delete-habit-section-subtree">${t('common.section_delete_subtree')}</button>
+    </div>
+  </div>`;
+}
+
+function closeDeleteHabitSectionModal() {
+  _pendingHabitSectionDelete = null;
+  document.getElementById('deleteHabitSectionModal')?.classList.remove('visible');
+}
+
+async function deleteHabitSectionMoveUp() {
+  const sectionId = _pendingHabitSectionDelete;
+  if (!sectionId) return;
+  _pendingHabitSectionDelete = null;
+  document.getElementById('deleteHabitSectionModal')?.classList.remove('visible');
+  const node = _habitTree.byId.get(sectionId);
+  if (!node) return;
+  const parentId = node.parentId || null;
+  const parentChildren = [..._habitTree.byId.values()]
+    .filter(n => (n.parentId || null) === parentId)
+    .sort((a, b) => (Number(a.row.sort_order) || 0) - (Number(b.row.sort_order) || 0));
+  const moving = [...node.children];
+  const movingIds = new Set(moving.map(n => n.id));
+  const rest = parentChildren.filter(n => n.id !== sectionId);
+  const at = Math.max(0, parentChildren.findIndex(n => n.id === sectionId));
+  const finalOrder = [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+  for (let i = 0; i < finalOrder.length; i++) {
+    const n = finalOrder[i];
+    const updates = { sort_order: i };
+    if (movingIds.has(n.id)) updates.parent_id = parentId;
+    if (Number(n.row.sort_order) !== i || updates.parent_id !== undefined) {
+      await state.db.from('habit_categories').update(updates).eq('id', n.id);
+    }
+  }
+  await state.db.from('habit_categories').delete().eq('id', sectionId);
+  showToast(t('toast.deleted'), 'info');
+  await refreshHabits();
+}
+
+async function deleteHabitSectionSubtree() {
+  const sectionId = _pendingHabitSectionDelete;
+  if (!sectionId) return;
+  _pendingHabitSectionDelete = null;
+  document.getElementById('deleteHabitSectionModal')?.classList.remove('visible');
+  const node = _habitTree.byId.get(sectionId);
+  if (!node) return;
+  const subtree = [node, ...descendantsOf(node)];
+  const bucketIds = subtree.filter(n => n.kind === 'bucket').map(n => n.id);
+  const sectionIds = subtree.filter(n => n.kind === 'section').map(n => n.id).reverse();
+  const catRows = subtree.map(n => ({ ...n.row }));
+  const itemRows = [];
+  for (const bid of bucketIds) {
+    const { data } = await state.db.from('habits').select('*').eq('category_id', bid);
+    for (const r of (data || [])) itemRows.push(r);
+  }
+  // Explicit per-item deletion so calendar dirty tracking fires.
+  for (const item of itemRows) await state.db.from('habits').delete().eq('id', item.id);
+  for (const bid of bucketIds) await state.db.from('habit_categories').delete().eq('id', bid);
+  for (const sid of sectionIds) await state.db.from('habit_categories').delete().eq('id', sid);
+  showToast(t('toast.deleted'), 'info');
+  await refreshHabits();
+  if (state.sharing) {
+    const sharedItems = itemRows.filter(h => h.shared_id && h.shared_group_id);
+    if (sharedItems.length) {
+      (async () => {
+        for (const item of sharedItems) await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
+      })().catch(async (e) => {
+        console.warn('Failed to delete shared habits from Drive:', e);
+        for (const r of catRows) await state.db.from('habit_categories').insert(r);
+        for (const r of itemRows) await state.db.from('habits').insert(r);
+        await refreshHabits();
+        showToast(t('toast.delete_failed'), 'error');
+      });
+    }
+  }
+}
 
 // ── Shared Habits ───────────────────────────────────────────────
 
@@ -2686,7 +3048,7 @@ document.addEventListener('input', e => {
   }
 });
 
-export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, habitFinishedFor, initHabitHoverDelay, isStructuredRule, normalizeFrequencyRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName, computeNextDue, isMyCreatedSharedHabit };
+export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, habitFinishedFor, initHabitHoverDelay, isStructuredRule, normalizeFrequencyRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName, getHabitCatPath, getHabitCatOrderKey, computeNextDue, isMyCreatedSharedHabit };
 
 window.setHabitFilter = setHabitFilter;
 window.openAddHabitModal = openAddHabitModal;
@@ -3153,12 +3515,18 @@ window.deleteHabitCompletion = deleteHabitCompletion;
 window.cancelEditCompletion = cancelEditCompletion;
 window.editHabitLastDone = editHabitLastDone;
 window.openAddHabitCategoryModal = openAddHabitCategoryModal;
+window.openAddHabitCategoryInSection = openAddHabitCategoryInSection;
 window.closeAddHabitCategoryModal = closeAddHabitCategoryModal;
 window.saveNewHabitCategory = saveNewHabitCategory;
 window.deleteHabitCategory = deleteHabitCategory;
+window.deleteHabitSection = deleteHabitSection;
+window.closeDeleteHabitSectionModal = closeDeleteHabitSectionModal;
+window.deleteHabitSectionMoveUp = deleteHabitSectionMoveUp;
+window.deleteHabitSectionSubtree = deleteHabitSectionSubtree;
 window.addHabitFromInput = addHabitFromInput;
 window.renderHabits = renderHabits;
 window.navigateToHabitCategory = navigateToHabitCategory;
+window.navigateToHabitSection = navigateToHabitSection;
 window.editHabitInline = editHabitInline;
 
 window.openEditHabitCategoryModal = openEditHabitCategoryModal;
@@ -3217,9 +3585,10 @@ window.openHabitImportModal = async function() {
   const { openBatchImportModal, ensureImportCategories, chunkedBatchInsert } = await import('./batch-import.js');
   const { parseHabitImportJSON, validateHabitImportItem } = await import('./habit-import.js');
 
-  const cats = Array.from(_habitCatMap.values())
-    .filter(c => c.name !== SHARED_CATEGORY)
-    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const cats = [..._habitTree.byId.values()]
+    .filter(n => n.kind === 'bucket' && n.id !== _sharedHabitCatId && n.row.name !== '')
+    .sort((a, b) => compareOrderKeys(orderKeyOf(a, _habitTree.byId), orderKeyOf(b, _habitTree.byId)))
+    .map(n => ({ ...n.row, _path: pathLabelOf(n, _habitTree.byId) }));
 
   const groups = (state.sharing && state.sharing.isReady()) ? state.sharing.getAllGroups() : [];
 
@@ -3255,7 +3624,7 @@ window.openHabitImportModal = async function() {
     newCategory: t('habits.import_new_category'),
 
     categories: [{ name: '', display: t('common.category_default') },
-      ...cats.map(c => ({ name: c.name, display: c.name }))],
+      ...cats.map(c => ({ name: c._path, display: c._path }))],
     promptDefaultCategory: 'General',
     groups: groups.map(g => ({ id: g.id, name: g.name })),
     sharingReady: !!(state.sharing && state.sharing.isReady()),
@@ -3268,7 +3637,7 @@ window.openHabitImportModal = async function() {
       { key: 'name', label: t('habits.import_field_name'), type: 'text' },
       { key: 'frequency_rule', label: t('habits.import_field_frequency'), type: 'datalist', options: HABIT_IMPORT_FREQ_EXAMPLES },
       { key: 'category', label: t('habits.import_field_category'), type: 'datalist',
-        options: ['General', ...cats.map(c => c.name)] },
+        options: ['General', ...cats.map(c => c._path)] },
       { key: 'group_id', label: t('habits.import_field_group'), type: 'grouplist' },
     ],
     previewMeta: (it) => {
@@ -3289,6 +3658,21 @@ window.openHabitImportModal = async function() {
 
     ensureCategories: (names) => ensureImportCategories(names, {
       table: 'habit_categories', getMap: () => _habitCatMap, reload: loadHabitCategories,
+      getPathMap: () => _habitCatByPath,
+      ensurePath: async (pathName) => {
+        const segments = parseSectionPath(pathName);
+        if (segments.length < 2) return;
+        const parentId = await ensureHabitSectionChain(segments.slice(0, -1));
+        const name = segments[segments.length - 1];
+        if (!habitChildRow(parentId, name)) {
+          const { error } = await state.db.from('habit_categories').insert({
+            name, shortname: null, color: nextPaletteColor(_habitCatMap),
+            sort_order: nextHabitSortOrder(parentId), kind: 'bucket', parent_id: parentId,
+          });
+          if (error) throw new Error(error.message);
+          await loadHabitCategories();
+        }
+      },
     }),
 
     createItems: async (validItems, catMap) => {

@@ -30,7 +30,7 @@ function buildPrompt(lang) {
     { "name": "Person Name", "birthday": "YYYY-MM-DD", "note": "optional" }
   ],
   "lists": [
-    { "name": "List Name", "color": "#hex" }
+    { "name": "List Name", "color": "#hex", "kind": "bucket", "parent": null }
   ],
   "list_items": [
     { "list_name": "List Name", "text": "Item text" }
@@ -47,6 +47,8 @@ function buildPrompt(lang) {
 
 Generate 3–5 items per category. Use today (${today}) as reference for dates. IDs and timestamps are auto-generated — don't include them. For tasks, set "project" to the project's name. For list_items, set "list_name" to the list's name.
 
+**Sections.** Buckets can be grouped into nested sections. For TODOs and Habits, write a category as a path to nest it, e.g. "Reading > Fiction": include one section holding two buckets, plus one bucket nested two levels deep, e.g. "Reading > Non-Fiction > History". For Lists, add one list with "kind": "section" and give two other lists "parent" set to that section's name; list items always belong to a bucket list, never to a section.
+
 **Habits & chores.** Habits aren't just personal development — include household chores, especially infrequent ones where a reminder is essential (e.g. descaling the washing machine every 3 months, changing pillowcases every 2 weeks, cleaning windows every 4 months, vacuuming behind furniture monthly).
 ${freqRules}
 
@@ -62,6 +64,8 @@ ${schema}`,
 
 Génère 3 à 5 éléments par catégorie. Utilise la date du jour (${today}) comme référence. Les IDs et timestamps sont auto-générés — ne les inclus pas. Pour les tâches, mets le nom du projet dans "project". Pour les list_items, mets le nom de la liste dans "list_name".
 
+**Sections.** Les buckets peuvent être regroupés en sections imbriquées. Pour les TODOs et les Habitudes, écris une catégorie sous forme de chemin pour l'imbriquer, ex. « Lecture > Fiction » : inclus une section contenant deux buckets, plus un bucket imbriqué à deux niveaux, ex. « Lecture > Non-fiction > Histoire ». Pour les Listes, ajoute une liste avec "kind": "section" et mets "parent" à ce nom de section pour deux autres listes ; les éléments vont toujours dans une liste bucket, jamais dans une section.
+
 **Habitudes & tâches ménagères.** Les habitudes ne sont pas que du développement personnel — inclus des corvées ménagères, surtout les peu fréquentes où un rappel est indispensable (ex. détartrer le lave-linge tous les 3 mois, changer les taies d'oreiller toutes les 2 semaines, nettoyer les vitres tous les 4 mois, aspirer derrière les meubles tous les mois).
 ${freqRules}
 
@@ -76,6 +80,8 @@ ${schema}`,
 **Personaliza para mí.** Usa lo que sepas sobre mí — edad, género, ciudad, profesión, formación, hobbies, intereses — para dar forma al contenido. Si no lo sabes, haz una suposición coherente (elige una ciudad, una profesión, algunos hobbies) y genera datos que encajen con ese perfil.
 
 Genera 3–5 elementos por categoría. Usa la fecha de hoy (${today}) como referencia. Los IDs y timestamps se generan automáticamente — no los incluyas. Para las tareas, pon el nombre del proyecto en "project". Para list_items, pon el nombre de la lista en "list_name".
+
+**Secciones.** Los buckets pueden agruparse en secciones anidadas. Para TODOs y Hábitos, escribe una categoría como ruta para anidarla, ej. «Lectura > Ficción»: incluye una sección con dos buckets, más un bucket anidado a dos niveles, ej. «Lectura > No ficción > Historia». Para Listas, añade una lista con "kind": "section" y pon "parent" con el nombre de esa sección en otras dos listas; los elementos van siempre a una lista bucket, nunca a una sección.
 
 **Hábitos y tareas del hogar.** Los hábitos no son solo desarrollo personal — incluye tareas domésticas, especialmente las poco frecuentes donde un recordatorio es esencial (ej. descalcificar la lavadora cada 3 meses, cambiar fundas de almohada cada 2 semanas, limpiar ventanas cada 4 meses, aspirar detrás de los muebles mensualmente).
 ${freqRules}
@@ -203,6 +209,13 @@ function normalizeCustomData(data) {
       listNameToId[r.name] = r.id;
       return r;
     });
+    // Nested sections: a row may name its parent list. Sections group
+    // buckets (two levels via chained parents); items never target them.
+    for (const r of data.lists) {
+      if (r.kind !== 'section') r.kind = 'bucket';
+      r.parent_id = (r.parent && r.parent !== r.name && listNameToId[r.parent]) ? listNameToId[r.parent] : null;
+      delete r.parent;
+    }
   }
 
   if (data.list_items) {

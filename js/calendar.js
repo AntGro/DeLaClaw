@@ -10,8 +10,9 @@ import { esc, renderMd } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { sharedBadge } from './sharing-ui.js';
 import { t, getLang } from './i18n.js';
-import { getTodos, catIdForTodo, getCategoryColor, getCatDisplayName } from './todos.js';
-import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatDisplayName, isAutoHabit } from './habits.js';
+import { getTodos, catIdForTodo, getCategoryColor, getTodoCatPath, getTodoCatOrderKey } from './todos.js';
+import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatPath, getHabitCatOrderKey, isAutoHabit } from './habits.js';
+import { compareOrderKeys } from './sections-pure.js';
 import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates, isHabitSnoozed } from './calendar-pure.js';
 
 let calYear;
@@ -78,7 +79,7 @@ function collectRangeEvents(start, end) {
       const catId = catIdForTodo(td);
       push(d, {
         type: 'todo', id: td.id, title: td.text || '', sub: '',
-        catId, catColor: getCategoryColor(catId), catName: getCatDisplayName(catId),
+        catId, catColor: getCategoryColor(catId), catName: getTodoCatPath(catId), catOrder: getTodoCatOrderKey(catId),
         shared_id: td.shared_id || null, shared_group_id: td.shared_group_id || null,
       });
     }
@@ -94,7 +95,7 @@ function collectRangeEvents(start, end) {
     const hCatId = catIdForHabit(h);
     const hBase = {
       type: 'habit', id: h.id, title: h.name || '', sub: '',
-      catId: hCatId, catColor: getHabitCategoryColor(hCatId), catName: getHabitCatDisplayName(hCatId),
+      catId: hCatId, catColor: getHabitCategoryColor(hCatId), catName: getHabitCatPath(hCatId), catOrder: getHabitCatOrderKey(hCatId),
       next_due: (h.next_due || '').slice(0, 10) || null,
       shared_id: h.shared_id || null, shared_group_id: h.shared_group_id || null,
       is_auto: isAutoHabit(h),
@@ -583,14 +584,16 @@ function dayGroupsHTML(dateStr) {
     if (g.type === 'birthday') {
       items = evs.map(e => dayPanelRow(e, dateStr)).join('');
     } else {
-      // Subsections per category, like the welcome buckets
+      // Subsections per category, like the welcome buckets — ordered
+      // by tree order, labelled by full path, chips keep bucket colour
       const byCat = new Map();
       for (const e of evs) {
         const key = e.catId || '__none';
-        if (!byCat.has(key)) byCat.set(key, { name: e.catName, color: e.catColor, items: [] });
+        if (!byCat.has(key)) byCat.set(key, { name: e.catName, color: e.catColor, order: e.catOrder || [0], items: [] });
         byCat.get(key).items.push(e);
       }
-      for (const { name, color, items: catItems } of byCat.values()) {
+      const orderedGroups = [...byCat.values()].sort((a, b) => compareOrderKeys(a.order, b.order));
+      for (const { name, color, items: catItems } of orderedGroups) {
         if (byCat.size > 1 || name) {
           items += `<div class="welcome-todo-cat-label" style="--cat-color:${color}"><span class="welcome-todo-cat-dot"></span>${esc(name || '')}</div>`;
         }

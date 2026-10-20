@@ -6204,6 +6204,471 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   }
 
   // ===================================================================
+  // NESTED SECTIONS (2.23.0)
+  // ===================================================================
+  {
+    test('sections-pure: tree, paths, order keys, sibling uniqueness', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const rows = [
+        { id: 'g', name: '', kind: 'bucket', parent_id: null, sort_order: 0, is_protected: 1 },
+        { id: 's1', name: 'Reading', kind: 'section', parent_id: null, sort_order: 1 },
+        { id: 'b1', name: 'Fiction', kind: 'bucket', parent_id: 's1', sort_order: 0 },
+        { id: 'b2', name: 'Essays', kind: 'bucket', parent_id: 's1', sort_order: 1 },
+        { id: 'b3', name: 'Cooking', kind: 'bucket', parent_id: null, sort_order: 2 },
+        { id: 'orphan', name: 'Orphan', kind: 'bucket', parent_id: 'missing', sort_order: 3 },
+        { id: 'underbucket', name: 'UB', kind: 'bucket', parent_id: 'b3', sort_order: 4 },
+      ];
+      const { roots, byId } = m.buildSectionTree(rows);
+      assert(roots.map(n => n.id).join(',') === 'g,s1,b3,orphan,underbucket',
+        'orphans and children of buckets degrade to the top level, got ' + roots.map(n => n.id));
+      assert(byId.get('s1').children.map(n => n.id).join(',') === 'b1,b2', 'section children sorted by sort_order');
+      assert(m.pathLabelOf(byId.get('b1'), byId) === 'Reading > Fiction', 'path label joins segments');
+      assert(JSON.stringify(m.orderKeyOf(byId.get('b1'), byId)) === '[1,0]', 'order key follows the path');
+      assert(m.compareOrderKeys([1, 0], [2]) < 0 && m.compareOrderKeys([1], [1, 0]) < 0, 'order keys compare lexicographically, prefix first');
+      assert(m.descendantBucketIds(byId.get('s1')).join(',') === 'b1,b2', 'descendant buckets of a section');
+      assert(m.resolveSectionPath(roots, ['Reading', 'Fiction'])?.id === 'b1', 'path resolution descends sections');
+      assert(m.resolveSectionPath(roots, ['Cooking', 'Fiction']) === null, 'cannot descend into a bucket');
+      assert(m.siblingNameTaken(rows, 's1', 'fiction', null) === true, 'sibling names are unique per parent (case-insensitive)');
+      assert(m.siblingNameTaken(rows, null, 'fiction', null) === false, 'the same name is free under another parent');
+      assert(m.siblingNameTaken(rows, 's1', 'reading', null) === false, 'a name used at another level does not collide');
+      assert(JSON.stringify(m.parseSectionPath(' A >  B > ')) === '["A","B"]', 'path parsing trims and drops empties');
+      // Legacy rows (no kind/parent_id) normalise to top-level buckets
+      const legacy = m.buildSectionTree([{ id: 'x', name: 'Flat', sort_order: 0 }]);
+      assert(legacy.roots.length === 1 && legacy.roots[0].kind === 'bucket' && legacy.roots[0].parentId === null,
+        'pre-feature rows are flat buckets');
+      // A parent cycle must not loop: both rows surface at the top level
+      const cyc = m.buildSectionTree([
+        { id: 'a', name: 'A', kind: 'section', parent_id: 'b', sort_order: 0 },
+        { id: 'b', name: 'B', kind: 'section', parent_id: 'a', sort_order: 1 },
+      ]);
+      assert(cyc.roots.length === 2, 'cycle degrades to top level');
+    });
+
+    test('sections-pure: layout rectangles, footprint choice, gap rule', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const bucket = (id) => ({ id, kind: 'bucket', children: [] });
+      const section = (id, n) => ({ id, kind: 'section', children: Array.from({ length: n }, (_, i) => bucket(id + i)) });
+      // 5 buckets, cap 3: smallest C with minimal rows is 3 (2 rows, 1 empty)
+      assert(m.footprintCols(section('S', 5), 3) === 3, 'footprint of 5 buckets under cap 3 is 3');
+      const lay = m.layoutLevel([section('S', 5)], 3);
+      assert(lay.placements[0].cols === 3 && lay.placements[0].rows === 2, 'section occupies a 3x2 rectangle');
+      assert(lay.maxBlocks === 3 && lay.rowCount === 2, 'level metrics follow the rectangle');
+      // A single-bucket section is exactly one block wide
+      assert(m.footprintCols(section('One', 1), 4) === 1, 'single-bucket section spans 1 block');
+      // 4 buckets, cap 3: C=2 gives 2 full rows — beats C=3 (2 rows, 2 empty)
+      assert(m.footprintCols(section('F', 4), 3) === 2, 'ties on rows break by fewest empty cells');
+      // Gap rule: two 2-wide sections under cap 3 — the second starts a new row
+      const gap = m.layoutLevel([section('A', 2), section('B', 2)], 3);
+      assert(gap.maxBlocks === 2 && gap.rowCount === 2, 'a section that does not fit starts a new row, leaving a gap');
+      // Strict order + buckets mix
+      const mixed = m.layoutLevel([bucket('x'), section('M', 2), bucket('y')], 3);
+      assert(mixed.placements.map(p => p.id).join(',') === 'x,M,y', 'placement preserves chip order');
+      // Deep nesting terminates and stays within the cap
+      const deep = { id: 'd0', kind: 'section', children: [{ id: 'd1', kind: 'section', children: [bucket('leaf')] }] };
+      const dl = m.layoutLevel([deep], 3);
+      assert(dl.placements[0].cols >= 1 && dl.placements[0].cols <= 3, 'nested sections lay out within the cap');
+    });
+
+    test('sections: schema + migrations carry kind/parent_id on all three tables', () => {
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      for (const table of ['todo_categories', 'habit_categories', 'lists']) {
+        const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS ${table}`);
+        assert(start >= 0, `schema.sql missing ${table}`);
+        const ddl = schema.slice(start, schema.indexOf(');', start));
+        assert(ddl.includes("kind TEXT DEFAULT 'bucket'"), `${table} must gain kind with bucket default`);
+        assert(ddl.includes('parent_id TEXT'), `${table} must gain parent_id`);
+        assert(!ddl.includes('parent_id TEXT REFERENCES'), `${table}.parent_id must stay a plain column (no FK)`);
+      }
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(drive.includes("'2.23.0'"), 'drive migrations must include 2.23.0');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'2.23.0'"), 'local migrations must include 2.23.0');
+      for (const table of ['todo_categories', 'habit_categories', 'lists']) {
+        assert(local.includes(`ALTER TABLE ${table} ADD COLUMN kind`), `local migration must add kind to ${table}`);
+        assert(local.includes(`ALTER TABLE ${table} ADD COLUMN parent_id`), `local migration must add parent_id to ${table}`);
+      }
+      const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
+      assert(sw.includes("'js/sections-pure.js'"), 'sw.js precache must include sections-pure.js');
+    });
+
+    test('sections: views render sections, bucket-only pickers, no calendar resync on section save', () => {
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      for (const [name, src] of [['todos.js', todosSrc], ['habits.js', habitsSrc], ['lists.js', listsSrc]]) {
+        assert(src.includes("data-node-kind=\"section\""), `${name} must render section blocks`);
+        assert(src.includes('applySectionGrid'), `${name} must use the per-level section grid layout`);
+        assert(src.includes('deleteSectionMoveUp') || src.includes('deleteHabitSectionMoveUp') || src.includes('deleteListSectionMoveUp'),
+          `${name} must offer move-up on section delete`);
+        assert(src.includes('deleteSectionSubtree') || src.includes('deleteHabitSectionSubtree') || src.includes('deleteListSectionSubtree'),
+          `${name} must offer subtree delete on section delete`);
+      }
+      // Section saves never mark a category renamed (Google Calendar stays
+      // bucket-only); bucket saves still do.
+      assert(todosSrc.includes('if (!isSection && (updates.shortname !== oldShortname'), 'todos: section rename must not resync calendar');
+      assert(habitsSrc.includes('if (!isSection && (updates.shortname !== oldShortname'), 'habits: section rename must not resync calendar');
+      // Welcome quick-add excludes sections
+      const welcomeSrc = fs.readFileSync(path.join(JS_DIR, 'welcome.js'), 'utf-8');
+      assert((welcomeSrc.match(/kind !== 'section'/g) || []).length >= 2, 'welcome quick-add must exclude sections for TODOs and Habits');
+      // Backup exports whole rows, so kind/parent_id travel with no change
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes("select('*')") || mainSrc.includes('select("*")'), 'backup must stay whole-row');
+    });
+
+    test('sections: demo data showcases nesting in all three languages', () => {
+      const demo = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
+      // TODO categories are derived from item category strings in demo
+      // mode, so the seed uses full paths (one section per language).
+      for (const p of ['Reading > Fiction', 'Lecture > Fiction', 'Lectura > Ficción']) {
+        assert(demo.includes(`category: '${p}'`), `demo todos must include the path category ${p}`);
+      }
+      // Two-level paths: a subsection with buckets, next to direct buckets
+      for (const p of ['Reading > Non-Fiction > History', 'Lecture > Non-fiction > Histoire', 'Lectura > No ficción > Historia']) {
+        assert(demo.includes(`category: '${p}'`), `demo todos must include the two-level path ${p}`);
+      }
+      // Lists carry explicit section/bucket rows: an outer section and a
+      // subsection per language, the subsection holding two buckets.
+      assert((demo.match(/kind: 'section'/g) || []).length === 6, 'demo lists must seed two sections per language (outer + subsection)');
+      assert((demo.match(/kind: 'bucket', parent_id: 'demo-list-006'/g) || []).length === 6,
+        'each demo outer section must hold two direct buckets');
+      assert((demo.match(/kind: 'bucket', parent_id: 'demo-list-009'/g) || []).length === 6,
+        'each demo subsection must hold two buckets');
+      // The personalised-demo generation prompt teaches sections too.
+      const chooser = fs.readFileSync(path.join(JS_DIR, 'demo-chooser.js'), 'utf-8');
+      assert(chooser.includes('"kind": "section"') && chooser.includes('r.parent_id'),
+        'demo chooser must document and resolve list sections');
+      assert((chooser.match(/Non-Fiction > History|Non-fiction > Histoire|No ficción > Historia/g) || []).length === 3,
+        'demo chooser prompt must show a two-level path example in all three languages');
+      // The demo category derivation in main.js must understand paths.
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes("buildCatRows(data.todos, 'category', 'todo_categories', true)"),
+        'demo todo categories must be built with path support');
+      assert(mainSrc.includes("buildCatRows(data.habits, 'category', 'habit_categories', true)"),
+        'demo habit categories must be built with path support');
+      assert(mainSrc.includes("kind === 'section' ? '#3b82f6'"), 'demo derivation must create section rows in the bold default section color');
+    });
+
+    test('sections: section chips navigate via explicit delegation cases, sections have copy-link', () => {
+      // Section chips in TODOs/Habits carry data-category, which the
+      // delegation default fallback does NOT read (getId has no
+      // data-category) — without explicit cases the click silently
+      // passed the button element instead of the id and navigation
+      // never happened (live-test bug, Oct 17).
+      const delegation = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+      assert(delegation.includes("case 'navigate-to-todo-section': callWindow('navigateToTodoSection', [getCat(el)])"),
+        'delegation must route navigate-to-todo-section with getCat');
+      assert(delegation.includes("case 'navigate-to-habit-section': callWindow('navigateToHabitSection', [getCat(el)])"),
+        'delegation must route navigate-to-habit-section with getCat');
+      assert(delegation.includes("case 'navigate-to-list-section': callWindow('navigateToListSection'"),
+        'delegation must route navigate-to-list-section explicitly');
+      // Same trap for the section entry actions: without explicit cases
+      // the add-in-section modal received the button element as the
+      // parent id (bucket landed at root, invisible inside the section)
+      // and section delete silently did nothing (live-test bug, Oct 17).
+      for (const [action, fn, getter] of [
+        ['open-add-category-in-section', 'openAddCategoryInSection', 'getCat'],
+        ['delete-section', 'deleteSection', 'getCat'],
+        ['open-add-habit-category-in-section', 'openAddHabitCategoryInSection', 'getCat'],
+        ['delete-habit-section', 'deleteHabitSection', 'getCat'],
+        ['open-add-list-in-section', 'openAddListInSection', null],
+        ['delete-list-section', 'deleteListSection', null],
+      ]) {
+        assert(delegation.includes(`case '${action}': callWindow('${fn}'`),
+          `delegation must route ${action} explicitly`);
+        if (getter) assert(delegation.includes(`case '${action}': callWindow('${fn}', [${getter}(el)])`),
+          `${action} must pass ${getter}(el)`);
+      }
+      // Copy-link at section level in all three views, with deep links
+      // that resolve back to the section block.
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(todosSrc.includes('data-action="copy-item-link" data-link-type="todocat"'), 'todo section header must have a copy-link button');
+      assert(habitsSrc.includes('data-action="copy-item-link" data-link-type="habitcat"'), 'habit section header must have a copy-link button');
+      assert(listsSrc.includes('data-action="copy-item-link" data-link-type="list"'), 'list section header must have a copy-link button');
+      assert(listsSrc.includes('id="list-section-${esc(list.id)}" data-list-id="${esc(list.id)}"'),
+        'list section block must carry data-list-id so the list deep link finds it');
+      const utilsSrc = fs.readFileSync(path.join(JS_DIR, 'utils.js'), 'utf-8');
+      assert(utilsSrc.includes("todocat: 'todos'") && utilsSrc.includes("habitcat: 'habits'"),
+        'deep-link type map must know todocat/habitcat');
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes('todocat: `#todosView [data-node-id=') && mainSrc.includes('habitcat: `#habitsView [data-node-id='),
+        'findItemElement must resolve todocat/habitcat inside their views');
+    });
+
+    test('utils: onColorFor picks white on dark colors, near-black on pale ones', async () => {
+      // utils.js registers document/window listeners at module load.
+      if (globalThis.document && !globalThis.document.addEventListener) globalThis.document.addEventListener = () => {};
+      if (!globalThis.window) globalThis.window = { addEventListener: () => {} };
+      else if (!globalThis.window.addEventListener) globalThis.window.addEventListener = () => {};
+      const { onColorFor } = await import(pathToFileURL(path.join(JS_DIR, 'utils.js')).href);
+      assert(onColorFor('#000000') === '#fff', 'black background takes white text');
+      assert(onColorFor('#1e3a8a') === '#fff', 'dark blue takes white text');
+      // White-preferred policy: white is kept whenever it clears the
+      // WCAG AA large-text floor (3:1) — saturated palette mid-tones
+      // stay white even though dark text would score a higher ratio.
+      assert(onColorFor('#3b82f6') === '#fff', 'palette blue keeps white text (3.7:1, above the floor)');
+      assert(onColorFor('#ef4444') === '#fff', 'palette red keeps white text (3.8:1)');
+      assert(onColorFor('#6366f1') === '#fff', 'palette indigo keeps white text (4.5:1)');
+      assert(onColorFor('#8b5cf6') === '#fff', 'palette violet keeps white text (4.2:1)');
+      assert(onColorFor('#ec4899') === '#fff', 'palette pink keeps white text (3.5:1)');
+      // Below the floor, white would be unreadable — dark text takes over.
+      assert(onColorFor('#ffffff') === '#111', 'white background takes dark text');
+      assert(onColorFor('#facc15') === '#111', 'pale yellow takes dark text');
+      assert(onColorFor('#94a3b8') === '#111', 'pale slate takes dark text (white is 2.5:1)');
+      assert(onColorFor('#22c55e') === '#111', 'bright green takes dark text (white is 2.3:1)');
+      assert(onColorFor('#f97316') === '#111', 'palette orange takes dark text (white is 2.8:1)');
+      assert(onColorFor('#eab308') === '#111', 'palette yellow takes dark text (white is 1.9:1)');
+      assert(onColorFor('#abc') === '#111', 'shorthand hex expands (pale blue-grey takes dark text)');
+      assert(onColorFor('not-a-color') === '#fff' && onColorFor('') === '#fff' && onColorFor(null) === '#fff',
+        'unparseable colors fall back to white (historical header look)');
+    });
+
+    test('sections: border + header color, adaptive titles, list button parity', () => {
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      // The section color appears as the block's border (2px) and as
+      // the solid header band at full strength; the body background
+      // stays transparent (bucket cards keep their own surface/tint).
+      assert(css.includes('.section-block{border:2px solid var(--cat-color);border-radius:12px;padding:10px;background:transparent'),
+        'section block must be a colored border on a transparent background');
+      assert(!css.includes('var(--cat-color) 12%, transparent);display:flex;flex-direction:column;gap:10px'),
+        'the old 12%-over-transparent section background must be gone');
+      assert(!css.includes('padding:10px;background:var(--cat-color);display:flex'),
+        'the full-color section background must be gone');
+      assert(css.includes('.section-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;background:var(--cat-color);color:var(--cat-on-color,#fff)'),
+        'section header must be a solid band in the full-strength chosen color');
+      assert(css.includes('.section-name{font-size:1rem;font-weight:700;color:var(--cat-on-color,#fff)'),
+        'section title must use the adaptive on-color on the band');
+      assert(css.includes('.section-chips{padding:0 4px;}') && css.includes('.category-nav-buttons{display:flex;gap:5px;flex-wrap:wrap;align-items:center;justify-content:center'),
+        'section chips must inherit the centered top-level chip alignment (no flex-start override)');
+      // The default section color is a bold palette color, not the
+      // pale slate of the first iteration.
+      for (const [name, src] of [['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8')],
+                                 ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8')],
+                                 ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8')]]) {
+        assert(src.includes("const SECTION_DEFAULT_COLOR = '#3b82f6'"),
+          `${name} must default sections to the bold palette blue`);
+      }
+      assert(css.includes('> .todo-cat-header{background:var(--cat-color);color:var(--cat-on-color,#fff)'),
+        'bucket headers must use the adaptive on-color for their titles');
+      // Lists parity: section action buttons use the same class as the
+      // TODO/Habit section buttons (todo-cat-shortname-btn). The
+      // archive-project-btn class is only styled inside card headers,
+      // so on section headers it rendered as a default browser button.
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(listsSrc.includes('class="todo-cat-shortname-btn" data-action="open-add-list-in-section"'),
+        'list section New list button must use todo-cat-shortname-btn');
+      assert(listsSrc.includes('class="todo-cat-shortname-btn" data-action="open-edit-list"'),
+        'list section Edit list button must use todo-cat-shortname-btn');
+      const sectionStart = listsSrc.indexOf('function renderListSection');
+      const sectionEnd = listsSrc.indexOf('function navigateToListSection');
+      const sectionFn = listsSrc.slice(sectionStart, sectionEnd);
+      assert(!sectionFn.includes('archive-project-btn'), 'renderListSection must not use archive-project-btn at all');
+      // Bucket cards and section blocks both have solid colored
+      // headers, so both set the adaptive on-color next to --cat-color.
+      for (const [name, src] of [['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8')],
+                                 ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8')],
+                                 ['lists.js', listsSrc]]) {
+        assert((src.match(/--cat-on-color:\$\{onColorFor\(/g) || []).length >= 2,
+          `${name} must set --cat-on-color on both its bucket cards and its section blocks`);
+        assert(src.includes('onColorFor,'), `${name} must import onColorFor from utils`);
+      }
+    });
+
+    test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const rows = [
+        { id: 'g', name: '', kind: 'bucket', parent_id: null, sort_order: 0, is_protected: 1 },
+        { id: 'A', name: 'A', kind: 'section', parent_id: null, sort_order: 1 },
+        { id: 'B', name: 'B', kind: 'bucket', parent_id: 'A', sort_order: 0 },
+        { id: 'C', name: 'C', kind: 'section', parent_id: 'A', sort_order: 1 },
+        { id: 'D', name: 'D', kind: 'bucket', parent_id: 'C', sort_order: 0 },
+        { id: 'E', name: 'E', kind: 'bucket', parent_id: null, sort_order: 2 },
+        { id: 'F', name: 'B', kind: 'bucket', parent_id: null, sort_order: 3 },
+      ];
+      // Append a root bucket into a section: single update, sort after the last child
+      let plan = m.planNodeMove(rows, 'E', 'A', null);
+      assert(JSON.stringify(plan.updates) === JSON.stringify([{ id: 'E', parent_id: 'A', sort_order: 2 }]),
+        'append into a section lands after its last child, got ' + JSON.stringify(plan.updates));
+      // Append a section to the root: only the section row changes — its subtree follows untouched
+      plan = m.planNodeMove(rows, 'C', null, null);
+      assert(plan.updates.length === 1 && plan.updates[0].id === 'C' && plan.updates[0].parent_id === null && plan.updates[0].sort_order === 4,
+        'moving a section rewrites only its own row (subtree follows), got ' + JSON.stringify(plan.updates));
+      // Positional insert: renumber the target group around the inserted node
+      plan = m.planNodeMove(rows, 'E', 'A', 'B');
+      const byId = Object.fromEntries(plan.updates.map(u => [u.id, u]));
+      assert(byId.E.parent_id === 'A' && byId.E.sort_order === 0 && byId.B.sort_order === 1 && byId.C.sort_order === 2,
+        'positional insert renumbers the target group, got ' + JSON.stringify(plan.updates));
+      // His examples: A > C > D — C and D may move into a sibling section, never into themselves/descendants
+      assert(m.planNodeMove(rows, 'A', 'C', null).error === 'cycle', 'a section cannot move into its own descendant');
+      assert(m.planNodeMove(rows, 'A', 'A', null).error === 'cycle', 'a section cannot move into itself');
+      assert(m.planNodeMove(rows, 'C', 'D', null).error === 'invalid-parent', 'a node cannot move into a bucket');
+      assert(!m.planNodeMove(rows, 'D', 'A', null).error, 'a deep bucket can move up into another section');
+      // Per-parent name uniqueness is enforced on moves
+      assert(m.planNodeMove(rows, 'F', 'A', null).error === 'name-taken', 'a move colliding with a sibling name is refused');
+      // Protected rows are never rewritten, even by a positional renumber at the root
+      plan = m.planNodeMove(rows, 'E', null, 'g');
+      assert(!plan.updates.some(u => u.id === 'g'), 'the protected default row is never updated by a move');
+    });
+
+    test('sections: header click reveals the collapsed row; sections have short names', () => {
+      // Header click: the delegation case fires only when the click
+      // lands on the header element itself (not title/stats/buttons).
+      const delegation = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+      assert(delegation.includes("case 'toggle-section-chips': if (e.target === el) toggleSectionChipsReveal(el);"),
+        'header clicks must toggle the chips reveal only when the header itself is the click target');
+      assert(delegation.includes("'toggle-section-chips': 1"),
+        'the reveal toggle is a pure view action and must be allowed in read-only mode');
+      const cssSn = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(cssSn.includes('.section-chips-collapsed.section-chips-open{'),
+        'a manually opened collapsed row must get the revealed styling');
+      const itemUtilsSn = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(itemUtilsSn.includes("querySelectorAll('.section-chips-open')"),
+        'chip drags must clear the manually opened row state on finish');
+      for (const [name, src] of [
+        ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8')],
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8')],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8')],
+      ]) {
+        assert(src.includes('<div class="section-header" data-action="toggle-section-chips">'),
+          `${name} section headers must carry the toggle-section-chips action`);
+        // Short names: never nulled for sections any more — not on
+        // edit save, not on convert, and chips prefer them.
+        assert(!src.includes('shortname: isSection ? null'), `${name} edit save must persist section short names`);
+        assert(!src.includes("kind: 'section', shortname: null"), `${name} converting to a section must keep its short name`);
+        assert(!/shortname = isSection \?/.test(src), `${name} nav chips must not blank section short names`);
+        assert(!src.includes("isSectionRow(currentRow) ? 'none'"), `${name} edit modal must show the shortname field for sections`);
+      }
+      const todosSn = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      assert(todosSn.includes('childCat.shortname || childCat.name'), 'todo section chips must prefer the section short name');
+      const habitsSn = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      assert(habitsSn.includes('child.row.shortname || child.row.name'), 'habit section chips must prefer the section short name');
+      const listsSn = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(listsSn.includes('child.row.shortname || child.row.name'), 'list section chips must prefer the section short name');
+    });
+
+    test('sections: hover reveals only the hovered section’s own action buttons', () => {
+      // The reveal selector must be child-scoped to the section's own
+      // header: a plain descendant selector made hovering an outer
+      // section reveal the buttons of every nested section too.
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.section-block:hover > .section-header > .section-header-actions'),
+        'hover reveal must be scoped to the section’s own header');
+      assert(css.includes('.section-block:focus-within > .section-header > .section-header-actions'),
+        'focus-within reveal must be scoped to the section’s own header');
+      assert(!css.includes('.section-block:hover .section-header-actions'),
+        'the unscoped descendant hover rule must not come back');
+    });
+
+    test('sections: header icons take the section name colour', () => {
+      // lucideIcon() hardcodes stroke colours for some icons (folder
+      // amber, pencil amber, trash-2 red, folder-plus violet) via
+      // LUCIDE_COLORS; inside a section header they must render in
+      // the adaptive on-colour, like the section name itself.
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.section-header svg.lucide-icon{stroke:var(--cat-on-color,#fff);}'),
+        'section header icons must be stroked with the on-colour');
+      const icons = fs.readFileSync(path.join(JS_DIR, 'icons.js'), 'utf-8');
+      assert(icons.includes("'folder': '#f59e0b'") && icons.includes("'trash-2': '#ef4444'"),
+        'test premise: the icon colour map hardcodes folder/trash colours');
+    });
+
+    test('sections: chip drag crosses sections via planNodeMove on all three pages', () => {
+      const itemUtils = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(itemUtils.includes('crossDrop') && itemUtils.includes('updateCrossTarget') && itemUtils.includes('nav-drop-target'),
+        'initNavBtnReorder must support cross-container drops with target highlighting');
+      for (const [name, src, factory, mover] of [
+        ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8'), 'todoNavCrossDrop', 'moveTodoNodeToParent'],
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8'), 'habitNavCrossDrop', 'moveHabitNodeToParent'],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8'), 'listNavCrossDrop', 'moveListNodeToParent'],
+      ]) {
+        assert(src.includes(`function ${factory}(`) && src.includes(`crossDrop: ${factory}()`),
+          `${name} must pass a cross-drop config to its chip rows`);
+        assert(src.includes(`async function ${mover}(`) && src.includes('planNodeMove('),
+          `${name} must persist chip-drag moves through planNodeMove`);
+      }
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(!css.includes('.nav-drop-target'),
+        'drop targets get no ring/highlight styling (removed at his request); the placeholder shows the insertion point');
+      assert(!itemUtils.includes("closest('.section-block')"),
+        'chip drops must resolve at chips-row level only — no section-block drop target');
+      // Smooth landings, like chip reordering: the move re-render is
+      // wrapped in the bucket FLIP snapshot/animate, and chips in a
+      // row glide (FLIP) when the drag placeholder enters/leaves it.
+      assert((itemUtils.match(/flipChipsAround\(/g) || []).length >= 4,
+        'cross-row placeholder moves must be FLIP-animated (flipChipsAround)');
+      for (const [name, src, mover] of [
+        ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8'), 'moveTodoNodeToParent'],
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8'), 'moveHabitNodeToParent'],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8'), 'moveListNodeToParent'],
+      ]) {
+        const fnSlice = src.slice(src.indexOf(`async function ${mover}(`), src.indexOf(`async function ${mover}(`) + 900);
+        assert(fnSlice.includes('snapshotBuckets(grid)') && fnSlice.includes('animateBucketsFromSnapshot(grid, snapshot, 600)'),
+          `${name} ${mover} must FLIP-animate cards across the move re-render`);
+      }
+    });
+
+    test('sections: chips rows always render — collapsed for ≤1 child, revealed during chip drags', () => {
+      // A single child has nothing to navigate between and nothing to
+      // reorder, so its row is collapsed in normal rendering — but it
+      // stays in the DOM and is revealed while a chip drag runs, so
+      // every drop can happen at chips-row level.
+      for (const [name, src, prefix] of [
+        ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8'), 'todoSectionChips-'],
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8'), 'habitSectionChips-'],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8'), 'listSectionChips-'],
+      ]) {
+        assert(src.includes(`section-chips\${node.children.length > 1 ? '' : ' section-chips-collapsed'}" id="${prefix}`),
+          `${name} section chips row must always render, collapsed when the section has at most one child`);
+      }
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.section-chips-collapsed{max-height:0;min-height:0;opacity:0;visibility:hidden;overflow:hidden;transition:max-height .25s ease'),
+        'collapsed chips rows must be zero-height and transparent, with an animated (not display:none) collapse');
+      assert(css.includes('body.chip-drag-active .section-chips-collapsed,.section-chips-collapsed.section-chips-open{max-height:40px;min-height:30px;opacity:1;visibility:visible'),
+        'collapsed chips rows must grow and fade in while a chip drag is active (or when manually opened)');
+      const itemUtilsSrc = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(itemUtilsSrc.includes("document.body.classList.add('chip-drag-active')")
+        && itemUtilsSrc.includes("document.body.classList.remove('chip-drag-active')"),
+        'chip drags must toggle the chip-drag-active body class on activation and on finish');
+      assert(itemUtilsSrc.includes('allBtns().length < 2 && !crossDrop'),
+        'single-chip rows must still initialise when crossDrop is configured (their chip can be dragged out)');
+      const itemUtils = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(itemUtils.includes('const container = document.getElementById(containerId);\n  if (!container) return;'),
+        'initNavBtnReorder must tolerate a missing chips container');
+      // Section chips mirror the top-level nav rule: bucket children
+      // show their shortname when set (full name stays in the title
+      // tooltip); section children keep their full name.
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      assert(todosSrc.includes('childCat.shortname || getCatDisplayName(child.id)'),
+        'todo section chips must prefer the bucket shortname');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      assert(habitsSrc.includes('child.row.shortname || getHabitCatDisplayName(child.id)'),
+        'habit section chips must prefer the bucket shortname');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(listsSrc.includes('child.row.shortname || child.row.name'),
+        'list section chips must prefer the bucket shortname');
+      // List card header actions follow the same reveal rule as TODO /
+      // Habit category headers: hidden until hover (the shared CSS
+      // keeps them visible on touch widths). No inline opacity
+      // override may force them permanently visible.
+      assert(!listsSrc.includes('project-header-actions" style="opacity:1'),
+        'list header actions must not force opacity:1 inline (hover reveal like todos/habits)');
+      const cssSrc = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(cssSrc.includes('.project-card-header .project-header-actions{display:flex;align-items:center;gap:6px;opacity:0'),
+        'project-header-actions must default to hidden with hover reveal');
+      // Flashcards decks follow the same rule for their secondary
+      // actions (edit / add / delete), but the Practice button (and
+      // the all-done check) stays always visible: it renders OUTSIDE
+      // the hover-revealed container.
+      const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      assert(!flashSrc.includes('project-header-actions" style="opacity:1'),
+        'flashcard deck header actions must not force opacity:1 inline');
+      assert((flashSrc.match(/\$\{practiceButton\}\n        <div class="project-header-actions">/g) || []).length === 2,
+        'both deck renderers (flashcards + texts) must place the Practice button outside the hover-revealed actions');
+    });
+  }
+
+  // ===================================================================
   // SUMMARY
   // ===================================================================
   await Promise.all(pendingAsyncTests);

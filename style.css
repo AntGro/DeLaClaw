@@ -579,14 +579,17 @@ input,select,button{font-family:inherit;}
 .project-card:hover{box-shadow:0 4px 20px rgba(0,0,0,0.15),0 0 0 1px var(--accent-dim);}
 .project-card[style*="--cat-color"]{border-top:none;background:color-mix(in srgb, var(--cat-color) 6%, var(--surface));}
 .project-card[style*="--cat-color"]:hover{box-shadow:0 4px 20px color-mix(in srgb, var(--cat-color) 12%, transparent),0 0 0 1px color-mix(in srgb, var(--cat-color) 30%, var(--border));}
-/* ── Colored card headers (unified across all pages) ── */
+/* ── Colored card headers (unified across all pages) ──
+   Text on the solid color is --cat-on-color (set by renderers via
+   onColorFor(): white on dark colors, near-black on pale ones);
+   #fff fallback keeps the historical look where it is not set. */
 .project-card[style*="--cat-color"] > .project-card-header,
-.project-card[style*="--cat-color"] > .todo-cat-header{background:var(--cat-color);color:#fff;border-radius:11px 11px 0 0;padding-bottom:5px;}
+.project-card[style*="--cat-color"] > .todo-cat-header{background:var(--cat-color);color:var(--cat-on-color,#fff);border-radius:11px 11px 0 0;padding-bottom:5px;}
 .project-card[style*="--cat-color"] > .project-card-header strong,
-.project-card[style*="--cat-color"] > .todo-cat-header h3{color:#fff;}
+.project-card[style*="--cat-color"] > .todo-cat-header h3{color:var(--cat-on-color,#fff);}
 .project-card[style*="--cat-color"] > .project-card-header .tech,
 .project-card[style*="--cat-color"] > .project-card-header .project-info .tech,
-.project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-stats{color:rgba(255,255,255,0.75);}
+.project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-stats{color:color-mix(in srgb, var(--cat-on-color,#fff) 75%, transparent);}
 .project-card[style*="--cat-color"] > .project-card-header svg.lucide-icon,
 .project-card[style*="--cat-color"] > .todo-cat-header svg.lucide-icon{stroke:currentColor;}
 .project-card[style*="--cat-color"] > .project-card-header .archive-project-btn,
@@ -596,7 +599,7 @@ input,select,button{font-family:inherit;}
 .project-card[style*="--cat-color"] > .project-card-header .todo-cat-shortname-btn,
 .project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-shortname-btn,
 .project-card[style*="--cat-color"] > .project-card-header .todo-cat-delete-btn,
-.project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-delete-btn{color:rgba(255,255,255,0.65);}
+.project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-delete-btn{color:color-mix(in srgb, var(--cat-on-color,#fff) 65%, transparent);}
 .project-card[style*="--cat-color"] > .project-card-header .archive-project-btn:hover,
 .project-card[style*="--cat-color"] > .project-card-header .prompt-project-btn:hover,
 .project-card[style*="--cat-color"] > .project-card-header .expand-project-btn:hover,
@@ -604,13 +607,13 @@ input,select,button{font-family:inherit;}
 .project-card[style*="--cat-color"] > .project-card-header .todo-cat-shortname-btn:hover,
 .project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-shortname-btn:hover,
 .project-card[style*="--cat-color"] > .project-card-header .todo-cat-delete-btn:hover,
-.project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-delete-btn:hover{color:#fff;background:rgba(255,255,255,0.15);}
+.project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-delete-btn:hover{color:var(--cat-on-color,#fff);background:color-mix(in srgb, var(--cat-on-color,#fff) 15%, transparent);}
 .project-card[style*="--cat-color"] > .project-card-header .todo-cat-shortname-label,
-.project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-shortname-label{color:rgba(255,255,255,0.6);}
-.project-card[style*="--cat-color"] > .project-card-header .fc-chip{background:rgba(255,255,255,0.2);color:#fff;}
-.project-card[style*="--cat-color"] > .project-card-header .fc-practice-btn{background:rgba(255,255,255,0.2);backdrop-filter:blur(4px);}
-.project-card[style*="--cat-color"] > .project-card-header .fc-practice-btn:hover{background:rgba(255,255,255,0.3);opacity:1;}
-.project-card[style*="--cat-color"] > .project-card-header .fc-all-done{color:rgba(255,255,255,0.85);}
+.project-card[style*="--cat-color"] > .todo-cat-header .todo-cat-shortname-label{color:color-mix(in srgb, var(--cat-on-color,#fff) 60%, transparent);}
+.project-card[style*="--cat-color"] > .project-card-header .fc-chip{background:color-mix(in srgb, var(--cat-on-color,#fff) 20%, transparent);color:var(--cat-on-color,#fff);}
+.project-card[style*="--cat-color"] > .project-card-header .fc-practice-btn{background:color-mix(in srgb, var(--cat-on-color,#fff) 20%, transparent);backdrop-filter:blur(4px);}
+.project-card[style*="--cat-color"] > .project-card-header .fc-practice-btn:hover{background:color-mix(in srgb, var(--cat-on-color,#fff) 30%, transparent);opacity:1;}
+.project-card[style*="--cat-color"] > .project-card-header .fc-all-done{color:color-mix(in srgb, var(--cat-on-color,#fff) 85%, transparent);}
 .project-card-header{padding:14px 16px 0;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
 .project-info strong{font-size:0.95rem;font-weight:600;margin-bottom:2px;letter-spacing:-0.2px;display:block;}
 .project-info .tech{font-size:0.75rem;color:var(--muted);}
@@ -1170,6 +1173,39 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .category-nav-btn{padding:3px 8px;border-radius:12px;border:none;background:color-mix(in srgb,var(--cat-color,var(--accent)) 12%,var(--surface));color:color-mix(in srgb,var(--cat-color,var(--accent)) 80%,var(--text));cursor:pointer;font-size:0.85rem;font-weight:600;transition:all 0.2s;font-family:inherit;white-space:nowrap;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;-webkit-user-select:none;}
 .category-nav-btn:hover{background:color-mix(in srgb,var(--cat-color,var(--accent)) 8%,var(--surface));}
 .category-nav-btn.nav-btn-dragging{box-shadow:0 2px 12px rgba(0,0,0,0.25);}
+
+/* ── Nested sections (TODOs / Habits / Lists) ──
+   The section color appears as the block's border (2px, so it reads
+   clearly) and as the solid header band at full strength; the body
+   background stays transparent so the bucket cards float inside
+   the outline. Header text uses --cat-on-color like bucket headers. */
+.section-block{border:2px solid var(--cat-color);border-radius:12px;padding:10px;background:transparent;display:flex;flex-direction:column;gap:10px;min-width:0;}
+.section-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;background:var(--cat-color);color:var(--cat-on-color,#fff);margin:-10px -10px 0;padding:10px 14px;border-radius:10px 10px 0 0;}
+.section-header-left{display:flex;align-items:baseline;gap:8px;min-width:0;}
+.section-name{font-size:1rem;font-weight:700;color:var(--cat-on-color,#fff);margin:0;display:flex;align-items:center;gap:6px;}
+.section-name svg{color:var(--cat-on-color,#fff);flex:none;}
+.section-stats{font-size:0.75rem;color:var(--muted);white-space:nowrap;}
+.section-header .section-stats{color:color-mix(in srgb, var(--cat-on-color,#fff) 75%, transparent);}
+.section-header .todo-cat-shortname-btn,.section-header .todo-cat-delete-btn{color:color-mix(in srgb, var(--cat-on-color,#fff) 65%, transparent);}
+.section-header .todo-cat-shortname-btn:hover,.section-header .todo-cat-delete-btn:hover{color:var(--cat-on-color,#fff);background:color-mix(in srgb, var(--cat-on-color,#fff) 15%, transparent);}
+/* Header icons (folder next to the name, action buttons) take the
+   section name's colour: several lucide icons carry a hardcoded
+   stroke colour (folder amber, pencil amber, trash red, folder-plus
+   violet) that would otherwise clash with the header band. */
+.section-header svg.lucide-icon{stroke:var(--cat-on-color,#fff);}
+.section-header-actions{display:flex;align-items:center;gap:4px;opacity:0;transition:opacity 0.2s;}
+.section-block:hover > .section-header > .section-header-actions,.section-block:focus-within > .section-header > .section-header-actions{opacity:1;}
+.section-chips{padding:0 4px;}
+/* Rows of sections with at most one child are normally collapsed
+   (no navigation or reordering is possible), but they are revealed
+   while a chip drag is in progress so every drop can happen at
+   chips-row level. The collapse is animatable (max/min-height +
+   opacity, not display:none) so the rows grow and shrink smoothly
+   as drags start and end. */
+.section-chips-collapsed{max-height:0;min-height:0;opacity:0;visibility:hidden;overflow:hidden;transition:max-height .25s ease,min-height .25s ease,opacity .2s ease,visibility 0s linear .25s;}
+body.chip-drag-active .section-chips-collapsed,.section-chips-collapsed.section-chips-open{max-height:40px;min-height:30px;opacity:1;visibility:visible;transition:max-height .25s ease,min-height .25s ease,opacity .2s ease,visibility 0s;}
+.section-level{display:grid;gap:14px;justify-content:center;align-items:start;}
+.section-level>.empty-msg{grid-column:1/-1;text-align:center;}
 
 
 .todo-cat-header{padding:14px 16px 0;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}

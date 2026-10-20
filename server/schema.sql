@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS todo_categories (
   color TEXT,
   sort_order INTEGER DEFAULT 0,
   is_protected INTEGER DEFAULT 0,
+  kind TEXT DEFAULT 'bucket',
+  parent_id TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
@@ -47,6 +49,8 @@ CREATE TABLE IF NOT EXISTS habit_categories (
   color TEXT,
   sort_order INTEGER DEFAULT 0,
   is_protected INTEGER DEFAULT 0,
+  kind TEXT DEFAULT 'bucket',
+  parent_id TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
@@ -199,6 +203,8 @@ CREATE TABLE IF NOT EXISTS lists (
   icon TEXT,
   sort_order INTEGER DEFAULT 0,
   archived INTEGER DEFAULT 0,
+  kind TEXT DEFAULT 'bucket',
+  parent_id TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))

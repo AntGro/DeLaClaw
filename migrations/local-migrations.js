@@ -567,4 +567,16 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE habits ADD COLUMN is_auto INTEGER DEFAULT 0;
     ALTER TABLE habit_completions ADD COLUMN is_auto INTEGER DEFAULT 0;
   `,
+  '2.23.0': `
+    -- Nested sections: category/list rows gain kind ('bucket' default, or
+    -- 'section') and parent_id (NULL = top level). parent_id is a plain
+    -- column, deliberately not a foreign key, so backup restore needs no
+    -- parent-before-child ordering within a table.
+    ALTER TABLE todo_categories ADD COLUMN kind TEXT DEFAULT 'bucket';
+    ALTER TABLE todo_categories ADD COLUMN parent_id TEXT;
+    ALTER TABLE habit_categories ADD COLUMN kind TEXT DEFAULT 'bucket';
+    ALTER TABLE habit_categories ADD COLUMN parent_id TEXT;
+    ALTER TABLE lists ADD COLUMN kind TEXT DEFAULT 'bucket';
+    ALTER TABLE lists ADD COLUMN parent_id TEXT;
+  `,
 };

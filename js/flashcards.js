@@ -551,11 +551,13 @@ function renderFlashcardDeck(deckId, q) {
           <span class="tech">${allDeckCards.length} ${t('flashcards.cards')} ${chips.join(' ')}</span>
         </div>
       </div>
-      <div class="project-header-actions" style="opacity:1;">
-        ${deckId !== _defaultDeckId ? `<button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deckId)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>` : ''}
+      <div style="display:flex;align-items:center;gap:6px;">
         ${practiceButton}
-        <button class="archive-project-btn" data-action="open-add-flashcard" data-deck="${esc(deckId)}" title="${t('flashcards.add_card')}">${lucideIcon('plus', 16)}</button>
-        ${deckId !== _defaultDeckId ? `<button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deckId)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>` : ''}
+        <div class="project-header-actions">
+          ${deckId !== _defaultDeckId ? `<button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deckId)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>` : ''}
+          <button class="archive-project-btn" data-action="open-add-flashcard" data-deck="${esc(deckId)}" title="${t('flashcards.add_card')}">${lucideIcon('plus', 16)}</button>
+          ${deckId !== _defaultDeckId ? `<button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deckId)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>` : ''}
+        </div>
       </div>
     </div>
     <div class="task-list">
@@ -619,11 +621,13 @@ function renderTextDeck(deckId, q) {
           <span class="tech">${allDeckTexts.length} ${t('text_revision.texts')} ${chips.join(' ')}</span>
         </div>
       </div>
-      <div class="project-header-actions" style="opacity:1;">
-        ${deckId !== _defaultDeckId ? `<button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deckId)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>` : ''}
+      <div style="display:flex;align-items:center;gap:6px;">
         ${practiceButton}
-        <button class="archive-project-btn" data-action="open-add-text" data-deck="${esc(deckId)}" title="${t('text_revision.add_text')}">${lucideIcon('plus', 16)}</button>
-        ${deckId !== _defaultDeckId ? `<button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deckId)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>` : ''}
+        <div class="project-header-actions">
+          ${deckId !== _defaultDeckId ? `<button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deckId)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>` : ''}
+          <button class="archive-project-btn" data-action="open-add-text" data-deck="${esc(deckId)}" title="${t('text_revision.add_text')}">${lucideIcon('plus', 16)}</button>
+          ${deckId !== _defaultDeckId ? `<button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deckId)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>` : ''}
+        </div>
       </div>
     </div>
     <div class="task-list">

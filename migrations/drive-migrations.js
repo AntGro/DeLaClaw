@@ -385,4 +385,15 @@ export const DRIVE_MIGRATIONS = {
       if (row.is_auto == null) row.is_auto = 0;
     }
   },
+  '2.23.0': async (store) => {
+    // 2.23.0: nested sections — category/list rows gain kind ('bucket' by
+    // default, 'section' for section rows) and parent_id (null = top level).
+    // parent_id is a plain field, deliberately not a foreign key.
+    for (const table of ['todo_categories', 'habit_categories', 'lists']) {
+      for (const row of (store[table] || [])) {
+        if (row.kind == null) row.kind = 'bucket';
+        if (row.parent_id === undefined) row.parent_id = null;
+      }
+    }
+  },
 };

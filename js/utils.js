@@ -2,6 +2,7 @@ import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { DEFAULT_CATEGORY_PALETTE } from './state.js';
 import { APP_VERSION } from './version.js';
+import { layoutLevel } from './sections-pure.js';
 
 // ===================================================================
 // UTILS
@@ -622,6 +623,64 @@ function balanceGrid(gridEl, { min = 400, max = 700, gap = 14 } = {}) {
 }
 
 // ===================================================================
+// Section Grid Layout — per-level even grid for nested sections.
+//
+// A level container's direct children carry data-node-kind
+// ('bucket' | 'section') and data-node-id. A section element contains
+// exactly one level container of its own (its direct child with class
+// 'section-level'). Layout is computed by sections-pure.layoutLevel:
+// blocks at this level share one width (container width / widest row,
+// clamped like balanceGrid), sections span the columns their footprint
+// needs and never split across rows. A section's own level is then laid
+// out capped at the span it was given, so a section is a true R×C
+// rectangle of this level's cells.
+// ===================================================================
+const _sectionGridObservers = new WeakMap();
+function _abstractDomNode(el) {
+  const node = { id: el.dataset.nodeId, kind: el.dataset.nodeKind === 'section' ? 'section' : 'bucket', children: [] };
+  if (node.kind === 'section') {
+    const inner = [...el.children].find(c => c.classList?.contains('section-level'));
+    if (inner) node.children = [...inner.children].filter(c => c.dataset?.nodeKind).map(_abstractDomNode);
+  }
+  return node;
+}
+function applySectionGrid(gridEl, { min = 400, max = 700, gap = 14 } = {}) {
+  if (!gridEl) return;
+  const applyContainer = (container, capOverride) => {
+    const els = [...container.children].filter(c => c.dataset?.nodeKind);
+    if (!els.length) { container.style.gridTemplateColumns = ''; return; }
+    const w = container.clientWidth;
+    if (!w) return;
+    const maxCols = capOverride != null
+      ? Math.max(1, capOverride)
+      : Math.max(1, Math.floor((w + gap) / (min + gap)));
+    const lay = layoutLevel(els.map(_abstractDomNode), maxCols);
+    const m = Math.max(1, lay.maxBlocks);
+    const colW = Math.min(max, (w - (m - 1) * gap) / m);
+    container.style.gridTemplateColumns = m <= 1 && !capOverride ? '1fr' : `repeat(${m}, ${colW}px)`;
+    els.forEach((el, i) => {
+      const p = lay.placements[i];
+      if (el.dataset.nodeKind === 'section' && p) {
+        el.style.gridColumn = `span ${p.cols}`;
+        el.dataset.spanCols = String(p.cols);
+      }
+    });
+    for (const el of els) {
+      if (el.dataset.nodeKind !== 'section') continue;
+      const inner = [...el.children].find(c => c.classList?.contains('section-level'));
+      if (inner) applyContainer(inner, Number(el.dataset.spanCols) || undefined);
+    }
+  };
+  const apply = () => applyContainer(gridEl, null);
+  apply();
+  if (!_sectionGridObservers.has(gridEl)) {
+    const ro = new ResizeObserver(apply);
+    ro.observe(gridEl);
+    _sectionGridObservers.set(gridEl, ro);
+  }
+}
+
+// ===================================================================
 // fetchAll — paginated read that defeats server-side row caps
 // ===================================================================
 // Some REST layers cap any unpaginated GET (PostgREST's default is
@@ -775,6 +834,7 @@ const DEEP_LINK_TYPE_MAP = {
   todo: 'todos', habit: 'habits', project: 'projects', task: 'projects',
   birthday: 'birthdays', flashcard: 'flashcards',
   list: 'lists', listitem: 'lists',
+  todocat: 'todos', habitcat: 'habits',
 };
 
 /** Parse a deep-link hash like #todo/abc123 → { type, id } or null */
@@ -825,6 +885,30 @@ function highlightItem(el) {
   void el.offsetWidth;
   el.classList.add('deep-link-highlight');
   el.addEventListener('animationend', () => el.classList.remove('deep-link-highlight'), { once: true });
+}
+
+/** Readable text color to sit ON a solid category color, following
+ *  the WCAG 2.x contrast model (relative luminance + contrast ratio).
+ *  Policy: white is preferred — headers are bold display text, so
+ *  white is kept whenever it clears the WCAG AA large-text floor of
+ *  3:1 against the color. Only genuinely pale colors, where white
+ *  falls below 3:1, switch to near-black (which then always clears
+ *  7:1). Picking "whichever ratio is higher" instead would flip
+ *  every saturated mid-tone (the whole category palette) to dark
+ *  text even though white is perfectly readable on them. Non-hex
+ *  input falls back to white (the historical header treatment).
+ *  Renderers expose the result as --cat-on-color next to --cat-color. */
+function onColorFor(color) {
+  const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(String(color || '').trim());
+  if (!m) return '#fff';
+  let h = m[1];
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  const lin = [0, 2, 4].map(i => {
+    const v = parseInt(h.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  const lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+  return 1.05 / (lum + 0.05) >= 3 ? '#fff' : '#111';
 }
 
 /** Pick the next palette color not yet used by any entry in `catMapOrArray`.
@@ -892,9 +976,9 @@ export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
   showConfirmAction, closeConfirmAction, executeConfirmAction, setConfirmActionProgress,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
-  isEditing, balanceGrid, fetchAll,
+  isEditing, balanceGrid, applySectionGrid, fetchAll,
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, isDesktopLike,
-  backfillCategoryColors, nextPaletteColor,
+  backfillCategoryColors, nextPaletteColor, onColorFor,
   parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,
   autoResizeTextarea,
   snapshotTextInputs, restoreTextInputs,

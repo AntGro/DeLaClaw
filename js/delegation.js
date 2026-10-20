@@ -13,6 +13,18 @@
   function getCat(el) {
     return el.dataset.category || el.dataset.cat || '';
   }
+  // Reveal/hide a section's collapsed chips row (sections with at
+  // most one child) so its lone chip can be grabbed. Only one row is
+  // open at a time; any chip drag clears the open state on finish.
+  function toggleSectionChipsReveal(headerEl) {
+    var block = headerEl.closest ? headerEl.closest('.section-block') : null;
+    if (!block) return;
+    var row = block.querySelector('.section-chips-collapsed');
+    if (!row) return;
+    var opening = !row.classList.contains('section-chips-open');
+    document.querySelectorAll('.section-chips-open').forEach(function (r) { r.classList.remove('section-chips-open'); });
+    if (opening) row.classList.add('section-chips-open');
+  }
   function callWindow(fnName, args) {
     var fn = window[fnName];
     if (typeof fn === 'function') {
@@ -38,6 +50,8 @@
     'sort-flashcards': 1, 'sort-lists': 1, 'toggle-archived': 1, 'toggle-search': 1,
     'clear-search': 1, 'switch-settings-pane': 1, 'toggle-theme': 1, 'export-backup': 1,
     'navigate-to-category': 1, 'toggle-done-todos': 1, 'navigate-to-habit-category': 1,
+    'navigate-to-todo-section': 1, 'navigate-to-habit-section': 1, 'navigate-to-list-section': 1,
+    'toggle-section-chips': 1,
     'navigate-to-flash-deck': 1, 'open-habit-history': 1, 'navigate-to-project': 1,
     'toggle-expand-project': 1, 'copy-project-title': 1, 'copy-item-link': 1,
     'show-todo-general-card': 1, 'calendar-prev': 1, 'calendar-next': 1, 'calendar-today': 1,
@@ -140,6 +154,12 @@
       case 'import-backup': callWindow('importBackup', []); break;
       case 'show-todo-general-card': callWindow('showTodoGeneralCard', []); break;
       case 'navigate-to-category': callWindow('navigateToCategory', [getCat(el)]); break;
+      case 'navigate-to-todo-section': callWindow('navigateToTodoSection', [getCat(el)]); break;
+      // Only a click on the header itself — not on its title, stats
+      // or buttons (those are children with their own behaviour).
+      case 'toggle-section-chips': if (e.target === el) toggleSectionChipsReveal(el); break;
+      case 'open-add-category-in-section': callWindow('openAddCategoryInSection', [getCat(el)]); break;
+      case 'delete-section': callWindow('deleteSection', [getCat(el)]); break;
       case 'delete-category': callWindow('deleteCategory', [getCat(el)]); break;
       case 'delete-all-done': e.stopPropagation(); callWindow('deleteAllDoneTodos', [getCat(el)]); break;
       case 'toggle-done-todos': callWindow('toggleDoneTodos', [el.dataset.catId || getCat(el)]); break;
@@ -172,6 +192,9 @@
       case 'close-add-category-modal': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddCategoryModal', []); break;
       case 'open-add-habit-modal': callWindow('openAddHabitModal', []); break;
       case 'navigate-to-habit-category': callWindow('navigateToHabitCategory', [getCat(el)]); break;
+      case 'navigate-to-habit-section': callWindow('navigateToHabitSection', [getCat(el)]); break;
+      case 'open-add-habit-category-in-section': callWindow('openAddHabitCategoryInSection', [getCat(el)]); break;
+      case 'delete-habit-section': callWindow('deleteHabitSection', [getCat(el)]); break;
       case 'delete-habit-category': callWindow('deleteHabitCategory', [getCat(el)]); break;
       case 'open-edit-habit-category-modal': callWindow('openEditHabitCategoryModal', [getCat(el)]); break;
       case 'add-habit-from-input': { if (!(el.matches && el.matches('input, textarea'))) { var hInp = el.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.habit-add-input, .todo-cat-input'); if (hInp) callWindow('addHabitFromInput', [hInp]); } } break;
@@ -308,6 +331,9 @@
       case 'close-avatar-preview': callWindow('closeAvatarPreviewModal', []); break;
       case 'open-add-list': callWindow('openAddListModal', []); break;
       case 'navigate-to-list': callWindow('navigateToList', [el.dataset.listId||el.dataset.id||getId(el)]); break;
+      case 'navigate-to-list-section': callWindow('navigateToListSection', [el.dataset.listId||el.dataset.id||getId(el)]); break;
+      case 'open-add-list-in-section': callWindow('openAddListInSection', [el.dataset.listId||el.dataset.id||getId(el)]); break;
+      case 'delete-list-section': callWindow('deleteListSection', [el.dataset.listId||el.dataset.id||getId(el)]); break;
       case 'open-edit-list': callWindow('openEditListModal', [getId(el)]); break;
       case 'delete-list': callWindow('deleteList', [getId(el)]); break;
       case 'quick-add-list-item': callWindow('quickAddListItem', [el.dataset.listId||getId(el)]); break;

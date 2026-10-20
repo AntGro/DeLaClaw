@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-20T23:15:54.286Z from 50 modules (v2.25.5). Total LOC 36001. Do not hand-edit.
+> Generated 2026-10-20T23:34:26.091Z from 50 modules (v2.26.0). Total LOC 36049. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -34,7 +34,7 @@
 | sharing-ui | 1235 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | calendar.js,groups.js,habits.js,lists.js | esc:38,guard+pendingSet,window:8 |
 | calendar-sync | 1203 | birthdays,gcal_sync,habits,settings,todos | calendar-pure,drive-folders,habits,i18n | main.js | - |
 | utils | 995 | flashcards,x | i18n,icons,sections-pure,state | - | esc:7,window:6 |
-| calendar | 662 | - | calendar-pure,habits,i18n,icons | main.js | esc:17,window:8 |
+| calendar | 689 | - | calendar-pure,habits,i18n,icons | main.js | esc:17,window:8 |
 | batch-import | 559 | - | icons,import-pure,state,utils | - | esc:13 |
 | delegation | 512 | - |  | - | window:1 |
 | hero | 473 | - | logo,storm3d | main.js | - |
@@ -43,10 +43,10 @@
 | sections-pure | 412 | - |  | calendar.js,habits.js,lists.js,todos.js | - |
 | demo | 310 | x |  | drive.js | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
+| calendar-pure | 228 | - |  | calendar-sync.js,calendar.js,habits.js,main.js | - |
 | sharing-file-reconcile | 217 | - |  | drive.js,sharing-drive.js | - |
 | scene-parse | 215 | text_line_progress,texts |  | flashcards.js | - |
 | icons | 212 | - |  | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
-| calendar-pure | 207 | - |  | calendar-sync.js,calendar.js,habits.js,main.js | - |
 | groups | 202 | - | i18n,icons,sharing-ui,state | main.js | esc:3,window:4 |
 | agents-ui | 200 | agent_grants | db,i18n,icons,utils | main.js | esc:29,window:5 |
 | storm3d | 185 | - |  | hero.js | - |

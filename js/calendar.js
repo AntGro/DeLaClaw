@@ -69,20 +69,25 @@ function collectRangeEvents(start, end) {
     if (!map.has(date)) map.set(date, []);
     map.get(date).push(ev);
   };
+  const today = todayStr();
 
-  // TODOs: due date in the visible month, not done (pinned to original date)
+  // TODOs: on their due date; an overdue TODO also appears on today
+  // (it still needs doing today). Overdue instances are flagged for
+  // the dashed-red highlight.
   for (const td of getTodos()) {
     if (!calShow.todo) break;
     if (td.done) continue;
     const d = (td.due_date || '').slice(0, 10);
-    if (d >= start && d <= end) {
-      const catId = catIdForTodo(td);
-      push(d, {
-        type: 'todo', id: td.id, title: td.text || '', sub: '',
-        catId, catColor: getCategoryColor(catId), catName: getTodoCatPath(catId), catOrder: getTodoCatOrderKey(catId),
-        shared_id: td.shared_id || null, shared_group_id: td.shared_group_id || null,
-      });
-    }
+    if (!d) continue;
+    const catId = catIdForTodo(td);
+    const evBase = {
+      type: 'todo', id: td.id, title: td.text || '', sub: '',
+      catId, catColor: getCategoryColor(catId), catName: getTodoCatPath(catId), catOrder: getTodoCatOrderKey(catId),
+      shared_id: td.shared_id || null, shared_group_id: td.shared_group_id || null,
+    };
+    const overdue = d < today;
+    if (d >= start && d <= end) push(d, { ...evBase, ...(overdue ? { overdue: true } : {}) });
+    if (overdue && today >= start && today <= end) push(today, { ...evBase, overdue: true, dueToday: true });
   }
 
   // Habits: every occurrence of structured rules within the month;
@@ -103,18 +108,35 @@ function collectRangeEvents(start, end) {
     // While a snooze is active, occurrences inside the window are hidden;
     // occurrences on/after the wake date show normally (the habit wakes
     // that day, overdue if its due date passed during the window).
-    const snoozed = isHabitSnoozed(h, todayStr());
+    const snoozed = isHabitSnoozed(h, today);
+    const ndStr = (h.next_due || '').slice(0, 10);
+    const habitOverdue = !!ndStr && ndStr < today;
     if (rule && !isStructuredRule(rule)) {
-      const d = (h.next_due || '').slice(0, 10);
-      if (d && d >= start && d <= end && !(h.end_date && d > h.end_date) && !(snoozed && d < h.snoozed_until)) push(d, { ...hBase });
+      const d = ndStr;
+      if (d && d >= start && d <= end && !(h.end_date && d > h.end_date) && !(snoozed && d < h.snoozed_until)) {
+        push(d, { ...hBase, ...(habitOverdue ? { overdue: true } : {}) });
+      }
+      // Overdue free-text habit: no cadence to project, but it still
+      // needs doing today — mirror it onto today like structured ones.
+      if (habitOverdue && today >= start && today <= end && !(h.end_date && d > h.end_date) && !(snoozed && today < h.snoozed_until)) {
+        push(today, { ...hBase, overdue: true, dueToday: true });
+      }
       continue;
     }
     const occ = expandHabitOccurrences(
       { frequency_rule: rule, next_due: h.next_due, end_date: h.end_date },
       start, end,
       (r, lastDone) => computeNextDue(r, lastDone),
+      today,
     );
-    for (const d of occ) { if (snoozed && d < h.snoozed_until) continue; push(d, { ...hBase }); }
+    for (const d of occ) {
+      if (snoozed && d < h.snoozed_until) continue;
+      push(d, {
+        ...hBase,
+        ...(habitOverdue && (d === ndStr || d === today) ? { overdue: true } : {}),
+        ...(habitOverdue && d === today ? { dueToday: true } : {}),
+      });
+    }
   }
 
   // Birthdays: yearly occurrence in every month the range spans
@@ -151,7 +173,7 @@ function chipHTML(ev, hidden) {
   // Shape encodes the type; background encodes the item's category color
   // (birthdays have no category → type color fallback).
   const catColor = ev.catColor || (ev.type === 'birthday' ? 'var(--pink)' : 'var(--accent)');
-  return `<span class="cal-chip cal-${ev.type}" style="--cat-color:${catColor}"${hidden ? ' data-hidden=""' : ''}>${icon}<span>${title}</span></span>`;
+  return `<span class="cal-chip cal-${ev.type}${ev.overdue ? ' cal-chip-overdue' : ''}" style="--cat-color:${catColor}"${hidden ? ' data-hidden=""' : ''}>${icon}<span>${title}</span></span>`;
 }
 
 // Show as many chips per day cell as fit in the available space, hiding the
@@ -516,7 +538,7 @@ function dayPanelRow(ev, dateStr) {
     </button>`;
   }
   if (ev.type === 'todo') {
-    return `<div class="cal-row">
+    return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
       <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong></span>
       <button class="todo-done-btn" data-todo-id="${esc(ev.id)}" data-action="calendar-toggle-todo"
         data-done="true" data-date="${dateStr}" title="${t('common.done')}">
@@ -524,21 +546,26 @@ function dayPanelRow(ev, dateStr) {
       </button>
     </div>`;
   }
-  // Only the next due occurrence can be marked done: completing a future
-  // occurrence would complete the current next_due instead (markHabitDone
-  // always completes the habit's current due date).
+  // Only the next due occurrence can be marked done — plus its overdue
+  // mirror on today: completing a future occurrence would complete the
+  // current next_due instead (markHabitDone always completes the
+  // habit's current due date, stamped today).
   // Automatic habits validate themselves — no Done button, just the badge.
   if (ev.is_auto) {
-    return `<div class="cal-row">
+    return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
       <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong></span>
       <span class="habit-auto-badge">${lucideIcon('zap', 12)} ${t('habits.auto_badge')}</span>
     </div>`;
   }
   const isNextDue = ev.next_due && dateStr === ev.next_due;
-  const doneAttrs = isNextDue
+  // The overdue mirror on today is also completable: marking it done
+  // validates the habit today (markHabitDone completes with today's
+  // date and recomputes next_due from it).
+  const canComplete = isNextDue || ev.dueToday;
+  const doneAttrs = canComplete
     ? `title="${t('common.done')}"`
     : `disabled title="${esc(t('calendar.only_next_due'))}"`;
-  return `<div class="cal-row">
+  return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
     <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong></span>
     <button class="habit-done-btn" data-habit-id="${esc(ev.id)}" data-action="calendar-habit-done"
       data-date="${dateStr}" ${doneAttrs}>

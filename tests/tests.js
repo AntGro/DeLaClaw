@@ -4173,6 +4173,26 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         { frequency_rule: 'every_N_days:2', next_due: '2026-09-01' }, '2026-10-01', '2026-10-31', every2);
       assert(occ[0] === '2026-10-01', 'fast-forward lands on Oct 1, got ' + occ[0]);
 
+      // Overdue (today given): due date + today + cadence stepped
+      // from today — the occurrences in between are NOT projected.
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-11' }, '2026-10-01', '2026-10-31', every2, '2026-10-21');
+      assert(JSON.stringify(occ) === JSON.stringify(['2026-10-11', '2026-10-21', '2026-10-23', '2026-10-25', '2026-10-27', '2026-10-29', '2026-10-31']),
+        'overdue: due date, today, then from-today cadence, got ' + occ.join(','));
+      // Same overdue habit viewed in a past month: nothing at all
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-11' }, '2026-09-01', '2026-09-30', every2, '2026-10-21');
+      assert(occ.length === 0, 'overdue habit shows nothing in a past month, got ' + occ.join(','));
+      // Not overdue (next_due ahead of today): normal projection, no today mirror
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-25' }, '2026-10-01', '2026-10-31', every2, '2026-10-21');
+      assert(occ[0] === '2026-10-25' && !occ.includes('2026-10-21'), 'future next_due keeps the normal projection');
+      // Overdue with an end date: from-today cadence still caps at end_date
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-11', end_date: '2026-10-24' }, '2026-10-01', '2026-10-31', every2, '2026-10-21');
+      assert(JSON.stringify(occ) === JSON.stringify(['2026-10-11', '2026-10-21', '2026-10-23']),
+        'overdue + end_date caps the from-today cadence, got ' + occ.join(','));
+
       // No next_due: starts from the function's first occurrence
       occ = expandHabitOccurrences(
         { frequency_rule: 'every_N_days:2', next_due: null }, '2026-10-01', '2026-10-31', every2);
@@ -6473,6 +6493,25 @@ test('share popover is viewport-bound with scrollable group and member lists', (
           `${name} must set --cat-on-color on both its bucket cards and its section blocks`);
         assert(src.includes('onColorFor,'), `${name} must import onColorFor from utils`);
       }
+    });
+
+    test('calendar: overdue habits and todos mirror onto today, dashed-red highlight', () => {
+      const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+      assert(cal.includes('(r, lastDone) => computeNextDue(r, lastDone),\n      today,'),
+        'calendar must pass today into expandHabitOccurrences for the overdue model');
+      assert(cal.includes('overdue: true, dueToday: true'),
+        'overdue items must be mirrored onto today with overdue + dueToday flags');
+      assert(cal.includes('const canComplete = isNextDue || ev.dueToday;'),
+        "the habit done button must be enabled on today's overdue mirror");
+      assert(cal.includes('cal-chip-overdue') && cal.includes('cal-row-overdue'),
+        'chips and day-panel rows must carry the overdue highlight class');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.cal-row-overdue { border-color: var(--red); border-style: dashed; }'),
+        'overdue day-panel rows get a red dashed border');
+      assert(css.includes('.cal-chip-overdue { outline: 1px dashed var(--red);'),
+        'overdue grid chips get a red dashed outline');
+      assert(css.includes('.cal-row .habit-done-btn {') && css.includes('border-radius: 50%;'),
+        'the calendar habit done button is a styled round button');
     });
 
     test('sections-pure: runBucketToSectionMigration — checked writes, flip last, rollback on flip failure', async () => {

@@ -2325,6 +2325,7 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
   overflow: hidden;
   min-width: 0;
 }
+.cal-chip-overdue { outline: 1px dashed var(--red); outline-offset: -1px; }
 .cal-chip > i, .cal-chip > img { margin-top: 4px; }
 .cal-chip > span {
   display: -webkit-box;
@@ -2457,6 +2458,22 @@ button.cal-row { cursor: pointer; }
   justify-content: center;
 }
 .cal-row .habit-done-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+/* Habit done button in calendar rows: a proper round button (the
+   global .habit-done-btn is a text pill on the Habits page and left
+   this icon-only button effectively unstyled here). */
+.cal-row .habit-done-btn {
+  width: 40px; height: 40px; min-width: 40px; min-height: 40px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, #22c55e 55%, transparent);
+  background: color-mix(in srgb, #22c55e 12%, transparent);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.cal-row .habit-done-btn:hover { background: color-mix(in srgb, #22c55e 24%, transparent); border-color: #22c55e; }
+.cal-row .habit-done-btn:disabled { background: transparent; border-color: var(--border); }
+/* Overdue items (due-date instance and today's mirror) are flagged
+   with a red dashed border in the day panel and in grid chips. */
+.cal-row-overdue { border-color: var(--red); border-style: dashed; }
 
 /* Delete button inside modals */
 .modal-actions .modal-delete {

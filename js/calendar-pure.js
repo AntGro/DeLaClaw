@@ -103,7 +103,7 @@ export function getMonthGrid(year, month) {
  * stays pure (the app passes a wrapper around computeNextDue).
  * Free-text / missing rules pin a single occurrence on next_due when in range.
  */
-export function expandHabitOccurrences(habit, monthStart, monthEnd, nextDueFn) {
+export function expandHabitOccurrences(habit, monthStart, monthEnd, nextDueFn, todayStr = null) {
   const out = [];
   const rule = habit.frequency_rule || '';
   // End date: no occurrence is ever shown strictly past it (an occurrence
@@ -111,6 +111,27 @@ export function expandHabitOccurrences(habit, monthStart, monthEnd, nextDueFn) {
   // stepping also stops there instead of walking to monthEnd.
   const endDate = (habit.end_date || '').slice(0, 10);
   const limit = endDate && endDate < monthEnd ? endDate : monthEnd;
+  // Overdue (next due in the past, todayStr provided): the occurrences
+  // between the due date and today will never happen — validating the
+  // habit makes today its last completion and the following dues are
+  // recomputed from today. So show exactly: the due date itself,
+  // today, and the cadence stepped from today. (Without todayStr the
+  // historical projection below is kept — other callers rely on it.)
+  const nd0 = (habit.next_due || '').slice(0, 10);
+  if (todayStr && nd0 && nd0 < todayStr && nd0 <= limit) {
+    if (nd0 >= monthStart) out.push(nd0);
+    if (todayStr >= monthStart && todayStr <= monthEnd) out.push(todayStr);
+    let cursor = todayStr;
+    let guard = 0;
+    while (guard++ < 500) {
+      const n = nextDueFn(rule, cursor);
+      const ns = n ? String(n).slice(0, 10) : null;
+      if (!ns || ns <= cursor || ns > limit) break;
+      cursor = ns;
+      if (cursor >= monthStart) out.push(cursor);
+    }
+    return out;
+  }
   if (!rule) {
     const nd = (habit.next_due || '').slice(0, 10);
     if (nd && nd >= monthStart && nd <= limit) out.push(nd);

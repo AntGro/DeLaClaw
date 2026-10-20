@@ -343,7 +343,9 @@ async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag, 
   }
   if (!resp.ok) {
     const errText = await resp.text();
-    throw new Error(`Drive upload failed: ${resp.status} ${errText}`);
+    const err = new Error(`Drive upload failed: ${resp.status} ${errText}`);
+    err.code = resp.status;
+    throw err;
   }
 
   const result = await resp.json();
@@ -980,6 +982,17 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
               ? reconcileItems(localData, Array.isArray(remoteData) ? remoteData : [], intents)
               : mergeTable(table, localData, Array.isArray(remoteData) ? remoteData : []);
             fileMeta[table] = { ...meta, etag: newEtag };
+            flushingTables.delete(table);
+            delete flushPromises[table];
+            return flushTable(table, retries + 1, keepalive);
+          }
+          if (err.code === 404 && meta.fileId && retries < MAX_RETRIES) {
+            // The tracked file no longer exists (deleted by a migration,
+            // another client, or in the Drive UI): drop the stale meta
+            // and retry as a create. Without this, every debounced flush
+            // PATCHes the dead id and fails forever.
+            console.warn(`Drive: file for ${table} not found, recreating it`);
+            fileMeta[table] = { fileId: null, etag: null, modifiedTime: null, size: 0 };
             flushingTables.delete(table);
             delete flushPromises[table];
             return flushTable(table, retries + 1, keepalive);

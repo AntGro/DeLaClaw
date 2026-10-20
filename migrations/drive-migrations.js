@@ -232,6 +232,13 @@ export const DRIVE_MIGRATIONS = {
       const file = ctx.filesByName.get(name);
       if (file) await ctx.deleteFile(tok, file.id);
     }
+    // The adapter tracks file ids per table: forget the deleted files,
+    // or a later flush keeps PATCHing a dead id and fails forever
+    // (agent_grants comes back in 2.0.10, so its flush is guaranteed).
+    if (ctx.fileMeta) {
+      ctx.fileMeta.nvidia_usage = { fileId: null, etag: null, modifiedTime: null, size: 0 };
+      ctx.fileMeta.agent_grants = { fileId: null, etag: null, modifiedTime: null, size: 0 };
+    }
   },
 
   '2.0.10': async (store) => {

@@ -6495,6 +6495,18 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
+    test('drive: a vanished table file self-heals instead of looping on 404', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters', 'drive.js'), 'utf-8');
+      assert(drive.includes('err.code = resp.status;'),
+        'uploadFile must surface the HTTP status on the thrown error');
+      assert(drive.includes('err.code === 404 && meta.fileId && retries < MAX_RETRIES')
+        && drive.includes('file for ${table} not found, recreating it'),
+        'flushTable must drop stale file meta and retry as a create on 404');
+      const migrations = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(migrations.includes('ctx.fileMeta.agent_grants = { fileId: null'),
+        'migration 2.0.9 must forget the file ids it deletes (agent_grants returns in 2.0.10)');
+    });
+
     test('calendar: overdue habits and todos mirror onto today, dashed-red highlight', () => {
       const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
       assert(cal.includes('(r, lastDone) => computeNextDue(r, lastDone),\n      today,'),

@@ -378,3 +378,34 @@ export function layoutLevel(nodes, maxCols) {
 export function footprintCols(node, maxCols) {
   return createLayoutEngine().footprintCols(node, maxCols);
 }
+
+/**
+ * The write sequence of a bucket → section conversion, after the '*'
+ * bucket has been inserted: move every item to the '*' bucket in ONE
+ * bulk update, then flip the original row to kind 'section'.
+ *
+ * No adapter offers multi-statement transactions, so safety comes
+ * from ordering and checks instead: every result is checked, the
+ * kind flip is last, and if the flip fails the items are bulk-moved
+ * back and the '*' bucket is deleted (best effort) before the
+ * original error is rethrown. Without this, a silent mid-sequence
+ * failure could leave items pointing at a section row, which the
+ * renderer never draws — the items would vanish from the page.
+ *
+ * spec: { categoryTable, itemTable, itemFk, categoryId, starId,
+ *         itemPatch, itemRollbackPatch, flipPatch }
+ * Patches are full update payloads (they include the FK field);
+ * itemFk names the column matched by the bulk updates' .eq().
+ */
+export async function runBucketToSectionMigration(db, spec) {
+  const { categoryTable, itemTable, itemFk, categoryId, starId, itemPatch, itemRollbackPatch, flipPatch } = spec;
+  const move = await db.from(itemTable).update(itemPatch).eq(itemFk, categoryId);
+  if (move.error) throw move.error;
+  const flip = await db.from(categoryTable).update(flipPatch).eq('id', categoryId);
+  if (!flip.error) return;
+  try {
+    await db.from(itemTable).update(itemRollbackPatch).eq(itemFk, starId);
+    await db.from(categoryTable).delete().eq('id', starId);
+  } catch (_) { /* best effort — the flip error is the one that matters */ }
+  throw flip.error;
+}

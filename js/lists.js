@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, applySectionGrid, truncateWithShowMore, fetchAll, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
-import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove } from './sections-pure.js';
+import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration } from './sections-pure.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
@@ -84,13 +84,19 @@ async function convertListBucketToSection(list) {
   }).select();
   if (error) throw error;
   const starId = data?.[0]?.id;
-  if (starId) {
-    await state.db.from('list_items').update({ list_id: starId }).eq('list_id', list.id);
-    (state.allLists = state.allLists || []).push(normalizeSectionFields(data[0]));
-  }
-  await state.db.from('lists').update({ kind: 'section', updated_at: new Date().toISOString() }).eq('id', list.id);
+  // Abort without flipping kind if the '*' bucket is missing — see
+  // convertTodoBucketToSection.
+  if (!starId) throw new Error('section-convert-star-missing');
+  await runBucketToSectionMigration(state.db, {
+    categoryTable: 'lists', itemTable: 'list_items', itemFk: 'list_id',
+    categoryId: list.id, starId,
+    itemPatch: { list_id: starId },
+    itemRollbackPatch: { list_id: list.id },
+    flipPatch: { kind: 'section', updated_at: new Date().toISOString() },
+  });
+  // Local state only changes once the database sequence succeeded.
+  (state.allLists = state.allLists || []).push(normalizeSectionFields(data[0]));
   list.kind = 'section';
-  list.shortname = null;
   rebuildListTree();
 }
 

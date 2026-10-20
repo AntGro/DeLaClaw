@@ -6475,6 +6475,64 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
+    test('sections-pure: runBucketToSectionMigration — checked writes, flip last, rollback on flip failure', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const spec = {
+        categoryTable: 'todo_categories', itemTable: 'todos', itemFk: 'category_id',
+        categoryId: 'CAT', starId: 'STAR',
+        itemPatch: { category_id: 'STAR', category: '*' },
+        itemRollbackPatch: { category_id: 'CAT', category: 'Reading' },
+        flipPatch: { kind: 'section' },
+      };
+      // Fake query-builder db: records calls, fails the Nth call when failAt > 0.
+      const fakeDb = (failAt) => {
+        const calls = [];
+        const record = (entry) => { calls.push(entry); return Promise.resolve({ error: calls.length === failAt ? new Error('injected-' + calls.length) : null }); };
+        return {
+          calls,
+          from: (table) => ({
+            update: (patch) => ({ eq: (col, val) => record({ op: 'update', table, patch, col, val }) }),
+            delete: () => ({ eq: (col, val) => record({ op: 'delete', table, col, val }) }),
+          }),
+        };
+      };
+      // Success: bulk move, then flip — exactly two writes, in order.
+      let db = fakeDb(0);
+      await m.runBucketToSectionMigration(db, spec);
+      assert(db.calls.length === 2, 'success path must be exactly two writes');
+      assert(db.calls[0].table === 'todos' && db.calls[0].col === 'category_id' && db.calls[0].val === 'CAT'
+        && db.calls[0].patch.category_id === 'STAR', 'first write bulk-moves the items to the star bucket');
+      assert(db.calls[1].table === 'todo_categories' && db.calls[1].patch.kind === 'section',
+        'the kind flip is the last write');
+      // Move fails: throws, and the flip is never attempted.
+      db = fakeDb(1);
+      let threw = null;
+      try { await m.runBucketToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 1, 'a failed move must abort before the kind flip');
+      // Flip fails: throws, after rolling back (items moved back, star deleted).
+      db = fakeDb(2);
+      threw = null;
+      try { await m.runBucketToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 4, 'a failed flip must roll back before rethrowing');
+      assert(db.calls[2].op === 'update' && db.calls[2].table === 'todos' && db.calls[2].col === 'category_id'
+        && db.calls[2].val === 'STAR' && db.calls[2].patch.category_id === 'CAT',
+        'rollback bulk-moves the items back to the original bucket');
+      assert(db.calls[3].op === 'delete' && db.calls[3].table === 'todo_categories' && db.calls[3].val === 'STAR',
+        'rollback deletes the star bucket');
+      // Views are wired to the helper, with no per-item loop left.
+      for (const [name, src] of [
+        ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8')],
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8')],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8')],
+      ]) {
+        assert(src.includes('runBucketToSectionMigration(state.db'), `${name} conversion must run through the checked migration helper`);
+        assert(src.includes("throw new Error('section-convert-star-missing')"), `${name} conversion must abort when the star bucket is missing`);
+      }
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(!listsSrc.includes('list.shortname = null;'),
+        'list conversion must not null the shortname in memory (sections keep short names since v2.25.0)');
+    });
+
     test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {
       const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
       const rows = [

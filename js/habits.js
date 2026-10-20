@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
-import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, orderKeyOf, compareOrderKeys } from './sections-pure.js';
+import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration, orderKeyOf, compareOrderKeys } from './sections-pure.js';
 import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder, bulkSortOrder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { pendingSharedNextDue as _pendingSharedNextDue } from './pending-next-due.js';
@@ -94,13 +94,16 @@ async function convertHabitBucketToSection(cat) {
   if (error) throw error;
   await loadHabitCategories();
   const star = habitChildRow(cat.id, '*');
-  if (star) {
-    const { data: items } = await state.db.from('habits').select('id').eq('category_id', cat.id);
-    for (const item of (items || [])) {
-      await state.db.from('habits').update({ category_id: star.id, category: '*' }).eq('id', item.id);
-    }
-  }
-  await state.db.from('habit_categories').update({ kind: 'section' }).eq('id', cat.id);
+  // Abort without flipping kind if the '*' bucket is missing — see
+  // convertTodoBucketToSection.
+  if (!star) throw new Error('section-convert-star-missing');
+  await runBucketToSectionMigration(state.db, {
+    categoryTable: 'habit_categories', itemTable: 'habits', itemFk: 'category_id',
+    categoryId: cat.id, starId: star.id,
+    itemPatch: { category_id: star.id, category: '*' },
+    itemRollbackPatch: { category_id: cat.id, category: cat.name },
+    flipPatch: { kind: 'section' },
+  });
   await loadHabitCategories();
 }
 

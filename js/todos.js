@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
-import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, orderKeyOf, compareOrderKeys } from './sections-pure.js';
+import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration, orderKeyOf, compareOrderKeys } from './sections-pure.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -93,13 +93,17 @@ async function convertTodoBucketToSection(cat) {
   if (error) throw error;
   await loadTodoCategories();
   const star = todoChildRow(cat.id, '*');
-  if (star) {
-    const { data: items } = await state.db.from('todos').select('id').eq('category_id', cat.id);
-    for (const item of (items || [])) {
-      await state.db.from('todos').update({ category_id: star.id, category: '*' }).eq('id', item.id);
-    }
-  }
-  await state.db.from('todo_categories').update({ kind: 'section' }).eq('id', cat.id);
+  // Without the '*' bucket there is nowhere safe to move the items;
+  // abort WITHOUT flipping kind (the bucket stays a bucket and its
+  // items stay visible) rather than orphaning them on a section.
+  if (!star) throw new Error('section-convert-star-missing');
+  await runBucketToSectionMigration(state.db, {
+    categoryTable: 'todo_categories', itemTable: 'todos', itemFk: 'category_id',
+    categoryId: cat.id, starId: star.id,
+    itemPatch: { category_id: star.id, category: '*' },
+    itemRollbackPatch: { category_id: cat.id, category: cat.name },
+    flipPatch: { kind: 'section' },
+  });
   await loadTodoCategories();
 }
 

@@ -6550,6 +6550,20 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const ctx2 = { getToken: async () => 'tok', filesByName: new Map(), downloadFile: async () => ({ data: [] }), deleteFile: async () => {} };
       await DRIVE_MIGRATIONS['2.9.17'](store2, ctx2);
       assert(store2.lists.length === 0, 'no wardrobe data → no Wardrobe section');
+      // Backup-restore path: the store itself carries the vestiaire
+      // tables and the Drive files are gone — the section must still
+      // be built, from the store.
+      const store3 = {
+        lists: [], list_items: [],
+        vestiaire_categories: files['vestiaire_categories.json'],
+        vestiaire: files['vestiaire.json'],
+      };
+      await DRIVE_MIGRATIONS['2.9.17'](store3, ctx2);
+      assert(store3.lists.some(l => l.id === 'vest_wardrobe' && l.kind === 'section'),
+        'restore path: Wardrobe section is built from the reseeded store');
+      assert(store3.list_items.find(i => i.id === 'vest_i1')?.list_id === 'vest_cat1',
+        'restore path: items land in their category list');
+      assert(!store3.vestiaire && !store3.vestiaire_categories, 'restore path: store vestiaire keys are dropped after migrating');
       // Local twin links the same rows in 2.23.0 (kind/parent_id arrive there)
       const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
       assert(local.includes("'vest_wardrobe_star', '*'") && local.includes('ELSE \'vest_wardrobe_star\''),

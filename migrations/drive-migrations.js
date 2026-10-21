@@ -276,8 +276,20 @@ export const DRIVE_MIGRATIONS = {
       if (v.note) note += (note ? '\n\n' : '') + v.note;
       return note;
     };
-    const cats = await readFile('vestiaire_categories.json');
-    const items = await readFile('vestiaire.json');
+    // Source of the wardrobe data: a backup restore reseeds the store
+    // with the backup's own vestiaire tables, while a plain upgrade
+    // never loads them (no longer in DRIVE_TABLES) — there the data
+    // still lives in the Drive files. Prefer the store when it
+    // carries rows; the files are the fallback. (Reading only the
+    // files made restores lose the wardrobe whenever vestiaire.json
+    // was no longer in the folder — e.g. deleted by an earlier
+    // migration run.)
+    const cats = (Array.isArray(store.vestiaire_categories) && store.vestiaire_categories.length)
+      ? store.vestiaire_categories
+      : await readFile('vestiaire_categories.json');
+    const items = (Array.isArray(store.vestiaire) && store.vestiaire.length)
+      ? store.vestiaire
+      : await readFile('vestiaire.json');
     store.lists = store.lists || [];
     store.list_items = store.list_items || [];
     const namedCats = cats.filter((c) => !c.is_protected && c.name);

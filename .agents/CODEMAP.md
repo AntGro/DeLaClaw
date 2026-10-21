@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-21T23:50:41.477Z from 50 modules (v2.28.0). Total LOC 36137. Do not hand-edit.
+> Generated 2026-10-21T23:58:58.493Z from 50 modules (v2.29.0). Total LOC 36179. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -28,7 +28,7 @@
 |--------|-----|--------|---------|------------|-------|
 | main | 3960 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
 | sharing-drive | 2525 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
-| i18n | 2448 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,calendar.js | pendingSet |
+| i18n | 2466 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,calendar.js | pendingSet |
 | drive | 1561 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | item-utils | 1358 | - | db,i18n,icons,state | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
 | sharing-ui | 1235 | habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | calendar.js,groups.js,habits.js,lists.js | esc:38,guard+pendingSet,window:8 |
@@ -46,10 +46,10 @@
 | calendar-pure | 228 | - |  | calendar-sync.js,calendar.js,frequency-rule.js,habits.js | - |
 | sharing-file-reconcile | 217 | - |  | drive.js,sharing-drive.js | - |
 | scene-parse | 215 | text_line_progress,texts |  | flashcards.js | - |
+| groups | 214 | - | i18n,icons,sharing-ui,state | main.js | esc:3,window:4 |
 | frequency-rule | 213 | - | calendar-pure | habit-import.js,habits.js | - |
 | icons | 212 | - |  | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
-| groups | 202 | - | i18n,icons,sharing-ui,state | main.js | esc:3,window:4 |
-| agents-ui | 200 | agent_grants | db,i18n,icons,utils | main.js | esc:29,window:5 |
+| agents-ui | 207 | agent_grants | db,i18n,icons,state | main.js | esc:31,window:5 |
 | storm3d | 185 | - |  | hero.js | - |
 | sharing | 179 | - | offline-cache,sharing-drive,sharing-envelope,sharing-interface | - | - |
 | rest | 162 | x |  | main.js | - |
@@ -62,7 +62,7 @@
 | daily-visits | 77 | - |  | main.js | - |
 | sharing-envelope | 67 | - |  | sharing-drive.js,sharing-ui.js,sharing.js | - |
 | drive-backup-policy | 67 | - | ../migrations/version-compare.js,./../migrations/version-compare | drive.js | - |
-| state | 52 | - | db | batch-import.js,birthdays.js,calendar-sync.js,calendar.js | window:1 |
+| state | 57 | - | db | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | window:1 |
 | drive-folders | 43 | - |  | calendar-sync.js,drive.js,main.js,sharing-drive.js | - |
 | pending-next-due | 32 | - |  | habits.js | - |
 | bootstrap | 26 | - |  | - | - |

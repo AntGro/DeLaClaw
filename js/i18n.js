@@ -588,6 +588,12 @@ const T = {
       updated_m_ago: 'Updated {0}m ago',
       updated_h_ago: 'Updated {0}h ago',
     },
+    coming_soon: {
+      groups_title: 'Groups are coming soon',
+      groups_hint: 'We are putting the finishing touches on group sharing. It will be available in an upcoming release.',
+      agents_title: 'Agents are coming soon',
+      agents_hint: 'Agent access is still being finished. It will be available in an upcoming release.',
+    },
     sharing: {
       groups: 'Groups',
       create_group: 'Create a group',
@@ -1378,6 +1384,12 @@ const T = {
       updated_s_ago: 'Mis \u00e0 jour il y a {0}s',
       updated_m_ago: 'Mis \u00e0 jour il y a {0} min',
       updated_h_ago: 'Mis \u00e0 jour il y a {0}h',
+    },
+    coming_soon: {
+      groups_title: 'Les groupes arrivent bientôt',
+      groups_hint: 'Nous mettons la touche finale au partage en groupe. Il sera disponible dans une prochaine version.',
+      agents_title: 'Les agents arrivent bientôt',
+      agents_hint: 'L’accès des agents est encore en cours de finalisation. Il sera disponible dans une prochaine version.',
     },
     sharing: {
       groups: 'Groupes',
@@ -2170,6 +2182,12 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       updated_s_ago: 'Actualizado hace {0}s',
       updated_m_ago: 'Actualizado hace {0} min',
       updated_h_ago: 'Actualizado hace {0}h',
+    },
+    coming_soon: {
+      groups_title: 'Los grupos llegarán pronto',
+      groups_hint: 'Estamos dando los últimos toques al uso compartido en grupo. Estará disponible en una próxima versión.',
+      agents_title: 'Los agentes llegarán pronto',
+      agents_hint: 'El acceso de agentes aún se está finalizando. Estará disponible en una próxima versión.',
     },
     sharing: {
       groups: 'Grupos',

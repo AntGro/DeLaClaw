@@ -1,5 +1,5 @@
 import { lucideIcon } from './icons.js';
-import state from './state.js';
+import state, { COMING_SOON } from './state.js';
 import { esc } from './utils.js';
 import { t } from './i18n.js';
 import { sharingGroupCardHtml, visibleMembers } from './sharing-ui.js';
@@ -147,6 +147,18 @@ function groupListItemHtml(group, selected) {
 export async function renderGroups() {
   const container = document.getElementById('groupsView');
   if (!container) return;
+
+  // Release gate: group handling is not ready yet — show a coming
+  // soon message instead of the management UI. Sharing logic and
+  // existing groups are untouched; only this interface is hidden.
+  if (COMING_SOON.groups) {
+    container.innerHTML = `<div class="page-empty-state">
+      <div class="empty-icon">${lucideIcon('users', 48, 'var(--muted)')}</div>
+      <h3>${t('coming_soon.groups_title')}</h3>
+      <p>${t('coming_soon.groups_hint')}</p>
+    </div>`;
+    return;
+  }
 
   const activeMode = localStorage.getItem('claw_cc_active_mode');
 

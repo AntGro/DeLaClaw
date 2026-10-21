@@ -6,6 +6,7 @@
 // tokens are issued and revocable now; connection instructions follow.
 // ===================================================================
 import db from './db.js';
+import { COMING_SOON } from './state.js';
 import { t } from './i18n.js';
 import { esc, showToast, showConfirmAction } from './utils.js';
 import { lucideIcon, brandFileIcon } from './icons.js';
@@ -49,6 +50,12 @@ async function fetchGrants() {
 export async function renderAgentsPane() {
   const container = document.getElementById('agentsPaneContent');
   if (!container) return;
+  // Release gate: agents are not ready yet — show a coming soon
+  // message instead of the management UI (logic untouched).
+  if (COMING_SOON.agents) {
+    container.innerHTML = `<div class="page-empty-state"><div class="page-empty-icon">${lucideIcon('bot',28)}</div><h3>${esc(t('coming_soon.agents_title'))}</h3><p class="setting-hint">${esc(t('coming_soon.agents_hint'))}</p></div>`;
+    return;
+  }
   if (localStorage.getItem('claw_cc_active_mode')==='demo') {
     container.innerHTML = `<div class="page-empty-state"><div class="page-empty-icon">${lucideIcon('bot',28)}</div><h3>${esc(t('agents.no_tokens'))}</h3><p class="setting-hint">${esc(t('agents.demo_not_supported'))}</p></div>`;
     return;

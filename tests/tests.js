@@ -6657,6 +6657,28 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'habit delete confirm must render the habit name with renderMd');
     });
 
+    test('release gate: groups and agents show coming soon, logic untouched', () => {
+      const state = fs.readFileSync(path.join(JS_DIR, 'state.js'), 'utf-8');
+      assert(state.includes('export const COMING_SOON = { groups: true, agents: true };'),
+        'the release gate flags must live in state.js, both on');
+      const groups = fs.readFileSync(path.join(JS_DIR, 'groups.js'), 'utf-8');
+      const gateAt = groups.indexOf('if (COMING_SOON.groups) {');
+      assert(gateAt !== -1 && gateAt < groups.indexOf("activeMode === 'demo'"),
+        'renderGroups must render the coming soon state before any group UI');
+      assert(groups.includes("t('coming_soon.groups_title')") && groups.includes("t('coming_soon.groups_hint')"),
+        'the groups gate must use the coming_soon i18n strings');
+      const agents = fs.readFileSync(path.join(JS_DIR, 'agents-ui.js'), 'utf-8');
+      const aGateAt = agents.indexOf('if (COMING_SOON.agents) {');
+      assert(aGateAt !== -1 && aGateAt < agents.indexOf("==='demo'"),
+        'renderAgentsPane must render the coming soon state before any agent UI');
+      assert(agents.includes("t('coming_soon.agents_title')") && agents.includes("t('coming_soon.agents_hint')"),
+        'the agents gate must use the coming_soon i18n strings');
+      const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      for (const key of ['groups_title', 'groups_hint', 'agents_title', 'agents_hint']) {
+        assert(i18n.split(`${key}:`).length - 1 >= 3, `coming_soon.${key} must exist in EN, FR and ES`);
+      }
+    });
+
     test('calendar: view granularity and type filters persist per device', () => {
       const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
       assert(cal.includes("JSON.parse(localStorage.getItem(CALENDAR_PREFS_KEY))"),

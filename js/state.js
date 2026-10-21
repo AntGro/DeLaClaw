@@ -37,6 +37,11 @@ export const IDEAS_KEY = 'claw_cc_ideas';
 export const THEME_KEY = 'claw_cc_theme';
 export const CURRENT_VIEW_KEY = 'claw_cc_current_view';
 export const CALENDAR_PREFS_KEY = 'claw_cc_calendar_prefs';
+
+// Release gate: unfinished features render a "coming soon" message
+// instead of their UI. The underlying logic is untouched — flip a
+// flag to false to re-enable the feature's interface.
+export const COMING_SOON = { groups: true, agents: true };
 // Security note: credentials are never persisted — only URL and mode are stored.
 // Keys/secrets are held in memory (and cleared on disconnect).
 export const STAY_CONNECTED_KEY = 'claw_cc_stay_connected';

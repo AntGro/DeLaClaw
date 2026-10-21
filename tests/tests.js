@@ -6657,6 +6657,21 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'habit delete confirm must render the habit name with renderMd');
     });
 
+    test('calendar week view: narrow screens wrap to two rows with chips, not dots', () => {
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.cal-week-page { grid-template-columns: repeat(4, minmax(0, 1fr)); }'),
+        'narrow week view must lay the 7 days out as 4 + 3');
+      assert(css.includes('.cal-week-page .cal-chips { display: flex; }') && css.includes('.cal-week-page .cal-dots { display: none; }'),
+        'narrow week cells must show chips instead of dots');
+      assert(css.includes('#calendarGrid:has(> .cal-week-page) .cal-weekdays { display: none; }'),
+        'the 7-column weekday header must hide when the week grid wraps');
+      assert(css.includes('.cal-week-page .cal-day-dow { display: block; }'),
+        'the in-cell weekday label must appear in the wrapped layout');
+      const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+      assert(cal.includes('dayCellHTML(date, true, events, names[i])'),
+        'week cells must receive their weekday label');
+    });
+
     test('calendar: overdue habits and todos mirror onto today, dashed-red highlight', () => {
       const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
       assert(cal.includes('(r, lastDone) => computeNextDue(r, lastDone),\n      today,'),

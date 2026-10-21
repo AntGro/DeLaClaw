@@ -227,16 +227,21 @@ function armCalendarResize() {
   });
 }
 
-function dayCellHTML(date, inMonth, events) {
+function dayCellHTML(date, inMonth, events, dowLabel) {
   const dayNum = parseInt(date.slice(8, 10), 10);
   const evs = events.get(date) || [];
   const chips = evs.map((e, i) => chipHTML(e, i >= MAX_CHIPS)).join('');
   const more = evs.length > MAX_CHIPS
     ? `<span class="cal-more">+${evs.length - MAX_CHIPS}</span>` : '';
   const dots = evs.slice(0, 5).map(e => `<i class="cal-dot cal-${e.type}"></i>`).join('');
+  // Week view passes its weekday label: on narrow screens the week
+  // grid wraps to two rows, the 7-column header no longer aligns,
+  // and the weekday is shown inside the cell instead (CSS reveals
+  // .cal-day-dow only in that layout).
+  const dow = dowLabel ? `<span class="cal-day-dow">${esc(dowLabel)}</span>` : '';
   return `<button class="cal-day${inMonth ? '' : ' cal-out'}${date === todayStr() ? ' cal-today' : ''}"
       data-action="open-calendar-day" data-date="${date}">
-    <span class="cal-day-num">${dayNum}</span>
+    <span class="cal-day-num">${dayNum}</span>${dow}
     <span class="cal-chips">${chips}${more}</span>
     <span class="cal-dots">${dots}</span>
   </button>`;
@@ -361,9 +366,10 @@ function renderMonthView(grid) {
 function renderWeekView(grid) {
   const dates = getWeekDates(calDate);
   const events = collectRangeEvents(dates[0], dates[6]);
-  let html = `<div class="cal-weekdays">${weekdayNames().map(w => `<span>${esc(w)}</span>`).join('')}</div>`;
+  const names = weekdayNames();
+  let html = `<div class="cal-weekdays">${names.map(w => `<span>${esc(w)}</span>`).join('')}</div>`;
   html += '<div class="cal-week cal-week-page">';
-  for (const date of dates) html += dayCellHTML(date, true, events);
+  dates.forEach((date, i) => { html += dayCellHTML(date, true, events, names[i]); });
   html += '</div>';
   grid.innerHTML = html;
 }

@@ -2353,6 +2353,17 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
   color: var(--muted);
   padding-left: 6px;
 }
+/* Weekday label inside a week-view cell: hidden except in the
+   narrow two-row week layout, where the header row is hidden. */
+.cal-day-dow {
+  display: none;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
 .cal-dots { display: none; }
 
 /* Add (+) dropdown menu */
@@ -2515,6 +2526,17 @@ button.cal-row { cursor: pointer; }
   .cal-dot.cal-birthday { background: var(--pink); }
   .cal-day-num { font-size: 0.75rem; }
   .calendar-month-label { font-size: 0.95rem; }
+  /* Week view on narrow screens: days wrap over two rows (4 + 3) so
+     each cell is wide enough to show chips again instead of dots.
+     The 7-column weekday header no longer aligns with the wrapped
+     grid, so it is hidden and each cell shows its weekday instead. */
+  #calendarGrid:has(> .cal-week-page) .cal-weekdays { display: none; }
+  .cal-week-page { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .cal-week-page .cal-day { min-height: 118px; padding: 6px; align-items: stretch; }
+  .cal-week-page .cal-chips { display: flex; }
+  .cal-week-page .cal-more { display: block; }
+  .cal-week-page .cal-dots { display: none; }
+  .cal-week-page .cal-day-dow { display: block; }
 }
 
 /* Calendar: chip avatars + day-panel header */

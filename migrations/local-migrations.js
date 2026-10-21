@@ -1,6 +1,8 @@
 // ===================================================================
 // LOCAL MIGRATIONS — SQLite DDL/DML for the Bun+SQLite backend
 // ===================================================================
+
+import { recomputeNextDueForMigration } from '../js/frequency-rule.js';
 // Each key is a version string. Migrations run in version order on
 // server startup when schema_version is behind.
 //
@@ -17,6 +19,9 @@
 //   2. The value is a SQL string — can contain multiple statements
 //   3. Do NOT include schema_version bump — the runner handles it
 //   4. Use SQLite-compatible syntax (not Postgres)
+//   (Exception: a value may be a JS function (db) => {} for data
+//   transforms SQL cannot express — the runner calls it inside the
+//   same transaction. 2.27.0 is the first.)
 //
 // Example:
 //   '1.140': `
@@ -596,4 +601,25 @@ export const LOCAL_MIGRATIONS = {
     UPDATE lists SET parent_id = 'vest_wardrobe'
     WHERE substr(id, 1, 5) = 'vest_' AND id <> 'vest_wardrobe';
   `,
+  // 2.27.0: recompute habits.next_due from (rule, latest completion) —
+  // same decision as the Drive migration, via the shared
+  // recomputeNextDueForMigration (js/frequency-rule.js). JS function
+  // migration: the runner calls it with the db handle, in the
+  // migration transaction.
+  '2.27.0': (db) => {
+    const habits = db.prepare('SELECT id, frequency_rule, next_due, end_date FROM habits').all();
+    const latestByHabit = new Map();
+    for (const c of db.prepare('SELECT habit_id, completed_at FROM habit_completions').all()) {
+      const ts = Date.parse(c.completed_at) || 0;
+      const cur = latestByHabit.get(c.habit_id);
+      if (!cur || ts >= cur.ts) latestByHabit.set(c.habit_id, { raw: c.completed_at, ts });
+    }
+    const upd = db.prepare('UPDATE habits SET next_due = ?, is_finished = ? WHERE id = ?');
+    for (const h of habits) {
+      const latest = latestByHabit.get(h.id);
+      const result = recomputeNextDueForMigration(h, latest ? latest.raw : null);
+      if (!result) continue;
+      upd.run(result.next_due, result.is_finished, h.id);
+    }
+  },
 };

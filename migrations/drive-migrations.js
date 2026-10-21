@@ -16,6 +16,7 @@
 // Drive files themselves (like the legacy format conversion below).
 //
 import { toLocalDateString, prevDay, nextDay } from '../js/daily-visits.js';
+import { recomputeNextDueForMigration } from '../js/frequency-rule.js';
 // After each migration:
 //   1. schema_version is bumped in the in-memory settings (never by the
 //      migration itself — see rule 5 below)
@@ -427,6 +428,28 @@ export const DRIVE_MIGRATIONS = {
         if (row.kind == null) row.kind = 'bucket';
         if (row.parent_id === undefined) row.parent_id = null;
       }
+    }
+  },
+  '2.27.0': async (store) => {
+    // 2.27.0: recompute habits.next_due from (rule, latest completion).
+    // Rule fixes since v1.651 (local-date parsing of the last-done base,
+    // monthly rule normalization) mean long-untouched habits can carry a
+    // next_due the current code would never produce. The per-habit
+    // decision (skip free-text / completion-less habits, never move a
+    // due date earlier than stored, finished follows the value) lives
+    // in recomputeNextDueForMigration — shared with the local backend.
+    const latestByHabit = new Map();
+    for (const c of store.habit_completions || []) {
+      const ts = Date.parse(c.completed_at) || 0;
+      const cur = latestByHabit.get(c.habit_id);
+      if (!cur || ts >= cur.ts) latestByHabit.set(c.habit_id, { raw: c.completed_at, ts });
+    }
+    for (const h of store.habits || []) {
+      const latest = latestByHabit.get(h.id);
+      const result = recomputeNextDueForMigration(h, latest ? latest.raw : null);
+      if (!result) continue;
+      h.next_due = result.next_due;
+      h.is_finished = result.is_finished;
     }
   },
 };

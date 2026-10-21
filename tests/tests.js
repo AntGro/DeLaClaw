@@ -4594,10 +4594,10 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     });
 
     test('computeNextDue: no today-clamp — stale habits stay overdue', () => {
-      const habits = jsFiles['habits.js'];
-      assert(!habits.includes('< today ? localDateStr(today)'),
+      const freq = jsFiles['frequency-rule.js'];
+      assert(!freq.includes('< today ? localDateStr(today)'),
         'computeNextDue must not clamp past due dates to today; the overdue UI state exists for exactly this');
-      assert(habits.includes('a habit neglected for more than one period is overdue'),
+      assert(freq.includes('a habit neglected for more than one period is overdue'),
         'computeNextDue must document that past dates are intentional');
     });
 
@@ -4614,12 +4614,13 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('next_due: no raw new Date() parse of date-only values remains', () => {
       const habits = jsFiles['habits.js'];
+      const freq = jsFiles['frequency-rule.js'];
       const welcome = jsFiles['welcome.js'];
       const main = jsFiles['main.js'];
       const demo = jsFiles['demo-data.js'];
-      assert(habits.includes('parseLocalDate(lastDoneDate)'),
+      assert(freq.includes('parseLocalDate(lastDoneDate)'),
         'computeNextDue must parse its base through parseLocalDate');
-      assert(!habits.includes('new Date(lastDoneDate)'),
+      assert(!freq.includes('new Date(lastDoneDate)') && !habits.includes('new Date(lastDoneDate)'),
         'computeNextDue must not raw-parse a possibly date-only lastDoneDate (UTC-midnight shift west of UTC)');
       assert(!habits.includes('new Date(habit.next_due)'),
         'habitDueStatus/formatHabitDue must parse next_due through parseLocalDate');
@@ -6571,6 +6572,76 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(local.includes("UPDATE lists SET kind = 'section' WHERE id = 'vest_wardrobe';")
         && local.includes("UPDATE lists SET parent_id = 'vest_wardrobe'"),
         'local 2.23.0 promotes the Wardrobe row to a section and nests the vest_* lists');
+    });
+
+    test('migration 2.27.0: habit next_due recompute (helper, Drive and Local)', async () => {
+      const freq = await import(pathToFileURL(path.join(JS_DIR, 'frequency-rule.js')).href);
+      const { recomputeNextDueForMigration } = freq;
+      assert(typeof recomputeNextDueForMigration === 'function', 'frequency-rule must export the migration recompute helper');
+      assert(typeof freq.computeNextDue === 'function', 'computeNextDue must live in frequency-rule.js (single source for migrations)');
+      // Stale too-early value (the west-of-UTC class of bug): weekly:Fri
+      // stored as Wednesday — recomputed from the Monday completion.
+      let r = recomputeNextDueForMigration(
+        { frequency_rule: 'weekly:Fri', next_due: '2026-10-14', end_date: null }, '2026-10-12T12:00:00.000Z');
+      assert(r && r.next_due === '2026-10-16' && r.is_finished === 0,
+        'stale early next_due must be corrected to the real Friday, got ' + JSON.stringify(r));
+      // Legitimate early-completion skip: stored LATER than f(rule,
+      // lastDone) — the migration must not resurrect the skipped day.
+      r = recomputeNextDueForMigration(
+        { frequency_rule: 'every_N_weeks:1:Fri', next_due: '2026-10-23', end_date: null }, '2026-10-14T12:00:00.000Z');
+      assert(r && r.next_due === '2026-10-23', 'an early-completion skip must be preserved, got ' + JSON.stringify(r));
+      // Finished: recomputed due strictly past end_date clears next_due.
+      r = recomputeNextDueForMigration(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-10', end_date: '2026-10-11' }, '2026-10-10T12:00:00.000Z');
+      assert(r && r.next_due === null && r.is_finished === 1,
+        'a recompute past end_date must finish the habit, got ' + JSON.stringify(r));
+      // Skips: free-text rule, and structured with no completion anchor.
+      assert(recomputeNextDueForMigration({ frequency_rule: 'Tous les mois', next_due: '2026-10-01' }, '2026-10-01T12:00:00.000Z') === null,
+        'free-text habits must be left alone');
+      assert(recomputeNextDueForMigration({ frequency_rule: 'every_N_days:1', next_due: '2026-10-01' }, null) === null,
+        'habits without completions must be left alone');
+
+      // Drive migration applies the helper over the store.
+      const { DRIVE_MIGRATIONS } = await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+      const store = {
+        habits: [
+          { id: 'h1', frequency_rule: 'weekly:Fri', next_due: '2026-10-14', end_date: null, is_finished: 0 },
+          { id: 'h2', frequency_rule: 'Tous les mois', next_due: '2026-09-01', end_date: null, is_finished: 0 },
+        ],
+        habit_completions: [
+          { habit_id: 'h1', completed_at: '2026-10-05T12:00:00.000Z' },
+          { habit_id: 'h1', completed_at: '2026-10-12T12:00:00.000Z' },
+          { habit_id: 'h2', completed_at: '2026-09-01T12:00:00.000Z' },
+        ],
+      };
+      await DRIVE_MIGRATIONS['2.27.0'](store);
+      assert(store.habits[0].next_due === '2026-10-16', 'drive 2.27.0 must recompute from the LATEST completion');
+      assert(store.habits[1].next_due === '2026-09-01', 'drive 2.27.0 must not touch free-text habits');
+
+      // Local migration is a JS function the runner calls with the db.
+      const { LOCAL_MIGRATIONS } = await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'local-migrations.js')).href);
+      assert(typeof LOCAL_MIGRATIONS['2.27.0'] === 'function', 'local 2.27.0 must be a function migration');
+      const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'server.js'), 'utf-8');
+      assert(serverSrc.includes("typeof migration === 'function'"), 'the local runner must call function migrations');
+      let Database;
+      try { ({ Database } = await import('bun:sqlite')); } catch { Database = null; }
+      if (Database) {
+        const db = new Database(':memory:');
+        db.exec('CREATE TABLE habits (id TEXT PRIMARY KEY, frequency_rule TEXT, next_due TEXT, end_date TEXT, is_finished INTEGER DEFAULT 0)');
+        db.exec('CREATE TABLE habit_completions (id TEXT PRIMARY KEY, habit_id TEXT, completed_at TEXT)');
+        db.exec("INSERT INTO habits VALUES ('h1', 'weekly:Fri', '2026-10-14', NULL, 0)");
+        db.exec("INSERT INTO habit_completions VALUES ('c1', 'h1', '2026-10-12T12:00:00.000Z')");
+        LOCAL_MIGRATIONS['2.27.0'](db);
+        const row = db.prepare('SELECT next_due, is_finished FROM habits WHERE id = ?').get('h1');
+        assert(row.next_due === '2026-10-16' && row.is_finished === 0,
+          'local 2.27.0 must recompute the same value as Drive, got ' + JSON.stringify(row));
+        db.close();
+      }
+      // habits.js must keep re-exporting computeNextDue for its callers.
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      assert(habitsSrc.includes('computeNextDue, localDateStr } from \'./frequency-rule.js\'')
+        && habitsSrc.includes('computeNextDue, isMyCreatedSharedHabit };'),
+        'habits.js must import computeNextDue from frequency-rule and keep re-exporting it');
     });
 
     test('calendar: overdue habits and todos mirror onto today, dashed-red highlight', () => {

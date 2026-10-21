@@ -49,7 +49,12 @@ db.exec(`INSERT INTO settings (key, value) VALUES ('db_created_at', '"' || datet
       for (const version of toRun) {
         try {
           db.exec("BEGIN TRANSACTION;");
-          db.exec(LOCAL_MIGRATIONS[version]);
+          const migration = LOCAL_MIGRATIONS[version];
+          // Most migrations are SQL strings; a function migration
+          // receives the db handle (data transforms SQL cannot
+          // express — e.g. 2.27.0's next_due recompute).
+          if (typeof migration === 'function') migration(db);
+          else db.exec(migration);
           db.exec(`UPDATE settings SET value = '${version}', updated_at = datetime('now') WHERE key = 'schema_version';`);
           db.exec("COMMIT;");
           console.log(`Migration ${version} applied successfully`);

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-21T23:22:21.044Z from 50 modules (v2.27.0). Total LOC 36096. Do not hand-edit.
+> Generated 2026-10-21T23:31:53.212Z from 50 modules (v2.27.1). Total LOC 36094. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -45,8 +45,8 @@
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
 | calendar-pure | 228 | - |  | calendar-sync.js,calendar.js,frequency-rule.js,habits.js | - |
 | sharing-file-reconcile | 217 | - |  | drive.js,sharing-drive.js | - |
-| frequency-rule | 215 | - | calendar-pure | habit-import.js,habits.js | - |
 | scene-parse | 215 | text_line_progress,texts |  | flashcards.js | - |
+| frequency-rule | 213 | - | calendar-pure | habit-import.js,habits.js | - |
 | icons | 212 | - |  | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
 | groups | 202 | - | i18n,icons,sharing-ui,state | main.js | esc:3,window:4 |
 | agents-ui | 200 | agent_grants | db,i18n,icons,utils | main.js | esc:29,window:5 |

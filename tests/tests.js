@@ -6585,11 +6585,12 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         { frequency_rule: 'weekly:Fri', next_due: '2026-10-14', end_date: null }, '2026-10-12T12:00:00.000Z');
       assert(r && r.next_due === '2026-10-16' && r.is_finished === 0,
         'stale early next_due must be corrected to the real Friday, got ' + JSON.stringify(r));
-      // Legitimate early-completion skip: stored LATER than f(rule,
-      // lastDone) — the migration must not resurrect the skipped day.
+      // Pure recompute (Antoine's call): even when the stored value is
+      // LATER than f(rule, lastDone) — e.g. an early-completion skip —
+      // the recomputed value wins; the migration does not second-guess.
       r = recomputeNextDueForMigration(
         { frequency_rule: 'every_N_weeks:1:Fri', next_due: '2026-10-23', end_date: null }, '2026-10-14T12:00:00.000Z');
-      assert(r && r.next_due === '2026-10-23', 'an early-completion skip must be preserved, got ' + JSON.stringify(r));
+      assert(r && r.next_due === '2026-10-16', 'the pure recompute must win over the stored value, got ' + JSON.stringify(r));
       // Finished: recomputed due strictly past end_date clears next_due.
       r = recomputeNextDueForMigration(
         { frequency_rule: 'every_N_days:2', next_due: '2026-10-10', end_date: '2026-10-11' }, '2026-10-10T12:00:00.000Z');

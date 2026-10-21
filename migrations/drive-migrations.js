@@ -435,9 +435,9 @@ export const DRIVE_MIGRATIONS = {
     // Rule fixes since v1.651 (local-date parsing of the last-done base,
     // monthly rule normalization) mean long-untouched habits can carry a
     // next_due the current code would never produce. The per-habit
-    // decision (skip free-text / completion-less habits, never move a
-    // due date earlier than stored, finished follows the value) lives
-    // in recomputeNextDueForMigration — shared with the local backend.
+    // decision (pure f(rule, latest completion); skip free-text /
+    // completion-less habits; finished follows the value) lives in
+    // recomputeNextDueForMigration — shared with the local backend.
     const latestByHabit = new Map();
     for (const c of store.habit_completions || []) {
       const ts = Date.parse(c.completed_at) || 0;

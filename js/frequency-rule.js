@@ -37,19 +37,19 @@ export function normalizeFrequencyRule(rule) {
 
 /**
  * The 2.27.0 migration's per-habit decision: the corrected
- * { next_due, is_finished } for a habit, recomputed from its rule and
- * its latest completion — or null when the habit must be left alone
- * (free-text rule: next_due is not derivable; no completion: no
- * anchor to recompute from, the stored first due date stands).
+ * { next_due, is_finished } for a habit — a pure recompute,
+ * next_due = f(rule, latest completion) — or null when the habit
+ * must be left alone (free-text rule: next_due is not derivable;
+ * no completion: no last done to anchor on, the stored first due
+ * date stands).
  *
- * The recompute never moves a due date EARLIER than the stored one:
- * a stored value later than f(rule, lastDone) can be a legitimate
- * early-completion skip (see updateHabitNextDue's guard), which is
- * indistinguishable from a too-late stale value — while the rule
- * fixes this migration repairs (local-date parsing west of UTC,
- * rule normalization) produced too-EARLY stored dates. The finished
- * state follows the final value exactly like the app's recompute
- * choke point: strictly past end_date → finished, next_due cleared.
+ * Pure means it can move a due date earlier than the stored one,
+ * including resurrecting an occurrence an early completion had
+ * skipped (updateHabitNextDue's guard) — accepted for this one-shot
+ * repair migration (Antoine's call, Oct 2026: beta stage, the simple
+ * semantics win). The finished state follows the recomputed value
+ * exactly like the app's recompute choke point: strictly past
+ * end_date → finished, next_due cleared.
  */
 export function recomputeNextDueForMigration(habit, lastDoneRaw) {
   const rule = normalizeFrequencyRule(habit.frequency_rule || '');
@@ -57,11 +57,9 @@ export function recomputeNextDueForMigration(habit, lastDoneRaw) {
   if (!lastDoneRaw) return null;
   const candidate = computeNextDue(rule, lastDoneRaw);
   if (!candidate) return null;
-  const stored = habit.next_due ? String(habit.next_due).slice(0, 10) : null;
-  const finalDue = (stored && candidate < stored) ? stored : candidate;
   const endDate = habit.end_date ? String(habit.end_date).slice(0, 10) : null;
-  const finished = !!(endDate && finalDue > endDate);
-  return { next_due: finished ? null : finalDue, is_finished: finished ? 1 : 0 };
+  const finished = !!(endDate && candidate > endDate);
+  return { next_due: finished ? null : candidate, is_finished: finished ? 1 : 0 };
 }
 
 

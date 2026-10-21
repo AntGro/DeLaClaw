@@ -248,8 +248,11 @@ export const DRIVE_MIGRATIONS = {
 
   '2.9.17': async (store, ctx) => {
     // Wardrobe tab removed: migrate vestiaire_categories -> lists
-    // ("Wardrobe - <name>" per category) and vestiaire -> list_items,
-    // folding brand/size/color/purchase status into the item note.
+    // inside a "Wardrobe" section (one list per category, named just
+    // <name>) and vestiaire -> list_items, folding brand/size/color/
+    // purchase status into the item note. Items whose category is the
+    // protected default (or unknown) land in a '*' list inside the
+    // section, like items directly under any section.
     // The vestiaire files are not in DRIVE_TABLES anymore, so they are
     // fetched and deleted explicitly via ctx.
     const tok = await ctx.getToken();
@@ -277,38 +280,49 @@ export const DRIVE_MIGRATIONS = {
     const items = await readFile('vestiaire.json');
     store.lists = store.lists || [];
     store.list_items = store.list_items || [];
-    const listIdFor = new Map();
-    for (const c of cats) {
-      if (c.is_protected || !c.name) continue;
-      const id = `vest_${c.id}`;
-      store.lists.push({
-        id, name: `Wardrobe - ${c.name}`,
-        shortname: c.shortname ?? null, color: c.color ?? null, icon: null,
-        sort_order: c.sort_order ?? 0, archived: 0,
-        owner_id: c.owner_id ?? null, created_at: c.created_at, updated_at: c.updated_at,
-      });
-      listIdFor.set(c.id, id);
-    }
-    let wardrobeId = null;
-    if (items.some((v) => !listIdFor.has(v.category_id))) {
-      wardrobeId = 'vest_wardrobe';
+    const namedCats = cats.filter((c) => !c.is_protected && c.name);
+    // Build the Wardrobe structure only when there is anything to
+    // move — an account that never used the wardrobe gets no section.
+    if (namedCats.length || items.length) {
       const now = new Date().toISOString();
+      const sectionId = 'vest_wardrobe';
       store.lists.push({
-        id: wardrobeId, name: 'Wardrobe',
+        id: sectionId, name: 'Wardrobe',
         shortname: null, color: '#8b5cf6', icon: null,
-        sort_order: 9999, archived: 0,
+        sort_order: 9999, archived: 0, kind: 'section', parent_id: null,
         owner_id: null, created_at: now, updated_at: now,
       });
-    }
-    for (const v of items) {
-      const listId = listIdFor.get(v.category_id) || wardrobeId;
-      if (!listId) continue;
-      store.list_items.push({
-        id: `vest_${v.id}`, list_id: listId, text: v.name, checked: 0,
-        note: buildNote(v), sort_order: v.sort_order ?? 0,
-        shared_id: null, shared_group_id: null,
-        owner_id: v.owner_id ?? null, created_at: v.created_at, updated_at: v.updated_at,
-      });
+      const listIdFor = new Map();
+      for (const c of namedCats) {
+        const id = `vest_${c.id}`;
+        store.lists.push({
+          id, name: c.name,
+          shortname: c.shortname ?? null, color: c.color ?? null, icon: null,
+          sort_order: c.sort_order ?? 0, archived: 0, kind: 'bucket', parent_id: sectionId,
+          owner_id: c.owner_id ?? null, created_at: c.created_at, updated_at: c.updated_at,
+        });
+        listIdFor.set(c.id, id);
+      }
+      let starId = null;
+      if (items.some((v) => !listIdFor.has(v.category_id))) {
+        starId = 'vest_wardrobe_star';
+        store.lists.push({
+          id: starId, name: '*',
+          shortname: null, color: '#8b5cf6', icon: null,
+          sort_order: 0, archived: 0, kind: 'bucket', parent_id: sectionId,
+          owner_id: null, created_at: now, updated_at: now,
+        });
+      }
+      for (const v of items) {
+        const listId = listIdFor.get(v.category_id) || starId;
+        if (!listId) continue;
+        store.list_items.push({
+          id: `vest_${v.id}`, list_id: listId, text: v.name, checked: 0,
+          note: buildNote(v), sort_order: v.sort_order ?? 0,
+          shared_id: null, shared_group_id: null,
+          owner_id: v.owner_id ?? null, created_at: v.created_at, updated_at: v.updated_at,
+        });
+      }
     }
     for (const name of ['vestiaire.json', 'vestiaire_categories.json']) {
       const f = ctx.filesByName.get(name);

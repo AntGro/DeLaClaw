@@ -6348,7 +6348,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
       // Lists carry explicit section/bucket rows: an outer section and a
       // subsection per language, the subsection holding two buckets.
-      assert((demo.match(/kind: 'section'/g) || []).length === 6, 'demo lists must seed two sections per language (outer + subsection)');
+      // (6 = 2 showcase sections × 3 languages, + 1 for the EN Wardrobe
+      // section that mirrors the 2.9.17 migration shape.)
+      assert((demo.match(/kind: 'section'/g) || []).length === 7, 'demo lists must seed two sections per language (outer + subsection) plus the Wardrobe section');
       assert((demo.match(/kind: 'bucket', parent_id: 'demo-list-006'/g) || []).length === 6,
         'each demo outer section must hold two direct buckets');
       assert((demo.match(/kind: 'bucket', parent_id: 'demo-list-009'/g) || []).length === 6,
@@ -6505,6 +6507,56 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const migrations = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
       assert(migrations.includes('ctx.fileMeta.agent_grants = { fileId: null'),
         'migration 2.0.9 must forget the file ids it deletes (agent_grants returns in 2.0.10)');
+    });
+
+    test('drive-migration 2.9.17: wardrobe becomes a Wardrobe section of lists', async () => {
+      const { DRIVE_MIGRATIONS } = await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+      const files = {
+        'vestiaire_categories.json': [
+          { id: 'cat0', name: '', is_protected: 1 },
+          { id: 'cat1', name: 'Top', shortname: 'Top', color: '#111111', sort_order: 2, created_at: 'x', updated_at: 'x' },
+          { id: 'cat2', name: 'Pants', sort_order: 1, created_at: 'x', updated_at: 'x' },
+        ],
+        'vestiaire.json': [
+          { id: 'i1', category_id: 'cat1', name: 'Shirt', brand: 'RL', size: 'M', color: '', purchase_status: 'achete', sort_order: 0, created_at: 'x', updated_at: 'x' },
+          { id: 'i2', category_id: 'cat0', name: 'Misc', sort_order: 0, created_at: 'x', updated_at: 'x' },
+        ],
+      };
+      const deleted = [];
+      const ctx = {
+        getToken: async () => 'tok',
+        filesByName: new Map(Object.keys(files).map(n => [n, { id: 'f-' + n }])),
+        downloadFile: async (tok, fid) => ({ data: files[fid.slice(2)] }),
+        deleteFile: async (tok, fid) => { deleted.push(fid); },
+      };
+      const store = { lists: [], list_items: [] };
+      await DRIVE_MIGRATIONS['2.9.17'](store, ctx);
+      const section = store.lists.find(l => l.id === 'vest_wardrobe');
+      assert(section && section.kind === 'section' && section.name === 'Wardrobe' && section.parent_id === null,
+        'a Wardrobe section is created');
+      const top = store.lists.find(l => l.id === 'vest_cat1');
+      assert(top && top.name === 'Top' && top.kind === 'bucket' && top.parent_id === 'vest_wardrobe',
+        'a category becomes a list named <name> inside the section');
+      assert(!store.lists.some(l => (l.name || '').startsWith('Wardrobe - ')), 'no flat Wardrobe - <name> lists remain');
+      const star = store.lists.find(l => l.id === 'vest_wardrobe_star');
+      assert(star && star.name === '*' && star.parent_id === 'vest_wardrobe',
+        'orphan items get a * list inside the section');
+      assert(store.list_items.find(i => i.id === 'vest_i1')?.list_id === 'vest_cat1', 'item lands in its category list');
+      assert(store.list_items.find(i => i.id === 'vest_i2')?.list_id === 'vest_wardrobe_star', 'protected-category item lands in the * list');
+      assert(store.list_items.find(i => i.id === 'vest_i1').note.includes('Brand / Make: RL'), 'item note keeps the field block');
+      assert(deleted.length === 2, 'both vestiaire files are deleted');
+      // Nothing to migrate → no section
+      const store2 = { lists: [], list_items: [] };
+      const ctx2 = { getToken: async () => 'tok', filesByName: new Map(), downloadFile: async () => ({ data: [] }), deleteFile: async () => {} };
+      await DRIVE_MIGRATIONS['2.9.17'](store2, ctx2);
+      assert(store2.lists.length === 0, 'no wardrobe data → no Wardrobe section');
+      // Local twin links the same rows in 2.23.0 (kind/parent_id arrive there)
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'vest_wardrobe_star', '*'") && local.includes('ELSE \'vest_wardrobe_star\''),
+        'local 2.9.17 mirrors the section/star shape');
+      assert(local.includes("UPDATE lists SET kind = 'section' WHERE id = 'vest_wardrobe';")
+        && local.includes("UPDATE lists SET parent_id = 'vest_wardrobe'"),
+        'local 2.23.0 promotes the Wardrobe row to a section and nests the vest_* lists');
     });
 
     test('calendar: overdue habits and todos mirror onto today, dashed-red highlight', () => {

@@ -52,7 +52,7 @@ User jobs:
 - `sort_order` monotonic per list (for list ordering) and per item (within-list ordering)
 - Duplicate list names allowed (no unique constraint)
 - Inline edit: save on Enter/confirm, cancel on blur (standard DeLaClaw inline edit UX)
-- Wardrobe removal (v2.9.17): each former wardrobe category became a list named `Wardrobe - <name>` (default bucket → `Wardrobe`); item notes carry a `Brand / Make:` / `Size:` / `Color:` / `Status:` field block with only non-empty lines, then pre-existing notes after a blank line. Migrated ids are prefixed `vest_`
+- Wardrobe removal (v2.9.17): former wardrobe categories became lists named `<name>` inside a `Wardrobe` section (id `vest_wardrobe`); items in the protected default or an unknown category went to a `*` list inside the section (`vest_wardrobe_star`); item notes carry a `Brand / Make:` / `Size:` / `Color:` / `Status:` field block with only non-empty lines, then pre-existing notes after a blank line. Migrated ids are prefixed `vest_`. On the local backend the section kind/parent links are applied by 2.23.0, which adds those columns
 
 ## Adapter & Backend
 - `db.from('lists')`, `db.from('list_items')`

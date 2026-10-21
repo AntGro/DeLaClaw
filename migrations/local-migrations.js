@@ -453,15 +453,26 @@ export const LOCAL_MIGRATIONS = {
 
   '2.9.17': `
     -- Wardrobe tab removed: migrate vestiaire_categories -> lists
-    -- ("Wardrobe - <name>" per category) and vestiaire -> list_items,
-    -- folding brand/size/color/purchase status into the item note.
+    -- inside a "Wardrobe" section (one list per category, named just
+    -- <name>) and vestiaire -> list_items, folding brand/size/color/
+    -- purchase status into the item note. kind/parent_id do not exist
+    -- yet at this version: the section row and its children are
+    -- inserted flat here and linked by 2.23.0, which adds the columns
+    -- (kind='section' for 'vest_wardrobe', parent_id for the rest).
+    -- Items in the protected default (or an unknown) category land
+    -- in a '*' list inside the section.
     INSERT INTO lists (id, name, shortname, color, icon, sort_order, archived, owner_id, created_at, updated_at)
-    SELECT 'vest_' || id, 'Wardrobe - ' || name, shortname, color, NULL, sort_order, 0, owner_id, created_at, updated_at
+    SELECT 'vest_wardrobe', 'Wardrobe', NULL, '#8b5cf6', NULL, 9999, 0, NULL, datetime('now'), datetime('now')
+    WHERE EXISTS (SELECT 1 FROM vestiaire)
+       OR EXISTS (SELECT 1 FROM vestiaire_categories WHERE is_protected = 0 AND name <> '');
+
+    INSERT INTO lists (id, name, shortname, color, icon, sort_order, archived, owner_id, created_at, updated_at)
+    SELECT 'vest_' || id, name, shortname, color, NULL, sort_order, 0, owner_id, created_at, updated_at
     FROM vestiaire_categories
     WHERE is_protected = 0 AND name <> '';
 
     INSERT INTO lists (id, name, shortname, color, icon, sort_order, archived, owner_id, created_at, updated_at)
-    SELECT 'vest_wardrobe', 'Wardrobe', NULL, '#8b5cf6', NULL, 9999, 0, NULL, datetime('now'), datetime('now')
+    SELECT 'vest_wardrobe_star', '*', NULL, '#8b5cf6', NULL, 0, 0, NULL, datetime('now'), datetime('now')
     WHERE EXISTS (
       SELECT 1 FROM vestiaire v LEFT JOIN vestiaire_categories c ON c.id = v.category_id
       WHERE NOT (c.is_protected = 0 AND c.name <> '')
@@ -471,7 +482,7 @@ export const LOCAL_MIGRATIONS = {
       SELECT
         v.id, v.category_id, v.name, v.sort_order, v.owner_id, v.created_at, v.updated_at,
         v.note AS old_note,
-        CASE WHEN c.is_protected = 0 AND c.name <> '' THEN 'vest_' || v.category_id ELSE 'vest_wardrobe' END AS list_id,
+        CASE WHEN c.is_protected = 0 AND c.name <> '' THEN 'vest_' || v.category_id ELSE 'vest_wardrobe_star' END AS list_id,
         rtrim(
           (CASE WHEN v.brand IS NOT NULL AND v.brand <> '' THEN 'Brand / Make: ' || v.brand || char(10) ELSE '' END) ||
           (CASE WHEN v.size IS NOT NULL AND v.size <> '' THEN 'Size: ' || v.size || char(10) ELSE '' END) ||
@@ -578,5 +589,11 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE habit_categories ADD COLUMN parent_id TEXT;
     ALTER TABLE lists ADD COLUMN kind TEXT DEFAULT 'bucket';
     ALTER TABLE lists ADD COLUMN parent_id TEXT;
+    -- Wardrobe migration (2.9.17) ran before these columns existed:
+    -- promote its 'Wardrobe' row to a section and nest the migrated
+    -- lists (vest_*) under it.
+    UPDATE lists SET kind = 'section' WHERE id = 'vest_wardrobe';
+    UPDATE lists SET parent_id = 'vest_wardrobe'
+    WHERE substr(id, 1, 5) = 'vest_' AND id <> 'vest_wardrobe';
   `,
 };

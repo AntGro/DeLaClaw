@@ -36,6 +36,7 @@ if (typeof window !== 'undefined') window.__dlc = state;
 export const IDEAS_KEY = 'claw_cc_ideas';
 export const THEME_KEY = 'claw_cc_theme';
 export const CURRENT_VIEW_KEY = 'claw_cc_current_view';
+export const CALENDAR_PREFS_KEY = 'claw_cc_calendar_prefs';
 // Security note: credentials are never persisted — only URL and mode are stored.
 // Keys/secrets are held in memory (and cleared on disconnect).
 export const STAY_CONNECTED_KEY = 'claw_cc_stay_connected';

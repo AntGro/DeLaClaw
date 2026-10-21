@@ -5,7 +5,7 @@
 // in js/birthdays.js). Date math lives in js/calendar-pure.js.
 // ===================================================================
 
-import state from './state.js';
+import state, { CALENDAR_PREFS_KEY } from './state.js';
 import { esc, renderMd } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { sharedBadge } from './sharing-ui.js';
@@ -18,10 +18,42 @@ import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, togg
 let calYear;
 let calMonth; // 0-based
 let calDate; // 'YYYY-MM-DD' anchor for day/week views (always in sync with calYear/calMonth)
-let calView = 'month'; // 'day' | 'week' | 'month' | 'year'
+// Display preferences — view granularity and type filters — persist
+// per device in localStorage (like the theme and the current tab), so
+// they survive reloads without fighting across devices the way a
+// synced setting would.
+function loadCalPrefs() {
+  try { return JSON.parse(localStorage.getItem(CALENDAR_PREFS_KEY)) || {}; } catch { return {}; }
+}
+const _calPrefs = loadCalPrefs();
+let calView = ['day', 'week', 'month', 'year'].includes(_calPrefs.view) ? _calPrefs.view : 'month'; // 'day' | 'week' | 'month' | 'year'
 let calPanelDate = null; // date string of the open day panel, if any
 let calAddCleanup = null;
-let calShow = { todo: true, habit: true, birthday: true }; // type filters
+let calShow = { // type filters
+  todo: _calPrefs.show?.todo !== false,
+  habit: _calPrefs.show?.habit !== false,
+  birthday: _calPrefs.show?.birthday !== false,
+};
+
+function saveCalPrefs() {
+  try { localStorage.setItem(CALENDAR_PREFS_KEY, JSON.stringify({ view: calView, show: calShow })); } catch {}
+}
+
+// Reflect calView/calShow on the toolbar buttons (the static HTML
+// defaults to Month + all filters on, so this also repairs the
+// buttons on first paint after a restore).
+function syncCalendarToolbar() {
+  document.querySelectorAll('#calendarViewMenu [data-action="set-calendar-view"]').forEach(btn => {
+    const active = btn.dataset.view === calView;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-checked', String(active));
+  });
+  document.querySelectorAll('[data-action="toggle-calendar-filter"]').forEach(btn => {
+    const active = !!calShow[btn.dataset.filter];
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-checked', String(active));
+  });
+}
 
 const TYPE_ORDER = { todo: 0, habit: 1, birthday: 2 };
 const MAX_CHIPS = 3;
@@ -338,6 +370,7 @@ function renderCalendar() {
   ensureInit();
   const grid = document.getElementById('calendarGrid');
   if (!grid) return;
+  syncCalendarToolbar();
   updateCalendarLabel();
   armCalendarResize();
   if (calView === 'week') renderWeekView(grid);
@@ -425,16 +458,13 @@ function calendarNav(delta) {
 function setCalendarView(view, opts) {
   if (!['day', 'week', 'month', 'year'].includes(view)) return;
   calView = view;
+  saveCalPrefs();
   if (opts && opts.month !== undefined && opts.month !== '') {
     const m = parseInt(opts.month, 10);
     if (m >= 0 && m < 12) setAnchor(toDateStr(calYear, m, 1));
   }
   if (opts && opts.date) setAnchor(opts.date);
-  document.querySelectorAll('#calendarViewMenu [data-action="set-calendar-view"]').forEach(btn => {
-    const active = btn.dataset.view === view;
-    btn.classList.toggle('active', active);
-    btn.setAttribute('aria-checked', String(active));
-  });
+  syncCalendarToolbar();
   renderCalendar();
 }
 
@@ -455,12 +485,8 @@ function toggleCalendarFilter(type) {
   const next = toggleShow(calShow, type);
   if (next === calShow) return;
   calShow = next;
-  document.querySelectorAll('[data-action="toggle-calendar-filter"]').forEach(btn => {
-    if (btn.dataset.filter === type) {
-      btn.classList.toggle('active', calShow[type]);
-      btn.setAttribute('aria-checked', String(calShow[type]));
-    }
-  });
+  saveCalPrefs();
+  syncCalendarToolbar();
   renderCalendar();
 }
 

@@ -6657,6 +6657,27 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'habit delete confirm must render the habit name with renderMd');
     });
 
+    test('calendar: view granularity and type filters persist per device', () => {
+      const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+      assert(cal.includes("JSON.parse(localStorage.getItem(CALENDAR_PREFS_KEY))"),
+        'calendar prefs must load from localStorage at init');
+      assert(cal.includes("['day', 'week', 'month', 'year'].includes(_calPrefs.view)"),
+        'a stored view must be validated against the known granularities');
+      assert(cal.includes('_calPrefs.show?.todo !== false'),
+        'stored filters must default to shown unless explicitly off');
+      assert(cal.includes('localStorage.setItem(CALENDAR_PREFS_KEY, JSON.stringify({ view: calView, show: calShow }))'),
+        'calendar prefs must save view + filters together');
+      const viewFn = cal.slice(cal.indexOf('function setCalendarView'), cal.indexOf('function clampMenuToViewport'));
+      assert(viewFn.includes('saveCalPrefs();'), 'setCalendarView must persist the choice');
+      const filterFn = cal.slice(cal.indexOf('function toggleCalendarFilter'), cal.indexOf('function openCalendarDate'));
+      assert(filterFn.includes('saveCalPrefs();'), 'toggleCalendarFilter must persist the choice');
+      assert(cal.includes('syncCalendarToolbar();\n  updateCalendarLabel();'),
+        'renderCalendar must sync the toolbar buttons from the restored state');
+      const state = fs.readFileSync(path.join(JS_DIR, 'state.js'), 'utf-8');
+      assert(state.includes("CALENDAR_PREFS_KEY = 'claw_cc_calendar_prefs'"),
+        'the prefs key must follow the claw_cc_* convention in state.js');
+    });
+
     test('calendar week view: narrow screens wrap to two rows with chips, not dots', () => {
       const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
       assert(css.includes('.cal-week-page { grid-template-columns: repeat(4, minmax(0, 1fr)); }'),

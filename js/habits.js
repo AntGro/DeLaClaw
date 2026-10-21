@@ -2023,7 +2023,7 @@ async function deleteHabit(habitId) {
   if (!habit) return;
   showConfirmAction(
     t('common.delete'),
-    `Delete "${habit.name}"? All completion history will be lost.`,
+    `Delete "${renderMd(habit.name)}"? All completion history will be lost.`,
     async () => {
       const pointerRow = habit.shared_id ? { ...habit } : null;
       const { error } = await state.db.from('habits').delete().eq('id', habitId);
@@ -2053,7 +2053,9 @@ async function deleteHabit(habitId) {
 
       showToast(t('habits.habit_deleted'), 'info');
       await refreshHabits();
-    }
+    },
+    null,
+    { messageHtml: true }
   );
 }
 

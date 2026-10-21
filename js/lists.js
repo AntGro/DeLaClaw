@@ -943,7 +943,7 @@ async function deleteListItem(id) {
   if (!item) return;
   showConfirmAction(
     t('common.delete'),
-    `Remove "${item.text}"?`,
+    `Remove "${renderMd(item.text)}"?`,
     async () => {
       const pointerRow = item.shared_id ? { ...item } : null;
       const { error } = await state.db.from('list_items').delete().eq('id', id);
@@ -973,7 +973,9 @@ async function deleteListItem(id) {
 
       showToast(t('toast.removed'), 'info');
       await refreshLists();
-    }
+    },
+    null,
+    { messageHtml: true }
   );
 }
 

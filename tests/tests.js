@@ -6645,6 +6645,18 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'habits.js must import computeNextDue from frequency-rule and keep re-exporting it');
     });
 
+    test('delete confirms render markdown names instead of raw [text](url) syntax', () => {
+      const utils = fs.readFileSync(path.join(JS_DIR, 'utils.js'), 'utf-8');
+      assert(utils.includes('if (opts?.messageHtml) msgEl.innerHTML = message;'),
+        'showConfirmAction must support opts.messageHtml (plain text stays the default)');
+      const lists = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(lists.includes('`Remove "${renderMd(item.text)}"?`') && lists.includes('{ messageHtml: true }'),
+        'list item delete confirm must render the item text with renderMd');
+      const habits = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      assert(habits.includes('`Delete "${renderMd(habit.name)}"? All completion history will be lost.`'),
+        'habit delete confirm must render the habit name with renderMd');
+    });
+
     test('calendar: overdue habits and todos mirror onto today, dashed-red highlight', () => {
       const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
       assert(cal.includes('(r, lastDone) => computeNextDue(r, lastDone),\n      today,'),

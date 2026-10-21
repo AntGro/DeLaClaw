@@ -841,6 +841,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .confirm-action-icon-svg{color:var(--red);flex-shrink:0;}
 .confirm-action-modal h2{color:var(--red);font-size:1.05rem;margin-bottom:6px;font-weight:700;}
 .confirm-action-msg{font-size:0.88rem;color:var(--muted);margin:8px 0 4px;line-height:1.5;}
+.confirm-action-msg a{color:var(--accent);text-decoration:underline;overflow-wrap:anywhere;}
 .confirm-action-detail{font-size:0.8rem;color:var(--text);background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);border-radius:8px;padding:10px 14px;margin:12px 0 4px;line-height:1.4;word-break:break-word;}
 .confirm-action-modal .modal-actions{justify-content:center;gap:12px;margin-top:20px;}
 .confirm-action-modal .modal-actions button{min-width:110px;padding:10px 20px;font-size:0.88rem;}

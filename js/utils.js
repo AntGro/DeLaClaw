@@ -162,7 +162,13 @@ let _confirmActionProgressText = null;
 
 function showConfirmAction(title, message, onConfirm, detail, opts) {
   document.getElementById('confirmActionTitle').textContent = title;
-  document.getElementById('confirmActionMessage').textContent = message;
+  // Message is plain text by default. Callers whose message embeds a
+  // markdown-rendered value (list item text, habit name) pass
+  // opts.messageHtml with the value already run through renderMd —
+  // otherwise the raw [text](url) syntax shows in the modal.
+  const msgEl = document.getElementById('confirmActionMessage');
+  if (opts?.messageHtml) msgEl.innerHTML = message;
+  else msgEl.textContent = message;
   const detailEl = document.getElementById('confirmActionDetail');
   if (detail) {
     if (opts?.detailHtml) {

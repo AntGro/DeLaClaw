@@ -85,7 +85,7 @@ function en() {
     { id: 'demo-proj-001', name: 'Website Redesign', shortname: 'WEB', color: '#6366f1', tech: 'Next.js, Tailwind', links: [{ label: 'Figma', url: 'https://figma.com/project-web' }], archived: false, sort_order: 0, created_at: d(-45), updated_at: d(-2) },
     { id: 'demo-proj-002', name: 'Book Club — Spring Reads', shortname: 'BOOK', color: '#10b981', tech: '', links: [], archived: false, sort_order: 1, created_at: d(-30), updated_at: d(-5) },
     { id: 'demo-proj-003', name: 'Apartment Move', shortname: 'APT', color: '#f59e0b', tech: '', links: [], archived: false, sort_order: 2, created_at: d(-20), updated_at: d(-1) },
-    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, Supabase', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
+    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, PostgreSQL', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
     { id: 'demo-proj-005', name: 'Q3 Marketing Plan', shortname: 'MKT', color: '#8b5cf6', tech: '', links: [], archived: true, sort_order: 4, created_at: d(-90), updated_at: d(-40) },
   ];
 
@@ -221,7 +221,7 @@ function fr() {
     { id: 'demo-proj-001', name: 'Refonte du site web', shortname: 'WEB', color: '#6366f1', tech: 'Next.js, Tailwind', links: [{ label: 'Figma', url: 'https://figma.com/projet-web' }], archived: false, sort_order: 0, created_at: d(-45), updated_at: d(-2) },
     { id: 'demo-proj-002', name: 'Club de lecture — Printemps', shortname: 'LECT', color: '#10b981', tech: '', links: [], archived: false, sort_order: 1, created_at: d(-30), updated_at: d(-5) },
     { id: 'demo-proj-003', name: 'Déménagement', shortname: 'APT', color: '#f59e0b', tech: '', links: [], archived: false, sort_order: 2, created_at: d(-20), updated_at: d(-1) },
-    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, Supabase', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
+    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, PostgreSQL', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
     { id: 'demo-proj-005', name: 'Plan marketing T3', shortname: 'MKT', color: '#8b5cf6', tech: '', links: [], archived: true, sort_order: 4, created_at: d(-90), updated_at: d(-40) },
   ];
 
@@ -352,7 +352,7 @@ function es() {
     { id: 'demo-proj-001', name: 'Rediseño web', shortname: 'WEB', color: '#6366f1', tech: 'Next.js, Tailwind', links: [{ label: 'Figma', url: 'https://figma.com/proyecto-web' }], archived: false, sort_order: 0, created_at: d(-45), updated_at: d(-2) },
     { id: 'demo-proj-002', name: 'Club de lectura — Primavera', shortname: 'LECT', color: '#10b981', tech: '', links: [], archived: false, sort_order: 1, created_at: d(-30), updated_at: d(-5) },
     { id: 'demo-proj-003', name: 'Mudanza', shortname: 'APT', color: '#f59e0b', tech: '', links: [], archived: false, sort_order: 2, created_at: d(-20), updated_at: d(-1) },
-    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, Supabase', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
+    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, PostgreSQL', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
     { id: 'demo-proj-005', name: 'Plan de marketing T3', shortname: 'MKT', color: '#8b5cf6', tech: '', links: [], archived: true, sort_order: 4, created_at: d(-90), updated_at: d(-40) },
   ];
 

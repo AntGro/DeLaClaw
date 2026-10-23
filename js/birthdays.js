@@ -1,15 +1,12 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
-import { esc, showToast, showConfirmAction, balanceGrid, fetchAll } from './utils.js';
-import { scrollToAndHighlight, initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
-import { t, getLang } from './i18n.js';
+import { esc, showToast, showConfirmAction, fetchAll } from './utils.js';
+import { t } from './i18n.js';
 
 // ===================================================================
-// BIRTHDAYS — DATA, CRUD & RENDERING
+// BIRTHDAYS — DATA & CRUD (no page: birthdays surface on the Calendar page)
 // ===================================================================
 
-let birthdaySearchQuery = '';
-let birthdayFilter = 'all';
 
 async function refreshBirthdays() {
   if (!state.db.connected) return;
@@ -25,255 +22,9 @@ async function refreshBirthdays() {
     return;
   }
   state.allBirthdays = data || [];
-  if (state.currentView === 'birthdays') {
-    renderBirthdays();
+  if (state.currentView === 'calendar' && window.renderCalendar) {
+    window.renderCalendar();
   }
-}
-
-// ===================================================================
-// DATE HELPERS
-// ===================================================================
-
-function getNextBirthday(birthdayStr) {
-  const bd = new Date(birthdayStr + 'T00:00:00');
-  const today = new Date();
-  const thisYear = today.getFullYear();
-  const todayStart = new Date(thisYear, today.getMonth(), today.getDate());
-
-  let next = new Date(thisYear, bd.getMonth(), bd.getDate());
-  if (next < todayStart) {
-    next = new Date(thisYear + 1, bd.getMonth(), bd.getDate());
-  }
-  return next;
-}
-
-function daysUntilBirthday(birthdayStr) {
-  const next = getNextBirthday(birthdayStr);
-  const today = new Date();
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  return Math.round((next - todayStart) / (1000 * 60 * 60 * 24));
-}
-
-function getAge(birthdayStr) {
-  const bd = new Date(birthdayStr + 'T00:00:00');
-  const today = new Date();
-  let age = today.getFullYear() - bd.getFullYear();
-  const m = today.getMonth() - bd.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < bd.getDate())) age--;
-  return age;
-}
-
-function getTurningAge(birthdayStr) {
-  const bd = new Date(birthdayStr + 'T00:00:00');
-  const next = getNextBirthday(birthdayStr);
-  return next.getFullYear() - bd.getFullYear();
-}
-
-function formatBirthdayDate(birthdayStr) {
-  const bd = new Date(birthdayStr + 'T00:00:00');
-  return bd.toLocaleDateString(getLang(), { month: 'long', day: 'numeric' });
-}
-
-function formatBirthdayFull(birthdayStr) {
-  const bd = new Date(birthdayStr + 'T00:00:00');
-  return bd.toLocaleDateString(getLang(), { month: 'long', day: 'numeric', year: 'numeric' });
-}
-
-// ===================================================================
-// RENDERING
-// ===================================================================
-
-function setBirthdayFilter(filter) {
-  birthdayFilter = filter;
-  document.querySelectorAll('#birthdayFilters .filter-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.filter === filter);
-  });
-  renderBirthdays();
-}
-window.setBirthdayFilter = setBirthdayFilter;
-
-function renderBirthdays() {
-  const grid = document.getElementById('birthdayGrid');
-  if (!grid) return;
-
-  let birthdays = [...state.allBirthdays];
-
-  // Apply search filter
-  if (birthdaySearchQuery) {
-    const q = birthdaySearchQuery.toLowerCase();
-    birthdays = birthdays.filter(b => b.name && b.name.toLowerCase().includes(q));
-  }
-
-  // Apply birthday filter
-  if (birthdayFilter === 'upcoming') {
-    birthdays = birthdays.filter(b => daysUntilBirthday(b.birthday) <= 30);
-  } else if (birthdayFilter === 'this-month') {
-    const thisMonth = new Date().getMonth();
-    birthdays = birthdays.filter(b => {
-      const next = getNextBirthday(b.birthday);
-      return next.getMonth() === thisMonth;
-    });
-  }
-
-  // Apply sort
-  const sortBy = document.getElementById('birthdaySortBy')?.value || 'upcoming';
-  if (sortBy === 'name') {
-    birthdays.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  } else if (sortBy === 'age') {
-    birthdays.sort((a, b) => getAge(b.birthday) - getAge(a.birthday));
-  } else {
-    // Default: sort by next occurrence
-    birthdays.sort((a, b) => daysUntilBirthday(a.birthday) - daysUntilBirthday(b.birthday));
-  }
-
-
-  if (birthdays.length === 0) {
-    grid.innerHTML = `<div class="page-empty-state">
-      <div class="empty-icon">${lucideIcon('cake', 48, 'var(--muted)')}</div>
-      <h3>${t('birthdays.empty_title')}</h3>
-      <p>${t('birthdays.empty_hint')}</p>
-      <button class="empty-cta" data-action="open-add-birthday">${lucideIcon('plus', 16)} ${t('birthdays.add_first')}</button>
-    </div>`;
-    document.getElementById('birthdayNavButtons').innerHTML = '';
-    return;
-  }
-
-  // Separate into upcoming (next 30 days) and later
-  const upcoming = birthdays.filter(b => daysUntilBirthday(b.birthday) <= 30);
-  const thisMonth = new Date().getMonth();
-  const thisYear = new Date().getFullYear();
-  const later = birthdays.filter(b => {
-    if (daysUntilBirthday(b.birthday) > 30) return true;
-    // Upcoming birthdays in a different month also appear in their month section
-    const next = getNextBirthday(b.birthday);
-    return !(next.getMonth() === thisMonth && next.getFullYear() === thisYear);
-  });
-
-  // Build ordered sections: "Coming Up" + month groups
-  const sections = [];
-  if (upcoming.length > 0) {
-    sections.push({ key: 'upcoming', label: 'Coming Up', icon: 'party-popper', items: upcoming, isUpcoming: true });
-  }
-
-  if (later.length > 0) {
-    const monthGroups = {};
-    const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-    for (const b of later) {
-      const next = getNextBirthday(b.birthday);
-      const key = `${next.getFullYear()}-${String(next.getMonth()).padStart(2,'0')}`;
-      const label = `${monthNames[next.getMonth()]} ${next.getFullYear()}`;
-      const shortLabel = `${monthNames[next.getMonth()].slice(0,3)} ${String(next.getFullYear()).slice(2)}`;
-      if (!monthGroups[key]) monthGroups[key] = { label, shortLabel, items: [] };
-      monthGroups[key].items.push(b);
-    }
-    const sortedKeys = Object.keys(monthGroups).sort();
-    for (const key of sortedKeys) {
-      const grp = monthGroups[key];
-      sections.push({ key, label: grp.label, shortLabel: grp.shortLabel, icon: 'calendar', items: grp.items, isUpcoming: false });
-    }
-  }
-
-  // Generate gradient colors — rotate hue across sections for continuity
-  // Start at warm orange (25°), end at cool blue-purple (260°)
-  const totalSections = sections.length;
-  const hueStart = 25;
-  const hueEnd = 260;
-  for (let i = 0; i < totalSections; i++) {
-    const hue = totalSections === 1 ? hueStart : Math.round(hueStart + (hueEnd - hueStart) * (i / (totalSections - 1)));
-    sections[i].color = `hsl(${hue}, 70%, 55%)`;
-  }
-
-  // Render nav buttons
-  const navContainer = document.getElementById('birthdayNavButtons');
-  navContainer.innerHTML = sections.map(s => {
-    const display = s.isUpcoming ? t('birthdays.soon') : (s.shortLabel || s.label);
-    return `<button class="category-nav-btn" style="--cat-color:${s.color}" data-action="navigate-to-birthday-section" data-key="${esc(s.key)}" title="${s.label}">${display}</button>`;
-  }).join('');
-
-  // Render grid
-  let html = '';
-  for (const s of sections) {
-    html += `<div class="project-card" style="--cat-color:${s.color}" data-birthday-section="${s.key}">
-      <div class="todo-cat-header">
-        <div class="todo-cat-header-left">
-          <div class="todo-cat-info">
-            <h3 class="todo-cat-name">${lucideIcon(s.icon, 18)} ${s.label}</h3>
-            <span class="todo-cat-stats">${s.items.length} ${s.items.length === 1 ? 'birthday' : 'birthdays'}</span>
-          </div>
-        </div>
-      </div>
-      <div class="task-list birthday-bucket-list">
-        ${s.items.map(b => renderBirthdayCard(b, s.isUpcoming)).join('')}
-      </div>
-    </div>`;
-  }
-
-  const scrollY = window.scrollY;
-  const innerScrolls = captureInnerScrollPositions(grid);
-  grid.innerHTML = html;
-  window.scrollTo(0, scrollY);
-  restoreInnerScrollPositions(grid, innerScrolls);
-  initBirthdayHoverDelay(grid);
-  balanceGrid(grid);
-}
-
-function initBirthdayHoverDelay(container) {
-  initItemHoverDelay(container, {
-    itemSelector: '.birthday-card',
-    actionsSelector: '.birthday-actions',
-    rowSelector: '.birthday-info',
-    textSelector: '.birthday-name',
-    onDblClick: (item) => {
-      const id = item.dataset.id;
-      if (id) editBirthdayInline(id);
-    },
-  });
-}
-
-function navigateToBirthdaySection(key) {
-  const card = document.querySelector(`[data-birthday-section="${key}"]`);
-  scrollToAndHighlight(card, null);
-}
-
-function renderBirthdayCard(b, isUpcoming) {
-  const days = daysUntilBirthday(b.birthday);
-  const turning = getTurningAge(b.birthday);
-  const dateStr = formatBirthdayDate(b.birthday);
-  const noteHtml = b.note ? `<span class="birthday-note">${esc(b.note)}</span>` : '';
-
-  let daysLabel;
-  if (days === 0) {
-    daysLabel = `<span class="birthday-countdown today">${lucideIcon('party-popper', 14)} ${t('birthdays.today')}</span>`;
-  } else if (days === 1) {
-    daysLabel = `<span class="birthday-countdown tomorrow">${t('birthdays.tomorrow')}</span>`;
-  } else {
-    daysLabel = `<span class="birthday-countdown ${isUpcoming ? 'soon' : ''}">${days}d</span>`;
-  }
-
-  const initial = (b.name || '?').charAt(0).toUpperCase();
-  const avatarInner = b.avatar_url
-    ? `<img src="${esc(b.avatar_url)}" alt="${esc(b.name)}" class="birthday-avatar-img">`
-    : initial;
-
-  return `<div class="bucket-item birthday-card ${days === 0 ? 'birthday-today' : ''} ${isUpcoming ? 'birthday-upcoming' : ''}" data-id="${b.id}">
-    <div class="birthday-avatar" data-action="handle-avatar-click" data-id="${esc(b.id)}" title="${t('birthdays.change_photo')}">${avatarInner}</div>
-    <div class="birthday-info">
-      <div class="birthday-name-row">
-        <span class="birthday-name">${esc(b.name)}</span>
-        ${daysLabel}
-      </div>
-      <div class="birthday-meta">
-        <span class="birthday-date">${lucideIcon('cake', 14)} ${dateStr}</span>
-        <span class="birthday-age">${t('birthdays.turning')} ${turning}</span>
-        ${noteHtml}
-      </div>
-    </div>
-    <div class="birthday-actions">
-      <button data-action="copy-item-link" data-link-type="birthday" data-id="${esc(b.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 16)}</button>
-      <button data-action="open-edit-birthday" data-id="${esc(b.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
-      <button data-action="delete-birthday" data-id="${esc(b.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
-    </div>
-  </div>`;
 }
 
 // ===================================================================
@@ -313,7 +64,12 @@ function editBirthdayModalHTML() {
     <input type="date" id="editBirthdayDate">
     <label>${t('birthdays.note_label')}</label>
     <input type="text" id="editBirthdayNote" maxlength="500">
+    <label>${t('birthdays.upload_photo')}</label>
+    <div class="new-birthday-avatar-row">
+      <div class="new-birthday-avatar-preview" id="editBirthdayAvatarPreview" data-action="edit-birthday-avatar" data-id=""></div>
+    </div>
     <div class="modal-actions">
+      <button class="modal-delete" data-action="delete-birthday" id="editBirthdayDeleteBtn" data-id="">${lucideIcon('trash-2', 14)} ${t('common.delete')}</button>
       <button class="modal-cancel" data-action="close-edit-birthday">${t('common.cancel')}</button>
       <button class="modal-save" data-action="save-edit-birthday">${t('common.save')}</button>
     </div>
@@ -461,11 +217,11 @@ function clearNewBirthdayAvatar() {
   document.getElementById('newBirthdayAvatarClear').style.display = 'none';
 }
 
-function openAddBirthdayModal() {
+function openAddBirthdayModal(presetDate) {
   const modal = document.getElementById('addBirthdayModal');
   modal.innerHTML = addBirthdayModalHTML();
   document.getElementById('newBirthdayName').value = '';
-  document.getElementById('newBirthdayDate').value = '';
+  document.getElementById('newBirthdayDate').value = presetDate || '';
   document.getElementById('newBirthdayNote').value = '';
   clearNewBirthdayAvatar();
   modal.classList.add('visible');
@@ -496,78 +252,6 @@ async function saveNewBirthday() {
   await refreshBirthdays();
 }
 
-function editBirthdayInline(id) {
-  const b = state.allBirthdays.find(x => x.id === id);
-  if (!b) return;
-  const nameEl = document.querySelector(`.birthday-card[data-id="${id}"] .birthday-name`);
-  if (!nameEl) return;
-
-  // Hide actions while editing
-  const actionsEl = nameEl.closest('.birthday-card')?.querySelector('.birthday-actions');
-  if (actionsEl) actionsEl.classList.remove('visible');
-
-  // Build extra fields
-  const extras = document.createElement('div');
-  extras.className = 'inline-edit-extras';
-
-  // Birthday date row
-  const dateRow = document.createElement('div');
-  dateRow.className = 'inline-edit-row';
-  const dateLabel = document.createElement('label');
-  dateLabel.className = 'inline-edit-label';
-  dateLabel.textContent = t('birthdays.birthday_label');
-  const dateInput = document.createElement('input');
-  dateInput.type = 'date';
-  dateInput.className = 'inline-edit-input';
-  dateInput.value = b.birthday || '';
-  dateRow.appendChild(dateLabel);
-  dateRow.appendChild(dateInput);
-
-  // Note row
-  const noteRow = document.createElement('div');
-  noteRow.className = 'inline-edit-row';
-  const noteLabel = document.createElement('label');
-  noteLabel.className = 'inline-edit-label';
-  noteLabel.textContent = t('common.note');
-  const noteInput = document.createElement('input');
-  noteInput.type = 'text';
-  noteInput.className = 'inline-edit-input';
-  noteInput.value = b.note || '';
-  noteInput.placeholder = t('birthdays.note_placeholder');
-  noteRow.appendChild(noteLabel);
-  noteRow.appendChild(noteInput);
-
-  extras.appendChild(dateRow);
-  extras.appendChild(noteRow);
-
-  inlineEditText(nameEl, b.name, {
-    maxLength: 200,
-    extraEl: extras,
-    containerEl: nameEl.closest('.birthday-card'),
-    collectExtra: () => ({
-      birthday: dateInput.value,
-      note: noteInput.value.trim(),
-    }),
-    saveFn: async (newName, extra) => {
-      const updates = {};
-      if (newName !== b.name) updates.name = newName;
-      if (extra) {
-        if (extra.birthday && extra.birthday !== b.birthday) updates.birthday = extra.birthday;
-        const oldNote = b.note || '';
-        if (extra.note !== oldNote) updates.note = extra.note || null;
-      }
-      if (Object.keys(updates).length > 0) {
-        updates.updated_at = new Date().toISOString();
-        const { error } = await state.db.from('birthdays').update(updates).eq('id', id);
-        if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
-        Object.assign(b, updates);
-        showToast(t('birthdays.birthday_updated'), 'success');
-      }
-    },
-    refreshFn: renderBirthdays,
-  });
-}
-
 function openEditBirthdayModal(id) {
   const b = state.allBirthdays.find(x => x.id === id);
   if (!b) return;
@@ -577,8 +261,25 @@ function openEditBirthdayModal(id) {
   document.getElementById('editBirthdayName').value = b.name;
   document.getElementById('editBirthdayDate').value = b.birthday;
   document.getElementById('editBirthdayNote').value = b.note || '';
+  setEditBirthdayAvatarPreview(b.avatar_url);
+  document.getElementById('editBirthdayAvatarPreview').dataset.id = id;
+  document.getElementById('editBirthdayDeleteBtn').dataset.id = id;
   modal.classList.add('visible');
   setTimeout(() => document.getElementById('editBirthdayName').focus(), 100);
+}
+
+function setEditBirthdayAvatarPreview(avatarUrl) {
+  const preview = document.getElementById('editBirthdayAvatarPreview');
+  if (!preview) return;
+  preview.replaceChildren();
+  if (avatarUrl) {
+    const img = document.createElement('img');
+    img.src = avatarUrl;
+    img.alt = 'avatar';
+    preview.appendChild(img);
+  } else {
+    preview.innerHTML = lucideIcon('user', 24);
+  }
 }
 
 function closeEditBirthdayModal() {
@@ -608,20 +309,21 @@ async function deleteBirthday(id) {
   const b = state.allBirthdays.find(x => x.id === id);
   if (!b) return;
   showConfirmAction(
-    'Delete Birthday',
-    `Remove ${b.name}'s birthday?`,
+    t('birthdays.delete_title'),
+    t('birthdays.delete_confirm', b.name),
     async () => {
       const { error } = await state.db.from('birthdays').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
-
-      // Animate item out before re-rendering
-      const el = document.querySelector(`.birthday-card[data-id="${CSS.escape(id)}"]`);
-      await animateItemRemoval(el);
-
+      closeEditBirthdayModal();
+      closeCalendarDayPanel();
       showToast(t('birthdays.birthday_removed'), 'info');
       await refreshBirthdays();
     }
   );
+}
+
+function closeCalendarDayPanel() {
+  if (window.closeCalendarDay) window.closeCalendarDay();
 }
 
 
@@ -769,6 +471,7 @@ function showCropModal(file, id) {
       const b = state.allBirthdays.find(x => x.id === id);
       if (b) b.avatar_url = dataUrl;
       overlay.remove();
+      setEditBirthdayAvatarPreview(dataUrl);
       // Update the preview overlay if still open
       const previewOverlay = document.getElementById('avatarPreviewOverlay');
       if (previewOverlay) {
@@ -781,7 +484,7 @@ function showCropModal(file, id) {
             `<button class="avatar-action-btn avatar-remove-btn" data-action="remove-avatar" data-id="${esc(id)}" title="${t('birthdays.remove_photo')}">${lucideIcon('trash-2', 18)}</button>`);
         }
       }
-      renderBirthdays();
+      if (window.renderCalendar) window.renderCalendar();
       showToast(t('birthdays.photo_updated'), 'success');
     } catch (e) {
       showToast(t('toast.failed_to_save'), 'error');
@@ -832,11 +535,12 @@ async function removeAvatar(id) {
   if (b) b.avatar_url = null;
   const overlay = document.getElementById('avatarPreviewOverlay');
   if (overlay) overlay.remove();
-  renderBirthdays();
+  setEditBirthdayAvatarPreview(null);
+  if (window.renderCalendar) window.renderCalendar();
   showToast(t('birthdays.photo_removed'), 'success');
 }
 
-export { refreshBirthdays, renderBirthdays, initBirthdayModals };
+export { refreshBirthdays, initBirthdayModals };
 
 // Window bindings for inline onclick handlers
 window.openAddBirthdayModal = openAddBirthdayModal;
@@ -846,9 +550,6 @@ window.openEditBirthdayModal = openEditBirthdayModal;
 window.closeEditBirthdayModal = closeEditBirthdayModal;
 window.saveEditBirthday = saveEditBirthday;
 window.deleteBirthday = deleteBirthday;
-window.renderBirthdays = renderBirthdays;
-window.navigateToBirthdaySection = navigateToBirthdaySection;
-window.filterBirthdays = function(e) { birthdaySearchQuery = e.target.value; renderBirthdays(); };
 window.handleAvatarClick = handleAvatarClick;
 window.pickAvatarFile = pickAvatarFile;
 window.closeAvatarPreviewModal = function() {

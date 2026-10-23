@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 /**
- * DeLaClaw Integration Tests
+ * DeLaClaw Static Analysis Tests
  * 
- * Static analysis + headless browser smoke tests.
- * Run via: node tests.js (from command-center-test/)
- * Or via: bash run_tests.sh (from command-center/)
+ * Static analysis of source code (grep/regex) — no browser automation.
+ * Run via: node tests/tests.js (from repo root)
  * 
  * Catches: missing functions, HTML entities in JS, broken ES module chains,
- * login gate not appearing, views not loading, console errors.
+ * schema drift between adapters, i18n gaps, CODEMAP staleness.
  */
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { pathToFileURL } = require('url');
 
 const JS_DIR = path.join(__dirname, '..', 'js');
 const STYLE_FILE = path.join(__dirname, '..', 'style.css');
@@ -23,16 +22,27 @@ let failed = 0;
 const failures = [];
 
 function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log(`  ✅ ${name}`);
-  } catch (e) {
+  const pass = () => { passed++; console.log(`  ✅ ${name}`); };
+  const fail = e => {
     failed++;
-    failures.push({ name, error: e.message });
+    failures.push({ name, error: e && e.message });
     console.log(`  ❌ ${name}`);
-    console.log(`     ${e.message}`);
+    console.log(`     ${e && e.message}`);
+  };
+  try {
+    const r = fn();
+    if (r && typeof r.then === 'function') pendingAsyncTests.push(r.then(pass, fail));
+    else pass();
+  } catch (e) {
+    fail(e);
   }
+}
+
+const pendingAsyncTests = [];
+
+async function assertRejects(promise, msg) {
+  try { await promise; } catch (e) { return; }
+  throw new Error(msg);
 }
 
 function assert(condition, msg) {
@@ -178,7 +188,7 @@ test('All named imports resolve to exports in target files', () => {
         // Check export { ... imp ... } or export function imp or export const imp
         const exportBlock = targetContent.match(/export\s*\{([^}]+)\}/);
         const inExportBlock = exportBlock && exportBlock[1].split(',').map(s => s.trim()).includes(imp);
-        const isExportedDirectly = new RegExp(`export\\s+(function|const|let|var)\\s+${imp}\\b`).test(targetContent);
+        const isExportedDirectly = new RegExp(`export\\s+(async\\s+)?(function|const|let|var)\\s+${imp}\\b`).test(targetContent);
         if (!inExportBlock && !isExportedDirectly) {
           throw new Error(`${name}: imports '${imp}' from ./${targetFile} but it's not exported`);
         }
@@ -212,8 +222,9 @@ test('Sharing refresh handler centralizes sync before render', () => {
   const handlerIdx = main.indexOf("document.addEventListener('sharing-changed', async () =>");
   assert(handlerIdx !== -1, 'main.js must own a single async sharing-changed handler');
   const handler = main.slice(handlerIdx, main.indexOf('  // Show demo banner', handlerIdx));
-  // syncShared* handle pointer create/delete; the handler then does a full
-  // refresh to also pick up external mutations (group-deletion cleanup, etc.)
+  // Each sync reports whether anything affecting the display changed; the
+  // handler refreshes only the views that need it — no unconditional
+  // full refresh of all three views.
   for (const seq of [
     ['syncSharedTodos', 'refreshTodos'],
     ['syncSharedHabits', 'refreshHabits'],
@@ -224,6 +235,12 @@ test('Sharing refresh handler centralizes sync before render', () => {
     assert(positions[0] < positions[1],
       `sharing handler must run ${seq.join(' -> ')}`);
   }
+  assert(/if \(await syncSharedTodos\(\)\) await refreshTodos\(\);/.test(handler),
+    'todos refresh must be conditional on the sync reporting changes');
+  assert(/if \(await syncSharedHabits\(\)\) await refreshHabits\(\);/.test(handler),
+    'habits refresh must be conditional on the sync reporting changes');
+  assert(/if \(await syncSharedListItems\(\)\) await refreshLists\(\);/.test(handler),
+    'lists refresh must be conditional on the sync reporting changes');
   assert(!jsFiles['todos.js'].includes("document.addEventListener('sharing-changed'"),
     'todos.js must not register its own sharing-changed listener');
   assert(!jsFiles['habits.js'].includes("document.addEventListener('sharing-changed'"),
@@ -232,32 +249,89 @@ test('Sharing refresh handler centralizes sync before render', () => {
     'lists.js must not register its own sharing-changed listener');
 });
 
-test('Orphan handler is module-level, not inside connect()', () => {
-  const main = jsFiles['main.js'];
-  // Listener must exist at module level
-  assert(main.includes("document.addEventListener('sharing-orphan-detected'"),
-    'main.js must register sharing-orphan-detected listener');
-  // Must NOT be inside connect() — extract connect body and check
-  const connectIdx = main.indexOf('async function connect(');
-  assert(connectIdx !== -1, 'connect() must exist');
-  const connectBody = main.slice(connectIdx, main.indexOf('\n}\n', connectIdx) + 3);
-  assert(!connectBody.includes('sharing-orphan-detected'),
-    'orphan listener must be outside connect() to avoid leak on reconnect');
+test('Shared syncs report display changes via return value (pointer moves + updated_at)', () => {
+  // Every mutation bumps updated_at, so a changed updated_at with no pointer
+  // move means a remote content edit the view must re-render for.
+  for (const [file, doSync, retSync] of [
+    ['todos.js', '_doSyncSharedTodos', 'syncSharedTodos'],
+    ['habits.js', '_doSyncSharedHabits', 'syncSharedHabits'],
+    ['lists.js', '_doSyncSharedListItems', 'syncSharedListItems'],
+  ]) {
+    const src = jsFiles[file];
+    assert(src.includes(`return await ${doSync}()`),
+      `${file}: ${retSync} must return the change flag`);
+    assert(new RegExp(`function ${doSync}\\(\\)[\\s\\S]*?return needsRefresh;`).test(src),
+      `${file}: ${doSync} must return needsRefresh instead of refreshing internally`);
+    assert(!new RegExp(`function ${doSync}\\(\\)[\\s\\S]*?if \\(needsRefresh\\) \\{\\s*await refresh`).test(src),
+      `${file}: ${doSync} must not refresh internally — the handler owns the refresh`);
+    assert(/prevSeen !== undefined && prevSeen !== sh\.updated_at/.test(src),
+      `${file}: ${doSync} must detect remote content edits via updated_at`);
+  }
 });
 
-test('Orphan handler uses queued processing, not direct showConfirmAction', () => {
+test('Purge handler refreshes views directly (syncs cannot see the purge)', () => {
   const main = jsFiles['main.js'];
-  // Must have a queue and threshold
-  assert(main.includes('_orphanQueue'), 'must use _orphanQueue for sequential processing');
-  assert(main.includes('ORPHAN_THRESHOLD'), 'must require multiple detections before prompting');
-  assert(main.includes('_processOrphanQueue'), 'must process queue sequentially');
+  const idx = main.indexOf("document.addEventListener('sharing-group-purge-items'");
+  assert(idx !== -1, 'purge listener must exist');
+  const slice = main.slice(idx, idx + 1500);
+  // The group is already gone from memory when pointers are deleted, so the
+  // syncs would report no changes — the purge must refresh the views itself.
+  const purgeEnd = slice.indexOf("dispatchEvent(new CustomEvent('sharing-changed'))");
+  assert(purgeEnd !== -1, 'purge handler still notifies sharing-changed for footer/pane');
+  const before = slice.slice(0, purgeEnd);
+  for (const r of ['await refreshTodos();', 'await refreshHabits();', 'await refreshLists();']) {
+    assert(before.includes(r), `purge handler must call ${r} directly`);
+  }
 });
 
-test('Orphan handler passes onCancel to showConfirmAction', () => {
+test('No orphan machinery remains (access-loss purge replaced it)', () => {
   const main = jsFiles['main.js'];
-  // Find the orphan showConfirmAction call and check it has onCancel
-  const orphanSection = main.slice(main.indexOf('function _processOrphanQueue'));
-  assert(orphanSection.includes('onCancel'), 'orphan dialog must pass onCancel to allow retry');
+  for (const dead of ['sharing-orphan-detected', '_orphanQueue', '_processOrphanQueue',
+      'ORPHAN_THRESHOLD', '_orphanConfirmed', '_orphanCounts', '_orphanDialogOpen']) {
+    assert(!main.includes(dead), `main.js must not contain ${dead}`);
+  }
+  for (const f of ['todos.js', 'habits.js', 'lists.js']) {
+    assert(!jsFiles[f].includes('sharing-orphan-detected'),
+      `${f} sync must not dispatch sharing-orphan-detected`);
+  }
+  assert(!main.includes('showGroupDeletedNotice'),
+    'main.js must not show a group-deleted dialog');
+});
+
+test('Removed-remotely listener shows the single access-loss toast (no verdict branching)', () => {
+  const main = jsFiles['main.js'];
+  assert(main.includes("document.addEventListener('sharing-group-removed-remotely'"),
+    'main.js must listen for sharing-group-removed-remotely');
+  assert(main.includes("t('sharing.group_no_longer_accessible', groupName)"),
+    'main.js must toast sharing.group_no_longer_accessible with the group name');
+  assert(!main.includes("verdict === 'deleted'"),
+    'main.js must not branch the removed-remotely notice on a verdict');
+});
+
+test('main.js purges item pointers on sharing-group-purge-items (no dialog)', () => {
+  const main = jsFiles['main.js'];
+  assert(main.includes("document.addEventListener('sharing-group-purge-items'"),
+    'main.js must listen for sharing-group-purge-items');
+  const idx = main.indexOf("document.addEventListener('sharing-group-purge-items'");
+  const slice = main.slice(idx, idx + 1500);
+  for (const table of ['habits', 'todos', 'list_items']) {
+    assert(slice.includes(`'${table}'`), `purge handler must delete pointer rows from ${table}`);
+  }
+  assert(slice.includes('.delete()'), 'purge handler must delete the pointer rows outright');
+  assert(!slice.includes('showConfirmAction'), 'purge handler must not show a dialog');
+  assert(slice.includes("'sharing-changed'"), 'purge handler must trigger a view refresh');
+});
+
+test("unjoinGroup purges the member's still-shared pointers", () => {
+  // The leave dialog already converted kept copies to personal before the
+  // flip, so the remaining shared pointers are purged outright — the orphan
+  // dialog that used to offer unlinking them is gone.
+  const drive = jsFiles['sharing-drive.js'];
+  const start = drive.indexOf('async unjoinGroup(groupId');
+  assert(start !== -1, 'unjoinGroup must exist');
+  const body = drive.slice(start, start + 2500);
+  assert(body.includes("'sharing-group-purge-items'"),
+    'unjoinGroup must dispatch sharing-group-purge-items');
 });
 
 test('showConfirmAction supports onCancel callback', () => {
@@ -271,25 +345,17 @@ test('showConfirmAction supports onCancel callback', () => {
   assert(execFn.includes('_confirmCancelCallback = null'), 'executeConfirmAction must clear cancel callback before close');
 });
 
-test('Sync dispatches sharing-orphan-detected instead of clearing directly', () => {
+test('Sync leaves dangling pointers in place (no orphan event)', () => {
+  // A pointer whose group is gone from memory is either transient (skipped
+  // load) or already purged by the access-loss / leave path — sync must not
+  // touch it either way.
   for (const [file, label] of [['habits.js', 'habits'], ['todos.js', 'todos'], ['lists.js', 'lists']]) {
     const src = jsFiles[file];
-    // Must dispatch event, not update/nullify directly
-    assert(src.includes("sharing-orphan-detected"), `${label} sync must dispatch sharing-orphan-detected`);
-    // Must NOT directly nullify shared fields in the orphan branch
-    const orphanIdx = src.indexOf('sharing-orphan-detected');
-    // Check the surrounding context doesn't do update({shared_id: null}) in the same branch
-    const nearContext = src.slice(Math.max(0, orphanIdx - 200), orphanIdx);
-    assert(!nearContext.includes("shared_id: null"), `${label} sync must not directly nullify shared fields near orphan detection`);
+    assert(!src.includes('sharing-orphan-detected'),
+      `${label} sync must not dispatch sharing-orphan-detected`);
+    assert(!src.includes("shared_id: null"),
+      `${label} sync must not nullify shared fields for dropped groups`);
   }
-});
-
-test('Orphan handler deletes empty pointers instead of nullifying', () => {
-  const main = jsFiles['main.js'];
-  const handler = main.slice(main.indexOf('function _processOrphanQueue'));
-  assert(handler.includes('hasContent'), 'orphan confirm must check if item has local content');
-  assert(handler.includes('.delete()'), 'orphan confirm must delete empty pointer items');
-  assert(handler.includes('.update('), 'orphan confirm must nullify items with local content');
 });
 
 test('Shared habit next_due read from shared storage during refresh', () => {
@@ -495,26 +561,6 @@ test('Flashcard items use border-left color from retrievability (no strength bar
 // ===================================================================
 // 15. Birthday hover actions use correct rowSelector
 // ===================================================================
-test('Birthday hover delay uses .birthday-info as rowSelector (not .birthday-card)', () => {
-  const birthJs = jsFiles['birthdays.js'];
-  const hoverCall = birthJs.match(/initItemHoverDelay\([\s\S]*?rowSelector:\s*'([^']+)'/);
-  assert(hoverCall, 'initItemHoverDelay should be called for birthdays');
-  assert(hoverCall[1] === '.birthday-info', 
-    `rowSelector should be '.birthday-info' (got '${hoverCall[1]}') — querySelector doesn't match self`);
-});
-
-// ===================================================================
-// 16. Wardrobe left border uses purchase status (not category color)
-// ===================================================================
-test('Wardrobe items use purchase-status-based border color', () => {
-  const vestJs = jsFiles['vestiaire.js'];
-  assert(vestJs.includes('vest-purchased') || vestJs.includes('vest-tried'),
-    'vestiaire should add status classes for border color');
-  assert(styleCss.includes('.vest-purchased'), '.vest-purchased CSS rule should exist');
-  assert(styleCss.includes('.vest-tried'), '.vest-tried CSS rule should exist');
-});
-
-// ===================================================================
 // 17. All lucideIcon() calls reference icons defined in LUCIDE_PATHS
 // ===================================================================
 test('All lucideIcon() calls reference defined icons', () => {
@@ -562,7 +608,7 @@ test('No ondblclick HTML attributes in JS files (use initItemHoverDelay onDblCli
 // 19. Double-click edit: all initItemHoverDelay calls include onDblClick
 // ===================================================================
 test('All initItemHoverDelay calls include onDblClick callback', () => {
-  const pages = ['projects.js', 'todos.js', 'habits.js', 'birthdays.js', 'vestiaire.js', 'flashcards.js'];
+  const pages = ['projects.js', 'todos.js', 'habits.js', 'flashcards.js'];
   for (const file of pages) {
     const content = jsFiles[file];
     if (!content) continue;
@@ -587,8 +633,6 @@ test('Double-click onDblClick triggers inline edit (not modal) on all pages', ()
     'projects.js': { dblClickFn: 'promptEditTask', mustUse: 'inlineEditText' },
     'todos.js': { dblClickFn: 'editTodoInline', mustUse: 'inlineEditText' },
     'habits.js': { dblClickFn: 'editHabitInline', mustUse: 'inlineEditText' },
-    'birthdays.js': { dblClickFn: 'editBirthdayInline', mustUse: 'inlineEditText' },
-    'vestiaire.js': { dblClickFn: 'editVestiaire', mustUse: 'inlineEditText' },
     'flashcards.js': { dblClickFn: 'editFlashcardInline', mustUse: 'inlineEditText' },
   };
   for (const [file, { dblClickFn, mustUse }] of Object.entries(inlinePages)) {
@@ -612,7 +656,7 @@ test('Double-click onDblClick triggers inline edit (not modal) on all pages', ()
 // 21. rowSelector must differ from itemSelector (querySelector doesn't match self)
 // ===================================================================
 test('initItemHoverDelay rowSelector differs from itemSelector', () => {
-  const pagesWithHover = ['projects.js', 'todos.js', 'habits.js', 'birthdays.js', 'vestiaire.js', 'flashcards.js'];
+  const pagesWithHover = ['projects.js', 'todos.js', 'habits.js', 'birthdays.js', 'flashcards.js'];
   for (const file of pagesWithHover) {
     const content = jsFiles[file];
     if (!content) continue;
@@ -873,56 +917,13 @@ test('editHabitInline updates shared habits through sharing API', () => {
     'habits.js: editHabitInline must update shared habits through updateSharedHabit');
   assert(!fn.includes('creator_category'),
     'habits.js: editHabitInline must not rewrite creator_category when local deck changes');
-  assert(fn.includes("state.db.from('habits').update({ category: updates.category, category_id: updates.category_id })"),
-    'habits.js: editHabitInline must update only the local category pointer for shared habits');
+  assert(fn.includes('localUpdates.category = updates.category') && fn.includes('localUpdates.end_date = updates.end_date')
+      && fn.includes("state.db.from('habits').update(localUpdates)"),
+    'habits.js: editHabitInline must update only the local pointer fields (category, end_date) for shared habits');
 
   const sharedBranch = fn.slice(fn.indexOf('if (habit.shared_id'), fn.indexOf('} else {', fn.indexOf('if (habit.shared_id')));
   assert(!/state\.db\.from\(['"]habits['"]\)\.update\(updates\)/.test(sharedBranch),
     'habits.js: editHabitInline shared branch must not write the full updates object only to local DB');
-});
-
-// ===================================================================
-// 25bb. Supabase shared habits use one canonical id and normalized shape
-// ===================================================================
-test('Supabase shared habits use canonical ids and normalize habit payloads', () => {
-  const supabase = jsFiles['sharing-supabase.js'];
-  const addStart = supabase.indexOf('async function addSharedHabit');
-  const addEnd = supabase.indexOf('async function _replaceSharedHabitCompletions', addStart);
-  assert(addStart !== -1 && addEnd !== -1, 'sharing-supabase.js: addSharedHabit block not found');
-  const addFn = supabase.slice(addStart, addEnd);
-
-  assert(addFn.includes('const sharedId = habitData.id || crypto.randomUUID()'),
-    'sharing-supabase.js: addSharedHabit must keep the caller-provided shared habit id or mint a full UUID');
-  assert(addFn.includes('id: sharedId'),
-    'sharing-supabase.js: addSharedHabit must write the same id to sharing_items');
-  assert(addFn.includes('payload: { ...habitPayload, id: sharedId, completions: [] }'),
-    'sharing-supabase.js: addSharedHabit must store habit fields in payload with the canonical id');
-  assert(supabase.includes('const itemId = itemData.id || crypto.randomUUID()'),
-    'sharing-supabase.js: shared item fallback ids must be full UUIDs, not short ids');
-
-  const getStart = supabase.indexOf('function _normalizeSharedHabit');
-  const getEnd = supabase.indexOf('function getAllSharedTodos', getStart);
-  assert(getStart !== -1 && getEnd !== -1, 'sharing-supabase.js: normalized shared habit block not found');
-  const getFn = supabase.slice(getStart, getEnd);
-  assert(getFn.includes('...payload') && getFn.includes('id: item.id') && getFn.includes("item_type: 'habit'"),
-    'sharing-supabase.js: getAllSharedHabits must expose habit payload fields at top level');
-  assert(getFn.includes("i.item_type === 'habit_completion'") && getFn.includes('parent_item_id === item.id'),
-    'sharing-supabase.js: getAllSharedHabits must attach child habit completions');
-  assert(getFn.includes('_payload_id: payload.id || null'),
-    'sharing-supabase.js: normalized habits must expose legacy payload ids for pointer repair');
-
-  const habits = jsFiles['habits.js'];
-  const saveStart = habits.indexOf('async function saveNewHabit');
-  const saveEnd = habits.indexOf('function editHabitInline', saveStart);
-  const saveFn = habits.slice(saveStart, saveEnd);
-  assert(saveFn.includes('shared_id: sharedId') && saveFn.includes('id: sharedId'),
-    'habits.js: local shared habit pointer and shared habit item must use the same id');
-
-  const syncStart = habits.indexOf('async function _doSyncSharedHabits');
-  const syncEnd = habits.indexOf('window.syncSharedHabits', syncStart);
-  const syncFn = habits.slice(syncStart, syncEnd);
-  assert(syncFn.includes('legacySharedId') && syncFn.includes('_payload_id'),
-    'habits.js: syncSharedHabits must repair old Supabase pointers keyed by payload id');
 });
 
 // ===================================================================
@@ -1029,18 +1030,10 @@ test('Shared list add action passes clicked button element', () => {
 // ===================================================================
 // 25g. Sharing adapters normalize completeItem(doneBy) without nested arrays
 // ===================================================================
-test('Sharing adapters normalize completeItem(doneBy) without nested arrays', () => {
-  const supabase = jsFiles['sharing-supabase.js'];
+test('Sharing adapter normalizes completeItem(doneBy) without nested arrays', () => {
   const drive = jsFiles['sharing-drive.js'];
 
-  assert(supabase.includes('function _normalizeDoneBy(doneBy, groupId = null)'),
-    'sharing-supabase.js: completeItem must use a doneBy normalization helper');
-  assert(supabase.includes('Array.isArray(doneBy)') && supabase.includes('done_by: _normalizeDoneBy(doneBy, groupId)'),
-    'sharing-supabase.js: completeItem must preserve arrays instead of wrapping them');
-  assert(!supabase.includes('done_by: [doneBy || getCurrentUser().email]'),
-    'sharing-supabase.js: completeItem must not wrap doneBy blindly');
-
-  const start = drive.indexOf('async completeItem(groupId, itemId, doneBy)');
+  const start = drive.indexOf('async completeItem(groupId, itemId, doneBy, opts)');
   const end = drive.indexOf('async uncompleteItem', start);
   assert(start !== -1 && end !== -1, 'sharing-drive.js: completeItem block not found');
   const fn = drive.slice(start, end);
@@ -1052,35 +1045,897 @@ test('Sharing adapters normalize completeItem(doneBy) without nested arrays', ()
     'sharing-drive.js: completeItem must not write raw doneBy directly');
 });
 
-test('sharing member identity is memberId-based and agent-safe', () => {
+test('sharing member identity is member_id-based and agent-safe', () => {
   const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
   const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
-  const supabase = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
 
   assert(iface.includes('Emails are permission material, not identity'),
-    'sharing-interface.js must document the memberId/displayName identity invariant');
+    'sharing-interface.js must document the member_id/display_name identity invariant');
   assert(iface.includes('getCurrentMember') && iface.includes('getAgentSafeGroup'),
     'sharing interface must expose current-member and agent-safe group APIs');
 
   assert(sui.includes('data-member-id') && !sui.includes('data-email'),
-    'sharing-ui.js must remove members by memberId, not email/display string');
+    'sharing-ui.js must remove members by member_id, not email/display string');
   assert(sui.includes('state.sharing.getCurrentMember(group.id)'),
     'sharing-ui.js must ask the adapter for current group membership');
 
-  assert(drive.includes('Do not persist raw email in group.json'),
+  assert(drive.includes('The raw email is never persisted in group.json'),
     'sharing-drive.js must treat invite email as permission material only');
   assert(!drive.includes(`email,\n          name: email`),
     'sharing-drive.js must not write raw invite email into group.json members');
+});
 
-  assert(supabase.includes('invited_label') && supabase.includes('getAgentSafeGroup'),
-    'sharing-supabase.js must preserve invited_label separately and expose agent-safe serialization');
+test('sharing leave keep-copies conversion is throw-on-error', () => {
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const fn = sui.slice(sui.indexOf('async function _convertGroupItemsToPersonal'));
+  const body = fn.slice(0, fn.indexOf('\n}\n') + 3);
 
-  const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
-  assert(migration.includes('DROP FUNCTION IF EXISTS verify_join_token(text)'),
-    '1.484 migration must drop verify_join_token before redefining');
-  assert(migration.includes('FUNCTION get_group_members('),
-    '1.484 migration must define get_group_members');
+  assert(body.includes('if (error) throw'),
+    '_convertGroupItemsToPersonal must throw on DB errors, not ignore { error }');
+  const unguarded = (body.match(/state\.db\.from\(/g) || [])
+    .length - (body.match(/dbThrow\(\s*state\.db\.from\(/g) || []).length;
+  assert(unguarded === 0,
+    '_convertGroupItemsToPersonal must wrap every DB call in the throw-on-error helper');
+  assert(body.includes('habit_completions') && body.includes('restore completion'),
+    'habit completion restores must also be throw-on-error');
+});
+
+test('sharing remove-member modal stays open with in-progress effect', () => {
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const utils = fs.readFileSync(path.join(JS_DIR, 'utils.js'), 'utf-8');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+
+  assert(sui.includes('{ keepOpen: true, progressText: t(\'sharing.removing_member\') }'),
+    'sharingRemoveMember must keep the confirm modal open with an in-progress label');
+  for (const key of ['removing_member']) {
+    assert(i18n.includes(`${key}: 'Removing\\u2026'`),
+      `i18n EN must define sharing.${key}`);
+  }
+  assert(utils.includes("btn.classList.add('loading')"),
+    'utils keepOpen branch must show a spinner on the confirm button, not hide it');
+  assert(utils.includes('_confirmActionLocked = false;\n        closeConfirmAction();'),
+    'utils keepOpen branch must close the modal itself once the callback settles');
+  assert(utils.includes("busyBtn.classList.remove('loading')"),
+    'closeConfirmAction must reset the keepOpen busy state for the next open');
+  const css = fs.readFileSync(STYLE_FILE, 'utf-8');
+  assert(css.includes('.modal-save.loading:not(.confirm-action-btn)::before'),
+    'the generic modal-save spinner must not fire on the confirm-action button (two spinners otherwise)');
+});
+
+test('sharing create-group modal locks UI and reports file progress', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+
+  assert(drive.includes('async createGroup(name, onProgress)'),
+    'sharing-drive.js createGroup must accept an onProgress callback');
+  assert(drive.includes("onProgress?.({ step: 'itemFiles', done: doneFiles, total: totalFiles })"),
+    'sharing-drive.js must report per-file progress as each upload resolves');
+  assert(sui.includes('sharingCreateGroupCancelBtn') && sui.includes('cancelBtn.disabled = true'),
+    'sharing-ui.js must disable the Cancel button while the group is being created');
+  assert(sui.includes('!overlay.dataset.creating'),
+    'sharing-ui.js must block backdrop dismissal while the group is being created');
+  assert(sui.includes('sharingCreateProgress') && sui.includes('sharingCreateProgressFill'),
+    'sharing-ui.js must render a progress bar in the create-group modal');
+  assert(sui.includes("t('sharing.creating_files', ev.done, ev.total)"),
+    'sharing-ui.js must show the determinate file count during creation');
+  for (const key of ['creating_folder', 'writing_group', 'creating_files']) {
+    assert(i18n.includes(key + ':'),
+      `i18n.js must define the sharing.${key} progress string`);
+  }
+});
+
+test('sharing partial creation: group.json last, trash on failure, load-time GC', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf-8');
+
+  // 1. group.json is written AFTER the item-file uploads: its presence marks completion
+  const createStart = drive.indexOf('async createGroup(name, onProgress)');
+  const createEnd = drive.indexOf('/** Load all groups', createStart);
+  const createBody = drive.slice(createStart, createEnd);
+  const promiseAllIdx = createBody.indexOf('const results = await Promise.all(');
+  const groupJsonIdx = createBody.indexOf(`driveUpload(tok, subfolder.id, null, 'group.json', group)`);
+  assert(promiseAllIdx !== -1 && groupJsonIdx !== -1 && groupJsonIdx > promiseAllIdx,
+    'createGroup must upload group.json after the item-file Promise.all (presence = completion marker)');
+
+  // 2. In-session cleanup: a failed creation trashes the partial folder, then rethrows
+  assert(createBody.includes('await driveTrashFile(tok, subfolder.id)'),
+    'createGroup must best-effort trash the partial folder on failure');
+  assert(createBody.includes('throw err;'),
+    'createGroup must rethrow after cleanup so the modal shows the error');
+
+  // 3. Own-group discovery is purely row-based: loadAll reads the kind
+  //    'created' rows and finds each folder by its deterministic
+  //    DeLaClaw-Shared-{groupId} name — no DeLaClaw-Shared/ folder scan,
+  //    no abandoned-folder GC, no 15-minute grace.
+  assert(!drive.includes('ABANDONED_GROUP_AGE_MS'),
+    'sharing-drive.js must not define the abandoned-group age threshold anymore');
+  const loadStart = drive.indexOf('async function loadGroup(folderId, groupId, opts');
+  const loadEnd = drive.indexOf('async function normalizeEntry', loadStart);
+  const loadBody = drive.slice(loadStart, loadEnd);
+  assert(!loadBody.includes('ageMs'),
+    'loadGroup must not compute a folder age anymore');
+  assert(!loadBody.includes('driveTrashFile(tok, folderId)'),
+    'loadGroup must never trash folders at load time anymore');
+  // A created row is only written after group.json lands, so a missing
+  // group.json on an owned folder means the folder's files were deleted on
+  // Drive: throw so the skipped notice names the group instead of silently
+  // dropping it.
+  assert(loadBody.includes('if (!gFile && owned)'),
+    'loadGroup must treat a missing group.json on an owned folder as broken');
+  assert(loadBody.includes('throw downloadError(`group.json for own group'),
+    'loadGroup must throw (skipped notice) when an owned folder lacks group.json');
+
+  // 3b. loadAll discovers own groups from the groups table, not from a
+  //     DeLaClaw-Shared/ folder scan
+  const allStart = drive.indexOf('/** Load all groups');
+  const allEnd = drive.indexOf('getAllGroups()', allStart);
+  const allBody = drive.slice(allStart, allEnd);
+  assert(allBody.includes("driveFindFolder(tok, GROUP_PREFIX + gid, null)"),
+    'loadAll must find each own-group folder by its deterministic DeLaClaw-Shared-{groupId} name');
+  assert(allBody.includes("row.kind !== 'created'"),
+    'loadAll must iterate the kind created rows of the groups table for own groups');
+  assert(!allBody.includes('driveListChildren(tok, rootFolder.id'),
+    'loadAll must not scan the DeLaClaw-Shared/ root folder for own groups');
+  assert(allBody.includes('_skippedGroups.set(gid, { name })'),
+    'loadAll must surface the skipped chip with the stored name when an own-group folder is missing on Drive');
+
+  // 4. Per-folder error isolation: one bad folder must not fail the whole loadAll
+  assert(allBody.includes('.catch(err =>'),
+    'loadAll must isolate per-folder load failures so one bad folder cannot break all groups');
+
+  // 5. No createdTime plumbing remains (the age guard is gone)
+  assert(!drive.includes('createdTime'),
+    'sharing-drive.js must not reference createdTime anymore');
+
+  // 6. CSP must allow the Drive picker iframe (join flow)
+  const frameSrc = html.match(/frame-src ([^;]+);/);
+  assert(frameSrc && frameSrc[1].includes('https://docs.google.com'),
+    'index.html CSP frame-src must allow https://docs.google.com for the Drive join picker');
+
+  // 7. Group creation is all-or-nothing: the kind 'created' row must be
+  //    durably recorded before the group exists in memory or in the UX.
+  //    A failed upsert throws (the creation catch trashes the folder and the
+  //    modal shows the error); the old warn-only path must be gone.
+  assert(!createBody.includes("console.warn('sharing: failed to record created group:'"),
+    'createGroup must not warn-and-continue when the created-group row upsert fails');
+  assert(createBody.includes('Failed to record created group'),
+    'createGroup must throw when the created-group row upsert fails');
+  const upsertIdx = createBody.indexOf("db.from('groups').upsert(createdRow, { onConflict: 'id' })");
+  const memRegIdx = createBody.indexOf('_groups.set(groupId, entry)');
+  assert(upsertIdx !== -1 && memRegIdx !== -1 && memRegIdx > upsertIdx,
+    'createGroup must register the group in memory only after the groups-row upsert succeeds');
+
+  // 8. The poll announces newly joined members: pending → joined flips
+  //    detected by diffing against the pre-overwrite local state emit a
+  //    'member-joined' event (self excluded), and main.js toasts it.
+  assert(drive.includes("emit('member-joined'"),
+    'sharing-drive.js poll must emit member-joined for newly joined members');
+  assert(drive.includes('selfMemberId'),
+    'sharing-drive.js poll must exclude our own member ID from join announcements');
+  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  assert(/onUpdate\(\(event, detail\)/.test(main) && main.includes("event === 'member-joined'"),
+    'main.js must toast on the sharing member-joined event');
+  assert(main.includes("t('sharing.member_joined'"),
+    "main.js must use the sharing.member_joined i18n key for the join toast");
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  const locStarts = {};
+  for (const m of i18n.matchAll(/^  (en|fr|es): \{$/gm)) locStarts[m[1]] = m.index;
+  const locOrder = ['en', 'fr', 'es'];
+  for (let i = 0; i < locOrder.length; i++) {
+    const slice = i18n.slice(locStarts[locOrder[i]], i + 1 < locOrder.length ? locStarts[locOrder[i + 1]] : i18n.length);
+    assert(/^\s{6}member_joined:/m.test(slice),
+      `i18n.js [${locOrder[i]}].sharing must define 'member_joined:'`);
+  }
+});
+
+test('sharing group load is all-or-nothing: a failed file download skips the whole group', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+
+  // Labeled download errors preserve the Drive status code, so callers can
+  // distinguish access loss (403/404) from transient failures.
+  assert(drive.includes('function downloadError(what, err)'),
+    'sharing-drive.js must define the downloadError helper');
+  assert(drive.includes('if (err?.code != null) e.code = err.code;'),
+    'downloadError must preserve the Drive status code on the wrapped error');
+
+  // loadGroupWithIds (joined path): every required-file download must throw on
+  // failure — never degrade to a partially-loaded group (a half-loaded group
+  // could show the user's items as missing, inviting recreates that become
+  // duplicates once the real file loads).
+  const idsStart = drive.indexOf('async function loadGroupWithIds(folderId, groupId, fileIds');
+  const idsEnd = drive.indexOf('/** Map item_type to the per-type file key. */', idsStart);
+  const idsBody = drive.slice(idsStart, idsEnd);
+  assert(!idsBody.includes('return null'),
+    'loadGroupWithIds must not degrade failed downloads to null (partial group)');
+  assert(idsBody.includes('throw downloadError(`group.json for joined group ${groupId}`, err)'),
+    'loadGroupWithIds must throw a labeled error when the group.json download fails');
+  assert(idsBody.includes('throw downloadError(`${type}.json for joined group ${groupId}`, err)'),
+    'loadGroupWithIds must throw a labeled error when an item-file download fails');
+
+  // loadGroup (owned path): item-file downloads must throw too (no partial
+  // group). The required set is 16 files.
+  const loadStart = drive.indexOf('async function loadGroup(folderId, groupId, opts');
+  const dlStart = drive.indexOf('const downloads = [];', loadStart);
+  const dlEnd = drive.indexOf('const [gResult, ...typeResults]', loadStart);
+  const dlBody = drive.slice(dlStart, dlEnd);
+  assert(!dlBody.includes('return null'),
+    'loadGroup must not degrade failed item downloads to null (partial group)');
+  assert(dlBody.includes('throw downloadError(`${ITEM_TYPES[i]}.json for group ${groupId}`, err)'),
+    'loadGroup must throw a labeled error when an item-file download fails');
+
+  // loadAll: a joined load that fails with definite access loss (404, or a
+  // 403 with a known access-loss reason) is purged immediately via
+  // handleStaleGroup — the poll only covers loaded groups, so a skipped
+  // group would otherwise never be purged. Anything else is transient and
+  // retried on the next load.
+  const allStart = drive.indexOf('/** Load all groups');
+  const allEnd = drive.indexOf('getAllGroups()', allStart);
+  const allBody = drive.slice(allStart, allEnd);
+  assert(allBody.includes('isDefiniteAccessLoss(err)'),
+    'loadAll must classify joined-load failures with isDefiniteAccessLoss');
+  assert(allBody.includes('handleStaleGroup(joined.id)'),
+    'loadAll must purge the failed joined group with no verdict');
+
+  // handleStaleGroup: single-path purge (poll + loadAll) — drops the group
+  // from memory, clears the skip mark, purges pointers, deletes the
+  // groups-table row, notifies the app. No verdict.
+  assert(drive.includes('async handleStaleGroup(groupId)'),
+    'sharing-drive.js must define handleStaleGroup with no verdict parameter');
+  assert(drive.includes("db.from('groups').delete().eq('id', groupId)"),
+    'handleStaleGroup must purge the groups-table row');
+  assert(drive.includes('_skippedGroups.delete(groupId)'),
+    'handleStaleGroup must clear a stale skip mark');
+  assert(drive.includes("'sharing-group-purge-items'"),
+    'handleStaleGroup must dispatch sharing-group-purge-items');
+  assert(drive.includes('{ detail: { groupName } }'),
+    'sharing-group-removed-remotely must carry only the group name');
+
+  // loadAll must still isolate the (now throwing) per-folder failures so one
+  // bad folder cannot break the other groups.
+  assert(allBody.includes('.catch(err =>'),
+    'loadAll must isolate per-folder load failures so one bad folder cannot break all groups');
+});
+
+test('access-loss notice is a single toast; skipped groups get a chip', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  const css = fs.readFileSync(STYLE_FILE, 'utf-8');
+  const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+
+  // handleStaleGroup resolves the group name (live data, then the stored
+  // groups-table row) and the removed-remotely event carries only the name.
+  assert(drive.includes('const row = _groupRows.find(r => r.id === groupId);'),
+    'handleStaleGroup must look up the groups-table row before purging');
+  assert(drive.includes('row?.name || groupId'),
+    'handleStaleGroup must fall back to the stored row name');
+
+  // main.js: one toast, no dialog, no verdict branching.
+  assert(main.includes("t('sharing.group_no_longer_accessible', groupName)"),
+    'main.js must toast the access-loss notice with the group name');
+  assert(!main.includes("verdict === 'deleted'"),
+    'main.js must not branch the notice on a verdict');
+  const noticeIdx = main.indexOf("document.addEventListener('sharing-group-removed-remotely'");
+  const noticeBody = main.slice(noticeIdx, main.indexOf('});', noticeIdx) + 3);
+  assert(!noticeBody.includes('drive.google.com'),
+    'the access-loss notice must not link to the Drive folder');
+
+  // loadAll: transient per-folder failures are recorded as skipped groups.
+  assert(drive.includes('_skippedGroups.clear()'),
+    'loadAll must rebuild the skipped set on every run');
+  assert(drive.includes('_skippedGroups.set(groupId, { name:'),
+    'loadAll must record a failed group load as skipped');
+  assert(drive.includes('getSkippedGroups()'),
+    'sharing-drive.js must expose getSkippedGroups()');
+  assert(drive.includes('_skippedGroups.delete(groupId)'),
+    'handleStaleGroup must clear a stale skip mark when purging');
+
+  // groups.js: skipped groups render with a chip in the Group tab sidebar.
+  const groups = fs.readFileSync(path.join(JS_DIR, 'groups.js'), 'utf-8');
+  assert(groups.includes('getSkippedGroups?.()'),
+    'renderGroups must read the skipped groups');
+  assert(groups.includes('sharing-group-skipped-stamp'),
+    'renderGroups must render skipped groups with a chip');
+  assert(css.includes('.sharing-group-skipped-stamp'),
+    'style.css must define the skipped chip');
+
+  // i18n: new keys in all three locales.
+  const starts = {};
+  for (const m of i18nSrc.matchAll(/^  (en|fr|es): \{$/gm)) starts[m[1]] = m.index;
+  const order = ['en', 'fr', 'es'];
+  for (const key of ['group_no_longer_accessible', 'group_skipped']) {
+    for (let i = 0; i < order.length; i++) {
+      const slice = i18nSrc.slice(starts[order[i]], i + 1 < order.length ? starts[order[i + 1]] : i18nSrc.length);
+      assert(new RegExp(`^\\s{6}${key}:`, 'm').test(slice),
+        `i18n.js [${order[i]}].sharing must define '${key}:'`);
+    }
+  }
+  assert(i18nSrc.includes("ok: 'OK'") && i18nSrc.includes("ok: 'Aceptar'"),
+    "i18n.js must define common 'ok' in all locales");
+});
+
+test('groups table stores group names for unreachable-folder notices (joined + created)', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+
+  // The groups table holds both joined pointers (kind 'joined') and created-
+  // group records (kind 'created', id + name only) so notices can name a
+  // group even when its Drive folder is unreachable.
+  assert(drive.includes("kind: 'joined'"),
+    'joinWithFileIds must tag the pointer row with kind joined');
+  assert(drive.includes('name: groupData?.name || null'),
+    'joinWithFileIds must store the group name in the pointer row');
+  assert(drive.includes("kind: 'created'"),
+    'createGroup must record the created group with kind created');
+  assert(drive.includes("db.from('groups').upsert(createdRow, { onConflict: 'id' })"),
+    'createGroup must persist the created-group row in the groups table');
+  assert(drive.includes('for (const joined of _joinedRows())'),
+    'loadAll must load only joined rows (kind !== created), never created records');
+
+  // Name resolution order: live group data, then the stored groups-table row.
+  assert(drive.includes('const _storedGroupName = (groupId) =>'),
+    'sharing-drive.js must define _storedGroupName');
+  assert(drive.includes('row?.name || groupId'),
+    'handleStaleGroup must fall back to the stored groups-table row name');
+  assert(drive.includes('_storedGroupName(gid)'),
+    'loadAll must name a skipped own group from its created record');
+  assert(drive.includes('joined.id, joined.name)'),
+    'loadAll must pass the stored pointer name to the skip marking');
+
+  // deleteGroup removes the created record; unjoinGroup removes the pointer.
+  assert(drive.includes("// Drop the created-group row from the groups table"),
+    'deleteGroup must drop the created-group row');
+});
+
+test('join publishes to _groups only after the pointer is persisted', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+
+  // A failed join must not arm the already-loaded shortcut: the in-memory
+  // entry is held locally and published only once the join pointer is
+  // persisted, so a retry re-runs the full join instead of toasting "joined"
+  // for a partial join.
+  const joinStart = drive.indexOf('async joinWithFileIds(folderId, fileIds, opts');
+  const joinEnd = drive.indexOf('/** Leave a joined group', joinStart);
+  const joinBody = drive.slice(joinStart, joinEnd);
+  assert(joinBody.includes('loadGroupWithIds(folderId, groupId, fileIds, { cache: false })'),
+    'joinWithFileIds must load the group without publishing to _groups');
+  const setIdx = joinBody.indexOf('_groups.set(groupId, e)');
+  const upsertIdx = joinBody.indexOf("db.from('groups').upsert(entry, { onConflict: 'id' })");
+  assert(upsertIdx !== -1 && setIdx > upsertIdx,
+    'joinWithFileIds must publish to _groups only after the pointer upsert');
+});
+
+test('no localStorage group-name cache: names come from the groups table', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const adapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+
+  // The localStorage cache is gone — the groups table (synced personal data)
+  // is the single source of stored group names.
+  assert(!drive.includes('GROUP_NAME_CACHE_KEY'),
+    'sharing-drive.js must not define a localStorage key for group names');
+  assert(!drive.includes('cacheGroupName'),
+    'sharing-drive.js must not define or call cacheGroupName');
+  assert(!drive.includes('localStorage'),
+    'sharing-drive.js must not touch localStorage for group names');
+
+  // All group state (joined pointers + created-group records) lives in the
+  // groups table.
+  assert(adapter.includes("'groups',"),
+    'DRIVE_TABLES must list the groups table');
+});
+
+test('sharing departure is unjoin-only (no leaveGroup)', () => {
+  const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const delegation = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+
+  assert(!iface.includes('leaveGroup'),
+    'sharing-interface.js must not expose leaveGroup');
+  assert(!drive.includes('async leaveGroup'),
+    'sharing-drive.js must not implement leaveGroup');
+  assert(!sui.includes('sharingLeaveGroup') && !sui.includes('sharing-leave-group'),
+    'sharing-ui.js must not reference the removed leave path');
+  assert(!delegation.includes('sharing-leave-group'),
+    'delegation.js must not route the removed leave action');
+  assert(sui.includes('sharing-unjoin-group') && drive.includes('async unjoinGroup'),
+    'unjoin must remain the single departure path');
+});
+
+test('sharing members use stable hashed IDs with a pending-invite join gate', () => {
+  const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+
+  assert(drive.includes('async function memberIdFromEmail(email)'),
+    'sharing-drive.js must derive the member ID deterministically from the email');
+  assert(!drive.includes('function newMemberId()'),
+    'sharing-drive.js must not mint random member IDs anymore');
+  assert(drive.includes('const creatorMemberId = await memberIdFromEmail(user.email);'),
+    'sharing-drive.js must derive the creator member ID from the email');
+  assert(!drive.includes('emailHash'),
+    'sharing-drive.js must not carry a separate emailHash field anymore');
+  assert(!drive.includes('emailHint'),
+    'sharing-drive.js must not carry the legacy emailHint fallback anymore');
+  assert(drive.includes('No pending invite for this account'),
+    'sharing-drive.js must reject joins without a matching pending invite');
+  assert(drive.includes('m.status === \'pending\' && m.member_id === selfId'),
+    'sharing-drive.js must match the joiner to their pending invite by stable member ID');
+  assert(drive.includes('await assertCreator(groupId)'),
+    'sharing-drive.js must enforce creator-only invite/remove in the adapter');
+  assert(iface.includes('creator-only') && iface.includes('pending invite'),
+    'sharing-interface.js must document creator-only ops and the pending-invite join requirement');
+  // No removal notice file exists anymore: re-inviting a removed member
+  // revives the member row in place, and a later removal is detected purely
+  // as access loss on the member's next poll.
+});
+
+test('sharing email normalization is Gmail-scoped (dots significant elsewhere)', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const src = drive.match(/function normalizeEmail\(email\) \{[\s\S]*?\n  \}/);
+  assert(src, 'sharing-drive.js must define normalizeEmail');
+  const normalizeEmail = new Function(`${src[0]}; return normalizeEmail;`)();
+
+  // Gmail: dots and +tags are ignored by Google
+  assert(normalizeEmail('John.Doe@Gmail.com') === 'johndoe@gmail.com', 'gmail dots stripped');
+  assert(normalizeEmail('john+tag@gmail.com') === 'john@gmail.com', 'gmail +tag stripped');
+  assert(normalizeEmail('John.Doe@Googlemail.com') === 'johndoe@gmail.com', 'googlemail alias mapped');
+  // Everywhere else dots are significant and must be preserved
+  assert(normalizeEmail('John.Doe@Company.com') === 'john.doe@company.com', 'non-gmail dots kept');
+  assert(normalizeEmail('  JOHN@Example.COM ') === 'john@example.com', 'trimmed and lowercased');
+  // memberIdFromEmail must hash the normalized form
+  assert(drive.includes('sha256Hex(normalizeEmail(email))'),
+    'memberIdFromEmail must hash the normalized email, not the raw input');
+});
+
+test('groups is a Drive personal table, not a bespoke sharing file', () => {
+  // The groups table must load with the other personal tables at startup
+  // and be read/written through db — never via bespoke download/upload code
+  // in sharing-drive.js, which would skip the per-table startup download
+  // and silently back up an empty table.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  const tablesMatch = driveAdapter.match(/const DRIVE_TABLES = \[([\s\S]*?)\];/);
+  assert(tablesMatch, 'drive.js must define DRIVE_TABLES');
+  assert(tablesMatch[1].includes("'groups'"),
+    'DRIVE_TABLES must include groups so it loads with the other personal tables');
+
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  assert(!drive.includes('loadJoinedGroups') && !drive.includes('saveJoinedGroups') && !drive.includes('_joinedMeta'),
+    'sharing-drive.js must not keep bespoke groups file IO (loadJoinedGroups/saveJoinedGroups/_joinedMeta)');
+  assert(drive.includes("db.from('groups')"),
+    'sharing-drive.js must read/write group rows through db.from(\'groups\')');
+  assert(drive.includes(".upsert(entry, { onConflict: 'id' })"),
+    'join must upsert the pointer keyed on the row id so the Drive 412 merge stays a union');
+  assert(drive.includes('createDriveSharing(getToken, personalFolderId, capabilities = {}, db = null, opts = {})'),
+    'createDriveSharing must accept the db proxy as a 4th parameter and opts (onSyncActivity) as a 5th');
+
+  const factory = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+  assert(factory.includes('config.db,'),
+    'sharing.js factory must pass config.db through to createDriveSharing');
+  const main = jsFiles['main.js'];
+  const sharingCfg = main.slice(main.indexOf("createSharing('googledrive'"));
+  assert(sharingCfg.includes('db: state.db,'),
+    'main.js must wire state.db into the googledrive sharing config');
+});
+
+test('fresh install writes settings.json last, as the completion marker', () => {
+  // Regression: the fresh-install branch used to create settings.json (empty) in the
+  // same parallel batch as every other table file, then flush schema_version into it.
+  // A partial failure could leave settings.json stamped with schema_version=latest while
+  // a category table file was missing — the retry then skipped both the fresh-install
+  // seeding and the migrations, leaving the category table without its protected
+  // (_default_*, __shared__) rows. settings.json must be written last, only after every
+  // other table file was created and seeded, so a partial failure always leaves the
+  // retry with no schema_version and the pending migrations re-seed the protected rows.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  const freshStart = driveAdapter.indexOf('if (isFreshInstall)');
+  assert(freshStart !== -1, 'drive.js must have a fresh-install branch');
+  const freshBlock = driveAdapter.slice(freshStart, driveAdapter.indexOf('} else {', freshStart));
+
+  const batchIdx = freshBlock.indexOf("filter(t => t !== 'settings')");
+  assert(batchIdx !== -1,
+    'fresh install must create all table files except settings.json in the first batch');
+  const seedFlushIdx = freshBlock.indexOf('Flush seeded category tables to Drive');
+  assert(seedFlushIdx > batchIdx,
+    'fresh install must flush the seeded category tables before settings.json exists');
+  const settingsWriteIdx = freshBlock.indexOf("uploadFile(seedTok, folderId, null, 'settings.json'");
+  assert(settingsWriteIdx > seedFlushIdx,
+    'fresh install must write settings.json (with schema_version) last, in a single upload');
+});
+
+test('migration runner uses the backup policy module', () => {
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  assert(driveAdapter.includes("from './drive-backup-policy.js'"),
+    'drive.js must import the pre-migration backup policy module');
+  assert(driveAdapter.includes('decideBackupAction('),
+    'drive.js must decide restore/snapshot/stale via decideBackupAction');
+});
+
+test('migration runner deletes the pre-migration backup after the batch succeeds', () => {
+  // A lingering backup always means "a migration failed and will be retried
+  // from clean state" — never a historical archive.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  assert(driveAdapter.includes('deleteFile(tok, backupId)'),
+    'drive.js must delete the backup file after the migration batch completes');
+});
+
+test('migration restore overwrites table files in place (never delete-then-restore)', () => {
+  // Deleting table files first would leave a window with zero table files, in
+  // which the next connect would take the fresh-install branch and stamp empty
+  // tables as latest.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  const restoreIdx = driveAdapter.indexOf('drive_restoring_backup');
+  assert(restoreIdx !== -1, 'drive.js must have a restore path');
+  const restoreBlock = driveAdapter.slice(restoreIdx, restoreIdx + 2000);
+  assert(restoreBlock.includes('uploadFile(restoreTok, folderId, meta.fileId'),
+    'restore must overwrite each table file in place via its existing fileId');
+});
+
+test('migration runner writes settings.json once, at the end of the batch', () => {
+  // The schema_version on Drive must move exactly once per batch: it is the
+  // batch's completion marker, written only after every migration's tables
+  // were uploaded. settings.json is therefore NOT flushed per migration.
+  // A failure before the final write leaves the pre-batch version behind,
+  // so a backup whose version equals the current version always means
+  // "its batch did not complete" — no batch-target tracking needed.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  assert(!driveAdapter.includes("dirtyTables.add('settings')"),
+    'settings.json must not be flushed per migration');
+  assert(driveAdapter.includes('uploadFile(settingsTok'),
+    'settings.json must be written once after the migration loop');
+});
+
+test('no migration touches the schema_version settings entry', () => {
+  // The backup/restore policy depends on the schema_version on Drive moving
+  // exactly once per batch (written by the runner at the end). A migration
+  // that read or wrote the version stamp independently would silently break
+  // that invariant, so the contract forbids it (see drive-migrations.js
+  // header, rule 5) and this test enforces it.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+  // Strip comments so the contract's own documentation doesn't trip the check
+  // (this file contains no '//' inside strings, so naive stripping is safe).
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map(line => { const i = line.indexOf('//'); return i === -1 ? line : line.slice(0, i); })
+    .join('\n');
+  assert(!/schema_version/.test(code),
+    'a migration references schema_version in code — the runner owns the version stamp');
+});
+
+test('local migration 2.10.43 renames the text chunking columns', async () => {
+  // Runs the real SQL against an old-schema texts table. Needs bun:sqlite;
+  // skipped under plain node.
+  let Database;
+  try {
+    ({ Database } = await import('bun:sqlite'));
+  } catch {
+    console.log('  (skip: bun:sqlite unavailable)');
+    return;
+  }
+  const { LOCAL_MIGRATIONS } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'local-migrations.js')).href);
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE texts (
+    id TEXT PRIMARY KEY, lines_per_chunk INTEGER NOT NULL DEFAULT 4,
+    context_lines INTEGER NOT NULL DEFAULT 3)`);
+  db.exec(`INSERT INTO texts (id, lines_per_chunk, context_lines)
+    VALUES ('t1', 6, 2), ('t2', 4, 3)`);
+  db.exec(LOCAL_MIGRATIONS['2.10.43']);
+  const cols = db.prepare('PRAGMA table_info(texts)').all().map(c => c.name);
+  assert(cols.includes('blocks_per_chunk') && cols.includes('context_blocks'),
+    'new columns must exist');
+  assert(!cols.includes('lines_per_chunk') && !cols.includes('context_lines'),
+    'old columns must be gone');
+  const rows = db.prepare('SELECT blocks_per_chunk, context_blocks FROM texts ORDER BY id').all();
+  assert(rows[0].blocks_per_chunk === 6 && rows[0].context_blocks === 2,
+    'values must survive the rename');
+  assert(rows[1].blocks_per_chunk === 4 && rows[1].context_blocks === 3,
+    'defaults must survive the rename');
+  db.close();
+});
+
+test('drive migration 2.10.43 renames the text chunking keys', async () => {
+  const { DRIVE_MIGRATIONS } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+  const store = { texts: [
+    { id: 't1', lines_per_chunk: 6, context_lines: 2, title: 'x' },
+    { id: 't2', title: 'y' },
+  ]};
+  await DRIVE_MIGRATIONS['2.10.43'](store);
+  const [r1, r2] = store.texts;
+  assert(r1.blocks_per_chunk === 6 && r1.context_blocks === 2,
+    'values must move to the new keys');
+  assert(!('lines_per_chunk' in r1) && !('context_lines' in r1),
+    'old keys must be gone');
+  assert(!('blocks_per_chunk' in r2) && !('context_blocks' in r2),
+    'rows without old keys must be untouched');
+});
+
+test('sharing i18n keys used in code exist in every locale', () => {
+  // Regression: t('sharing.name_updated') showed the raw key in English because
+  // the string existed in fr/es but was missing from en. Every sharing.* key
+  // referenced in code must be defined in all three locales.
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  const starts = {};
+  for (const m of i18n.matchAll(/^  (en|fr|es): \{$/gm)) starts[m[1]] = m.index;
+  const order = ['en', 'fr', 'es'];
+  const sharing = {};
+  for (let i = 0; i < order.length; i++) {
+    const slice = i18n.slice(starts[order[i]], i + 1 < order.length ? starts[order[i + 1]] : i18n.length);
+    const s0 = slice.indexOf('    sharing: {');
+    assert(s0 >= 0, `i18n.js must define a sharing section for [${order[i]}]`);
+    const rest = slice.slice(s0);
+    const next = rest.slice('    sharing: {'.length).search(/\n    [a-z_]+: \{/);
+    sharing[order[i]] = next < 0 ? rest : rest.slice(0, '    sharing: {'.length + next);
+  }
+  const used = new Set();
+  for (const f of ['sharing-ui.js', 'sharing-drive.js']) {
+    const src = fs.readFileSync(path.join(JS_DIR, f), 'utf-8');
+    for (const m of src.matchAll(/\bt\(\s*['"]sharing\.([A-Za-z0-9_]+)['"]/g)) used.add(m[1]);
+  }
+  assert(used.size > 0, 'expected to find t(\'sharing.*\') usages in sharing code');
+  for (const key of [...used].sort()) {
+    for (const loc of order) {
+      assert(new RegExp(`^\\s{6}${key}:`, 'm').test(sharing[loc]),
+        `i18n.js [${loc}].sharing must define '${key}:' (used via t('sharing.${key}'))`);
+    }
+  }
+});
+
+test('sharing async buttons use the standard busy shimmer', () => {
+  // Invite / join / reconnect buttons must use the shared saving/is-pending
+  // shimmer (same as guard() in main.js), not ad-hoc opacity/text swaps, so
+  // it's always clear something is happening.
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(!sui.includes("btn.style.opacity = '0.5'"),
+    'sharing buttons must not use manual opacity instead of the busy shimmer');
+  assert(sui.includes('function setBtnBusy(btn, busy)'),
+    'sharing-ui.js must define the setBtnBusy helper');
+  const uses = (sui.match(/setBtnBusy\(btn, true\)/g) || []).length;
+  assert(uses >= 4, `expected at least 4 setBtnBusy(btn, true) uses, found ${uses}`);
+});
+
+test('Group tab shows with loading state while init is pending', () => {
+  // Sharing management lives in the Group tab now (the Settings → Sharing
+  // pane was removed). The tab renders a loading state while the async
+  // Drive sharing init is pending and fills in on completion.
+  const groups = fs.readFileSync(path.join(JS_DIR, 'groups.js'), 'utf-8');
+  const renderFn = groups.slice(groups.indexOf('async function renderGroups'));
+  assert(renderFn.includes("'googledrive'") && renderFn.includes("t('common.loading')"),
+    'renderGroups must render a loading state while Drive sharing init is pending');
+  assert(renderFn.includes('sharingInitFailed'),
+    'renderGroups must fall back to the not-available hint when init failed');
+});
+
+test('sharing join picker accepts every required file key', () => {
+  // Regression: the picker's doc→key allowlist in sharing-ui.js once
+  // hard-coded the key list, so a newly added required file was silently
+  // dropped and the join failed with "Missing files: …".
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(!sui.includes("['group', 'todos', 'habits', 'lists']"),
+    'sharing-ui.js must not hard-code the join picker key allowlist');
+  const pickerFn = sui.slice(sui.indexOf('async function sharingOpenJoinPicker'));
+  assert(pickerFn.includes('getRequiredGroupFiles()'),
+    'sharingOpenJoinPicker must derive accepted keys from getRequiredGroupFiles()');
+});
+
+test('sharing join is disabled without a desktop-like pointer', () => {
+  // Joining requires multi-selecting every group file in the Google file
+  // picker. The gate is capability-based (fine pointer + hover), not device
+  // identity: phones/tablets can't multi-select, touchscreen laptops can.
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(sui.includes('isDesktopLike') && sui.includes("from './utils.js'"),
+    'sharing-ui.js must import isDesktopLike from utils.js');
+  const modalFn = sui.slice(sui.indexOf('function sharingOpenJoinCodeModal'));
+  assert(modalFn.includes('if (!isDesktopLike())'),
+    'sharingOpenJoinCodeModal must gate on isDesktopLike()');
+  assert(modalFn.includes("t('sharing.join_not_available_on_touch')"),
+    'sharingOpenJoinCodeModal must show the touch-device notice');
+  const utils = fs.readFileSync(path.join(JS_DIR, 'utils.js'), 'utf-8');
+  assert(utils.includes('function isDesktopLike()')
+    && utils.includes("'(pointer: fine)'") && utils.includes("'(hover: hover)'"),
+    'utils.js isDesktopLike must check fine pointer + hover (capability, not UA)');
+});
+
+test('sharing leave confirmation overrides the Delete default', () => {
+  // Regression: the "Leave this group?" modal showed "Delete" with a trash icon
+  // because showConfirmAction defaults the confirm button to Delete/trash.
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  const leaveCall = sui.slice(sui.indexOf('async function sharingUnjoinGroup'));
+  assert(leaveCall.includes("btnText: t('sharing.leave')"),
+    'sharingUnjoinGroup must override the confirm-modal Delete default with the Leave label');
+  assert(leaveCall.includes("variant: 'neutral'"),
+    'sharingUnjoinGroup must use the neutral (non-red) confirm variant');
+});
+
+test('sharing unjoin writes a left marker instead of deleting the member row', () => {
+  // Leaving must keep a status:'left' tombstone in group.json so the creator's
+  // poll can revoke the leaver's Drive permission (only the folder owner can).
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const unjoin = drive.slice(drive.indexOf('async unjoinGroup(groupId'));
+  const unjoinFn = unjoin.slice(0, unjoin.indexOf('},', unjoin.indexOf('emit(')));
+  assert(unjoinFn.includes("self.status = 'left'"),
+    'unjoinGroup must flip the member status to left');
+  assert(unjoinFn.includes('self.left_at'),
+    'unjoinGroup must stamp left_at on the member row');
+  assert(!unjoinFn.includes('.filter(m => m.member_id !== currentMember.member_id)'),
+    'unjoinGroup must not delete the member row from group.json');
+  assert(drive.includes('async function revokeLeftMembers(groupId, tok)'),
+    'sharing-drive.js must define the creator-side revokeLeftMembers sweep');
+  assert(drive.includes('driveRemovePermission(tok, e.folderId, permissionId)'),
+    'revokeLeftMembers must revoke the Drive permission for left members');
+  assert(drive.includes("m.role === 'creator' || m.role === 'owner'") || drive.includes("m.role === 'owner'"),
+    'revokeLeftMembers must never revoke the owner/creator permission');
+  assert(drive.includes('isCreatorOf(groupId)') && drive.includes('revokeLeftMembers(groupId, tok)'),
+    'the poll loop must run the revoke-left sweep for creator-owned groups');
+});
+
+test('sharing normalizeMember preserves the left marker', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const norm = drive.slice(drive.indexOf('async function normalizeMember'));
+  assert(norm.includes('left_at'),
+    'normalizeMember must preserve left_at so the left marker survives re-saves of group.json');
+});
+
+test('sharing UI never displays left members', () => {
+  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+  assert(sui.includes('function visibleMembers(group)'),
+    'sharing-ui.js must define a visibleMembers helper');
+  assert(sui.includes("filter(m => m.status !== 'left')"),
+    'visibleMembers must exclude status:left tombstones');
+  for (const site of ['visibleMembers(group).length', 'for (const member of visibleMembers(group))',
+      'const activeMembers = visibleMembers(group)', 'visibleMembers(selectedGroup)']) {
+    assert(sui.includes(site), `member display site must use visibleMembers (${site})`);
+  }
+});
+
+test('sharing re-invite revives the existing row for the same email', () => {
+  // Member IDs are stable per email, so re-inviting someone who left (or was
+  // removed) must reset their existing row to a fresh pending invite instead
+  // of minting a duplicate row.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const invite = drive.slice(drive.indexOf('async inviteUser(groupId, inviteTarget)'));
+  assert(invite.includes('const member_id = await memberIdFromEmail(email);'),
+    'inviteUser must derive the member ID deterministically from the invite email');
+  assert(invite.includes('const existing = e.group.members.find(m => m.member_id === member_id);'),
+    'inviteUser must look up the existing member row by stable member ID');
+  assert(invite.includes("existing.status = 'pending'") && invite.includes('existing.left_at = null'),
+    'inviteUser must revive a stale row (left/removed) back to a pending invite');
+});
+
+test('inviteUser refuses already-joined or pending members before any Drive call', () => {
+  // Re-inviting a joined member must not demote them to pending, and
+  // re-inviting a pending member must not mint a duplicate invite: the guard
+  // runs against the in-memory roster before the Drive permission grant.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const invite = drive.slice(drive.indexOf('async inviteUser(groupId, inviteTarget)'));
+  const grantIdx = invite.indexOf('await driveShareWithUser(tok, e.folderId, email,');
+  const joinedGuard = invite.indexOf("existing.status === 'joined'");
+  const pendingGuard = invite.indexOf("existing.status === 'pending'");
+  assert(joinedGuard !== -1 && joinedGuard < grantIdx,
+    'inviteUser must reject an already-joined member before the Drive grant');
+  assert(pendingGuard !== -1 && pendingGuard < grantIdx,
+    'inviteUser must reject an already-pending invite before the Drive grant');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  assert(i18n.includes('already_member:') && i18n.includes('already_invited:'),
+    'i18n.js must define sharing.already_member and sharing.already_invited');
+});
+
+test('member roster mutations are tracked as intents and acknowledged on saveGroup success', () => {
+  // Only rows this client actually changed may win a 412 merge, so every
+  // roster mutation marks an intent and saveGroup acknowledges them on success.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  assert(drive.includes('if (!entry.memberIntents) entry.memberIntents = createIntentState();'),
+    'normalizeEntry must initialise per-entry memberIntents');
+  const createdMarks = (drive.match(/markCreated\(memberIntentsFor\(e\), member_id\)/g) || []).length;
+  assert(createdMarks >= 2, 'inviteUser must markCreated on both the revive and the push branch');
+  assert(drive.includes('markCreated(memberIntentsFor(e), member.member_id);'),
+    'the join flip (pending → joined) must markCreated');
+  assert(drive.includes('markDeleted(memberIntentsFor(e), member_id);'),
+    'removeUser must markDeleted');
+  assert(drive.includes('for (const id of leftIds) markDeleted(memberIntentsFor(e), id);'),
+    'revokeLeftMembers must markDeleted for each swept left marker');
+  const saveGroup = drive.slice(drive.indexOf('async function saveGroup(groupId'));
+  assert(saveGroup.includes('mergeMemberLists(e.group.members, remoteGroup.members || [], memberIntentsFor(e))'),
+    'saveGroup 412 merge must be intent-aware');
+  assert(saveGroup.includes('acknowledgeIntents(memberIntents, capturedMemberIntents);'),
+    'saveGroup must acknowledge member intents on successful upload');
+});
+
+test('poll reconciles the roster intent-aware instead of wholesale-overwriting', () => {
+  // The 15s poll must not drop an invite whose group.json upload is still in
+  // flight: rows this tab created (memberIntents.createdIds) survive the
+  // overwrite via reconcileMembers; everything else takes the remote version.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const poll = drive.slice(drive.indexOf('async poll()'));
+  assert(poll.includes('reconcileMembers('),
+    'poll must reconcile the member roster intent-aware');
+  assert(poll.includes('e.group.members = members;'),
+    'poll must apply the reconciled roster after the overwrite');
+});
+
+test('inviteUser rolls back the roster when the group.json write fails', () => {
+  // A failed invite write must leave the tab exactly as if the invite never
+  // happened: the pushed row is dropped (or the revived row restored) and the
+  // intent discarded, so retrying passes the duplicate-invite guard. No UI
+  // blocking, no bounded retry — the toast is the failure surface.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const invite = drive.slice(drive.indexOf('async inviteUser(groupId, inviteTarget)'));
+  const saveIdx = invite.indexOf('await saveGroup(groupId);');
+  assert(saveIdx !== -1, 'inviteUser must await saveGroup');
+  const tail = invite.slice(saveIdx);
+  assert(tail.includes('catch (err)'), 'inviteUser must catch a saveGroup failure');
+  assert(tail.includes('undoRosterChange?.();'),
+    'inviteUser must roll back the roster mutation when saveGroup throws');
+  assert(tail.includes('discardIntent(memberIntentsFor(e), member_id);'),
+    'inviteUser must discard the member intent when saveGroup throws');
+  assert(tail.includes('throw err;'), 'inviteUser must rethrow so the UI can toast');
+});
+
+test('invite rows carry invited_at; re-invite re-stamps it; creator row has none', () => {
+  // invited_at is the invite generation used by resolveMemberStatusConflict:
+  // joined beats pending only when its invited_at is the same or newer.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const invite = drive.slice(drive.indexOf('async inviteUser(groupId, inviteTarget)'));
+  assert(invite.includes("status: 'pending'") && invite.includes('invited_at: new Date().toISOString()'),
+    'inviteUser must stamp invited_at on the new pending row');
+  assert(invite.includes('existing.invited_at = invited_at;'),
+    're-invite must re-stamp invited_at so the new invite outranks any prior join');
+  assert(drive.includes('invited_at: null, // never invited: created the group'),
+    'the creator row must carry invited_at: null (never invited)');
+  assert(drive.includes('invited_at: member.invited_at ?? null,'),
+    'normalizeMember must pass invited_at through');
+});
+
+test('groups-table pointer rows use snake_case like every other personal table', () => {
+  // The groups table is a personal table, so its rows follow the personal-table
+  // convention (snake_case) — same as the shared group.json roster and the
+  // shared item files. One convention everywhere.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  assert(drive.includes('created_at: new Date().toISOString(), updated_at: new Date().toISOString(),'),
+    'created pointer row must use created_at/updated_at');
+  assert(drive.includes("joined_at: now, updated_at: now"),
+    'join pointer row must use joined_at/updated_at');
+  assert(drive.includes('file_ids: fileIds') && drive.includes('folder_id: folderId') && drive.includes('member_id: member.member_id'),
+    'join pointer row must use file_ids/folder_id/member_id');
+  const adapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  assert(adapter.includes("const localTime = r.updated_at || r.created_at || '';"),
+    'mergeRecords stays single-convention (snake_case)');
+});
+
+test('group.json is fully snake_case (group-level + member rows)', () => {
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const groupDefaults = drive.match(/created_by: null, members: \[\], created_at: null/g) || [];
+  assert(groupDefaults.length === 2, 'both normalizeGroup fallbacks must use created_by/created_at');
+  assert(drive.includes('created_by: creatorMemberId'), 'createGroup must write created_by');
+  assert(drive.includes('created_at: new Date().toISOString(),'), 'createGroup must write created_at');
+  // No camelCase roster/group fields may remain anywhere in the sharing code.
+  for (const f of ['sharing-drive.js', 'sharing-ui.js']) {
+    const src = fs.readFileSync(path.join(JS_DIR, f), 'utf-8');
+    const hits = src.match(/\b(memberId|displayName|invitedLabel|invitedAt|joinedAt|drivePermissionId|leftAt|createdBy|createdAt)\b/g) || [];
+    assert(hits.length === 0, f + ' must not contain camelCase roster fields, found: ' + [...new Set(hits)].join(','));
+  }
+});
+
+test('loadGroup audits folder permissions for orphan grants (creator only)', () => {
+  // Once per load, creator tabs list the folder's Drive permissions and
+  // revoke writer grants with no matching member row in group.json (left by
+  // failed invite writes or failed revocations). A member must never touch
+  // another owner's folder ACL.
+  const drive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+  const auditStart = drive.indexOf('async function auditFolderPermissions(groupId, tok)');
+  assert(auditStart !== -1, 'auditFolderPermissions must exist');
+  const audit = drive.slice(auditStart, drive.indexOf('function publicMember(member)'));
+  assert(audit.includes('await isCreatorOf(groupId)'), 'audit must be creator-gated');
+  assert(audit.includes('driveListPermissions(tok, e.folderId)'),
+    'audit must list the folder permissions');
+  assert(audit.includes("p.role !== 'writer'"), 'audit must only consider writer grants');
+  assert(audit.includes('await driveRemovePermission(tok, e.folderId, p.id);'),
+    'audit must revoke orphan grants');
+  const load = drive.slice(drive.indexOf('async function loadGroup(folderId, groupId'));
+  assert(load.includes('if (owned) await auditFolderPermissions(groupId, tok);'),
+    'loadGroup must run the audit for owned groups');
 });
 
 // ===================================================================
@@ -1129,17 +1984,20 @@ test('Edit habit modal includes last-done date field', () => {
 
 test('Shared habit last-done edits write to shared completions and can clear latest completion', () => {
   const habitsJs = jsFiles['habits.js'];
-  const helperStart = habitsJs.indexOf('async function setSharedHabitLastDone');
-  const helperEnd = habitsJs.indexOf('async function setLocalHabitLastDone', helperStart);
-  assert(helperStart !== -1 && helperEnd !== -1, 'habits.js: setSharedHabitLastDone helper not found');
+  const helperStart = habitsJs.indexOf('async function computeSharedLastDoneCompletions');
+  const helperEnd = habitsJs.indexOf('async function setSharedHabitLastDone', helperStart);
+  assert(helperStart !== -1 && helperEnd !== -1, 'habits.js: computeSharedLastDoneCompletions helper not found');
   const helper = habitsJs.slice(helperStart, helperEnd);
-  assert(helper.includes('state.sharing.updateSharedHabit') && helper.includes('nextCompletions'),
+  assert(helper.includes('planLastDoneEdit'),
+    'habits.js: computeSharedLastDoneCompletions must use planLastDoneEdit for decision logic');
+  const setterStart = habitsJs.indexOf('async function setSharedHabitLastDone');
+  const setterEnd = habitsJs.indexOf('async function setLocalHabitLastDone', setterStart);
+  const setter = habitsJs.slice(setterStart, setterEnd);
+  assert(setter.includes('state.sharing.updateSharedHabit') && setter.includes('nextCompletions'),
     'habits.js: shared last-done edits must rewrite shared completions, not only local completions');
-  // planLastDoneEdit handles the null case (clear latest) — verify it exists and is used
+  // planLastDoneEdit handles the null case (clear latest) — verify it exists
   const planFn = habitsJs.includes('function planLastDoneEdit');
   assert(planFn, 'habits.js: planLastDoneEdit pure helper must exist');
-  assert(helper.includes('planLastDoneEdit'),
-    'habits.js: setSharedHabitLastDone must use planLastDoneEdit for decision logic');
 
   const saveStart = habitsJs.indexOf('async function saveEditHabit');
   const saveEnd = habitsJs.indexOf('async function deleteHabit', saveStart);
@@ -1159,7 +2017,6 @@ test('Shared habit last-done edits write to shared completions and can clear lat
 test('Shared habit completions use group member ids, not account emails', () => {
   const habitsJs = jsFiles['habits.js'];
   const drive = jsFiles['sharing-drive.js'];
-  const supabase = jsFiles['sharing-supabase.js'];
   const iface = jsFiles['sharing-interface.js'];
 
   assert(iface.includes('getCurrentMemberId'),
@@ -1178,12 +2035,6 @@ test('Shared habit completions use group member ids, not account emails', () => 
   const driveFn = drive.slice(driveStart, driveEnd);
   assert(driveFn.includes('currentMemberId(groupId)') && !driveFn.includes('ensureUser') && !driveFn.includes('.email'),
     'sharing-drive.js: getCurrentMemberId must return the group member id, not the account email');
-
-  const sbStart = supabase.indexOf('async function getCurrentMemberId');
-  const sbEnd = supabase.indexOf('async function createGroup', sbStart);
-  const sbFn = supabase.slice(sbStart, sbEnd);
-  assert(sbFn.includes('_getItemWriter(groupId)') && sbFn.includes('w.memberId'),
-    'sharing-supabase.js: getCurrentMemberId must return the item writer member id');
 });
 
 // ===================================================================
@@ -1253,7 +2104,6 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
     'js/lists.js': '.list-item',
     'js/projects.js': '.task-item',
     'js/todos.js': '.todo-item',
-    'js/vestiaire.js': '.vestiaire-item',
   };
 
   for (const [file, selector] of Object.entries(expected)) {
@@ -1264,7 +2114,7 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
   }
 
   // idAttr must be camelCase (dataset API), never raw 'data-xxx-yyy'
-  const allFiles = ['js/lists.js', 'js/projects.js', 'js/todos.js', 'js/vestiaire.js'];
+  const allFiles = ['js/lists.js', 'js/projects.js', 'js/todos.js'];
   for (const file of allFiles) {
     const src = fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8');
     const idAttrMatches = src.match(/idAttr:\s*['"]([^'"]+)['"]/g) || [];
@@ -1293,7 +2143,6 @@ test('Drag clones are globally tagged and cleaned before drag-enabled re-renders
     'lists.js': 'function renderLists',
     'todos.js': 'function renderTodos',
     'projects.js': 'function buildProjectCards',
-    'vestiaire.js': 'function renderVestiaire',
   };
   for (const [file, marker] of Object.entries(renderChecks)) {
     const src = jsFiles[file];
@@ -1308,12 +2157,11 @@ test('Drag clones are globally tagged and cleaned before drag-enabled re-renders
 });
 
 // ===================================================================
-// 31. CHECK constraint parity across all backends (Supabase ↔ Demo ↔ SQLite)
+// 31. CHECK constraint parity across backends (Demo ↔ SQLite)
 // ===================================================================
 
-test('CHECK constraints match across Supabase, Demo adapter, and SQLite schema', () => {
+test('CHECK constraints match across Demo adapter and SQLite schema', () => {
   const demoSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'adapters', 'demo.js'), 'utf8');
-  const supabaseSrc = fs.readFileSync(path.resolve(__dirname, '..', 'sql', 'supabase_schema.sql'), 'utf8');
   const sqliteSrc = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'schema.sql'), 'utf8');
 
   // --- Helper: extract sorted values from a regex match group ---
@@ -1335,16 +2183,11 @@ test('CHECK constraints match across Supabase, Demo adapter, and SQLite schema',
     demoSrc.match(/tasks:\s*\{\s*status:\s*\[([^\]]+)\]/),
     'Demo CHECK_CONSTRAINTS tasks.status');
 
-  const pgTaskStatus = extractValues(
-    supabaseSrc.match(/tasks_status_check.*?CHECK.*?ARRAY\[([^\]]+)\]/),
-    'Supabase tasks_status_check');
-
   const sqliteTaskStatus = extractValues(
     sqliteSrc.match(/tasks[\s\S]*?status\s+TEXT[^,]*CHECK\s*\(\s*status\s+IN\s*\(([^)]+)\)/i),
     'SQLite tasks.status CHECK');
 
-  assertSameValues(demoTaskStatus, pgTaskStatus, 'Demo tasks.status', 'Supabase tasks.status');
-  assertSameValues(sqliteTaskStatus, pgTaskStatus, 'SQLite tasks.status', 'Supabase tasks.status');
+  assertSameValues(demoTaskStatus, sqliteTaskStatus, 'Demo tasks.status', 'SQLite tasks.status');
 
   // Regression guard: draft must be present
   assert(demoTaskStatus.includes('draft'), 'tasks.status must include "draft" for draft task creation');
@@ -1355,18 +2198,13 @@ test('CHECK constraints match across Supabase, Demo adapter, and SQLite schema',
     demoSrc.match(/todos:\s*\{\s*priority:\s*\[([^\]]+)\]/),
     'Demo CHECK_CONSTRAINTS todos.priority');
 
-  const pgTodoPriority = extractValues(
-    supabaseSrc.match(/todos_priority_check.*?CHECK.*?ARRAY\[([^\]]+)\]/),
-    'Supabase todos_priority_check');
-
   const sqliteTodoPriority = extractValues(
     sqliteSrc.match(/todos[\s\S]*?priority\s+TEXT[^,]*CHECK\s*\(\s*priority\s+IN\s*\(([^)]+)\)/i),
     'SQLite todos.priority CHECK');
 
-  assertSameValues(demoTodoPriority, pgTodoPriority, 'Demo todos.priority', 'Supabase todos.priority');
-  assertSameValues(sqliteTodoPriority, pgTodoPriority, 'SQLite todos.priority', 'Supabase todos.priority');
+  assertSameValues(demoTodoPriority, sqliteTodoPriority, 'Demo todos.priority', 'SQLite todos.priority');
 
-  // ── 3. flashcard_notes.proposal_status (Demo + SQLite only — no Supabase CHECK) ──
+  // ── 3. flashcard_notes.proposal_status (Demo ↔ SQLite) ──
 
   const demoProposalStatus = extractValues(
     demoSrc.match(/flashcard_notes:\s*\{\s*proposal_status:\s*\[([^\]]+)\]/),
@@ -1381,226 +2219,62 @@ test('CHECK constraints match across Supabase, Demo adapter, and SQLite schema',
 });
 
 // ===================================================================
-// 32. Integration: archive project → delete it → remaining cards still render
-// ===================================================================
-
-async function archiveDeleteIntegrationTest() {
-  const { execSync } = require('child_process');
-
-  // Resolve playwright
-  let chromium;
-  const tryPaths = [
-    'playwright',
-    path.join(__dirname, '..', 'node_modules', 'playwright'),
-    path.join(__dirname, '..', '..', 'spaces', 'node_modules', 'playwright'),
-  ];
-  for (const p of tryPaths) {
-    try { chromium = require(p).chromium; break; } catch {}
-  }
-  if (!chromium) throw new Error('Playwright not found');
-
-  // Start a dedicated Bun server with a fresh temp DB
-  const tmpDb = '/tmp/delaclaw-integration-test.db';
-  try { fs.unlinkSync(tmpDb); } catch {}
-
-  const serverDir = path.join(__dirname, '..', 'server');
-  const bunProc = require('child_process').spawn(
-    'bun', ['run', path.join(serverDir, 'server.js')],
-    { env: { ...process.env, PORT: '4848', DB_PATH: tmpDb }, stdio: ['pipe', 'pipe', 'pipe'] }
-  );
-
-  // Wait for server to be ready
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Bun server start timeout')), 8000);
-    let output = '';
-    bunProc.stdout.on('data', d => {
-      output += d.toString();
-      if (output.includes('4848') || output.includes('Listening') || output.includes('listening')) {
-        clearTimeout(timeout);
-        resolve();
-      }
-    });
-    bunProc.stderr.on('data', d => { output += d.toString(); });
-    // Also poll in case the log message format changes
-    const poll = setInterval(async () => {
-      try {
-        const resp = await fetch('http://127.0.0.1:4848/rest/v1/projects');
-        if (resp.ok) { clearTimeout(timeout); clearInterval(poll); resolve(); }
-      } catch {}
-    }, 200);
-  });
-
-  let browser;
-  try {
-    // Seed 3 projects + tasks via REST API
-    const BASE = 'http://127.0.0.1:4848/rest/v1';
-    for (const p of [
-      { id: 'proj-alpha', name: 'Alpha', color: '#ff5555', sort_order: 0 },
-      { id: 'proj-beta', name: 'Beta', color: '#55ff55', sort_order: 1 },
-      { id: 'proj-gamma', name: 'Gamma', color: '#5555ff', sort_order: 2 },
-    ]) {
-      await fetch(`${BASE}/projects`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(p),
-      });
-    }
-    // Add tasks to Alpha and Gamma (Beta stays empty)
-    for (const t of [
-      { project: 'proj-alpha', text: 'Alpha task 1', status: 'todo' },
-      { project: 'proj-alpha', text: 'Alpha task 2', status: 'todo' },
-      { project: 'proj-gamma', text: 'Gamma task 1', status: 'todo' },
-    ]) {
-      await fetch(`${BASE}/tasks`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(t),
-      });
-    }
-
-    // Launch browser
-    browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-    const errors = [];
-    page.on('pageerror', err => errors.push(err.message || String(err)));
-
-    // Navigate to app and log in via local mode
-    await page.goto('http://127.0.0.1:4848/', { waitUntil: 'networkidle', timeout: 15000 });
-    // Skip hero and dismiss welcome panel
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(500);
-    try { await page.click('#gateWelcomeLogin', { timeout: 5000 }); } catch {}
-    await page.click('.backend-option[data-mode="local"]');
-    await page.fill('#username', 'http://127.0.0.1:4848');
-    await page.click('#loginForm button[type="submit"]');
-    // Wait for the app to be visible (login gate hidden)
-    await page.waitForSelector('#app.active', { timeout: 10000 });
-    // Wait for tasks to load (no more "Loading..." in visible cards)
-    await page.waitForFunction(() => {
-      const taskLists = document.querySelectorAll('.task-list');
-      return taskLists.length >= 3 && [...taskLists].every(tl => !tl.textContent.includes('Loading'));
-    }, { timeout: 10000 });
-
-    // Verify initial state: Alpha has 2 tasks, Beta has "No tasks yet", Gamma has 1 task
-    const initialAlpha = await page.$eval('#tasks-proj-alpha', el => el.textContent);
-    const initialBeta = await page.$eval('#tasks-proj-beta', el => el.textContent);
-    const initialGamma = await page.$eval('#tasks-proj-gamma', el => el.textContent);
-
-    test('Integration: initial state — Alpha has 2 tasks', () => {
-      assert(initialAlpha.includes('Alpha task 1') && initialAlpha.includes('Alpha task 2'),
-        `Expected Alpha tasks, got: ${initialAlpha}`);
-    });
-    test('Integration: initial state — Beta shows empty', () => {
-      assert(initialBeta.includes('No tasks yet'), `Expected empty Beta, got: ${initialBeta}`);
-    });
-    test('Integration: initial state — Gamma has 1 task', () => {
-      assert(initialGamma.includes('Gamma task 1'), `Expected Gamma task, got: ${initialGamma}`);
-    });
-
-    // Archive project Beta (call via JS — header actions have opacity:0 until hover)
-    await page.evaluate(() => window.archiveProject('proj-beta'));
-    await page.waitForTimeout(500);
-
-    // Verify Beta card is gone from main grid (buildProjectCards excludes archived)
-    const betaCardExists = await page.$('#tasks-proj-beta') !== null;
-    test('Integration: archived project disappears from main grid', () => {
-      assert(!betaCardExists, 'Beta task-list should not exist after archiving');
-    });
-
-    // Show archived section
-    await page.evaluate(() => window.toggleShowArchived());
-    await page.waitForTimeout(300);
-    const archivedSection = await page.$eval('#archivedProjectsSection', el => el.style.display);
-    test('Integration: archived section visible after toggle', () => {
-      assert(archivedSection === 'block', `Expected block, got: ${archivedSection}`);
-    });
-
-    // Delete the archived project Beta — trigger via JS (the button is in the archived list)
-    await page.evaluate(() => window.deleteProject('proj-beta', 'Beta'));
-    // Confirm in the delete modal
-    await page.waitForSelector('#confirmActionModal.visible', { timeout: 5000 });
-    await page.click('#confirmActionBtn');
-    // Wait for the delete to complete and cards to rebuild
-    await page.waitForTimeout(1000);
-
-    // THE KEY ASSERTION: remaining project cards must NOT show "Loading..."
-    const afterAlpha = await page.$eval('#tasks-proj-alpha', el => el.textContent);
-    const afterGamma = await page.$eval('#tasks-proj-gamma', el => el.textContent);
-    const alphaHasLoading = afterAlpha.includes('Loading');
-    const gammaHasLoading = afterGamma.includes('Loading');
-
-    test('Integration: Alpha still renders tasks after deleting archived Beta', () => {
-      assert(!alphaHasLoading && afterAlpha.includes('Alpha task 1'),
-        `Alpha stuck on Loading or lost tasks. Content: "${afterAlpha}"`);
-    });
-    test('Integration: Gamma still renders tasks after deleting archived Beta', () => {
-      assert(!gammaHasLoading && afterGamma.includes('Gamma task 1'),
-        `Gamma stuck on Loading or lost tasks. Content: "${afterGamma}"`);
-    });
-
-    // Beta should be gone entirely (no card, no archived entry)
-    const betaGone = await page.$('#tasks-proj-beta').then(el => el === null);
-    test('Integration: deleted project Beta is fully removed from DOM', () => {
-      assert(betaGone, 'proj-beta card should not exist after deletion');
-    });
-
-    // No JS errors during the whole flow
-    test('Integration: no JS errors during archive+delete flow', () => {
-      const real = errors.filter(e => !e.includes('favicon') && !e.includes('supabase'));
-      assert(real.length === 0, `JS errors: ${real.join('; ')}`);
-    });
-
-  } finally {
-    if (browser) await browser.close();
-    bunProc.kill();
-    try { fs.unlinkSync(tmpDb); } catch {}
-  }
-}
-
-// ===================================================================
 // AUTH & SHARING: Migration files exist
 // ===================================================================
 console.log('\n-- Auth & Sharing (D+E Hybrid)\n');
 
-test('Unified migration SQL file 1.484 exists', () => {
-  const migDir = path.join(__dirname, '..', 'migrations');
-  assert(fs.existsSync(path.join(migDir, '1.484_sharing_ownership_categories.sql')), 'Missing unified migration file');
+// ===================================================================
+// AUTH: no sign-in popup from background tabs + tolerant silent refresh
+// ===================================================================
+test('drive adapter defers prompted re-auth until the tab is visible', () => {
+  const drive = fs.readFileSync(path.join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf-8');
+  const start = drive.indexOf('function scheduleReauthWhenFree()');
+  const end = drive.indexOf('async function getToken()', start);
+  assert(start !== -1 && end !== -1, 'drive.js: scheduleReauthWhenFree block not found');
+  const fn = drive.slice(start, end);
+  assert(fn.includes('document.hidden'),
+    'drive.js: scheduleReauthWhenFree must check document.hidden before firing the sign-in popup');
+  assert(fn.includes("addEventListener('visibilitychange'") && fn.includes('_reauthVisibilityHandler'),
+    'drive.js: background-tab re-auth must defer via a one-shot visibilitychange handler');
 });
 
-test('supabase-migrations.js has entry for 1.484', () => {
-  const content = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'supabase-migrations.js'), 'utf-8');
-  assert(content.includes("'1.484':"), 'Missing supabase migration entry for 1.484');
+test('drive adapter tolerates transient silent-refresh failures before declaring token dead', () => {
+  const drive = fs.readFileSync(path.join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf-8');
+  const start = drive.indexOf('async function getToken()');
+  const end = drive.indexOf('// ── Run pending migrations ──', start);
+  assert(start !== -1 && end !== -1, 'drive.js: getToken block not found');
+  const fn = drive.slice(start, end);
+  assert(fn.includes('_silentFailStreak') && fn.includes('MAX_SILENT_FAILURES'),
+    'drive.js: getToken must count consecutive silent failures before marking the token dead');
 });
 
-test('local-migrations.js has entries for 1.294 and 1.297', () => {
+test('drive adapter passes login_hint to the GIS token client', () => {
+  const drive = fs.readFileSync(path.join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf-8');
+  const start = drive.indexOf('function getGoogleAccessToken(');
+  const end = drive.indexOf('// ── Drive API helpers ──', start);
+  assert(start !== -1 && end !== -1, 'drive.js: getGoogleAccessToken block not found');
+  const fn = drive.slice(start, end);
+  assert(fn.includes('initTokenClient({') && fn.includes('hint: getStoredDriveEmail()'),
+    'drive.js: initTokenClient must pass the stored Google account email as login_hint');
+  assert(drive.includes("localStorage.getItem(_DRIVE_EMAIL_KEY)") || drive.includes("localStorage.getItem('claw_drive_email')") || drive.includes('_DRIVE_EMAIL_KEY'),
+    'drive.js: the login_hint email must be persisted in localStorage (survives PWA restarts)');
+  assert(drive.includes('drive/v3/about?fields=user(emailAddress)'),
+    'drive.js: the Google account email must be captured from the Drive about API after auth');
+});
+
+test('disconnect clears the stored login_hint email', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf-8');
+  const start = main.indexOf('function clearStayConnectedCreds()');
+  const end = main.indexOf('async function disconnect()', start);
+  assert(start !== -1 && end !== -1, 'main.js: clearStayConnectedCreds block not found');
+  const fn = main.slice(start, end);
+  assert(fn.includes('clearStoredDriveEmail()'),
+    'main.js: clearStayConnectedCreds must clear the stored login_hint email (disconnect / switch account)');
+});
+
+test('local-migrations.js has entry for 1.294', () => {
   const content = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
   assert(content.includes("'1.294':"), 'Missing local migration entry for 1.294');
-  assert(content.includes("'1.297':"), 'Missing local migration entry for 1.297');
-});
-
-test('auth.js exports initAuth, sendMagicLink, claimOwnership, getAuthUser, signOut, onAuthStateChange', () => {
-  const authJs = fs.readFileSync(path.join(JS_DIR, 'auth.js'), 'utf-8');
-  const expected = ['initAuth', 'sendMagicLink', 'claimOwnership', 'getAuthUser', 'signOut', 'onAuthStateChange'];
-  for (const fn of expected) {
-    assert(authJs.includes(`export ${fn.startsWith('on') ? 'function' : 'async function'} ${fn}`) ||
-           authJs.includes(`export function ${fn}`),
-      `auth.js missing export: ${fn}`);
-  }
-});
-
-test('sharing-supabase.js exports createSupabaseSharing', () => {
-  const content = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
-  assert(content.includes('export async function createSupabaseSharing'),
-    'sharing-supabase.js missing export: createSupabaseSharing');
-});
-
-test('sharing.js factory includes supabase case (not commented out)', () => {
-  const content = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
-  // Must NOT be commented out — look for actual case, not inside // comments
-  const lines = content.split('\n');
-  const hasActiveCase = lines.some(l => {
-    const trimmed = l.trim();
-    return trimmed.startsWith("case 'supabase':") || trimmed.startsWith('case "supabase":');
-  });
-  assert(hasActiveCase, "sharing.js: 'supabase' case is missing or commented out");
 });
 
 test('sw.js JS precache list matches source modules, with demo data explicit', () => {
@@ -1640,30 +2314,6 @@ test('sw.js JS precache list matches source modules, with demo data explicit', (
   assert(stale.length === 0, `sw.js has stale JS precache entries: ${stale.join(', ')}`);
 });
 
-test('auth.js claimOwnership includes joined_groups table', () => {
-  const authJs = fs.readFileSync(path.join(JS_DIR, 'auth.js'), 'utf-8');
-  assert(authJs.includes("'joined_groups'"), 'auth.js claimOwnership missing joined_groups table');
-});
-
-test('sharing-supabase.js references all expected RPC function names', () => {
-  const content = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
-  const rpcNames = [
-    'verify_join_token', 'confirm_join', 'get_shared_items',
-    'add_shared_item', 'update_shared_item', 'delete_shared_item',
-    'get_group_members', 'leave_group',
-  ];
-  for (const rpc of rpcNames) {
-    assert(content.includes(`'${rpc}'`), `sharing-supabase.js missing RPC call: ${rpc}`);
-  }
-});
-
-test('sharing-supabase inviteUser returns a member-scoped invite code', () => {
-  const content = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf-8');
-  assert(content.includes('inviteCode'), 'inviteUser should return inviteCode');
-  assert(content.includes('getMemberInviteLink(groupId, token, expiresAt)'), 'inviteUser should build a member-scoped code with expiry');
-  assert(!content.includes("'#join='"), 'sharing-supabase.js must not generate URL hash invite links');
-});
-
 test('Drive sharing invite code encodes folder id in DLC1 envelope', () => {
   const content = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
   assert(content.includes("b: 'googledrive'"), 'sharing-drive.js missing googledrive invite-code envelope');
@@ -1676,8 +2326,8 @@ test('state.js includes authUser property', () => {
   assert(content.includes('authUser'), 'state.js missing authUser property');
 });
 
-test('No HTML entities in new JS files (auth.js, sharing-supabase.js)', () => {
-  const files = ['auth.js', 'sharing-supabase.js'];
+test('No HTML entities in JS files', () => {
+  const files = ['sharing.js', 'sharing-ui.js', 'delegation.js'];
   for (const name of files) {
     const content = fs.readFileSync(path.join(JS_DIR, name), 'utf-8');
     const entities = content.match(/&(quot|amp|lt|gt|apos);/g);
@@ -1687,60 +2337,16 @@ test('No HTML entities in new JS files (auth.js, sharing-supabase.js)', () => {
   }
 });
 
-test('1.484 migration defines all 8 RPC functions', () => {
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
-  const expected = [
-    'verify_join_token', 'confirm_join', 'get_shared_items',
-    'add_shared_item', 'update_shared_item', 'delete_shared_item',
-    'get_group_members', 'leave_group',
-  ];
-  for (const fn of expected) {
-    assert(sql.includes(`FUNCTION ${fn}(`), `1.484 migration missing function: ${fn}`);
-  }
-});
-
-test('1.484 migration adds owner_id to all personal tables', () => {
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
-  const tables = [
-    'projects', 'tasks', 'todos', 'habits', 'habit_completions',
-    'flashcard_notes', 'birthdays', 'vestiaire', 'lists', 'list_items',
-    'settings', 'prompts',
-  ];
-  for (const t of tables) {
-    assert(sql.includes(`ALTER TABLE ${t} ADD COLUMN`), `1.484 missing ALTER TABLE ${t}`);
-  }
-});
-
-test('1.484 migration enforces owner-or-agent RLS and claim_ownership RPC', () => {
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '1.484_sharing_ownership_categories.sql'), 'utf-8');
-  assert(!sql.includes('CREATE POLICY "owner or unclaimed"'), '1.484 must not CREATE owner or unclaimed');
-  assert(sql.includes('CREATE POLICY "owner or agent"'), '1.484 must create owner or agent policies');
-  assert(sql.includes('set_owner_id()'), '1.484 must include set_owner_id trigger');
-  assert(sql.includes('claim_ownership()'), '1.484 must include claim_ownership function');
-});
-
-test('sql/supabase_schema.sql has owner-or-agent for all personal tables + joined_groups', () => {
-  const schema = fs.readFileSync(path.join(__dirname, '../', 'sql', 'supabase_schema.sql'), 'utf-8');
-  assert(!schema.includes('owner or unclaimed'), 'supabase_schema.sql must not contain owner or unclaimed after 1.300');
-  const personal = ['birthdays','flashcard_notes','habit_completions','habits','list_items','lists','projects','prompts','settings','tasks','todos','vestiaire','joined_groups'];
-  let count = 0;
-  for (const t of personal) {
-    const re = new RegExp(`CREATE POLICY "owner or agent"[^;]*ON[^;]*"?${t}"?`, 'i');
-    assert(re.test(schema), `supabase_schema.sql missing "owner or agent" policy for ${t}`);
-    count++;
-  }
-  assert(count === 13, `expected 13 owner-or-agent policies for personal tables, counted ${count}`);
-  assert(schema.includes('trg_set_owner_id'), 'supabase_schema.sql must include trg_set_owner_id triggers');
-  assert(schema.includes('claim_ownership'), 'supabase_schema.sql must include claim_ownership function');
-});
-
 test('sharing uses pasted DLC1 invite codes instead of #join links', () => {
   const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
   const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
   const env = fs.readFileSync(path.join(JS_DIR, 'sharing-envelope.js'), 'utf-8');
   assert(env.includes('DLC1.'), 'sharing-envelope.js missing DLC1 invite-code prefix');
   assert(sui.includes('handleJoinCode'), 'sharing-ui.js missing pasted invite-code handler');
-  assert(sui.includes('sharing-open-join-code'), 'sharing-ui.js missing Join group paste entry point');
+  assert(sui.includes('function sharingOpenJoinCodeModal'), 'sharing-ui.js missing Join group paste entry point');
+  const groups = fs.readFileSync(path.join(JS_DIR, 'groups.js'), 'utf-8');
+  assert(groups.includes("window.sharingOpenJoinCodeModal?.()"),
+    'the Group tab Add/Join menu must open the join-code modal');
   assert(!main.includes('#join='), 'main.js must not keep URL-hash invite join handling');
 });
 
@@ -1773,705 +2379,11 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
 // ── Auth Prompt UI ──
 
-test('index.html has authPromptOverlay modal', () => {
-  assert(indexHtml.includes('id="authPromptOverlay"'), 'authPromptOverlay missing from index.html');
-  assert(indexHtml.includes('id="authPromptContent"'), 'authPromptContent missing from index.html');
-});
-
-test('i18n has auth keys in all 3 languages', () => {
-  const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
-  const requiredKeys = ['sign_in', 'sign_in_hint', 'send_magic_link', 'skip', 'check_inbox', 'sign_out', 'signed_in_as'];
-  // Check EN section (first auth: block)
-  const authBlocks = i18nSrc.split(/\bauth:\s*\{/);
-  assert(authBlocks.length >= 4, `Expected 3 auth blocks (EN/FR/ES), found ${authBlocks.length - 1}`);
-  for (const key of requiredKeys) {
-    // Verify the key appears in at least 3 contexts
-    const re = new RegExp(`\\b${key}\\b.*:`, 'g');
-    const matches = i18nSrc.match(re) || [];
-    assert(matches.length >= 3, `i18n auth.${key} not found in all 3 languages (found ${matches.length})`);
-  }
-});
-
-test('main.js defines showAuthPrompt function', () => {
-  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
-  assert(main.includes('function showAuthPrompt('), 'showAuthPrompt function missing from main.js');
-});
-
-test('main.js stores _rawSupabaseAdapter before wrapping', () => {
-  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
-  assert(main.includes('state._rawSupabaseAdapter = adapter'), '_rawSupabaseAdapter assignment missing');
-});
-
-test('main.js shows auth prompt after initAuth for unauthenticated users', () => {
-  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
-  assert(!main.includes('claw_auth_skipped'), 'claw_auth_skipped must be removed - auth is mandatory since 1.300');
-  assert(main.includes('showAuthPrompt('), 'showAuthPrompt call missing after initAuth');
-  assert(main.includes('sign_in_hint_mandatory'), 'mandatory auth hint missing from showAuthPrompt');
-});
-
-test('sharing-ui.js updateSharingNavVisibility shows for supabase mode', () => {
-  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
-  assert(sui.includes("activeMode === 'supabase'"), 'sharing nav visibility missing supabase mode check');
-});
-
-test('sharing-ui.js renderSharingPane has inline auth prompt for unauthenticated supabase', () => {
-  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
-  assert(sui.includes('auth-inline-prompt'), 'auth-inline-prompt class missing from sharing pane render');
-  // sharingAuth* IDs now generated by buildAuthSteps('sharingAuth', ...) from utils.js
-  assert(sui.includes("buildAuthSteps('sharingAuth'"), 'buildAuthSteps call with sharingAuth prefix missing from sharing pane render');
-});
-
-test('sharing-ui.js renderSharingPane shows signed-in badge for authenticated supabase', () => {
-  const sui = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
-  assert(sui.includes('auth-signed-in-badge'), 'auth-signed-in-badge class missing');
-});
-
-test('window.sendAuthFromSharing is exposed', () => {
-  const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
-  assert(main.includes('window.sendAuthFromSharing'), 'window.sendAuthFromSharing not exposed');
-});
-
-// (Removed: test for Supabase Site URL in setup guide — Supabase setup steps removed in deprecation)
-
-// ===================================================================
-// 30. Browser smoke test: all JS modules load without runtime errors
-// ===================================================================
-
-async function browserSmokeTest() {
-  const http = require('http');
-
-  // Resolve playwright from available locations (project, workspace, or global)
-  let chromium;
-  const tryPaths = [
-    'playwright',
-    path.join(__dirname, '..', 'node_modules', 'playwright'),
-    path.join(__dirname, '..', '..', 'spaces', 'node_modules', 'playwright'),
-  ];
-  for (const p of tryPaths) {
-    try { chromium = require(p).chromium; break; } catch {}
-  }
-  if (!chromium) throw new Error('Playwright not found — install via npm or link node_modules/playwright');
-
-  // Start a minimal static file server for the command-center directory
-  const ROOT = path.join(__dirname, '..');
-  const MIME = {
-    '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
-    '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
-    '.ico': 'image/x-icon', '.webp': 'image/webp', '.jpg': 'image/jpeg',
-  };
-  const server = http.createServer((req, res) => {
-    const url = req.url.split('?')[0];
-    const filePath = path.join(ROOT, url === '/' ? 'index.html' : url);
-    try {
-      const data = fs.readFileSync(filePath);
-      const ext = path.extname(filePath);
-      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-      res.end(data);
-    } catch {
-      res.writeHead(404);
-      res.end('Not found');
-    }
-  });
-
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const port = server.address().port;
-
-  let browser;
-  try {
-    browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-
-    // Collect JS errors (SyntaxError, ReferenceError, TypeError)
-    const jsErrors = [];
-    page.on('pageerror', err => {
-      jsErrors.push(err.message || String(err));
-    });
-    // Also catch module-load failures reported as console.error
-    page.on('console', msg => {
-      if (msg.type() === 'error') {
-        const text = msg.text();
-        // Filter out expected network errors (Supabase fetch, favicon, etc.)
-        if (text.includes('SyntaxError') || text.includes('ReferenceError') || text.includes('TypeError')) {
-          jsErrors.push(text);
-        }
-      }
-    });
-
-    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle', timeout: 15000 });
-
-    // Give modules a moment to finish executing
-    await page.waitForTimeout(1000);
-
-    test('All JS modules load without SyntaxError / ReferenceError / TypeError', () => {
-      assert(jsErrors.length === 0,
-        `Browser detected ${jsErrors.length} JS error(s):\n${jsErrors.map(e => '       • ' + e).join('\n')}`);
-    });
-  } finally {
-    if (browser) await browser.close();
-    server.close();
-  }
-}
-
-async function todoPriorityIntegrationTest() {
-  const { execSync } = require('child_process');
-
-  let chromium;
-  const tryPaths = [
-    'playwright',
-    path.join(__dirname, '..', 'node_modules', 'playwright'),
-    path.join(__dirname, '..', '..', 'spaces', 'node_modules', 'playwright'),
-  ];
-  for (const p of tryPaths) {
-    try { chromium = require(p).chromium; break; } catch {}
-  }
-  if (!chromium) throw new Error('Playwright not found');
-
-  const tmpDb = '/tmp/delaclaw-priority-test.db';
-  try { fs.unlinkSync(tmpDb); } catch {}
-
-  const serverDir = path.join(__dirname, '..', 'server');
-  const bunProc = require('child_process').spawn(
-    'bun', ['run', path.join(serverDir, 'server.js')],
-    { env: { ...process.env, PORT: '4849', DB_PATH: tmpDb }, stdio: ['pipe', 'pipe', 'pipe'] }
-  );
-
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Bun server start timeout')), 8000);
-    let output = '';
-    bunProc.stdout.on('data', d => { output += d.toString(); });
-    bunProc.stderr.on('data', d => { output += d.toString(); });
-    const poll = setInterval(async () => {
-      try {
-        const resp = await fetch('http://127.0.0.1:4849/rest/v1/todos');
-        if (resp.ok) { clearTimeout(timeout); clearInterval(poll); resolve(); }
-      } catch {}
-    }, 200);
-  });
-
-  const server = { close: () => { try { bunProc.kill(); } catch {} } };
-  let browser;
-  try {
-    const BASE = 'http://127.0.0.1:4849/rest/v1';
-
-    // Seed a todo with default priority
-    await fetch(`${BASE}/todos`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: 'todo-prio-1', text: 'Priority test todo', priority: 'medium', category: 'Test', sort_order: 0 }),
-    });
-
-    const PRIORITY_LEVELS = ['urgent', 'high', 'medium', 'low'];
-
-    // Test setting each priority via REST (simulates what setTodoPriority does)
-    for (const level of PRIORITY_LEVELS) {
-      const resp = await fetch(`${BASE}/todos?id=eq.todo-prio-1`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ priority: level }),
-      });
-      test(`Set priority to "${level}" — DB accepts`, () => {
-        assert(resp.ok, `PATCH failed for priority "${level}": ${resp.status}`);
-      });
-
-      // Read back and verify
-      const getResp = await fetch(`${BASE}/todos?id=eq.todo-prio-1`);
-      const rows = await getResp.json();
-      test(`Read back priority "${level}" — matches`, () => {
-        assert(rows[0].priority === level, `Expected "${level}", got "${rows[0].priority}"`);
-      });
-    }
-
-    // Test sort order: urgent < high < medium < low
-    const sortMap = { urgent: 0, high: 1, medium: 2, low: 3 };
-    // Seed todos with all priorities
-    for (const level of PRIORITY_LEVELS) {
-      await fetch(`${BASE}/todos`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: `todo-sort-${level}`, text: `Sort ${level}`, priority: level, category: 'Sort', sort_order: 0 }),
-      });
-    }
-    const allResp = await fetch(`${BASE}/todos?category=eq.Sort`);
-    const allTodos = await allResp.json();
-    const sorted = [...allTodos].sort((a, b) => (sortMap[a.priority] ?? 99) - (sortMap[b.priority] ?? 99));
-    test('Priority sort order: urgent < high < medium < low', () => {
-      const actual = sorted.map(t => t.priority);
-      assert(JSON.stringify(actual) === JSON.stringify(['urgent', 'high', 'medium', 'low']),
-        `Expected [urgent,high,medium,low], got [${actual}]`);
-    });
-
-    // Test distinct colors for each priority
-    const prioColors = { urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6' };
-    const colorSet = new Set(Object.values(prioColors));
-    test('All priority colors are distinct', () => {
-      assert(colorSet.size === 4, `Expected 4 distinct colors, got ${colorSet.size}`);
-    });
-
-    // Test urgent uses different icon from high
-    const PRIO_LEVELS_DEF = [
-      { key: 'urgent', icon: 'alert-triangle' },
-      { key: 'high', icon: 'flag' },
-      { key: 'medium', icon: 'flag' },
-      { key: 'low', icon: 'flag' },
-      { key: 'normal', icon: 'circle-off' },
-    ];
-    test('Urgent icon differs from High icon', () => {
-      const urgentIcon = PRIO_LEVELS_DEF.find(l => l.key === 'urgent').icon;
-      const highIcon = PRIO_LEVELS_DEF.find(l => l.key === 'high').icon;
-      assert(urgentIcon !== highIcon, `Urgent and High use same icon: ${urgentIcon}`);
-    });
-
-  } finally {
-    if (browser) await browser.close();
-    server.close();
-  }
-}
-
-// ===================================================================
-// Integration: Import Flashcards (language-aware, new/existing deck, convert/generate)
-// ===================================================================
-
-async function importFlashcardsIntegrationTest() {
-  let chromium;
-  const tryPaths = [
-    'playwright',
-    path.join(__dirname, '..', 'node_modules', 'playwright'),
-    path.join(__dirname, '..', '..', 'spaces', 'node_modules', 'playwright'),
-  ];
-  for (const p of tryPaths) {
-    try { chromium = require(p).chromium; break; } catch {}
-  }
-  if (!chromium) throw new Error('Playwright not found');
-
-  const tmpDb = '/tmp/delaclaw-import-test.db';
-  try { fs.unlinkSync(tmpDb); } catch {}
-
-  const serverDir = path.join(__dirname, '..', 'server');
-  const bunProc = require('child_process').spawn(
-    'bun', ['run', path.join(serverDir, 'server.js')],
-    { env: { ...process.env, PORT: '4850', DB_PATH: tmpDb }, stdio: ['pipe', 'pipe', 'pipe'] }
-  );
-
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Bun server start timeout')), 8000);
-    bunProc.stdout.on('data', () => {});
-    bunProc.stderr.on('data', () => {});
-    const poll = setInterval(async () => {
-      try {
-        const resp = await fetch('http://127.0.0.1:4850/rest/v1/flashcards');
-        if (resp.ok) { clearTimeout(timeout); clearInterval(poll); resolve(); }
-      } catch {}
-    }, 200);
-  });
-
-  let browser;
-  try {
-    const BASE = 'http://127.0.0.1:4850/rest/v1';
-
-    // Seed an existing deck with 2 flashcards
-    await fetch(`${BASE}/flashcards`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([
-        { deck: 'Histoire', front: 'Quelle annee la Bastille a ete prise ?', back: '1789' },
-        { deck: 'Histoire', front: 'Qui etait le Roi-Soleil ?', back: 'Louis XIV' },
-      ]),
-    });
-
-    browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-    const jsErrors = [];
-    page.on('pageerror', err => jsErrors.push(err.message || String(err)));
-
-    await page.goto('http://127.0.0.1:4850/', { waitUntil: 'networkidle', timeout: 15000 });
-    // Skip hero and dismiss welcome panel
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(500);
-    try { await page.click('#gateWelcomeLogin', { timeout: 5000 }); } catch {}
-    await page.click('.backend-option[data-mode="local"]');
-    await page.fill('#username', 'http://127.0.0.1:4850');
-    await page.click('#loginForm button[type="submit"]');
-    await page.waitForSelector('#app.active', { timeout: 10000 });
-
-    // Navigate to flashcards page
-    await page.evaluate(() => {
-      const navBtn = document.querySelector('[data-page="flashcards"]');
-      if (navBtn) navBtn.click();
-    });
-    await page.waitForTimeout(1000);
-
-    // ── Test 1: Import new flashcards into an existing deck ──
-    await page.evaluate(() => window.openImportModal('Histoire'));
-    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
-    await page.click('#importConvertCard');
-    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
-
-    const selectedDeck = await page.$eval('#importDeckSelect', el => el.value);
-    test('Import: existing deck pre-selected', () => {
-      assert(selectedDeck === 'Histoire', `Expected 'Histoire', got '${selectedDeck}'`);
-    });
-
-    const promptText = await page.$eval('#importPromptText', el => el.value || el.textContent);
-    test('Import: convert prompt contains JSON instruction', () => {
-      assert(promptText.includes('JSON array') && promptText.includes('"front"'),
-        'Prompt should mention JSON array and front field');
-    });
-
-    const importJSON = JSON.stringify([
-      { front: 'Qui a proclame la Republique ?', back: 'La Convention nationale, le 22 septembre 1792' },
-      { front: 'En quelle annee Napoleon a-t-il ete sacre empereur ?', back: '1804' },
-    ]);
-    await page.fill('#importPasteArea', importJSON);
-    await page.waitForTimeout(300);
-
-    const previewVisible = await page.$eval('#importPreview', el => el.style.display !== 'none');
-    test('Import: preview shown after valid JSON paste', () => {
-      assert(previewVisible, 'Preview should be visible');
-    });
-
-    const reviewEnabled = await page.$eval('#importReviewBtn', el => !el.disabled);
-    test('Import: review button enabled after valid JSON', () => {
-      assert(reviewEnabled, 'Review button should be enabled');
-    });
-
-    await page.click('#importReviewBtn');
-    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
-    await page.click('#importConfirmBtn');
-    await page.waitForTimeout(1000);
-
-    const modalGone = await page.$('#importFlashModal') === null;
-    test('Import: modal closes after successful import', () => {
-      assert(modalGone, 'Modal should be removed after import');
-    });
-
-    const cardsResp = await fetch(`${BASE}/flashcards?deck=eq.Histoire`);
-    const allCards = await cardsResp.json();
-    test('Import: cards added to existing deck (2 original + 2 imported = 4)', () => {
-      assert(allCards.length === 4, `Expected 4 cards in Histoire, got ${allCards.length}`);
-    });
-
-    // ── Test 2: Import flashcards into a new deck ──
-    await page.evaluate(() => window.openImportModal());
-    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
-    await page.click('#importConvertCard');
-    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
-
-    await page.evaluate(() => {
-      const deckSelect = document.querySelector('#importDeckSelect');
-      const opt = document.createElement('option');
-      opt.value = 'Geographie';
-      opt.textContent = 'Geographie';
-      opt.selected = true;
-      deckSelect.insertBefore(opt, deckSelect.querySelector('[value="__new"]'));
-      deckSelect.dispatchEvent(new Event('change'));
-    });
-    await page.waitForTimeout(200);
-
-    const geoJSON = JSON.stringify([
-      { front: 'Quelle est la capitale de la France ?', back: 'Paris' },
-      { front: 'Quel est le plus long fleuve de France ?', back: 'La Loire (1 012 km)' },
-      { front: 'Combien de regions en France metropolitaine ?', back: '13 regions' },
-    ]);
-    await page.fill('#importPasteArea', geoJSON);
-    await page.waitForTimeout(300);
-    await page.click('#importReviewBtn');
-    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
-    await page.click('#importConfirmBtn');
-    await page.waitForTimeout(1000);
-
-    const geoResp = await fetch(`${BASE}/flashcards?deck=eq.Geographie`);
-    const geoCards = await geoResp.json();
-    test('Import: cards added to new deck (Geographie, 3 cards)', () => {
-      assert(geoCards.length === 3, `Expected 3 cards in Geographie, got ${geoCards.length}`);
-    });
-
-    // ── Test 3: Import texts (convert mode) into a new deck ──
-    await page.evaluate(() => window.openImportModal());
-    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
-    await page.click('#importConvertCard');
-    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
-
-    // Create a new text deck
-    await page.evaluate(() => {
-      const deckSelect = document.querySelector('#importDeckSelect');
-      const opt = document.createElement('option');
-      opt.value = 'Poesie';
-      opt.textContent = 'Poesie';
-      opt.selected = true;
-      deckSelect.insertBefore(opt, deckSelect.querySelector('[value="__new"]'));
-      deckSelect.dispatchEvent(new Event('change'));
-    });
-
-    await page.selectOption('#importTypeSelect', 'text');
-    await page.waitForTimeout(200);
-
-    const textPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
-    test('Import: text convert prompt mentions title/content fields', () => {
-      assert(textPrompt.includes('"title"') && textPrompt.includes('"content"'),
-        'Text prompt should mention title and content');
-    });
-
-    const textJSON = JSON.stringify([
-      { title: 'Demain, des l aube', author: 'Victor Hugo', content: 'Demain, des l aube, a l heure ou blanchit la campagne,\nJe partirai.' },
-    ]);
-    await page.fill('#importPasteArea', textJSON);
-    await page.waitForTimeout(300);
-    await page.click('#importReviewBtn');
-    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
-    await page.click('#importConfirmBtn');
-    await page.waitForTimeout(1000);
-
-    const textsResp = await fetch(`${BASE}/texts?deck=eq.Poesie`);
-    const allTexts = await textsResp.json();
-    test('Import: text added to new deck (Poesie, 1 text)', () => {
-      assert(allTexts.length === 1, `Expected 1 text in Poesie, got ${allTexts.length}`);
-    });
-
-    // ── Test 4: Language-aware prompt — French ──
-    await page.evaluate(() => localStorage.setItem('cc-lang', 'fr'));
-    await page.reload({ waitUntil: 'networkidle', timeout: 15000 });
-    await page.evaluate(() => { const b = document.querySelector('[data-page="flashcards"]'); if (b) b.click(); });
-    await page.waitForTimeout(1000);
-
-    await page.evaluate(() => window.openImportModal('Histoire'));
-    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
-    await page.click('#importGenerateCard');
-    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
-
-    const frPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
-    test('Import: French prompt includes French language instruction', () => {
-      assert(frPrompt.includes('French'),
-        'French prompt should contain "French" language instruction');
-    });
-    test('Import: generate prompt includes existing cards as context', () => {
-      assert(frPrompt.includes('Histoire') && frPrompt.includes('Existing cards'),
-        'Generate prompt should reference the deck and show existing cards');
-    });
-
-    // ── Test 5: Language-aware prompt — English (no extra instruction) ──
-    await page.evaluate(() => {
-      document.querySelector('#importFlashModal')?.remove();
-      localStorage.setItem('cc-lang', 'en');
-    });
-    await page.reload({ waitUntil: 'networkidle', timeout: 15000 });
-    await page.evaluate(() => { const b = document.querySelector('[data-page="flashcards"]'); if (b) b.click(); });
-    await page.waitForTimeout(1000);
-
-    await page.evaluate(() => window.openImportModal('Histoire'));
-    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
-    await page.click('#importGenerateCard');
-    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
-
-    const enPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
-    test('Import: English prompt has no language instruction', () => {
-      assert(!enPrompt.includes('IMPORTANT: Generate ALL content'),
-        'English prompt should not have language instruction');
-    });
-
-    // ── Test 6: Language-aware prompt — Spanish ──
-    await page.evaluate(() => {
-      document.querySelector('#importFlashModal')?.remove();
-      localStorage.setItem('cc-lang', 'es');
-    });
-    await page.reload({ waitUntil: 'networkidle', timeout: 15000 });
-    await page.evaluate(() => { const b = document.querySelector('[data-page="flashcards"]'); if (b) b.click(); });
-    await page.waitForTimeout(1000);
-
-    await page.evaluate(() => window.openImportModal('Histoire'));
-    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
-    await page.click('#importGenerateCard');
-    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
-
-    const esPrompt = await page.$eval('#importPromptText', el => el.value || el.textContent);
-    test('Import: Spanish prompt includes Spanish language instruction', () => {
-      assert(esPrompt.includes('Spanish'),
-        'Spanish prompt should contain "Spanish" language instruction');
-    });
-
-    // ── Test 7: Invalid JSON shows error ──
-    await page.evaluate(() => {
-      document.querySelector('#importFlashModal')?.remove();
-      localStorage.setItem('cc-lang', 'en');
-    });
-    await page.reload({ waitUntil: 'networkidle', timeout: 15000 });
-    await page.evaluate(() => { const b = document.querySelector('[data-page="flashcards"]'); if (b) b.click(); });
-    await page.waitForTimeout(1000);
-
-    await page.evaluate(() => window.openImportModal('Histoire'));
-    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
-    await page.click('#importConvertCard');
-    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
-
-    await page.fill('#importPasteArea', 'not valid json');
-    await page.waitForTimeout(300);
-
-    const errorVisible = await page.$eval('#importError', el => el.style.display !== 'none');
-    const reviewDisabled = await page.$eval('#importReviewBtn', el => el.disabled);
-    test('Import: invalid JSON shows error and disables button', () => {
-      assert(errorVisible && reviewDisabled, 'Error should show and review button should be disabled');
-    });
-
-    // Clean up invalid JSON modal
-    await page.evaluate(() => document.querySelector('#importFlashModal')?.remove());
-
-    // ── Test 8: Review step — exclude cards ──
-    await page.evaluate(() => window.openImportModal('Histoire'));
-    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
-    await page.click('#importConvertCard');
-    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
-
-    const excludeJSON = JSON.stringify([
-      { front: 'Card to keep', back: 'Keep answer' },
-      { front: 'Card to exclude', back: 'Exclude answer' },
-    ]);
-    await page.fill('#importPasteArea', excludeJSON);
-    await page.waitForTimeout(300);
-    await page.click('#importReviewBtn');
-    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
-
-    // Verify all review cards are shown
-    const reviewCardCount = await page.$$eval('.import-review-card', els => els.length);
-    test('Import: review step shows all cards', () => {
-      assert(reviewCardCount === 2, `Expected 2 review cards, got ${reviewCardCount}`);
-    });
-
-    // Uncheck the second card
-    await page.click('.import-review-check[data-idx="1"]');
-    await page.waitForTimeout(200);
-
-    // Confirm import — only 1 card should be imported
-    const prevCount = await fetch(`${BASE}/flashcards?deck=eq.Histoire`).then(r => r.json()).then(d => d.length);
-    await page.click('#importConfirmBtn');
-    await page.waitForTimeout(1000);
-
-    const afterResp = await fetch(`${BASE}/flashcards?deck=eq.Histoire`);
-    const afterCards = await afterResp.json();
-    test('Import: excluding a card in review prevents its import', () => {
-      assert(afterCards.length === prevCount + 1, `Expected ${prevCount + 1} cards (one excluded), got ${afterCards.length}`);
-    });
-
-    // ── Test 9: Review step — edit card before import ──
-    await page.evaluate(() => window.openImportModal('Histoire'));
-    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
-    await page.click('#importConvertCard');
-    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
-
-    const editJSON = JSON.stringify([
-      { front: 'Original question', back: 'Original answer' },
-    ]);
-    await page.fill('#importPasteArea', editJSON);
-    await page.waitForTimeout(300);
-    await page.click('#importReviewBtn');
-    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
-
-    // Edit the front field
-    await page.fill('.import-review-field-input[data-field="front"]', 'Edited question');
-    await page.waitForTimeout(100);
-
-    await page.click('#importConfirmBtn');
-    await page.waitForTimeout(1000);
-
-    const editResp = await fetch(`${BASE}/flashcards?front=eq.Edited question`);
-    const editedCards = await editResp.json();
-    test('Import: editing a card in review applies the edit', () => {
-      assert(editedCards.length === 1, `Expected 1 card with edited front, got ${editedCards.length}`);
-    });
-
-    // ── Test 10: Import with zero existing decks ──
-    // Delete all flashcards and texts so no decks exist
-    await fetch(`${BASE}/flashcards?id=not.is.null`, { method: 'DELETE' });
-    await fetch(`${BASE}/texts?id=not.is.null`, { method: 'DELETE' });
-    // Refresh data in the app
-    await page.evaluate(() => window.refreshFlashcards());
-    await page.waitForTimeout(500);
-
-    await page.evaluate(() => window.openImportModal());
-    await page.waitForSelector('#importFlashModal', { timeout: 5000 });
-    await page.click('#importConvertCard');
-    await page.waitForSelector('#importFlow', { state: 'visible', timeout: 3000 });
-
-    const noDecksSelectVal = await page.$eval('#importDeckSelect', el => el.value);
-    const newDeckWrapVisible = await page.$eval('#importNewDeckWrap', el => el.style.display !== 'none');
-    test('Import: zero decks — __new auto-selected and new deck input visible', () => {
-      assert(noDecksSelectVal === '__new', `Expected __new selected, got '${noDecksSelectVal}'`);
-      assert(newDeckWrapVisible, 'New deck input should be visible when no decks exist');
-    });
-
-    // Type a new deck name and verify it reads back correctly
-    await page.fill('#importNewDeckName', 'MathDeck');
-    await page.waitForTimeout(200);
-    const noDecksNewName = await page.$eval('#importNewDeckName', el => el.value);
-    test('Import: zero decks — new deck name input functional', () => {
-      assert(noDecksNewName === 'MathDeck', `Expected 'MathDeck', got '${noDecksNewName}'`);
-    });
-
-    // Actually import a card to this new deck
-    const newDeckJSON = JSON.stringify([{ front: 'What is 2+2?', back: '4' }]);
-    await page.fill('#importPasteArea', newDeckJSON);
-    await page.waitForTimeout(300);
-    await page.click('#importReviewBtn');
-    await page.waitForSelector('#importReviewStep', { state: 'visible', timeout: 3000 });
-    await page.click('#importConfirmBtn');
-    await page.waitForTimeout(1000);
-
-    const mathResp = await fetch(`${BASE}/flashcards?deck=eq.MathDeck`);
-    const mathCards = await mathResp.json();
-    test('Import: zero decks — card imported to brand-new deck', () => {
-      assert(mathCards.length === 1, `Expected 1 card in MathDeck, got ${mathCards.length}`);
-    });
-
-    // ── Test 11: No JS errors during all import flows ──
-    test('Import: no JS errors during import flows', () => {
-      const real = jsErrors.filter(e => !e.includes('favicon') && !e.includes('supabase') && !e.includes('fetch'));
-      assert(real.length === 0, `JS errors: ${real.join('; ')}`);
-    });
-
-  } finally {
-    if (browser) await browser.close();
-    bunProc.kill();
-    try { fs.unlinkSync(tmpDb); } catch {}
-  }
-}
-
-// Run browser smoke test, then print summary
+// Run remaining checks
+// (Removed: Playwright browser smoke test + integration tests —
+//  the browser-automation tests were never run reliably in this
+//  environment, so the suite is static analysis only.)
 (async () => {
-  const skipIntegration = process.env.CI === 'true';
-
-  if (skipIntegration) {
-    console.log('\n  Skipping integration tests (CI mode)\n');
-  } else {
-    console.log('\n🌐 Browser Smoke Test\n');
-    try {
-      await browserSmokeTest();
-    } catch (e) {
-      test('Browser smoke test setup', () => {
-        throw new Error(`Failed to run browser smoke test: ${e.message}`);
-      });
-    }
-
-    console.log('\n🔗 Integration: Archive + Delete\n');
-    try {
-      await archiveDeleteIntegrationTest();
-    } catch (e) {
-      test('Archive+delete integration test setup', () => {
-        throw new Error(`Failed to run integration test: ${e.message}`);
-      });
-    }
-
-    console.log('\n🔗 Integration: TODO Priority Levels\n');
-    try {
-      await todoPriorityIntegrationTest();
-    } catch (e) {
-      test('TODO priority integration test setup', () => {
-        throw new Error(`Failed to run integration test: ${e.message}`);
-      });
-    }
-
-    console.log('\n🔗 Integration: Import Flashcards\n');
-    try {
-      await importFlashcardsIntegrationTest();
-    } catch (e) {
-      test('Import flashcards integration test setup', () => {
-        throw new Error(`Failed to run integration test: ${e.message}`);
-      });
-    }
-  }
 
   // ===================================================================
   // SHARING INTERFACE CONFORMANCE
@@ -2490,18 +2402,6 @@ async function importFlashcardsIntegrationTest() {
       assert(interfaceKeys.length >= 30,
         `Expected ≥30 interface keys, got ${interfaceKeys.length}`);
     });
-
-    // Check the Supabase adapter return block
-    const sbSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-supabase.js'), 'utf8');
-    const sbReturn = sbSrc.match(/return \{[\s\S]*?\n  \};/);
-    const sbKeys = sbReturn ? [...sbReturn[0].matchAll(/^\s{4}(\w+)/gm)].map(m => m[1]) : [];
-
-    for (const { key } of interfaceKeys) {
-      test(`supabase adapter exports: ${key}`, () => {
-        assert(sbKeys.includes(key),
-          `sharing-supabase.js return block is missing "${key}"`);
-      });
-    }
 
     // Check the Drive adapter object literal
     const drvSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf8');
@@ -2524,31 +2424,14 @@ async function importFlashcardsIntegrationTest() {
   // ===================================================================
   console.log('\n-- Security: credential storage\n');
 
-  test('utils.js exports getSupabaseKeyRole and isServiceRoleKey', () => {
-    const u = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'utils.js'), 'utf8');
-    assert(u.includes('getSupabaseKeyRole'), 'utils.js must export getSupabaseKeyRole');
-    assert(u.includes('isServiceRoleKey'), 'utils.js must export isServiceRoleKey');
-    assert(u.includes('sb_secret_'), 'must check sb_secret_ prefix');
-    assert(u.includes('sb_publishable_'), 'must check sb_publishable_ prefix');
-  });
-
-  test('main.js saveStayConnectedCreds strips key for local/demo/drive and rejects service_role', () => {
+  test('main.js saveStayConnectedCreds never persists keys', () => {
     const m = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'main.js'), 'utf8');
-    assert(m.includes("m === 'local'") && m.includes("key = ''"), 'saveStayConnectedCreds must strip key for local');
-    assert(m.includes('getSupabaseKeyRole') && m.includes('service_role'), 'must check service_role in saveStayConnectedCreds');
-  });
-
-  test('main.js doLogin rejects service_role before connect', () => {
-    const m = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'main.js'), 'utf8');
-    const idxCheck = m.indexOf("err_service_role");
-    const idxConnect = m.indexOf("await connect(url, key, mode)");
-    assert(idxCheck !== -1, 'doLogin must reference login.err_service_role');
-    assert(idxCheck < idxConnect, 'service_role check must be before connect()');
+    assert(m.includes("key: ''"), 'saveStayConnectedCreds must never persist keys');
   });
 
   test('state.js STAY_CONNECTED_KEY has security comment', () => {
     const s = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'state.js'), 'utf8');
-    assert(s.includes('anon key is public') || s.includes('RLS is the boundary'), 'state.js must document anon public + RLS');
+    assert(s.includes('Never persist') || s.includes('credentials are never persisted'), 'state.js must document that credentials are never persisted');
   });
 
   test('drive.js token scoped by clientId and dedup pending promise', () => {
@@ -2592,7 +2475,7 @@ async function importFlashcardsIntegrationTest() {
   test('CODEMAP features include all 8 core features', () => {
     const p = path.join(__dirname, '..', '.agents', 'CODEMAP.json');
     const j = JSON.parse(fs.readFileSync(p, 'utf-8'));
-    const expected = ['todos','habits','projects','birthdays','vestiaire','flashcards','lists','welcome'];
+    const expected = ['todos','habits','projects','birthdays','flashcards','lists','welcome'];
     for (const f of expected) {
       assert(j.features[f], `Missing feature in CODEMAP: ${f}`);
       assert(j.features[f].entry, `${f} missing entry`);
@@ -2603,12 +2486,12 @@ async function importFlashcardsIntegrationTest() {
 
   test('CODEMAP core includes adapters and critical modules', () => {
     const j = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '.agents', 'CODEMAP.json'), 'utf-8'));
-    const must = ['main','state','db','utils','i18n','item-utils','auth','sharing'];
+    const must = ['main','state','db','utils','i18n','item-utils','sharing'];
     for (const m of must) {
       assert(j.core[m], `Missing core module in CODEMAP: ${m}`);
     }
     // adapters
-    const adapters = ['supabase','rest','demo','drive','offline-cache'];
+    const adapters = ['rest','demo','drive','offline-cache'];
     for (const a of adapters) {
       assert(j.core[a] || fs.existsSync(path.join(__dirname,'..','js','adapters',`${a}.js`)), `Adapter ${a} should be represented`);
     }
@@ -2630,46 +2513,6 @@ async function importFlashcardsIntegrationTest() {
       throw new Error('Failed to regenerate CODEMAP: '+e.message);
     }
   });
-
-  test('supabase-migrations.js freshness: matches generated output from SQL files', () => {
-    const { execSync } = require('child_process');
-    const migFile = path.join(__dirname, '..', 'migrations', 'supabase-migrations.js');
-    const before = fs.readFileSync(migFile, 'utf-8');
-    execSync('node scripts/generate-supabase-migrations.js', { cwd: path.join(__dirname,'..'), stdio: 'pipe' });
-    const after = fs.readFileSync(migFile, 'utf-8');
-    assert(before === after, 'supabase-migrations.js is stale — run: node scripts/generate-supabase-migrations.js');
-  });
-
-  test('supabase_schema.sql covers all structures from latest migration', () => {
-    const schema = fs.readFileSync(path.join(__dirname, '..', 'sql', 'supabase_schema.sql'), 'utf-8');
-    const migDir = path.join(__dirname, '..', 'migrations');
-    const sqlFiles = fs.readdirSync(migDir).filter(f => f.endsWith('.sql')).sort();
-    const latestMig = sqlFiles[sqlFiles.length - 1];
-    const latestVer = latestMig.split('_')[0];
-
-    // Schema version must match latest migration
-    assert(schema.includes("'" + latestVer + "'"), 'supabase_schema.sql schema_version (' + latestVer + ') not found');
-
-    // All tables created by the migration must exist in the base schema
-    const migration = fs.readFileSync(path.join(migDir, latestMig), 'utf-8');
-    const tableMatches = migration.matchAll(/CREATE TABLE IF NOT EXISTS\s+(\w+)/g);
-    for (const m of tableMatches) {
-      assert(schema.includes(m[1]), 'supabase_schema.sql missing table: ' + m[1]);
-    }
-
-    // All functions defined by the migration must exist in the base schema
-    const fnMatches = migration.matchAll(/CREATE OR REPLACE FUNCTION\s+(\w+)/g);
-    for (const m of fnMatches) {
-      assert(schema.includes(m[1]), 'supabase_schema.sql missing function: ' + m[1]);
-    }
-
-    // No stale schema_version inserts (only the latest should remain)
-    const verInserts = [...schema.matchAll(/schema_version.*?(\d+\.\d+)/g)];
-    const versions = verInserts.map(m => m[1]);
-    const stale = versions.filter(v => v !== latestVer);
-    assert(stale.length === 0, 'supabase_schema.sql has stale schema_version inserts: ' + stale.join(', '));
-  });
-
 
   // ===================================================================
   // SHARING: unshare/copy-to-personal guards
@@ -2714,8 +2557,4438 @@ async function importFlashcardsIntegrationTest() {
 
 
   // ===================================================================
+  // VERSIONING: X.Y.Z comparator + format guards
+  // ===================================================================
+
+  // version-compare.js is a browser ES module; load it by evaluating its
+  // source with the `export` keyword stripped (Node runs this file as CJS).
+  const vcSrc = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'version-compare.js'), 'utf8')
+    .replace(/^export /m, '');
+  const compareVersions = new Function(`${vcSrc}; return compareVersions;`)();
+
+  test('compareVersions orders X.Y.Z correctly (not as floats)', () => {
+    assert(compareVersions('1.939.0', '1.939.1') === -1, 'patch order');
+    assert(compareVersions('1.939.1', '1.939.0') === 1, 'patch order reversed');
+    assert(compareVersions('2.0.0', '1.939.9') === 1, 'major beats high minor');
+    assert(compareVersions('1.10.0', '1.9.0') === 1, '1.10.0 > 1.9.0 (parseFloat would say otherwise)');
+    assert(compareVersions('1.939.1', '1.939.1') === 0, 'equal');
+  });
+
+  test('compareVersions treats legacy X.Y as X.Y.0', () => {
+    assert(compareVersions('1.809', '1.809.0') === 0, 'legacy equals three-part');
+    assert(compareVersions('1.809', '1.809.1') === -1, 'legacy behind patch');
+    assert(compareVersions('1.939', '1.94.0') === 1, '1.939 (legacy) stays newer than 1.94.0 — no reinterpretation');
+    const sorted = ['1.939.1', '1.809', '2.0.0', '1.809.0'].sort(compareVersions);
+    assert(sorted.join(',') === '1.809,1.809.0,1.939.1,2.0.0', `sort order wrong: ${sorted.join(',')}`);
+  });
+
+  test('VERSION file uses X.Y.Z format', () => {
+    const vtxt = fs.readFileSync(path.join(__dirname, '..', 'VERSION'), 'utf8');
+    const latest = vtxt.match(/^latest=([^\s]+)/m)[1];
+    assert(/^[0-9]+\.[0-9]+\.[0-9]+$/.test(latest), `latest must be X.Y.Z, got '${latest}'`);
+  });
+
+  test('pre-commit hook enforces X.Y.Z format', () => {
+    const hook = fs.readFileSync(path.join(__dirname, '..', '.githooks', 'pre-commit'), 'utf8');
+    assert(hook.includes('^[0-9]+\\.[0-9]+\\.[0-9]+$'), 'hook must validate X.Y.Z format');
+    assert(!hook.includes('X.YYY format'), 'hook must not reference old X.YYY format');
+  });
+
+  test('no parseFloat/string version comparisons remain in migration paths', () => {
+    const files = ['js/adapters/drive.js', 'server/server.js', 'js/sharing-ui.js', 'js/main.js'];
+    for (const file of files) {
+      const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+      assert(!/parseFloat\([^)]*(?:version|Version|dbVer)/.test(src),
+        `${file}: parseFloat used on a version — use compareVersions`);
+      assert(!/\.filter\(v => v > currentVersion\)/.test(src),
+        `${file}: string version comparison — use compareVersions`);
+    }
+  });
+
+
+  // ===================================================================
+  // Sharing file reconciliation — in-memory deletion intents
+  // (js/sharing-file-reconcile.js, wired in js/sharing-drive.js)
+  // ===================================================================
+  {
+    const { pathToFileURL } = require('url');
+    const reconcile = await import(pathToFileURL(path.join(JS_DIR, 'sharing-file-reconcile.js')).href);
+    const { createIntentState, markCreated, markDeleted, discardIntent, unionItems, reconcileItems, reconcileMembers, mergeMemberLists, resolveMemberStatusConflict, captureIntents, acknowledgeIntents } = reconcile;
+
+    const item = (id, updated_at) => ({ id, updated_at });
+    const ids = arr => arr.map(i => i.id).sort();
+    const member = (member_id, status, invited_at) => ({ member_id, status, invited_at });
+
+    test('reconcile: stale local item missing remotely is dropped without a create intent', () => {
+      const intents = createIntentState();
+      const out = reconcileItems([item('a', '2026-09-12T10:00:00Z')], [], intents);
+      assert(ids(out).length === 0, 'stale local item must be dropped (remote deletion)');
+    });
+
+    test('reconcile: pending local creation missing remotely is retained', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      const out = reconcileItems([item('a', '2026-09-12T10:00:00Z')], [], intents);
+      assert(ids(out).join() === 'a', 'pending creation must survive reconciliation');
+    });
+
+    test('reconcile: pending local deletion suppresses a stale remote item', () => {
+      const intents = createIntentState();
+      markDeleted(intents, 'a');
+      const out = reconcileItems([], [item('a', '2026-09-12T10:00:00Z')], intents);
+      assert(ids(out).length === 0, 'remote copy of a pending delete must be suppressed');
+    });
+
+    test('reconcile: remote-only item without a delete intent is accepted', () => {
+      const intents = createIntentState();
+      const out = reconcileItems([], [item('b', '2026-09-12T10:00:00Z')], intents);
+      assert(ids(out).join() === 'b', 'remote creation must be accepted');
+    });
+
+    test('reconcile: item on both sides resolves by newer updated_at (tie keeps remote)', () => {
+      const intents = createIntentState();
+      const localNewer = reconcileItems(
+        [item('a', '2026-09-12T11:00:00Z')], [item('a', '2026-09-12T10:00:00Z')], intents);
+      assert(localNewer[0].updated_at === '2026-09-12T11:00:00Z', 'newer local wins');
+      const remoteNewer = reconcileItems(
+        [item('a', '2026-09-12T10:00:00Z')], [item('a', '2026-09-12T11:00:00Z')], intents);
+      assert(remoteNewer[0].updated_at === '2026-09-12T11:00:00Z', 'newer remote wins');
+      const tie = reconcileItems(
+        [item('a', '2026-09-12T10:00:00Z')], [item('a', '2026-09-12T10:00:00Z')], intents);
+      assert(tie.length === 1, 'tie keeps a single copy');
+    });
+
+    test('unionItems: pure union for remote-vs-remote snapshots (migration)', () => {
+      const out = unionItems(
+        [item('a', '2026-09-12T10:00:00Z')],
+        [item('b', '2026-09-12T10:00:00Z'), item('a', '2026-09-12T09:00:00Z')]);
+      assert(ids(out).join() === 'a,b', 'union keeps both sides');
+      assert(out.find(i => i.id === 'a').updated_at === '2026-09-12T10:00:00Z', 'newer wins');
+    });
+
+    test('mergeMemberLists: without intents, local wins wholesale per row (legacy)', () => {
+      const out = mergeMemberLists(
+        [member('a', 'pending'), member('b', 'pending')],
+        [member('a', 'joined'), member('c', 'joined')]);
+      const byId = Object.fromEntries(out.map(m => [m.member_id, m.status]));
+      assert(byId.a === 'pending', 'local row wins without intents');
+      assert(byId.b === 'pending' && byId.c === 'joined', 'union keeps both sides');
+    });
+
+    test('mergeMemberLists: untouched rows take the remote version (join not reverted)', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'newbie'); // this client invited 'newbie'
+      const out = mergeMemberLists(
+        [member('joiner', 'pending'), member('newbie', 'pending')],
+        [member('joiner', 'joined'), member('creator', 'joined')],
+        intents);
+      const byId = Object.fromEntries(out.map(m => [m.member_id, m.status]));
+      assert(byId.joiner === 'joined', 'concurrent join flipped by the invitee must survive our retry');
+      assert(byId.newbie === 'pending', 'our own change still wins');
+      assert(byId.creator === 'joined', 'remote-only rows are kept');
+    });
+
+    test('mergeMemberLists: rows we removed stay removed even if still present remotely', () => {
+      const intents = createIntentState();
+      markDeleted(intents, 'gone');
+      const out = mergeMemberLists(
+        [member('staying', 'joined')],
+        [member('gone', 'joined'), member('staying', 'joined')],
+        intents);
+      assert(!out.some(m => m.member_id === 'gone'), 'locally removed row must not be resurrected');
+    });
+
+    test('resolveMemberStatusConflict: joined wins when invited_at is the same generation', () => {
+      const w = resolveMemberStatusConflict(
+        member('a', 'pending', '2026-09-20T10:00:00Z'),
+        member('a', 'joined', '2026-09-20T10:00:00Z'));
+      assert(w && w.status === 'joined', 'same invite generation: join stands');
+    });
+
+    test('resolveMemberStatusConflict: joined wins when its invited_at is newer', () => {
+      const w = resolveMemberStatusConflict(
+        member('a', 'joined', '2026-09-22T10:00:00Z'),
+        member('a', 'pending', '2026-09-20T10:00:00Z'));
+      assert(w && w.status === 'joined', 'newer invite generation: join stands');
+    });
+
+    test('resolveMemberStatusConflict: pending wins after a re-invite (newer invited_at)', () => {
+      const w = resolveMemberStatusConflict(
+        member('a', 'joined', '2026-09-20T10:00:00Z'),
+        member('a', 'pending', '2026-09-23T10:00:00Z'));
+      assert(w && w.status === 'pending', 're-invite is newer: stale joined must not override it');
+    });
+
+    test('resolveMemberStatusConflict: no precedence for other status pairs or missing invited_at', () => {
+      assert(resolveMemberStatusConflict(
+        member('a', 'joined', '2026-09-20T10:00:00Z'),
+        member('a', 'left', '2026-09-20T10:00:00Z')) === null, 'joined vs left: no rule');
+      assert(resolveMemberStatusConflict(
+        member('a', 'pending'),
+        member('a', 'joined', '2026-09-20T10:00:00Z')) === null, 'missing invited_at: no rule');
+    });
+
+    test('mergeMemberLists: invited_at rule decides pending/joined with no intent on the row', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'other'); // unrelated intent: must not affect 'a'
+      const out = mergeMemberLists(
+        [member('a', 'pending', '2026-09-20T10:00:00Z'), member('other', 'pending', '2026-09-20T10:00:00Z')],
+        [member('a', 'joined', '2026-09-20T10:00:00Z'), member('other', 'pending', '2026-09-20T10:00:00Z')],
+        intents);
+      const byId = Object.fromEntries(out.map(m => [m.member_id, m.status]));
+      assert(byId.a === 'joined', 'same-generation join survives the 412 merge without an intent');
+    });
+
+    test('reconcileMembers: without intents, the remote roster wins wholesale', () => {
+      const out = reconcileMembers(
+        [member('a', 'pending'), member('b', 'pending')],
+        [member('a', 'joined'), member('c', 'joined')],
+        createIntentState());
+      const byId = Object.fromEntries(out.map(m => [m.member_id, m.status]));
+      assert(byId.a === 'joined', 'remote version wins without intents');
+      assert(!byId.b && byId.c === 'joined', 'local-only rows without a create intent are dropped');
+    });
+
+    test('reconcileMembers: unflushed created rows survive the poll overwrite', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'newbie'); // our invite upload is still in flight
+      const out = reconcileMembers(
+        [member('newbie', 'pending'), member('joiner', 'pending')],
+        [member('joiner', 'joined'), member('creator', 'joined')],
+        intents);
+      const byId = Object.fromEntries(out.map(m => [m.member_id, m.status]));
+      assert(byId.newbie === 'pending', 'unflushed invite row must not be dropped by the poll');
+      assert(byId.joiner === 'joined', 'untouched rows take the remote version');
+      assert(byId.creator === 'joined', 'remote-only rows are kept');
+    });
+
+    test('reconcileMembers: created row present remotely is not duplicated', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'newbie');
+      const out = reconcileMembers(
+        [member('newbie', 'pending')],
+        [member('newbie', 'pending'), member('creator', 'joined')],
+        intents);
+      assert(out.filter(m => m.member_id === 'newbie').length === 1, 'no duplicate rows');
+    });
+
+    test('discardIntent: clears both intent sets for the id', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      markDeleted(intents, 'b');
+      discardIntent(intents, 'a');
+      discardIntent(intents, 'b');
+      assert(intents.createdIds.size === 0 && intents.deletedIds.size === 0,
+        'a rolled-back mutation must leave no intent behind');
+    });
+
+    test('intents: successful upload acknowledges only its captured intents', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      markDeleted(intents, 'b');
+      const captured = captureIntents(intents, [item('a', '2026-09-12T10:00:00Z')]);
+      acknowledgeIntents(intents, captured);
+      assert(!intents.createdIds.has('a'), 'captured create acknowledged');
+      assert(!intents.deletedIds.has('b'), 'captured delete acknowledged');
+    });
+
+    test('intents: id created while an upload is in flight stays pending', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      const captured = captureIntents(intents, [item('a', '2026-09-12T10:00:00Z')]);
+      markCreated(intents, 'b'); // created after the upload started
+      acknowledgeIntents(intents, captured);
+      assert(!intents.createdIds.has('a'), 'in-flight upload acks its own create');
+      assert(intents.createdIds.has('b'), 'later create must stay pending');
+    });
+
+    test('intents: failed upload retains all intents (no acknowledge call)', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      markDeleted(intents, 'b');
+      captureIntents(intents, [item('a', '2026-09-12T10:00:00Z')]);
+      // no acknowledgeIntents — the write failed
+      assert(intents.createdIds.has('a'), 'create intent retained after failure');
+      assert(intents.deletedIds.has('b'), 'delete intent retained after failure');
+    });
+
+    test('intents: delete-then-recreate mid-flight keeps the create intent', () => {
+      const intents = createIntentState();
+      markDeleted(intents, 'a');
+      const captured = captureIntents(intents, []); // payload omits a
+      markCreated(intents, 'a'); // re-created while the delete upload is in flight
+      acknowledgeIntents(intents, captured);
+      assert(intents.createdIds.has('a'), 're-creation must stay pending');
+      assert(!intents.deletedIds.has('a'), 'stale delete must not linger');
+    });
+
+    test('intents: create-then-delete mid-flight keeps the delete intent', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      const captured = captureIntents(intents, [item('a', '2026-09-12T10:00:00Z')]);
+      markDeleted(intents, 'a'); // deleted while the create upload is in flight
+      acknowledgeIntents(intents, captured);
+      assert(intents.deletedIds.has('a'), 'delete must stay pending for the next upload');
+    });
+
+    test('intents: markCreated/markDeleted keep the sets disjoint per id', () => {
+      const intents = createIntentState();
+      markCreated(intents, 'a');
+      markDeleted(intents, 'a');
+      assert(!intents.createdIds.has('a') && intents.deletedIds.has('a'), 'delete wins');
+      markCreated(intents, 'a');
+      assert(intents.createdIds.has('a') && !intents.deletedIds.has('a'), 're-create wins');
+    });
+
+    // ── wiring in sharing-drive.js ──
+    const drive = jsFiles['sharing-drive.js'];
+    test('sharing-drive wires the backend-agnostic reconcile module', () => {
+      assert(drive.includes("from './sharing-file-reconcile.js'"), 'must import the reconcile module');
+      assert(!/function mergeItems\(/.test(drive), 'local mergeItems must be gone');
+      assert(drive.includes('reconcileItems('), 'must use reconcileItems for local-vs-remote merges');
+      assert(drive.includes('unionItems('), 'must use unionItems for the legacy migration');
+      assert(drive.includes('captureIntents(') && drive.includes('acknowledgeIntents('),
+        'saveTypedItems must capture/acknowledge intents per upload');
+      const addItemBlock = drive.slice(drive.indexOf('async addItem('), drive.indexOf('async updateItem('));
+      assert(addItemBlock.includes('markCreated(') && addItemBlock.includes('intentStateFor(e, key)'),
+        'addItem must mark creates');
+      const addHabitBlock = drive.slice(drive.indexOf('async addSharedHabit('), drive.indexOf('async updateSharedHabit('));
+      assert(addHabitBlock.includes('markCreated(') && addHabitBlock.includes("intentStateFor(e, 'habits')"),
+        'addSharedHabit must mark creates');
+      const deleteBlock = drive.slice(drive.indexOf('async deleteItem('), drive.indexOf('async completeItem('));
+      assert(deleteBlock.includes('markDeleted(') && deleteBlock.includes('intentStateFor(e, type)'),
+        'deleteItem must mark deletes');
+      const deleteHabitBlock = drive.slice(drive.indexOf('async deleteSharedHabit('), drive.indexOf('async addSharedHabitCompletion('));
+      assert(deleteHabitBlock.includes('markDeleted(') && deleteHabitBlock.includes("intentStateFor(e, 'habits')"),
+        'deleteSharedHabit must mark deletes');
+      assert(drive.includes('entry.typeIntents[type] = createIntentState()'), 'entries must init per-type intent state');
+    });
+
+    test('sw.js precaches the new reconcile module', () => {
+      const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
+      assert(sw.includes("'js/sharing-file-reconcile.js'"), 'sw.js PRECACHE_URLS must list the new module');
+    });
+  }
+
+  // ===================================================================
+  // Drive personal-table sync intents (js/adapters/drive.js)
+  // Bridges the sharing-file-reconcile engine to personal tables so a
+  // deletion on one device is not resurrected by another device's stale
+  // in-memory copy on poll or on the 412 merge.
+  // ===================================================================
+  {
+    const { pathToFileURL } = require('url');
+    const demo = await import(pathToFileURL(path.join(JS_DIR, 'adapters/demo.js')).href);
+    const { createDemoAdapter } = demo;
+
+    // The demo builder executes synchronously on .then — no async needed.
+    const exec = (builder) => {
+      let out, err;
+      builder.then(r => { out = r; }, e => { err = e; });
+      if (err) throw err;
+      return out;
+    };
+
+    test('demo: _doDelete echoes deleted rows when _returnRow is set', () => {
+      const db = createDemoAdapter({});
+      exec(db.from('todos').insert({ id: 'a', text: 'x' }));
+      exec(db.from('todos').insert({ id: 'b', text: 'y' }));
+      const del = db.from('todos').delete().eq('id', 'a');
+      del._returnRow = true;
+      const res = exec(del);
+      assert(Array.isArray(res.data) && res.data.length === 1 && res.data[0].id === 'a',
+        'deleted row must be echoed so the caller can name the intent');
+      const remaining = exec(db.from('todos').select('*'));
+      assert(remaining.data.length === 1 && remaining.data[0].id === 'b',
+        'only the filtered row must be deleted');
+    });
+
+    test('demo: _doDelete echoes every row on a bulk delete with _returnRow', () => {
+      const db = createDemoAdapter({});
+      exec(db.from('todos').insert({ id: 'a', text: 'x', done: true }));
+      exec(db.from('todos').insert({ id: 'b', text: 'y', done: true }));
+      exec(db.from('todos').insert({ id: 'c', text: 'z', done: false }));
+      const del = db.from('todos').delete().eq('done', true);
+      del._returnRow = true;
+      const res = exec(del);
+      const ids = res.data.map(r => r.id).sort().join(',');
+      assert(ids === 'a,b', 'bulk delete must echo all deleted ids, got: ' + ids);
+    });
+
+    test('demo: _doDelete keeps { data: null } without _returnRow (demo mode unchanged)', () => {
+      const db = createDemoAdapter({});
+      exec(db.from('todos').insert({ id: 'a', text: 'x' }));
+      const res = exec(db.from('todos').delete().eq('id', 'a'));
+      assert(res.data === null, 'default delete contract must stay { data: null }');
+    });
+
+    // ── wiring in js/adapters/drive.js (source-level, like the other drive tests) ──
+    const driveAdapterSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+
+    test('drive: personal tables import the sync-intent engine', () => {
+      assert(driveAdapterSrc.includes("from '../sharing-file-reconcile.js'"),
+        'drive.js must import the backend-agnostic reconcile module');
+      assert(driveAdapterSrc.includes('INTENT_TABLES'), 'must define the intent-covered table set');
+      assert(driveAdapterSrc.includes('KEY_VALUE_TABLES.has(t)'),
+        'settings/prompts must be excluded from intent tables (id-keyed only)');
+    });
+
+    test('drive: from() marks create/delete intents on mutation', () => {
+      assert(driveAdapterSrc.includes('markDriveMutationIntents(table, builder, result, beforeIds)'),
+        'from() wrapper must mark mutation intents');
+      assert(driveAdapterSrc.includes("markCreated(intents, row.id)"),
+        'inserts/upserts must mark created ids');
+      assert(driveAdapterSrc.includes("markDeleted(intents, row.id)"),
+        'deletes must mark deleted ids from the echoed rows');
+    });
+
+    test('drive: flush captures/acknowledges intents and reconciles on 412', () => {
+      assert(driveAdapterSrc.includes('captureIntents(intents, localData)') &&
+             driveAdapterSrc.includes('acknowledgeIntents(intents, captured)'),
+        'flushTable must capture per upload and acknowledge only on success');
+      assert(driveAdapterSrc.includes('reconcileItems(localData, Array.isArray(remoteData) ? remoteData : [], intents)'),
+        '412 path must reconcile with intents instead of the blind union merge');
+      assert(driveAdapterSrc.includes('mergeTable(table, localData, Array.isArray(remoteData) ? remoteData : [])'),
+        'key-value tables must keep their key-based merge on 412');
+    });
+
+    test('drive: poll reconciles with intents instead of overwriting', () => {
+      assert(driveAdapterSrc.includes('reconcileItems(oldData, newData, intentStateFor(tableName))'),
+        'pollForChanges must reconcile the download against in-memory state with intents');
+      assert(!/inner\._store\[tableName\] = newData;/.test(driveAdapterSrc),
+        'the blind poll overwrite must be gone');
+    });
+
+    test('drive: backup restore resets sync intents', () => {
+      assert(driveAdapterSrc.includes('tableIntents[table] = createIntentState()'),
+        'restore must drop stale intents (local == remote by construction)');
+    });
+  }
+
+  // ===================================================================
+  // Drive folder names — production vs preview hosts (js/drive-folders.js)
+  // ===================================================================
+  {
+    const { pathToFileURL } = require('url');
+    const folders = await import(pathToFileURL(path.join(JS_DIR, 'drive-folders.js')).href);
+    const { isProdHostname, driveFolderSuffix, driveFolderNames } = folders;
+
+    test('drive folders: production hostnames keep the DeLaClaw names', () => {
+      for (const host of ['delaclaw.com', 'www.delaclaw.com', 'DeLaClaw.COM']) {
+        assert(isProdHostname(host), `${host} must be treated as production`);
+        assert(driveFolderSuffix(host) === '', `${host} must have no suffix`);
+        const n = driveFolderNames(host);
+        assert(n.personal === 'DeLaClaw', 'personal folder');
+        assert(n.backups === 'DeLaClaw Backups', 'backups folder');
+        assert(n.sharedRoot === 'DeLaClaw-Shared', 'shared root');
+        assert(n.groupPrefix === 'DeLaClaw-Shared-', 'group prefix');
+      }
+    });
+
+    test('drive folders: non-production hosts get isolated DeLaClawDev names', () => {
+      for (const host of ['dev.delaclaw.pages.dev', 'localhost', '127.0.0.1', '', 'pr-123.delaclaw.pages.dev']) {
+        const label = host || '(empty)';
+        assert(!isProdHostname(host), `${label} must not be treated as production`);
+        assert(driveFolderSuffix(host) === 'Dev', `${label} must get the Dev suffix`);
+        const n = driveFolderNames(host);
+        assert(n.personal === 'DeLaClawDev', 'personal folder');
+        assert(n.backups === 'DeLaClawDev Backups', 'backups folder');
+        assert(n.sharedRoot === 'DeLaClawDev-Shared', 'shared root');
+        assert(n.groupPrefix === 'DeLaClawDev-Shared-', 'group prefix');
+      }
+    });
+
+    // ── wiring ──
+    test('drive adapter derives the personal folder from the hostname', () => {
+      const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf-8');
+      assert(src.includes("from '../drive-folders.js'"), 'must import the folder-name module');
+      assert(/const DRIVE_FOLDER_NAME = driveFolderNames\(currentHostname\(\)\)\.personal/.test(src),
+        'personal folder must be hostname-derived, not hardcoded');
+      assert(!/const DRIVE_FOLDER_NAME = 'DeLaClaw'/.test(src), 'hardcoded folder name must be gone');
+    });
+
+    test('sharing adapter derives shared root + group prefix from the hostname', () => {
+      const src = jsFiles['sharing-drive.js'];
+      assert(src.includes("from './drive-folders.js'"), 'must import the folder-name module');
+      assert(src.includes('sharedRoot: SHARED_ROOT_NAME') && src.includes('groupPrefix: GROUP_PREFIX'),
+        'shared root and group prefix must be hostname-derived');
+      assert(!/const SHARED_ROOT_NAME = 'DeLaClaw-Shared'/.test(src), 'hardcoded shared root must be gone');
+    });
+
+    test('main.js derives the backup folder from the hostname', () => {
+      const src = jsFiles['main.js'];
+      assert(src.includes("from './drive-folders.js'"), 'must import the folder-name module');
+      assert(/const DRIVE_FOLDER_NAME = driveFolderNames\(currentHostname\(\)\)\.backups/.test(src),
+        'backup folder must be hostname-derived, not hardcoded');
+    });
+
+    test('calendar sync derives the calendar name from the hostname', () => {
+      const src = jsFiles['calendar-sync.js'];
+      assert(src.includes("from './drive-folders.js'"), 'must import the folder-name module');
+      assert(src.includes('`DeLaClaw${driveFolderSuffix(currentHostname())}`'),
+        'calendar name must be hostname-derived, not hardcoded');
+      assert(!/name = 'DeLaClaw'/.test(src), 'hardcoded calendar name must be gone');
+    });
+
+    test('delete-account dialog names the actual Drive folder', () => {
+      const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      const lines = i18n.split('\n').filter(l => l.includes('confirm_body_drive:'));
+      assert(lines.length === 3, `expected confirm_body_drive in 3 locales, found ${lines.length}`);
+      for (const line of lines) {
+        assert(line.includes('{folder}'), 'dialog body must interpolate the folder name');
+        assert(!line.includes('DeLaClaw'), 'dialog body must not hardcode the folder name');
+      }
+      const src = jsFiles['main.js'];
+      assert(/t\(bodyKey, \{ folder: /.test(src), 'must pass the folder name to the dialog');
+      assert(src.includes('driveFolderNames(currentHostname()).personal'),
+        'folder name must be hostname-derived, not hardcoded');
+    });
+
+    test('account deletion runs the gated wipe in order', () => {
+      const src = jsFiles['main.js'];
+      const steps = ['deleteOwnedGroups()', 'leaveJoinedGroups()',
+        'disableCalSync({ deleteCalendar: true })', 'deletePersonalData', 'revokeToken'];
+      let idx = 0;
+      for (const step of steps) {
+        const at = src.indexOf(step, idx);
+        assert(at !== -1, `wipe must include ${step}`);
+        assert(at >= idx, `wipe steps out of order at ${step}`);
+        idx = at;
+      }
+      for (const stepKey of ['account.step_created_groups', 'account.step_joined_groups',
+                             'account.step_calendar', 'account.step_data']) {
+        assert(src.includes(`abort('${stepKey}'`),
+          `a ${stepKey} failure must abort the wipe`);
+      }
+    });
+
+    test('drive adapter permanently deletes personal data (no trash)', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      assert(drive.includes('async deletePersonalData()'), 'drive adapter must expose deletePersonalData');
+      assert(!drive.includes('async deleteAccount()'), 'the old trash-based deleteAccount must be gone');
+      const body = drive.slice(drive.indexOf('async deletePersonalData()'));
+      assert(body.includes("method: 'DELETE'"), 'personal data must be permanently deleted, not trashed');
+      assert(!body.includes('trashed: true'), 'the personal-data wipe must not trash');
+      assert(body.includes('{ ok: false'), 'failures must return ok:false so the UI aborts');
+      assert(drive.includes('async revokeToken()'), 'drive adapter must expose revokeToken');
+    });
+
+    test('sharing adapter exposes the strict wipe methods', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      assert(drive.includes('async deleteOwnedGroups()'), 'must expose deleteOwnedGroups');
+      assert(drive.includes('this.deleteGroup(row.id)'), 'deleteOwnedGroups must go through deleteGroup');
+      assert(drive.includes('async leaveJoinedGroups()'), 'must expose leaveJoinedGroups');
+      const leave = drive.slice(drive.indexOf('async leaveJoinedGroups()'));
+      assert(leave.includes('{ strict: true }'), 'the wipe leave must be strict');
+    });
+
+    test('deleteOwnedGroups treats a 404 trash on a loaded group as already deleted', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      const trash = drive.slice(drive.indexOf('async function driveTrashFile'));
+      assert(trash.includes('err.code = res.status'), 'driveTrashFile must surface the status code');
+      const wipe = drive.slice(drive.indexOf('async deleteOwnedGroups()'));
+      assert(wipe.includes('err?.code !== 404'), 'a 404 from deleteGroup must not abort the wipe');
+      assert(wipe.includes('_groups.delete(row.id)'), 'the loaded group entry must be dropped on 404');
+    });
+
+    test('group delete/leave modals stay open with per-step progress and refresh views', () => {
+      const ui = jsFiles['sharing-ui.js'];
+      const del = ui.slice(ui.indexOf('async function sharingDeleteGroup'));
+      const leave = ui.slice(ui.indexOf('async function sharingUnjoinGroup'));
+      for (const [name, src, steps] of [
+        ['delete-group', del, ['deleting_converting_items', 'deleting_items', 'deleting_group', 'refreshing_views']],
+        ['leave-group', leave, ['deleting_converting_items', 'leaving_group', 'refreshing_views']],
+      ]) {
+        assert(src.includes('keepOpen: true'), `${name} modal must stay open until the action is done`);
+        for (const step of steps) {
+          assert(src.includes(`setConfirmActionProgress(t('sharing.${step}'))`),
+            `${name} must report the ${step} step`);
+        }
+        assert(src.includes('await _refreshViewsAfterItemsChanged()'),
+          `${name} must explicitly refresh views (the sync cannot see the conversion)`);
+      }
+    });
+
+    test('setConfirmActionProgress only updates while the modal is locked', () => {
+      const utils = jsFiles['utils.js'];
+      assert(utils.includes('function setConfirmActionProgress'), 'utils must expose setConfirmActionProgress');
+      const body = utils.slice(utils.indexOf('function setConfirmActionProgress'));
+      assert(body.includes('_confirmActionLocked'), 'progress updates must be gated on the modal lock');
+      assert(utils.includes('setConfirmActionProgress,') || utils.includes('setConfirmActionProgress\n'),
+        'setConfirmActionProgress must be exported');
+    });
+
+    test('setup help names the actual Drive folder', () => {
+      const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      const lines = i18n.split('\n').filter(l => l.includes('drive_1_desc:'));
+      assert(lines.length === 3, `expected drive_1_desc in 3 locales, found ${lines.length}`);
+      for (const line of lines) {
+        assert(line.includes('{folder}'), 'setup description must interpolate the folder name');
+        assert(!line.includes('<code>DeLaClaw/'), 'setup description must not hardcode the folder name');
+      }
+      const src = jsFiles['main.js'];
+      assert(src.includes("t('setup.drive_1_desc', { folder:"),
+        'must pass the folder name to the setup description');
+    });
+
+    test('sw.js precaches the folder-name module', () => {
+      const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
+      assert(sw.includes("'js/drive-folders.js'"), 'sw.js PRECACHE_URLS must list the new module');
+    });
+  }
+
+  // ===================================================================
+  // SHARING ACCESS LOSS — definite access loss purges the group
+  // A joined group whose folder becomes unreachable (member removed, or the
+  // group deleted) is purged: pointers deleted outright, no dialog, one
+  // info toast. Only a definite access loss purges — 404 always; a 403 only
+  // with a known access-loss reason. Anything else fails open (transient).
+  // ===================================================================
+  {
+    const drive = jsFiles['sharing-drive.js'];
+    const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+    const main = jsFiles['main.js'];
+
+    test('forceSave only flushes dirty types, never re-uploads clean data', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      const m = drive.match(/async forceSave\(\) \{([\s\S]*?)\n    \},/);
+      assert(m, 'forceSave must exist');
+      const body = m[1];
+      // group.json mutations save immediately (never debounced), so forceSave
+      // must not re-upload it — otherwise Disconnect takes ~10s+ with zero
+      // pending changes.
+      assert(!body.includes('saveGroup('),
+        'forceSave must not unconditionally re-upload group.json');
+      // Clean type data must not be re-uploaded either; only dirty types
+      // (or types with waiters) are flushed.
+      assert(!body.includes('saveTypedItems('),
+        'forceSave must not re-upload clean type files');
+      assert(body.includes('_sharedDirty.has(key)'),
+        'forceSave must gate flushes on the dirty set');
+    });
+
+    test('getOwnedGroupsBytes includes extra_* file sizes', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      // createGroup must record the extra files' upload sizes (they are
+      // created on Drive as empty arrays, so their bytes are real).
+      assert(/typeMeta\[key\] = \{ fileId: r\.id, size: r\.size \}/.test(drive),
+        'createGroup must track extra file sizes in typeMeta');
+      // The byte total must sum group.json + item types + extra files for
+      // owned groups (joined groups live on the creator's Drive).
+      const m = drive.match(/getOwnedGroupsBytes\(\) \{([\s\S]*?)\n    \},/);
+      assert(m, 'getOwnedGroupsBytes must exist');
+      assert(m[1].includes('EXTRA_FILES'),
+        'owned-group byte total must include the extra_* files, not just group.json and item types');
+      assert(m[1].includes('RESERVED_FILES'),
+        'owned-group byte total must include the reserved messages/games files');
+    });
+
+    test('required file set is group + item types + extras + reserved (16 files)', () => {
+      const m = drive.match(/const REQUIRED_GROUP_FILES = \[(.*?)\];/s);
+      assert(m, 'REQUIRED_GROUP_FILES declaration must be parseable');
+      assert(m[1].includes("'group'") && m[1].includes('ITEM_TYPES') &&
+             m[1].includes('EXTRA_FILES') && m[1].includes('RESERVED_FILES'),
+        'required set must be group + item types + extras + reserved files');
+    });
+
+    test('group files: extra_11/extra_12 replaced by messages.json and games.json', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      // Only 10 numbered extras remain; the last two placeholder slots are
+      // the named files reserved for future features, created empty.
+      assert(/const EXTRA_COUNT\s+= 10;/.test(drive),
+        'EXTRA_COUNT must be 10 (extra_1..extra_10)');
+      const r = drive.match(/const RESERVED_FILES\s+= \[(.*?)\];/s);
+      assert(r && r[1].includes("'messages'") && r[1].includes("'games'"),
+        "RESERVED_FILES must be ['messages', 'games']");
+      assert(drive.includes('...RESERVED_FILES.map(name => ({ key: name, name: `${name}.json` }))'),
+        'createGroup must create messages.json and games.json empty at group creation');
+      // The full set stays 16 keys: group + 3 item types + 10 extras + 2 reserved.
+      const keys = ['group', 'todos', 'habits', 'lists',
+        ...Array.from({ length: 10 }, (_, i) => `extra_${i + 1}`), 'messages', 'games'];
+      assert(keys.length === 16 && !keys.includes('extra_11') && !keys.includes('extra_12'),
+        'file set must be 16 files with no extra_11/extra_12');
+    });
+
+    test('removeUser deletes the member row and revokes access', () => {
+      const fn = drive.match(/async removeUser\(groupId, member_id\) \{([\s\S]*?)\n    \},/);
+      assert(fn, 'removeUser must exist');
+      const body = fn[1];
+      const reassignIdx = body.indexOf('item.created_by = creatorId');
+      const revokeIdx = body.indexOf('driveRemovePermission');
+      const rowIdx = body.indexOf('.filter(m => m.member_id !== member_id)');
+      assert(reassignIdx !== -1, 'removeUser must rewrite created_by to the creator');
+      assert(revokeIdx !== -1, 'removeUser must revoke the folder permission');
+      assert(rowIdx !== -1, 'removeUser must delete the member row');
+      assert(reassignIdx < revokeIdx && revokeIdx < rowIdx,
+        'removeUser must reassign items, then revoke, then delete the row');
+    });
+
+    test('isDefiniteAccessLoss classifies access loss vs transient failures', () => {
+      const fn = drive.match(/function isDefiniteAccessLoss\(err\) \{([\s\S]*?)\n\}/);
+      assert(fn, 'sharing-drive.js must define isDefiniteAccessLoss');
+      const body = fn[1];
+      assert(body.includes('code === 404'), 'a 404 is always access loss');
+      assert(body.includes('isDriveRateLimited(err)'),
+        'rate-limited 403s are excluded before the access-loss check');
+      assert(body.includes('DRIVE_ACCESS_LOSS_REASONS.has(err?.reason)'),
+        'a 403 counts as access loss only with a known access-loss reason');
+      assert(body.includes('return false;'),
+        'unknown/missing 403 reasons and other errors fail open (transient)');
+      assert(drive.includes("'insufficientPermissions'") && drive.includes("'forbidden'"),
+        'the access-loss reason set must hold insufficientPermissions and forbidden');
+    });
+
+    test('poll and startup load both gate on isDefiniteAccessLoss', () => {
+      const uses = drive.match(/isDefiniteAccessLoss\(err\)/g) || [];
+      assert(uses.length >= 2,
+        'the 15s poll and the startup joined-load must both gate on isDefiniteAccessLoss');
+      assert(!/notFoundStrikes/.test(drive),
+        'notFoundStrikes must not be referenced anywhere');
+    });
+
+    test('group_no_longer_accessible exists in all three locales', () => {
+      const starts = {};
+      for (const m of i18nSrc.matchAll(/^  (en|fr|es): \{$/gm)) starts[m[1]] = m.index;
+      const order = ['en', 'fr', 'es'];
+      for (let i = 0; i < order.length; i++) {
+        const slice = i18nSrc.slice(starts[order[i]], i + 1 < order.length ? starts[order[i + 1]] : i18nSrc.length);
+        assert(/^\s{6}group_no_longer_accessible:/m.test(slice),
+          `i18n.js [${order[i]}].sharing must define 'group_no_longer_accessible:'`);
+      }
+      assert(!/group_removed_remotely|group_deleted_remotely|group_deleted_title|group_deleted_check_folder/.test(i18nSrc),
+        'the old verdict/i18n keys must be gone from i18n.js');
+    });
+  }
+
+  // ===================================================================
+  // SHARING ADD FLOW — optimistic: the shared upload runs in the background
+  // addItem stages the item in memory first and fires the optional onStaged
+  // hook before the Drive upload, so the UI can render without waiting for
+  // the network. shareTodoFromAdd unblocks on staging (not on upload);
+  // a background upload failure rolls the pointer row back and restores the
+  // typed text.
+  // ===================================================================
+  {
+    const drive = jsFiles['sharing-drive.js'];
+    const todosSrc = jsFiles['todos.js'];
+
+    test('addItem fires onStaged after in-memory staging, before the debounced upload', () => {
+      const m = drive.match(/async addItem\(groupId, \{([\s\S]*?)\n    \},/);
+      assert(m, 'addItem declaration must be parseable');
+      const body = m[1];
+      const pushIdx = body.indexOf('e.typeData[key].push(item)');
+      const stagedIdx = body.indexOf('onStaged(item)');
+      const uploadIdx = body.indexOf('scheduleSharedFlush(groupId, key)');
+      assert(pushIdx !== -1 && stagedIdx !== -1 && uploadIdx !== -1,
+        'addItem must stage in memory, fire onStaged, then schedule the debounced upload');
+      assert(pushIdx < stagedIdx && stagedIdx < uploadIdx,
+        'onStaged must fire after the in-memory push and before the Drive upload is scheduled');
+      assert(/typeof onStaged === 'function'/.test(body),
+        'onStaged must be optional (guarded call)');
+    });
+
+    test('shareTodoFromAdd unblocks on staging, not on the upload', () => {
+      const start = todosSrc.indexOf('async function shareTodoFromAdd');
+      const end = todosSrc.indexOf('window.shareTodoFromAdd', start);
+      assert(start !== -1 && end !== -1, 'shareTodoFromAdd must exist');
+      const body = todosSrc.slice(start, end);
+      assert(body.includes('onStaged'), 'must pass onStaged to addItem');
+      assert(!body.includes('await state.sharing.addItem'),
+        'must not await the shared upload before unblocking the UI');
+      assert(/\.delete\(\)\.eq\('id', localRow\.id\)/.test(body),
+        'a background upload failure must delete the staged pointer row');
+      assert(body.includes('input.value = text'),
+        'a background upload failure must restore the typed text');
+    });
+  }
+
+  // ===================================================================
+  // OPTIMISTIC-EVERYWHERE — every shared mutation stages in memory first
+  // and fires onStaged before the Drive upload; a failed upload rolls the
+  // staging back (adapter-level) so no zombie item or stale intent survives
+  // to be resurrected by a later flush/merge. Views unblock on staging via
+  // Promise.race and run the upload in the background with a local rollback.
+  // ===================================================================
+  {
+    const drive = jsFiles['sharing-drive.js'];
+    const todosSrc = jsFiles['todos.js'];
+    const habitsSrc = jsFiles['habits.js'];
+    const listsSrc = jsFiles['lists.js'];
+
+    function methodBody(name, endMarker) {
+      const start = drive.indexOf(`async ${name}(`);
+      const end = drive.indexOf(endMarker, start);
+      assert(start !== -1 && end !== -1, `${name} block must be parseable`);
+      return drive.slice(start, end);
+    }
+
+    test('updateItem stages, fires onStaged, and rolls back on upload failure', () => {
+      const body = methodBody('updateItem', 'async deleteItem(');
+      assert(body.includes('{ onStaged } = {}'), 'updateItem must accept the onStaged option');
+      const assignIdx = body.indexOf('Object.assign(item, changes');
+      const stagedIdx = body.indexOf('onStaged(item)');
+      const uploadIdx = body.indexOf('_mutationQueue.runSerialized(mkey, entry,');
+      assert(assignIdx !== -1 && stagedIdx !== -1 && uploadIdx !== -1, 'must stage, fire onStaged, then upload');
+      assert(assignIdx < stagedIdx && stagedIdx < uploadIdx, 'onStaged must fire after staging, before upload');
+      assert(/restore: \(\) => \{[\s\S]*?Object\.assign\(cur, prev\)/.test(body),
+        'a failed upload must restore the pre-staging item snapshot via the queued restore');
+    });
+
+    test('deleteItem stages, fires onStaged, and rolls back on upload failure', () => {
+      const body = methodBody('deleteItem', 'async completeItem(');
+      assert(body.includes('{ onStaged } = {}'), 'deleteItem must accept the onStaged option');
+      const spliceIdx = body.indexOf('arr.splice(idx, 1)');
+      const uploadIdx = body.indexOf('await scheduleSharedFlush(groupId, type)');
+      assert(spliceIdx !== -1 && uploadIdx !== -1 && spliceIdx < uploadIdx,
+        'must stage the delete in memory before scheduling the debounced upload');
+      assert(/catch \(err\)[\s\S]*?cur\.splice\(/.test(body),
+        'a failed upload must re-insert the removed item');
+      assert(body.includes('restoreIntents(intents, itemId, prevIntents)'),
+        'a failed upload must restore the pre-staging intent snapshot');
+    });
+
+    test('shared-habit mutations accept onStaged and roll back on upload failure', () => {
+      for (const [name, endMarker] of [
+        ['addSharedHabit', 'async updateSharedHabit('],
+        ['updateSharedHabit', 'async deleteSharedHabit('],
+        ['deleteSharedHabit', 'async addSharedHabitCompletion('],
+        ['addSharedHabitCompletion', 'async forceSave('],
+      ]) {
+        const body = methodBody(name, endMarker);
+        assert(/\{ onStaged[^}]*\} = \{\}/.test(body), `${name} must accept the onStaged option`);
+        assert(/typeof onStaged === 'function'/.test(body), `${name}: onStaged must be optional (guarded call)`);
+        assert(body.includes('_mutationQueue.runSerialized(mkey, entry,') || /catch \(err\)/.test(body),
+          `${name}: a failed upload must roll the staging back`);
+      }
+    });
+
+    test('completeItem/uncompleteItem pass opts through to updateItem', () => {
+      const doneBy = drive.indexOf('async completeItem(groupId, itemId, doneBy, opts)');
+      assert(doneBy !== -1, 'completeItem must accept opts');
+      const doneBlock = drive.slice(doneBy, drive.indexOf('async uncompleteItem', doneBy));
+      assert(doneBlock.includes('}, opts)'), 'completeItem must forward opts to updateItem');
+      const undoneBy = drive.indexOf('async uncompleteItem(groupId, itemId, opts)');
+      assert(undoneBy !== -1, 'uncompleteItem must accept opts');
+    });
+
+    test('share flows stage in shared memory before planting the local pointer', () => {
+      // Stage-before-pointer: the in-memory staging (created intent + dirty
+      // type) must happen before the local pointer row exists, so the poll
+      // and the orphan-pointer cleanup can't misread the in-between state.
+      // The UI unblocks on staging; the debounced upload settles afterwards.
+      const cases = [
+        [todosSrc, 'shareExistingTodo', 'state.sharing.addItem(groupId, {'],
+        [todosSrc, 'bulkShareTodoCategory', 'state.sharing.addItem(groupId, {'],
+        [todosSrc, 'shareTodoFromAdd', 'state.sharing.addItem(groupId, {'],
+        [habitsSrc, 'saveNewHabit', 'state.sharing.addSharedHabit(groupId,'],
+        [habitsSrc, 'shareExistingHabit', 'state.sharing.addSharedHabit(groupId,'],
+        [habitsSrc, 'bulkShareHabitCategory', 'state.sharing.addSharedHabit(groupId,'],
+        [listsSrc, 'shareExistingListItem', 'state.sharing.addItem(groupId, {'],
+        [listsSrc, 'bulkShareList', 'state.sharing.addItem(groupId, {'],
+      ];
+      for (const [src, name, uploadCall] of cases) {
+        const start = src.indexOf(`async function ${name}(`);
+        assert(start !== -1, `${name} must exist`);
+        const nextFn = src.indexOf('\nasync function ', start + 20);
+        const nextWin = src.indexOf(`\nwindow.${name}`, start);
+        const end = Math.min(nextFn !== -1 ? nextFn : Infinity, nextWin !== -1 ? nextWin : Infinity);
+        assert(end !== Infinity, `${name}: function boundary must be parseable`);
+        const body = src.slice(start, end);
+        assert(body.includes('onStaged'), `${name}: must pass onStaged to the share call`);
+        assert(body.includes('Promise.race([staged'), `${name}: must unblock the UI on staging`);
+        const uploadIdx = body.indexOf(uploadCall);
+        const pointerIdx = body.indexOf('shared_id: sharedId');
+        assert(uploadIdx !== -1 && pointerIdx !== -1, `${name}: must stage in memory and plant a pointer`);
+        assert(uploadIdx < pointerIdx,
+          `${name}: must stage in shared memory before inserting the local pointer`);
+      }
+    });
+
+    test('share failure rollbacks only touch locally-staged state', () => {
+      // A failure before the in-memory staging must not delete or restore
+      // local rows that were never touched.
+      const cases = [
+        [todosSrc, 'shareTodoFromAdd', 'localStaged'],
+        [todosSrc, 'shareExistingTodo', 'locallyStaged'],
+        [habitsSrc, 'shareExistingHabit', 'localStaged'],
+        [listsSrc, 'shareExistingListItem', 'localStaged'],
+      ];
+      for (const [src, name, flag] of cases) {
+        const start = src.indexOf(`async function ${name}(`);
+        assert(start !== -1, `${name} must exist`);
+        const nextFn = src.indexOf('\nasync function ', start + 20);
+        const nextWin = src.indexOf(`\nwindow.${name}`, start);
+        const end = Math.min(nextFn !== -1 ? nextFn : Infinity, nextWin !== -1 ? nextWin : Infinity);
+        assert(end !== Infinity, `${name}: function boundary must be parseable`);
+        const body = src.slice(start, end);
+        assert(new RegExp(`if \\(${flag}`).test(body),
+          `${name}: the background failure rollback must be guarded by the local-staging flag`);
+      }
+    });
+
+    test('unshare flows unblock on local staging, upload deletes in background', () => {
+      const cases = [
+        [todosSrc, 'unshareTodo', 'state.sharing.deleteItem('],
+        [habitsSrc, 'unshareHabit', 'state.sharing.deleteSharedHabit('],
+        [listsSrc, 'unshareListItem', 'state.sharing.deleteItem('],
+      ];
+      for (const [src, name, uploadCall] of cases) {
+        const start = src.indexOf(`async function ${name}(`);
+        assert(start !== -1, `${name} must exist`);
+        const nextFn = src.indexOf('\nasync function ', start + 20);
+        const nextWin = src.indexOf(`\nwindow.${name}`, start);
+        const end = Math.min(nextFn !== -1 ? nextFn : Infinity, nextWin !== -1 ? nextWin : Infinity);
+        assert(end !== Infinity, `${name}: function boundary must be parseable`);
+        const body = src.slice(start, end);
+        assert(!body.includes(`await ${uploadCall}`),
+          `${name}: must not await the shared delete before unblocking the UI`);
+        assert(body.includes(uploadCall), `${name}: must still issue the shared delete`);
+        assert(/\.then\(/.test(body), `${name}: the background delete must settle with a rollback handler`);
+      }
+    });
+
+    test('i18n defines share_all_partial in EN/FR/ES', () => {
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      const count = (i18nSrc.match(/share_all_partial:/g) || []).length;
+      assert(count === 3, `share_all_partial must be defined in all three locales, found ${count}`);
+    });
+
+    test('sharing-drive.js wires update-style mutations through the mutation queue', () => {
+      assert(drive.includes(`import { createMutationQueue } from './sharing-mutation-queue.js'`),
+        'sharing-drive.js must import the mutation queue module');
+      for (const [name, endMarker] of [
+        ['updateItem', 'async deleteItem('],
+        ['updateSharedHabit', 'async deleteSharedHabit('],
+        ['addSharedHabitCompletion', 'async forceSave('],
+      ]) {
+        const start = drive.indexOf(`async ${name}(`);
+        const end = drive.indexOf(endMarker, start);
+        assert(start !== -1 && end !== -1, `${name} block must be parseable`);
+        const body = drive.slice(start, end);
+        assert(body.includes('_mutationQueue.enqueue(mkey,'), `${name}: must enqueue the mutation at staging`);
+        assert(body.includes('restore:'), `${name}: must supply a restore closure`);
+        assert(body.includes('replay:'), `${name}: must supply a replay closure`);
+        assert(body.includes('_mutationQueue.runSerialized(mkey, entry,'),
+          `${name}: must upload through runSerialized`);
+        assert(!body.includes('await saveTypedItems'),
+          `${name}: must not upload outside the serialized helper`);
+      }
+    });
+
+    test('completeItem/uncompleteItem inherit the sequencing via updateItem', () => {
+      const start = drive.indexOf('async completeItem(groupId, itemId, doneBy, opts)');
+      const end = drive.indexOf('async uncompleteItem', start);
+      const body = drive.slice(start, end);
+      assert(body.includes('return this.updateItem('), 'completeItem must delegate to updateItem');
+    });
+  }
+
+  // ===================================================================
+  // DEBOUNCED SHARED FLUSH — shared item uploads coalesce per (group, type)
+  // like the personal tables: mutations stage in memory and mark the type
+  // dirty immediately; one debounced upload carries everything staged within
+  // the window. The sharing poll skips dirty/in-flight types, and the syncs
+  // never plant a pointer for an item this tab is still sharing.
+  // ===================================================================
+  {
+    const drive = jsFiles['sharing-drive.js'];
+    const todosSrc = jsFiles['todos.js'];
+    const habitsSrc = jsFiles['habits.js'];
+    const listsSrc = jsFiles['lists.js'];
+
+    function methodBody(name, endMarker) {
+      const start = drive.indexOf(`async ${name}(`);
+      const end = drive.indexOf(endMarker, start);
+      assert(start !== -1 && end !== -1, `${name} block must be parseable`);
+      return drive.slice(start, end);
+    }
+
+    test('shared mutations schedule a debounced flush instead of uploading directly', () => {
+      for (const [name, endMarker] of [
+        ['addItem', 'async updateItem('],
+        ['updateItem', 'async deleteItem('],
+        ['deleteItem', 'async completeItem('],
+        ['addSharedHabit', 'async updateSharedHabit('],
+        ['updateSharedHabit', 'async deleteSharedHabit('],
+        ['deleteSharedHabit', 'async addSharedHabitCompletion('],
+        ['addSharedHabitCompletion', 'async forceSave('],
+      ]) {
+        const body = methodBody(name, endMarker);
+        assert(body.includes('scheduleSharedFlush('), `${name} must schedule the debounced flush`);
+        assert(!body.includes('saveTypedItems('), `${name} must not upload directly`);
+      }
+    });
+
+    test('debounced flush coalesces per (group, type) and settles waiters per generation', () => {
+      assert(drive.includes('SHARED_FLUSH_DEBOUNCE_MS'), 'must define the debounce window');
+      assert(drive.includes('`${groupId}:${type}`'),
+        'the debounce key must be per (group, type)');
+      assert(/if \(_sharedFlushTimers\.has\(key\)\) return;/.test(drive),
+        'must keep a single timer per (group, type)');
+      // Waiters are snapshotted before the upload so a mutation staged
+      // mid-upload is never settled by a flush whose payload excluded it.
+      const runFlush = drive.slice(drive.indexOf('async function _runSharedFlush'));
+      const snapshotIdx = runFlush.indexOf('_sharedWaiters.delete(key)');
+      const uploadIdx = runFlush.indexOf('await saveTypedItems(groupId, type)');
+      assert(snapshotIdx !== -1 && uploadIdx !== -1 && snapshotIdx < uploadIdx,
+        'must snapshot the waiter list before the upload starts');
+      assert(/if \(\(_sharedWaiters\.get\(key\) \|\| \[\]\)\.length\) _armSharedFlush\(groupId, type\)/.test(runFlush),
+        'mutations staged mid-upload must get a fresh timer afterwards');
+      assert(/catch \(err\) \{[\s\S]*?_sharedDirty\.delete\(key\)/.test(runFlush),
+        'a failed flush must clear the dirty mark so the poll skip cannot wedge');
+    });
+
+    test('sharing poll skips types with unflushed changes or an upload in flight', () => {
+      const pollStart = drive.indexOf('async poll()');
+      assert(pollStart !== -1, 'poll must exist');
+      const pollBody = drive.slice(pollStart, drive.indexOf('async handleStaleGroup', pollStart));
+      assert(/_sharedDirty\.has\(fkey\) \|\| _sharedFlushing\.has\(fkey\)/.test(pollBody),
+        'poll must skip types that are dirty or flushing');
+    });
+
+    test('sharing poll discovers groups created or joined on another device', () => {
+      const pollStart = drive.indexOf('async poll()');
+      assert(pollStart !== -1, 'poll must exist');
+      const pollBody = drive.slice(pollStart, drive.indexOf('async handleStaleGroup', pollStart));
+      assert(pollBody.includes('if (_loaded) {'),
+        'poll discovery must wait for the initial load to avoid racing loadAll');
+      assert(/for \(const row of _groupRows\)[\s\S]*?!row\?\.id \|\| _groups\.has\(row\.id\)/.test(pollBody),
+        'poll discovery must skip rows already in memory');
+      assert(pollBody.includes('driveFindFolder(tok, GROUP_PREFIX + row.id'),
+        'poll discovery must load created rows via the deterministic folder name');
+      assert(pollBody.includes("emit('group-discovered'"),
+        'poll discovery must announce newly loaded groups');
+      assert(/isDefiniteAccessLoss\(err\)\) \{[\s\S]*?await this\.handleStaleGroup\(row\.id\)/.test(pollBody),
+        'poll discovery must purge joined rows hit by definite access loss');
+    });
+
+    test('scene parser: direction with NAME: is not read as dialogue', () => {
+      const src = fs.readFileSync(path.join(JS_DIR, 'scene-parse.js'), 'utf-8');
+      assert(src.includes('checked FIRST') || /startsWith\('\\*\\*'\)/.test(src),
+        'scene-parse.js must check the ** direction wrapper before any speaker prefix');
+    });
+
+    test('scene mode: role field, preview, and focus_role persistence', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('id="newTextRole"') && flashJs.includes('id="editTextRole"'),
+        'add/edit text modals must have a role field');
+      assert(flashJs.includes('updateScenePreview'),
+        'text modals must have a live scene parse preview');
+      assert((flashJs.match(/focus_role: role/g) || []).length >= 2,
+        'add/edit text saves must persist focus_role');
+      const sceneParseJs = fs.readFileSync(path.join(JS_DIR, 'scene-parse.js'), 'utf-8');
+      assert(/delete\(\)\.eq\('text_id', id\)/.test(sceneParseJs),
+        'changing focus_role must reset chunk progress (via persistTextEdit)');
+    });
+
+    test('scene revision: only own lines are evaluated', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("data-kind=\"${line.kind}\"") || flashJs.includes('data-kind="${line.kind}"'),
+        'revision lines must carry their kind (mine/cue/dir)');
+      assert(/const myLineCount = chunkLines\.filter\(l => l\.kind === 'mine'\)\.length/.test(flashJs),
+        'submit must count only the role\'s own lines');
+      assert(flashJs.includes("if (kind !== 'mine') return;"),
+        'cue/direction lines must not toggle known/failed');
+    });
+
+    test('scene pickers skip chunks with none of the role\'s lines', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert((flashJs.match(/chunkHasRoleLines\(/g) || []).length >= 3,
+        'all text-revision pickers must skip chunks without the role\'s lines');
+    });
+
+    test('chunk progress invalidated on any chunking-input change', async () => {
+      const { isTextChunkingStale, sceneSpeakersEqual } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const tx = { content: 'line1\nline2', blocks_per_chunk: 4, focus_role: 'RODRIGUE' };
+      const same = { content: 'line1\nline2', blocks_per_chunk: 4, focus_role: 'RODRIGUE' };
+      assert(!isTextChunkingStale(tx, same), 'unchanged tuple keeps progress');
+      assert(!isTextChunkingStale(tx, { ...same, focus_role: 'rodrigue' }),
+        'case-only role change keeps progress');
+      assert(isTextChunkingStale(tx, { ...same, content: 'line1\nline2\nline3' }),
+        'content change invalidates progress');
+      assert(isTextChunkingStale(tx, { ...same, blocks_per_chunk: 8 }),
+        'blocks_per_chunk change invalidates progress');
+      assert(isTextChunkingStale(tx, { ...same, focus_role: 'CHIMÈNE' }),
+        'role change invalidates progress');
+      assert(!isTextChunkingStale({ content: 'a' }, { content: 'a' }),
+        'missing blocks_per_chunk defaults to 4 on both sides');
+      assert(!isTextChunkingStale(null, same), 'null text is not stale');
+      // Unicode normalization: NFD pasted from another source still matches NFC.
+      const nfc = 'LÉA', nfd = 'LÉA'.normalize('NFD');
+      assert(nfc !== nfd, 'test precondition: forms differ');
+      assert(sceneSpeakersEqual(nfc, nfd), 'role matching must normalize Unicode');
+      assert(sceneSpeakersEqual('  RODRIGUE ', 'rodrigue'), 'role matching trims');
+      // saveEditText must persist via the error-checked helper.
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('persistTextEdit(state.db, id, tx, updates,'),
+        'saveEditText must persist via persistTextEdit');
+      assert(flashJs.includes("showToast(t('toast.failed_to_save'), 'error')"),
+        'saveEditText must toast on persist failure');
+    });
+
+    test('persistTextEdit: adapter errors abort safely', async () => {
+      const { persistTextEdit } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const tx = { id: 't1', content: 'a', blocks_per_chunk: 4, focus_role: 'R' };
+      const updates = { content: 'b' };
+      const stale = { content: 'b', blocks_per_chunk: 4, focus_role: 'R' };
+      const fresh = { content: 'a', blocks_per_chunk: 4, focus_role: 'R' };
+      const makeDb = ({ updateError = null, deleteError = null, calls = [] } = {}) => ({
+        calls,
+        from: (table) => ({
+          update: (body) => ({ eq: async () => { calls.push('update:' + table + ':' + JSON.stringify(body || {})); return { data: null, error: updateError }; } }),
+          delete: () => ({ eq: async () => { calls.push('delete:' + table); return { data: null, error: deleteError }; } }),
+        }),
+      });
+      // 1. Failed text update: no progress deletion, not ok.
+      let db = makeDb({ updateError: { message: 'boom' } });
+      let res = await persistTextEdit(db, 't1', tx, updates, stale);
+      assert(!res.ok, 'failed update is not ok');
+      assert(!db.calls.some(c => c.startsWith('delete:')), 'no delete after failed update');
+      // 2. Update ok, stale, delete fails: not ok, delete was attempted.
+      db = makeDb({ deleteError: { message: 'boom' } });
+      res = await persistTextEdit(db, 't1', tx, updates, stale);
+      assert(!res.ok, 'failed delete is not ok');
+      assert(db.calls.includes('delete:text_line_progress'), 'delete attempted');
+      // 3. Update ok, stale, delete ok: ok.
+      db = makeDb();
+      res = await persistTextEdit(db, 't1', tx, updates, stale);
+      assert(res.ok, 'stale chunking with successful mutations is ok');
+      assert(db.calls.includes('delete:text_line_progress'), 'stale progress deleted');
+      // 4. Update ok, chunking unchanged: ok, no delete.
+      db = makeDb();
+      res = await persistTextEdit(db, 't1', tx, { content: 'a' }, fresh);
+      assert(res.ok, 'unchanged chunking is ok');
+      assert(!db.calls.some(c => c.startsWith('delete:')), 'no delete when chunking unchanged');
+      // 5. Delete fails: text rolled back to pre-edit values, tuple stays consistent.
+      db = makeDb({ deleteError: { message: 'boom' } });
+      const fullTx = { id: 't1', deck: 'D', title: 'T', author: 'A', content: 'a',
+        deck_id: 'd1', blocks_per_chunk: 4, focus_role: 'R' };
+      res = await persistTextEdit(db, 't1', fullTx,
+        { content: 'b', title: 'T2', blocks_per_chunk: 6 }, stale);
+      assert(!res.ok && res.rolledBack, 'failed delete rolls back');
+      const textUpdates = db.calls.filter(c => c.startsWith('update:texts:'));
+      const rollbackCall = textUpdates[textUpdates.length - 1];
+      assert(rollbackCall && rollbackCall.includes('"content":"a"') && rollbackCall.includes('"title":"T"'),
+        'rollback restores pre-edit values');
+      assert(rollbackCall.includes('"blocks_per_chunk":4'),
+        'rollback restores the previous chunking setting');
+      // 6. Delete fails and rollback fails: not ok, not rolled back.
+      // (stateful fake: the initial update succeeds so the delete — and
+      // then the rollback — are actually reached.)
+      let updateCalls = 0;
+      const failDb = {
+        from: () => ({
+          update: () => ({ eq: async () => (++updateCalls === 1
+            ? { data: null, error: null }
+            : { data: null, error: { message: 'down' } }) }),
+          delete: () => ({ eq: async () => ({ data: null, error: { message: 'down' } }) }),
+        }),
+      };
+      res = await persistTextEdit(failDb, 't1', fullTx,
+        { content: 'b', title: 'T2', blocks_per_chunk: 6 }, stale);
+      assert(!res.ok && !res.rolledBack, 'failed delete + failed rollback is not ok and not rolled back');
+      assert(updateCalls === 2, 'rollback was attempted after the failed delete');
+      // 7. Update throws: converted to { ok: false }, no delete attempted.
+      const throwDb = {
+        from: () => ({
+          update: () => ({ eq: async () => { throw new Error('transport'); } }),
+          delete: () => ({ eq: async () => { throw new Error('unreached'); } }),
+        }),
+      };
+      res = await persistTextEdit(throwDb, 't1', tx, updates, stale);
+      assert(!res.ok, 'thrown error is not ok');
+      // 8. Delete throws (update succeeded): same rollback path as a
+      // returned { error } — the tuple must not be left split.
+      const deleteThrowDb = {
+        calls: [],
+        from: (table) => ({
+          update: (body) => ({ eq: async () => {
+            deleteThrowDb.calls.push('update:' + table + ':' + JSON.stringify(body || {}));
+            return { data: null, error: null };
+          } }),
+          delete: () => ({ eq: async () => { throw new Error('transport'); } }),
+        }),
+      };
+      res = await persistTextEdit(deleteThrowDb, 't1', fullTx,
+        { content: 'b', title: 'T2', blocks_per_chunk: 6 }, stale);
+      assert(!res.ok && res.rolledBack, 'thrown delete rolls back like a returned error');
+      const rbCalls = deleteThrowDb.calls.filter(c => c.startsWith('update:texts:'));
+      assert(rbCalls.length === 2 && rbCalls[1].includes('"content":"a"'),
+        'rollback restores pre-edit values after a thrown delete');
+    });
+
+    test('auto-repair: no healing on failed progress read; writes are error-checked', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('let progressReadOk = false;'),
+        'progress read success must be tracked separately from the texts read');
+      assert(flashJs.includes('if (progressReadOk) for (const tx of allTexts)'),
+        'auto-repair must not run when the progress read failed');
+      assert(flashJs.includes('if (delError) throw delError;'),
+        'repair must not drop in-memory rows when the backend delete failed');
+      assert(flashJs.includes('if (insError) throw insError;'),
+        'repair must not stage inserted rows when the backend insert failed');
+    });
+
+    test('scene revision: masked bubbles hide content length; leading cues auto-reveal', async () => {
+      const { leadingRevealCount } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      assert(leadingRevealCount(['cue', 'dir', 'mine', 'cue']) === 2,
+        'leading cues/directions before the first own line auto-reveal');
+      assert(leadingRevealCount(['mine', 'cue']) === 0,
+        'no auto-reveal when the chunk opens with the own line');
+      assert(leadingRevealCount(['cue', 'dir']) === 0,
+        'no auto-reveal without an own line');
+      assert(leadingRevealCount([]) === 0, 'empty chunk');
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('leadingRevealCount(chunkLines.map(l => l.kind))'),
+        'overlay must auto-reveal leading cues/directions');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(/\.tr-scene \.tr-line\.tr-line-masked \{[^}]*width:\s*85%/.test(css),
+        'masked bubbles must render at max width (no content-length hint)');
+    });
+
+    test('scene revision: revealing an own line auto-reveals following cues/directions', async () => {
+      const { trailingRevealCount } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      assert(trailingRevealCount(['mine', 'cue', 'dir', 'mine'], 0) === 2,
+        'cue + direction after an own line auto-reveal');
+      assert(trailingRevealCount(['mine', 'cue', 'cue', 'cue', 'mine'], 0) === 3,
+        'several consecutive blocks of another role all auto-reveal');
+      assert(trailingRevealCount(['mine', 'mine', 'cue'], 0) === 0,
+        'the next own line stays masked (nothing auto-reveals)');
+      assert(trailingRevealCount(['cue', 'mine', 'cue', 'dir'], 1) === 2,
+        'the cascade runs to the end of the chunk when no own line follows');
+      assert(trailingRevealCount(['mine'], 0) === 0, 'own line is last');
+      assert(trailingRevealCount([], 0) === 0, 'empty chunk');
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('trailingRevealCount(trOverlayLines.map(l => l.kind), idx)'),
+        'line click must compute the trailing auto-reveal from the line kinds');
+      assert(/if \(kind === 'mine'\) \{\s*\n\s*\/\/ Revealing an own line also reveals/.test(flashJs),
+        'the cascade must trigger only when an own line is revealed');
+    });
+
+    test('plain-text revision: chunk string split into lines', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("typeof rawChunk === 'string' ? rawChunk.split('\\n') : rawChunk"),
+        'plain-text chunks are joined strings and must be split back into lines');
+    });
+
+    test('edit text modal: lines-per-chunk and context lines are editable', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('id="editTextBlocksPerChunk"'),
+        'edit modal must expose blocks-per-chunk');
+      assert(flashJs.includes('id="editTextContextBlocks"'),
+        'edit modal must expose context blocks');
+      const i18nJs = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      assert(i18nJs.includes("blocks_per_chunk: 'Blocks per chunk'"),
+        'EN label must say blocks, not lines');
+      assert(!i18nJs.includes("'Lines per chunk'") && !i18nJs.includes("'Context lines'"),
+        'old EN labels must be gone');
+      assert(flashJs.includes('blocks_per_chunk: blocksPerChunk, context_blocks: contextBlocks };'),
+        'saveEditText must persist both settings');
+      assert(flashJs.includes('{ content, blocks_per_chunk: blocksPerChunk, focus_role: role });'),
+        'a changed blocks-per-chunk must invalidate chunk progress');
+    });
+
+    test('text revision: progress bar fills as blocks are revealed', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('function updateTextPracticeProgress()'),
+        'text revision must drive the header progress bar from revealed lines');
+      assert(!flashJs.includes('<div class="practice-progress-fill" style="width:100%;"></div>\n      <div class="practice-meta"><span class="practice-meta-text">${esc(text.title)}'),
+        'text revision bar must not be hardcoded full');
+      assert(flashJs.includes('  }\n  updateTextPracticeProgress();\n}'),
+        'progress must update on overlay open (after auto-reveal)');
+      assert(flashJs.includes("    updateTextPracticeProgress();\n  } else {"),
+        'progress must update on each tap-to-reveal');
+    });
+
+    test('scene revision: chat-bubble layout for theatrical lines', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("tr-lines-container${sceneMode ? ' tr-scene' : ''}"),
+        'lines container must flag scene mode for the bubble layout');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(/\.tr-scene \.tr-line \{[^}]*width:\s*fit-content/.test(css),
+        'scene lines must shrink to fit their content');
+      assert(/\.tr-scene \.tr-line \{[^}]*max-width:\s*85%/.test(css),
+        'scene bubbles must be capped below full width');
+      assert(css.includes('.tr-scene .tr-line[data-kind="mine"] { align-self:flex-start; }'),
+        'own role lines must anchor left');
+      assert(css.includes('.tr-scene .tr-line[data-kind="cue"] { align-self:flex-end; }'),
+        'other role lines must anchor right');
+      assert(css.includes('.tr-scene .tr-line[data-kind="dir"] { align-self:center; }'),
+        'didascalies must anchor center');
+      assert(/\.tr-reveal-dir \{[^}]*text-align:\s*left/.test(css),
+        'didascalies text must be left-aligned inside the bubble');
+    });
+
+    test('auto-repair heals count-mismatched chunk progress', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('existing.length !== chunkCount'),
+        'auto-repair must detect count-mismatched progress, not just missing progress');
+      assert(flashJs.includes("await state.db.from('text_line_progress').delete().eq('text_id', tx.id);"),
+        'auto-repair must drop stale rows before regenerating');
+    });
+
+    test('scene parser: one block is one unit, inner newlines preserved', async () => {
+      const { parseSceneContent, sceneLineText, splitSceneIntoChunks } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      // Multi-line dialogue block -> single unit, newline inside.
+      let r = parseSceneContent('<A: line1\nline2>');
+      assert(r.lines.length === 1, 'one block must be one unit');
+      assert(r.lines[0].speaker === 'A', 'single-character speaker must parse');
+      assert(sceneLineText(r.lines[0]) === 'line1\nline2', 'inner newline preserved');
+      assert(r.unparsedBlocks === 0, 'no unparsed warning');
+      // Explicit split via several entries.
+      r = parseSceneContent('<A: line1>\n<A: line2>');
+      assert(r.lines.length === 2, 'two entries must be two units');
+      assert(r.lines.every(l => l.speaker === 'A'), 'both keep the speaker');
+      // Direction blocks: same rule, one unit.
+      r = parseSceneContent('<**dir one\ndir two**>');
+      assert(r.lines.length === 1 && r.lines[0].speaker === null, 'multi-line direction is one unit');
+      assert(sceneLineText(r.lines[0]) === 'dir one\ndir two', 'direction newlines preserved');
+      // Chunking counts blocks, not physical lines.
+      r = parseSceneContent('<A: a\nb>\n<B: c>');
+      assert(splitSceneIntoChunks(r.lines, 2).length === 1, 'two blocks fit one chunk of 2');
+      // Inline directions still parse inside multi-line blocks.
+      r = parseSceneContent('<A: **softly** hi\n**loud** bye>');
+      assert(r.lines[0].segments.filter(s => s.kind === 'dir').length === 2, 'inline dirs survive');
+    });
+
+    test('scene revision: block newlines render as breaks (revealed, mask, preview)', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("const br = t => esc(t).replace(/\\n/g, '<br>');"),
+        'revealed block HTML must turn inner newlines into breaks');
+      assert(flashJs.includes(".split('\\n')") && flashJs.includes(".join('<br>');"),
+        'masked bullets must follow the block line structure');
+    });
+
+    test('scene parser: NFD speaker cues parse (NFC-normalized)', async () => {
+      const { parseSceneContent } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const nfdName = 'LÉA'.normalize('NFD');
+      const r = parseSceneContent('<' + nfdName + ':\nUne ligne.\n>');
+      assert(r.unparsedBlocks === 0, 'NFD speaker cue must parse');
+      assert(r.lines[0].speaker === 'LÉA', 'speaker normalized to NFC');
+    });
+
+    test('scene parser: speaker cues are case-insensitive', async () => {
+      const { parseSceneContent, sceneSpeakersEqual } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const mixed = parseSceneContent('<Rodrigue:\nA line.\n>');
+      assert(mixed.unparsedBlocks === 0, 'mixed-case speaker must parse');
+      assert(mixed.lines[0].speaker === 'Rodrigue', 'display keeps the name as written');
+      assert(JSON.stringify(mixed.speakers) === JSON.stringify(['Rodrigue']), 'speaker list');
+      const lower = parseSceneContent('<rodrigue: hi.>');
+      assert(lower.unparsedBlocks === 0, 'lowercase speaker must parse');
+      // Case variants dedupe to one speaker entry.
+      const both = parseSceneContent('<RODRIGUE: a.>\n<rodrigue: b.>');
+      assert(JSON.stringify(both.speakers) === JSON.stringify(['RODRIGUE']), 'speaker dedupe');
+      // Identity helper.
+      assert(sceneSpeakersEqual('RODRIGUE', 'rodrigue'), 'role match must be case-insensitive');
+      assert(sceneSpeakersEqual(null, null), 'null role equals null');
+      assert(!sceneSpeakersEqual('RODRIGUE', 'CHIMÈNE'), 'different speakers differ');
+      assert(!sceneSpeakersEqual(null, 'RODRIGUE'), 'null speaker never matches a role');
+      // Direction blocks still win over speaker-looking content.
+      const dir = parseSceneContent("<**Elle sort. SOSTHÈNE: observe.**>");
+      assert(dir.lines[0].speaker === null, 'direction with NAME: stays a direction');
+    });
+
+    test('scene revision: one color per role', async () => {
+      const { buildRoleColorMap, ROLE_PALETTE_SIZE } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      assert(ROLE_PALETTE_SIZE === 6, 'palette size');
+      const map = buildRoleColorMap(['RODRIGUE', 'CHIMÈNE', 'SOSTHÈNE'], 'rodrigue');
+      assert(map.get('rodrigue') === 'tr-role-mine', 'revised role keeps the reserved class');
+      assert(map.get('chimène') === 'tr-role-c0', 'first other role gets c0');
+      assert(map.get('sosthène') === 'tr-role-c1', 'second other role gets c1');
+      // Palette cycles when roles outnumber entries.
+      const many = buildRoleColorMap(
+        ['ME', 'A', 'B', 'C', 'D', 'E', 'F', 'G'], 'me');
+      assert(many.get('g') === 'tr-role-c0', 'colors repeat past the palette size');
+      assert(many.get('me') === 'tr-role-mine', 'reserved class unaffected by cycling');
+      // Case-insensitive dedupe; nulls skipped.
+      const dup = buildRoleColorMap(['Rodrigue', 'RODRIGUE', null, ''], 'x');
+      assert(dup.size === 1 && dup.get('rodrigue') === 'tr-role-c0', 'dedupe');
+      // Overlay wires color + alignment into the group header.
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('buildRoleColorMap(parseSceneContent(text.content).speakers, text.focus_role)'),
+        'color map must come from the full-text speaker order (stable across chunks)');
+      assert(flashJs.includes("tr-group-speaker ${colorCls} ${isMine ? 'tr-spk-left' : 'tr-spk-right'}"),
+        'header must carry the role color and kind alignment (mine left, cues right)');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      for (let i = 0; i < 6; i++) {
+        assert(css.includes(`--role-c${i}:`), `missing --role-c${i} variable`);
+        assert(css.includes(`.tr-role-c${i} {`), `missing .tr-role-c${i} class`);
+      }
+      assert(/\[data-theme="light"\][\s\S]*--role-c0:/.test(css),
+        'palette must have light-theme values');
+      assert(css.includes('.tr-role-mine'), 'missing reserved .tr-role-mine class');
+      assert(css.includes('.tr-spk-left') && css.includes('.tr-spk-right'), 'missing alignment classes');
+    });
+
+    test('demo data: sample scene with roles for scene mode', () => {
+      const demoJs = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
+      assert(demoJs.includes('demo-text-002'), 'demo must include a sample scene text');
+      assert(/focus_role: scene\.focus_role/.test(demoJs),
+        'sample scene text must set focus_role');
+      assert(demoJs.includes('<**'), 'sample scene must use direction blocks');
+      assert(/<[A-ZÀ-Þ][^>]*:/.test(demoJs), 'sample scene must use dialogue blocks');
+      assert(demoJs.includes('splitSceneIntoChunks(parseSceneContent(scene.content)'),
+        'scene chunk progress must use the real parser so chunk_index matches the app');
+      assert(!demoJs.includes('strength:'), 'demo progress must not use the stale strength field');
+      assert(!demoJs.includes('last_reviewed'), 'demo progress must not use the stale last_reviewed field');
+      assert(demoJs.includes("import { parseSceneContent, splitSceneIntoChunks } from './scene-parse.js';"),
+        'demo-data must import the scene parser');
+    });
+
+    test('scene revision: multi-line didascalies render as a single block', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('Didascalies are a single reveal unit'),
+        'overlay must merge consecutive direction lines');
+      assert(flashJs.includes("openDirParts.join('<br>')"),
+        'merged direction block must join its lines');
+      assert(flashJs.includes('entry.idx = chunkLines.length'),
+        'merged entries must re-sequence their line index');
+    });
+
+    test('scene revision: didascalies get a localized header', async () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes("t('text_revision.stage_directions')"),
+        'direction groups must show a localized didascalies header');
+      assert(flashJs.includes('tr-group-speaker tr-role-dir tr-spk-center'),
+        'didascalies header must be centered and muted like a role header');
+      assert(flashJs.includes("group.lines[0].kind === 'dir'"),
+        'plain-text lines (kind mine, no speaker) must not get a didascalies header');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.tr-role-dir'), 'missing .tr-role-dir CSS');
+      assert(css.includes('.tr-spk-center'), 'missing .tr-spk-center CSS');
+    });
+
+    test('scene revision: book-like speaker groups', async () => {
+      const { groupLinesBySpeaker } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const lines = [
+        { speaker: 'RODRIGUE' }, { speaker: 'RODRIGUE' }, { speaker: 'rodrigue' },
+        { speaker: 'CHIMÈNE' },
+        { speaker: null }, { speaker: null },
+        { speaker: 'RODRIGUE' },
+      ];
+      const groups = groupLinesBySpeaker(lines);
+      assert(groups.length === 4, 'consecutive same-speaker lines group together (case-insensitive)');
+      assert(groups[0].lines.length === 3 && groups[0].speaker === 'RODRIGUE', 'first group keeps first-appearance name');
+      assert(groups[2].speaker === null && groups[2].lines.length === 2, 'directions group together');
+      assert(groups[3].speaker === 'RODRIGUE', 'non-consecutive same speaker starts a new group');
+      // Overlay renders one header per group, outside the line boxes.
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('groupLinesBySpeaker(chunkLines)'),
+        'lines container must group consecutive same-speaker lines');
+      assert(flashJs.includes('tr-group-speaker ${colorCls}'),
+        'each dialogue group must show the speaker name once, outside the line boxes');
+      assert(!flashJs.includes('tr-reveal-speaker'),
+        'per-line speaker divs must be gone (name lives on the group header)');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.tr-group-speaker'), 'missing .tr-group-speaker CSS');
+      assert(css.includes('.tr-reveal-dir'), 'missing .tr-reveal-dir CSS');
+    });
+
+    test('free practice: revise button samples a chunk when nothing is due', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/if \(pool\.length === 0\) \{ startFreePractice\(textId\); return; \}/.test(flashJs),
+        'per-text revise with empty pool must start free practice instead of a toast');
+      assert(/showTextPracticeOverlay\(tx, picked, \{ freePractice: true \}\)/.test(flashJs),
+        'free practice must open the overlay flagged as free practice');
+      assert(/const picked = candidates\[Math\.floor\(Math\.random\(\) \* candidates\.length\)\];/.test(flashJs),
+        'free practice must sample randomly, not always pick the stalest chunk');
+    });
+
+    test('free practice: submit skips scheduling updates', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const submitStart = flashJs.indexOf('window.submitTextReview = async function');
+      const submitBody = flashJs.slice(submitStart, flashJs.indexOf('window.showTextPracticeSummary', submitStart));
+      const freeIdx = submitBody.indexOf('if (trFreePractice)');
+      const fsrsIdx = submitBody.indexOf('fsrsUpdate');
+      assert(freeIdx !== -1 && fsrsIdx !== -1 && freeIdx < fsrsIdx,
+        'submitTextReview must branch to the free-practice summary before any FSRS update');
+      assert(/showFreePracticeSummary\(knownCount, totalLines\);\s*return;/.test(submitBody),
+        'free practice submit must not fall through to the scheduling path');
+    });
+
+    test('shared chains: no success-path re-render (failure still refreshes)', () => {
+      const habits = jsFiles['habits.js'];
+      // The optimistic refresh already shows the published values (the
+      // pending id makes refreshHabits trust the local recompute), so a
+      // second full re-render on success would tear down in-flight edits
+      // and drags. Success handlers must only release the pending id.
+      const successRerenders = (habits.match(/\(\) => \{ _pendingSharedNextDue\.delete\(habit\.shared_id\); refreshHabits\(\); \},/g) || []).length;
+      assert(successRerenders === 0, `no shared chain may re-render on success, found ${successRerenders}`);
+      // ...while every failure handler must still refresh to roll the
+      // optimistic staging back.
+      const failureRerenders = (habits.match(/_pendingSharedNextDue\.release\(habit\.shared_id\);\s*(?:console\.warn\([^;]*;\s*)?(?:await )?refreshHabits\(\);/g) || []).length;
+      assert(failureRerenders >= 6, `expected 6 failure-path re-renders (done, inline last-done, edit modal, inline frequency edit, delete completion, edit completion date), found ${failureRerenders}`);
+    });
+
+    test('shared frequency edit: next_due renders immediately', () => {
+      const habits = jsFiles['habits.js'];
+      assert(habits.includes("pendingSharedNextDue as _pendingSharedNextDue") && habits.includes("from './pending-next-due.js'"),
+        'in-flight shared next_due publishes must be tracked via the refcount module');
+      assert(habits.includes('!_pendingSharedNextDue.has(habit.shared_id)'),
+        'refreshHabits must trust the locally recomputed next_due while a publish is in flight');
+      // The pending id must be registered BEFORE the recompute await: a
+      // refresh racing the awaits must not clobber the fresh local value.
+      assert(/_pendingSharedNextDue\.add\(habit\.shared_id\);\s*try\s*\{\s*newNextDue = await updateHabitNextDue\(habitId, updates\.frequency_rule/.test(habits),
+        'the inline frequency-edit chain must register the pending id before awaiting the recompute');
+      // ...and released if the recompute itself throws, so the id is never stranded.
+      assert(/catch \(e\) \{\s*_pendingSharedNextDue\.release\(habit\.shared_id\);\s*throw e;\s*\}/.test(habits),
+        'a throwing recompute must release the pending id');
+    });
+
+    test('shared completion delete/date-edit: next_due immediate', () => {
+      const habits = jsFiles['habits.js'];
+      const adds = (habits.match(/_pendingSharedNextDue\.add\(habit\.shared_id\);/g) || []).length;
+      assert(adds >= 6, `expected in-flight next_due marking in 6 paths (done, inline last-done, edit modal, inline frequency edit, delete completion, edit completion date), found ${adds}`);
+    });
+
+    test('pending-next-due: overlapping mutations share one marker per habit', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'pending-next-due.js')).href);
+      assert(typeof mod.createPendingNextDue === 'function', 'factory must be exported');
+      assert(mod.pendingSharedNextDue, 'habits-view singleton must be exported');
+      const t = mod.createPendingNextDue();
+      // Interleaving: A adds, B adds, A releases -> marker still held for B.
+      t.add('h1'); t.add('h1'); t.release('h1');
+      assert(t.has('h1'), 'releasing one of two overlapping mutations must keep the marker');
+      t.release('h1');
+      assert(!t.has('h1'), 'releasing the last mutation must free the marker');
+      // Releasing an id with no outstanding mutations is a harmless no-op.
+      t.release('never-added');
+      assert(!t.has('never-added'), 'releasing an unknown id must not create state');
+      // Ids are independent.
+      t.add('h1'); t.add('h2'); t.release('h1');
+      assert(!t.has('h1') && t.has('h2'), 'markers must be independent per habit id');
+    });
+
+    test('todo-import: parse/validate/normalize', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'todo-import.js')).href);
+      const { parseTodoImportJSON, normalizeTodoImportDate, validateTodoImportItem, TODO_IMPORT_PRIORITIES } = mod;
+      assert(TODO_IMPORT_PRIORITIES.includes('normal') && TODO_IMPORT_PRIORITIES.length === 5, 'five priorities');
+
+      // parse: fences stripped, non-array/empty rejected
+      const fenced = '```json\n[{"title":"A"}]\n```';
+      assert(parseTodoImportJSON(fenced).length === 1, 'markdown fences must be stripped');
+      for (const bad of ['not json', '{"a":1}', '[]', '[42]']) {
+        let threw = false;
+        try { parseTodoImportJSON(bad); } catch { threw = true; }
+        assert(threw, `must reject ${bad}`);
+      }
+
+      // dates: YYYY-MM-DD = local midnight; ISO passes through; junk rejected
+      const iso = normalizeTodoImportDate('2026-10-15', 'due_date');
+      const d = new Date(2026, 9, 15);
+      assert(iso === d.toISOString(), 'YYYY-MM-DD must normalize to local-midnight ISO');
+      assert(normalizeTodoImportDate(null, 'due_date') === null, 'empty → null');
+      assert(normalizeTodoImportDate('', 'due_date') === null, 'empty string → null');
+      assert(normalizeTodoImportDate('2026-10-15T18:30', 'due_date') === new Date('2026-10-15T18:30').toISOString(), 'ISO datetime passes through');
+      for (const bad of ['2026-13-01', '2026-02-30', 'tomorrow', 42]) {
+        let threw = false;
+        try { normalizeTodoImportDate(bad, 'due_date'); } catch { threw = true; }
+        assert(threw, `must reject date ${JSON.stringify(bad)}`);
+      }
+
+      // validate: full item
+      const ctx = { categoryNames: ['Admin', 'Groceries'], groupById: new Map([['g1', 'Family']]), sharingReady: true };
+      let r = validateTodoImportItem(
+        { title: ' Renew passport ', priority: 'HIGH', due_date: '2026-11-02', snooze_until: '2026-10-20T09:00', category: 'admin', group_id: 'g1' },
+        0, ctx);
+      assert(r.errors.length === 0, 'valid item must have no errors: ' + JSON.stringify(r.errors));
+      assert(r.item.title === 'Renew passport', 'title trimmed');
+      assert(r.item.priority === 'high', 'priority lowercased');
+      assert(r.item.categoryIsNew === false, '"admin" matches existing "Admin" case-insensitively');
+      assert(r.item.groupName === 'Family', 'group name resolved');
+
+      // validate: new category detected, defaults applied
+      r = validateTodoImportItem({ title: 'X' }, 1, ctx);
+      assert(r.errors.length === 0 && r.item.priority === 'normal' && r.item.category === '' && !r.item.categoryIsNew, 'defaults');
+      r = validateTodoImportItem({ title: 'X', category: 'Brand new' }, 2, ctx);
+      assert(r.item.categoryIsNew, 'unknown category flagged as new');
+
+      // validate: errors collected per field
+      r = validateTodoImportItem(
+        { title: '  ', priority: 'whenever', due_date: 'nope', category: 42, group_id: 'zzz' },
+        3, ctx);
+      const fields = r.errors.map(e => e.field).sort();
+      assert(fields.join(',') === 'category,due_date,group_id,priority,title', `all bad fields reported, got ${fields}`);
+
+      // validate: group_id without sharing
+      r = validateTodoImportItem({ title: 'X', group_id: 'g1' }, 4, { ...ctx, sharingReady: false });
+      assert(r.errors.some(e => e.field === 'group_id'), 'group_id without sharing must error');
+
+      // validate: default bucket display names map to the default bucket (never created)
+      for (const name of ['General', 'general', 'GENERAL', 'Général']) {
+        r = validateTodoImportItem({ title: 'X', category: name }, 5, ctx);
+        assert(r.errors.length === 0 && r.item.category === '' && !r.item.categoryIsNew,
+          `"${name}" must map to the default bucket, got ${JSON.stringify(r.item)}`);
+      }
+      // validate: a real category named "General" wins over the default bucket
+      const ctxReal = { ...ctx, categoryNames: ['Admin', 'General'] };
+      r = validateTodoImportItem({ title: 'X', category: 'general' }, 6, ctxReal);
+      assert(r.item.category === 'General' && !r.item.categoryIsNew, 'real "General" category must win');
+    });
+
+    test('calendar-pure: month grid, habit expansion, birthdays', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      const { toDateStr, getMonthGrid, expandHabitOccurrences, birthdayInMonth, birthdaysInRange, toggleShow, addDays, getWeekDates } = mod;
+
+      assert(toDateStr(2026, 9, 5) === '2026-10-05', 'toDateStr pads correctly');
+
+      // October 2026: Oct 1 is a Thursday → grid starts Mon Sep 28, 5 weeks
+      const oct = getMonthGrid(2026, 9);
+      assert(oct.length === 5, 'Oct 2026 has 5 weeks, got ' + oct.length);
+      assert(oct[0][0].date === '2026-09-28' && !oct[0][0].inMonth, 'starts Mon Sep 28 (outside)');
+      assert(oct[0][3].date === '2026-10-01' && oct[0][3].inMonth, 'Oct 1 is Thursday of week 1');
+      assert(oct[4][6].date === '2026-11-01' && !oct[4][6].inMonth, 'ends Sun Nov 1 (outside)');
+      for (const w of oct) assert(w.length === 7, 'every week has 7 days');
+
+      // February 2026 (non-leap): Feb 1 is a Sunday → starts Mon Jan 26, 5 weeks
+      const feb = getMonthGrid(2026, 1);
+      assert(feb.length === 5, 'Feb 2026 has 5 weeks, got ' + feb.length);
+      assert(feb[0][0].date === '2026-01-26', 'starts Mon Jan 26');
+      assert(feb[4][5].date === '2026-02-28' && feb[4][5].inMonth, 'Sat Feb 28 in month');
+      assert(feb[4][6].date === '2026-03-01' && !feb[4][6].inMonth, 'ends Sun Mar 1 (outside)');
+
+      // Habit expansion with an injected next-due function (every 2 days)
+      const every2 = (rule, last) => {
+        const base = last ? new Date(last + 'T00:00:00') : new Date(2026, 8, 30);
+        base.setDate(base.getDate() + 2);
+        const p = n => String(n).padStart(2, '0');
+        return `${base.getFullYear()}-${p(base.getMonth() + 1)}-${p(base.getDate())}`;
+      };
+      let occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-01' }, '2026-10-01', '2026-10-31', every2);
+      assert(occ.length === 16 && occ[0] === '2026-10-01' && occ[15] === '2026-10-31',
+        'every-2-days across October: ' + occ.length + ' occurrences');
+
+      // Stale next_due fast-forwards into the month
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-09-01' }, '2026-10-01', '2026-10-31', every2);
+      assert(occ[0] === '2026-10-01', 'fast-forward lands on Oct 1, got ' + occ[0]);
+
+      // Overdue (today given): due date + today + cadence stepped
+      // from today — the occurrences in between are NOT projected.
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-11' }, '2026-10-01', '2026-10-31', every2, '2026-10-21');
+      assert(JSON.stringify(occ) === JSON.stringify(['2026-10-11', '2026-10-21', '2026-10-23', '2026-10-25', '2026-10-27', '2026-10-29', '2026-10-31']),
+        'overdue: due date, today, then from-today cadence, got ' + occ.join(','));
+      // Same overdue habit viewed in a past month: nothing at all
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-11' }, '2026-09-01', '2026-09-30', every2, '2026-10-21');
+      assert(occ.length === 0, 'overdue habit shows nothing in a past month, got ' + occ.join(','));
+      // Not overdue (next_due ahead of today): normal projection, no today mirror
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-25' }, '2026-10-01', '2026-10-31', every2, '2026-10-21');
+      assert(occ[0] === '2026-10-25' && !occ.includes('2026-10-21'), 'future next_due keeps the normal projection');
+      // Overdue with an end date: from-today cadence still caps at end_date
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-11', end_date: '2026-10-24' }, '2026-10-01', '2026-10-31', every2, '2026-10-21');
+      assert(JSON.stringify(occ) === JSON.stringify(['2026-10-11', '2026-10-21', '2026-10-23']),
+        'overdue + end_date caps the from-today cadence, got ' + occ.join(','));
+
+      // No next_due: starts from the function's first occurrence
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:2', next_due: null }, '2026-10-01', '2026-10-31', every2);
+      assert(occ[0] === '2026-10-02', 'null next_due seeds from fn, got ' + occ[0]);
+
+      // Free-text rule: single pin on next_due when in range
+      occ = expandHabitOccurrences(
+        { frequency_rule: '', next_due: '2026-10-15' }, '2026-10-01', '2026-10-31', every2);
+      assert(occ.length === 1 && occ[0] === '2026-10-15', 'free-text pins next_due');
+      occ = expandHabitOccurrences(
+        { frequency_rule: '', next_due: '2026-11-15' }, '2026-10-01', '2026-10-31', every2);
+      assert(occ.length === 0, 'out-of-range next_due gives nothing');
+
+      // Non-progressing function terminates
+      occ = expandHabitOccurrences(
+        { frequency_rule: 'x', next_due: '2026-10-01' }, '2026-10-01', '2026-10-31', () => '2026-10-01');
+      assert(occ.length === 1, 'stalled nextDueFn terminates');
+
+      // Birthdays
+      let b = birthdayInMonth('1990-10-15', 2026, 9);
+      assert(b && b.date === '2026-10-15' && b.turningAge === 36, 'birthday in month');
+      b = birthdayInMonth('1990-10-15', 2026, 8);
+      assert(b === null, 'birthday in another month is null');
+      b = birthdayInMonth('2000-02-29', 2024, 1);
+      assert(b && b.date === '2024-02-29', 'Feb 29 on leap year');
+      b = birthdayInMonth('2000-02-29', 2026, 1);
+      assert(b === null, 'Feb 29 overflows out of Feb on non-leap years');
+      b = birthdayInMonth('2000-02-29', 2026, 2);
+      assert(b && b.date === '2026-03-01', 'Feb 29 lands on Mar 1 (matches app overflow)');
+      b = birthdayInMonth('not-a-date', 2026, 9);
+      assert(b === null, 'garbage birthday is null');
+
+      // Birthdays across a range (regression: occurrences must depend on
+      // the range only, never on a view's anchor month)
+      let bs = birthdaysInRange('1990-03-22', '2026-01-01', '2026-12-31');
+      assert(bs.length === 1 && bs[0].date === '2026-03-22' && bs[0].turningAge === 36,
+        'full-year range finds a March birthday');
+      bs = birthdaysInRange('1990-10-02', '2026-09-28', '2026-10-04');
+      assert(bs.length === 1 && bs[0].date === '2026-10-02',
+        'week crossing a month boundary finds the next-month birthday');
+      bs = birthdaysInRange('1990-09-30', '2026-09-28', '2026-10-04');
+      assert(bs.length === 1 && bs[0].date === '2026-09-30',
+        'week crossing a month boundary finds the first-month birthday');
+      bs = birthdaysInRange('1990-09-15', '2026-09-28', '2026-10-04');
+      assert(bs.length === 0, 'birthday outside the range is excluded');
+      bs = birthdaysInRange('1990-10-15', '2026-10-15', '2026-10-15');
+      assert(bs.length === 1 && bs[0].date === '2026-10-15', 'single-day range');
+      bs = birthdaysInRange('2000-02-29', '2026-01-01', '2026-12-31');
+      assert(bs.length === 1 && bs[0].date === '2026-03-01',
+        'Feb 29 lands on Mar 1 across a full-year range (non-leap)');
+      bs = birthdaysInRange('2000-02-29', '2024-01-01', '2024-12-31');
+      assert(bs.length === 1 && bs[0].date === '2024-02-29',
+        'Feb 29 stays Feb 29 across a full-year range (leap)');
+
+      // Filter toggles
+      const show = { todo: true, habit: true, birthday: true };
+      const off = toggleShow(show, 'habit');
+      assert(off.habit === false && off.todo === true && show.habit === true, 'toggleShow flips one key immutably');
+      assert(toggleShow(show, 'nope') === show, 'unknown filter type returns same reference');
+
+      // Week helpers
+      assert(addDays('2026-10-15', 1) === '2026-10-16', 'addDays forward');
+      assert(addDays('2026-10-15', -15) === '2026-09-30', 'addDays backward across month');
+      assert(addDays('2026-12-31', 1) === '2027-01-01', 'addDays across year');
+      const week = getWeekDates('2026-10-15'); // a Thursday
+      assert(week.length === 7 && week[0] === '2026-10-12' && week[6] === '2026-10-18',
+        'week of Oct 15 2026 is Mon 12 – Sun 18, got ' + week[0] + '…' + week[6]);
+      const weekSun = getWeekDates('2026-10-18'); // a Sunday
+      assert(weekSun[0] === '2026-10-12', 'Sunday belongs to the same Mon-first week');
+    });
+
+    test('habit-import: validate frequency/category/group', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'habit-import.js')).href);
+      const { parseHabitImportJSON, validateHabitImportItem } = mod;
+      const ctx = { categoryNames: ['Health', ''], groupById: new Map([['g1', 'Family']]), sharingReady: true };
+
+      // valid structured frequencies, incl. legacy normalization
+      const cases = [
+        ['every_N_days:1', 'every_N_days:1'],
+        ['every_N_weeks:1:Mon,Wed,Fri', 'every_N_weeks:1:Mon,Wed,Fri'],
+        ['every_N_months:1:15', 'every_N_months:1:15'],
+        ['yearly:06-15', 'yearly:06-15'],
+        ['daily', 'every_N_days:1'],
+        ['weekly:Fri', 'every_N_weeks:1:Fri'],
+        ['weekly:', 'every_N_weeks:1:'], // pure interval: every week, no set day
+        ['monthly:15', 'every_N_months:1:15'],
+      ];
+      for (const [input, expected] of cases) {
+        const r = validateHabitImportItem({ name: 'H', frequency: input }, 0, ctx);
+        assert(r.errors.length === 0, `"${input}" must validate: ` + JSON.stringify(r.errors));
+        assert(r.item.frequency_rule === expected, `"${input}" must normalize to "${expected}", got "${r.item.frequency_rule}"`);
+      }
+
+      // invalid frequencies (unrecognized, degenerate, or impossible dates)
+      for (const bad of ['sometimes', 'every_X_days:1', 42,
+        'every_N_days:0', 'every_N_weeks:1:Mondey', 'every_N_months:1:',
+        'every_N_months:1:32', 'every_N_months:1:second:Mon', 'yearly:13-01',
+        'yearly:02-30', 'yearly:6-15']) {
+        const r = validateHabitImportItem({ name: 'H', frequency: bad }, 0, ctx);
+        assert(r.errors.some(e => e.field === 'frequency'), `"${bad}" must error on frequency`);
+      }
+      // Feb 29 is allowed (leap years exist)
+      const leap = validateHabitImportItem({ name: 'H', frequency: 'yearly:02-29' }, 0, ctx);
+      assert(leap.errors.length === 0 && leap.item.frequency_rule === 'yearly:02-29', 'yearly:02-29 must validate');
+      let r = validateHabitImportItem({ name: 'H' }, 0, ctx);
+      assert(r.errors.some(e => e.field === 'frequency'), 'missing frequency must error');
+
+      // name required
+      r = validateHabitImportItem({ name: '  ', frequency: 'every_N_days:1' }, 0, ctx);
+      assert(r.errors.some(e => e.field === 'name'), 'blank name must error');
+
+      // category: existing / new / default-bucket display name
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', category: 'health' }, 0, ctx);
+      assert(r.item.category === 'Health' && !r.item.categoryIsNew, 'matches existing case-insensitively');
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', category: 'NewCat' }, 0, ctx);
+      assert(r.item.categoryIsNew, 'unknown category flagged new');
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', category: 'General' }, 0, ctx);
+      assert(r.item.category === '' && !r.item.categoryIsNew, '"General" maps to the default bucket');
+
+      // group: resolved / unknown / sharing off
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', group_id: 'g1' }, 0, ctx);
+      assert(r.item.group_id === 'g1' && r.item.groupName === 'Family', 'group resolved');
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', group_id: 'zz' }, 0, ctx);
+      assert(r.errors.some(e => e.field === 'group_id'), 'unknown group must error');
+      r = validateHabitImportItem({ name: 'H', frequency: 'every_N_days:1', group_id: 'g1' }, 0, { ...ctx, sharingReady: false });
+      assert(r.errors.some(e => e.field === 'group_id'), 'group without sharing must error');
+
+      // parse rejects junk like the todo parser
+      let threw = false;
+      try { parseHabitImportJSON('[]'); } catch { threw = true; }
+      assert(threw, 'empty array must be rejected');
+    });
+
+    test('daily-visits: pure row transition', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'daily-visits.js')).href);
+      const { nextVisitRow, nextDay, toLocalDateString, VISIT_ROW_ID } = mod;
+      assert(VISIT_ROW_ID === 'singleton', 'singleton id must be stable');
+
+      // First ever visit initializes the row: streak starts at 1.
+      const init = nextVisitRow(null, '2026-10-11');
+      assert(init.current_streak === 1 && init.num_active_days === 1 && init.max_streak === 1,
+        'init must start streak and counts at 1');
+      assert(init.created_at === '2026-10-11' && init.last_connection_date === '2026-10-11',
+        'init must stamp today');
+
+      // Same-day reconnect and clock-back are no-ops.
+      assert(nextVisitRow(init, '2026-10-11') === null, 'same-day reconnect must change nothing');
+      assert(nextVisitRow(init, '2026-10-10') === null, 'clock moved back must change nothing');
+
+      // Consecutive day: streak and count increment, last advances.
+      const d2 = nextVisitRow(init, '2026-10-12');
+      assert(d2.current_streak === 2 && d2.num_active_days === 2 && d2.last_connection_date === '2026-10-12',
+        'consecutive day must extend the streak');
+      assert(d2.max_streak === 2, 'max streak must follow a new high');
+      assert(d2.created_at === '2026-10-11', 'created_at must never move');
+
+      // Gap: streak resets to 1, count still increments, max preserved.
+      const d3 = nextVisitRow(d2, '2026-10-15');
+      assert(d3.current_streak === 1 && d3.num_active_days === 3,
+        'a missed day must reset the streak but keep counting days');
+      assert(d3.max_streak === 2, 'max streak must survive a reset');
+
+      // Legacy row without last_connection_date initializes in place.
+      const seeded = nextVisitRow({ id: 'singleton', created_at: '2026-09-01', num_active_days: 0, current_streak: 0, max_streak: 0, last_connection_date: null }, '2026-10-11');
+      assert(seeded.current_streak === 1 && seeded.num_active_days === 1 && seeded.created_at === '2026-09-01',
+        'migration-seeded row must initialize on first connect, keeping created_at');
+
+      // Date helpers: month boundary and local formatting.
+      assert(nextDay('2026-01-31') === '2026-02-01', 'nextDay must cross month boundaries');
+      assert(nextDay('2024-02-28') === '2024-02-29', 'nextDay must handle leap years');
+      const local = toLocalDateString(new Date(2026, 9, 11, 23, 59));
+      assert(local === '2026-10-11', `toLocalDateString must use device-local date, got ${local}`);
+    });
+
+    test('main: visit tracking uses the aggregate row, not per-date upserts', () => {
+      const main = jsFiles['main.js'];
+      assert(main.includes("from './daily-visits.js'"), 'main.js must import the daily-visits module');
+      assert(main.includes('nextVisitRow('), 'recordDailyVisit must go through the pure transition');
+      assert(!main.includes("upsert({ visit_date: today }"), 'per-date visit upsert must be gone');
+    });
+
+    test('drive migration 2.11.1 collapses visit dates into the aggregate row', async () => {
+      const { DRIVE_MIGRATIONS } =
+        await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+      const store = { daily_visits: [
+        { visit_date: '2026-10-08', owner_id: null },
+        { visit_date: '2026-10-09', owner_id: null },
+        { visit_date: '2026-10-11', owner_id: null },
+      ]};
+      await DRIVE_MIGRATIONS['2.11.1'](store);
+      const [row] = store.daily_visits;
+      assert(row.id === 'singleton', 'must write the singleton row');
+      assert(row.created_at === '2026-10-08', 'created_at must be the earliest visit');
+      assert(row.num_active_days === 3, 'must count distinct visit dates');
+      assert(row.last_connection_date === '2026-10-11', 'last must be the latest visit');
+      assert(row.current_streak === 1 && row.max_streak === 2,
+        `trailing run is 1 but longest run is 2 (10-08, 10-09); got current=${row.current_streak} max=${row.max_streak}`);
+
+      const consec = { daily_visits: [
+        { visit_date: '2026-10-09' }, { visit_date: '2026-10-10' }, { visit_date: '2026-10-11' },
+      ]};
+      await DRIVE_MIGRATIONS['2.11.1'](consec);
+      assert(consec.daily_visits[0].current_streak === 3, 'consecutive dates must seed a 3-day trailing run');
+      assert(consec.daily_visits[0].max_streak === 3, 'longest run must equal the trailing run here');
+
+      const empty = { daily_visits: [] };
+      await DRIVE_MIGRATIONS['2.11.1'](empty);
+      const [e] = empty.daily_visits;
+      assert(e.num_active_days === 0 && e.last_connection_date === null && e.current_streak === 0,
+        'empty history must seed a zeroed row for recordDailyVisit to initialize');
+    });
+
+    test('local migration 2.11.1 reshapes daily_visits into the aggregate row', async () => {
+      // Runs the real SQL against the old-schema table. Needs bun:sqlite;
+      // skipped under plain node.
+      let Database;
+      try {
+        ({ Database } = await import('bun:sqlite'));
+      } catch {
+        console.log('  (skip: bun:sqlite unavailable)');
+        return;
+      }
+      const { LOCAL_MIGRATIONS } =
+        await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'local-migrations.js')).href);
+      const db = new Database(':memory:');
+      db.exec(`CREATE TABLE daily_visits (
+        visit_date TEXT NOT NULL, owner_id TEXT, created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (visit_date, owner_id))`);
+      db.exec(`INSERT INTO daily_visits (visit_date) VALUES
+        ('2026-10-05'), ('2026-10-08'), ('2026-10-09'), ('2026-10-11')`);
+      db.exec(LOCAL_MIGRATIONS['2.11.1']);
+      const cols = db.prepare('PRAGMA table_info(daily_visits)').all().map(c => c.name);
+      for (const c of ['id', 'created_at', 'num_active_days', 'current_streak', 'max_streak', 'last_connection_date']) {
+        assert(cols.includes(c), `new column ${c} must exist`);
+      }
+      assert(!cols.includes('visit_date'), 'old visit_date column must be gone');
+      const [row] = db.prepare('SELECT * FROM daily_visits').all();
+      assert(row.id === 'singleton', 'must write the singleton row');
+      assert(row.created_at === '2026-10-05', `created_at must be earliest visit, got ${row.created_at}`);
+      assert(row.num_active_days === 4, `must count distinct dates, got ${row.num_active_days}`);
+      assert(row.last_connection_date === '2026-10-11', 'last must be the latest visit');
+      assert(row.current_streak === 1,
+        `trailing run ending 10-11 is 1 (10-10 missing), got ${row.current_streak}`);
+      assert(row.max_streak === 2,
+        `longest run anywhere is 2 (10-08, 10-09), got ${row.max_streak}`);
+      db.close();
+
+      // The reported case: a 10-day run, a gap, then 2 consecutive visits.
+      const db2 = new Database(':memory:');
+      db2.exec(`CREATE TABLE daily_visits (
+        visit_date TEXT NOT NULL, owner_id TEXT, created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (visit_date, owner_id))`);
+      const vals = [];
+      for (let d = 1; d <= 10; d++) vals.push(`('2026-09-${String(d).padStart(2, '0')}')`);
+      vals.push(`('2026-09-15')`, `('2026-09-16')`);
+      db2.exec(`INSERT INTO daily_visits (visit_date) VALUES ${vals.join(',')}`);
+      db2.exec(LOCAL_MIGRATIONS['2.11.1']);
+      const [r2] = db2.prepare('SELECT current_streak, max_streak, num_active_days FROM daily_visits').all();
+      assert(r2.current_streak === 2, `trailing run must be 2, got ${r2.current_streak}`);
+      assert(r2.max_streak === 10, `historical max must be 10, got ${r2.max_streak}`);
+      assert(r2.num_active_days === 12, `must count 12 distinct dates, got ${r2.num_active_days}`);
+      db2.close();
+    });
+
+    test('main: sharing-changed not re-broadcast for local item mutations', () => {
+      const main = jsFiles['main.js'];
+      // Local item-* mutations are rendered optimistically by their callers;
+      // re-broadcasting them as sharing-changed would round-trip through
+      // syncShared* -> refresh* and tear down in-flight inline edits/drags.
+      // Only remote changes (poll's items-changed) and structural events
+      // may trigger the re-sync.
+      assert(/if \(!event\.startsWith\('item-'\)\)\s*document\.dispatchEvent\(new CustomEvent\('sharing-changed'\)\)/.test(main),
+        'onUpdate must filter item-* events before dispatching sharing-changed');
+    });
+
+    test('saveEditHabit: single shared mutation regardless of last-done change', () => {
+      const habits = jsFiles['habits.js'];
+      // Extract saveEditHabit body and count shared uploads: the modal must
+      // fold name, frequency, completions and next_due into ONE staged
+      // mutation (one debounced upload), whether or not the last-done date
+      // changed. A second upload would double the debounce-to-green time.
+      const start = habits.indexOf('async function saveEditHabit() {');
+      assert(start >= 0, 'saveEditHabit must exist');
+      const nextFn = habits.indexOf('\nasync function ', start + 100);
+      const body = habits.slice(start, nextFn >= 0 ? nextFn : undefined);
+      const uploads = (body.match(/state\.sharing\.updateSharedHabit/g) || []).length;
+      assert(uploads === 1, `saveEditHabit must stage exactly one shared mutation, found ${uploads}`);
+      // The single mutation must carry next_due in all cases.
+      assert(/next_due: newNextDue/.test(body), 'the combined mutation must publish the recomputed next_due');
+    });
+
+    test('saveEditHabit: no undeclared identifiers in the shared mutation', () => {
+      const habits = jsFiles['habits.js'];
+      const start = habits.indexOf('async function saveEditHabit() {');
+      assert(start >= 0, 'saveEditHabit must exist');
+      const nextFn = habits.indexOf('\nasync function ', start + 100);
+      const body = habits.slice(start, nextFn >= 0 ? nextFn : undefined);
+      // The single updateSharedHabit call must not reference onStaged (removed:
+      // the modal never awaited the staging promise, so the callback was dead).
+      // An undeclared identifier here would throw ReferenceError at runtime,
+      // silently breaking shared habit saves.
+      assert(!body.includes('onStaged'),
+        'saveEditHabit must not reference the removed onStaged staging callback');
+    });
+
+    test('sharing-drive: item-updated emits at staging time, not post-flush', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      // Every item-updated emit must precede the debounced-flush await in its
+      // method. A post-flush emit fires ~2s later and round-trips through
+      // sharing-changed -> syncShared* -> refresh*, tearing down in-flight
+      // inline edits and drags (the emit is redundant with the caller's
+      // optimistic refresh; at staging time the 500ms refresh cooldown
+      // absorbs it).
+      const emits = [...drive.matchAll(/emit\('item-updated', \{ groupId, item \}\);/g)];
+      assert(emits.length === 3, `expected 3 item-updated emits, found ${emits.length}`);
+      for (const m of emits) {
+        // The flush await must come AFTER the emit (staging-time emit), never
+        // before it: find the nearest runSerialized await on each side.
+        const before = drive.slice(Math.max(0, m.index - 400), m.index);
+        const after = drive.slice(m.index, m.index + 400);
+        assert(!/await _mutationQueue\.runSerialized/.test(before),
+          'item-updated must be emitted at staging time, before the flush await');
+        assert(/await _mutationQueue\.runSerialized/.test(after),
+          'item-updated emit must be followed by the flush await in the same method');
+      }
+    });
+
+    test('habits view uses the shared refcount module, not a local Set', () => {
+      const habits = jsFiles['habits.js'];
+      assert(habits.includes("from './pending-next-due.js'"),
+        'habits.js must import the pending-next-due module');
+      assert(!/_pendingSharedNextDue = new Set\(\)/.test(habits),
+        'habits.js must not keep a local Set: overlapping mutations would release each other\u2019s marker');
+    });
+
+    test('shared done / last-done / modal: pending id registered before the recompute', () => {
+      const habits = jsFiles['habits.js'];
+      // Done path: add precedes the local recompute await.
+      assert(/_pendingSharedNextDue\.add\(habit\.shared_id\);\s*let newNextDue;\s*let completion;\s*try\s*\{\s*newNextDue = await updateHabitNextDue\(habitId, habit\.frequency_rule, now, \{ out: fin \}\)/.test(habits),
+        'markHabitDone must register the pending id before recomputing next_due');
+      // Inline last-done and edit modal: add precedes the preview-based recompute.
+      assert(/const effLatest = previewLastDoneLatest\([^)]*\);\s*_pendingSharedNextDue\.add\(habit\.shared_id\);\s*let newNextDue;/.test(habits),
+        'inline last-done and edit modal must register the pending id around the preview-based recompute');
+    });
+
+    test('previewLastDoneLatest mirrors the staging logic', () => {
+      const habits = jsFiles['habits.js'];
+      assert(/function previewLastDoneLatest\(completions, newIso\)/.test(habits),
+        'previewLastDoneLatest must be defined');
+      assert(habits.includes('const plan = planLastDoneEdit(completions, newIso);'),
+        'the preview must plan from the same pure function as the staging path');
+      assert(/latestHabitCompletion\(result\)\?\.completed_at \|\| null;/.test(habits),
+        'the preview must return the planned latest completion');
+      const uses = (habits.match(/previewLastDoneLatest\(sh\?\.completions \|\| \[\],/g) || []).length;
+      assert(uses >= 2, `expected previewLastDoneLatest used in 2 paths (inline last-done, edit modal), found ${uses}`);
+    });
+
+    test('manual last-done edit: honest recompute, no min() pinning', () => {
+      const habits = jsFiles['habits.js'];
+      assert(!habits.includes('nextDue = currentNextDue;'),
+        'the manual-edit path must not pin next_due to its old value when the recomputed date is later');
+      assert(habits.includes('next_due is always f(rule,'),
+        'updateHabitNextDue must document the honest-recompute contract');
+    });
+
+    test('shared next_due publish: no stale closure on habit.next_due', () => {
+      const habits = jsFiles['habits.js'];
+      // Every background chain must publish updateHabitNextDue's return
+      // value: a captured `habit` object goes stale when a refresh replaces
+      // state.allHabits (optimistic refresh mid-chain, or a poll racing an
+      // edit session), which would publish the pre-edit due date.
+      // The six chains publish the recomputed next_due folded into their main
+      // mutation (single debounced upload): Done via addSharedHabitCompletion
+      // opts, last-done via setSharedHabitLastDone opts, freq via sharedUpdates,
+      // delete/date-edit via the completions update.
+      const pubs = (habits.match(/next_due: newNextDue/g) || []).length;
+      const assignPubs = (habits.match(/\.next_due = newNextDue/g) || []).length;
+      assert(pubs + assignPubs >= 6, `expected 6 next_due publishes from the recompute return value (done, inline last-done, edit modal, inline frequency edit, delete completion, edit completion date), found ${pubs + assignPubs}`);
+      // In the six mutation chains, the publish must use the recompute's return
+      // value (newNextDue), never habit.next_due off a possibly-stale closure.
+      const stale = (habits.match(/(updateSharedHabit|addSharedHabitCompletion)\([^;]*?next_due: habit\.next_due/g) || []).length;
+      assert(stale === 0, `no shared publish may read next_due off a captured habit object, found ${stale}`);
+      const retvals = (habits.match(/newNextDue = await updateHabitNextDue/g) || []).length;
+      assert(retvals >= 6, `expected 6 captures of the recompute return value, found ${retvals}`);
+    });
+
+    test('syncSharedHabits cleanup: two consecutive misses before pointer delete', () => {
+      const habits = jsFiles['habits.js'];
+      assert(habits.includes('const _syncMissStrikes = new Map();'),
+        'a strike map must track consecutive shared-storage misses');
+      assert(/strikes < 2\)/.test(habits) || habits.includes('strikes < 2'),
+        'pointer cleanup must require two consecutive misses, never deleting on a single transient empty read');
+    });
+
+    test('formatHabitRelative: future dates clamp to today, never "-1d ago"', () => {
+      const habits = jsFiles['habits.js'];
+      assert(/const diffDays = Math\.max\(0, Math\.floor\(diffMs/.test(habits),
+        'formatHabitRelative must clamp future dates: a same-day date picked before noon is stamped at noon local, and Math.floor of the negative fraction is -1');
+    });
+
+    test('computeNextDue: no today-clamp — stale habits stay overdue', () => {
+      const freq = jsFiles['frequency-rule.js'];
+      assert(!freq.includes('< today ? localDateStr(today)'),
+        'computeNextDue must not clamp past due dates to today; the overdue UI state exists for exactly this');
+      assert(freq.includes('a habit neglected for more than one period is overdue'),
+        'computeNextDue must document that past dates are intentional');
+    });
+
+    test('parseLocalDate: date-only strings parse as that local calendar day (west-of-UTC)', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      assert(typeof mod.parseLocalDate === 'function', 'calendar-pure must export parseLocalDate');
+      const d = mod.parseLocalDate('2026-10-14');
+      assert(d.getFullYear() === 2026 && d.getMonth() === 9 && d.getDate() === 14,
+        'date-only 2026-10-14 must be local Oct 14 in every timezone (new Date() gives Oct 13 west of UTC), got ' + d.toString());
+      const ts = mod.parseLocalDate('2026-10-14T02:21:33.000Z');
+      assert(ts.getTime() === Date.parse('2026-10-14T02:21:33.000Z'),
+        'full timestamps must keep the normal instant parse');
+    });
+
+    test('next_due: no raw new Date() parse of date-only values remains', () => {
+      const habits = jsFiles['habits.js'];
+      const freq = jsFiles['frequency-rule.js'];
+      const welcome = jsFiles['welcome.js'];
+      const main = jsFiles['main.js'];
+      const demo = jsFiles['demo-data.js'];
+      assert(freq.includes('parseLocalDate(lastDoneDate)'),
+        'computeNextDue must parse its base through parseLocalDate');
+      assert(!freq.includes('new Date(lastDoneDate)') && !habits.includes('new Date(lastDoneDate)'),
+        'computeNextDue must not raw-parse a possibly date-only lastDoneDate (UTC-midnight shift west of UTC)');
+      assert(!habits.includes('new Date(habit.next_due)'),
+        'habitDueStatus/formatHabitDue must parse next_due through parseLocalDate');
+      assert(!habits.includes('completed_at: new Date(lastDoneVal)'),
+        'new-habit completion must be stamped via habitDateInputToIso (local noon), not a raw date-only parse');
+      assert(!welcome.includes('new Date(h.next_due)') && !welcome.includes('new Date(c.next_due)')
+        && !welcome.includes('new Date(a.next_due)') && !welcome.includes('new Date(b.next_due)'),
+        'welcome must not raw-parse a date-only next_due');
+      assert(!main.includes('new Date(c.next_due)'),
+        'main overdue count must not raw-parse a date-only next_due');
+      assert(!demo.includes('completed_at.slice(0, 10)'),
+        'demo seeding must pass the full completion timestamp to computeNextDue, not its UTC date slice');
+    });
+
+    test('habit end date: habitFinishedFor is strict (on the end date still due)', () => {
+      const habits = jsFiles['habits.js'];
+      const m = habits.match(/function habitFinishedFor\(computedNextDue, endDate\) \{([\s\S]*?)\n\}/);
+      assert(m, 'habitFinishedFor must exist in habits.js');
+      const habitFinishedFor = new Function('computedNextDue', 'endDate', m[1]);
+      assert(habitFinishedFor('2026-11-02', '2026-11-01') === true,
+        'next due strictly past the end date must finish the habit');
+      assert(habitFinishedFor('2026-11-01', '2026-11-01') === false,
+        'an occurrence exactly on the end date is still due, not finished');
+      assert(habitFinishedFor('2026-10-15', '2026-11-01') === false,
+        'next due before the end date stays active');
+      assert(habitFinishedFor(null, '2026-11-01') === false,
+        'no computed next due (free-text rule) never auto-finishes');
+      assert(habitFinishedFor('2026-11-02', null) === false,
+        'no end date never finishes');
+    });
+
+    test('habit end date: finish/revive enforced in updateHabitNextDue, published by all shared chains', () => {
+      const habits = jsFiles['habits.js'];
+      // The recompute choke point derives the finished state, clears
+      // next_due on finish, and writes both fields in one update.
+      const fn = habits.match(/async function updateHabitNextDue[\s\S]*?\n\}/);
+      assert(fn, 'updateHabitNextDue must exist');
+      assert(fn[0].includes('habitFinishedFor(nextDue, effEndDate)'),
+        'updateHabitNextDue must derive finished from the recomputed next due + end date');
+      assert(fn[0].includes('if (isFinished) nextDue = null;'),
+        'a finished habit must have next_due cleared');
+      assert(fn[0].includes("update({ next_due: nextDue, is_finished: isFinished ? 1 : 0 })"),
+        'the recompute must persist next_due and is_finished together');
+      assert(fn[0].includes('out.isFinished = isFinished'),
+        'the recompute must report the outcome via out for shared publishes');
+      // All six shared chains publish is_finished from the recompute outcome.
+      const pubs = (habits.match(/fin\.isFinished \? 1 : 0/g) || []).length;
+      assert(pubs >= 6,
+        `all six shared chains (Done, inline last-done, edit modal, inline frequency edit, completion delete, completion date edit) must publish is_finished from the recompute outcome, found ${pubs}`);
+      assert(habits.includes('is_finished: fin.isFinished ? 1 : 0 })'),
+        'markHabitDone must publish is_finished through addSharedHabitCompletion opts');
+      // Render: finished badge, no Done button, ends line while active.
+      assert(habits.includes("const isFinished = !isDraft && !!habit.is_finished;"),
+        'renderHabitItem must derive the finished state (drafts take precedence)');
+      assert(habits.includes("!isDraft && !isFinished && !isSnoozed && !isAuto ? `<button data-habit-id="),
+        'finished (and snoozed, and automatic) habits must not render a Done button');
+      assert(habits.includes("t('habits.finished')") && habits.includes("t('habits.ends_on'"),
+        'render must show the Finished badge and the Ends line');
+      // Modals carry the field both ways.
+      assert(habits.includes('id="newHabitEndDate"') && habits.includes('id="editHabitEndDate"'),
+        'add and edit modals must include an end date input');
+      assert(habits.includes("endDateVal = document.getElementById('editHabitEndDate')?.value || null"),
+        'edit save must read the end date');
+    });
+
+    test('habit end date: Calendar expansion caps at end_date; finished habits skipped', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      const step = (rule, last) => {
+        // daily stepper over date-only strings, in UTC for determinism
+        const d = new Date(last + 'T12:00:00Z');
+        d.setUTCDate(d.getUTCDate() + 1);
+        return d.toISOString().slice(0, 10);
+      };
+      const occ = mod.expandHabitOccurrences(
+        { frequency_rule: 'every_N_days:1', next_due: '2026-10-13', end_date: '2026-10-15' },
+        '2026-10-01', '2026-10-31', step);
+      assert(JSON.stringify(occ) === JSON.stringify(['2026-10-13', '2026-10-14', '2026-10-15']),
+        'occurrences must stop at the end date (inclusive), got ' + occ.join(','));
+      const cal = jsFiles['calendar.js'];
+      assert(cal.includes('if (h.is_finished) continue;'),
+        'Calendar must skip finished habits entirely');
+      assert(cal.includes('next_due: h.next_due, end_date: h.end_date'),
+        'Calendar must pass end_date into the expansion');
+    });
+
+    test('habit end date: inline edit can set, modify and clear it (personal + shared)', () => {
+      const habits = jsFiles['habits.js'];
+      // The inline editor gains an end-date row next to frequency/category,
+      // prefilled from the habit, reported by collectExtra (null = cleared).
+      assert(habits.includes("endInput.value = habit.end_date || '';"),
+        'inline edit must prefill the end date input from the habit');
+      assert(habits.includes('end_date: endInput.value || null,'),
+        'collectExtra must report the end date (null when the input is cleared)');
+      assert(habits.includes('if ((extra.end_date || null) !== (habit.end_date || null)) updates.end_date = extra.end_date || null;'),
+        'saveFn must diff the end date against the stored one');
+      // A frequency OR end-date change recomputes for both kinds; the shared
+      // chain publishes end_date + the recompute outcome in one mutation.
+      assert(habits.includes('const needsRecompute = updates.frequency_rule !== undefined || updates.end_date !== undefined;'),
+        'inline save must recompute when frequency or end date changes');
+      assert(habits.includes('if (updates.end_date !== undefined) sharedUpdates.end_date = updates.end_date;'),
+        'shared inline edit must publish the new end date');
+      assert(habits.includes('endDate: updates.end_date, out: fin });'),
+        'shared inline recompute must pass the end-date override and capture the finished outcome');
+      assert(habits.includes('endDate: updates.end_date });'),
+        'personal inline recompute must pass the end-date override');
+    });
+
+    test('habit end date: backup save/load carry whole habit rows (no field allowlist)', () => {
+      const main = jsFiles['main.js'];
+      // Save: generateBackupJSON exports select('*') per table, habits
+      // included — end_date / is_finished ride along with every other field.
+      assert(main.includes("'habits'") && /backup\[table\] = await fetchAll\(\(\) => state\.db\.from\(table\)\.select\('\*'\)\)/.test(main),
+        'backup save must export full habit rows via select(*)');
+      // Load: restore inserts rows wholesale, stripping only owner_id.
+      assert(main.includes('const { owner_id, ...rest } = r;'),
+        'backup restore must strip only owner_id, keeping end_date / is_finished');
+      // In-memory adapters are reseeded with the backup rows as-is and then
+      // run pending migrations, which default the fields on old backups.
+      assert(main.includes('inMemAdapter.reseed(reseedData);') && main.includes('inMemAdapter.runPendingMigrations()'),
+        'restore must reseed rows as-is, then run migrations (2.18.0 defaults end_date/is_finished on pre-feature backups)');
+    });
+
+    test('automatic habits: planAutoRoll steps missed occurrences and applies the end-date rule', async () => {
+      const { planAutoRoll } =
+        await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      const step = (rule, cursor) => {
+        // Deterministic stepper standing in for computeNextDue (verified
+        // against the real one separately): monthly on the 1st, daily.
+        if (rule === 'monthly') {
+          const [y, m] = cursor.split('-').map(Number);
+          const nm = m === 12 ? 1 : m + 1, ny = m === 12 ? y + 1 : y;
+          return `${ny}-${String(nm).padStart(2, '0')}-01`;
+        }
+        const d = new Date(cursor + 'T12:00:00');
+        d.setDate(d.getDate() + 1);
+        return d.toISOString().slice(0, 10);
+      };
+      const TODAY = '2026-10-15';
+      let plan = planAutoRoll({ frequency_rule: 'monthly', next_due: '2026-10-01' }, TODAY, step);
+      assert(JSON.stringify(plan) === JSON.stringify({ missed: ['2026-10-01'], nextDue: '2026-11-01', finished: false }),
+        'one missed monthly occurrence must be validated, next due steps forward');
+      plan = planAutoRoll({ frequency_rule: 'daily', next_due: '2026-10-12' }, TODAY, step);
+      assert(JSON.stringify(plan.missed) === JSON.stringify(['2026-10-12', '2026-10-13', '2026-10-14']) && plan.nextDue === '2026-10-15',
+        'daily catch-up must validate every missed day and stop at today');
+      assert(planAutoRoll({ frequency_rule: 'daily', next_due: '2026-10-15' }, TODAY, step) === null,
+        "today's occurrence must NOT be pre-validated");
+      plan = planAutoRoll({ frequency_rule: 'monthly', next_due: '2026-10-01', end_date: '2026-10-01' }, TODAY, step);
+      assert(plan.finished === true && plan.nextDue === null && plan.missed.length === 1,
+        'an automatic habit must finish itself after its final occurrence');
+      plan = planAutoRoll({ frequency_rule: 'monthly', next_due: '2026-09-01', end_date: '2026-08-15' }, TODAY, step);
+      assert(plan.finished === true && plan.missed.length === 0,
+        'an occurrence past the end date must never be validated');
+    });
+
+    test('automatic habits: storage, roll wiring and UI gating', () => {
+      const habits = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const pure = fs.readFileSync(path.join(JS_DIR, 'calendar-pure.js'), 'utf-8');
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(schema.includes('is_auto INTEGER DEFAULT 0'), 'schema: is_auto on habits + habit_completions');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(local.includes("'2.20.0'") && local.includes('ALTER TABLE habits ADD COLUMN is_auto INTEGER DEFAULT 0')
+        && local.includes('ALTER TABLE habit_completions ADD COLUMN is_auto INTEGER DEFAULT 0'),
+        'local migration 2.20.0 must add is_auto to both tables');
+      assert(drive.includes("'2.20.0'") && drive.includes('row.is_auto == null'),
+        'drive migration 2.20.0 must default is_auto on habit + completion rows');
+      assert(/export function planAutoRoll\(habit, todayStr, nextDueFn\)/.test(pure), 'planAutoRoll must be a pure exported helper');
+      assert(habits.includes('await rollAutoHabits();'), 'refreshHabits must run the roll before rendering');
+      assert(habits.includes('if (!isAutoHabit(habit) || habit.is_finished) continue;'), 'roll must skip non-auto and finished habits');
+      assert(habits.includes('if (isHabitSnoozed(habit, todayStr)) continue;'), 'roll must leave snoozed habits alone (catch-up on wake)');
+      assert(habits.includes('_rollingAutoHabits'), 'roll must be re-entrancy guarded');
+      assert(habits.includes('auto: 1,') && habits.includes('is_auto: c.auto ? 1 : 0'),
+        'shared auto completions must carry auto:1 and be injected with is_auto');
+      assert(/export function isAutoHabit\(habit\)/.test(habits)
+        && habits.includes("habit.is_auto && !habit.is_draft && isStructuredRule(habit.frequency_rule || '')"),
+        'isAutoHabit must require the flag, a non-draft and a structured rule');
+      assert(habits.includes('id="newHabitAuto"') && habits.includes('id="editHabitAuto"'), 'add/edit modals must offer the Automatic toggle');
+      assert(habits.includes("class=\"habit-auto-badge\""), 'card must show the Auto badge');
+      assert(habits.includes('!isSnoozed && !isAuto ? `<button data-action="open-habit-snooze-modal"'), 'automatic habits must not offer snooze');
+      assert(habits.includes('const autoStr = comp.is_auto'), 'history must mark auto completions');
+      const welcome = fs.readFileSync(path.join(JS_DIR, 'welcome.js'), 'utf-8');
+      assert(welcome.includes('if (isAutoHabit(c)) return false;'), 'Welcome due list must exclude automatic habits');
+      const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+      assert(cal.includes('is_auto: isAutoHabit(h)') && cal.includes('if (ev.is_auto) {'),
+        'Calendar day panel must not offer Done for automatic habits');
+      assert(habits.includes('if (isAuto) sharedItem.is_auto = 1;'), 'shared creation must publish is_auto');
+      assert(habits.includes('is_auto: autoVal };') || habits.includes('is_auto: autoVal }'), 'edit modal shared chain must publish is_auto');
+      assert(habits.includes('habit._rowAuto = habit.is_auto ? 1 : 0;'), 'refresh must capture the pointer is_auto for row sync');
+    });
+
+    test('habit early validation asks for confirmation before completing', () => {
+      const habits = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      // The guard lives in the markHabitDone wrapper — the single funnel
+      // for the Habits page, Welcome and Calendar Done buttons — and only
+      // the confirmed path runs the real completion body.
+      assert(habits.includes('async function markHabitDone(habitId, btnEl) {'), 'markHabitDone wrapper must exist');
+      assert(habits.includes('async function markHabitDoneNow(habitId, btnEl) {'), 'the completion body must live in markHabitDoneNow');
+      assert(habits.includes("if (habit && dueStr && dueStr > habitTodayStr()) {"),
+        'the confirm must trigger only when the due date is in the future');
+      assert(habits.includes("t('habits.early_done_title')") && habits.includes("t('habits.early_done_msg', dueDate)"),
+        'the confirm must use the early-done copy with the localized due date');
+      assert(habits.includes('() => markHabitDoneNow(habitId, btnEl)'),
+        'only the confirm callback may run the completion');
+      assert(habits.includes("variant: 'neutral'"), 'the confirm must use the neutral (non-destructive) variant');
+      // Cancel/close runs nothing: showConfirmAction close path only calls
+      // the confirm callback on execute — nothing else to pin here beyond
+      // the wrapper returning before markHabitDoneNow when unconfirmed.
+      assert(habits.includes('    );\n    return;\n  }\n  return markHabitDoneNow(habitId, btnEl);'),
+        'an unconfirmed early validation must not fall through to the completion');
+    });
+
+    test('habit snooze: isHabitSnoozed wakes on the snooze date (defer semantics)', async () => {
+      const { isHabitSnoozed } =
+        await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      assert(isHabitSnoozed({ snoozed_until: '2026-10-20' }, '2026-10-14') === true,
+        'snoozed while the wake date is ahead');
+      assert(isHabitSnoozed({ snoozed_until: '2026-10-20' }, '2026-10-20') === false,
+        'the habit wakes ON the snooze date');
+      assert(isHabitSnoozed({ snoozed_until: '2026-10-20' }, '2026-10-21') === false,
+        'an expired snooze is inactive (the habit is simply overdue — defer, not skip)');
+      assert(isHabitSnoozed({ snoozed_until: null }, '2026-10-14') === false, 'no snooze set');
+      assert(isHabitSnoozed({}, '2026-10-14') === false, 'field absent (pre-migration row)');
+      assert(isHabitSnoozed(null, '2026-10-14') === false, 'null habit is safe');
+    });
+
+    test('habit snooze: card, modal, group-wide publish and surface exclusions', () => {
+      const habits = jsFiles['habits.js'];
+      const welcome = jsFiles['welcome.js'];
+      const main = jsFiles['main.js'];
+      const calendar = jsFiles['calendar.js'];
+      const sync = jsFiles['calendar-sync.js'];
+      // Card: snoozed habits show the badge state, no Done, an unsnooze
+      // button; active habits get the snooze (moon) button.
+      assert(habits.includes('data-action="open-habit-snooze-modal"'), 'card must offer snooze');
+      assert(habits.includes('data-action="unsnooze-habit"'), 'snoozed card must offer unsnooze');
+      assert(habits.includes("if (isHabitSnoozed(habit, habitTodayStr())) return 'snoozed';"),
+        'habitDueStatus must report snoozed so filters and badges agree');
+      // Modal with presets + custom date, future dates only.
+      assert(habits.includes('function habitSnoozeModalHTML()'), 'snooze modal must exist');
+      assert(habits.includes('data-action="habit-snooze-for"') && habits.includes('id="habitSnoozeCustomDate"'),
+        'snooze modal must offer presets and a custom date');
+      // The custom date field is a real date field: constrained width,
+      // prefilled (+1 week) so iOS shows date segments instead of a blank
+      // box, and min = tomorrow.
+      assert(habits.includes('class="snooze-date-input"'), 'custom date input must use the constrained date-field class');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(/\.snooze-date-input\{[^}]*width:\s*230px/.test(css), 'date field must not sprawl full modal width');
+      assert(habits.includes("custom.value = toDateStr(in7.getFullYear(), in7.getMonth(), in7.getDate());"),
+        'custom date must be prefilled with +1 week');
+      assert(habits.includes('custom.min = toDateStr(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate());'),
+        'custom date must not allow today or the past');
+      // Welcome focus habits carry the same snooze + share actions as the
+      // Habits page cards (same data-actions, so delegation routes them to
+      // the same handlers; refreshHabits re-renders Welcome via
+      // 'habits-changed').
+      assert(welcome.includes('data-action="open-habit-snooze-modal" data-id="${esc(habit.id)}"'),
+        'Welcome habit items must offer snooze');
+      assert(welcome.includes('data-action="share-existing-habit" data-id="${esc(habit.id)}"'),
+        'Welcome habit items must offer share');
+      assert(welcome.includes('data-action="unshare-habit" data-id="${esc(habit.id)}"') && welcome.includes('data-action="copy-habit-to-personal" data-id="${esc(habit.id)}"'),
+        'Welcome habit items must offer unshare / copy-to-personal like the Habits page');
+      assert(welcome.includes('isMyCreatedSharedHabit(habit.shared_id)'),
+        'Welcome must use the creator check for unshare vs copy');
+      assert(habits.includes("if (val <= habitTodayStr()) { showToast(t('habits.snooze_future_date'), 'error'); return; }"),
+        'a custom snooze date must be in the future');
+      // Group-wide for shared habits (like TODO snooze): published on the
+      // shared item, mirrored onto pointers, pointer row synced separately.
+      assert(habits.includes("state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { snoozed_until: snoozedUntil })"),
+        'shared snooze must publish snoozed_until on the shared item');
+      assert(habits.includes('habit.snoozed_until = sh.snoozed_until || null;'),
+        'refreshHabits must mirror snoozed_until from the shared item');
+      assert(habits.includes("await state.db.from('habits').update({ snoozed_until: sharedSnoozedUntil }).eq('id', habit.id);"),
+        'refreshHabits must sync snoozed_until onto the pointer row');
+      // Snoozing never moves next_due (defer): the apply path writes only
+      // snoozed_until.
+      const applyStart = habits.indexOf('async function applyHabitSnooze');
+      const applyBlock = habits.slice(applyStart, habits.indexOf('function habitSnoozeFor', applyStart));
+      assert(!applyBlock.includes('next_due'), 'applyHabitSnooze must not touch next_due');
+      // Surfaces: Welcome list + mini calendar, footer overdue count,
+      // Calendar page window filter, Google Calendar sync gates.
+      assert(welcome.includes('if (isHabitSnoozed(c, todayStr)) return false;'), 'Welcome due list must exclude snoozed habits');
+      assert(welcome.includes('if (isHabitSnoozed(h, calTodayStr)) return false;'), 'Welcome mini calendar must exclude snoozed habits');
+      assert(main.includes('!isHabitSnoozed(c, todayLocal)'), 'overdue count must exclude snoozed habits');
+      assert(calendar.includes('!(snoozed && d < h.snoozed_until)'), 'Calendar page must hide occurrences inside the snooze window');
+      assert(sync.includes('snoozed_until: sh.snoozed_until || null,'), 'calendar sync must resolve snoozed_until for shared habits');
+      assert(sync.includes('!isHabitSnoozed(item, toLocalDateStr(new Date()))') && sync.includes('!isHabitSnoozed(r.item, toLocalDateStr(new Date()))'),
+        'calendar sync eligibility must exclude actively snoozed habits (so their events are removed)');
+      // Demo seed shows the state.
+      const demo = fs.readFileSync(path.join(__dirname, '..', 'js', 'demo-data.js'), 'utf-8');
+      assert((demo.match(/snoozed_until: dateOnly\(6\)/g) || []).length === 3,
+        'demo Water the plants habit must be snoozed in all three languages');
+    });
+
+    test('migrations add habit snoozed_until (2.19.0)', () => {
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(schema.includes('snoozed_until TEXT'),
+        'schema.sql habits table must include snoozed_until');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'2.19.0'") && local.includes('ALTER TABLE habits ADD COLUMN snoozed_until TEXT'),
+        'local migration 2.19.0 must add snoozed_until');
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(drive.includes("'2.19.0'") && drive.includes('row.snoozed_until === undefined'),
+        'drive migration 2.19.0 must default snoozed_until while preserving set values');
+    });
+
+    test('migrations add habit end_date and is_finished (2.18.0)', () => {
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(local.includes("'2.18.0'") && local.includes('ADD COLUMN end_date') && local.includes('ADD COLUMN is_finished'),
+        'local migration 2.18.0 must add end_date and is_finished');
+      assert(drive.includes("'2.18.0'") && drive.includes('end_date') && drive.includes('is_finished'),
+        'drive migration 2.18.0 must ensure end_date and is_finished');
+      assert(schema.includes('end_date TEXT') && schema.includes('is_finished INTEGER DEFAULT 0'),
+        'base schema must include end_date and is_finished');
+    });
+
+    test('edit modals: deck list excludes wrong-type decks and __shared__', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/function deckOptionsForEdit\(type, currentDeckId\)/.test(flashJs),
+        'a shared deck-options helper must exist for the edit modals');
+      assert(flashJs.includes(".filter(d => d.id !== _sharedDeckId && getDeckType(d.id) === type)"),
+        'edit deck options must exclude __shared__ and wrong-type decks');
+      assert(/openEditFlashcardModal[\s\S]{0,400}deckOptionsForEdit\('flashcard'/.test(flashJs),
+        'card edit modal must offer only flashcard decks');
+      assert(/openEditTextModal[\s\S]{0,400}deckOptionsForEdit\('text'/.test(flashJs),
+        'text edit modal must offer only text decks');
+    });
+
+    test('free practice summary shows no rating and states scheduling is untouched', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const fnStart = flashJs.indexOf('function showFreePracticeSummary');
+      const fnBody = flashJs.slice(fnStart, flashJs.indexOf('function showTextPracticeSummary', fnStart));
+      assert(!fnBody.includes('ratingLabels'), 'free practice summary must not show a scheduling rating');
+      assert(fnBody.includes("t('text_revision.free_practice_note')"),
+        'free practice summary must state scheduling was untouched');
+      assert(fnBody.includes("data-action=\"continue-free-practice\""),
+        'free practice summary must offer another free-practice chunk');
+    });
+
+    test('practice overlay scrolls tall content (safe centering)', () => {
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      const overlayBlock = css.match(/\.practice-overlay \{[^}]*\}/)[0];
+      assert(overlayBlock.includes('overflow-y:auto'),
+        '.practice-overlay must scroll when content exceeds the viewport');
+      assert(!/justify-content:\s*center/.test(overlayBlock),
+        '.practice-overlay must not use justify-content:center (pushes overflowing content off-screen)');
+      assert(css.includes('.practice-overlay > :not(.practice-header)'),
+        'overlay content must use auto margins for safe vertical centering');
+      const headerBlock = css.match(/\.practice-header \{[^}]*\}/)[0];
+      assert(headerBlock.includes('position:sticky'),
+        '.practice-header must be in-flow sticky, not absolute, so tall content starts below it');
+      assert(!headerBlock.includes('position:absolute'),
+        '.practice-header must not overlap scrolled content');
+    });
+
+    test('i18n: every t() key used in js/ resolves (no raw keys in UI)', async () => {
+      // Browser shims for the i18n module top-level code.
+      if (!globalThis.localStorage) globalThis.localStorage = { getItem: () => 'en', setItem: () => {} };
+      if (!globalThis.document) globalThis.document = { documentElement: {} };
+      const { t } = await import(pathToFileURL(path.join(JS_DIR, 'i18n.js')).href);
+      const used = new Set();
+      const dynamicProbes = { 'habits.day_': 'habits.day_mon', 'habits.freq_': 'habits.freq_first' };
+      for (const [name, src] of Object.entries(jsFiles)) {
+        for (const m of src.matchAll(/t\(\s*['"]([\w.]+)['"]/g)) {
+          const prev = src[m.index - 1];
+          if (prev && /[\w$]/.test(prev)) continue; // e.g. split('.') — not a t() call
+          const key = m[1];
+          if (!key.includes('.')) continue;
+          used.add(`${name}:${dynamicProbes[key] || key}`);
+        }
+      }
+      const missing = [...used].filter(entry => t(entry.split(':')[1]) === entry.split(':')[1]);
+      assert(missing.length === 0,
+        `unresolved i18n keys (UI would show the raw key): ${missing.join(', ')}`);
+    });
+
+    test('new-deck modal persists the selected deck type', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/deck_type: type/.test(flashJs),
+        'saveNewFlashDeck must persist deck_type');
+      assert(/if \(row\?\.deck_type === 'text' \|\| row\?\.deck_type === 'flashcard'\) return row\.deck_type;/.test(flashJs),
+        'getDeckType must prefer the stored deck_type');
+    });
+
+    test('migrations add focus_role and deck_type (2.10.18)', () => {
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(local.includes('2.10.18') && local.includes('ADD COLUMN focus_role') && local.includes('ADD COLUMN deck_type'),
+        'local migration 2.10.18 must add focus_role and deck_type');
+      assert(drive.includes('2.10.18') && drive.includes('focus_role') && drive.includes('deck_type'),
+        'drive migration 2.10.18 must ensure focus_role and deck_type');
+      assert(schema.includes('focus_role TEXT') && schema.includes('deck_type TEXT'),
+        'base schema must include focus_role and deck_type');
+      const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
+      assert(sw.includes('js/scene-parse.js'), 'sw.js must precache js/scene-parse.js');
+    });
+
+    test('text revision holds new chunks until nothing is due', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const gates = flashJs.match(/const due = (?:pool\.filter\(p => p\.chunk\.last_review\)|chunks\.filter\(ch => ch\.last_review\));\s*\n\s*const candidates = due\.length > 0 \? due : (?:pool|chunks);/g) || [];
+      assert(gates.length === 3,
+        `all three text-revision pickers must gate new chunks behind due ones (found ${gates.length})`);
+    });
+
+    test('text revision breaks ties by chunk order, not randomly', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(!/const picked = tied\[Math\.floor\(Math\.random\(\) \* tied\.length\)\]/.test(flashJs),
+        'random tie-break must be gone from text-revision picking');
+      assert(flashJs.includes('a.chunk.chunk_index - b.chunk.chunk_index'),
+        'tied chunks must break by chunk order so a text is learned following its flow');
+      assert((flashJs.match(/const picked = tied\[0\];/g) || []).length === 3,
+        'all three text-revision pickers must take the first tied chunk');
+    });
+
+    test('flashcard practice holds new cards until nothing is due', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(/const fresh = dueCount > 0 \? \[\] : pool\.filter\(c => !c\.last_review\)/.test(flashJs),
+        'practice session must not introduce new cards while due cards remain');
+    });
+
+    test('sharing poll is single-flight', () => {
+      const pollStart = drive.indexOf('async poll()');
+      assert(pollStart !== -1, 'poll must exist');
+      const pollBody = drive.slice(pollStart, drive.indexOf('async handleStaleGroup', pollStart));
+      assert(pollBody.includes('if (_pollRunning)'),
+        'poll must skip the tick when a previous poll is still running');
+      assert(/_pollRunning = true;[\s\S]*finally \{[\s\S]*_pollRunning = false;/.test(pollBody),
+        'poll must release the guard in a finally block');
+    });
+
+    test('group-discovered re-renders the Group tab without stealing selection', () => {
+      const groups = fs.readFileSync(path.join(JS_DIR, 'groups.js'), 'utf-8');
+      assert(groups.includes("'group-discovered'"),
+        'STRUCTURAL_EVENTS must include group-discovered');
+      const subStart = groups.indexOf('function ensureSubscribed()');
+      assert(subStart !== -1, 'ensureSubscribed must exist');
+      const subBody = groups.slice(subStart, groups.indexOf('\n}\n', subStart));
+      assert(/event === 'group-created' && detail\?\.group\?\.id/.test(subBody),
+        'auto-select must stay reserved for group-created');
+      assert(!subBody.split('\n').some(l => l.includes('group-discovered') && l.includes('selectedGroupId =')),
+        'group-discovered must not change the tab selection');
+    });
+
+    test('hasPendingCreate is exposed on the adapter and the interface', () => {
+      assert(drive.includes('hasPendingCreate(groupId, itemId)'),
+        'sharing-drive.js must expose hasPendingCreate');
+      assert(/intentStateFor\(e, type\)\.createdIds\.has\(itemId\)/.test(drive),
+        'hasPendingCreate must consult the unacknowledged created intents');
+      const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(/hasPendingCreate:\s+'fn'/.test(iface),
+        'SHARING_INTERFACE must declare hasPendingCreate');
+    });
+
+    test('syncs never plant a pointer for an item this tab is sharing', () => {
+      for (const [src, name] of [
+        [todosSrc, 'syncSharedTodos'],
+        [habitsSrc, 'syncSharedHabits'],
+        [listsSrc, 'syncSharedListItems'],
+      ]) {
+        assert(src.includes('state.sharing.hasPendingCreate(sh.group_id, sh.id)'),
+          `${name} must skip pointer creation while the share is in flight`);
+      }
+    });
+
+    test('bulk share keeps the original category on the local pointer', () => {
+      // Regression test for bulk-shared items landing in the Shared category:
+      // the pointer must carry the source category id, not __shared__.
+      const cases = [
+        [todosSrc, 'bulkShareTodoCategory', 'category_id: catId'],
+        [habitsSrc, 'bulkShareHabitCategory', 'category_id: habit.category_id || _defaultHabitCatId'],
+        [listsSrc, 'bulkShareList', 'list_id: listId'],
+      ];
+      for (const [src, name, marker] of cases) {
+        const start = src.indexOf(`async function ${name}(`);
+        assert(start !== -1, `${name} must exist`);
+        const end = src.indexOf(`\nwindow.${name}`, start);
+        assert(end !== -1, `${name}: function boundary must be parseable`);
+        const body = src.slice(start, end);
+        assert(body.includes(marker),
+          `${name}: the pointer insert must preserve the source category/list (${marker})`);
+      }
+    });
+
+    test('forceSave flushes dirty shared types immediately; destroy clears timers', () => {
+      const forceBody = methodBody('forceSave', 'async poll()');
+      assert(forceBody.includes('_runSharedFlush(groupId, type)'),
+        'forceSave must run the debounced flush for dirty types');
+      assert(/clearTimeout\(_sharedFlushTimers\.get\(key\)\)/.test(forceBody),
+        'forceSave must cancel the pending debounce timer before flushing');
+      const destroyStart = drive.indexOf('destroy()');
+      assert(destroyStart !== -1, 'destroy must exist');
+      const destroyBody = drive.slice(destroyStart, drive.indexOf('},', destroyStart) + 2);
+      assert(destroyBody.includes('_sharedFlushTimers.clear()'),
+        'destroy must clear the debounce timers');
+    });
+
+    test('tab hide/close and disconnect flush the sharing adapter too', () => {
+      // The debounced upload can lag staging by ~2s; without a flush on tab
+      // hide/close/disconnect a staged share would never reach Drive while
+      // its personal row is already gone.
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      const sharingFlushes = (mainSrc.match(/state\.sharing\?\.forceSave|state\.sharing\.forceSave\(\)/g) || []).length;
+      assert(sharingFlushes >= 3,
+        `beforeunload, tab-hide and disconnect must flush the sharing adapter, found ${sharingFlushes}`);
+      const discStart = mainSrc.indexOf('async function disconnect()');
+      assert(discStart !== -1, 'disconnect must exist');
+      const discBody = mainSrc.slice(discStart, mainSrc.indexOf('\n}\n', discStart));
+      const flushIdx = discBody.indexOf('state.sharing.forceSave()');
+      const destroyIdx = discBody.indexOf('state.sharing.destroy()');
+      assert(flushIdx !== -1 && destroyIdx !== -1 && flushIdx < destroyIdx,
+        'disconnect must flush the sharing adapter before destroying it');
+    });
+  }
+
+  // ===================================================================
+  // Sharing mutation queue — rollback+replay sequencing, behavioral
+  // (js/sharing-mutation-queue.js, wired in js/sharing-drive.js)
+  // ===================================================================
+  {
+    const { pathToFileURL } = require('url');
+    const { createMutationQueue } = await import(pathToFileURL(path.join(JS_DIR, 'sharing-mutation-queue.js')).href);
+
+    // Fake adapter-level update flow over a plain object, using the real
+    // queue module: `memory` is the in-memory item, `driveLog` records
+    // exactly what each upload would have serialized to Drive.
+    function makeUpdateHarness(initial, key = 'item') {
+      const queue = createMutationQueue();
+      const memory = { ...initial };
+      const driveLog = [];
+      let inFlight = 0;
+      let maxInFlight = 0;
+      function update(changes, { fail = false, gate = null } = {}) {
+        const prev = { ...memory };
+        const stagedAt = 'staged-at';
+        Object.assign(memory, changes);
+        const entry = queue.enqueue(key, {
+          restore: () => {
+            for (const k of Object.keys(memory)) if (!(k in prev)) delete memory[k];
+            Object.assign(memory, prev);
+          },
+          replay: () => Object.assign(memory, changes),
+        });
+        return queue.runSerialized(key, entry, async () => {
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          try {
+            if (gate) await gate;
+            if (fail) throw new Error('upload failed');
+            driveLog.push({ ...memory });
+          } finally {
+            inFlight--;
+          }
+        });
+      }
+      return { memory, driveLog, update, maxInFlight: () => maxInFlight };
+    }
+
+    test('mutation queue: failed A never reaches Drive, B survives', async () => {
+      const h = makeUpdateHarness({ priority: 'normal', done: false });
+      const pA = h.update({ priority: 'high' }, { fail: true });
+      const pB = h.update({ done: true });
+      await assertRejects(pA, 'A must reject');
+      await pB;
+      assert(h.memory.priority === 'normal' && h.memory.done === true,
+        `memory must be {priority:normal,done:true}, got ${JSON.stringify(h.memory)}`);
+      assert(h.driveLog.length === 1, `only B may upload, got ${h.driveLog.length} uploads`);
+      assert(h.driveLog[0].priority === 'normal' && h.driveLog[0].done === true,
+        `Drive must hold {priority:normal,done:true}, got ${JSON.stringify(h.driveLog[0])}`);
+    });
+
+    test('mutation queue: failed completion C1 is not persisted, C2 survives', async () => {
+      const queue = createMutationQueue();
+      const memory = { completions: [] };
+      const driveLog = [];
+      function addCompletion(c, { fail = false } = {}) {
+        const prev = memory.completions.slice();
+        memory.completions.push(c);
+        const entry = queue.enqueue('habit', {
+          restore: () => { memory.completions = prev; },
+          replay: () => { memory.completions.push(c); },
+        });
+        return queue.runSerialized('habit', entry, async () => {
+          if (fail) throw new Error('upload failed');
+          driveLog.push(memory.completions.slice());
+        });
+      }
+      const pA = addCompletion('C1', { fail: true });
+      const pB = addCompletion('C2');
+      await assertRejects(pA, 'A must reject');
+      await pB;
+      assert(JSON.stringify(memory.completions) === '["C2"]',
+        `memory completions must be ["C2"], got ${JSON.stringify(memory.completions)}`);
+      assert(driveLog.length === 1 && JSON.stringify(driveLog[0]) === '["C2"]',
+        `Drive completions must be ["C2"], got ${JSON.stringify(driveLog)}`);
+    });
+
+    test('mutation queue: two consecutive failures roll back to the base', async () => {
+      const h = makeUpdateHarness({ priority: 'normal', done: false });
+      const pA = h.update({ priority: 'high' }, { fail: true });
+      const pB = h.update({ done: true }, { fail: true });
+      await assertRejects(pA, 'A must reject');
+      await assertRejects(pB, 'B must reject');
+      assert(h.memory.priority === 'normal' && h.memory.done === false,
+        `memory must be back to base, got ${JSON.stringify(h.memory)}`);
+      assert(h.driveLog.length === 0, `no successful upload, got ${h.driveLog.length}`);
+    });
+
+    test('mutation queue: single failed mutation rolls back to its snapshot', async () => {
+      const h = makeUpdateHarness({ priority: 'normal' });
+      await assertRejects(h.update({ priority: 'high', brandNew: true }, { fail: true }), 'must reject');
+      assert(h.memory.priority === 'normal' && !('brandNew' in h.memory),
+        `memory must be back to base, got ${JSON.stringify(h.memory)}`);
+      assert(h.driveLog.length === 0, 'Drive must be untouched');
+    });
+
+    test('mutation queue: overlapping updates apply in staging order', async () => {
+      const h = makeUpdateHarness({ priority: 'normal' });
+      const pA = h.update({ priority: 'high' });
+      const pB = h.update({ priority: 'low' });
+      await pA;
+      await pB;
+      assert(h.memory.priority === 'low', `last staged wins, got ${h.memory.priority}`);
+      assert(h.driveLog.length === 2 && h.driveLog[1].priority === 'low', 'both uploads run in order');
+      assert(h.maxInFlight() === 1, 'uploads for one item must never overlap');
+    });
+
+    test('mutation queue: a gated upload blocks the same item only', async () => {
+      const h = makeUpdateHarness({ v: 0 });
+      let releaseA;
+      const gateA = new Promise(r => { releaseA = r; });
+      const pA = h.update({ v: 1 }, { gate: gateA });
+      const pB = h.update({ v: 2 });
+      await new Promise(r => setTimeout(r, 20));
+      assert(h.driveLog.length === 0, 'B must wait for A\u2019s upload to settle');
+      releaseA();
+      await pA;
+      await pB;
+      assert(h.driveLog.length === 2, 'both uploads complete after the gate releases');
+    });
+
+    test('mutation queue: different items upload independently', async () => {
+      const queue = createMutationQueue();
+      const order = [];
+      let releaseA;
+      const gateA = new Promise(r => { releaseA = r; });
+      const eA = queue.enqueue('a', { restore() {}, replay() {} });
+      const eB = queue.enqueue('b', { restore() {}, replay() {} });
+      const pA = queue.runSerialized('a', eA, async () => { order.push('a-start'); await gateA; order.push('a-end'); });
+      const pB = queue.runSerialized('b', eB, async () => { order.push('b-only'); });
+      await pB;
+      assert(order.includes('b-only') && !order.includes('a-end'),
+        `b must complete while a is still gated, got [${order}]`);
+      releaseA();
+      await pA;
+      assert(order.join(',') === 'a-start,b-only,a-end', `unexpected order [${order}]`);
+    });
+  }
+
+  // ===================================================================
+  // QUICK-ADD INPUT PRESERVATION — a background sharing sync (an upload
+  // completing, the 15s poll) triggers a full re-render via
+  // 'sharing-changed'. The render functions must not wipe what the user
+  // is typing in a quick-add box: values (and focus) are snapshotted
+  // before the DOM is replaced and restored after.
+  // ===================================================================
+  {
+    const utils = jsFiles['utils.js'];
+    const todosSrc = jsFiles['todos.js'];
+    const habitsSrc = jsFiles['habits.js'];
+    const listsSrc = jsFiles['lists.js'];
+
+    test('utils.js defines and exports snapshotTextInputs/restoreTextInputs', () => {
+      assert(utils.includes('function snapshotTextInputs('), 'snapshotTextInputs must be defined');
+      assert(utils.includes('function restoreTextInputs('), 'restoreTextInputs must be defined');
+      assert(/export \{[\s\S]*snapshotTextInputs, restoreTextInputs/.test(utils),
+        'both helpers must be exported from utils.js');
+      assert(utils.includes('document.activeElement'),
+        'the snapshot must record which input is focused');
+    });
+
+    for (const [file, src, selector, keyAttr, renderFn] of [
+      ['todos.js', todosSrc, '.todo-cat-input', 'data-category', 'function renderTodos()'],
+      ['habits.js', habitsSrc, '.todo-cat-input', 'data-category', 'function renderHabits()'],
+      ['lists.js', listsSrc, '.list-quick-input', 'data-list-id', 'function renderLists()'],
+    ]) {
+      test(`${file}: render preserves quick-add text across re-render`, () => {
+        const start = src.indexOf(renderFn);
+        assert(start !== -1, `${renderFn} must exist in ${file}`);
+        const body = src.slice(start);
+        const snapIdx = body.indexOf(`snapshotTextInputs(grid, '${selector}', '${keyAttr}')`);
+        const htmlIdx = body.indexOf('grid.innerHTML = html;');
+        const restoreIdx = body.indexOf(`restoreTextInputs(grid, '${selector}', '${keyAttr}', pendingInputs)`);
+        assert(snapIdx !== -1 && htmlIdx !== -1 && restoreIdx !== -1,
+          `${file} must snapshot before innerHTML and restore after`);
+        assert(snapIdx < htmlIdx && htmlIdx < restoreIdx,
+          'snapshot must run before the DOM is replaced, restore after');
+      });
+    }
+  }
+
+  // ===================================================================
+  // DRIVE BACKUP POLICY (runtime)
+  // ===================================================================
+  console.log('\n--- Drive Backup Policy\n');
+
+  const policyUrl = pathToFileURL(path.join(JS_DIR, 'adapters', 'drive-backup-policy.js')).href;
+  const { parseBackupVersion, newestBackupVersion, decideBackupAction } = await import(policyUrl);
+
+  test('backup policy: filename parsing', () => {
+    assert(parseBackupVersion('backup-v1.131.json') === '1.131', 'parses version from backup filename');
+    assert(parseBackupVersion('backup-v2.0.10.json') === '2.0.10', 'parses three-part version');
+    assert(parseBackupVersion('todos.json') === null, 'non-backup file → null');
+    assert(parseBackupVersion('backup-v1.131.json.bak') === null, 'suffix after .json → null');
+    assert(newestBackupVersion(['todos.json', 'backup-v1.131.json', 'backup-v2.0.10.json', 'backup-v1.9.json']) === '2.0.10',
+      'newest backup wins by version comparison, not string order');
+    assert(newestBackupVersion(['todos.json']) === null, 'no backups → null');
+  });
+
+  test('backup policy: decision table', () => {
+    // settings.json is written once, at the end of the batch, so the version
+    // on Drive moves exactly once per batch: backup version == current
+    // version ⟺ the batch did not complete.
+    assert(decideBackupAction(null, '1.131') === 'snapshot', 'no backup → snapshot current tables');
+    assert(decideBackupAction('1.131', '1.131') === 'restore', 'backup for current version → restore and re-run');
+    assert(decideBackupAction('1.130', '1.131') === 'stale', 'older backup → its batch completed, delete it');
+    assert(decideBackupAction('1.132', '1.131') === 'stale', 'newer backup → stale, delete it');
+    // Partial multi-migration batch: settings.json is only written at the
+    // end, so a mid-batch failure always leaves the backup version behind.
+    assert(decideBackupAction('1.0', '1.0') === 'restore',
+      'partial batch (settings never advanced past the backup) → restore from backup version');
+  });
+
+  test('Sharing join-flip repair: loadAll heals a joined pointer whose member row is still pending', () => {
+    const drive = jsFiles['sharing-drive.js'];
+    assert(drive.includes('async function repairPendingJoinFlip(groupId)'),
+      'sharing-drive.js must define repairPendingJoinFlip');
+    // Only the pending→joined case is repaired — anything else is a no-op.
+    assert(drive.includes("if (!member || member.status !== 'pending') return;"),
+      'repair must no-op unless our own member row is still pending');
+    // The flip mirrors the join: status, joined_at from the pointer row, display_name fallback.
+    assert(drive.includes("member.status = 'joined'"),
+      'repair must flip the member row to joined');
+    assert(drive.includes('markCreated(memberIntentsFor(e), selfId)'),
+      'repair must mark the flip as a pending intent before uploading');
+    // Best-effort: a failed repair upload is logged, never fails startup.
+    assert(drive.includes('pending→joined repair upload failed'),
+      'repair must log (not throw) when the re-upload fails');
+    // loadAll runs the repair for kind-join rows after loading.
+    assert(drive.includes('await repairPendingJoinFlip(row.id)'),
+      'loadAll must run the repair for joined pointers');
+    assert(drive.includes("if (row.kind !== 'joined' || !_groups.has(row.id)) continue;"),
+      'loadAll repair pass must only cover loaded joined pointers');
+  });
+
+  // ===================================================================
+  // Shared items in Google Calendar
+  // ===================================================================
+  {
+    const cal = jsFiles['calendar-sync.js'];
+    const todos = jsFiles['todos.js'];
+    const habits = jsFiles['habits.js'];
+    const main = jsFiles['main.js'];
+
+    test('share payloads carry due_date so shared todos can sync to the calendar', () => {
+      const m = todos.match(/text: todo\.text, category: cat\?\.name \?\? '', priority: todo\.priority \|\| 'normal', note: todo\.note \|\| '', due_date: todo\.due_date \|\| null, snooze_until: todo\.snooze_until \|\| null/g);
+      assert(m && m.length === 2,
+        `expected due_date in both share payloads (shareExistingTodo + bulk share), found ${m ? m.length : 0}`);
+    });
+
+    test('calendar resolves shared pointers through the sharing payload', () => {
+      assert(cal.includes('export const SHARED_NOT_READY'), 'must export the not-ready sentinel');
+      assert(cal.includes("if (!row?.shared_id) return { status: 'personal', item: row };"),
+        'non-shared rows must pass through untouched');
+      assert(cal.includes("if (!sharingLoaded()) return { status: 'deferred' };"),
+        'shared rows must defer while sharing is not loaded');
+      assert(cal.includes('due_date: sh.payload?.due_date || null'), 'todo dates must resolve from the payload');
+      assert(cal.includes('snooze_until: sh.payload?.snooze_until || null'), 'todo snooze must resolve from the payload');
+      assert(cal.includes('done: sh.done ? 1 : 0'), 'todo done must resolve from the shared item');
+      assert(cal.includes('next_due: sh.next_due || null'), 'habit next_due must resolve from the payload');
+    });
+
+    test('calendar never deletes events for shared rows whose sharing data is not loaded', () => {
+      assert(cal.includes('if (item === SHARED_NOT_READY) continue;'),
+        'targeted path must skip deferred rows, not delete their events');
+      assert(cal.includes('deferredIds'), 'full scan must track deferred ids');
+      assert(cal.includes('handledIds.has(itemId) || deferredIds.has(itemId)'),
+        'orphan deletion must spare deferred ids');
+    });
+
+    test('shared calendar titles use [Type][Category][Group] with the member-local category', () => {
+      assert(cal.includes('[TODO][${catLabel}][${todo._sharedGroupName}]'),
+        'shared todo title must be [TODO][category][group]');
+      assert(cal.includes('[Habit][${catLabel}][${habit._sharedGroupName}]'),
+        'shared habit title must be [Habit][category][group]');
+      assert(cal.includes('sharedItemCatLabel(todo, getTodoCategories())'),
+        'shared todo category must resolve from the local pointer row only');
+      assert(cal.includes('sharedItemCatLabel(habit, getHabitCategories())'),
+        'shared habit category must resolve from the local pointer row only');
+      assert(cal.includes('cat.name !== SHARED_CATEGORY'),
+        'the __shared__ pseudo-category must not leak into event titles');
+      assert(!cal.includes('todo._sharedCategory}][${todo._sharedGroupName}]'),
+        'the payload category must not appear in shared todo titles');
+      assert(!cal.includes('habit._sharedCategory}][${habit._sharedGroupName}]'),
+        'the creator category must not appear in shared habit titles');
+      assert(cal.includes('`[TODO][${catLabel}]`'), 'personal todo title format must be unchanged');
+      assert(cal.includes("`[Habit][${catLabel}]`"), 'personal habit title format must be unchanged');
+    });
+
+    test('remote shared changes mark pointers dirty via fingerprint diff', () => {
+      assert(todos.includes('function sharedTodoCalFingerprint(sh)'),
+        'todos must fingerprint the calendar-relevant payload fields');
+      assert(todos.includes("state.markCalDirty?.('todos', pointer.id)"),
+        'todos must dirty the pointer when a remote change touches event fields');
+      assert(habits.includes('function sharedHabitCalFingerprint(sh)'),
+        'habits must fingerprint the calendar-relevant payload fields');
+      assert(habits.includes("state.markCalDirty?.('habits', pointer.id)"),
+        'habits must dirty the pointer when a remote change touches event fields');
+      assert(main.includes('state.markCalDirty = markCalDirty;'),
+        'main must expose markCalDirty on state (avoids a view/calendar import cycle)');
+    });
+  }
+
+  // ===================================================================
+  // Deterministic calendar event IDs + id migration
+  // ===================================================================
+  {
+    const cal = jsFiles['calendar-sync.js'];
+    const main = jsFiles['main.js'];
+
+    test('event ids are derived from item ids (dashes stripped, base32hex)', () => {
+      assert(cal.includes('export function deterministicEventId(itemId)'),
+        'must export deterministicEventId');
+      assert(cal.includes("String(itemId).replace(/-/g, '')"),
+        'must strip dashes from the item id');
+      assert(cal.includes('/^[a-v0-9]{5,1024}$/'),
+        'must validate the base32hex event-id alphabet');
+    });
+
+    test('creates send the deterministic event id and keep the event body for 409 recovery', () => {
+      assert(cal.includes('body: { ...event, id: newEventId }'),
+        'create ops must carry the deterministic id');
+      assert(cal.includes("opMeta.push({ action: 'create', id, event });") ||
+             cal.includes("opMeta.push({ action: 'create', id: itemId, event });"),
+        'create opMeta must keep the event body for the 409 patch path');
+    });
+
+    test('409 on create patches the existing event instead of duplicating', () => {
+      assert(cal.includes('} else if (s === 409) {'),
+        'must branch on 409 in create result processing');
+      assert(cal.includes("method: 'PATCH'") && cal.includes('patchResp.ok'),
+        '409 path must PATCH the existing event');
+      assert(cal.includes('never create a duplicate'),
+        '409 path must document the no-duplicate intent');
+    });
+
+    test('sync entries are bare (item_type, item_id) pairs', () => {
+      assert(cal.includes('await state.db.from(\'gcal_sync\').insert({ item_type: itemType, item_id: itemId });'),
+        'entry writes must not store gcal_event_id or last_synced_at');
+      assert(!/upsertSyncEntry\([^)]*eventId/.test(cal),
+        'no caller may pass an event id to the entry writer');
+      assert(cal.includes('function eventIdForEntry(itemId, entry)'),
+        'must resolve event ids via the stored-or-derived helper');
+    });
+
+    test('migration gate is row-driven: work remains iff old rows exist', () => {
+      assert(cal.includes('export async function migrateEventIdsToDeterministic()'),
+        'must export the migration');
+      assert(cal.includes(".from('gcal_sync').select('gcal_event_id')"),
+        'the migration gate must inspect gcal_sync rows, not calendar prefs');
+      assert(cal.includes('.some(r => r.gcal_event_id)'),
+        'any row still carrying a gcal_event_id means work remains');
+      assert(!cal.includes('shared rows present'),
+        'the shared-rows abort must be gone (no shared items exist yet)');
+    });
+
+    test('migration wipes the calendar, then re-pushes and validates', () => {
+      assert(cal.includes('async function wipeCalendarEvents(token, calendarId)'),
+        'must have a wipe primitive (paginated list + batch delete)');
+      assert(cal.includes("singleEvents: 'false'"),
+        'the wipe listing must return recurring series as single masters');
+      assert(cal.includes("timeMin: '2000-01-01T00:00:00Z'"),
+        'the wipe listing must use an explicit far-past timeMin');
+      assert(cal.includes('event(s) could not be deleted'),
+        'the wipe must be all-or-nothing: throw when any event survives');
+      const mig = cal.slice(cal.indexOf('export async function migrateEventIdsToDeterministic()'));
+      assert(mig.includes('await wipeCalendarEvents(token, calId)'),
+        'the migration must wipe the calendar');
+      assert(mig.includes('await clearSyncEntries()'),
+        'the migration must clear the ledger after the wipe');
+      assert(mig.includes('await loadTodoCategories()') && mig.includes('await loadHabitCategories()'),
+        'category maps must load before the recreate pass rebuilds titles');
+      assert(mig.includes("await setSetting(ID_MIGRATION_FLAG, 'done')"),
+        'must only mark done after validation');
+      assert(mig.includes('still dirty'),
+        'must validate that no failed ops are still pending');
+      assert(mig.includes('without ledger row'),
+        'must validate that every syncable item has a ledger row');
+    });
+
+    test('migration turns calendar sync off on 403 instead of blocking forever', () => {
+      const mig = cal.slice(cal.indexOf('export async function migrateEventIdsToDeterministic()'));
+      assert(mig.includes("await setSetting('gcal_scope_missing', 'true')"),
+        'a 403 must record the scope-missing marker');
+      assert(mig.includes("await setSetting('gcal_sync_enabled', 'false')"),
+        'a 403 must turn calendar sync off');
+      assert(main.includes("t('cal_sync.scope_disabled')"),
+        'main must tell the user how to re-enable sync after the auto-disable');
+    });
+
+    test('migration is a login gate: no app access until it completes', () => {
+      assert(main.includes("throw new Error('cal_migration_failed')"),
+        'a deferred migration must throw out of connect()');
+      const gateIdx = main.indexOf("throw new Error('cal_migration_failed')");
+      const hideIdx = main.indexOf("document.getElementById('gate').style.display = 'none'");
+      assert(gateIdx !== -1 && hideIdx !== -1 && gateIdx < hideIdx,
+        'the gate must throw before the login screen hides');
+      assert(!main.includes('migrateEventIdsToDeterministic().catch'),
+        'the fire-and-forget startup trigger must be gone');
+      assert(main.includes("e.message === 'cal_migration_failed'"),
+        'doLogin/autoConnect must handle the migration failure like other login errors');
+    });
+
+    test('calendar wipe pauses table syncs so mid-wipe events keep their dirty marks', () => {
+      assert(cal.includes('let _wipeRunning = false'),
+        'must track an in-flight wipe');
+      assert(cal.includes('if (_wipeRunning) return; // wipe in flight'),
+        '_syncTableInner must return early without consuming dirty sets during a wipe');
+      assert(cal.includes('export async function wipeDeLaClawCalendar()'),
+        'must export the wipe helper used by toggle-off and resync');
+      assert(cal.includes('export async function clearSyncEntries()'),
+        'must export the ledger-clear helper');
+    });
+
+    test('toggle-off wipes the calendar instead of deleting per type', () => {
+      const body = cal.slice(cal.indexOf('export async function disableCalSync'));
+      assert(body.includes('await wipeDeLaClawCalendar()'),
+        'disableCalSync must wipe the whole calendar (ledger rows and orphans)');
+      assert(body.includes('await clearSyncEntries()'),
+        'disableCalSync must clear the ledger after the wipe');
+      assert(!body.includes('deleteTypeEvents(types[i])'),
+        'the per-type delete loop must be gone from disableCalSync');
+    });
+
+    test('toggle-off fails loud: wipe failure keeps the ledger and the enabled flag', () => {
+      const start = cal.indexOf('export async function disableCalSync');
+      const body = cal.slice(start, cal.indexOf('\n}\n', start));
+      assert(!body.includes('catch (_)'),
+        'disableCalSync must not swallow failures — callers report them');
+      const wipeIdx = body.indexOf('await wipeDeLaClawCalendar()');
+      const flagIdx = body.indexOf("setSetting('gcal_sync_enabled', 'false')");
+      assert(wipeIdx !== -1 && flagIdx !== -1 && wipeIdx < flagIdx,
+        'the enabled flag must only be cleared after a successful wipe');
+    });
+
+    test('account deletion verifies the calendar DELETE before clearing state', () => {
+      const start = cal.indexOf('export async function disableCalSync');
+      const body = cal.slice(start, cal.indexOf('\n}\n', start));
+      const checkIdx = body.indexOf('res.status !== 404');
+      const clearIdx = body.indexOf('await clearSyncEntries()');
+      assert(checkIdx !== -1,
+        'the deleteCalendar branch must check the DELETE response');
+      assert(checkIdx < clearIdx,
+        'a failed calendar DELETE must throw before the ledger is cleared');
+    });
+
+    test('toggle-off, resync and account deletion surface calendar failures', () => {
+      assert(main.includes("t('cal_sync.disable_failed')"),
+        'master toggle-off must toast when the wipe fails');
+      assert(main.includes("t('cal_sync.resync_failed')"),
+        'resync must abort with a toast when the wipe fails');
+      assert(main.includes("abort('account.step_calendar'"),
+        'account deletion must abort (not proceed) when the calendar DELETE fails');
+    });
+
+    test('per-type deletion requeues failed ids instead of dropping them', () => {
+      const body = cal.slice(cal.indexOf('async function _deleteTypeEventsInner'));
+      assert(body.includes('markDirty(tableName, e.item_id)'),
+        'failed deletes must requeue the id so a later run retries');
+    });
+
+    test('gcal_sync schema is the lean pair in server/schema.sql', () => {
+      const schemaSrc = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'schema.sql'), 'utf8');
+      const m = schemaSrc.match(/CREATE TABLE IF NOT EXISTS gcal_sync \(([\s\S]*?)\);/);
+      assert(m, 'gcal_sync table must exist in schema.sql');
+      assert(!m[1].includes('gcal_event_id'), 'gcal_sync must not have gcal_event_id');
+      assert(!m[1].includes('last_synced_at'), 'gcal_sync must not have last_synced_at');
+    });
+  }
+
+  // ===================================================================
+  // Group rename (creator-only)
+  // ===================================================================
+  {
+    const drive = jsFiles['sharing-drive.js'];
+    const iface = jsFiles['sharing-interface.js'];
+    const ui = jsFiles['sharing-ui.js'];
+    const todos = jsFiles['todos.js'];
+    const habits = jsFiles['habits.js'];
+
+    test('renameGroup is creator-only and part of the sharing interface contract', () => {
+      assert(iface.includes("renameGroup:              'fn'"),
+        'SHARING_INTERFACE must require renameGroup');
+      assert(drive.includes('async renameGroup(groupId, newName)'),
+        'drive adapter must implement renameGroup(groupId, newName)');
+      assert(drive.includes('await assertCreator(groupId);'),
+        'renameGroup must assert the caller is the creator');
+      assert(drive.includes("if (!name) throw new Error('Group name cannot be empty')"),
+        'renameGroup must reject empty names');
+    });
+
+    test('rename rolls back the in-memory name when the Drive upload fails', () => {
+      assert(drive.includes('const prevName = e.group.name;'),
+        'renameGroup must capture the previous name before the upload');
+      assert(drive.includes('e.group.name = prevName;'),
+        'renameGroup must restore the previous name if saveGroup throws');
+    });
+
+    test('rename persists to the local groups row and emits group-changed', () => {
+      assert(drive.includes('await _updateGroupRowName(groupId, name);'),
+        'renameGroup must update the local groups row name');
+      assert(drive.includes("emit('group-changed', { groupId, group: e.group });"),
+        'renameGroup must emit group-changed so the pane and calendar pick it up');
+      assert(drive.includes('if (name === e.group.name) return e.group;'),
+        'renaming to the same name must be a no-op');
+    });
+
+    test('poll persists a creator-side rename to the member local row', () => {
+      assert(drive.includes('const nameChanged = normalizedGroup.name && normalizedGroup.name !== e.group.name;'),
+        'the group.json poll must detect a remote rename');
+      assert(drive.includes('if (nameChanged) await _updateGroupRowName(groupId, normalizedGroup.name);'),
+        'the poll must persist the renamed name on the local groups row');
+    });
+
+    test('calendar fingerprints include the group name so renames re-title events', () => {
+      assert(todos.includes("sh.group_name || '',"),
+        'todo fingerprint must include the group name ([TODO][Category][Group] titles)');
+      assert(habits.includes("sh.group_name || '',"),
+        'habit fingerprint must include the group name ([Habit][Category][Group] titles)');
+    });
+
+    test('rename UI is creator-only with guarded inline edit', () => {
+      assert(ui.includes('data-action="sharing-rename-group"'),
+        'the group card must expose a rename action');
+      assert(ui.includes('${isCreator ? `<button class="sharing-action-btn sharing-action-btn-compact sharing-rename-btn"'),
+        'the rename button must render for creators only');
+      assert(ui.includes('window.sharingRenameGroup = sharingRenameGroup;'),
+        'sharingRenameGroup must be exposed for delegation');
+      assert(ui.includes("input.addEventListener('blur', cancel)"),
+        'blur must cancel the rename inline edit, never save');
+      assert(ui.includes('setLocked(true);'),
+        'the rename editor must lock input and buttons while the rename is in flight');
+    });
+
+    test('rename inline editor is styled like the pane and has explicit confirm/cancel', () => {
+      assert(styleCss.includes('.sharing-rename-input{'),
+        'style.css must style the rename input (no bare browser-default input)');
+      assert(styleCss.includes('.sharing-rename-input{flex:1;min-width:0;font:inherit;'),
+        'the rename input must inherit the heading typography so editing causes no layout shift');
+      assert(ui.includes('class="sharing-rename-confirm"'),
+        'the rename editor must offer an explicit confirm button');
+      assert(ui.includes('class="sharing-rename-cancel"'),
+        'the rename editor must offer an explicit cancel button');
+      assert(ui.includes("lucideIcon('check', 14)") && ui.includes("lucideIcon('x', 14)"),
+        'confirm/cancel must use Lucide icons, never emoji');
+      assert(ui.includes('title="${esc(t(\'save\'))}"') && ui.includes('title="${esc(t(\'cancel\'))}"'),
+        'confirm/cancel buttons must use i18n titles, no hardcoded text');
+      assert(ui.includes("addEventListener('pointerdown', (e) => e.preventDefault())"),
+        'button pointerdown must not blur the input, or the blur-cancel would swallow the click');
+    });
+
+    test('group card header wraps on narrow widths', () => {
+      assert(styleCss.includes('.sharing-group-header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;'),
+        'the group header must wrap so actions drop below the name instead of overflowing the card');
+      assert(styleCss.includes('.sharing-group-info{flex:1 1 220px;min-width:0;}'),
+        'the group info column must shrink and yield space to the actions');
+    });
+
+    test('group header action buttons are icon-only with hover hints', () => {
+      for (const [cls, icon] of [
+        ['sharing-drive-link', '${LOGOS.googledrive(14)}'],
+        ['sharing-copy-link-btn', "${lucideIcon('key', 14)}"],
+        ['sharing-rename-btn', "${lucideIcon('pencil', 14)}"],
+        ['sharing-leave-btn', "${lucideIcon('log-out', 14)}"],
+      ]) {
+        assert(ui.includes(`sharing-action-btn-compact ${cls}`),
+          `${cls} must reuse the compact icon-only button style`);
+        assert(ui.includes(`${icon}</button>`) || ui.includes(`${icon}</a>`),
+          `${cls} must render the icon with no text label after it`);
+      }
+      assert(!ui.includes("${LOGOS.googledrive(14)} ${t('sharing.open_drive_folder')}"),
+        'the Drive button must not carry a text label (title tooltip only)');
+      assert(ui.includes('title="${t(\'sharing.rename_group\')}" aria-label="${t(\'sharing.rename_group\')}"'),
+        'icon-only buttons must keep i18n title and aria-label hints');
+    });
+
+    test('renameGroup enforces the 60-character limit at the adapter boundary', () => {
+      assert(drive.includes("if (name.length > 60) throw new Error('Group name must be 60 characters or fewer');"),
+        'renameGroup must reject names longer than 60 characters (UI maxlength is cosmetic)');
+    });
+
+    test('rename retries the local groups-row update once before warning', () => {
+      assert(drive.includes('({ error } = await db.from(\'groups\')'),
+        '_updateGroupRowName must retry the row update once on failure');
+      assert(drive.includes('group.json stays authoritative'),
+        'the retry comment must record that the Drive write is not rolled back');
+    });
+
+    test('shared-sync drives the calendar sync directly after the fingerprint marks pointers dirty', () => {
+      const main = jsFiles['main.js'];
+      assert(main.includes('state.syncCalendarTable = syncCalendarTable;'),
+        'main.js must expose the calendar table sync on state (same hook pattern as markCalDirty)');
+      assert(todos.includes("if (calDirtyMarked) await state.syncCalendarTable?.('todos');"),
+        '_doSyncSharedTodos must drive the calendar sync directly — a rename/remote edit writes no local row, so no flush would consume the dirty marks');
+      assert(habits.includes("if (calDirtyMarked) await state.syncCalendarTable?.('habits');"),
+        '_doSyncSharedHabits must drive the calendar sync directly — a rename/remote edit writes no local row, so no flush would consume the dirty marks');
+    });
+
+    test('calendar sync re-queues failed ops instead of dropping them', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(cal.includes('function requeueFailedOps(tableName, ids)'),
+        'calendar-sync must have a requeueFailedOps helper that puts ids back in _dirtyItems');
+      assert(cal.includes('requeueFailedOps(tableName, opMeta.map(m => m.id))'),
+        'a sendBatch throw must re-queue every attempted id — the dirty set is already consumed');
+      assert(cal.includes('requeueFailedOps(tableName, [...failedIds])'),
+        'per-op failures must be re-queued for a later syncTable run');
+      assert(/const isRetryable = \(s\) => s === 0 \|\| s === 429 \|\| s >= 500/.test(cal),
+        'only unknown/rate-limited/server-error outcomes are retried — other 4xx would loop forever');
+    });
+
+    test('calendar sync no longer treats status 0 as a successful delete', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(!/if \(s === 0 \|\|/.test(cal),
+        'status 0 (no parseable batch result) must not clear the sync entry — the event may still exist');
+      assert(cal.includes('if (ok2xx || s === 404 || s === 410)'),
+        'a delete clears its sync entry only on 2xx/404/410; anything else keeps the entry for retry');
+    });
+
+    test('startup reconciles the calendar ledger before polling starts', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(cal.includes('export async function reconcileLedger()'),
+        'calendar-sync must export a reconcileLedger startup check');
+      assert(cal.includes('const { items } = await getSyncableItems(type);'),
+        'reconcileLedger must diff the syncable items against the ledger entries');
+      assert(cal.includes('if (!have.has(id)) { markDirty(table, id); marked = true; }'),
+        'items without a ledger entry must be marked dirty');
+      assert(cal.includes('if (marked) await syncTable(table);'),
+        'a non-empty diff must drive a syncTable run so the 409-adopt/create heal applies');
+      assert(cal.includes("if (prefs.birthdays) types.push({ table: 'birthdays', type: 'birthday' });"),
+        'the ledger check must cover birthdays as well as todos and habits');
+      const main = jsFiles['main.js'];
+      const pollIdx = main.indexOf('state.sharing.startPolling()');
+      const recIdx = main.indexOf('await reconcileCalendarLedger()');
+      assert(recIdx !== -1 && recIdx < pollIdx,
+        'main.js must run the ledger reconciliation before the sharing poll starts');
+    });
+
+    test('calendar event dates are derived in local time, not UTC', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(cal.includes('function localDateStr(value)'),
+        'calendar-sync must resolve event dates through a local-timezone helper');
+      assert(cal.includes('const d = localDateStr(date);'),
+        'todoToEvent must not slice the UTC string — a 00:30 local deadline would land on the previous day');
+      assert(cal.includes('const date = localDateStr(habit.next_due);'),
+        'habitToEvent must use the same local-timezone date helper');
+      assert(cal.includes('/^\\d{4}-\\d{2}-\\d{2}$/.test(s)'),
+        'date-only values (habits, birthdays) must pass through unchanged');
+      assert(cal.includes('return toLocalDateStr(d);'),
+        'nextDay must format the day-after in local time — the old UTC round-trip returned the start date during BST');
+      assert(!cal.includes('date.slice(0, 10)') && !cal.includes('next_due.slice(0, 10)'),
+        'no raw UTC string slicing may remain on the event-date path');
+    });
+
+    test('calendar settings offer a resynchronize button when sync is active', () => {
+      const main = jsFiles['main.js'];
+      const delegation = jsFiles['delegation.js'];
+      const subIdx = indexHtml.indexOf('id="calSyncSubSettings"');
+      const btnIdx = indexHtml.indexOf('data-action="resync-cal-sync"');
+      assert(subIdx !== -1 && btnIdx !== -1 && btnIdx > subIdx,
+        'the resync button must live inside #calSyncSubSettings, which is only shown when sync is enabled');
+      assert(indexHtml.includes('data-icon="refresh-cw"'),
+        'the resync button must use a Lucide icon, not an emoji');
+      assert(main.includes('window.resyncCalSync = resyncCalSync;'),
+        'resyncCalSync must be exposed on window for the delegation handler');
+      assert(delegation.includes("case 'resync-cal-sync': callWindow('resyncCalSync', []);"),
+        'delegation.js must route data-action="resync-cal-sync" to window.resyncCalSync');
+    });
+
+    test('resync is strictly equivalent to toggling sync off then on', () => {
+      const main = jsFiles['main.js'];
+      const body = main.slice(main.indexOf('async function resyncCalSync'));
+      const disableIdx = body.indexOf('await disableCalSync(');
+      const enableIdx = body.indexOf('await enableCalSync()');
+      const reconcileIdx = body.indexOf('await reconcileCalendar(');
+      assert(disableIdx !== -1 && enableIdx !== -1 && reconcileIdx !== -1,
+        'resyncCalSync must call disableCalSync, enableCalSync and reconcileCalendar');
+      assert(disableIdx < enableIdx && enableIdx < reconcileIdx,
+        'resync must delete all events first, then re-enable, then full-push — the off→on order');
+      assert(body.includes('if (_calSyncBusy) return;'),
+        'resyncCalSync must share the _calSyncBusy guard against double-invocation');
+      assert(body.includes('cal_sync.resynced'),
+        'resyncCalSync must toast cal_sync.resynced on success');
+    });
+
+    test('resync disables the calendar toggles while it runs', () => {
+      const main = jsFiles['main.js'];
+      const body = main.slice(main.indexOf('async function resyncCalSync'));
+      for (const action of ['toggle-cal-sync', 'toggle-cal-sync-habits', 'toggle-cal-sync-todos', 'toggle-cal-sync-birthdays']) {
+        assert(body.includes(`'[data-action="${action}"]'`),
+          `resyncCalSync must disable the ${action} toggle while the resync runs`);
+      }
+      assert(body.includes("toggleRows.forEach(r => r.classList.add('is-pending'))"),
+        'resyncCalSync must grey out the toggles when it starts');
+      assert(body.includes("toggleRows.forEach(r => r.classList.remove('is-pending'))"),
+        'resyncCalSync must re-enable the toggles in its finally block');
+    });
+
+    test('disabled modal-cancel buttons look disabled', () => {
+      assert(styleCss.includes('.modal-cancel:disabled'),
+        'style.css must visually grey out .modal-cancel when disabled (create-group modal disables Cancel mid-create)');
+    });
+
+    test('calendar mutations are serialized per table', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      assert(cal.includes('const _tableChains = new Map()'),
+        'must keep a per-table promise chain for calendar mutations');
+      const lockBody = cal.slice(cal.indexOf('function _withTableLock'));
+      assert(lockBody.includes('prev.catch(() => {})'),
+        'a rejected run must not break the serialization chain');
+      assert(lockBody.includes('cur.then(dropTail, dropTail)'),
+        'the chain tail must be dropped whether the run settles or fails');
+      assert(/export function syncTable\(tableName\) \{\s*return _withTableLock\(tableName, \(\) => _syncTableInner\(tableName\)\);\s*\}/.test(cal),
+        'syncTable must run inside the per-table lock');
+      assert(cal.includes('return _withTableLock(tableName, () => _deleteTypeEventsInner(itemType));'),
+        'deleteTypeEvents must run inside the per-table lock');
+      assert(cal.includes('async function _syncTableInner(tableName)'),
+        'the syncTable body must live in _syncTableInner');
+      assert(cal.includes('async function _deleteTypeEventsInner(itemType)'),
+        'the deleteTypeEvents body must live in _deleteTypeEventsInner');
+    });
+
+    test('calendar failure strings exist in EN/FR/ES', () => {
+      const i18n = jsFiles['i18n.js'];
+      for (const key of ['resync:', 'resynced:', 'migrating:', 'migration_failed:', 'scope_disabled:', 'removing_all:', 'disable_failed:', 'resync_failed:', 'step_failed:']) {
+        const count = (i18n.match(new RegExp(`\\b${key}`, 'g')) || []).length;
+        assert(count >= 3, `i18n '${key.replace(':', '')}' must be defined in all three languages (found ${count})`);
+      }
+    });
+
+    test('forceSave notifies _onTableFlushed so the calendar sync fires on tab-hide saves', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const body = drive.slice(drive.indexOf('async forceSave()'));
+      assert(body.includes('adapter._onTableFlushed'),
+        'forceSave must notify _onTableFlushed — the debounced path is not the only flush path');
+      assert(body.includes('flushed.push(t)'),
+        'only tables that actually flushed may be notified (flushTable rethrows on failure)');
+    });
+
+    test('drive: flushTable rethrows upload failures (debounced retry and gating depend on it)', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const body = drive.slice(drive.indexOf('async function flushTable('), drive.indexOf('function scheduleSave(table)'));
+      const logIdx = body.indexOf('console.error(`Drive: save failed for ${table}`, e);');
+      assert(logIdx !== -1, 'flushTable must log the save failure');
+      const tail = body.slice(logIdx, logIdx + 700);
+      assert(tail.includes('throw e;') && tail.indexOf('throw e;') < tail.indexOf('} finally'),
+        'flushTable must rethrow after logging — swallowing silently cleared the dirty flag on failure, losing the upload with no retry');
+    });
+
+    test('drive: forceSave re-schedules tables that failed to flush', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const body = drive.slice(drive.indexOf('async forceSave()'), drive.indexOf('get connected()'));
+      assert(body.includes('scheduleSave(r.t)'),
+        'forceSave must re-schedule failed tables for the debounced retry instead of silently dropping them from dirtyTables');
+    });
+
+    test('drive adapter exposes flushTables to gate operations on upload success', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const idx = drive.indexOf('async flushTables(');
+      assert(idx !== -1, 'drive adapter must expose flushTables');
+      const body = drive.slice(idx, idx + 1500);
+      assert(body.includes('adapter._onTableFlushed'),
+        'flushTables must notify _onTableFlushed like the other flush paths so the calendar sync fires');
+      assert(body.includes('scheduleSave(t);') && body.includes('throw e;'),
+        'flushTables must keep the debounced retry alive before rethrowing the failure');
+    });
+
+    test('leave flow force-flushes converted tables before flipping left in group.json', () => {
+      const ui = jsFiles['sharing-ui.js'];
+      const convertIdx = ui.indexOf('await _convertGroupItemsToPersonal(groupId);');
+      const flushIdx = ui.indexOf('flushTables');
+      const unjoinIdx = ui.indexOf('await state.sharing.unjoinGroup(groupId);');
+      assert(convertIdx !== -1 && flushIdx !== -1 && unjoinIdx !== -1 &&
+             convertIdx < flushIdx && flushIdx < unjoinIdx,
+        'the keep-copies leave must flush tables to Drive between the conversion and the left flip');
+    });
+
+    test('loadAll repairs a self-leave whose groups-row delete never landed', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      const idx = drive.indexOf('async function repairSelfLeave(groupId)');
+      assert(idx !== -1, 'sharing-drive must define a self-leave repair');
+      const body = drive.slice(idx, idx + 1800);
+      assert(body.includes("member.status !== 'left'"),
+        'the repair must only trigger on our own left-marked member row');
+      assert(body.includes('_groups.delete(groupId)'),
+        'the repair must drop the group without surfacing it, so the pointer sync cannot re-add pointers');
+      assert(body.includes("db.from('groups').delete().eq('id', groupId)"),
+        'the repair must retry the groups-table row delete');
+    });
+
+    test('loadAll runs the self-leave repair alongside the join-flip repair', () => {
+      const drive = jsFiles['sharing-drive.js'];
+      const loadAll = drive.slice(drive.indexOf('async loadAll()'), drive.indexOf('getAllGroups()'));
+      assert(loadAll.includes('await repairPendingJoinFlip(row.id);') &&
+             loadAll.includes('await repairSelfLeave(row.id);'),
+        'loadAll must run both post-load repairs before the startup pointer sync');
+    });
+
+    test('calendar batch requests use keepalive so they survive tab close', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      const body = cal.slice(cal.indexOf('async function sendBatch'));
+      assert(body.includes('keepalive: true'),
+        'sendBatch must set keepalive like the Drive upload does — beforeunload flushes cannot await the response');
+    });
+  }
+
+  // ===================================================================
+  // DRIVE READ-ONLY FALLBACK — cache snapshot + mutation gates
+  // ===================================================================
+  {
+    const { pathToFileURL } = require('url');
+    // Browser shims for the i18n/state module top-level code.
+    if (!globalThis.localStorage) globalThis.localStorage = { getItem: () => 'en', setItem: () => {}, removeItem: () => {} };
+    if (!globalThis.document) globalThis.document = { documentElement: {} };
+
+    // Minimal in-memory IndexedDB: only the surface offline-cache.js uses
+    // (open + upgrade, one store, put/get/getAllKeys, tx.oncomplete).
+    if (!globalThis.indexedDB) {
+      const stores = new Map();
+      const makeDb = (data) => ({
+        createObjectStore() { return {}; },
+        transaction() {
+          let completeFn = null;
+          const tx = {
+            onerror: null, error: null,
+            objectStore() {
+              return {
+                put(value, key) { data.set(key, value); return {}; },
+                get(key) {
+                  const r = {};
+                  queueMicrotask(() => { r.result = data.get(key); if (r.onsuccess) r.onsuccess(); });
+                  return r;
+                },
+                getAllKeys() {
+                  const r = {};
+                  queueMicrotask(() => { r.result = [...data.keys()]; if (r.onsuccess) r.onsuccess(); });
+                  return r;
+                },
+              };
+            },
+          };
+          Object.defineProperty(tx, 'oncomplete', {
+            set(fn) { completeFn = fn; queueMicrotask(() => { if (completeFn) completeFn(); }); },
+            get() { return completeFn; },
+          });
+          return tx;
+        },
+      });
+      globalThis.indexedDB = {
+        open(name) {
+          const req = {};
+          queueMicrotask(() => {
+            const isNew = !stores.has(name);
+            if (isNew) stores.set(name, new Map());
+            req.result = makeDb(stores.get(name));
+            if (isNew && req.onupgradeneeded) req.onupgradeneeded();
+            if (req.onsuccess) req.onsuccess();
+          });
+          return req;
+        },
+      };
+    }
+
+    const demo = await import(pathToFileURL(path.join(JS_DIR, 'adapters/demo.js')).href);
+    const oc = await import(pathToFileURL(path.join(JS_DIR, 'adapters/offline-cache.js')).href);
+    const execB = (builder) => {
+      let out, err;
+      builder.then(r => { out = r; }, e => { err = e; });
+      if (err) throw err;
+      return out;
+    };
+
+    test('readonly adapter: selects pass, mutations rejected with read_only, store untouched', async () => {
+      const adapter = oc.wrapReadOnlyAdapter(demo.createDemoAdapter({
+        todos: [{ id: 'a', text: 'x' }],
+        settings: [{ key: 'schema_version', value: '9.9.9' }],
+      }));
+      const before = execB(adapter.from('todos').select('*'));
+      assert(before.data.length === 1 && before.data[0].id === 'a', 'select must serve cached rows');
+
+      for (const [label, build] of [
+        ['insert', () => adapter.from('todos').insert({ id: 'b', text: 'y' })],
+        ['update', () => adapter.from('todos').update({ text: 'z' }).eq('id', 'a')],
+        ['upsert', () => adapter.from('todos').upsert({ id: 'a', text: 'z' })],
+        ['delete', () => adapter.from('todos').delete().eq('id', 'a')],
+      ]) {
+        const res = execB(build());
+        assert(res.error && res.error.code === 'read_only', `${label} must be rejected with code read_only, got ${JSON.stringify(res)}`);
+      }
+      const after = execB(adapter.from('todos').select('*'));
+      assert(after.data.length === 1 && after.data[0].text === 'x', 'store must be untouched by rejected mutations');
+
+      let bulkErr = null;
+      try { await adapter.bulkSortOrder('todos', [{ id: 'a', sort_order: 3 }]); } catch (e) { bulkErr = e; }
+      assert(bulkErr && bulkErr.code === 'read_only', 'bulkSortOrder must throw read_only');
+      let reseedErr = null;
+      try { adapter.reseed({ todos: [] }); } catch (e) { reseedErr = e; }
+      assert(reseedErr && reseedErr.code === 'read_only', 'reseed must throw read_only');
+      assert(execB(adapter.from('todos').select('*')).data.length === 1, 'reseed must not replace the store');
+    });
+
+    test('cache snapshot: round-trip via driveCacheScope, STRIP + EXCLUDE honoured, unknown scope is null', async () => {
+      const scope = oc.driveCacheScope('user@example.com');
+      assert(scope === 'drive:user@example.com', 'scope must be drive:<email>');
+      await oc.cacheSnapshot(scope, {
+        todos: [{ id: 'a', text: 'x' }],
+        settings: [{ key: 'schema_version', value: '9.9.9' }],
+        birthdays: [{ id: 'b1', name: 'X', avatar_url: 'data:image/png;base64,AAAA' }],
+        prompts: [{ key: 'global', text: 'secret-ish' }],
+      });
+      const snap = await oc.loadCacheSnapshot(scope);
+      assert(snap && snap.tables.todos.length === 1 && snap.tables.todos[0].text === 'x', 'snapshot must round-trip todos');
+      assert(snap.tables.settings.some(r => r.key === 'schema_version'), 'snapshot must keep the schema marker');
+      assert(!('avatar_url' in snap.tables.birthdays[0]), 'birthdays avatar_url must be stripped from the cache');
+      assert(!('prompts' in snap.tables), 'prompts table must be excluded from the cache');
+      assert(snap.latestTs > 0, 'snapshot must carry a latest sync timestamp');
+      const none = await oc.loadCacheSnapshot(oc.driveCacheScope('nobody@example.com'));
+      assert(none === null, 'never-populated scope must load as null');
+    });
+
+    const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+    test('drive: read-only gate + cache write-through + auth-state callback are wired', () => {
+      assert(driveSrc.includes("readOnlyMode && builder._method !== 'GET'"),
+        'drive from() must reject mutations while readOnlyMode is on');
+      assert(driveSrc.includes('snapshotTableToCache(table, localData)'),
+        'flush success must mirror the uploaded table into the offline cache');
+      assert(driveSrc.includes('snapshotAllToCache();'),
+        'initial load must snapshot all tables into the offline cache');
+      assert(driveSrc.includes('snapshotTableToCache(tableName, reconciled)'),
+        'poll reconciliation must refresh the cached table');
+      assert(driveSrc.includes('onAuthStateChange(cb)') && driveSrc.includes('noteTokenDead()') && driveSrc.includes('noteTokenAlive()'),
+        'drive adapter must report token death/recovery to main.js');
+      assert(driveSrc.includes('export function getStoredDriveEmail') && driveSrc.includes('export function requestDriveToken'),
+        'drive.js must export the stored email + a prompted token request for the cold-start fallback');
+    });
+
+    const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+    test('main: cold-start auth failure boots read-only from the cache snapshot', () => {
+      assert(mainSrc.includes('isDriveAuthError(e)') && mainSrc.includes('loadCacheSnapshot(driveCacheScope(getStoredDriveEmail()))'),
+        'connect() must classify auth errors and load the Drive cache snapshot');
+      assert(mainSrc.includes('wrapReadOnlyAdapter(createDemoAdapter(snap.tables))'),
+        'cold-start fallback must serve the snapshot through the read-only wrapper');
+      assert(mainSrc.includes("some(r => r.key === 'schema_version')"),
+        'fallback must require a real (schema-marked) snapshot, not an empty cache');
+      assert(mainSrc.includes('enterReadOnlyMode') && mainSrc.includes('exitReadOnlyMode') && mainSrc.includes('window.notifyReadOnly'),
+        'main.js must own enter/exit read-only and expose the delegation toast hook');
+      assert(mainSrc.includes('if (state.readOnlyMode) { showToast'),
+        'guard() must refuse modal saves in read-only mode');
+      assert(mainSrc.includes('filter(r => !r.shared_id)') && mainSrc.includes('if (!readOnlySharingBlob)'),
+        'cold-start snapshot must drop content-less shared pointer rows only when no sharing blob was cached');
+    });
+
+    test('sharing snapshot: blob round-trips as the __sharing__ pseudo-table', async () => {
+      const scope = oc.driveCacheScope('sharer@example.com');
+      const blob = { v: 1, groups: [{ id: 'g1', name: 'Family' }], itemsByGroup: {}, currentUser: null, currentMemberIds: {} };
+      await oc.cacheSharingSnapshot(scope, blob);
+      const snap = await oc.loadCacheSnapshot(scope);
+      assert(snap && snap.tables.__sharing__?.[0]?.groups?.[0]?.name === 'Family',
+        'the sharing blob must come back from loadCacheSnapshot for the read-only boot');
+      await oc.cacheSharingSnapshot(scope, null);
+      const snap2 = await oc.loadCacheSnapshot(scope);
+      assert(snap2.tables.__sharing__?.[0]?.groups?.[0]?.name === 'Family', 'a null blob must not clear the stored snapshot');
+    });
+
+    test('cache sharing: reads resolve from the blob, mutations reject read_only', async () => {
+      // sharing.js re-exports sharing-drive.js, whose utils.js chain
+      // registers document/window listeners at module load.
+      if (globalThis.document && !globalThis.document.addEventListener) globalThis.document.addEventListener = () => {};
+      if (!globalThis.window) globalThis.window = { addEventListener: () => {} };
+      else if (!globalThis.window.addEventListener) globalThis.window.addEventListener = () => {};
+      const { createSharing } = await import(pathToFileURL(path.join(JS_DIR, 'sharing.js')).href);
+      const blob = {
+        v: 1,
+        groups: [{ id: 'g1', name: 'Family', backendType: 'googledrive', created_by: 'm1', folderId: 'fold1',
+          members: [
+            { member_id: 'm1', role: 'creator', status: 'joined', display_name: 'Alice', invited_label: null, joined_at: '2026-01-01T00:00:00.000Z' },
+            { member_id: 'm2', role: 'member', status: 'joined', display_name: 'Bob', invited_label: null, joined_at: '2026-01-02T00:00:00.000Z' },
+          ] }],
+        itemsByGroup: { g1: {
+          todos: [{ id: 't1', item_type: 'todo', payload: { text: 'Shared task' }, done: false, created_by: 'm2', created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' }],
+          habits: [
+            { id: 'h1', item_type: 'habit', payload: { name: 'Shared habit' }, completions: [], done: false, created_by: 'm1', created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' },
+            { id: 'c1', item_type: 'habit_completion', parent_item_id: 'h1', payload: {}, done: true, created_by: 'm1', created_at: '2026-01-03T00:00:00.000Z', updated_at: '2026-01-03T00:00:00.000Z' },
+          ],
+          lists: [{ id: 'l1', item_type: 'list_item', payload: { text: 'Milk' }, done: false, created_by: 'm1', created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' }],
+        } },
+        currentUser: { display_name: 'Alice', backendUserId: 'googledrive' },
+        currentMemberIds: { g1: 'm1' },
+      };
+      const sharing = await createSharing('cache', { snapshot: blob });
+      assert((await sharing.loadAll()).length === 1, 'loadAll must return the cached groups');
+      assert(sharing.getAllGroups()[0].name === 'Family', 'getAllGroups must serve the blob groups');
+      const all = sharing.getAllSharedItems();
+      assert(all.length === 4 && all.every(i => i.group_id === 'g1' && i.group_name === 'Family'),
+        'getAllSharedItems must return every file item, group-annotated');
+      assert(sharing.getAllSharedTodos().length === 1 && sharing.getAllSharedTodos()[0].payload.text === 'Shared task',
+        'getAllSharedTodos must filter to todo items');
+      assert(sharing.getAllSharedHabits().length === 1 && sharing.getAllSharedHabits()[0].id === 'h1',
+        'getAllSharedHabits must return habits only, not their completions');
+      assert(sharing.getItems('g1', 'habit').length === 2, 'getItems must keep file semantics (habit + its completion)');
+      assert(sharing.getItems('g1').length === 4, 'getItems without a type must return all files');
+      assert(sharing.getCurrentMember('g1')?.member_id === 'm1' && sharing.getCurrentMember('g1')?.display_name === 'Alice',
+        'getCurrentMember must resolve my member row from currentMemberIds');
+      assert((await sharing.getCurrentMemberId('g1')) === 'm1', 'getCurrentMemberId must serve the blob map');
+      assert(sharing.getCurrentUser().display_name === 'Alice', 'getCurrentUser must serve the blob identity');
+      assert(typeof sharing.getInviteLink('g1') === 'string' && sharing.getInviteLink('g1').startsWith('DLC1.'),
+        'getInviteLink must encode the cached folderId');
+      assert(sharing.hasPendingCreate('g1', 't1') === false && (await sharing.poll()) === false,
+        'cache sharing must never report pending creates or poll changes');
+      for (const [label, call] of [
+        ['addItem', () => sharing.addItem('g1', {})],
+        ['deleteItem', () => sharing.deleteItem('g1', 't1')],
+        ['createGroup', () => sharing.createGroup('X')],
+        ['inviteUser', () => sharing.inviteUser('g1', 'a@b.c')],
+        ['addSharedHabit', () => sharing.addSharedHabit('g1', {})],
+        ['unjoinGroup', () => sharing.unjoinGroup('g1')],
+      ]) {
+        let err = null;
+        try { await call(); } catch (e) { err = e; }
+        assert(err && err.code === 'read_only', `${label} must reject with code read_only, got ${err && (err.code || err.message)}`);
+      }
+    });
+
+    test('main: sharing snapshot builder + cache sharing boot are wired', () => {
+      assert(mainSrc.includes('buildSharingCacheBlob') && mainSrc.includes('cacheSharingSnapshot(driveCacheScope(email), blob)'),
+        'main.js must build the sharing blob and store it in the Drive cache scope');
+      assert(mainSrc.includes('scheduleSharingCacheSnapshot()'),
+        'sharing uploads and remote changes must schedule a snapshot refresh');
+      assert(mainSrc.includes("createSharing('cache', { snapshot: readOnlySharingBlob })"),
+        'a read-only boot with a sharing blob must initialize cache sharing');
+      assert(mainSrc.includes('readOnlySharingBlob = snap.tables.__sharing__?.[0] || null'),
+        'the boot must extract the sharing blob from the loaded snapshot');
+    });
+
+    const sharingSrc = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+    test('sharing factory: cache backend is a validated read-only adapter', () => {
+      assert(sharingSrc.includes('createCachedSharing') && sharingSrc.includes("case 'cache':"),
+        'sharing.js must expose the cache backend built from the snapshot blob');
+    });
+
+    test('main: storage persistence is requested at boot', () => {
+      assert(mainSrc.includes('navigator.storage.persist') && mainSrc.includes('requestStoragePersistence();'),
+        'boot must ask the browser to exempt the SW cache + IndexedDB snapshots from eviction');
+    });
+
+    const delegationSrc = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+    test('delegation: read-only allowlist blocks mutations, keeps navigation', () => {
+      assert(delegationSrc.includes('READ_ONLY_ALLOWED') && delegationSrc.includes('function isReadOnly()'),
+        'delegation must gate data-actions in read-only mode');
+      assert(delegationSrc.includes("'close-and-open-revision'") ,
+        'the mutating close-and-open-revision action must be explicitly denied despite its close- prefix');
+      assert(delegationSrc.includes("isReadOnly() && !readOnlyAllows(action)"),
+        'click handler must consult the allowlist before dispatch');
+      for (const studyAction of ['start-practice', 'reveal-card', 'rate-card', 'continue-free-practice',
+        'start-text-practice', 'start-text-practice-for-text', 'handle-line-click', 'submit-text-review',
+        'continue-text-same-text']) {
+        assert(delegationSrc.includes(`'${studyAction}': 1`),
+          `study action ${studyAction} must be allowed in read-only mode (sessions run, ratings don't persist)`);
+      }
+    });
+
+    const flashcardsSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+    test('flashcards: study sessions advance in read-only mode without recording ratings', () => {
+      assert(flashcardsSrc.includes('if (!state.readOnlyMode) {\n      const now = new Date();\n      const updates = fsrsUpdate(card, rating, now);'),
+        'rateCard must skip the FSRS update (memory + DB) in read-only mode while still advancing the session');
+      assert(flashcardsSrc.includes('if (!state.readOnlyMode) {\n    const now = new Date();\n    const updates = fsrsUpdate(chunk, rating, now);'),
+        'submitTextReview must skip the FSRS update (memory + DB) in read-only mode while still showing the summary');
+    });
+
+    const itemUtilsSrc = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+    test('item-utils: drag, nav reorder, inline edit and reorder all refuse in read-only mode', () => {
+      const gates = (itemUtilsSrc.match(/state\.readOnlyMode/g) || []).length;
+      assert(gates >= 5, `item-utils must check state.readOnlyMode at drag/nav/inline-edit/reorder/bulkSortOrder (found ${gates})`);
+      assert(itemUtilsSrc.includes("import state from './state.js';"),
+        'item-utils must read the shared readOnlyMode flag');
+    });
+
+    const stateSrc = fs.readFileSync(path.join(JS_DIR, 'state.js'), 'utf-8');
+    test('state: readOnlyMode flag exists, default false', () => {
+      assert(stateSrc.includes('readOnlyMode: false'), 'state.js must carry readOnlyMode: false');
+    });
+  }
+
+  // ===================================================================
+  // NESTED SECTIONS (2.23.0)
+  // ===================================================================
+  {
+    test('sections-pure: tree, paths, order keys, sibling uniqueness', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const rows = [
+        { id: 'g', name: '', kind: 'bucket', parent_id: null, sort_order: 0, is_protected: 1 },
+        { id: 's1', name: 'Reading', kind: 'section', parent_id: null, sort_order: 1 },
+        { id: 'b1', name: 'Fiction', kind: 'bucket', parent_id: 's1', sort_order: 0 },
+        { id: 'b2', name: 'Essays', kind: 'bucket', parent_id: 's1', sort_order: 1 },
+        { id: 'b3', name: 'Cooking', kind: 'bucket', parent_id: null, sort_order: 2 },
+        { id: 'orphan', name: 'Orphan', kind: 'bucket', parent_id: 'missing', sort_order: 3 },
+        { id: 'underbucket', name: 'UB', kind: 'bucket', parent_id: 'b3', sort_order: 4 },
+      ];
+      const { roots, byId } = m.buildSectionTree(rows);
+      assert(roots.map(n => n.id).join(',') === 'g,s1,b3,orphan,underbucket',
+        'orphans and children of buckets degrade to the top level, got ' + roots.map(n => n.id));
+      assert(byId.get('s1').children.map(n => n.id).join(',') === 'b1,b2', 'section children sorted by sort_order');
+      assert(m.pathLabelOf(byId.get('b1'), byId) === 'Reading > Fiction', 'path label joins segments');
+      assert(JSON.stringify(m.orderKeyOf(byId.get('b1'), byId)) === '[1,0]', 'order key follows the path');
+      assert(m.compareOrderKeys([1, 0], [2]) < 0 && m.compareOrderKeys([1], [1, 0]) < 0, 'order keys compare lexicographically, prefix first');
+      assert(m.descendantBucketIds(byId.get('s1')).join(',') === 'b1,b2', 'descendant buckets of a section');
+      assert(m.resolveSectionPath(roots, ['Reading', 'Fiction'])?.id === 'b1', 'path resolution descends sections');
+      assert(m.resolveSectionPath(roots, ['Cooking', 'Fiction']) === null, 'cannot descend into a bucket');
+      assert(m.siblingNameTaken(rows, 's1', 'fiction', null) === true, 'sibling names are unique per parent (case-insensitive)');
+      assert(m.siblingNameTaken(rows, null, 'fiction', null) === false, 'the same name is free under another parent');
+      assert(m.siblingNameTaken(rows, 's1', 'reading', null) === false, 'a name used at another level does not collide');
+      assert(JSON.stringify(m.parseSectionPath(' A >  B > ')) === '["A","B"]', 'path parsing trims and drops empties');
+      // Legacy rows (no kind/parent_id) normalise to top-level buckets
+      const legacy = m.buildSectionTree([{ id: 'x', name: 'Flat', sort_order: 0 }]);
+      assert(legacy.roots.length === 1 && legacy.roots[0].kind === 'bucket' && legacy.roots[0].parentId === null,
+        'pre-feature rows are flat buckets');
+      // A parent cycle must not loop: both rows surface at the top level
+      const cyc = m.buildSectionTree([
+        { id: 'a', name: 'A', kind: 'section', parent_id: 'b', sort_order: 0 },
+        { id: 'b', name: 'B', kind: 'section', parent_id: 'a', sort_order: 1 },
+      ]);
+      assert(cyc.roots.length === 2, 'cycle degrades to top level');
+    });
+
+    test('sections-pure: layout rectangles, footprint choice, gap rule', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const bucket = (id) => ({ id, kind: 'bucket', children: [] });
+      const section = (id, n) => ({ id, kind: 'section', children: Array.from({ length: n }, (_, i) => bucket(id + i)) });
+      // 5 buckets, cap 3: smallest C with minimal rows is 3 (2 rows, 1 empty)
+      assert(m.footprintCols(section('S', 5), 3) === 3, 'footprint of 5 buckets under cap 3 is 3');
+      const lay = m.layoutLevel([section('S', 5)], 3);
+      assert(lay.placements[0].cols === 3 && lay.placements[0].rows === 2, 'section occupies a 3x2 rectangle');
+      assert(lay.maxBlocks === 3 && lay.rowCount === 2, 'level metrics follow the rectangle');
+      // A single-bucket section is exactly one block wide
+      assert(m.footprintCols(section('One', 1), 4) === 1, 'single-bucket section spans 1 block');
+      // 4 buckets, cap 3: C=2 gives 2 full rows — beats C=3 (2 rows, 2 empty)
+      assert(m.footprintCols(section('F', 4), 3) === 2, 'ties on rows break by fewest empty cells');
+      // Gap rule: two 2-wide sections under cap 3 — the second starts a new row
+      const gap = m.layoutLevel([section('A', 2), section('B', 2)], 3);
+      assert(gap.maxBlocks === 2 && gap.rowCount === 2, 'a section that does not fit starts a new row, leaving a gap');
+      // Strict order + buckets mix
+      const mixed = m.layoutLevel([bucket('x'), section('M', 2), bucket('y')], 3);
+      assert(mixed.placements.map(p => p.id).join(',') === 'x,M,y', 'placement preserves chip order');
+      // Deep nesting terminates and stays within the cap
+      const deep = { id: 'd0', kind: 'section', children: [{ id: 'd1', kind: 'section', children: [bucket('leaf')] }] };
+      const dl = m.layoutLevel([deep], 3);
+      assert(dl.placements[0].cols >= 1 && dl.placements[0].cols <= 3, 'nested sections lay out within the cap');
+    });
+
+    test('sections: schema + migrations carry kind/parent_id on all three tables', () => {
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      for (const table of ['todo_categories', 'habit_categories', 'lists']) {
+        const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS ${table}`);
+        assert(start >= 0, `schema.sql missing ${table}`);
+        const ddl = schema.slice(start, schema.indexOf(');', start));
+        assert(ddl.includes("kind TEXT DEFAULT 'bucket'"), `${table} must gain kind with bucket default`);
+        assert(ddl.includes('parent_id TEXT'), `${table} must gain parent_id`);
+        assert(!ddl.includes('parent_id TEXT REFERENCES'), `${table}.parent_id must stay a plain column (no FK)`);
+      }
+      const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(drive.includes("'2.23.0'"), 'drive migrations must include 2.23.0');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'2.23.0'"), 'local migrations must include 2.23.0');
+      for (const table of ['todo_categories', 'habit_categories', 'lists']) {
+        assert(local.includes(`ALTER TABLE ${table} ADD COLUMN kind`), `local migration must add kind to ${table}`);
+        assert(local.includes(`ALTER TABLE ${table} ADD COLUMN parent_id`), `local migration must add parent_id to ${table}`);
+      }
+      const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
+      assert(sw.includes("'js/sections-pure.js'"), 'sw.js precache must include sections-pure.js');
+    });
+
+    test('sections: views render sections, bucket-only pickers, no calendar resync on section save', () => {
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      for (const [name, src] of [['todos.js', todosSrc], ['habits.js', habitsSrc], ['lists.js', listsSrc]]) {
+        assert(src.includes("data-node-kind=\"section\""), `${name} must render section blocks`);
+        assert(src.includes('applySectionGrid'), `${name} must use the per-level section grid layout`);
+        assert(src.includes('deleteSectionMoveUp') || src.includes('deleteHabitSectionMoveUp') || src.includes('deleteListSectionMoveUp'),
+          `${name} must offer move-up on section delete`);
+        assert(src.includes('deleteSectionSubtree') || src.includes('deleteHabitSectionSubtree') || src.includes('deleteListSectionSubtree'),
+          `${name} must offer subtree delete on section delete`);
+      }
+      // Section saves never mark a category renamed (Google Calendar stays
+      // bucket-only); bucket saves still do.
+      assert(todosSrc.includes('if (!isSection && (updates.shortname !== oldShortname'), 'todos: section rename must not resync calendar');
+      assert(habitsSrc.includes('if (!isSection && (updates.shortname !== oldShortname'), 'habits: section rename must not resync calendar');
+      // Welcome quick-add excludes sections
+      const welcomeSrc = fs.readFileSync(path.join(JS_DIR, 'welcome.js'), 'utf-8');
+      assert((welcomeSrc.match(/kind !== 'section'/g) || []).length >= 2, 'welcome quick-add must exclude sections for TODOs and Habits');
+      // Backup exports whole rows, so kind/parent_id travel with no change
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes("select('*')") || mainSrc.includes('select("*")'), 'backup must stay whole-row');
+    });
+
+    test('sections: demo data showcases nesting in all three languages', () => {
+      const demo = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
+      // TODO categories are derived from item category strings in demo
+      // mode, so the seed uses full paths (one section per language).
+      for (const p of ['Reading > Fiction', 'Lecture > Fiction', 'Lectura > Ficción']) {
+        assert(demo.includes(`category: '${p}'`), `demo todos must include the path category ${p}`);
+      }
+      // Two-level paths: a subsection with buckets, next to direct buckets
+      for (const p of ['Reading > Non-Fiction > History', 'Lecture > Non-fiction > Histoire', 'Lectura > No ficción > Historia']) {
+        assert(demo.includes(`category: '${p}'`), `demo todos must include the two-level path ${p}`);
+      }
+      // Lists carry explicit section/bucket rows: an outer section and a
+      // subsection per language, the subsection holding two buckets.
+      // (6 = 2 showcase sections × 3 languages, + 1 for the EN Wardrobe
+      // section that mirrors the 2.9.17 migration shape.)
+      assert((demo.match(/kind: 'section'/g) || []).length === 7, 'demo lists must seed two sections per language (outer + subsection) plus the Wardrobe section');
+      assert((demo.match(/kind: 'bucket', parent_id: 'demo-list-006'/g) || []).length === 6,
+        'each demo outer section must hold two direct buckets');
+      assert((demo.match(/kind: 'bucket', parent_id: 'demo-list-009'/g) || []).length === 6,
+        'each demo subsection must hold two buckets');
+      // The personalised-demo generation prompt teaches sections too.
+      const chooser = fs.readFileSync(path.join(JS_DIR, 'demo-chooser.js'), 'utf-8');
+      assert(chooser.includes('"kind": "section"') && chooser.includes('r.parent_id'),
+        'demo chooser must document and resolve list sections');
+      assert((chooser.match(/Non-Fiction > History|Non-fiction > Histoire|No ficción > Historia/g) || []).length === 3,
+        'demo chooser prompt must show a two-level path example in all three languages');
+      // The demo category derivation in main.js must understand paths.
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes("buildCatRows(data.todos, 'category', 'todo_categories', true)"),
+        'demo todo categories must be built with path support');
+      assert(mainSrc.includes("buildCatRows(data.habits, 'category', 'habit_categories', true)"),
+        'demo habit categories must be built with path support');
+      assert(mainSrc.includes("kind === 'section' ? '#3b82f6'"), 'demo derivation must create section rows in the bold default section color');
+    });
+
+    test('sections: section chips navigate via explicit delegation cases, sections have copy-link', () => {
+      // Section chips in TODOs/Habits carry data-category, which the
+      // delegation default fallback does NOT read (getId has no
+      // data-category) — without explicit cases the click silently
+      // passed the button element instead of the id and navigation
+      // never happened (live-test bug, Oct 17).
+      const delegation = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+      assert(delegation.includes("case 'navigate-to-todo-section': callWindow('navigateToTodoSection', [getCat(el)])"),
+        'delegation must route navigate-to-todo-section with getCat');
+      assert(delegation.includes("case 'navigate-to-habit-section': callWindow('navigateToHabitSection', [getCat(el)])"),
+        'delegation must route navigate-to-habit-section with getCat');
+      assert(delegation.includes("case 'navigate-to-list-section': callWindow('navigateToListSection'"),
+        'delegation must route navigate-to-list-section explicitly');
+      // Same trap for the section entry actions: without explicit cases
+      // the add-in-section modal received the button element as the
+      // parent id (bucket landed at root, invisible inside the section)
+      // and section delete silently did nothing (live-test bug, Oct 17).
+      for (const [action, fn, getter] of [
+        ['open-add-category-in-section', 'openAddCategoryInSection', 'getCat'],
+        ['delete-section', 'deleteSection', 'getCat'],
+        ['open-add-habit-category-in-section', 'openAddHabitCategoryInSection', 'getCat'],
+        ['delete-habit-section', 'deleteHabitSection', 'getCat'],
+        ['open-add-list-in-section', 'openAddListInSection', null],
+        ['delete-list-section', 'deleteListSection', null],
+      ]) {
+        assert(delegation.includes(`case '${action}': callWindow('${fn}'`),
+          `delegation must route ${action} explicitly`);
+        if (getter) assert(delegation.includes(`case '${action}': callWindow('${fn}', [${getter}(el)])`),
+          `${action} must pass ${getter}(el)`);
+      }
+      // Copy-link at section level in all three views, with deep links
+      // that resolve back to the section block.
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(todosSrc.includes('data-action="copy-item-link" data-link-type="todocat"'), 'todo section header must have a copy-link button');
+      assert(habitsSrc.includes('data-action="copy-item-link" data-link-type="habitcat"'), 'habit section header must have a copy-link button');
+      assert(listsSrc.includes('data-action="copy-item-link" data-link-type="list"'), 'list section header must have a copy-link button');
+      assert(listsSrc.includes('id="list-section-${esc(list.id)}" data-list-id="${esc(list.id)}"'),
+        'list section block must carry data-list-id so the list deep link finds it');
+      const utilsSrc = fs.readFileSync(path.join(JS_DIR, 'utils.js'), 'utf-8');
+      assert(utilsSrc.includes("todocat: 'todos'") && utilsSrc.includes("habitcat: 'habits'"),
+        'deep-link type map must know todocat/habitcat');
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes('todocat: `#todosView [data-node-id=') && mainSrc.includes('habitcat: `#habitsView [data-node-id='),
+        'findItemElement must resolve todocat/habitcat inside their views');
+    });
+
+    test('utils: onColorFor picks white on dark colors, near-black on pale ones', async () => {
+      // utils.js registers document/window listeners at module load.
+      if (globalThis.document && !globalThis.document.addEventListener) globalThis.document.addEventListener = () => {};
+      if (!globalThis.window) globalThis.window = { addEventListener: () => {} };
+      else if (!globalThis.window.addEventListener) globalThis.window.addEventListener = () => {};
+      const { onColorFor } = await import(pathToFileURL(path.join(JS_DIR, 'utils.js')).href);
+      assert(onColorFor('#000000') === '#fff', 'black background takes white text');
+      assert(onColorFor('#1e3a8a') === '#fff', 'dark blue takes white text');
+      // White-preferred policy: white is kept whenever it clears the
+      // WCAG AA large-text floor (3:1) — saturated palette mid-tones
+      // stay white even though dark text would score a higher ratio.
+      assert(onColorFor('#3b82f6') === '#fff', 'palette blue keeps white text (3.7:1, above the floor)');
+      assert(onColorFor('#ef4444') === '#fff', 'palette red keeps white text (3.8:1)');
+      assert(onColorFor('#6366f1') === '#fff', 'palette indigo keeps white text (4.5:1)');
+      assert(onColorFor('#8b5cf6') === '#fff', 'palette violet keeps white text (4.2:1)');
+      assert(onColorFor('#ec4899') === '#fff', 'palette pink keeps white text (3.5:1)');
+      // Below the floor, white would be unreadable — dark text takes over.
+      assert(onColorFor('#ffffff') === '#111', 'white background takes dark text');
+      assert(onColorFor('#facc15') === '#111', 'pale yellow takes dark text');
+      assert(onColorFor('#94a3b8') === '#111', 'pale slate takes dark text (white is 2.5:1)');
+      assert(onColorFor('#22c55e') === '#111', 'bright green takes dark text (white is 2.3:1)');
+      assert(onColorFor('#f97316') === '#111', 'palette orange takes dark text (white is 2.8:1)');
+      assert(onColorFor('#eab308') === '#111', 'palette yellow takes dark text (white is 1.9:1)');
+      assert(onColorFor('#abc') === '#111', 'shorthand hex expands (pale blue-grey takes dark text)');
+      assert(onColorFor('not-a-color') === '#fff' && onColorFor('') === '#fff' && onColorFor(null) === '#fff',
+        'unparseable colors fall back to white (historical header look)');
+    });
+
+    test('sections: border + header color, adaptive titles, list button parity', () => {
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      // The section color appears as the block's border (2px) and as
+      // the solid header band at full strength; the body background
+      // stays transparent (bucket cards keep their own surface/tint).
+      assert(css.includes('.section-block{border:2px solid var(--cat-color);border-radius:12px;padding:10px;background:transparent'),
+        'section block must be a colored border on a transparent background');
+      assert(!css.includes('var(--cat-color) 12%, transparent);display:flex;flex-direction:column;gap:10px'),
+        'the old 12%-over-transparent section background must be gone');
+      assert(!css.includes('padding:10px;background:var(--cat-color);display:flex'),
+        'the full-color section background must be gone');
+      assert(css.includes('.section-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;background:var(--cat-color);color:var(--cat-on-color,#fff)'),
+        'section header must be a solid band in the full-strength chosen color');
+      assert(css.includes('.section-name{font-size:1rem;font-weight:700;color:var(--cat-on-color,#fff)'),
+        'section title must use the adaptive on-color on the band');
+      assert(css.includes('.section-chips{padding:0 4px;}') && css.includes('.category-nav-buttons{display:flex;gap:5px;flex-wrap:wrap;align-items:center;justify-content:center'),
+        'section chips must inherit the centered top-level chip alignment (no flex-start override)');
+      // The default section color is a bold palette color, not the
+      // pale slate of the first iteration.
+      for (const [name, src] of [['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8')],
+                                 ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8')],
+                                 ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8')]]) {
+        assert(src.includes("const SECTION_DEFAULT_COLOR = '#3b82f6'"),
+          `${name} must default sections to the bold palette blue`);
+      }
+      assert(css.includes('> .todo-cat-header{background:var(--cat-color);color:var(--cat-on-color,#fff)'),
+        'bucket headers must use the adaptive on-color for their titles');
+      // Lists parity: section action buttons use the same class as the
+      // TODO/Habit section buttons (todo-cat-shortname-btn). The
+      // archive-project-btn class is only styled inside card headers,
+      // so on section headers it rendered as a default browser button.
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(listsSrc.includes('class="todo-cat-shortname-btn" data-action="open-add-list-in-section"'),
+        'list section New list button must use todo-cat-shortname-btn');
+      assert(listsSrc.includes('class="todo-cat-shortname-btn" data-action="open-edit-list"'),
+        'list section Edit list button must use todo-cat-shortname-btn');
+      const sectionStart = listsSrc.indexOf('function renderListSection');
+      const sectionEnd = listsSrc.indexOf('function navigateToListSection');
+      const sectionFn = listsSrc.slice(sectionStart, sectionEnd);
+      assert(!sectionFn.includes('archive-project-btn'), 'renderListSection must not use archive-project-btn at all');
+      // Bucket cards and section blocks both have solid colored
+      // headers, so both set the adaptive on-color next to --cat-color.
+      for (const [name, src] of [['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8')],
+                                 ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8')],
+                                 ['lists.js', listsSrc]]) {
+        assert((src.match(/--cat-on-color:\$\{onColorFor\(/g) || []).length >= 2,
+          `${name} must set --cat-on-color on both its bucket cards and its section blocks`);
+        assert(src.includes('onColorFor,'), `${name} must import onColorFor from utils`);
+      }
+    });
+
+    test('drive: a vanished table file self-heals instead of looping on 404', () => {
+      const drive = fs.readFileSync(path.join(JS_DIR, 'adapters', 'drive.js'), 'utf-8');
+      assert(drive.includes('err.code = resp.status;'),
+        'uploadFile must surface the HTTP status on the thrown error');
+      assert(drive.includes('err.code === 404 && meta.fileId && retries < MAX_RETRIES')
+        && drive.includes('file for ${table} not found, recreating it'),
+        'flushTable must drop stale file meta and retry as a create on 404');
+      const migrations = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(migrations.includes('ctx.fileMeta.agent_grants = { fileId: null'),
+        'migration 2.0.9 must forget the file ids it deletes (agent_grants returns in 2.0.10)');
+    });
+
+    test('drive-migration 2.9.17: wardrobe becomes a Wardrobe section of lists', async () => {
+      const { DRIVE_MIGRATIONS } = await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+      const files = {
+        'vestiaire_categories.json': [
+          { id: 'cat0', name: '', is_protected: 1 },
+          { id: 'cat1', name: 'Top', shortname: 'Top', color: '#111111', sort_order: 2, created_at: 'x', updated_at: 'x' },
+          { id: 'cat2', name: 'Pants', sort_order: 1, created_at: 'x', updated_at: 'x' },
+        ],
+        'vestiaire.json': [
+          { id: 'i1', category_id: 'cat1', name: 'Shirt', brand: 'RL', size: 'M', color: '', purchase_status: 'achete', sort_order: 0, created_at: 'x', updated_at: 'x' },
+          { id: 'i2', category_id: 'cat0', name: 'Misc', sort_order: 0, created_at: 'x', updated_at: 'x' },
+        ],
+      };
+      const deleted = [];
+      const ctx = {
+        getToken: async () => 'tok',
+        filesByName: new Map(Object.keys(files).map(n => [n, { id: 'f-' + n }])),
+        downloadFile: async (tok, fid) => ({ data: files[fid.slice(2)] }),
+        deleteFile: async (tok, fid) => { deleted.push(fid); },
+      };
+      const store = { lists: [], list_items: [] };
+      await DRIVE_MIGRATIONS['2.9.17'](store, ctx);
+      const section = store.lists.find(l => l.id === 'vest_wardrobe');
+      assert(section && section.kind === 'section' && section.name === 'Wardrobe' && section.parent_id === null,
+        'a Wardrobe section is created');
+      const top = store.lists.find(l => l.id === 'vest_cat1');
+      assert(top && top.name === 'Top' && top.kind === 'bucket' && top.parent_id === 'vest_wardrobe',
+        'a category becomes a list named <name> inside the section');
+      assert(!store.lists.some(l => (l.name || '').startsWith('Wardrobe - ')), 'no flat Wardrobe - <name> lists remain');
+      const star = store.lists.find(l => l.id === 'vest_wardrobe_star');
+      assert(star && star.name === '*' && star.parent_id === 'vest_wardrobe',
+        'orphan items get a * list inside the section');
+      assert(store.list_items.find(i => i.id === 'vest_i1')?.list_id === 'vest_cat1', 'item lands in its category list');
+      assert(store.list_items.find(i => i.id === 'vest_i2')?.list_id === 'vest_wardrobe_star', 'protected-category item lands in the * list');
+      assert(store.list_items.find(i => i.id === 'vest_i1').note.includes('Brand / Make: RL'), 'item note keeps the field block');
+      assert(deleted.length === 2, 'both vestiaire files are deleted');
+      // Nothing to migrate → no section
+      const store2 = { lists: [], list_items: [] };
+      const ctx2 = { getToken: async () => 'tok', filesByName: new Map(), downloadFile: async () => ({ data: [] }), deleteFile: async () => {} };
+      await DRIVE_MIGRATIONS['2.9.17'](store2, ctx2);
+      assert(store2.lists.length === 0, 'no wardrobe data → no Wardrobe section');
+      // Backup-restore path: the store itself carries the vestiaire
+      // tables and the Drive files are gone — the section must still
+      // be built, from the store.
+      const store3 = {
+        lists: [], list_items: [],
+        vestiaire_categories: files['vestiaire_categories.json'],
+        vestiaire: files['vestiaire.json'],
+      };
+      await DRIVE_MIGRATIONS['2.9.17'](store3, ctx2);
+      assert(store3.lists.some(l => l.id === 'vest_wardrobe' && l.kind === 'section'),
+        'restore path: Wardrobe section is built from the reseeded store');
+      assert(store3.list_items.find(i => i.id === 'vest_i1')?.list_id === 'vest_cat1',
+        'restore path: items land in their category list');
+      assert(!store3.vestiaire && !store3.vestiaire_categories, 'restore path: store vestiaire keys are dropped after migrating');
+      // Local twin links the same rows in 2.23.0 (kind/parent_id arrive there)
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'vest_wardrobe_star', '*'") && local.includes('ELSE \'vest_wardrobe_star\''),
+        'local 2.9.17 mirrors the section/star shape');
+      assert(local.includes("UPDATE lists SET kind = 'section' WHERE id = 'vest_wardrobe';")
+        && local.includes("UPDATE lists SET parent_id = 'vest_wardrobe'"),
+        'local 2.23.0 promotes the Wardrobe row to a section and nests the vest_* lists');
+    });
+
+    test('migration 2.27.0: habit next_due recompute (helper, Drive and Local)', async () => {
+      const freq = await import(pathToFileURL(path.join(JS_DIR, 'frequency-rule.js')).href);
+      const { recomputeNextDueForMigration } = freq;
+      assert(typeof recomputeNextDueForMigration === 'function', 'frequency-rule must export the migration recompute helper');
+      assert(typeof freq.computeNextDue === 'function', 'computeNextDue must live in frequency-rule.js (single source for migrations)');
+      // Stale too-early value (the west-of-UTC class of bug): weekly:Fri
+      // stored as Wednesday — recomputed from the Monday completion.
+      let r = recomputeNextDueForMigration(
+        { frequency_rule: 'weekly:Fri', next_due: '2026-10-14', end_date: null }, '2026-10-12T12:00:00.000Z');
+      assert(r && r.next_due === '2026-10-16' && r.is_finished === 0,
+        'stale early next_due must be corrected to the real Friday, got ' + JSON.stringify(r));
+      // Pure recompute (Antoine's call): even when the stored value is
+      // LATER than f(rule, lastDone) — e.g. an early-completion skip —
+      // the recomputed value wins; the migration does not second-guess.
+      r = recomputeNextDueForMigration(
+        { frequency_rule: 'every_N_weeks:1:Fri', next_due: '2026-10-23', end_date: null }, '2026-10-14T12:00:00.000Z');
+      assert(r && r.next_due === '2026-10-16', 'the pure recompute must win over the stored value, got ' + JSON.stringify(r));
+      // Finished: recomputed due strictly past end_date clears next_due.
+      r = recomputeNextDueForMigration(
+        { frequency_rule: 'every_N_days:2', next_due: '2026-10-10', end_date: '2026-10-11' }, '2026-10-10T12:00:00.000Z');
+      assert(r && r.next_due === null && r.is_finished === 1,
+        'a recompute past end_date must finish the habit, got ' + JSON.stringify(r));
+      // Skips: free-text rule, and structured with no completion anchor.
+      assert(recomputeNextDueForMigration({ frequency_rule: 'Tous les mois', next_due: '2026-10-01' }, '2026-10-01T12:00:00.000Z') === null,
+        'free-text habits must be left alone');
+      assert(recomputeNextDueForMigration({ frequency_rule: 'every_N_days:1', next_due: '2026-10-01' }, null) === null,
+        'habits without completions must be left alone');
+
+      // Drive migration applies the helper over the store.
+      const { DRIVE_MIGRATIONS } = await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+      const store = {
+        habits: [
+          { id: 'h1', frequency_rule: 'weekly:Fri', next_due: '2026-10-14', end_date: null, is_finished: 0 },
+          { id: 'h2', frequency_rule: 'Tous les mois', next_due: '2026-09-01', end_date: null, is_finished: 0 },
+        ],
+        habit_completions: [
+          { habit_id: 'h1', completed_at: '2026-10-05T12:00:00.000Z' },
+          { habit_id: 'h1', completed_at: '2026-10-12T12:00:00.000Z' },
+          { habit_id: 'h2', completed_at: '2026-09-01T12:00:00.000Z' },
+        ],
+      };
+      await DRIVE_MIGRATIONS['2.27.0'](store);
+      assert(store.habits[0].next_due === '2026-10-16', 'drive 2.27.0 must recompute from the LATEST completion');
+      assert(store.habits[1].next_due === '2026-09-01', 'drive 2.27.0 must not touch free-text habits');
+
+      // Local migration is a JS function the runner calls with the db.
+      const { LOCAL_MIGRATIONS } = await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'local-migrations.js')).href);
+      assert(typeof LOCAL_MIGRATIONS['2.27.0'] === 'function', 'local 2.27.0 must be a function migration');
+      const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'server.js'), 'utf-8');
+      assert(serverSrc.includes("typeof migration === 'function'"), 'the local runner must call function migrations');
+      let Database;
+      try { ({ Database } = await import('bun:sqlite')); } catch { Database = null; }
+      if (Database) {
+        const db = new Database(':memory:');
+        db.exec('CREATE TABLE habits (id TEXT PRIMARY KEY, frequency_rule TEXT, next_due TEXT, end_date TEXT, is_finished INTEGER DEFAULT 0)');
+        db.exec('CREATE TABLE habit_completions (id TEXT PRIMARY KEY, habit_id TEXT, completed_at TEXT)');
+        db.exec("INSERT INTO habits VALUES ('h1', 'weekly:Fri', '2026-10-14', NULL, 0)");
+        db.exec("INSERT INTO habit_completions VALUES ('c1', 'h1', '2026-10-12T12:00:00.000Z')");
+        LOCAL_MIGRATIONS['2.27.0'](db);
+        const row = db.prepare('SELECT next_due, is_finished FROM habits WHERE id = ?').get('h1');
+        assert(row.next_due === '2026-10-16' && row.is_finished === 0,
+          'local 2.27.0 must recompute the same value as Drive, got ' + JSON.stringify(row));
+        db.close();
+      }
+      // habits.js must keep re-exporting computeNextDue for its callers.
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      assert(habitsSrc.includes('computeNextDue, localDateStr } from \'./frequency-rule.js\'')
+        && habitsSrc.includes('computeNextDue, isMyCreatedSharedHabit };'),
+        'habits.js must import computeNextDue from frequency-rule and keep re-exporting it');
+    });
+
+    test('delete confirms render markdown names instead of raw [text](url) syntax', () => {
+      const utils = fs.readFileSync(path.join(JS_DIR, 'utils.js'), 'utf-8');
+      assert(utils.includes('if (opts?.messageHtml) msgEl.innerHTML = message;'),
+        'showConfirmAction must support opts.messageHtml (plain text stays the default)');
+      const lists = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(lists.includes('`Remove "${renderMd(item.text)}"?`') && lists.includes('{ messageHtml: true }'),
+        'list item delete confirm must render the item text with renderMd');
+      const habits = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      assert(habits.includes('`Delete "${renderMd(habit.name)}"? All completion history will be lost.`'),
+        'habit delete confirm must render the habit name with renderMd');
+    });
+
+    test('release gate: groups and agents show coming soon, logic untouched', () => {
+      const state = fs.readFileSync(path.join(JS_DIR, 'state.js'), 'utf-8');
+      assert(state.includes('export const COMING_SOON = { groups: true, agents: true };'),
+        'the release gate flags must live in state.js, both on');
+      const groups = fs.readFileSync(path.join(JS_DIR, 'groups.js'), 'utf-8');
+      const gateAt = groups.indexOf('if (COMING_SOON.groups) {');
+      assert(gateAt !== -1 && gateAt < groups.indexOf("activeMode === 'demo'"),
+        'renderGroups must render the coming soon state before any group UI');
+      assert(groups.includes("t('coming_soon.groups_title')") && groups.includes("t('coming_soon.groups_hint')"),
+        'the groups gate must use the coming_soon i18n strings');
+      const agents = fs.readFileSync(path.join(JS_DIR, 'agents-ui.js'), 'utf-8');
+      const aGateAt = agents.indexOf('if (COMING_SOON.agents) {');
+      assert(aGateAt !== -1 && aGateAt < agents.indexOf("==='demo'"),
+        'renderAgentsPane must render the coming soon state before any agent UI');
+      assert(agents.includes("t('coming_soon.agents_title')") && agents.includes("t('coming_soon.agents_hint')"),
+        'the agents gate must use the coming_soon i18n strings');
+      const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      for (const key of ['groups_title', 'groups_hint', 'agents_title', 'agents_hint']) {
+        assert(i18n.split(`${key}:`).length - 1 >= 3, `coming_soon.${key} must exist in EN, FR and ES`);
+      }
+    });
+
+    test('calendar: view granularity and type filters persist per device', () => {
+      const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+      assert(cal.includes("JSON.parse(localStorage.getItem(CALENDAR_PREFS_KEY))"),
+        'calendar prefs must load from localStorage at init');
+      assert(cal.includes("['day', 'week', 'month', 'year'].includes(_calPrefs.view)"),
+        'a stored view must be validated against the known granularities');
+      assert(cal.includes('_calPrefs.show?.todo !== false'),
+        'stored filters must default to shown unless explicitly off');
+      assert(cal.includes('localStorage.setItem(CALENDAR_PREFS_KEY, JSON.stringify({ view: calView, show: calShow }))'),
+        'calendar prefs must save view + filters together');
+      const viewFn = cal.slice(cal.indexOf('function setCalendarView'), cal.indexOf('function clampMenuToViewport'));
+      assert(viewFn.includes('saveCalPrefs();'), 'setCalendarView must persist the choice');
+      const filterFn = cal.slice(cal.indexOf('function toggleCalendarFilter'), cal.indexOf('function openCalendarDate'));
+      assert(filterFn.includes('saveCalPrefs();'), 'toggleCalendarFilter must persist the choice');
+      assert(cal.includes('syncCalendarToolbar();\n  updateCalendarLabel();'),
+        'renderCalendar must sync the toolbar buttons from the restored state');
+      const state = fs.readFileSync(path.join(JS_DIR, 'state.js'), 'utf-8');
+      assert(state.includes("CALENDAR_PREFS_KEY = 'claw_cc_calendar_prefs'"),
+        'the prefs key must follow the claw_cc_* convention in state.js');
+    });
+
+    test('calendar week view: narrow screens wrap to two rows with chips, not dots', () => {
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.cal-week-page { grid-template-columns: repeat(4, minmax(0, 1fr)); }'),
+        'narrow week view must lay the 7 days out as 4 + 3');
+      assert(css.includes('.cal-week-page .cal-chips { display: flex; }') && css.includes('.cal-week-page .cal-dots { display: none; }'),
+        'narrow week cells must show chips instead of dots');
+      assert(css.includes('#calendarGrid:has(> .cal-week-page) .cal-weekdays { display: none; }'),
+        'the 7-column weekday header must hide when the week grid wraps');
+      assert(css.includes('.cal-week-page .cal-day-dow { display: block; }'),
+        'the in-cell weekday label must appear in the wrapped layout');
+      const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+      assert(cal.includes('dayCellHTML(date, true, events, names[i])'),
+        'week cells must receive their weekday label');
+    });
+
+    test('calendar: overdue habits and todos mirror onto today, dashed-red highlight', () => {
+      const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+      assert(cal.includes('(r, lastDone) => computeNextDue(r, lastDone),\n      today,'),
+        'calendar must pass today into expandHabitOccurrences for the overdue model');
+      assert(cal.includes('overdue: true, dueToday: true'),
+        'overdue items must be mirrored onto today with overdue + dueToday flags');
+      assert(cal.includes('const canComplete = isNextDue || ev.dueToday;'),
+        "the habit done button must be enabled on today's overdue mirror");
+      assert(cal.includes('cal-chip-overdue') && cal.includes('cal-row-overdue'),
+        'chips and day-panel rows must carry the overdue highlight class');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.cal-row-overdue { border-color: var(--red); border-style: dashed; }'),
+        'overdue day-panel rows get a red dashed border');
+      assert(css.includes('.cal-chip-overdue { outline: 1px dashed var(--red);'),
+        'overdue grid chips get a red dashed outline');
+      assert(css.includes('.cal-row .habit-done-btn {') && css.includes('border-radius: 50%;'),
+        'the calendar habit done button is a styled round button');
+    });
+
+    test('sections-pure: runBucketToSectionMigration — checked writes, flip last, rollback on flip failure', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const spec = {
+        categoryTable: 'todo_categories', itemTable: 'todos', itemFk: 'category_id',
+        categoryId: 'CAT', starId: 'STAR',
+        itemPatch: { category_id: 'STAR', category: '*' },
+        itemRollbackPatch: { category_id: 'CAT', category: 'Reading' },
+        flipPatch: { kind: 'section' },
+      };
+      // Fake query-builder db: records calls, fails the Nth call when failAt > 0.
+      const fakeDb = (failAt) => {
+        const calls = [];
+        const record = (entry) => { calls.push(entry); return Promise.resolve({ error: calls.length === failAt ? new Error('injected-' + calls.length) : null }); };
+        return {
+          calls,
+          from: (table) => ({
+            update: (patch) => ({ eq: (col, val) => record({ op: 'update', table, patch, col, val }) }),
+            delete: () => ({ eq: (col, val) => record({ op: 'delete', table, col, val }) }),
+          }),
+        };
+      };
+      // Success: bulk move, then flip — exactly two writes, in order.
+      let db = fakeDb(0);
+      await m.runBucketToSectionMigration(db, spec);
+      assert(db.calls.length === 2, 'success path must be exactly two writes');
+      assert(db.calls[0].table === 'todos' && db.calls[0].col === 'category_id' && db.calls[0].val === 'CAT'
+        && db.calls[0].patch.category_id === 'STAR', 'first write bulk-moves the items to the star bucket');
+      assert(db.calls[1].table === 'todo_categories' && db.calls[1].patch.kind === 'section',
+        'the kind flip is the last write');
+      // Move fails: throws, and the flip is never attempted.
+      db = fakeDb(1);
+      let threw = null;
+      try { await m.runBucketToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 1, 'a failed move must abort before the kind flip');
+      // Flip fails: throws, after rolling back (items moved back, star deleted).
+      db = fakeDb(2);
+      threw = null;
+      try { await m.runBucketToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 4, 'a failed flip must roll back before rethrowing');
+      assert(db.calls[2].op === 'update' && db.calls[2].table === 'todos' && db.calls[2].col === 'category_id'
+        && db.calls[2].val === 'STAR' && db.calls[2].patch.category_id === 'CAT',
+        'rollback bulk-moves the items back to the original bucket');
+      assert(db.calls[3].op === 'delete' && db.calls[3].table === 'todo_categories' && db.calls[3].val === 'STAR',
+        'rollback deletes the star bucket');
+      // Views are wired to the helper, with no per-item loop left.
+      for (const [name, src] of [
+        ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8')],
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8')],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8')],
+      ]) {
+        assert(src.includes('runBucketToSectionMigration(state.db'), `${name} conversion must run through the checked migration helper`);
+        assert(src.includes("throw new Error('section-convert-star-missing')"), `${name} conversion must abort when the star bucket is missing`);
+      }
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(!listsSrc.includes('list.shortname = null;'),
+        'list conversion must not null the shortname in memory (sections keep short names since v2.25.0)');
+    });
+
+    test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const rows = [
+        { id: 'g', name: '', kind: 'bucket', parent_id: null, sort_order: 0, is_protected: 1 },
+        { id: 'A', name: 'A', kind: 'section', parent_id: null, sort_order: 1 },
+        { id: 'B', name: 'B', kind: 'bucket', parent_id: 'A', sort_order: 0 },
+        { id: 'C', name: 'C', kind: 'section', parent_id: 'A', sort_order: 1 },
+        { id: 'D', name: 'D', kind: 'bucket', parent_id: 'C', sort_order: 0 },
+        { id: 'E', name: 'E', kind: 'bucket', parent_id: null, sort_order: 2 },
+        { id: 'F', name: 'B', kind: 'bucket', parent_id: null, sort_order: 3 },
+      ];
+      // Append a root bucket into a section: single update, sort after the last child
+      let plan = m.planNodeMove(rows, 'E', 'A', null);
+      assert(JSON.stringify(plan.updates) === JSON.stringify([{ id: 'E', parent_id: 'A', sort_order: 2 }]),
+        'append into a section lands after its last child, got ' + JSON.stringify(plan.updates));
+      // Append a section to the root: only the section row changes — its subtree follows untouched
+      plan = m.planNodeMove(rows, 'C', null, null);
+      assert(plan.updates.length === 1 && plan.updates[0].id === 'C' && plan.updates[0].parent_id === null && plan.updates[0].sort_order === 4,
+        'moving a section rewrites only its own row (subtree follows), got ' + JSON.stringify(plan.updates));
+      // Positional insert: renumber the target group around the inserted node
+      plan = m.planNodeMove(rows, 'E', 'A', 'B');
+      const byId = Object.fromEntries(plan.updates.map(u => [u.id, u]));
+      assert(byId.E.parent_id === 'A' && byId.E.sort_order === 0 && byId.B.sort_order === 1 && byId.C.sort_order === 2,
+        'positional insert renumbers the target group, got ' + JSON.stringify(plan.updates));
+      // His examples: A > C > D — C and D may move into a sibling section, never into themselves/descendants
+      assert(m.planNodeMove(rows, 'A', 'C', null).error === 'cycle', 'a section cannot move into its own descendant');
+      assert(m.planNodeMove(rows, 'A', 'A', null).error === 'cycle', 'a section cannot move into itself');
+      assert(m.planNodeMove(rows, 'C', 'D', null).error === 'invalid-parent', 'a node cannot move into a bucket');
+      assert(!m.planNodeMove(rows, 'D', 'A', null).error, 'a deep bucket can move up into another section');
+      // Per-parent name uniqueness is enforced on moves
+      assert(m.planNodeMove(rows, 'F', 'A', null).error === 'name-taken', 'a move colliding with a sibling name is refused');
+      // Protected rows are never rewritten, even by a positional renumber at the root
+      plan = m.planNodeMove(rows, 'E', null, 'g');
+      assert(!plan.updates.some(u => u.id === 'g'), 'the protected default row is never updated by a move');
+    });
+
+    test('sections: header click reveals the collapsed row; sections have short names', () => {
+      // Header click: the delegation case fires only when the click
+      // lands on the header element itself (not title/stats/buttons).
+      const delegation = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+      assert(delegation.includes("case 'toggle-section-chips': if (e.target === el) toggleSectionChipsReveal(el);"),
+        'header clicks must toggle the chips reveal only when the header itself is the click target');
+      assert(delegation.includes("'toggle-section-chips': 1"),
+        'the reveal toggle is a pure view action and must be allowed in read-only mode');
+      const cssSn = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(cssSn.includes('.section-chips-collapsed.section-chips-open{'),
+        'a manually opened collapsed row must get the revealed styling');
+      const itemUtilsSn = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(itemUtilsSn.includes("querySelectorAll('.section-chips-open')"),
+        'chip drags must clear the manually opened row state on finish');
+      for (const [name, src] of [
+        ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8')],
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8')],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8')],
+      ]) {
+        assert(src.includes('<div class="section-header" data-action="toggle-section-chips">'),
+          `${name} section headers must carry the toggle-section-chips action`);
+        // Short names: never nulled for sections any more — not on
+        // edit save, not on convert, and chips prefer them.
+        assert(!src.includes('shortname: isSection ? null'), `${name} edit save must persist section short names`);
+        assert(!src.includes("kind: 'section', shortname: null"), `${name} converting to a section must keep its short name`);
+        assert(!/shortname = isSection \?/.test(src), `${name} nav chips must not blank section short names`);
+        assert(!src.includes("isSectionRow(currentRow) ? 'none'"), `${name} edit modal must show the shortname field for sections`);
+      }
+      const todosSn = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      assert(todosSn.includes('childCat.shortname || childCat.name'), 'todo section chips must prefer the section short name');
+      const habitsSn = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      assert(habitsSn.includes('child.row.shortname || child.row.name'), 'habit section chips must prefer the section short name');
+      const listsSn = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(listsSn.includes('child.row.shortname || child.row.name'), 'list section chips must prefer the section short name');
+    });
+
+    test('sections: hover reveals only the hovered section’s own action buttons', () => {
+      // The reveal selector must be child-scoped to the section's own
+      // header: a plain descendant selector made hovering an outer
+      // section reveal the buttons of every nested section too.
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.section-block:hover > .section-header > .section-header-actions'),
+        'hover reveal must be scoped to the section’s own header');
+      assert(css.includes('.section-block:focus-within > .section-header > .section-header-actions'),
+        'focus-within reveal must be scoped to the section’s own header');
+      assert(!css.includes('.section-block:hover .section-header-actions'),
+        'the unscoped descendant hover rule must not come back');
+    });
+
+    test('sections: header icons take the section name colour', () => {
+      // lucideIcon() hardcodes stroke colours for some icons (folder
+      // amber, pencil amber, trash-2 red, folder-plus violet) via
+      // LUCIDE_COLORS; inside a section header they must render in
+      // the adaptive on-colour, like the section name itself.
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.section-header svg.lucide-icon{stroke:var(--cat-on-color,#fff);}'),
+        'section header icons must be stroked with the on-colour');
+      const icons = fs.readFileSync(path.join(JS_DIR, 'icons.js'), 'utf-8');
+      assert(icons.includes("'folder': '#f59e0b'") && icons.includes("'trash-2': '#ef4444'"),
+        'test premise: the icon colour map hardcodes folder/trash colours');
+    });
+
+    test('sections: chip drag crosses sections via planNodeMove on all three pages', () => {
+      const itemUtils = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(itemUtils.includes('crossDrop') && itemUtils.includes('updateCrossTarget') && itemUtils.includes('nav-drop-target'),
+        'initNavBtnReorder must support cross-container drops with target highlighting');
+      for (const [name, src, factory, mover] of [
+        ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8'), 'todoNavCrossDrop', 'moveTodoNodeToParent'],
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8'), 'habitNavCrossDrop', 'moveHabitNodeToParent'],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8'), 'listNavCrossDrop', 'moveListNodeToParent'],
+      ]) {
+        assert(src.includes(`function ${factory}(`) && src.includes(`crossDrop: ${factory}()`),
+          `${name} must pass a cross-drop config to its chip rows`);
+        assert(src.includes(`async function ${mover}(`) && src.includes('planNodeMove('),
+          `${name} must persist chip-drag moves through planNodeMove`);
+      }
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(!css.includes('.nav-drop-target'),
+        'drop targets get no ring/highlight styling (removed at his request); the placeholder shows the insertion point');
+      assert(!itemUtils.includes("closest('.section-block')"),
+        'chip drops must resolve at chips-row level only — no section-block drop target');
+      // Smooth landings, like chip reordering: the move re-render is
+      // wrapped in the bucket FLIP snapshot/animate, and chips in a
+      // row glide (FLIP) when the drag placeholder enters/leaves it.
+      assert((itemUtils.match(/flipChipsAround\(/g) || []).length >= 4,
+        'cross-row placeholder moves must be FLIP-animated (flipChipsAround)');
+      for (const [name, src, mover] of [
+        ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8'), 'moveTodoNodeToParent'],
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8'), 'moveHabitNodeToParent'],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8'), 'moveListNodeToParent'],
+      ]) {
+        const fnSlice = src.slice(src.indexOf(`async function ${mover}(`), src.indexOf(`async function ${mover}(`) + 900);
+        assert(fnSlice.includes('snapshotBuckets(grid)') && fnSlice.includes('animateBucketsFromSnapshot(grid, snapshot, 600)'),
+          `${name} ${mover} must FLIP-animate cards across the move re-render`);
+      }
+    });
+
+    test('sections: chips rows always render — collapsed for ≤1 child, revealed during chip drags', () => {
+      // A single child has nothing to navigate between and nothing to
+      // reorder, so its row is collapsed in normal rendering — but it
+      // stays in the DOM and is revealed while a chip drag runs, so
+      // every drop can happen at chips-row level.
+      for (const [name, src, prefix] of [
+        ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8'), 'todoSectionChips-'],
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8'), 'habitSectionChips-'],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8'), 'listSectionChips-'],
+      ]) {
+        assert(src.includes(`section-chips\${node.children.length > 1 ? '' : ' section-chips-collapsed'}" id="${prefix}`),
+          `${name} section chips row must always render, collapsed when the section has at most one child`);
+      }
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.section-chips-collapsed{max-height:0;min-height:0;opacity:0;visibility:hidden;overflow:hidden;transition:max-height .25s ease'),
+        'collapsed chips rows must be zero-height and transparent, with an animated (not display:none) collapse');
+      assert(css.includes('body.chip-drag-active .section-chips-collapsed,.section-chips-collapsed.section-chips-open{max-height:40px;min-height:30px;opacity:1;visibility:visible'),
+        'collapsed chips rows must grow and fade in while a chip drag is active (or when manually opened)');
+      const itemUtilsSrc = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(itemUtilsSrc.includes("document.body.classList.add('chip-drag-active')")
+        && itemUtilsSrc.includes("document.body.classList.remove('chip-drag-active')"),
+        'chip drags must toggle the chip-drag-active body class on activation and on finish');
+      assert(itemUtilsSrc.includes('allBtns().length < 2 && !crossDrop'),
+        'single-chip rows must still initialise when crossDrop is configured (their chip can be dragged out)');
+      const itemUtils = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(itemUtils.includes('const container = document.getElementById(containerId);\n  if (!container) return;'),
+        'initNavBtnReorder must tolerate a missing chips container');
+      // Section chips mirror the top-level nav rule: bucket children
+      // show their shortname when set (full name stays in the title
+      // tooltip); section children keep their full name.
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      assert(todosSrc.includes('childCat.shortname || getCatDisplayName(child.id)'),
+        'todo section chips must prefer the bucket shortname');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      assert(habitsSrc.includes('child.row.shortname || getHabitCatDisplayName(child.id)'),
+        'habit section chips must prefer the bucket shortname');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      assert(listsSrc.includes('child.row.shortname || child.row.name'),
+        'list section chips must prefer the bucket shortname');
+      // List card header actions follow the same reveal rule as TODO /
+      // Habit category headers: hidden until hover (the shared CSS
+      // keeps them visible on touch widths). No inline opacity
+      // override may force them permanently visible.
+      assert(!listsSrc.includes('project-header-actions" style="opacity:1'),
+        'list header actions must not force opacity:1 inline (hover reveal like todos/habits)');
+      const cssSrc = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(cssSrc.includes('.project-card-header .project-header-actions{display:flex;align-items:center;gap:6px;opacity:0'),
+        'project-header-actions must default to hidden with hover reveal');
+      // Flashcards decks follow the same rule for their secondary
+      // actions (edit / add / delete), but the Practice button (and
+      // the all-done check) stays always visible: it renders OUTSIDE
+      // the hover-revealed container.
+      const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      assert(!flashSrc.includes('project-header-actions" style="opacity:1'),
+        'flashcard deck header actions must not force opacity:1 inline');
+      assert((flashSrc.match(/\$\{practiceButton\}\n        <div class="project-header-actions">/g) || []).length === 2,
+        'both deck renderers (flashcards + texts) must place the Practice button outside the hover-revealed actions');
+    });
+  }
+
+  // ===================================================================
   // SUMMARY
   // ===================================================================
+  await Promise.all(pendingAsyncTests);
   console.log(`\n${'═'.repeat(50)}`);
   console.log(`  Results: ${passed} passed, ${failed} failed`);
   console.log(`${'═'.repeat(50)}\n`);

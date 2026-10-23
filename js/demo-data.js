@@ -6,6 +6,7 @@
 // ===================================================================
 
 import { computeNextDue } from './habits.js';
+import { parseSceneContent, splitSceneIntoChunks } from './scene-parse.js';
 const _now = new Date();
 const _todayStr = _now.toISOString().slice(0, 10);
 const d = (offset) => {
@@ -84,7 +85,7 @@ function en() {
     { id: 'demo-proj-001', name: 'Website Redesign', shortname: 'WEB', color: '#6366f1', tech: 'Next.js, Tailwind', links: [{ label: 'Figma', url: 'https://figma.com/project-web' }], archived: false, sort_order: 0, created_at: d(-45), updated_at: d(-2) },
     { id: 'demo-proj-002', name: 'Book Club — Spring Reads', shortname: 'BOOK', color: '#10b981', tech: '', links: [], archived: false, sort_order: 1, created_at: d(-30), updated_at: d(-5) },
     { id: 'demo-proj-003', name: 'Apartment Move', shortname: 'APT', color: '#f59e0b', tech: '', links: [], archived: false, sort_order: 2, created_at: d(-20), updated_at: d(-1) },
-    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, Supabase', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
+    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, PostgreSQL', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
     { id: 'demo-proj-005', name: 'Q3 Marketing Plan', shortname: 'MKT', color: '#8b5cf6', tech: '', links: [], archived: true, sort_order: 4, created_at: d(-90), updated_at: d(-40) },
   ];
 
@@ -112,6 +113,12 @@ function en() {
     { id: 'demo-todo-006', text: 'Fix leaking kitchen tap', done: false, priority: 'normal', category: 'Home', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
     { id: 'demo-todo-007', text: 'Return library books', done: true, priority: 'normal', category: 'Personal', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-todo-008', text: 'Prepare slides for Monday standup', done: false, priority: 'high', category: 'Work', sort_order: 7, due_date: dateOnly(2), created_at: d(-1), updated_at: d(-1) },
+    { id: 'demo-todo-009', text: 'Finish "Piranesi"', done: false, priority: 'normal', category: 'Reading > Fiction', sort_order: 8, due_date: null, created_at: d(-3), updated_at: d(-3) },
+    { id: 'demo-todo-010', text: 'Pick a novel for the train', done: false, priority: 'low', category: 'Reading > Fiction', sort_order: 9, due_date: dateOnly(4), created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-todo-011', text: 'Read the new essay collection', done: false, priority: 'normal', category: 'Reading > Essays', sort_order: 10, due_date: null, created_at: d(-1), updated_at: d(-1) },
+    { id: 'demo-todo-012', text: 'Read the chapter on the fall of Rome', done: false, priority: 'normal', category: 'Reading > Non-Fiction > History', sort_order: 11, due_date: null, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-todo-013', text: 'Finish the biography of Augustus', done: false, priority: 'low', category: 'Reading > Non-Fiction > History', sort_order: 12, due_date: dateOnly(9), created_at: d(-1), updated_at: d(-1) },
+    { id: 'demo-todo-014', text: 'Read the article on black holes', done: false, priority: 'normal', category: 'Reading > Non-Fiction > Science', sort_order: 13, due_date: null, created_at: d(-1), updated_at: d(-1) },
   ];
 
   const habits = [
@@ -119,11 +126,11 @@ function en() {
     { id: 'demo-habit-002', name: 'Read 30 minutes', frequency_rule: 'every_N_days:1', category: 'Learning', is_draft: false, next_due: null, sort_order: 1, created_at: d(-45), updated_at: d(-1) },
     { id: 'demo-habit-003', name: 'Meditate', frequency_rule: 'every_N_days:1', category: 'Wellbeing', is_draft: false, next_due: null, sort_order: 2, created_at: d(-40), updated_at: d(-2) },
     { id: 'demo-habit-004', name: 'Practice guitar', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Creative', is_draft: false, next_due: null, sort_order: 3, created_at: d(-30), updated_at: d(-3) },
-    { id: 'demo-habit-005', name: 'Water the plants', frequency_rule: 'every_N_weeks:1:Wed,Sat', category: 'Home', is_draft: false, next_due: null, sort_order: 4, created_at: d(-50), updated_at: d(-4) },
+    { id: 'demo-habit-005', name: 'Water the plants', frequency_rule: 'every_N_weeks:1:Wed,Sat', snoozed_until: dateOnly(6), category: 'Home', is_draft: false, next_due: null, sort_order: 4, created_at: d(-50), updated_at: d(-4) },
     { id: 'demo-habit-006', name: 'Weekly meal prep', frequency_rule: 'every_N_weeks:1:Sun', category: 'Health', is_draft: false, next_due: null, sort_order: 5, created_at: d(-35), updated_at: d(-7) },
     { id: 'demo-habit-007', name: 'Journal', frequency_rule: 'every_N_days:2', category: '', is_draft: false, next_due: null, sort_order: 6, created_at: d(-90), updated_at: d(-2) },
     { id: 'demo-habit-008', name: 'Deep clean bathroom', frequency_rule: 'every_N_weeks:2', category: 'Home', is_draft: false, next_due: null, sort_order: 7, created_at: d(-56), updated_at: d(-9) },
-    { id: 'demo-habit-009', name: 'Budget review', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
+    { id: 'demo-habit-009', name: 'Budget review', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, end_date: dateOnly(75), is_auto: 1, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
     { id: 'demo-habit-010', name: 'Quarterly goals check-in', frequency_rule: 'every_N_months:3:first:Mon', category: 'Wellbeing', is_draft: false, next_due: null, sort_order: 9, created_at: d(-180), updated_at: d(-60) },
     { id: 'demo-habit-011', name: 'Dentist appointment', frequency_rule: 'yearly:03-15', category: 'Health', is_draft: false, next_due: null, sort_order: 10, created_at: d(-365), updated_at: d(-150) },
   ];
@@ -163,19 +170,20 @@ function en() {
     { id: 'demo-bd-006', name: 'Carlos Reyes', birthday: '1987-11-07', note: 'Met at the conference', avatar_url: null, created_at: d(-30), updated_at: d(-30) },
   ];
 
-  const vestiaire = [
-    { id: 'demo-vest-001', name: 'Linen blazer', category: 'Outerwear', color: 'Navy', brand: 'COS', size: 'M', note: 'Great for summer evenings', purchase_status: null, image_url: null, sort_order: 0, created_at: d(-90), updated_at: d(-10) },
-    { id: 'demo-vest-002', name: 'White Oxford shirt', category: 'Tops', color: 'White', brand: 'Uniqlo', size: 'M', note: '', purchase_status: null, image_url: null, sort_order: 1, created_at: d(-80), updated_at: d(-20) },
-    { id: 'demo-vest-003', name: 'Slim chinos', category: 'Bottoms', color: 'Khaki', brand: 'Arket', size: '32', note: 'Tapered fit', purchase_status: null, image_url: null, sort_order: 2, created_at: d(-70), updated_at: d(-15) },
-    { id: 'demo-vest-004', name: 'Running trainers', category: 'Shoes', color: 'Black/Grey', brand: 'Nike Pegasus', size: '43', note: 'Replace after 800 km', purchase_status: null, image_url: null, sort_order: 3, created_at: d(-60), updated_at: d(-5) },
-    { id: 'demo-vest-005', name: 'Wool overcoat', category: 'Outerwear', color: 'Charcoal', brand: 'Massimo Dutti', size: 'L', note: 'Dry clean only', purchase_status: null, image_url: null, sort_order: 4, created_at: d(-120), updated_at: d(-30) },
-    { id: 'demo-vest-006', name: 'Canvas tote bag', category: 'Accessories', color: 'Off-white', brand: 'Muji', size: '', note: 'Everyday carry', purchase_status: null, image_url: null, sort_order: 5, created_at: d(-50), updated_at: d(-25) },
-  ];
 
   const lists = [
     { id: 'demo-list-001', name: 'Travel Destinations', shortname: 'Travel', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
     { id: 'demo-list-002', name: 'Monthly Expenses to Reimburse', shortname: 'Expenses', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
     { id: 'demo-list-003', name: 'Movies to Watch', shortname: 'Movies', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-wardrobe', name: 'Wardrobe', shortname: null, color: '#8b5cf6', icon: 'folder', kind: 'section', parent_id: null, sort_order: 3, archived: 0, created_at: d(-12), updated_at: d(-4) },
+    { id: 'demo-list-004', name: 'Top', shortname: 'Top', color: '#8b5cf6', icon: 'shirt', kind: 'bucket', parent_id: 'demo-list-wardrobe', sort_order: 0, archived: 0, created_at: d(-12), updated_at: d(-4) },
+    { id: 'demo-list-005', name: 'Pants', shortname: 'Pants', color: '#7c3aed', icon: 'tag', kind: 'bucket', parent_id: 'demo-list-wardrobe', sort_order: 1, archived: 0, created_at: d(-12), updated_at: d(-4) },
+    { id: 'demo-list-006', name: 'Trips', shortname: null, color: '#3b82f6', icon: 'folder', kind: 'section', parent_id: null, sort_order: 5, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-007', name: 'Packing', shortname: 'Packing', color: '#0ea5e9', icon: 'shirt', kind: 'bucket', parent_id: 'demo-list-006', sort_order: 0, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-008', name: 'Souvenirs', shortname: 'Souvenirs', color: '#f59e0b', icon: 'tag', kind: 'bucket', parent_id: 'demo-list-006', sort_order: 1, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-009', name: 'Europe', shortname: null, color: '#3b82f6', icon: 'folder', kind: 'section', parent_id: 'demo-list-006', sort_order: 2, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-010', name: 'Paris', shortname: 'Paris', color: '#e11d48', icon: 'map-pin', kind: 'bucket', parent_id: 'demo-list-009', sort_order: 0, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-011', name: 'Rome', shortname: 'Rome', color: '#ea580c', icon: 'map-pin', kind: 'bucket', parent_id: 'demo-list-009', sort_order: 1, archived: 0, created_at: d(-6), updated_at: d(-1) },
   ];
 
   const list_items = [
@@ -189,9 +197,22 @@ function en() {
     { id: 'demo-li-008', list_id: 'demo-list-003', text: 'Mulholland Drive', checked: 0, note: null, sort_order: 0, created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-li-009', list_id: 'demo-list-003', text: 'Stalker', checked: 0, note: null, sort_order: 1, created_at: d(-18), updated_at: d(-18) },
     { id: 'demo-li-010', list_id: 'demo-list-003', text: 'In the Mood for Love', checked: 0, note: null, sort_order: 2, created_at: d(-15), updated_at: d(-15) },
+    { id: 'demo-li-011', list_id: 'demo-list-004', text: 'White Oxford Shirt', checked: 0, note: 'Brand / Make: Ralph Lauren\nSize: M\nColor: White\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-012', list_id: 'demo-list-004', text: 'Navy Breton Stripe Tee', checked: 0, note: 'Brand / Make: Armor-Lux\nSize: M\nStatus: Tried', sort_order: 1, created_at: d(-11), updated_at: d(-11) },
+    { id: 'demo-li-013', list_id: 'demo-list-004', text: 'Charcoal Cashmere Sweater', checked: 0, note: 'Brand / Make: Johnstons of Elgin\nSize: L\nColor: Charcoal\nStatus: Purchased\n\nGift from my mother', sort_order: 2, created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-li-014', list_id: 'demo-list-005', text: 'Selvedge Denim Jeans', checked: 0, note: 'Brand / Make: APC\nSize: 30\nColor: Raw indigo\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-015', list_id: 'demo-list-005', text: 'Navy Wool Trousers', checked: 0, note: 'Brand / Make: Suitsupply\nSize: 30\nColor: Navy\nStatus: Tried\n\nNeed hemming if kept', sort_order: 1, created_at: d(-9), updated_at: d(-9) },
+    { id: 'demo-li-016', list_id: 'demo-list-007', text: 'Passport', checked: 1, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-017', list_id: 'demo-list-007', text: 'Charger and adapter', checked: 0, note: null, sort_order: 1, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-018', list_id: 'demo-list-007', text: 'Travel pillow', checked: 0, note: null, sort_order: 2, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-019', list_id: 'demo-list-008', text: 'Postcards', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-020', list_id: 'demo-list-008', text: 'Local honey', checked: 0, note: null, sort_order: 1, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-021', list_id: 'demo-list-010', text: 'Eiffel Tower tickets', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-022', list_id: 'demo-list-010', text: 'Musée d\'Orsay', checked: 0, note: null, sort_order: 1, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-023', list_id: 'demo-list-011', text: 'Colosseum tickets', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, lists, list_items };
 }
 
 // ── FRENCH ──
@@ -200,7 +221,7 @@ function fr() {
     { id: 'demo-proj-001', name: 'Refonte du site web', shortname: 'WEB', color: '#6366f1', tech: 'Next.js, Tailwind', links: [{ label: 'Figma', url: 'https://figma.com/projet-web' }], archived: false, sort_order: 0, created_at: d(-45), updated_at: d(-2) },
     { id: 'demo-proj-002', name: 'Club de lecture — Printemps', shortname: 'LECT', color: '#10b981', tech: '', links: [], archived: false, sort_order: 1, created_at: d(-30), updated_at: d(-5) },
     { id: 'demo-proj-003', name: 'Déménagement', shortname: 'APT', color: '#f59e0b', tech: '', links: [], archived: false, sort_order: 2, created_at: d(-20), updated_at: d(-1) },
-    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, Supabase', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
+    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, PostgreSQL', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
     { id: 'demo-proj-005', name: 'Plan marketing T3', shortname: 'MKT', color: '#8b5cf6', tech: '', links: [], archived: true, sort_order: 4, created_at: d(-90), updated_at: d(-40) },
   ];
 
@@ -228,6 +249,12 @@ function fr() {
     { id: 'demo-todo-006', text: 'Réparer le robinet de la cuisine', done: false, priority: 'normal', category: 'Maison', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
     { id: 'demo-todo-007', text: 'Rendre les livres à la bibliothèque', done: true, priority: 'normal', category: 'Personnel', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-todo-008', text: 'Préparer les slides pour le standup de lundi', done: false, priority: 'high', category: 'Travail', sort_order: 7, due_date: dateOnly(2), created_at: d(-1), updated_at: d(-1) },
+    { id: 'demo-todo-009', text: 'Terminer « Piranesi »', done: false, priority: 'normal', category: 'Lecture > Fiction', sort_order: 8, due_date: null, created_at: d(-3), updated_at: d(-3) },
+    { id: 'demo-todo-010', text: 'Choisir un roman pour le train', done: false, priority: 'low', category: 'Lecture > Fiction', sort_order: 9, due_date: dateOnly(4), created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-todo-011', text: 'Lire le nouveau recueil d\'essais', done: false, priority: 'normal', category: 'Lecture > Essais', sort_order: 10, due_date: null, created_at: d(-1), updated_at: d(-1) },
+    { id: 'demo-todo-012', text: 'Lire le chapitre sur la chute de Rome', done: false, priority: 'normal', category: 'Lecture > Non-fiction > Histoire', sort_order: 11, due_date: null, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-todo-013', text: 'Terminer la biographie d\'Auguste', done: false, priority: 'low', category: 'Lecture > Non-fiction > Histoire', sort_order: 12, due_date: dateOnly(9), created_at: d(-1), updated_at: d(-1) },
+    { id: 'demo-todo-014', text: 'Lire l\'article sur les trous noirs', done: false, priority: 'normal', category: 'Lecture > Non-fiction > Sciences', sort_order: 13, due_date: null, created_at: d(-1), updated_at: d(-1) },
   ];
 
   const habits = [
@@ -235,11 +262,11 @@ function fr() {
     { id: 'demo-habit-002', name: 'Lire 30 minutes', frequency_rule: 'every_N_days:1', category: 'Apprentissage', is_draft: false, next_due: null, sort_order: 1, created_at: d(-45), updated_at: d(-1) },
     { id: 'demo-habit-003', name: 'Méditer', frequency_rule: 'every_N_days:1', category: 'Bien-être', is_draft: false, next_due: null, sort_order: 2, created_at: d(-40), updated_at: d(-2) },
     { id: 'demo-habit-004', name: 'Pratiquer la guitare', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Créativité', is_draft: false, next_due: null, sort_order: 3, created_at: d(-30), updated_at: d(-3) },
-    { id: 'demo-habit-005', name: 'Arroser les plantes', frequency_rule: 'every_N_weeks:1:Wed,Sat', category: 'Maison', is_draft: false, next_due: null, sort_order: 4, created_at: d(-50), updated_at: d(-4) },
+    { id: 'demo-habit-005', name: 'Arroser les plantes', frequency_rule: 'every_N_weeks:1:Wed,Sat', snoozed_until: dateOnly(6), category: 'Maison', is_draft: false, next_due: null, sort_order: 4, created_at: d(-50), updated_at: d(-4) },
     { id: 'demo-habit-006', name: 'Meal prep du dimanche', frequency_rule: 'every_N_weeks:1:Sun', category: 'Santé', is_draft: false, next_due: null, sort_order: 5, created_at: d(-35), updated_at: d(-7) },
     { id: 'demo-habit-007', name: 'Journal', frequency_rule: 'every_N_days:2', category: '', is_draft: false, next_due: null, sort_order: 6, created_at: d(-90), updated_at: d(-2) },
     { id: 'demo-habit-008', name: 'Grand ménage salle de bain', frequency_rule: 'every_N_weeks:2', category: 'Maison', is_draft: false, next_due: null, sort_order: 7, created_at: d(-56), updated_at: d(-9) },
-    { id: 'demo-habit-009', name: 'Revue du budget', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
+    { id: 'demo-habit-009', name: 'Revue du budget', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, end_date: dateOnly(75), is_auto: 1, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
     { id: 'demo-habit-010', name: 'Bilan trimestriel des objectifs', frequency_rule: 'every_N_months:3:first:Mon', category: 'Bien-être', is_draft: false, next_due: null, sort_order: 9, created_at: d(-180), updated_at: d(-60) },
     { id: 'demo-habit-011', name: 'Rendez-vous dentiste', frequency_rule: 'yearly:03-15', category: 'Santé', is_draft: false, next_due: null, sort_order: 10, created_at: d(-365), updated_at: d(-150) },
   ];
@@ -274,19 +301,19 @@ function fr() {
     { id: 'demo-bd-006', name: 'Carlos Reyes', birthday: '1987-11-07', note: 'Rencontré à la conférence', avatar_url: null, created_at: d(-30), updated_at: d(-30) },
   ];
 
-  const vestiaire = [
-    { id: 'demo-vest-001', name: 'Blazer en lin', category: 'Vestes', color: 'Marine', brand: 'COS', size: 'M', note: 'Parfait pour les soirées d\'été', purchase_status: null, image_url: null, sort_order: 0, created_at: d(-90), updated_at: d(-10) },
-    { id: 'demo-vest-002', name: 'Chemise Oxford blanche', category: 'Hauts', color: 'Blanc', brand: 'Uniqlo', size: 'M', note: '', purchase_status: null, image_url: null, sort_order: 1, created_at: d(-80), updated_at: d(-20) },
-    { id: 'demo-vest-003', name: 'Chino slim', category: 'Bas', color: 'Beige', brand: 'Arket', size: '32', note: 'Coupe fuselée', purchase_status: null, image_url: null, sort_order: 2, created_at: d(-70), updated_at: d(-15) },
-    { id: 'demo-vest-004', name: 'Baskets de course', category: 'Chaussures', color: 'Noir/Gris', brand: 'Nike Pegasus', size: '43', note: 'Remplacer après 800 km', purchase_status: null, image_url: null, sort_order: 3, created_at: d(-60), updated_at: d(-5) },
-    { id: 'demo-vest-005', name: 'Manteau en laine', category: 'Vestes', color: 'Anthracite', brand: 'Massimo Dutti', size: 'L', note: 'Nettoyage à sec uniquement', purchase_status: null, image_url: null, sort_order: 4, created_at: d(-120), updated_at: d(-30) },
-    { id: 'demo-vest-006', name: 'Tote bag en toile', category: 'Accessoires', color: 'Écru', brand: 'Muji', size: '', note: 'Sac du quotidien', purchase_status: null, image_url: null, sort_order: 5, created_at: d(-50), updated_at: d(-25) },
-  ];
 
   const lists = [
     { id: 'demo-list-001', name: 'Destinations de voyage', shortname: 'Voyage', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
     { id: 'demo-list-002', name: 'Notes de frais du mois', shortname: 'Frais', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
     { id: 'demo-list-003', name: 'Films à voir', shortname: 'Films', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-004', name: 'Garde-robe - Hauts', shortname: 'Hauts', color: '#8b5cf6', icon: 'shirt', sort_order: 3, archived: 0, created_at: d(-12), updated_at: d(-4) },
+    { id: 'demo-list-005', name: 'Garde-robe - Pantalons', shortname: 'Pantalons', color: '#7c3aed', icon: 'tag', sort_order: 4, archived: 0, created_at: d(-12), updated_at: d(-4) },
+    { id: 'demo-list-006', name: 'Voyages', shortname: null, color: '#3b82f6', icon: 'folder', kind: 'section', parent_id: null, sort_order: 5, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-007', name: 'Bagages', shortname: 'Bagages', color: '#0ea5e9', icon: 'shirt', kind: 'bucket', parent_id: 'demo-list-006', sort_order: 0, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-008', name: 'Souvenirs', shortname: 'Souvenirs', color: '#f59e0b', icon: 'tag', kind: 'bucket', parent_id: 'demo-list-006', sort_order: 1, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-009', name: 'Europe', shortname: null, color: '#3b82f6', icon: 'folder', kind: 'section', parent_id: 'demo-list-006', sort_order: 2, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-010', name: 'Paris', shortname: 'Paris', color: '#e11d48', icon: 'map-pin', kind: 'bucket', parent_id: 'demo-list-009', sort_order: 0, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-011', name: 'Rome', shortname: 'Rome', color: '#ea580c', icon: 'map-pin', kind: 'bucket', parent_id: 'demo-list-009', sort_order: 1, archived: 0, created_at: d(-6), updated_at: d(-1) },
   ];
 
   const list_items = [
@@ -300,10 +327,23 @@ function fr() {
     { id: 'demo-li-008', list_id: 'demo-list-003', text: 'Mulholland Drive', checked: 0, note: null, sort_order: 0, created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-li-009', list_id: 'demo-list-003', text: 'Stalker', checked: 0, note: null, sort_order: 1, created_at: d(-18), updated_at: d(-18) },
     { id: 'demo-li-010', list_id: 'demo-list-003', text: 'In the Mood for Love', checked: 0, note: null, sort_order: 2, created_at: d(-15), updated_at: d(-15) },
+    { id: 'demo-li-011', list_id: 'demo-list-004', text: 'Chemise Oxford blanche', checked: 0, note: 'Brand / Make: Ralph Lauren\nSize: M\nColor: White\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-012', list_id: 'demo-list-004', text: 'Marinière bleu marine', checked: 0, note: 'Brand / Make: Armor-Lux\nSize: M\nStatus: Tried', sort_order: 1, created_at: d(-11), updated_at: d(-11) },
+    { id: 'demo-li-013', list_id: 'demo-list-004', text: 'Pull en cachemire anthracite', checked: 0, note: 'Brand / Make: Johnstons of Elgin\nSize: L\nColor: Charcoal\nStatus: Purchased\n\nUn cadeau de ma mère', sort_order: 2, created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-li-014', list_id: 'demo-list-005', text: 'Jean brut selvedge', checked: 0, note: 'Brand / Make: APC\nSize: 30\nColor: Raw indigo\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-015', list_id: 'demo-list-005', text: 'Pantalon en laine bleu marine', checked: 0, note: 'Brand / Make: Suitsupply\nSize: 30\nColor: Navy\nStatus: Tried\n\nÀ ourler si je le garde', sort_order: 1, created_at: d(-9), updated_at: d(-9) },
+    { id: 'demo-li-016', list_id: 'demo-list-007', text: 'Passeport', checked: 1, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-017', list_id: 'demo-list-007', text: 'Chargeur et adaptateur', checked: 0, note: null, sort_order: 1, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-018', list_id: 'demo-list-007', text: 'Oreiller de voyage', checked: 0, note: null, sort_order: 2, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-019', list_id: 'demo-list-008', text: 'Cartes postales', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-020', list_id: 'demo-list-008', text: 'Miel local', checked: 0, note: null, sort_order: 1, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-021', list_id: 'demo-list-010', text: 'Billets Tour Eiffel', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-022', list_id: 'demo-list-010', text: 'Musée d\'Orsay', checked: 0, note: null, sort_order: 1, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-023', list_id: 'demo-list-011', text: 'Billets Colisée', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
   ];
 
   // Re-use same habit_completions (ids are the same, habit_ids match)
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, lists, list_items };
 }
 
 // ── SPANISH ──
@@ -312,7 +352,7 @@ function es() {
     { id: 'demo-proj-001', name: 'Rediseño web', shortname: 'WEB', color: '#6366f1', tech: 'Next.js, Tailwind', links: [{ label: 'Figma', url: 'https://figma.com/proyecto-web' }], archived: false, sort_order: 0, created_at: d(-45), updated_at: d(-2) },
     { id: 'demo-proj-002', name: 'Club de lectura — Primavera', shortname: 'LECT', color: '#10b981', tech: '', links: [], archived: false, sort_order: 1, created_at: d(-30), updated_at: d(-5) },
     { id: 'demo-proj-003', name: 'Mudanza', shortname: 'APT', color: '#f59e0b', tech: '', links: [], archived: false, sort_order: 2, created_at: d(-20), updated_at: d(-1) },
-    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, Supabase', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
+    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, PostgreSQL', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
     { id: 'demo-proj-005', name: 'Plan de marketing T3', shortname: 'MKT', color: '#8b5cf6', tech: '', links: [], archived: true, sort_order: 4, created_at: d(-90), updated_at: d(-40) },
   ];
 
@@ -340,6 +380,12 @@ function es() {
     { id: 'demo-todo-006', text: 'Arreglar el grifo de la cocina', done: false, priority: 'normal', category: 'Hogar', sort_order: 5, due_date: null, created_at: d(-14), updated_at: d(-14) },
     { id: 'demo-todo-007', text: 'Devolver los libros a la biblioteca', done: true, priority: 'normal', category: 'Personal', sort_order: 6, due_date: dateOnly(-2), created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-todo-008', text: 'Preparar las diapositivas para el standup del lunes', done: false, priority: 'high', category: 'Trabajo', sort_order: 7, due_date: dateOnly(2), created_at: d(-1), updated_at: d(-1) },
+    { id: 'demo-todo-009', text: 'Terminar «Piranesi»', done: false, priority: 'normal', category: 'Lectura > Ficción', sort_order: 8, due_date: null, created_at: d(-3), updated_at: d(-3) },
+    { id: 'demo-todo-010', text: 'Elegir una novela para el tren', done: false, priority: 'low', category: 'Lectura > Ficción', sort_order: 9, due_date: dateOnly(4), created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-todo-011', text: 'Leer la nueva colección de ensayos', done: false, priority: 'normal', category: 'Lectura > Ensayos', sort_order: 10, due_date: null, created_at: d(-1), updated_at: d(-1) },
+    { id: 'demo-todo-012', text: 'Leer el capítulo sobre la caída de Roma', done: false, priority: 'normal', category: 'Lectura > No ficción > Historia', sort_order: 11, due_date: null, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-todo-013', text: 'Terminar la biografía de Augusto', done: false, priority: 'low', category: 'Lectura > No ficción > Historia', sort_order: 12, due_date: dateOnly(9), created_at: d(-1), updated_at: d(-1) },
+    { id: 'demo-todo-014', text: 'Leer el artículo sobre agujeros negros', done: false, priority: 'normal', category: 'Lectura > No ficción > Ciencia', sort_order: 13, due_date: null, created_at: d(-1), updated_at: d(-1) },
   ];
 
   const habits = [
@@ -347,11 +393,11 @@ function es() {
     { id: 'demo-habit-002', name: 'Leer 30 minutos', frequency_rule: 'every_N_days:1', category: 'Aprendizaje', is_draft: false, next_due: null, sort_order: 1, created_at: d(-45), updated_at: d(-1) },
     { id: 'demo-habit-003', name: 'Meditar', frequency_rule: 'every_N_days:1', category: 'Bienestar', is_draft: false, next_due: null, sort_order: 2, created_at: d(-40), updated_at: d(-2) },
     { id: 'demo-habit-004', name: 'Practicar guitarra', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Creatividad', is_draft: false, next_due: null, sort_order: 3, created_at: d(-30), updated_at: d(-3) },
-    { id: 'demo-habit-005', name: 'Regar las plantas', frequency_rule: 'every_N_weeks:1:Wed,Sat', category: 'Hogar', is_draft: false, next_due: null, sort_order: 4, created_at: d(-50), updated_at: d(-4) },
+    { id: 'demo-habit-005', name: 'Regar las plantas', frequency_rule: 'every_N_weeks:1:Wed,Sat', snoozed_until: dateOnly(6), category: 'Hogar', is_draft: false, next_due: null, sort_order: 4, created_at: d(-50), updated_at: d(-4) },
     { id: 'demo-habit-006', name: 'Meal prep semanal', frequency_rule: 'every_N_weeks:1:Sun', category: 'Salud', is_draft: false, next_due: null, sort_order: 5, created_at: d(-35), updated_at: d(-7) },
     { id: 'demo-habit-007', name: 'Diario', frequency_rule: 'every_N_days:2', category: '', is_draft: false, next_due: null, sort_order: 6, created_at: d(-90), updated_at: d(-2) },
     { id: 'demo-habit-008', name: 'Limpieza a fondo del baño', frequency_rule: 'every_N_weeks:2', category: 'Hogar', is_draft: false, next_due: null, sort_order: 7, created_at: d(-56), updated_at: d(-9) },
-    { id: 'demo-habit-009', name: 'Revisión del presupuesto', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
+    { id: 'demo-habit-009', name: 'Revisión del presupuesto', frequency_rule: 'every_N_months:1:15', category: '', is_draft: false, next_due: null, end_date: dateOnly(75), is_auto: 1, sort_order: 8, created_at: d(-120), updated_at: d(-18) },
     { id: 'demo-habit-010', name: 'Revisión trimestral de objetivos', frequency_rule: 'every_N_months:3:first:Mon', category: 'Bienestar', is_draft: false, next_due: null, sort_order: 9, created_at: d(-180), updated_at: d(-60) },
     { id: 'demo-habit-011', name: 'Cita con el dentista', frequency_rule: 'yearly:03-15', category: 'Salud', is_draft: false, next_due: null, sort_order: 10, created_at: d(-365), updated_at: d(-150) },
   ];
@@ -386,19 +432,19 @@ function es() {
     { id: 'demo-bd-006', name: 'Carlos Reyes', birthday: '1987-11-07', note: 'Lo conocí en la conferencia', avatar_url: null, created_at: d(-30), updated_at: d(-30) },
   ];
 
-  const vestiaire = [
-    { id: 'demo-vest-001', name: 'Blazer de lino', category: 'Abrigos', color: 'Azul marino', brand: 'COS', size: 'M', note: 'Genial para noches de verano', purchase_status: null, image_url: null, sort_order: 0, created_at: d(-90), updated_at: d(-10) },
-    { id: 'demo-vest-002', name: 'Camisa Oxford blanca', category: 'Camisas', color: 'Blanco', brand: 'Uniqlo', size: 'M', note: '', purchase_status: null, image_url: null, sort_order: 1, created_at: d(-80), updated_at: d(-20) },
-    { id: 'demo-vest-003', name: 'Chino slim', category: 'Pantalones', color: 'Caqui', brand: 'Arket', size: '32', note: 'Corte entallado', purchase_status: null, image_url: null, sort_order: 2, created_at: d(-70), updated_at: d(-15) },
-    { id: 'demo-vest-004', name: 'Zapatillas para correr', category: 'Calzado', color: 'Negro/Gris', brand: 'Nike Pegasus', size: '43', note: 'Reemplazar tras 800 km', purchase_status: null, image_url: null, sort_order: 3, created_at: d(-60), updated_at: d(-5) },
-    { id: 'demo-vest-005', name: 'Abrigo de lana', category: 'Abrigos', color: 'Carbón', brand: 'Massimo Dutti', size: 'L', note: 'Solo limpieza en seco', purchase_status: null, image_url: null, sort_order: 4, created_at: d(-120), updated_at: d(-30) },
-    { id: 'demo-vest-006', name: 'Bolso tote de lona', category: 'Accesorios', color: 'Crudo', brand: 'Muji', size: '', note: 'Para el día a día', purchase_status: null, image_url: null, sort_order: 5, created_at: d(-50), updated_at: d(-25) },
-  ];
 
   const lists = [
     { id: 'demo-list-001', name: 'Destinos de viaje', shortname: 'Viajes', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
     { id: 'demo-list-002', name: 'Gastos a reembolsar', shortname: 'Gastos', color: '#ef4444', icon: 'receipt', sort_order: 1, archived: 0, created_at: d(-15), updated_at: d(-1) },
     { id: 'demo-list-003', name: 'Películas por ver', shortname: 'Pelis', color: '#a855f7', icon: 'film', sort_order: 2, archived: 0, created_at: d(-20), updated_at: d(-3) },
+    { id: 'demo-list-004', name: 'Guardarropa - Camisetas', shortname: 'Camisetas', color: '#8b5cf6', icon: 'shirt', sort_order: 3, archived: 0, created_at: d(-12), updated_at: d(-4) },
+    { id: 'demo-list-005', name: 'Guardarropa - Pantalones', shortname: 'Pantalones', color: '#7c3aed', icon: 'tag', sort_order: 4, archived: 0, created_at: d(-12), updated_at: d(-4) },
+    { id: 'demo-list-006', name: 'Viajes', shortname: null, color: '#3b82f6', icon: 'folder', kind: 'section', parent_id: null, sort_order: 5, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-007', name: 'Equipaje', shortname: 'Equipaje', color: '#0ea5e9', icon: 'shirt', kind: 'bucket', parent_id: 'demo-list-006', sort_order: 0, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-008', name: 'Recuerdos', shortname: 'Recuerdos', color: '#f59e0b', icon: 'tag', kind: 'bucket', parent_id: 'demo-list-006', sort_order: 1, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-009', name: 'Europa', shortname: null, color: '#3b82f6', icon: 'folder', kind: 'section', parent_id: 'demo-list-006', sort_order: 2, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-010', name: 'París', shortname: 'París', color: '#e11d48', icon: 'map-pin', kind: 'bucket', parent_id: 'demo-list-009', sort_order: 0, archived: 0, created_at: d(-6), updated_at: d(-1) },
+    { id: 'demo-list-011', name: 'Roma', shortname: 'Roma', color: '#ea580c', icon: 'map-pin', kind: 'bucket', parent_id: 'demo-list-009', sort_order: 1, archived: 0, created_at: d(-6), updated_at: d(-1) },
   ];
 
   const list_items = [
@@ -412,9 +458,22 @@ function es() {
     { id: 'demo-li-008', list_id: 'demo-list-003', text: 'Mulholland Drive', checked: 0, note: null, sort_order: 0, created_at: d(-20), updated_at: d(-20) },
     { id: 'demo-li-009', list_id: 'demo-list-003', text: 'Stalker', checked: 0, note: null, sort_order: 1, created_at: d(-18), updated_at: d(-18) },
     { id: 'demo-li-010', list_id: 'demo-list-003', text: 'In the Mood for Love', checked: 0, note: null, sort_order: 2, created_at: d(-15), updated_at: d(-15) },
+    { id: 'demo-li-011', list_id: 'demo-list-004', text: 'Camisa Oxford blanca', checked: 0, note: 'Brand / Make: Ralph Lauren\nSize: M\nColor: White\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-012', list_id: 'demo-list-004', text: 'Camiseta de rayas azul marino', checked: 0, note: 'Brand / Make: Armor-Lux\nSize: M\nStatus: Tried', sort_order: 1, created_at: d(-11), updated_at: d(-11) },
+    { id: 'demo-li-013', list_id: 'demo-list-004', text: 'Jersey de cachemira gris', checked: 0, note: 'Brand / Make: Johnstons of Elgin\nSize: L\nColor: Charcoal\nStatus: Purchased\n\nUn regalo de mi madre', sort_order: 2, created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-li-014', list_id: 'demo-list-005', text: 'Vaqueros de selvedge crudos', checked: 0, note: 'Brand / Make: APC\nSize: 30\nColor: Raw indigo\nStatus: Purchased', sort_order: 0, created_at: d(-12), updated_at: d(-12) },
+    { id: 'demo-li-015', list_id: 'demo-list-005', text: 'Pantalón de lana azul marino', checked: 0, note: 'Brand / Make: Suitsupply\nSize: 30\nColor: Navy\nStatus: Tried\n\nHay que hacer el bajo si me lo quedo', sort_order: 1, created_at: d(-9), updated_at: d(-9) },
+    { id: 'demo-li-016', list_id: 'demo-list-007', text: 'Pasaporte', checked: 1, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-017', list_id: 'demo-list-007', text: 'Cargador y adaptador', checked: 0, note: null, sort_order: 1, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-018', list_id: 'demo-list-007', text: 'Almohada de viaje', checked: 0, note: null, sort_order: 2, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-019', list_id: 'demo-list-008', text: 'Postales', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-020', list_id: 'demo-list-008', text: 'Miel local', checked: 0, note: null, sort_order: 1, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-021', list_id: 'demo-list-010', text: 'Entradas Torre Eiffel', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-022', list_id: 'demo-list-010', text: 'Museo de Orsay', checked: 0, note: null, sort_order: 1, created_at: d(-6), updated_at: d(-6) },
+    { id: 'demo-li-023', list_id: 'demo-list-011', text: 'Entradas Coliseo', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, vestiaire, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, lists, list_items };
 }
 
 // ── MAIN EXPORT ──
@@ -428,7 +487,9 @@ export function getDemoData(lang) {
       const completions = data.habit_completions
         .filter(c => c.habit_id === habit.id)
         .sort((a, b) => b.completed_at.localeCompare(a.completed_at));
-      const lastDone = completions.length > 0 ? completions[0].completed_at.slice(0, 10) : null;
+      // Pass the full timestamp: slicing it would hand computeNextDue the
+      // UTC calendar date, which is not the local day the habit was done.
+      const lastDone = completions.length > 0 ? completions[0].completed_at : null;
       habit.next_due = computeNextDue(habit.frequency_rule, lastDone);
     }
   }
@@ -460,7 +521,7 @@ export function getDemoData(lang) {
   const poem = poems[lang] || poems.en;
   data.texts = [{
     id: 'demo-text-001', deck: poem.deck, title: poem.title, author: poem.author,
-    content: poem.content, lines_per_chunk: 4, context_lines: 1,
+    content: poem.content, blocks_per_chunk: 4, context_blocks: 1,
     created_at: d(-20), updated_at: d(-3),
   }];
   // Generate chunk progress for the poem
@@ -478,13 +539,88 @@ export function getDemoData(lang) {
   if (chunk.length > 0) { poemChunks.push(ci); }
   data.text_line_progress = poemChunks.map(idx => ({
     id: `demo-tlp-${idx}`, text_id: 'demo-text-001', chunk_index: idx,
-    strength: idx === 0 ? 5 : idx === 1 ? 3 : 0,
+    stability: idx === 0 ? 5 : idx === 1 ? 3 : 0,
+    difficulty: 5,
+    last_review: idx <= 1 ? d(-2) : null,
     next_review: idx === 0 ? dateOnly(7) : idx === 1 ? dateOnly(1) : null,
-    last_reviewed: idx <= 1 ? d(-2) : null,
+    review_count: idx <= 1 ? 1 : 0,
     created_at: d(-20), updated_at: d(-2),
   }));
+  // Sample scene for role-based text revision (scene mode).
+  const scenes = {
+    en: {
+      title: 'The Audition', author: 'Demo', deck: 'Theatre', focus_role: 'ELENA',
+      content: `<**A bare stage. A single spotlight. ELENA waits center stage.**>
+<ELENA:
+**nervously** Is anyone there?
+I was told the audition starts at noon.
+>
+<MARCUS: **from the dark** You're early. **He steps into the light.**>
+<ELENA: Oh! **She laughs.** I thought I'd missed it.>
+<**The DIRECTOR: coughs from the wings.**>
+<DIRECTOR: **briskly** Places, please. We begin with the letter scene.>
+<MARCUS:
+Then let's begin.
+**gently** Take a breath, and speak your first line.
+>
+<ELENA: **steady now** I am ready.>`,
+    },
+    fr: {
+      title: "L'Audition", author: 'Demo', deck: 'Théâtre', focus_role: 'LÉA',
+      content: `<**Une scène nue. Un seul projecteur. LÉA attend au centre.**>
+<LÉA:
+**nerveusement** Il y a quelqu'un ?
+On m'a dit que l'audition commence à midi.
+>
+<PAUL: **depuis l'ombre** Vous êtes en avance. **Il entre dans la lumière.**>
+<LÉA: Oh ! **Elle rit.** Je croyais l'avoir manquée.>
+<**La METTEUSE EN SCÈNE : tousse depuis les coulisses.**>
+<METTEUSE EN SCÈNE: **vivement** En place, s'il vous plaît. On commence par la scène de la lettre.>
+<PAUL:
+Alors commençons.
+**doucement** Respirez un bon coup, et dites votre première réplique.
+>
+<LÉA: **désormais assurée** Je suis prête.>`,
+    },
+    es: {
+      title: 'La audición', author: 'Demo', deck: 'Teatro', focus_role: 'SOFÍA',
+      content: `<**Un escenario vacío. Un solo foco. SOFÍA espera en el centro.**>
+<SOFÍA:
+**nerviosa** ¿Hay alguien ahí?
+Me dijeron que la audición empieza al mediodía.
+>
+<DIEGO: **desde la oscuridad** Llegas temprano. **Entra en la luz.**>
+<SOFÍA: ¡Ah! **Se ríe.** Creí haberla perdido.>
+<**La DIRECTORA: tose entre bambalinas.**>
+<DIRECTORA: **enérgica** En sus marcas. Empezamos con la escena de la carta.>
+<DIEGO:
+Entonces empecemos.
+**con dulzura** Respira hondo y di tu primera réplica.
+>
+<SOFÍA: **ya serena** Estoy lista.>`,
+    },
+  };
+  const scene = scenes[lang] || scenes.en;
+  data.texts.push({
+    id: 'demo-text-002', deck: scene.deck, title: scene.title, author: scene.author,
+    content: scene.content, blocks_per_chunk: 4, context_blocks: 1,
+    focus_role: scene.focus_role,
+    created_at: d(-15), updated_at: d(-2),
+  });
+  // Chunk progress via the real scene parser so chunk_index matches the app.
+  const sceneChunks = splitSceneIntoChunks(parseSceneContent(scene.content).lines, 4);
+  sceneChunks.forEach((_, idx) => {
+    data.text_line_progress.push({
+      id: `demo-tlp-scene-${idx}`, text_id: 'demo-text-002', chunk_index: idx,
+      stability: idx === 0 ? 6 : idx === 1 ? 3 : 0,
+      difficulty: 5,
+      last_review: idx <= 1 ? d(-2) : null,
+      next_review: idx === 0 ? dateOnly(6) : idx === 1 ? dateOnly(1) : null,
+      review_count: idx <= 1 ? 1 : 0,
+      created_at: d(-15), updated_at: d(-2),
+    });
+  });
   data.prompts = [];
-  data.nvidia_usage = [];
 
   return data;
 }
@@ -493,9 +629,9 @@ export function getDemoData(lang) {
 export function getEmptyData() {
   return {
     projects: [], tasks: [], todos: [], habits: [], habit_completions: [],
-    flashcards: [], flashcard_notes: [], birthdays: [], vestiaire: [],
+    flashcards: [], flashcard_notes: [], birthdays: [],
     lists: [], list_items: [],
-    settings: [], prompts: [], texts: [], text_line_progress: [], nvidia_usage: [], daily_visits: [],
-    todo_categories: [], habit_categories: [], vestiaire_categories: [], flashcard_decks: [],
+    settings: [], prompts: [], texts: [], text_line_progress: [], daily_visits: [],
+    todo_categories: [], habit_categories: [], flashcard_decks: [],
   };
 }

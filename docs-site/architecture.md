@@ -22,8 +22,6 @@ flowchart TD
     drive --> calsync["js/calendar-sync.js<br/>(optional Google Calendar)"]
 ```
 
-> The Supabase adapter (`adapters/supabase.js`) and its offline-cache wrapper (`adapters/offline-cache.js`) remain in the codebase for migration support but are not part of the active architecture. See the `dev-latest-supabase-support` branch for the pre-deprecation codebase.
-
 ## Adapter pattern
 
 The app never talks to a backend directly. All database access goes through `db.js`, which delegates to the active adapter.
@@ -55,9 +53,9 @@ All adapters return `{ data, error }` objects. Successful queries return `{ data
 
 ### Google Drive adapter (drive.js)
 
-Combines the demo adapter's in-memory query engine with Google Drive persistence. On connect, it authenticates via Google Identity Services (`drive.file` scope, plus optional `calendar.app.created` for [Calendar sync](sync-architecture.md)), finds or creates a `DeLaClaw/` folder, and loads per-table JSON files (e.g. `todos.json`, `habits.json`) into memory. All runtime queries hit the in-memory store (instant). On any mutation, a 2-second debounced write-back uploads the changed table to Drive as its own JSON file. The adapter exposes `forceSave()` for explicit flushes (called on `beforeunload` and `visibilitychange` → hidden), and `reseed()` for backup imports. A 30-second polling loop checks Drive for external changes; an immediate poll also fires on tab switch (`visibilitychange` → visible) and window focus. Legacy single-file stores (`delaclaw-data.json`) are automatically migrated to per-table files on first connect.
+Combines the demo adapter's in-memory query engine with Google Drive persistence. On connect, it authenticates via Google Identity Services (`drive.file` scope, plus optional `calendar.app.created` for [Calendar sync](sync-architecture.md)), finds or creates a `DeLaClaw/` folder (`DeLaClawDev/` on dev and preview builds), and loads per-table JSON files (e.g. `todos.json`, `habits.json`) into memory. All runtime queries hit the in-memory store (instant). On any mutation, a 2-second debounced write-back uploads the changed table to Drive as its own JSON file. The adapter exposes `forceSave()` for explicit flushes (called on `beforeunload` and `visibilitychange` → hidden), and `reseed()` for backup imports. A 30-second polling loop checks Drive for external changes; an immediate poll also fires on window focus (covers both tab switch-back and window switch-back).
 
-After a successful Drive flush, the optional Calendar sync module writes dirty items (habits, TODOs, birthdays) to a dedicated "DeLaClaw" Google Calendar. See [Sync Architecture](sync-architecture.md) for the full flow.
+After a successful Drive flush, the optional Calendar sync module writes dirty items (habits, TODOs, birthdays) to a dedicated "DeLaClaw" Google Calendar ("DeLaClawDev" on dev and preview builds). See [Sync Architecture](sync-architecture.md) for the full flow.
 
 ## State management
 
@@ -71,7 +69,6 @@ const state = {
   allHabits: [],             // habit objects
   allHabitCompletions: [],   // habit completion records
   allBirthdays: [],          // birthday objects
-  allVestiaire: [],          // wardrobe items
   allLists: [],              // list objects
   allListItems: [],          // list item objects
   currentView: 'projects',   // active tab
@@ -94,7 +91,7 @@ There is no virtual DOM, no reactivity system, and no framework state management
 
 ## Database schema
 
-The canonical table list lives in `server/schema.sql` (SQLite base schema). `sql/supabase_schema.sql` remains as a legacy reference.
+The canonical table list lives in `server/schema.sql` (SQLite base schema).
 
 | Table | Purpose | Key relationships |
 |---|---|---|
@@ -111,16 +108,12 @@ The canonical table list lives in `server/schema.sql` (SQLite base schema). `sql
 | `texts` | Full texts for memorization (chunked) | -- |
 | `text_line_progress` | Per-chunk SRS progress for texts | `text_id` -> `texts.id` |
 | `birthdays` | Birthday records with optional avatars | -- |
-| `vestiaire` | Wardrobe inventory | `category_id` -> `vestiaire_categories.id` |
-| `vestiaire_categories` | Wardrobe category containers | -- |
 | `lists` | Checklist containers | -- |
 | `list_items` | Items within lists | `list_id` -> `lists.id` |
 | `settings` | Key-value store (schema version, preferences) | -- |
 | `prompts` | AI prompt templates | -- |
-| `nvidia_usage` | API token usage tracking | -- |
-| `daily_visits` | Login/visit tracking | -- |
-| `joined_groups` | Groups the user has joined (encrypted tokens) | -- |
-| `agent_grants` | AI agent permission grants | -- |
+| `daily_visits` | Visit statistics (active days, streaks) | -- |
+| `groups` | Groups the user has joined (encrypted tokens) + name records for groups they created | -- |
 | `sharing_groups` | Shared group definitions | -- |
 | `sharing_members` | Group membership | `group_id` -> `sharing_groups.id` |
 | `sharing_items` | Shared items (TODOs, habits, list items) | `group_id` -> `sharing_groups.id` |
@@ -128,6 +121,17 @@ The canonical table list lives in `server/schema.sql` (SQLite base schema). `sql
 ### Category integrity
 
 Each category/deck table has one protected default row (`name=''`, `is_protected=1`). A `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item foreign keys (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user-created category deletes all its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to group members.
+
+### Nested sections
+
+On the TODOs, Habits and Lists pages, category rows form a tree. Each row in `todo_categories`, `habit_categories` and `lists` carries:
+
+- `kind` — `'bucket'` (holds items) or `'section'` (holds buckets and sub-sections, never items directly)
+- `parent_id` — the containing section's id, or null at the top level. It is a plain column, deliberately **not** a foreign key, so backup restore never needs topological ordering.
+
+Users write nesting as a path in the category name (`Reading > Fiction`); the full path is derived from the parent chain, and each row stores only its own name segment. Names are unique per parent across both kinds, and `sort_order` is per sibling group. Converting a bucket into a section moves its items into a new `*` bucket inside it. Deleting a non-empty section offers two choices: move its children up one level, or delete the whole subtree.
+
+Sections are purely local: they are never shared to a group (sharing stays per bucket), and renaming or moving a section never affects Google Calendar sync, whose event titles use bucket names only. All tree, path and layout logic lives in `js/sections-pure.js`; every level is laid out as its own even grid of strictly rectangular blocks, with a section's width chosen bottom-up as the smallest that gives its minimal internal row count.
 
 ### CHECK constraints
 
@@ -146,7 +150,7 @@ The demo adapter mirrors these constraints in JavaScript.
 2. On success: cache the response and serve it
 3. On failure: serve from the SW precache
 
-The precache (`PRECACHE_URLS`) includes all static assets. The `CACHE_VERSION` string is updated automatically by the pre-commit hook from the `VERSION` file (format: `dlc-X.YYY`).
+The precache (`PRECACHE_URLS`) includes all static assets. The `CACHE_VERSION` string is updated automatically by the pre-commit hook from the `VERSION` file (format: `dlc-X.Y.Z`).
 
 On install, the SW calls `skipWaiting()`. On activate, it purges old caches and calls `clients.claim()`. The page listens for `controllerchange` events and reloads automatically when a new SW takes over.
 
@@ -156,20 +160,17 @@ The `VERSION` file at the repo root is the single source of truth:
 
 ```
 latest=1.016
-latest_compat=1.000
-latest_compat_deprec=1.000
 ```
 
 The pre-commit hook (`.githooks/pre-commit`):
 1. Verifies `VERSION` is staged and `latest` has increased
-2. Validates the `latest_compat_deprec <= latest_compat <= latest` invariant
-3. Regenerates `js/version.js` with exported constants
-4. Updates `CACHE_VERSION` in `sw.js`
-5. Regenerates `.agents/CODEMAP.json` and `.agents/CODEMAP.md` from source
-6. Stages all generated files
-7. Prints an impact hint from CODEMAP `dependents` to help fill the `Checked:` trailer
+2. Regenerates `js/version.js` with the exported `APP_VERSION` constant
+3. Updates `CACHE_VERSION` in `sw.js`
+4. Regenerates `.agents/CODEMAP.json` and `.agents/CODEMAP.md` from source
+5. Stages all generated files
+6. Prints an impact hint from CODEMAP `dependents` to help fill the `Checked:` trailer
 
-Schema version is stored in the `settings` table (`key = 'schema_version'`). The app compares it against `latest_compat` and `latest_compat_deprec` at startup, showing a warning banner if the database is behind.
+Schema version is stored in the `settings` table (`key = 'schema_version'`). Pending migrations from `migrations/` run automatically on startup (Local) or on connect (Drive) when it is behind.
 
 ## File structure
 
@@ -188,29 +189,39 @@ js/
   version.js               Auto-generated version constants
   calendar-sync.js         Google Calendar sync (Drive backend, optional)
   adapters/
-    supabase.js            Supabase PostgREST adapter (legacy, migration support)
     rest.js                Local Bun+SQLite REST adapter
     demo.js                In-memory adapter
     drive.js               Google Drive adapter (in-memory + per-table JSON persistence)
-    offline-cache.js       IndexedDB caching layer (legacy, Supabase-only)
-  auth.js                  Supabase email auth (legacy, migration support)
-  crypto-sync.js           AES-GCM encryption for joined_groups tokens (legacy, Supabase-only)
-  sharing.js               Sharing factory (selects Supabase or Drive adapter)
+    drive-backup-policy.js Pre-migration backup policy (pure)
+    offline-cache.js       IndexedDB caching layer
+  sharing.js               Sharing factory (Drive adapter)
   sharing-interface.js     Sharing adapter interface contract
-  sharing-supabase.js      Supabase sharing adapter (legacy, RPC-based)
   sharing-drive.js         Google Drive sharing adapter (per-table JSON)
   sharing-envelope.js      DLC1 invite-code encode/decode
-  sharing-ui.js            Sharing UI: settings pane, share popovers, completion modal
+  sharing-file-reconcile.js  Sharing file reconciliation engine
+  sharing-mutation-queue.js  Queued sharing mutations
+  sharing-ui.js            Sharing UI: Group tab, share popovers, completion modal
+  agents-ui.js             Settings > Agents pane
   delegation.js            Cross-module action delegation for shared items
   welcome.js               Today dashboard
   projects.js              Project boards + task management
   todos.js                 TODO management
   habits.js                Habit tracking
+  frequency-rule.js        Pure habit scheduling rules (next-due computation)
+  pending-next-due.js      Per-habit in-flight next-due publish tracking (pure)
   flashcards.js            Flashcard SRS + text memorization
-  birthdays.js             Birthday tracker
-  vestiaire.js             Wardrobe inventory
+  scene-parse.js           Scene script parsing for text memorization (pure)
+  birthdays.js             Birthday data + CRUD modals (no page; surfaces on Calendar)
+  calendar.js              Calendar page (todos, habits, birthdays month grid)
+  calendar-pure.js         Pure calendar date/expansion logic
   lists.js                 Checklists
-  agents-ui.js             Agent task board UI
+  sections-pure.js         Nested-section tree logic for TODOs, Habits and Lists (pure)
+  daily-visits.js          Daily-visit aggregate tracking (pure)
+  drive-folders.js         Environment-aware Drive folder names
+  import-pure.js           Batch-import parsing helpers (pure)
+  todo-import.js           TODO validation for batch import
+  habit-import.js          Habit validation for batch import
+  batch-import.js          Shared batch-import building blocks
   i18n.js                  Translation strings (en/fr/es)
   icons.js                 Lucide icon rendering + path data
   utils.js                 Shared utilities (escaping, toasts, markdown)
@@ -249,10 +260,10 @@ Language is stored in `localStorage` and can be changed in Settings. The `t()` f
 
 ## Drag-and-drop
 
-`js/item-utils.js` provides reusable drag-and-drop reordering via long-press (100ms threshold). Both category nav buttons and bucket items (TODOs, Projects, Vestiaire, Lists, Flashcard drafts) share the same UX:
+`js/item-utils.js` provides reusable drag-and-drop reordering via long-press (150ms threshold). Both category nav buttons and bucket items (TODOs, Projects, Lists, Flashcard drafts) share the same UX:
 
-- **Activation**: long-press on touch/pointer (`LONG_PRESS_MS = 100`), not native HTML drag events
+- **Activation**: long-press on touch/pointer (`LONG_PRESS_MS = 150`), not native HTML drag events
 - **Visual**: the real item follows the cursor/finger; a placeholder gap shows the drop position; siblings slide with FLIP animation. No visible drag handles — shadow-only to indicate float
-- **Cross-container**: TODOs, Vestiaire, Projects, Habits, and Lists support dragging items between categories/lists — drop updates the FK and re-numbers `sort_order` in both source and target containers
+- **Cross-container**: TODOs, Projects, Habits, and Lists support dragging items between categories/lists — drop updates the FK and re-numbers `sort_order` in both source and target containers
 - **Persistence**: `sort_order` updates are batched into a single DB write
 - **Auto-scroll**: scrollable containers auto-scroll when dragging near edges

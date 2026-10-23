@@ -1,6 +1,6 @@
 // Service Worker for DeLaClaw (PWA)
 // CACHE_VERSION is updated by the pre-commit hook from VERSION file
-const CACHE_VERSION = 'dlc-1.937';
+const CACHE_VERSION = 'dlc-2.30.2';
 
 
 const PRECACHE_URLS = [
@@ -11,47 +11,57 @@ const PRECACHE_URLS = [
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/favicon.png',
-  'js/adapters/supabase.js',
   'js/adapters/demo.js',
   'js/adapters/offline-cache.js',
   'js/adapters/rest.js',
   'js/adapters/drive.js',
+  'js/adapters/drive-backup-policy.js',
   'js/agents-ui.js',
-  'js/auth.js',
   'js/backend-logos.js',
+  'js/batch-import.js',
   'js/birthdays.js',
+  'js/calendar-pure.js',
   'js/calendar-sync.js',
-  'js/crypto-sync.js',
+  'js/calendar.js',
   'js/db.js',
   'js/delegation.js',
   'js/demo-chooser.js',
   'js/demo-data.js',
+  'js/drive-folders.js',
+  'js/daily-visits.js',
   'js/flashcards.js',
+  'js/scene-parse.js',
+  'js/sections-pure.js',
+  'js/frequency-rule.js',
+  'js/habit-import.js',
   'js/habits.js',
+  'js/import-pure.js',
+  'js/pending-next-due.js',
   'js/hero.js',
   'js/i18n.js',
   'js/icons.js',
   'js/item-utils.js',
   'js/lists.js',
+  'js/groups.js',
   'js/logo.js',
   'js/main.js',
   'js/projects.js',
   'js/sharing.js',
   'js/sharing-drive.js',
   'js/sharing-envelope.js',
+  'js/sharing-file-reconcile.js',
   'js/sharing-interface.js',
-  'js/sharing-supabase.js',
+  'js/sharing-mutation-queue.js',
   'js/sharing-ui.js',
   'js/state.js',
   'js/storm3d.js',
+  'js/todo-import.js',
   'js/todos.js',
   'js/utils.js',
   'js/version.js',
-  'js/vestiaire.js',
   'js/welcome.js',
   'js/bootstrap.js',
   'js/sw-register.js',
-  'vendor/supabase.js',
   'vendor/three/build/three.module.js',
   'vendor/three/examples/jsm/utils/BufferGeometryUtils.js',
   'icons/brand/claude.svg',
@@ -90,11 +100,6 @@ self.addEventListener('activate', (event) => {
 // Fetch: network-first for all requests, cache as fallback
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-
-  // Network-first for Supabase API calls — pass through, don't intercept
-  if (url.hostname.includes('supabase.co') || url.hostname.includes('supabase.com')) {
-    return;
-  }
 
   // Pass through Google API calls (Drive, Calendar, Identity) — never intercept
   if (url.hostname.includes('googleapis.com') || url.hostname.includes('accounts.google.com')) {

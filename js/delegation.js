@@ -13,6 +13,18 @@
   function getCat(el) {
     return el.dataset.category || el.dataset.cat || '';
   }
+  // Reveal/hide a section's collapsed chips row (sections with at
+  // most one child) so its lone chip can be grabbed. Only one row is
+  // open at a time; any chip drag clears the open state on finish.
+  function toggleSectionChipsReveal(headerEl) {
+    var block = headerEl.closest ? headerEl.closest('.section-block') : null;
+    if (!block) return;
+    var row = block.querySelector('.section-chips-collapsed');
+    if (!row) return;
+    var opening = !row.classList.contains('section-chips-open');
+    document.querySelectorAll('.section-chips-open').forEach(function (r) { r.classList.remove('section-chips-open'); });
+    if (opening) row.classList.add('section-chips-open');
+  }
   function callWindow(fnName, args) {
     var fn = window[fnName];
     if (typeof fn === 'function') {
@@ -20,6 +32,51 @@
       return true;
     }
     return false;
+  }
+
+  // ── Read-only mode (Drive auth lost, cached data viewable) ──
+  // state is exposed by state.js as window.__dlc. In read-only mode only
+  // navigation / viewing actions are allowed through; every mutation is
+  // blocked here, and independently at the adapter layer.
+  function isReadOnly() {
+    return !!(window.__dlc && window.__dlc.readOnlyMode);
+  }
+  function notifyReadOnly() {
+    if (window.notifyReadOnly) window.notifyReadOnly();
+  }
+  var READ_ONLY_ALLOWED = {
+    'switch-view': 1, 'set-project-filter': 1, 'set-todo-filter': 1, 'set-habit-filter': 1,
+    'set-flashcard-filter': 1, 'sort-projects': 1, 'sort-todos': 1, 'sort-habits': 1,
+    'sort-flashcards': 1, 'sort-lists': 1, 'toggle-archived': 1, 'toggle-search': 1,
+    'clear-search': 1, 'switch-settings-pane': 1, 'toggle-theme': 1, 'export-backup': 1,
+    'navigate-to-category': 1, 'toggle-done-todos': 1, 'navigate-to-habit-category': 1,
+    'navigate-to-todo-section': 1, 'navigate-to-habit-section': 1, 'navigate-to-list-section': 1,
+    'toggle-section-chips': 1,
+    'navigate-to-flash-deck': 1, 'open-habit-history': 1, 'navigate-to-project': 1,
+    'toggle-expand-project': 1, 'copy-project-title': 1, 'copy-item-link': 1,
+    'show-todo-general-card': 1, 'calendar-prev': 1, 'calendar-next': 1, 'calendar-today': 1,
+    'toggle-calendar-filter': 1, 'open-welcome-birthday': 1, 'set-calendar-view': 1,
+    'open-calendar-picker': 1, 'pick-calendar-month': 1, 'pick-calendar-year': 1,
+    'open-calendar-day': 1, 'toggle-calendar-add': 1, 'navigate-to-list': 1,
+    'sharing-copy-code': 1, 'sharing-copy-link': 1, 'sharing-copy-member-code': 1,
+    'sharing-copy-member-link': 1, 'sharing-copy-code-value': 1, 'sharing-copy-link-value': 1,
+    'groups-select': 1, 'groups-back': 1, 'welcome-open-habit-history': 1,
+    'scroll-to-welcome-bucket': 1, 'go-to-practice': 1, 'go-to-revise': 1,
+    'expand-meta': 1, 'collapse-meta': 1, 'dismiss-schema-banner': 1,
+    'end-practice': 1, 'end-text-practice': 1, 'overlay-close-settings': 1,
+    // Study sessions run in read-only mode: the session itself is
+    // view-only interaction, and rateCard / submitTextReview skip their
+    // FSRS persistence while readOnlyMode is on — ratings are never
+    // written or applied to the in-memory schedule.
+    'start-practice': 1, 'reveal-card': 1, 'rate-card': 1, 'continue-free-practice': 1,
+    'start-text-practice': 1, 'start-text-practice-for-text': 1, 'handle-line-click': 1,
+    'submit-text-review': 1, 'continue-text-same-text': 1
+  };
+  function readOnlyAllows(action) {
+    // 'close-and-open-revision' mutates (task status) despite its prefix.
+    if (action === 'close-and-open-revision') return false;
+    if (action.indexOf('close-') === 0) return true; // closing a modal/view is always safe
+    return !!READ_ONLY_ALLOWED[action];
   }
 
   function handleClick(e) {
@@ -30,7 +87,7 @@
     if (el.dataset.overlayClose !== undefined && e.target !== el) {
       if (action && action.indexOf('close-') === 0) return;
     }
-    if ((action === 'overlay-close-settings' || action === 'overlay-close-auth') && e.target !== el) return;
+    if (action === 'overlay-close-settings' && e.target !== el) return;
     if (action === 'close-modal' && el.dataset.modalId) {
       var m = document.getElementById(el.dataset.modalId);
       if (m) m.remove();
@@ -40,20 +97,16 @@
       if (el.select) el.select();
       return;
     }
+    if (isReadOnly() && !readOnlyAllows(action)) { notifyReadOnly(); return; }
     switch (action) {
       case 'switch-view': if (el.dataset.view) callWindow('switchView', [el.dataset.view]); break;
       case 'set-project-filter': callWindow('setProjectFilter', [el.dataset.filter]); break;
       case 'set-todo-filter': callWindow('setTodoFilter', [el.dataset.filter]); break;
       case 'set-habit-filter': callWindow('setHabitFilter', [el.dataset.filter]); break;
-      case 'set-birthday-filter': callWindow('setBirthdayFilter', [el.dataset.filter]); break;
-      case 'set-vestiaire-filter': callWindow('setVestiaireFilter', [el.dataset.filter]); break;
       case 'set-flashcard-filter': callWindow('setFlashcardFilter', [el.dataset.filter]); break;
-      case 'set-habit-view-mode': callWindow('setHabitViewMode', [el.dataset.view]); break;
       case 'sort-projects': callWindow('renderProjectGrid', []); break;
       case 'sort-todos': callWindow('renderTodos', []); break;
       case 'sort-habits': callWindow('renderHabits', []); break;
-      case 'sort-birthdays': callWindow('renderBirthdays', []); break;
-      case 'sort-vestiaire': callWindow('renderVestiaire', []); break;
       case 'sort-flashcards': callWindow('renderFlashcards', []); break;
       case 'sort-lists': callWindow('renderLists', []); break;
       case 'handle-model-change': callWindow('handleModelChange', []); break;
@@ -68,12 +121,12 @@
       case 'unshare-habit': callWindow('unshareHabit', [getId(el), el]); break;
       case 'copy-habit-to-personal': callWindow('copyHabitToPersonal', [getId(el), el]); break;
       case 'open-add-habit-category': callWindow('openAddHabitCategoryModal', []); break;
-      case 'open-add-birthday': callWindow('openAddBirthdayModal', []); break;
-      case 'open-add-vestiaire': callWindow('openAddVestiaireModal', [getCat(el)]); break;
-      case 'open-add-vestiaire-category': callWindow('openAddVestiaireCategoryModal', []); break;
+      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('closeCalendarDay', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
       case 'open-add-flash-deck': callWindow('openAddFlashDeckModal', []); break;
       case 'open-add-list': callWindow('openAddListModal', []); break;
       case 'open-import': callWindow('openImportModal', []); break;
+      case 'open-todo-import': callWindow('openTodoImportModal', []); break;
+      case 'open-habit-import': callWindow('openHabitImportModal', []); break;
       case 'start-practice': callWindow('startPractice', [el.dataset.deck || el.dataset.scope || '__all', el]); break;
       case 'start-text-practice': callWindow('startTextPractice', [el.dataset.deck || el.dataset.scope || '__all', el]); break;
       case 'toggle-search': callWindow('toggleSearch', [el]); break;
@@ -94,19 +147,19 @@
       case 'execute-confirm-action': callWindow('executeConfirmAction', []); break;
       case 'close-settings': callWindow('closeSettings', []); break;
       case 'overlay-close-settings': callWindow('closeSettings', []); break;
-      case 'overlay-close-auth': { var ov = document.getElementById('authPromptOverlay'); if (ov) ov.classList.remove('visible'); } break;
       case 'switch-settings-pane': if (el.dataset.pane) callWindow('switchSettingsPane', [el.dataset.pane]); break;
       case 'toggle-theme': callWindow('toggleTheme', []); break;
-      case 'toggle-nvidia-key-visibility': callWindow('toggleNvidiaKeyVisibility', []); break;
-      case 'save-nvidia-key': callWindow('saveNvidiaKey', []); break;
-      case 'apply-custom-model': callWindow('applyCustomModel', []); break;
-      case 'test-nvidia-api': callWindow('testNvidiaApi', []); break;
-      case 'toggle-nvidia-usage': callWindow('toggleNvidiaUsageDetail', []); break;
       case 'export-backup': callWindow('exportBackup', []); break;
       case 'export-to-drive': callWindow('exportToGoogleDrive', []); break;
       case 'import-backup': callWindow('importBackup', []); break;
       case 'show-todo-general-card': callWindow('showTodoGeneralCard', []); break;
       case 'navigate-to-category': callWindow('navigateToCategory', [getCat(el)]); break;
+      case 'navigate-to-todo-section': callWindow('navigateToTodoSection', [getCat(el)]); break;
+      // Only a click on the header itself — not on its title, stats
+      // or buttons (those are children with their own behaviour).
+      case 'toggle-section-chips': if (e.target === el) toggleSectionChipsReveal(el); break;
+      case 'open-add-category-in-section': callWindow('openAddCategoryInSection', [getCat(el)]); break;
+      case 'delete-section': callWindow('deleteSection', [getCat(el)]); break;
       case 'delete-category': callWindow('deleteCategory', [getCat(el)]); break;
       case 'delete-all-done': e.stopPropagation(); callWindow('deleteAllDoneTodos', [getCat(el)]); break;
       case 'toggle-done-todos': callWindow('toggleDoneTodos', [el.dataset.catId || getCat(el)]); break;
@@ -123,6 +176,11 @@
       case 'toggle-todo': { var done = el.dataset.done === 'true'; callWindow('toggleTodo', [getId(el) || el.dataset.todoId, done, el]); } break;
       case 'open-snooze-modal': callWindow('openSnoozeModal', [getId(el)]); break;
       case 'unsnooze-todo': callWindow('unsnoozeTodo', [getId(el), el]); break;
+      case 'open-habit-snooze-modal': callWindow('openHabitSnoozeModal', [getId(el)]); break;
+      case 'unsnooze-habit': callWindow('unsnoozeHabit', [getId(el), el]); break;
+      case 'habit-snooze-for': callWindow('habitSnoozeFor', [parseInt(el.dataset.amount||'0',10), el.dataset.unit]); break;
+      case 'close-habit-snooze-modal': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeHabitSnoozeModal', []); break;
+      case 'submit-habit-snooze': callWindow('submitHabitSnooze', []); break;
       case 'edit-todo-inline': callWindow('editTodoInline', [getId(el)]); break;
       case 'delete-todo': callWindow('deleteTodo', [getId(el)]); break;
       case 'set-todo-priority': callWindow('setTodoPriority', [getId(el), el.dataset.priority]); break;
@@ -134,6 +192,9 @@
       case 'close-add-category-modal': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddCategoryModal', []); break;
       case 'open-add-habit-modal': callWindow('openAddHabitModal', []); break;
       case 'navigate-to-habit-category': callWindow('navigateToHabitCategory', [getCat(el)]); break;
+      case 'navigate-to-habit-section': callWindow('navigateToHabitSection', [getCat(el)]); break;
+      case 'open-add-habit-category-in-section': callWindow('openAddHabitCategoryInSection', [getCat(el)]); break;
+      case 'delete-habit-section': callWindow('deleteHabitSection', [getCat(el)]); break;
       case 'delete-habit-category': callWindow('deleteHabitCategory', [getCat(el)]); break;
       case 'open-edit-habit-category-modal': callWindow('openEditHabitCategoryModal', [getCat(el)]); break;
       case 'add-habit-from-input': { if (!(el.matches && el.matches('input, textarea'))) { var hInp = el.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.habit-add-input, .todo-cat-input'); if (hInp) callWindow('addHabitFromInput', [hInp]); } } break;
@@ -157,9 +218,6 @@
       case 'delete-habit-completion': callWindow('deleteHabitCompletion', [el.dataset.id||getId(el)]); break;
       case 'save-habit-completion': callWindow('saveHabitCompletion', [el.dataset.id||getId(el)]); break;
       case 'cancel-edit-completion': callWindow('cancelEditCompletion', [el.dataset.id||getId(el)]); break;
-      case 'navigate-habit-calendar': callWindow('navigateHabitCalendar', [parseInt(el.dataset.delta||'0',10)]); break;
-      case 'navigate-habit-calendar-today': callWindow('navigateHabitCalendarToday', []); break;
-      case 'toggle-habit-cal-scale': callWindow('toggleHabitCalScale', []); break;
       case 'navigate-to-flash-deck': callWindow('navigateToFlashDeck', [el.dataset.deck||getId(el)]); break;
       case 'quick-add-draft': callWindow('quickAddDraft', []); break;
       case 'update-proposed-deck': callWindow('updateProposedDeck', [getId(el), el.value||el.dataset.deck]); break;
@@ -205,6 +263,7 @@
       case 'handle-line-click': if (window.handleLineClick) window.handleLineClick(el); else { var idx = el.dataset.lineIdx || el.dataset.line || el.dataset.index; callWindow('handleLineClick', [parseInt(idx||'0',10)]); } break;
       case 'submit-text-review': callWindow('submitTextReview', [getId(el), parseInt(el.dataset.lines || '0', 10)]); break;
       case 'continue-text-same-text': callWindow('continueTextSameText', []); break;
+      case 'continue-free-practice': callWindow('continueFreePractice', []); break;
       case 'archive-project': callWindow('archiveProject', [getId(el)]); break;
       case 'unarchive-project': callWindow('unarchiveProject', [getId(el)]); break;
       case 'delete-project': callWindow('deleteProject', [getId(el)]); break;
@@ -224,9 +283,41 @@
       case 'delete-all-archived-tasks': callWindow('deleteAllArchivedTasks', []); break;
       case 'approve-task-and-close': { var atId = el.dataset.taskId||getId(el); var atSt = el.dataset.status; if (window.updateTaskStatus) window.updateTaskStatus(atId, atSt, el); callWindow('closeRevisionModal', []); } break;
       case 'close-and-open-revision': { var coId = el.dataset.taskId||getId(el); var coSt = el.dataset.status; if (window.updateTaskStatus) window.updateTaskStatus(coId, coSt, el); callWindow('closeRevisionModal', []); if (window.openRevisionModal) setTimeout(function(){ window.openRevisionModal(coId); }, 120); } break;
-      case 'open-add-birthday': callWindow('openAddBirthdayModal', []); break;
-      case 'navigate-to-birthday-section': callWindow('navigateToBirthdaySection', [el.dataset.key||el.dataset.category||getCat(el)]); break;
+      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('closeCalendarDay', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
       case 'handle-avatar-click': callWindow('handleAvatarClick', [getId(el)]); break;
+      case 'calendar-prev': callWindow('calendarNav', [-1]); break;
+      case 'calendar-next': callWindow('calendarNav', [1]); break;
+      case 'calendar-today': callWindow('calendarToday', []); break;
+      case 'toggle-calendar-filter': callWindow('toggleCalendarFilter', [el.dataset.filter]); break;
+      case 'open-welcome-birthday': callWindow('openCalendarDate', [el.dataset.date]); break;
+      case 'set-calendar-view': callWindow('closeCalendarAddMenu', []); callWindow('setCalendarView', [el.dataset.view, el.dataset]); break;
+      case 'open-calendar-picker': callWindow('openCalendarPicker', [el.dataset.picker, el]); break;
+      case 'pick-calendar-month': callWindow('pickCalendarMonth', [el.dataset.month]); break;
+      case 'pick-calendar-year': callWindow('pickCalendarYear', [el.dataset.year]); break;
+      case 'open-calendar-day': callWindow('openCalendarDay', [el.dataset.date]); break;
+      case 'close-calendar-day': callWindow('closeCalendarDay', []); break;
+      case 'toggle-calendar-add': callWindow('toggleCalendarAddMenu', [el]); break;
+      case 'edit-birthday-avatar': callWindow('handleAvatarClick', [el.dataset.id]); break;
+      case 'calendar-birthday-edit': callWindow('closeCalendarDay', []); callWindow('openEditBirthdayModal', [el.dataset.id]); break;
+      case 'calendar-toggle-todo': {
+        var ctDone = el.dataset.done === 'true';
+        var ctDate = el.dataset.date;
+        Promise.resolve(window.toggleTodo ? window.toggleTodo(el.dataset.todoId, ctDone, el) : null)
+          .catch(function(){}).then(function() {
+            if (window.renderCalendar) window.renderCalendar();
+            if (window.renderCalendarDayPanel) window.renderCalendarDayPanel(ctDate);
+          });
+        break;
+      }
+      case 'calendar-habit-done': {
+        var chDate = el.dataset.date;
+        Promise.resolve(window.markHabitDone ? window.markHabitDone(el.dataset.habitId, el) : null)
+          .catch(function(){}).then(function() {
+            if (window.renderCalendar) window.renderCalendar();
+            if (window.renderCalendarDayPanel) window.renderCalendarDayPanel(chDate);
+          });
+        break;
+      }
       case 'open-edit-birthday': callWindow('openEditBirthdayModal', [getId(el)]); break;
       case 'delete-birthday': callWindow('deleteBirthday', [getId(el)]); break;
       case 'pick-new-birthday-avatar': callWindow('pickNewBirthdayAvatar', []); break;
@@ -240,6 +331,9 @@
       case 'close-avatar-preview': callWindow('closeAvatarPreviewModal', []); break;
       case 'open-add-list': callWindow('openAddListModal', []); break;
       case 'navigate-to-list': callWindow('navigateToList', [el.dataset.listId||el.dataset.id||getId(el)]); break;
+      case 'navigate-to-list-section': callWindow('navigateToListSection', [el.dataset.listId||el.dataset.id||getId(el)]); break;
+      case 'open-add-list-in-section': callWindow('openAddListInSection', [el.dataset.listId||el.dataset.id||getId(el)]); break;
+      case 'delete-list-section': callWindow('deleteListSection', [el.dataset.listId||el.dataset.id||getId(el)]); break;
       case 'open-edit-list': callWindow('openEditListModal', [getId(el)]); break;
       case 'delete-list': callWindow('deleteList', [getId(el)]); break;
       case 'quick-add-list-item': callWindow('quickAddListItem', [el.dataset.listId||getId(el)]); break;
@@ -255,35 +349,15 @@
       case 'bulk-share-list': callWindow('bulkShareList', [getId(el), el]); break;
       case 'unshare-list-item': callWindow('unshareListItem', [getId(el), el]); break;
       case 'copy-list-item-to-personal': callWindow('copyListItemToPersonal', [getId(el), el]); break;
-      case 'open-add-vestiaire': callWindow('openAddVestiaireModal', [getCat(el)]); break;      case 'navigate-to-vestiaire-cat': callWindow('navigateToVestiaireCat', [getCat(el)]); break;
-      case 'open-add-vestiaire-category': callWindow('openAddVestiaireCategoryModal', []); break;
-      case 'open-edit-vestiaire': callWindow('openEditVestiaireModal', [getId(el)]); break;
-      case 'delete-vestiaire': callWindow('deleteVestiaire', [getId(el)]); break;
-      case 'edit-vestiaire-inline': callWindow('editVestiaireInline', [getId(el)]); break;
-      case 'edit-vestiaire-brand-inline': callWindow('editVestiaireBrandInline', [getId(el)]); break;
-      case 'cycle-vestiaire-status': callWindow('cycleVestiaireStatus', [getId(el)]); break;
-      case 'open-edit-vestiaire-category': callWindow('openEditVestiaireCategoryModal', [getCat(el)]); break;
-      case 'delete-vestiaire-category': callWindow('deleteVestiaireCategory', [getCat(el)]); break;
-      case 'close-add-vestiaire': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddVestiaireModal', []); break;
-      case 'save-new-vestiaire': callWindow('saveNewVestiaire', []); break;
-      case 'close-add-vestiaire-category': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddVestiaireCategoryModal', []); break;
-      case 'save-new-vestiaire-category': callWindow('saveNewVestiaireCategory', []); break;
-      case 'close-edit-vestiaire': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditVestiaireModal', []); break;
-      case 'save-edit-vestiaire': callWindow('saveEditVestiaire', []); break;
-      case 'close-edit-vestiaire-category': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditVestiaireCategoryModal', []); break;
-      case 'save-edit-vestiaire-category': callWindow('saveEditVestiaireCategory', []); break;
-      case 'send-auth-from-sharing': callWindow('sendAuthFromSharing', []); break;
 
       case 'sharing-copy-code':
       case 'sharing-copy-link': callWindow('sharingCopyCode', [getId(el)||el.dataset.groupId]); break;
-      case 'sharing-leave-group': callWindow('sharingLeaveGroup', [el.dataset.groupId||getId(el)]); break;
       case 'sharing-unjoin-group': callWindow('sharingUnjoinGroup', [el.dataset.groupId||getId(el)]); break;
       case 'sharing-copy-member-code':
       case 'sharing-copy-member-link': callWindow('sharingCopyMemberCode', [el.dataset.groupId, el.dataset.token]); break;
       case 'sharing-remove-member': callWindow('sharingRemoveMember', [el.dataset.groupId, el.dataset.memberId]); break;
       case 'sharing-edit-my-name': callWindow('sharingEditMyName', [el.dataset.groupId, el.dataset.memberId, el.dataset.currentName]); break;
-      case 'toggle-revoked-members': callWindow('toggleRevokedMembers', [el.dataset.groupId]); break;
-      case 'sharing-invite': callWindow('sharingInvite', [el.dataset.groupId||getId(el)]); break;
+      case 'sharing-invite': callWindow('sharingInvite', [el.dataset.groupId||getId(el), el, null]); break;
       case 'sharing-delete-group': callWindow('sharingDeleteGroup', [el.dataset.groupId||getId(el)]); break;
       case 'sharing-create-group': callWindow('sharingCreateGroup', []); break;
       case 'sharing-create-group-submit': callWindow('sharingCreateGroupSubmit', []); break;
@@ -295,6 +369,10 @@
       case 'submit-share-popover': callWindow('submitSharePopover', []); break;
       case 'share-popover-open-sharing': callWindow('sharePopoverOpenSharing', []); break;
       case 'sharing-complete-submit': callWindow('sharingCompleteSubmit', [el.dataset.groupId, el.dataset.itemId]); break;
+      case 'groups-select': callWindow('selectGroup', [el.dataset.groupId]); break;
+      case 'groups-back': callWindow('selectGroup', [null]); break;
+      case 'groups-add-menu': callWindow('groupsAddMenu', []); break;
+      case 'groups-add-choice': callWindow('groupsAddChoice', [el.dataset.choice]); break;
       case 'welcome-set-priority': e.stopPropagation(); callWindow('welcomeSetPriority', [el.dataset.todoId||getId(el), el.dataset.priority]); break;
       case 'welcome-open-priority-picker': callWindow('welcomeOpenPriorityPicker', [el.dataset.todoId||getId(el), e, el]); break;
       case 'welcome-toggle-todo': { var wDone = el.dataset.done === 'true'; callWindow('welcomeToggleTodo', [el.dataset.todoId||getId(el), wDone, el]); } break;
@@ -310,14 +388,12 @@
       case 'go-to-revise': callWindow('goToRevise', []); break;
       case 'expand-meta': callWindow('expandMeta', [el.dataset.metaId||el.dataset.id, el.dataset.metaField||el.dataset.field]); break;
       case 'collapse-meta': callWindow('collapseMeta', [el.dataset.metaId||el.dataset.id, el.dataset.metaField||el.dataset.field]); break;
-      case 'show-migration-modal': callWindow('showMigrationModal', []); break;
       case 'dismiss-schema-banner': callWindow('dismissSchemaBanner', []); break;
-      case 'check-migration-status': callWindow('checkMigrationStatus', []); break;
-      case 'close-migration-modal': callWindow('closeMigrationModal', []); break;
       case 'close-compare-modal': callWindow('closeCompareModal', []); break;
       case 'toggle-cal-sync-habits': callWindow('toggleCalSyncSub', ['habits']); break;
       case 'toggle-cal-sync-todos': callWindow('toggleCalSyncSub', ['todos']); break;
       case 'toggle-cal-sync-birthdays': callWindow('toggleCalSyncSub', ['birthdays']); break;
+      case 'resync-cal-sync': callWindow('resyncCalSync', []); break;
       default: {
         var camel = action.replace(/-([a-z])/g, function(_,c){ return c.toUpperCase(); });
         if (window[camel] && typeof window[camel] === 'function') {
@@ -332,16 +408,17 @@
     if (!el) return;
     var action = el.dataset.action;
     if (!action) return;
+    // Read-only: only re-render sorts and calendar day picking are view-only.
+    if (isReadOnly() && ['sort-projects', 'sort-todos', 'sort-habits', 'sort-flashcards', 'sort-lists', 'pick-calendar-day'].indexOf(action) === -1) return;
     switch (action) {
       case 'sort-projects': callWindow('renderProjectGrid', []); break;
       case 'sort-todos': callWindow('renderTodos', []); break;
       case 'sort-habits': callWindow('renderHabits', []); break;
-      case 'sort-birthdays': callWindow('renderBirthdays', []); break;
-      case 'sort-vestiaire': callWindow('renderVestiaire', []); break;
       case 'sort-flashcards': callWindow('renderFlashcards', []); break;
       case 'sort-lists': callWindow('renderLists', []); break;
       case 'handle-model-change': callWindow('handleModelChange', []); break;
       case 'update-next-sibling-category': { var nxt = el.nextElementSibling; if (nxt && nxt.dataset) nxt.dataset.category = el.value; } break;
+      case 'pick-calendar-day': callWindow('pickCalendarDay', [el.value]); break;
       case 'update-proposed-deck': callWindow('updateProposedDeck', [el.dataset.id||el.dataset.todoId, el.value]); break;
       default: break;
     }
@@ -360,8 +437,6 @@
           case 'filter-projects': callWindow('filterProjects', [e]); break;
           case 'filter-todos': callWindow('filterTodos', [e]); break;
           case 'filter-habits': callWindow('filterHabits', [e]); break;
-          case 'filter-birthdays': callWindow('filterBirthdays', [e]); break;
-          case 'filter-vestiaire': callWindow('filterVestiaire', [e]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [e]); break;
           case 'filter-lists': callWindow('filterLists', [e]); break;
           default: break;
@@ -377,8 +452,6 @@
           case 'filter-projects': callWindow('filterProjects', [fakeEvt]); break;
           case 'filter-todos': callWindow('filterTodos', [fakeEvt]); break;
           case 'filter-habits': callWindow('filterHabits', [fakeEvt]); break;
-          case 'filter-birthdays': callWindow('filterBirthdays', [fakeEvt]); break;
-          case 'filter-vestiaire': callWindow('filterVestiaire', [fakeEvt]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [fakeEvt]); break;
           case 'filter-lists': callWindow('filterLists', [fakeEvt]); break;
           default: break;
@@ -386,12 +459,22 @@
       }, 150);
       return;
     }
+    if (isReadOnly()) return; // non-filter inputs are edit flows (silent: fires per keystroke)
+    switch (action) {
+      case 'update-scene-preview': callWindow('updateScenePreview', [el]); break;
+      default: break;
+    }
   }
   function handleKeydown(e) {
     var el = getActionEl(e.target);
     if (!el) return;
     var action = el.dataset.action;
     if (!action) return;
+    // Read-only: every keydown-handled action is an add/save flow.
+    if (isReadOnly()) {
+      if (action.slice(-9) === '-on-enter' || ['add-todo-to-category', 'add-habit-from-input', 'handle-draft-input', 'task-input', 'quick-add-input', 'quick-add-list-item'].indexOf(action) !== -1) notifyReadOnly();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       switch (action) {
         case 'save-edit-category-on-enter': e.preventDefault(); callWindow('saveEditCategory', []); break;
@@ -401,11 +484,8 @@
         case 'save-edit-habit-category-on-enter': e.preventDefault(); callWindow('saveEditHabitCategory', []); break;
         case 'save-new-list-on-enter': e.preventDefault(); callWindow('saveNewList', []); break;
         case 'save-edit-list-on-enter': e.preventDefault(); callWindow('saveEditList', []); break;
-        case 'save-new-vestiaire-on-enter': e.preventDefault(); callWindow('saveNewVestiaire', []); break;
-        case 'save-new-vestiaire-category-on-enter': e.preventDefault(); callWindow('saveNewVestiaireCategory', []); break;
-        case 'save-edit-vestiaire-category-on-enter': e.preventDefault(); callWindow('saveEditVestiaireCategory', []); break;
         case 'save-new-birthday-on-enter': e.preventDefault(); callWindow('saveNewBirthday', []); break;
-        case 'sharing-invite-on-enter': e.preventDefault(); if (window.sharingInvite) { var gid = el.dataset.groupId||el.dataset.id; window.sharingInvite(gid); } break;
+        case 'sharing-invite-on-enter': e.preventDefault(); if (window.sharingInvite) { var gid = el.dataset.groupId||el.dataset.id; window.sharingInvite(gid, null, el); } break;
         case 'sharing-create-group-on-enter': e.preventDefault(); callWindow('sharingCreateGroupSubmit', []); break;
         case 'sharing-join-code-on-enter': if ((e.ctrlKey || e.metaKey) && window.sharingJoinCodeSubmit) { e.preventDefault(); window.sharingJoinCodeSubmit(); } break;
         case 'add-todo-to-category': if (e.shiftKey) { setTimeout(function(){ if (window.autoResizeTextarea) window.autoResizeTextarea(el); }, 0); } else { e.preventDefault(); if (window.addTodoToCategory) window.addTodoToCategory(el); } break;

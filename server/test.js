@@ -184,17 +184,7 @@ console.log('── Birthdays ──');
   assert(upd[0].avatar_url.startsWith('data:'), 'UPDATE birthday avatar');
 }
 
-// ── 9. Vestiaire ──
-console.log('── Vestiaire ──');
-{
-  const { data } = await from('vestiaire').insert({ name: 'Oxford Shirt', brand: 'Uniqlo', size: 'M', category: 'Hauts', color: 'White', sort_order: 0 });
-  assert(!!data[0].id, 'INSERT vestiaire item');
-
-  const { data: upd } = await from('vestiaire').update({ purchase_status: 'achete' }, 'id', data[0].id);
-  assert(upd[0].purchase_status === 'achete', 'UPDATE vestiaire purchase_status');
-}
-
-// ── 10. Settings (upsert) ──
+// ── 9. Settings (upsert) ──
 console.log('── Settings ──');
 {
   const { data } = await from('settings').upsert({ key: 'nvidia_api_key', value: 'test-key-123', updated_at: new Date().toISOString() }, 'key');

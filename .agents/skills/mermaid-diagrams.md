@@ -110,6 +110,11 @@ A[Function: process()]
 A["Function: process()"]
 ```
 
+**Exception — `;` in sequence diagrams:** Mermaid v10's sequence-diagram grammar
+rejects `;` in message and note text **even inside double quotes** (verified
+against Mermaid 10.9.8: `Note over A,B: "hello; world"` is a parse error).
+In `sequenceDiagram` blocks, never use `;` — rewrite with `,`, `—`, or `.`.
+
 Alternative: HTML entities (`&#58;` for `:`, `&#40;` / `&#41;` for parens, `&#91;` / `&#93;` for brackets).
 
 ### 3. Subgraph syntax
@@ -147,7 +152,7 @@ Before committing a Mermaid diagram:
 - [ ] No lowercase `end` as a node name
 - [ ] No `o` or `x` immediately after `---`
 - [ ] All node IDs unique across the diagram
-- [ ] Test at [mermaid.live](https://mermaid.live) if unsure
+- [ ] Every touched block validated with the Mermaid v10 parser (`mermaid.parse` under node with a jsdom shim) — mandatory before committing, per AGENTS.md §7; a block that fails to parse renders as an error on the live docs site
 
 ## Project conventions
 
@@ -156,4 +161,4 @@ Before committing a Mermaid diagram:
 - Keep diagrams under ~15 nodes — split large flows into multiple diagrams
 - Use subgraphs for logical grouping when a diagram has 2+ distinct phases
 - `<br/>` for multi-line labels inside double-quoted strings
-- Existing diagrams: `architecture.md` (module tree), `backends.md` (per-backend data flows), `sync-architecture.md` (Drive + Calendar sync flows)
+- Existing diagrams: `architecture.md` (module tree), `backends.md` (per-backend data flows), `sharing.md` (sharing flows), `sync-architecture.md` (Drive + Calendar sync flows)

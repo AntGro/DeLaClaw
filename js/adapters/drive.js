@@ -1,16 +1,21 @@
 // ===================================================================
 // GOOGLE DRIVE ADAPTER — in-memory runtime, per-table Drive persistence
 // ===================================================================
-// On connect: reads per-table JSON files from a DeLaClaw/ folder.
+// On connect: reads per-table JSON files from the environment's Drive folder
+// (DeLaClaw/ on production, DeLaClawDev/ elsewhere — see js/drive-folders.js).
 // At runtime: all reads/writes hit the in-memory store (instant).
 // On mutation: debounced write-back per table (~2s after last change).
 //
 // Concurrency: uses Drive ETags for optimistic locking. On conflict
-// (412 Precondition Failed), re-reads the table, merges by id
-// (newer updated_at wins), and retries the write.
+// (412 Precondition Failed), re-reads the table and reconciles with
+// in-memory sync intents (createdIds/deletedIds — js/sharing-file-reconcile.js):
+// a row absent remotely is a remote deletion unless this tab created it and
+// hasn't uploaded it yet. Key-value tables (settings, prompts) keep their
+// key-based merge (newer updated_at wins).
 //
 // Change detection: polls Drive every POLL_INTERVAL_MS for modified
-// files and re-fetches only changed tables.
+// files and re-fetches only changed tables, reconciling (not overwriting)
+// against the in-memory store with the same intent engine.
 //
 // Migration: legacy single-file → per-table conversion and subsequent
 // schema migrations are handled by migrations/drive-migrations.js.
@@ -20,8 +25,13 @@
 // ===================================================================
 
 import { createDemoAdapter } from './demo.js';
+import { createIntentState, markCreated, markDeleted, reconcileItems, captureIntents, acknowledgeIntents } from '../sharing-file-reconcile.js';
 import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
+import { compareVersions } from '../../migrations/version-compare.js';
+import { parseBackupVersion, newestBackupVersion, decideBackupAction } from './drive-backup-policy.js';
 import { t } from '../i18n.js';
+import { driveFolderNames, currentHostname } from '../drive-folders.js';
+import { cacheTableRows, cacheSnapshot, driveCacheScope, readOnlyError, makeReadOnlyError } from './offline-cache.js';
 
 export const DRIVE_SCOPE_FILE = 'https://www.googleapis.com/auth/drive.file';
 export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
@@ -29,7 +39,8 @@ export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.app.crea
 export function getDriveScope() {
   return `${DRIVE_SCOPE_FILE} ${CALENDAR_SCOPE}`;
 }
-const DRIVE_FOLDER_NAME = 'DeLaClaw';
+// `DeLaClaw/` on production, `DeLaClawDev/` everywhere else (see js/drive-folders.js).
+const DRIVE_FOLDER_NAME = driveFolderNames(currentHostname()).personal;
 const DEBOUNCE_MS = 2000;
 const POLL_INTERVAL_MS = 30000;
 const MAX_RETRIES = 2;
@@ -38,10 +49,10 @@ const MAX_RETRIES = 2;
 const DRIVE_TABLES = [
   'projects', 'tasks', 'todos', 'habits', 'habit_completions',
   'flashcards', 'flashcard_notes', 'texts', 'text_line_progress',
-  'birthdays', 'vestiaire', 'lists', 'list_items',
-  'settings', 'prompts', 'nvidia_usage', 'daily_visits',
-  'todo_categories', 'habit_categories', 'vestiaire_categories', 'flashcard_decks',
-  'gcal_sync',
+  'birthdays', 'lists', 'list_items',
+  'settings', 'prompts', 'daily_visits',
+  'todo_categories', 'habit_categories', 'flashcard_decks',
+  'gcal_sync', 'agent_grants', 'groups',
 ];
 
 // ── Google Identity Services helpers ────────────────────────────
@@ -88,6 +99,7 @@ function clearDriveTokenCache(clientId) {
   _tokenExpiry = 0;
   _pendingPromise = null;
   _pendingClientId = null;
+  _waiterGeneration++;
   try {
     if (clientId) {
       sessionStorage.removeItem(_tokenKey(clientId));
@@ -103,6 +115,58 @@ function clearDriveTokenCache(clientId) {
       sessionStorage.removeItem('claw_drive_token');
     }
   } catch (_) {}
+}
+
+// Shared waiter, resolved when the tab is visible AND focused. Holds off
+// silent token refreshes — GIS always opens a popup window, stealing focus.
+let _tabUsableWaiter = null;
+// Bumped whenever the token state is torn down (adapter destroy): waiters
+// armed before the bump must not restart OAuth when they wake.
+let _waiterGeneration = 0;
+
+function _waitUntilTabUsable() {
+  if (_tabUsableWaiter) return _tabUsableWaiter;
+  _tabUsableWaiter = new Promise((resolve) => {
+    const onUsable = () => {
+      if (document.hidden || !document.hasFocus()) return;
+      document.removeEventListener('visibilitychange', onUsable);
+      window.removeEventListener('focus', onUsable);
+      _tabUsableWaiter = null;
+      resolve();
+    };
+    document.addEventListener('visibilitychange', onUsable);
+    window.addEventListener('focus', onUsable);
+    // In case the tab became usable between the check and arming the listeners
+    onUsable();
+  });
+  return _tabUsableWaiter;
+}
+
+// Google account email for login_hint — persisted in localStorage (survives PWA
+// restarts, unlike sessionStorage) so re-auth can skip the account chooser.
+const _DRIVE_EMAIL_KEY = 'claw_drive_email';
+
+export function getStoredDriveEmail() {
+  try { return localStorage.getItem(_DRIVE_EMAIL_KEY) || ''; } catch { return ''; }
+}
+
+/**
+ * Obtain a fresh token via the prompted OAuth flow (user gesture required).
+ * The token is persisted to sessionStorage by the normal token path, so a
+ * caller can simply reload the page afterwards to boot normally. Used by
+ * the read-only banner's Sign-in button after a cold-start cache boot,
+ * where no adapter instance exists to re-auth through.
+ */
+export function requestDriveToken(clientId) {
+  return getGoogleAccessToken(clientId, true);
+}
+
+function storeDriveEmail(email) {
+  try { if (email) localStorage.setItem(_DRIVE_EMAIL_KEY, email); } catch {}
+}
+
+export function clearStoredDriveEmail() {
+  try { localStorage.removeItem(_DRIVE_EMAIL_KEY); } catch {}
 }
 
 function getGoogleAccessToken(clientId, promptIfNeeded = true) {
@@ -126,7 +190,17 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
   if (_pendingPromise && _pendingClientId === clientId) {
     return _pendingPromise;
   }
-  // 4. Fresh OAuth flow — single flight
+  // 4. Fresh OAuth flow — single flight. Never start it from a hidden/
+  // unfocused tab (GIS always opens a popup window): wait until usable.
+  if (!promptIfNeeded && (document.hidden || !document.hasFocus())) {
+    const generation = _waiterGeneration;
+    console.log('[DeLaClaw] token refresh due but this tab is not active — holding the auth popup until you return. hidden:', document.hidden, 'hasFocus:', document.hasFocus());
+    return _waitUntilTabUsable().then(() => {
+      if (generation !== _waiterGeneration) throw new Error('drive_adapter_destroyed');
+      console.log('[DeLaClaw] tab active again — retrying deferred token refresh');
+      return getGoogleAccessToken(clientId, promptIfNeeded);
+    });
+  }
   _pendingClientId = clientId;
   _pendingPromise = new Promise((resolve, reject) => {
     if (typeof google === 'undefined' || !google.accounts) {
@@ -136,6 +210,7 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: getDriveScope(),
+      hint: getStoredDriveEmail(),
       callback: (resp) => {
         if (resp.error) {
           reject(new Error(resp.error));
@@ -143,7 +218,7 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
         }
         // Check granted scopes — Drive is mandatory
         const granted = resp.scope || '';
-        console.log('[DeLaClaw] initial sign-in granted scopes:', granted);
+        console.log('[DeLaClaw] initial sign-in granted scopes:', new Date().toISOString(), granted);
         if (!granted.includes(DRIVE_SCOPE_FILE)) {
           reject(new Error('drive_scope_denied'));
           return;
@@ -162,6 +237,8 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
     if (promptIfNeeded) {
       client.requestAccessToken();
     } else {
+      // '' shows consent UI at once if needed; background popups are
+      // prevented by the tab-usability gate above, not by this parameter.
       client.requestAccessToken({ prompt: '' });
     }
   }).finally(() => {
@@ -201,11 +278,11 @@ async function findOrCreateFolder(token) {
   return (await create.json()).id;
 }
 
-/** List all files in the DeLaClaw folder with id, name, modifiedTime */
+/** List all files in the environment's Drive folder with id, name, size, modifiedTime */
 async function listFolderFiles(token, folderId) {
   const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
   const resp = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&pageSize=100`,
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,size,modifiedTime)&pageSize=100`,
     { headers: { 'Authorization': `Bearer ${token}` } }
   );
   if (!resp.ok) throw new Error(`Failed to list Drive folder: ${resp.status}`);
@@ -266,7 +343,9 @@ async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag, 
   }
   if (!resp.ok) {
     const errText = await resp.text();
-    throw new Error(`Drive upload failed: ${resp.status} ${errText}`);
+    const err = new Error(`Drive upload failed: ${resp.status} ${errText}`);
+    err.code = resp.status;
+    throw err;
   }
 
   const result = await resp.json();
@@ -359,6 +438,18 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   const token = await getGoogleAccessToken(clientId, !silent);
 
+  // Persist the Google account email for login_hint on future re-auth —
+  // lets Google skip the account chooser (notably the iOS PWA popup).
+  try {
+    const about = await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (about.ok) {
+      const { user } = await about.json();
+      if (user && user.emailAddress) storeDriveEmail(user.emailAddress);
+    }
+  } catch { /* non-fatal: hint just won't be available */ }
+
   emit('loading', t('menu.drive_connecting'));
 
   const folderId = await findOrCreateFolder(token);
@@ -368,6 +459,46 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   const dirtyTables = new Set();
   const saveTimers = {};
 
+  // ── Per-table sync intents (createdIds/deletedIds) ──
+  // Same engine as shared group files (js/sharing-file-reconcile.js): deletion
+  // is only absence in a file backend, so a plain overwrite/union cannot tell
+  // "deleted on another device" apart from "not yet seen". Intents disambiguate:
+  // a row this tab created but hasn't uploaded is retained; a row this tab
+  // deleted but hasn't uploaded suppresses the stale remote copy. Captured per
+  // upload, acknowledged only on success. Key-value tables (settings, prompts)
+  // keep their key-based merge — intents are id-keyed only.
+  const tableIntents = {}; // { tableName: { createdIds: Set, deletedIds: Set } }
+  const intentStateFor = (table) => {
+    if (!tableIntents[table]) tableIntents[table] = createIntentState();
+    return tableIntents[table];
+  };
+  const INTENT_TABLES = new Set(DRIVE_TABLES.filter(t => !KEY_VALUE_TABLES.has(t)));
+
+  /** Record create/delete intents for one local mutation (id-keyed tables only). */
+  function markDriveMutationIntents(table, builder, result, beforeIds) {
+    const intents = intentStateFor(table);
+    const rows = Array.isArray(result?.data) ? result.data : (result?.data ? [result.data] : []);
+    if (builder._method === 'POST') {
+      for (const row of rows) if (row?.id) markCreated(intents, row.id);
+    } else if (builder._method === 'PUT') {
+      // Upsert: only ids that did not exist before this mutation are creations;
+      // rows that already existed are updates (no presence change).
+      for (const row of rows) {
+        if (row?.id && beforeIds && !beforeIds.has(row.id)) markCreated(intents, row.id);
+      }
+    } else if (builder._method === 'DELETE') {
+      if (rows.length > 0) {
+        for (const row of rows) if (row?.id) markDeleted(intents, row.id);
+      } else {
+        // No rows echoed back: fall back to the id filter when the delete
+        // named exactly one row (e.g. .delete().eq('id', x)).
+        const idFilter = builder._filters?.find(f => f.col === 'id' && f.op === 'eq');
+        if (idFilter?.val != null) markDeleted(intents, idFilter.val);
+      }
+    }
+    // PATCH (update): no presence change — no intent.
+  }
+
   // ── Load: list files, read data from whatever format exists ──
 
   const existingFiles = await listFolderFiles(token, folderId);
@@ -375,9 +506,8 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   let initialData = {};
 
-  // Check for per-table files first, fall back to legacy single-file
+  // Check for per-table files
   const hasPerTableFiles = DRIVE_TABLES.some(t => filesByName.has(`${t}.json`));
-  const legacyFile = filesByName.get('delaclaw-data.json');
 
   if (hasPerTableFiles) {
     // Normal load: read each per-table file in parallel
@@ -389,24 +519,16 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       const fileInfo = filesByName.get(fileName);
       if (fileInfo) {
         const { data, etag } = await downloadFile(token, fileInfo.id);
-        fileMeta[table] = { fileId: fileInfo.id, etag, modifiedTime: fileInfo.modifiedTime };
+        fileMeta[table] = { fileId: fileInfo.id, etag, modifiedTime: fileInfo.modifiedTime, size: Number(fileInfo.size || 0) };
         initialData[table] = Array.isArray(data) ? data : [];
         loaded++;
         emit('loading', t('menu.drive_loading_table', table), loaded, total);
       } else {
         initialData[table] = [];
-        fileMeta[table] = { fileId: null, etag: null, modifiedTime: null };
+        fileMeta[table] = { fileId: null, etag: null, modifiedTime: null, size: 0 };
       }
     });
     await Promise.all(readPromises);
-  } else if (legacyFile) {
-    // Legacy format: read single file, populate initialData from it
-    emit('migrating', t('menu.drive_upgrading'));
-    const { data: legacyData } = await downloadFile(token, legacyFile.id);
-    for (const table of DRIVE_TABLES) {
-      initialData[table] = legacyData[table] || [];
-      fileMeta[table] = { fileId: null, etag: null, modifiedTime: null };
-    }
   } else {
     // Fresh install: no files at all
     for (const table of DRIVE_TABLES) {
@@ -415,7 +537,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     }
   }
 
-  const isFreshInstall = !hasPerTableFiles && !legacyFile;
+  const isFreshInstall = !hasPerTableFiles;
 
   // ── Create in-memory adapter seeded with loaded data ──
 
@@ -424,10 +546,48 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   const inner = createDemoAdapter(initialData);
 
+  // ── Read-only fallback state ──
+  // When the token is declared dead, the app switches to read-only mode:
+  // in-memory data stays viewable, mutations are rejected at from().
+  // authStateCb is registered by main.js: (alive: boolean) => void.
+  let authStateCb = null;
+  let readOnlyMode = false;
+
+  // ── Offline-cache snapshots ──
+  // Mirror every table confirmed on Drive into IndexedDB so a later cold
+  // start with unobtainable auth can boot read-only from the latest
+  // online version. Scoped by account email; skipped until it is known.
+  function snapshotTableToCache(table, rows) {
+    const email = getStoredDriveEmail();
+    if (!email) return;
+    cacheTableRows(driveCacheScope(email), table, rows).catch(() => {});
+  }
+  function snapshotAllToCache() {
+    const email = getStoredDriveEmail();
+    if (!email) return;
+    const snap = {};
+    for (const table of DRIVE_TABLES) snap[table] = inner._store[table] || [];
+    cacheSnapshot(driveCacheScope(email), snap).catch(() => {});
+  }
+
   // ── Token refresh helper ──
 
   let _tokenDead = false;
   let _reauthPending = false;
+  // Consecutive silent-refresh failures — a single transient hiccup (sleep/wake,
+  // network blip) must not declare the token dead and pop a sign-in dialog.
+  let _silentFailStreak = 0;
+  const MAX_SILENT_FAILURES = 3;
+  // One-shot visibility/focus handler that defers the re-auth popup until the
+  // tab is visible AND focused again (armed when a background/unfocused tab
+  // hits the dead-token path). document.hidden alone is not enough: a tab
+  // that is active in a window behind another window still counts as
+  // "visible", so the popup would steal focus from what the user is doing.
+  let _reauthVisibilityHandler = null;
+
+  function tabIsUsable() {
+    return !document.hidden && document.hasFocus();
+  }
 
   function isUserBusy() {
     // Inline editing, modal open, or flashcard/text practice active
@@ -438,12 +598,25 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     );
   }
 
+  function noteTokenAlive() {
+    const wasDead = _tokenDead;
+    _tokenDead = false;
+    if (wasDead && authStateCb) authStateCb(true);
+  }
+
+  function noteTokenDead() {
+    if (_tokenDead) return;
+    _tokenDead = true;
+    if (authStateCb) authStateCb(false);
+    scheduleReauthWhenFree();
+  }
+
   async function proactiveReauth() {
     if (_reauthPending) return;
     _reauthPending = true;
     try {
       const tok = await getGoogleAccessToken(clientId, true);
-      if (tok) _tokenDead = false;
+      if (tok) noteTokenAlive();
     } catch {
       // User dismissed the popup — stay in dead state, retry next flush cycle
     } finally {
@@ -453,6 +626,25 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   function scheduleReauthWhenFree() {
     if (!_tokenDead || _reauthPending) return;
+    console.log('[DeLaClaw] reauth visibility check — hidden:', document.hidden, 'hasFocus:', document.hasFocus());
+    if (!tabIsUsable()) {
+      // Never open a sign-in popup from a background or unfocused tab — defer
+      // the prompted re-auth until the user is back on this tab instead of
+      // startling them. Listens for both visibilitychange and focus: switching
+      // back to an already-visible window fires focus, not visibilitychange.
+      if (!_reauthVisibilityHandler) {
+        _reauthVisibilityHandler = () => {
+          if (!tabIsUsable()) return;
+          document.removeEventListener('visibilitychange', _reauthVisibilityHandler);
+          window.removeEventListener('focus', _reauthVisibilityHandler);
+          _reauthVisibilityHandler = null;
+          scheduleReauthWhenFree();
+        };
+        document.addEventListener('visibilitychange', _reauthVisibilityHandler);
+        window.addEventListener('focus', _reauthVisibilityHandler);
+      }
+      return;
+    }
     if (!isUserBusy()) {
       proactiveReauth();
     } else {
@@ -464,42 +656,50 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   async function getToken() {
     try {
       const tok = await getGoogleAccessToken(clientId, false);
-      if (tok) { _tokenDead = false; return tok; }
-    } catch { /* silent refresh failed */ }
-    // Silent refresh failed — token is dead
-    if (!_tokenDead) {
-      _tokenDead = true;
-      scheduleReauthWhenFree();
+      if (tok) { noteTokenAlive(); _silentFailStreak = 0; return tok; }
+    } catch (err) {
+      // Adapter destroyed while a refresh was deferred: stay dead quietly,
+      // without feeding the silent-failure streak or triggering re-auth.
+      if (err && err.message === 'drive_adapter_destroyed') return null;
+      /* silent refresh failed */
     }
+    _silentFailStreak++;
+    // Only declare the token dead after consecutive silent failures — a single
+    // transient failure must not escalate to a prompted sign-in popup.
+    if (_silentFailStreak < MAX_SILENT_FAILURES) return _cachedToken;
+    // Silent refresh failed — token is dead: switch the app to read-only
+    noteTokenDead();
     return _cachedToken;
   }
 
   // ── Run pending migrations ──
 
   if (isFreshInstall) {
-    // Fresh install: create all table files on Drive with progress, set schema to latest
-    const latestVersion = Object.keys(DRIVE_MIGRATIONS).sort((a, b) => parseFloat(a) - parseFloat(b)).pop() || '0';
-    const total = DRIVE_TABLES.length;
+    // Fresh install: create all table files on Drive with progress, set schema to latest.
+    // settings.json is the completion marker: it is written last, only after every other
+    // table file was created and the category tables were seeded. A partial failure therefore
+    // never leaves a "setup complete" stamp behind — the retry takes the normal load path
+    // with no schema_version, runs the pending migrations, and the category migration
+    // re-seeds the protected rows.
+    const latestVersion = Object.keys(DRIVE_MIGRATIONS).sort(compareVersions).pop() || '0';
+    const tablesToCreate = DRIVE_TABLES.filter(t => t !== 'settings');
+    const total = tablesToCreate.length + 1; // + settings.json, written last
     emit('loading', t('menu.drive_creating_tables'), 0, total);
     const tok = await getToken();
     if (!tok) throw new Error('Drive setup failed: could not obtain auth token');
     let created = 0;
-    await Promise.all(DRIVE_TABLES.map(async (table) => {
+    await Promise.all(tablesToCreate.map(async (table) => {
       const result = await uploadFile(tok, folderId, null, `${table}.json`, []);
       fileMeta[table] = { fileId: result.id, etag: result.etag, modifiedTime: new Date().toISOString() };
       created++;
       emit('loading', t('menu.drive_creating_progress', created, total, table), created, total);
     }));
-    // Set schema_version to latest — no migrations needed
-    if (!inner._store.settings) inner._store.settings = [];
-    inner._store.settings.push({ key: 'schema_version', value: latestVersion });
 
     // Seed protected rows for category tables (fresh install has empty arrays)
     const now = new Date().toISOString();
     const catSeed = [
       ['todo_categories',      '_default_todo_cat',  '_shared_todo_cat'],
       ['habit_categories',     '_default_habit_cat', '_shared_habit_cat'],
-      ['vestiaire_categories', '_default_vest_cat',  '_shared_vest_cat'],
       ['flashcard_decks',      '_default_deck',      '_shared_deck'],
     ];
     for (const [table, defId, sharedId] of catSeed) {
@@ -509,37 +709,36 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         { id: sharedId, name: '__shared__', shortname: null, color: null, sort_order: 9999, is_protected: 1, owner_id: null, created_at: now, updated_at: now },
       );
     }
-    // Flush seeded category tables + settings to Drive (parallel)
+    // Flush seeded category tables to Drive (parallel) — still before settings.json exists
     const seedTok = await getToken();
     if (!seedTok) throw new Error('Drive setup failed: could not obtain auth token for seed flush');
-    const seedFlushes = catSeed.map(async ([table]) => {
+    await Promise.all(catSeed.map(async ([table]) => {
       const meta = fileMeta[table] || {};
       const result = await uploadFile(seedTok, folderId, meta.fileId, `${table}.json`, inner._store[table]);
       fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
-    });
-    // Settings flush
-    const settingsMeta = fileMeta.settings || {};
-    seedFlushes.push((async () => {
-      const result = await uploadFile(seedTok, folderId, settingsMeta.fileId, 'settings.json', inner._store.settings);
-      fileMeta.settings = { fileId: result.id || settingsMeta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
-    })());
-    await Promise.all(seedFlushes);
+    }));
+    // Set schema_version to latest — no migrations needed — and write settings.json last,
+    // in a single upload, so it only ever exists once setup fully succeeded.
+    if (!inner._store.settings) inner._store.settings = [];
+    inner._store.settings.push({ key: 'schema_version', value: latestVersion });
+    const settingsResult = await uploadFile(seedTok, folderId, null, 'settings.json', inner._store.settings);
+    fileMeta.settings = { fileId: settingsResult.id, etag: settingsResult.etag, modifiedTime: new Date().toISOString() };
+    created++;
+    emit('loading', t('menu.drive_creating_progress', created, total, 'settings'), created, total);
   } else {
     // ── Run pending migrations (existing installs only) ──
 
     const pendingMigrations = Object.keys(DRIVE_MIGRATIONS)
-      .sort((a, b) => parseFloat(a) - parseFloat(b));
+      .sort(compareVersions);
 
     if (pendingMigrations.length > 0) {
       const settings = inner._store.settings || [];
       const svEntry = settings.find(s => s.key === 'schema_version');
       const currentVersion = svEntry ? String(svEntry.value) : '0';
 
-      const toRun = pendingMigrations.filter(v => v > currentVersion);
+      let toRun = pendingMigrations.filter(v => compareVersions(v, currentVersion) > 0);
 
       if (toRun.length > 0) {
-        emit('migrating', t('menu.drive_backing_up'), 0, toRun.length);
-
         // Context object for migrations that need Drive API access
         const migrationCtx = {
           token, folderId, fileMeta, filesByName,
@@ -547,29 +746,98 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
           uploadFile, downloadFile, deleteFile, listFolderFiles,
         };
 
-        // Save a full backup before any migration runs
-        const backupData = {};
-        for (const table of DRIVE_TABLES) {
-          backupData[table] = JSON.parse(JSON.stringify(inner._store[table] || []));
-        }
-        backupData._meta = {
-          backup_of: currentVersion,
-          created_at: new Date().toISOString(),
-          reason: `pre-migration (${toRun.length} pending: ${toRun.join(', ')})`,
-        };
+        // ── Pre-migration backup policy (see js/adapters/drive-backup-policy.js) ──
+        // A lingering backup-v{B}.json means "a migration batch from B failed":
+        // restore the tables from it and re-run from B. Otherwise snapshot the
+        // current tables. The backup is deleted after the batch succeeds, so it
+        // never accumulates.
         const tok = await getToken();
-        if (tok) {
-          await uploadFile(tok, folderId, null, `backup-v${currentVersion}.json`, backupData);
+        if (!tok) throw new Error('Drive migration failed: could not obtain auth token');
+        // settings.json is written once, at the end of the batch, so the
+        // schema_version on Drive moves exactly once per batch: a backup whose
+        // version equals the current version always means "its batch did not
+        // complete". No batch-target tracking needed.
+        const backupVersion = newestBackupVersion(filesByName.keys());
+        const action = decideBackupAction(backupVersion, currentVersion);
+        let backupName = null;
+        let backupId = null;
+        if (action === 'restore') {
+          // A previous batch from this backup's version did not complete:
+          // overwrite every table file in place from the backup — never
+          // delete-then-restore, or a failed restore would leave zero table
+          // files and the next connect would take the fresh-install branch.
+          backupName = `backup-v${backupVersion}.json`;
+          const found = filesByName.get(backupName);
+          backupId = found.id;
+          emit('migrating', t('menu.drive_restoring_backup'), 0, toRun.length);
+          // A successful download is exactly the bytes that were written: the
+          // backup was validated before upload and Drive revisions are atomic.
+          const backupData = (await downloadFile(tok, found.id)).data;
+          for (const table of DRIVE_TABLES) {
+            inner._store[table] = Array.isArray(backupData[table]) ? backupData[table] : [];
+          }
+          const restoreTok = await getToken();
+          if (!restoreTok) throw new Error('Drive migration failed: could not obtain auth token for restore');
+          await Promise.all(DRIVE_TABLES.map(async (table) => {
+            const meta = fileMeta[table] || {};
+            const result = await uploadFile(restoreTok, folderId, meta.fileId || null, `${table}.json`, inner._store[table]);
+            fileMeta[table] = { fileId: result.id || meta.fileId, etag: result.etag, modifiedTime: new Date().toISOString() };
+          }));
+          // Local and remote are identical by construction now: any sync intents
+          // pending from before the restore are definitionally stale — drop them.
+          for (const table of DRIVE_TABLES) {
+            if (INTENT_TABLES.has(table)) tableIntents[table] = createIntentState();
+          }
+          // Drop any other (older) backups; the restored one is deleted on success.
+          for (const [name, f] of filesByName) {
+            if (name !== backupName && parseBackupVersion(name) !== null) {
+              try { await deleteFile(tok, f.id); } catch (e) { console.warn('[DeLaClaw] could not delete stale backup', name, e); }
+              filesByName.delete(name);
+            }
+          }
+          // Re-run the batch from the backup's version on clean state.
+          toRun = pendingMigrations.filter(v => compareVersions(v, backupVersion) > 0);
+        } else {
+          // 'snapshot' (no backup) or 'stale' (its batch completed): drop any
+          // backups, then snapshot the current tables.
+          for (const [name, f] of filesByName) {
+            if (parseBackupVersion(name) !== null) {
+              try { await deleteFile(tok, f.id); } catch (e) { console.warn('[DeLaClaw] could not delete stale backup', name, e); }
+              filesByName.delete(name);
+            }
+          }
+          // Build-time validation: JSON.stringify either succeeds completely
+          // or throws before any network call, and the upload below either
+          // lands as one atomic revision or fails — Drive never exposes a
+          // half-written file.
+          const backupData = {};
+          for (const table of DRIVE_TABLES) {
+            const rows = inner._store[table] || [];
+            if (!Array.isArray(rows)) throw new Error(`Drive backup failed: table ${table} is not an array`);
+            backupData[table] = JSON.parse(JSON.stringify(rows));
+          }
+          backupName = `backup-v${currentVersion}.json`;
+          backupData._meta = {
+            backup_of: currentVersion,
+            created_at: new Date().toISOString(),
+            reason: `pre-migration (${toRun.length} pending: ${toRun.join(', ')})`,
+          };
+          emit('migrating', t('menu.drive_backing_up'), 0, toRun.length);
+          const created = await uploadFile(tok, folderId, null, backupName, backupData);
+          backupId = created.id;
+          filesByName.set(backupName, { id: created.id, name: backupName });
         }
 
-        // Run each migration, bump schema_version after each success
+        // Run each migration, then write settings.json once at the end.
+        // Each migration flushes only its changed tables (settings.json is NOT
+        // written per migration): the schema_version on Drive moves exactly
+        // once per batch, from the pre-batch version to the final one. So a
+        // backup whose version equals the current schema_version always means
+        // "its batch did not complete" — no batch-target tracking needed.
         // Progress model: bar reaches 100% only after the last upload completes.
-        // Total units = sum of (1 migration run + N dirty flushes) across all migrations.
-        // We can't know dirty counts ahead of time, so we use a two-level scheme:
-        // outer progress = migration index (shown in message), inner = per-table flush.
         let completedUnits = 0;
-        // Pessimistic total: 1 (run) + 1 (settings flush) per migration; adjusted per step
-        let totalUnits = toRun.length * 2;
+        // Pessimistic total: 1 (run) + 1 (flush) per migration + 1 (settings write); adjusted per step
+        let totalUnits = toRun.length * 2 + 1;
 
         for (let i = 0; i < toRun.length; i++) {
           const version = toRun[i];
@@ -584,7 +852,8 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
           await DRIVE_MIGRATIONS[version](inner._store, migrationCtx);
           completedUnits++; // migration function done
 
-          // Update schema_version in memory
+          // Update schema_version in memory (the Drive write is deferred to
+          // the end of the batch)
           const entry = (inner._store.settings || []).find(s => s.key === 'schema_version');
           if (entry) {
             entry.value = version;
@@ -593,8 +862,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             inner._store.settings.push({ key: 'schema_version', value: version });
           }
 
-          // Flush only tables that actually changed + settings (for version bump)
-          const dirtyTables = new Set(['settings']);
+          // Flush only tables that actually changed (settings.json excluded:
+          // written once, after the loop).
+          const dirtyTables = new Set();
           for (const table of DRIVE_TABLES) {
             if (table === 'settings') continue;
             if (JSON.stringify(inner._store[table] || []) !== snapshots[table]) {
@@ -625,6 +895,37 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             }
           }
         }
+
+        // Write settings.json once, at the end of the batch, with the final
+        // schema_version. This is the batch's completion marker: it only lands
+        // on Drive after every migration's tables were uploaded. A failure
+        // before this point leaves the pre-batch version behind, and the retry
+        // restores the pre-migration backup and re-runs the batch from clean
+        // state. Always written, even if no migration touched the settings
+        // table (a pure version-bump migration changes nothing else).
+        {
+          const settingsTok = await getToken();
+          if (!settingsTok) throw new Error('Drive migration failed: could not obtain auth token for settings write');
+          const settingsMeta = fileMeta.settings || {};
+          const settingsResult = await uploadFile(settingsTok, folderId, settingsMeta.fileId, 'settings.json', inner._store.settings || []);
+          fileMeta.settings = { fileId: settingsResult.id || settingsMeta.fileId, etag: settingsResult.etag, modifiedTime: new Date().toISOString() };
+          completedUnits++;
+          emit('migrating', t('menu.drive_migrating', toRun[toRun.length - 1]), completedUnits, totalUnits);
+        }
+
+        // Batch complete: delete the pre-migration backup. A lingering backup
+        // always means "a migration failed and will be retried from clean
+        // state" — never a historical archive. (If this delete crashes, the
+        // next connect sees a stale backup — version older than settings —
+        // and removes it before snapshotting fresh.)
+        if (backupId) {
+          try {
+            await deleteFile(tok, backupId);
+          } catch (e) {
+            console.warn('[DeLaClaw] could not delete pre-migration backup', backupName, e);
+          }
+          filesByName.delete(backupName);
+        }
       }
     }
   }
@@ -649,6 +950,12 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         const localData = inner._store[table] || [];
         const meta = fileMeta[table] || {};
         const fileName = `${table}.json`;
+        const useIntents = INTENT_TABLES.has(table);
+        const intents = useIntents ? intentStateFor(table) : null;
+        // Capture exactly which intents this upload represents. Only a success
+        // acknowledges them — a mutation made while the request is in flight
+        // stays pending (same contract as shared group files).
+        const captured = useIntents ? captureIntents(intents, localData) : null;
 
         try {
           const result = await uploadFile(tok, folderId, meta.fileId, fileName, localData, meta.etag, keepalive);
@@ -656,14 +963,36 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
             fileId: result.id || meta.fileId,
             etag: result.etag,
             modifiedTime: new Date().toISOString(),
+            // Exact stored byte length: uploadFile sends JSON.stringify(data, null, 2)
+            size: new TextEncoder().encode(JSON.stringify(localData, null, 2)).length,
           };
+          if (useIntents) acknowledgeIntents(intents, captured);
+          // The uploaded array is now the latest online version — mirror
+          // it into the offline cache for the read-only fallback.
+          snapshotTableToCache(table, localData);
         } catch (err) {
           if (err.code === 412 && retries < MAX_RETRIES) {
             console.warn(`Drive: ETag conflict on ${table}, merging (attempt ${retries + 1})`);
             const { data: remoteData, etag: newEtag } = await downloadFile(tok, meta.fileId);
-            const merged = mergeTable(table, localData, Array.isArray(remoteData) ? remoteData : []);
-            inner._store[table] = merged;
+            // Intent-aware reconciliation (not a blind union): a row present
+            // locally but absent remotely is a remote deletion — unless this
+            // tab created it and hasn't uploaded it yet. Key-value tables keep
+            // their key-based merge.
+            inner._store[table] = useIntents
+              ? reconcileItems(localData, Array.isArray(remoteData) ? remoteData : [], intents)
+              : mergeTable(table, localData, Array.isArray(remoteData) ? remoteData : []);
             fileMeta[table] = { ...meta, etag: newEtag };
+            flushingTables.delete(table);
+            delete flushPromises[table];
+            return flushTable(table, retries + 1, keepalive);
+          }
+          if (err.code === 404 && meta.fileId && retries < MAX_RETRIES) {
+            // The tracked file no longer exists (deleted by a migration,
+            // another client, or in the Drive UI): drop the stale meta
+            // and retry as a create. Without this, every debounced flush
+            // PATCHes the dead id and fails forever.
+            console.warn(`Drive: file for ${table} not found, recreating it`);
+            fileMeta[table] = { fileId: null, etag: null, modifiedTime: null, size: 0 };
             flushingTables.delete(table);
             delete flushPromises[table];
             return flushTable(table, retries + 1, keepalive);
@@ -672,6 +1001,10 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         }
       } catch (e) {
         console.error(`Drive: save failed for ${table}`, e);
+        // Rethrow: callers decide — the debounced path re-schedules the retry
+        // (the table stays dirty), forceSave tracks per-table success, and
+        // flushTables gates operations on the upload actually succeeding.
+        throw e;
       } finally {
         flushingTables.delete(table);
         delete flushPromises[table];
@@ -710,6 +1043,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   let pollTimer = null;
 
   async function pollForChanges() {
+    // Skip while a token refresh is deferred: avoids a wake-up herd of
+    // duplicate Drive requests.
+    if (_tabUsableWaiter) return;
     try {
       const tok = await getToken();
       if (!tok) return;
@@ -739,19 +1075,29 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         const newData = Array.isArray(data) ? data : [];
         const oldData = inner._store[tableName] || [];
 
+        // Intent-aware reconciliation instead of a blind overwrite: a row
+        // present in memory but absent on Drive is a remote deletion — unless
+        // this tab created it and hasn't uploaded it yet (createdIds). A row
+        // this tab deleted but hasn't uploaded suppresses the stale remote
+        // copy instead of resurrecting it.
+        const reconciled = INTENT_TABLES.has(tableName)
+          ? reconcileItems(oldData, newData, intentStateFor(tableName))
+          : newData;
+
         // Only update + notify if data actually changed (skip our own writes)
-        if (JSON.stringify(newData) !== JSON.stringify(oldData)) {
+        if (JSON.stringify(reconciled) !== JSON.stringify(oldData)) {
           if (tableName === 'settings') {
             const oldGcal = oldData.filter(r => r.key?.startsWith('gcal_')).map(r => r.key);
             const newGcal = newData.filter(r => r.key?.startsWith('gcal_')).map(r => r.key);
             console.log('[drive-poll] settings overwritten, gcal keys: old=%o new=%o', oldGcal, newGcal);
           }
-          inner._store[tableName] = newData;
-          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+          inner._store[tableName] = reconciled;
+          snapshotTableToCache(tableName, reconciled);
+          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime, size: Number(file.size || 0) };
           if (adapter._onExternalChange) adapter._onExternalChange(tableName);
         } else {
           // Same data (our own flush reflected back) — update metadata only
-          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime };
+          fileMeta[tableName] = { fileId: file.id, etag, modifiedTime: file.modifiedTime, size: Number(file.size || 0) };
         }
       }));
       } catch (e) { _err = true; throw e; }
@@ -792,6 +1138,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     error: 'Sync error — retrying'
   };
 
+  let _sharingAdapter = null;
   function updateSyncBarState() {
     const bar = ensureSyncBar();
     bar.classList.remove('synced', 'pending', 'active', 'error');
@@ -799,7 +1146,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       bar.classList.add('active');
       bar.title = SYNC_TITLES.active;
       if (_syncErrorTimeout) { clearTimeout(_syncErrorTimeout); _syncErrorTimeout = null; }
-    } else if (dirtyTables.size > 0 || Object.keys(saveTimers).length > 0) {
+    } else if (dirtyTables.size > 0 || Object.keys(saveTimers).length > 0 || _sharingAdapter?.hasPendingUploads?.()) {
       bar.classList.add('pending');
       bar.title = SYNC_TITLES.pending;
       if (_syncErrorTimeout) { clearTimeout(_syncErrorTimeout); _syncErrorTimeout = null; }
@@ -833,14 +1180,27 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   const adapter = {
     from(table) {
       const builder = inner.from(table);
-      // Ensure insert/upsert always returns data (including auto-generated IDs)
-      // so the dirty-tracking wrapper can extract the item ID from result.data.
+      // Ensure insert/upsert/delete always returns data (including auto-generated IDs)
+      // so the dirty-tracking wrapper can extract item IDs from result.data.
       builder._returnRow = true;
       const origThen = builder.then.bind(builder);
       builder.then = (resolve, reject) => {
+        // Read-only mode (token dead): reads hit the in-memory store as
+        // usual; mutations are rejected without touching the store, so
+        // nothing is queued for a flush that cannot succeed.
+        if (readOnlyMode && builder._method !== 'GET') {
+          resolve({ data: null, error: readOnlyError() });
+          return;
+        }
+        // Snapshot pre-mutation ids so upserts can tell created rows from updated ones.
+        const beforeIds = (builder._method === 'PUT' && INTENT_TABLES.has(table))
+          ? new Set((inner._store[table] || []).map(r => r.id))
+          : null;
         origThen(async (result) => {
           if (builder._method !== 'GET') {
             scheduleSave(table);
+            // Sync intents feeding the poll + 412 reconciliation below.
+            if (INTENT_TABLES.has(table)) markDriveMutationIntents(table, builder, result, beforeIds);
             // Track dirty item IDs for calendar sync
             if (adapter._markCalDirty) {
               let itemId = null;
@@ -871,11 +1231,13 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     rpc(fn, params) { return inner.rpc(fn, params); },
 
     async bulkSortOrder(table, updates) {
+      if (readOnlyMode) throw makeReadOnlyError();
       await inner.bulkSortOrder(table, updates);
       if (updates.length > 0) scheduleSave(table);
     },
 
     reseed(data) {
+      if (readOnlyMode) throw makeReadOnlyError();
       inner.reseed(data);
       for (const table of DRIVE_TABLES) scheduleSave(table);
     },
@@ -888,14 +1250,14 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
      */
     async runPendingMigrations() {
       const pendingMigrations = Object.keys(DRIVE_MIGRATIONS)
-        .sort((a, b) => parseFloat(a) - parseFloat(b));
+        .sort(compareVersions);
       if (!pendingMigrations.length) return 0;
 
       const settings = inner._store.settings || [];
       const svEntry = settings.find(s => s.key === 'schema_version');
       const currentVersion = svEntry ? String(svEntry.value) : '0';
 
-      const toRun = pendingMigrations.filter(v => v > currentVersion);
+      const toRun = pendingMigrations.filter(v => compareVersions(v, currentVersion) > 0);
       if (!toRun.length) return 0;
 
       const migrationCtx = {
@@ -934,9 +1296,62 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       if (tablesToSave.length > 0) {
         syncStart();
         let _err = false;
-        try { await Promise.all(tablesToSave.map(t => flushTable(t, 0, true))); }
-        catch (e) { _err = true; }
-        finally { syncEnd(_err); }
+        const flushed = [];
+        try {
+          // flushTable rethrows on failure: settle per table so one failure
+          // doesn't skip the rest. Failed tables are re-scheduled for the
+          // debounced retry instead of being silently dropped from dirtyTables.
+          const results = await Promise.all(tablesToSave.map(t =>
+            flushTable(t, 0, true).then(
+              () => ({ t, ok: true }),
+              (e) => ({ t, ok: false, err: e }),
+            ),
+          ));
+          for (const r of results) {
+            if (r.ok) flushed.push(r.t);
+            else { _err = true; scheduleSave(r.t); }
+          }
+        } finally { syncEnd(_err); }
+        // Notify listeners (e.g. calendar sync) for tables that actually
+        // flushed. The debounced path does this per table — forceSave must
+        // too, otherwise a tab-hide save uploads to Drive but the calendar
+        // event is never created.
+        if (adapter._onTableFlushed) {
+          for (const t of flushed) {
+            try { adapter._onTableFlushed(t); } catch (_) {}
+          }
+        }
+      }
+    },
+
+    /**
+     * Upload dirty tables now instead of waiting for the debounce timer.
+     * Rethrows the first failure so callers can gate an operation on its
+     * writes actually reaching Drive (e.g. the leave flow forces the
+     * converted tables up before flipping 'left' in group.json — a hard
+     * crash between the flip and the debounced flush would otherwise lose
+     * the kept copies). Tables that failed stay dirty and keep their
+     * debounced retry. Notifies _onTableFlushed for uploaded tables so the
+     * calendar sync runs, like the debounced path.
+     */
+    async flushTables(tables) {
+      const targets = tables ? tables.filter(t => dirtyTables.has(t)) : [...dirtyTables];
+      const flushed = [];
+      for (const t of targets) {
+        if (saveTimers[t]) { clearTimeout(saveTimers[t]); delete saveTimers[t]; }
+        try {
+          await flushTable(t);
+          dirtyTables.delete(t); // only clear dirty after successful flush
+          flushed.push(t);
+        } catch (e) {
+          scheduleSave(t); // keep the debounced retry alive for the rest
+          throw e;
+        }
+      }
+      if (adapter._onTableFlushed) {
+        for (const t of flushed) {
+          try { adapter._onTableFlushed(t); } catch (_) {}
+        }
       }
     },
 
@@ -946,8 +1361,25 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     get driveFolderId() { return folderId; },
     get driveFileMeta() { return { ...fileMeta }; },
 
+    /** Real stored byte total of the personal Drive folder (from file listings). */
+    get drivePersonalBytes() {
+      return Object.values(fileMeta).reduce((n, m) => n + (Number(m?.size) || 0), 0);
+    },
+
     /** Expose token getter for sharing module. */
     getToken,
+    /** Read-only mode control — main.js drives it from auth state. */
+    setReadOnly(v) { readOnlyMode = !!v; },
+    get readOnly() { return readOnlyMode; },
+    /** Register the auth-state listener: cb(true) = token alive, cb(false) = token dead. */
+    onAuthStateChange(cb) { authStateCb = cb; },
+    /** Prompted re-auth for the read-only banner's Sign-in button. */
+    reauth() { return proactiveReauth(); },
+    /** Sync-bar controls for the sharing adapter's debounced uploads. */
+    syncStart,
+    syncEnd,
+    notifySharingState: () => updateSyncBarState(),
+    setSharingAdapter(sharing) { _sharingAdapter = sharing; },
 
     /** Force a prompted re-auth that includes the Calendar scope.
      *  Requests only calendar.app.created incrementally;
@@ -979,6 +1411,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
               _cachedClientId = clientId;
               _tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
               _persistToken(_cachedToken, _tokenExpiry, clientId, granted);
+              noteTokenAlive();
               resolve(resp.access_token);
             }
           },
@@ -1045,53 +1478,80 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     pollNow() { pollForChanges().catch(() => {}); },
 
     destroy() {
+      authStateCb = null;
       stopPolling();
       for (const t of Object.keys(saveTimers)) clearTimeout(saveTimers[t]);
+      if (_reauthVisibilityHandler) {
+        document.removeEventListener('visibilitychange', _reauthVisibilityHandler);
+        window.removeEventListener('focus', _reauthVisibilityHandler);
+        _reauthVisibilityHandler = null;
+      }
       clearDriveTokenCache(clientId);
     },
 
     /**
-     * Delete the user's DeLaClaw account: trash the Drive folder (and all
-     * files inside it), revoke the OAuth token, and clear local state.
-     * Returns { ok: true } on success or { ok: false, error: string }.
+     * Permanently delete the user's personal DeLaClaw Drive folder and every
+     * file inside it. Unlike trashing, this cannot be undone.
+     * Returns { ok: true } on success or { ok: false, error: string } — the
+     * caller aborts the account deletion on failure.
      */
-    async deleteAccount() {
+    async deletePersonalData() {
       try {
         const tok = await getToken();
         if (!tok) return { ok: false, error: 'No valid token — please sign in again' };
 
-        // 1. Delete the DeLaClaw calendar if sync was enabled
-        try {
-          const calRow = store.settings?.find(r => r.key === 'gcal_calendar_id');
-          const calId = calRow?.value;
-          if (calId) {
-            await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}`, {
-              method: 'DELETE',
-              headers: { 'Authorization': `Bearer ${tok}` },
-            });
-          }
-        } catch { /* best effort */ }
+        // List every file in the personal folder, then permanently delete
+        // each one before deleting the folder itself.
+        let pageToken = null;
+        const childIds = [];
+        do {
+          const url = new URL('https://www.googleapis.com/drive/v3/files');
+          url.searchParams.set('q', `'${folderId}' in parents and trashed = false`);
+          url.searchParams.set('fields', 'files(id),nextPageToken');
+          url.searchParams.set('pageSize', '100');
+          if (pageToken) url.searchParams.set('pageToken', pageToken);
+          const listRes = await fetch(url, { headers: { 'Authorization': `Bearer ${tok}` } });
+          if (!listRes.ok) return { ok: false, error: `Could not list personal files (HTTP ${listRes.status})` };
+          const data = await listRes.json();
+          for (const f of data.files || []) childIds.push(f.id);
+          pageToken = data.nextPageToken;
+        } while (pageToken);
 
-        // 2. Trash the DeLaClaw folder (cascades to all files inside)
-        try {
-          await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}`, {
-            method: 'PATCH',
-            headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ trashed: true }),
+        for (const id of childIds) {
+          const delRes = await fetch(`https://www.googleapis.com/drive/v3/files/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${tok}` },
           });
-        } catch { /* best effort */ }
+          if (!delRes.ok) return { ok: false, error: `Could not permanently delete a personal file (HTTP ${delRes.status})` };
+        }
 
-        // 3. Revoke the OAuth token
-        try {
-          await fetch(`https://oauth2.googleapis.com/revoke?token=${tok}`, { method: 'POST' });
-        } catch { /* best effort */ }
-
+        const folderRes = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${tok}` },
+        });
+        if (!folderRes.ok) return { ok: false, error: `Could not permanently delete the personal folder (HTTP ${folderRes.status})` };
         return { ok: true };
       } catch (e) {
         return { ok: false, error: e.message || 'Unexpected error' };
       }
     },
+
+    /**
+     * Revoke the OAuth token. Best effort — runs last, after the data is
+     * gone, so a revoke failure never blocks the wipe.
+     */
+    async revokeToken() {
+      try {
+        const tok = await getToken();
+        if (tok) await fetch(`https://oauth2.googleapis.com/revoke?token=${tok}`, { method: 'POST' });
+      } catch { /* best effort */ }
+      clearDriveTokenCache(clientId);
+    },
   };
+
+  // The just-loaded state is the latest online version — snapshot it
+  // into the offline cache before declaring ready.
+  snapshotAllToCache();
 
   startPolling();
 

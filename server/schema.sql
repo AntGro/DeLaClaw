@@ -1,4 +1,4 @@
--- Last — local SQLite schema (mirrors Supabase tables)
+-- Last — local SQLite schema
 
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS todo_categories (
   color TEXT,
   sort_order INTEGER DEFAULT 0,
   is_protected INTEGER DEFAULT 0,
+  kind TEXT DEFAULT 'bucket',
+  parent_id TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
@@ -47,18 +49,8 @@ CREATE TABLE IF NOT EXISTS habit_categories (
   color TEXT,
   sort_order INTEGER DEFAULT 0,
   is_protected INTEGER DEFAULT 0,
-  owner_id TEXT,
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS vestiaire_categories (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-  name TEXT NOT NULL,
-  shortname TEXT,
-  color TEXT,
-  sort_order INTEGER DEFAULT 0,
-  is_protected INTEGER DEFAULT 0,
+  kind TEXT DEFAULT 'bucket',
+  parent_id TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
@@ -71,6 +63,7 @@ CREATE TABLE IF NOT EXISTS flashcard_decks (
   color TEXT,
   sort_order INTEGER DEFAULT 0,
   is_protected INTEGER DEFAULT 0,
+  deck_type TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
@@ -101,6 +94,10 @@ CREATE TABLE IF NOT EXISTS habits (
   category_id TEXT REFERENCES habit_categories(id) ON DELETE CASCADE,
   is_draft INTEGER DEFAULT 0,
   next_due TEXT,
+  end_date TEXT,
+  is_finished INTEGER DEFAULT 0,
+  snoozed_until TEXT,
+  is_auto INTEGER DEFAULT 0,
   shared_id TEXT,
   shared_group_id TEXT,
   owner_id TEXT,
@@ -113,6 +110,7 @@ CREATE TABLE IF NOT EXISTS habit_completions (
   habit_id TEXT REFERENCES habits(id) ON DELETE CASCADE,
   completed_at TEXT,
   completed_by TEXT,
+  is_auto INTEGER DEFAULT 0,
   owner_id TEXT,
   note TEXT,
   created_at TEXT DEFAULT (datetime('now'))
@@ -152,8 +150,9 @@ CREATE TABLE IF NOT EXISTS texts (
   title TEXT NOT NULL,
   author TEXT,
   content TEXT NOT NULL,
-  lines_per_chunk INTEGER NOT NULL DEFAULT 4,
-  context_lines INTEGER NOT NULL DEFAULT 3,
+  blocks_per_chunk INTEGER NOT NULL DEFAULT 4,
+  context_blocks INTEGER NOT NULL DEFAULT 3,
+  focus_role TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -182,22 +181,6 @@ CREATE TABLE IF NOT EXISTS birthdays (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS vestiaire (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-  name TEXT NOT NULL,
-  brand TEXT,
-  size TEXT,
-  category TEXT DEFAULT '',
-  category_id TEXT REFERENCES vestiaire_categories(id) ON DELETE CASCADE,
-  color TEXT,
-  note TEXT,
-  purchase_status TEXT,
-  sort_order INTEGER DEFAULT 0,
-  owner_id TEXT,
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT,
@@ -212,15 +195,6 @@ CREATE TABLE IF NOT EXISTS prompts (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS nvidia_usage (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-  model TEXT,
-  tokens_in INTEGER,
-  tokens_out INTEGER,
-  owner_id TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS lists (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   name TEXT NOT NULL,
@@ -229,6 +203,8 @@ CREATE TABLE IF NOT EXISTS lists (
   icon TEXT,
   sort_order INTEGER DEFAULT 0,
   archived INTEGER DEFAULT 0,
+  kind TEXT DEFAULT 'bucket',
+  parent_id TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
@@ -249,27 +225,12 @@ CREATE TABLE IF NOT EXISTS list_items (
 );
 
 CREATE TABLE IF NOT EXISTS daily_visits (
-  visit_date TEXT NOT NULL,
-  owner_id TEXT,
-  created_at TEXT DEFAULT (datetime('now')),
-  PRIMARY KEY (visit_date, owner_id)
-);
-
-CREATE TABLE IF NOT EXISTS joined_groups (
-  group_id TEXT PRIMARY KEY,
-  member_id TEXT NOT NULL,
-  token TEXT,
-  display_name TEXT,
-  group_name TEXT,
-  remote_backend_type TEXT NOT NULL,
-  remote_url TEXT,
-  remote_anon_key TEXT,
-  owner_id TEXT,
-  token_ciphertext TEXT,
-  token_iv TEXT,
-  remote_anon_key_ciphertext TEXT,
-  remote_anon_key_iv TEXT,
-  joined_at TEXT DEFAULT (datetime('now'))
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  num_active_days INTEGER NOT NULL DEFAULT 0,
+  current_streak INTEGER NOT NULL DEFAULT 0,
+  max_streak INTEGER NOT NULL DEFAULT 0,
+  last_connection_date TEXT
 );
 
 -- ── Indexes for owner_id and shared_id — avoid full scans as tables grow ──
@@ -280,12 +241,10 @@ CREATE INDEX IF NOT EXISTS idx_habits_owner_id ON habits(owner_id);
 CREATE INDEX IF NOT EXISTS idx_habit_completions_owner_id ON habit_completions(owner_id);
 CREATE INDEX IF NOT EXISTS idx_flashcard_notes_owner_id ON flashcard_notes(owner_id);
 CREATE INDEX IF NOT EXISTS idx_birthdays_owner_id ON birthdays(owner_id);
-CREATE INDEX IF NOT EXISTS idx_vestiaire_owner_id ON vestiaire(owner_id);
 CREATE INDEX IF NOT EXISTS idx_lists_owner_id ON lists(owner_id);
 CREATE INDEX IF NOT EXISTS idx_list_items_owner_id ON list_items(owner_id);
 CREATE INDEX IF NOT EXISTS idx_prompts_owner_id ON prompts(owner_id);
 CREATE INDEX IF NOT EXISTS idx_settings_owner_id ON settings(owner_id);
-CREATE INDEX IF NOT EXISTS idx_joined_groups_owner_id ON joined_groups(owner_id);
 CREATE INDEX IF NOT EXISTS idx_todos_shared_id ON todos(shared_id);
 CREATE INDEX IF NOT EXISTS idx_todos_shared_group_id ON todos(shared_group_id);
 CREATE INDEX IF NOT EXISTS idx_habits_shared_id ON habits(shared_id);
@@ -296,15 +255,13 @@ CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_g
 -- ── Category table indexes ──
 CREATE INDEX IF NOT EXISTS idx_todo_categories_owner_id ON todo_categories(owner_id);
 CREATE INDEX IF NOT EXISTS idx_habit_categories_owner_id ON habit_categories(owner_id);
-CREATE INDEX IF NOT EXISTS idx_vestiaire_categories_owner_id ON vestiaire_categories(owner_id);
 CREATE INDEX IF NOT EXISTS idx_flashcard_decks_owner_id ON flashcard_decks(owner_id);
 CREATE INDEX IF NOT EXISTS idx_todos_category_id ON todos(category_id);
 CREATE INDEX IF NOT EXISTS idx_habits_category_id ON habits(category_id);
-CREATE INDEX IF NOT EXISTS idx_vestiaire_category_id ON vestiaire(category_id);
 CREATE INDEX IF NOT EXISTS idx_flashcards_deck_id ON flashcards(deck_id);
 CREATE INDEX IF NOT EXISTS idx_texts_deck_id ON texts(deck_id);
 
--- 1.410 agent grants (parity with Supabase)
+-- ── agent grants (external agent API tokens) ──
 CREATE TABLE IF NOT EXISTS agent_grants (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   owner_id TEXT,
@@ -324,8 +281,6 @@ INSERT OR IGNORE INTO todo_categories (id, name, is_protected, sort_order) VALUE
 INSERT OR IGNORE INTO todo_categories (id, name, is_protected, sort_order) VALUES ('_shared_todo_cat', '__shared__', 1, 9999);
 INSERT OR IGNORE INTO habit_categories (id, name, is_protected, sort_order) VALUES ('_default_habit_cat', '', 1, 0);
 INSERT OR IGNORE INTO habit_categories (id, name, is_protected, sort_order) VALUES ('_shared_habit_cat', '__shared__', 1, 9999);
-INSERT OR IGNORE INTO vestiaire_categories (id, name, is_protected, sort_order) VALUES ('_default_vest_cat', '', 1, 0);
-INSERT OR IGNORE INTO vestiaire_categories (id, name, is_protected, sort_order) VALUES ('_shared_vest_cat', '__shared__', 1, 9999);
 INSERT OR IGNORE INTO flashcard_decks (id, name, is_protected, sort_order) VALUES ('_default_deck', '', 1, 0);
 INSERT OR IGNORE INTO flashcard_decks (id, name, is_protected, sort_order) VALUES ('_shared_deck', '__shared__', 1, 9999);
 
@@ -350,16 +305,6 @@ CREATE TRIGGER IF NOT EXISTS trg_protect_habit_categories_upd
   WHEN OLD.is_protected = 1
   BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
 
-CREATE TRIGGER IF NOT EXISTS trg_protect_vestiaire_categories
-  BEFORE DELETE ON vestiaire_categories FOR EACH ROW
-  WHEN OLD.is_protected = 1
-  BEGIN SELECT RAISE(ABORT, 'Cannot delete protected category row'); END;
-
-CREATE TRIGGER IF NOT EXISTS trg_protect_vestiaire_categories_upd
-  BEFORE UPDATE ON vestiaire_categories FOR EACH ROW
-  WHEN OLD.is_protected = 1
-  BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
-
 CREATE TRIGGER IF NOT EXISTS trg_protect_flashcard_decks
   BEFORE DELETE ON flashcard_decks FOR EACH ROW
   WHEN OLD.is_protected = 1
@@ -371,10 +316,12 @@ CREATE TRIGGER IF NOT EXISTS trg_protect_flashcard_decks_upd
   BEGIN SELECT RAISE(ABORT, 'Cannot modify protected category row'); END;
 
 -- Google Calendar sync tracking
+-- gcal_sync is a bare set of live (item_type, item_id) pairs: the Google event
+-- id is derived from the item id (dashes stripped), so no mapping column is
+-- needed. (Calendar sync only runs on the Drive backend, where this table is
+-- a JSON file — the local SQLite copy is always empty, so no DDL migration.)
 CREATE TABLE IF NOT EXISTS gcal_sync (
   item_type TEXT NOT NULL,
   item_id TEXT NOT NULL,
-  gcal_event_id TEXT NOT NULL,
-  last_synced_at TEXT DEFAULT (datetime('now')),
   PRIMARY KEY (item_type, item_id)
 );

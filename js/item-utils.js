@@ -6,6 +6,7 @@ import { showToast, isTouchDevice } from './utils.js';
 import { t } from './i18n.js';
 import { lucideIcon } from './icons.js';
 import db from './db.js';
+import state from './state.js';
 
 // ===================================================================
 // SHARED DRAG STATE
@@ -13,7 +14,7 @@ import db from './db.js';
 export let isDragging = false;
 export function setDragging(v) { isDragging = v; }
 
-export const LONG_PRESS_MS = 100;
+export const LONG_PRESS_MS = 150;
 export const DRAG_THRESHOLD = 5;
 export const DRAG_CLONE_SELECTOR = '[data-drag-clone="true"]';
 export const DRAG_SOURCE_SELECTOR = '[data-drag-source="true"]';
@@ -322,6 +323,7 @@ export function initItemDragDrop(container, {
     item.addEventListener('dragstart', e => e.preventDefault(), sig);
 
     item.addEventListener('pointerdown', e => {
+      if (state.readOnlyMode) return; // read-only: no drag / move
       if (e.target.closest(excludeSelector)) return;
       if (dragState) return;
       if (e.button !== 0) return;
@@ -559,6 +561,7 @@ export async function reorderItems({
   tableName,
   reinitFn,
 }) {
+  if (state.readOnlyMode) return; // read-only: no reorder (also skips the optimistic in-memory sort_order update)
   // Diff: only PATCH items whose sort_order actually changed
   const updates = [];
   orderedIds.forEach((id, i) => {
@@ -582,6 +585,7 @@ export async function reorderItems({
 // BULK SORT ORDER — single RPC when available, parallel PATCHes fallback
 // ===================================================================
 export async function bulkSortOrder(tableName, updates) {
+  if (state.readOnlyMode) return; // read-only backstop (adapter rejects too)
   if (updates.length === 0) return;
   await db.bulkSortOrder(tableName, updates);
 }
@@ -589,10 +593,10 @@ export async function bulkSortOrder(tableName, updates) {
 // INNER SCROLL POSITION CAPTURE / RESTORE
 // ===================================================================
 // When a grid is rebuilt via innerHTML, scrollable inner lists (task-list,
-// todo-cat-list, list-item-list, vestiaire-item-list, birthday-bucket-list)
+// todo-cat-list, list-item-list, birthday-bucket-list)
 // lose their scrollTop. Capture before innerHTML, restore after.
 
-const SCROLLABLE_LIST_SELECTOR = '.task-list, .todo-cat-list, .list-item-list, .vestiaire-item-list, .birthday-bucket-list';
+const SCROLLABLE_LIST_SELECTOR = '.task-list, .todo-cat-list, .list-item-list, .birthday-bucket-list, .welcome-items';
 
 function scrollContainerKey(el) {
   if (el.id) return 'id:' + el.id;
@@ -692,6 +696,7 @@ let _inlineEditRefreshTimer = null;
 let _datePickerJustClosed = false;
 
 export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refreshFn, extraEl, onStart, onFinish, collectExtra, multiline, containerEl }) {
+  if (state.readOnlyMode) return; // read-only: no inline editing
   if (spanEl.dataset.editing) return;
 
   // Cancel any other active inline edit first (discard + restore span)
@@ -880,7 +885,7 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
 
       // Scroll the textarea into view within the scrollable task list
       // without changing the deck's maxHeight
-      const parentList = input.closest('.task-list, .vestiaire-item-list');
+      const parentList = input.closest('.task-list');
       if (parentList) {
         const parentRect = parentList.getBoundingClientRect();
         const inputRect = input.getBoundingClientRect();
@@ -901,11 +906,14 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
 // Shared across all pages. Long-press a nav pill to pick it up; other
 // pills slide apart with CSS transitions to show where it will land.
 // Drop to commit. `onReorder(orderedIds)` receives the full new order.
-export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = {}) {
+export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds, crossDrop } = {}) {
   const container = document.getElementById(containerId);
   if (!container) return;
   const allBtns = () => Array.from(container.querySelectorAll('.category-nav-btn'));
-  if (allBtns().length < 2) return;
+  // With crossDrop, even a single chip is a valid drag source (it can
+  // be dragged OUT to another row), so the usual <2 early return —
+  // which exists for pure reordering — does not apply.
+  if (allBtns().length < 2 && !crossDrop) return;
 
   let dragState = null;
 
@@ -940,6 +948,16 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = 
       if (!active) { cleanup(false); return; }
 
       const ph = active.placeholder;
+      if (active.hlEl) { active.hlEl.classList.remove('nav-drop-target'); active.hlEl = null; }
+      // Cross-container drop: read the insertion anchor from the
+      // placeholder's position in the TARGET row before it is removed.
+      const cross = complete ? active.crossTarget : null;
+      let crossBeforeId = null;
+      if (cross && cross.row && ph?.parentNode === cross.row) {
+        let sib = ph.nextElementSibling;
+        while (sib === btn) sib = sib.nextElementSibling;
+        if (sib?.classList?.contains('category-nav-btn')) crossBeforeId = sib.dataset[idAttr] || null;
+      }
 
       // Build final order from placeholder position
       let finalOrder;
@@ -975,6 +993,12 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = 
       btn.style.cssText = active.originalCssText || '';
       btn.classList.remove('nav-btn-dragging');
       allBtns().forEach(b => { b.style.transition = ''; b.style.transform = ''; });
+      if (crossDrop?.rootEl) {
+        crossDrop.rootEl.querySelectorAll('.category-nav-btn').forEach(b => { b.style.transition = ''; b.style.transform = ''; });
+        // A chips row manually revealed via the section header
+        // (section-chips-open) closes again once the move finishes.
+        crossDrop.rootEl.querySelectorAll('.section-chips-open').forEach(r => r.classList.remove('section-chips-open'));
+      }
 
       try {
         if (active.pointerId && btn.hasPointerCapture?.(active.pointerId)) btn.releasePointerCapture(active.pointerId);
@@ -984,9 +1008,13 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = 
 
       dragState = null;
       setDragging(false);
+      document.body.classList.remove('chip-drag-active');
       cleanup(true);
 
-      if (changed) {
+      if (cross) {
+        try { await crossDrop.onMove(entityId, cross.parentId, crossBeforeId); }
+        catch (e) { console.error('Nav btn cross-move failed:', e); }
+      } else if (changed) {
         try { await onReorder(finalOrder); }
         catch (e) { console.error('Nav btn reorder failed:', e); }
       }
@@ -1000,6 +1028,7 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = 
     btn.addEventListener('contextmenu', e => { if (activated) e.preventDefault(); });
 
     btn.addEventListener('pointerdown', e => {
+      if (state.readOnlyMode) return; // read-only: no nav reorder
       if (dragState) return;
       if (e.button !== 0) return;
       startX = e.clientX;
@@ -1018,6 +1047,10 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = 
         activated = true;
         e.preventDefault();
         setDragging(true);
+        // Reveals the normally-hidden chips rows (sections with at
+        // most one child) for the duration of the drag, so drops can
+        // target every section's row. CSS: .section-chips-collapsed.
+        document.body.classList.add('chip-drag-active');
         document.body.style.userSelect = 'none';
         document.body.style.webkitUserSelect = 'none';
 
@@ -1053,11 +1086,115 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = 
           placeholder,
           initialOrder,
           originalCssText,
+          crossTarget: null,
+          hlEl: null,
         };
 
         try { btn.setPointerCapture(e.pointerId); } catch (_) {}
       }, LONG_PRESS_MS);
     });
+
+    // ── Cross-container drop (opt-in via crossDrop) ──
+    // The dragged chip can leave its own chips row: dropping on
+    // another row inserts at the pointer's position among that row's
+    // chips (new parent = the row's owner). All drops happen at
+    // chips-row level — rows of sections with at most one child are
+    // revealed for the duration of the drag. canDrop (view-supplied)
+    // refuses cycles, name collisions and same-parent targets, and
+    // refused targets simply never highlight.
+    // FLIP-animate a chips row's chips around a placeholder move, so
+    // chips glide instead of jumping when the placeholder enters,
+    // leaves or shifts inside a row during a cross-container drag
+    // (the in-container path has its own FLIP for the home row).
+    const flipChipsAround = (rowEl, mutate) => {
+      if (!rowEl) { mutate(); return; }
+      const chips = Array.from(rowEl.querySelectorAll('.category-nav-btn')).filter(b => b !== btn);
+      chips.forEach(b => { b.style.transition = 'none'; b.style.transform = ''; });
+      const oldRects = new Map(chips.map(b => [b, b.getBoundingClientRect()]));
+      mutate();
+      chips.forEach(b => {
+        const o = oldRects.get(b);
+        const n = b.getBoundingClientRect();
+        const dx = o.left - n.left;
+        const dy = o.top - n.top;
+        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) b.style.transform = `translate(${dx}px,${dy}px)`;
+      });
+      rowEl.offsetHeight; // force reflow before enabling transitions
+      chips.forEach(b => {
+        if (b.style.transform) { b.style.transition = 'transform 0.25s ease'; b.style.transform = ''; }
+      });
+    };
+
+    const positionPlaceholderInRow = (rowEl, x, y) => {
+      const ph = dragState.placeholder;
+      const chips = Array.from(rowEl.querySelectorAll('.category-nav-btn')).filter(b => b !== btn);
+      const rowsG = [];
+      for (const chip of chips) {
+        const r = chip.getBoundingClientRect();
+        const midY = r.top + r.height / 2;
+        let g = rowsG.find(rw => Math.abs(midY - rw.midY) < r.height * 0.6);
+        if (g) g.items.push({ el: chip, rect: r });
+        else rowsG.push({ midY, items: [{ el: chip, rect: r }] });
+      }
+      rowsG.sort((a, b) => a.midY - b.midY);
+      rowsG.forEach(rw => rw.items.sort((a, b) => a.rect.left - b.rect.left));
+      let targetRow = rowsG[0];
+      if (rowsG.length > 1) {
+        let minDist = Infinity;
+        for (const rw of rowsG) { const d = Math.abs(y - rw.midY); if (d < minDist) { minDist = d; targetRow = rw; } }
+      }
+      let insertBefore = null;
+      if (targetRow) {
+        for (const item of targetRow.items) {
+          if (x < item.rect.left + item.rect.width / 2) { insertBefore = item.el; break; }
+        }
+        if (!insertBefore) {
+          const ri = rowsG.indexOf(targetRow);
+          if (ri < rowsG.length - 1) insertBefore = rowsG[ri + 1].items[0].el;
+        }
+      }
+      flipChipsAround(rowEl, () => {
+        if (insertBefore) {
+          if (ph.parentNode !== rowEl || ph.nextElementSibling !== insertBefore) rowEl.insertBefore(ph, insertBefore);
+        } else if (ph.parentNode !== rowEl || ph.nextElementSibling) {
+          rowEl.appendChild(ph);
+        }
+      });
+    };
+
+    const updateCrossTarget = (e) => {
+      const ds = dragState;
+      if (!ds) return false;
+      const prevPE = btn.style.pointerEvents;
+      btn.style.pointerEvents = 'none';
+      const hit = document.elementFromPoint(e.clientX, e.clientY);
+      btn.style.pointerEvents = prevPE;
+      const root = crossDrop.rootEl;
+      let target = null;
+      if (hit && root && root.contains(hit)) {
+        // Drops happen at chips-row level only: sections whose row
+        // is normally hidden (at most one child) have it revealed
+        // for the duration of the drag (body.chip-drag-active), so
+        // every section owns a visible row to drop into.
+        const rowEl = hit.closest('.category-nav-buttons');
+        if (rowEl && rowEl !== container && root.contains(rowEl)) {
+          const pid = crossDrop.rowOwner(rowEl);
+          if (pid !== undefined && crossDrop.canDrop(entityId, pid)) target = { parentId: pid, row: rowEl, hl: rowEl };
+        }
+      }
+      if (ds.hlEl && (!target || ds.hlEl !== target.hl)) { ds.hlEl.classList.remove('nav-drop-target'); ds.hlEl = null; }
+      ds.crossTarget = target;
+      if (!target) return false;
+      if (target.hl) { target.hl.classList.add('nav-drop-target'); ds.hlEl = target.hl; }
+      const curRow = ds.placeholder.parentNode?.classList?.contains('category-nav-buttons') ? ds.placeholder.parentNode : null;
+      if (curRow && curRow !== target.row) {
+        // Leaving another row: glide its chips closed behind the placeholder.
+        flipChipsAround(curRow, () => positionPlaceholderInRow(target.row, e.clientX, e.clientY));
+      } else {
+        positionPlaceholderInRow(target.row, e.clientX, e.clientY);
+      }
+      return true;
+    };
 
     btn.addEventListener('pointermove', e => {
       if (pressTimer && !activated) {
@@ -1072,6 +1209,18 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = 
       // Button follows cursor instantly (transition:none already set)
       btn.style.left = (e.clientX - dragState.offsetX) + 'px';
       btn.style.top = (e.clientY - dragState.offsetY) + 'px';
+
+      if (crossDrop) {
+        if (updateCrossTarget(e)) return;
+        // No cross target: make sure the placeholder is back home
+        // before the in-container positioning below runs, gliding
+        // the chips of the row it leaves (and of the home row).
+        const phEl = dragState.placeholder;
+        if (phEl.parentNode !== container) {
+          const oldRow = phEl.parentNode?.classList?.contains('category-nav-buttons') ? phEl.parentNode : null;
+          flipChipsAround(oldRow, () => flipChipsAround(container, () => container.insertBefore(phEl, btn)));
+        }
+      }
 
       // Determine insertion point — supports multi-row flex wrapping
       const ph = dragState.placeholder;
@@ -1151,7 +1300,7 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds } = 
       container.offsetHeight; // force reflow before enabling transitions
       siblings.forEach(b => {
         if (b.style.transform) {
-          b.style.transition = 'transform 0.15s ease';
+          b.style.transition = 'transform 0.25s ease';
           b.style.transform = '';
         }
       });

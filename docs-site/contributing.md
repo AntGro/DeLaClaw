@@ -56,7 +56,7 @@ DeLaClaw is vanilla JavaScript by design. No frameworks, no build step, no trans
 ### Pull requests
 
 - One logical change per PR.
-- All tests must pass (`node tests/tests.js` -- 76 tests currently).
+- All tests must pass (`node tests/tests.js`).
 - The PR description should explain *what* changed and *why*.
 - Screenshots or before/after comparisons for UI changes.
 
@@ -70,11 +70,10 @@ node tests/tests.js
 
 Tests include:
 - Unit tests for core logic (version parsing, drag-and-drop, utilities)
-- Adapter compliance tests (all four backends implement the same interface)
+- Adapter compliance tests (all backends implement the same interface)
 - REST server integration tests (requires Bun)
-- Browser-based end-to-end tests (requires Playwright -- `npx playwright install chromium`)
 
-All 76 tests must pass. If you add a new feature, add tests for it.
+All tests must pass. If you add a new feature, add tests for it.
 
 ## What contributions are welcome
 
@@ -99,7 +98,7 @@ Larger features should be discussed in an issue before starting work. This avoid
 File an issue with:
 - Steps to reproduce
 - Expected vs. actual behavior
-- Backend mode (Supabase / local / demo)
+- Backend mode (Drive / local / demo)
 - Browser and OS
 - Screenshots if applicable
 
@@ -115,14 +114,14 @@ Documentation improvements are always welcome. The main docs live in `docs/` and
 
 ## Releasing
 
-All changes land on `dev` first, which auto-deploys to [dev.delaclaw.pages.dev](https://dev.delaclaw.pages.dev). When `dev` is stable, merge it into `main` (which deploys to [delaclaw.com](https://delaclaw.com) via GitHub Pages).
+All changes land on `dev` first, which auto-deploys to [dev.delaclaw.pages.dev](https://dev.delaclaw.pages.dev). When `dev` is stable, merge it into `main` (which deploys to [delaclaw.com](https://delaclaw.com) via Cloudflare Pages).
 
 ### Pre-release checklist
 
 - All tests pass
 - Preview on [dev.delaclaw.pages.dev](https://dev.delaclaw.pages.dev) looks correct
-- `VERSION` has the right `latest`, `latest_compat`, and `latest_compat_deprec`
-- If DB schema changed: migration files exist for all three backends (Supabase `.sql`, `local-migrations.js`, `drive-migrations.js`), and `sql/supabase_schema.sql` is updated. See [MIGRATION_GUIDE.md](/migrations/MIGRATION_GUIDE.md)
+- `VERSION` has the right `latest`
+- If DB schema changed: migration entries exist for Local (`local-migrations.js`) and Drive (`drive-migrations.js`), and `server/schema.sql` is updated. See [MIGRATION_GUIDE.md](/migrations/MIGRATION_GUIDE.md)
 - i18n: all new strings present in EN, FR, ES
 - No hardcoded dark-mode colors — all via CSS variables
 - Responsive: tested on mobile viewport (≤ 480px)
@@ -131,7 +130,7 @@ All changes land on `dev` first, which auto-deploys to [dev.delaclaw.pages.dev](
 
 ### Post-release smoke test
 
-- Login with each backend (Supabase, Google Drive, Local, Demo)
+- Login with each backend (Google Drive, Local, Demo)
 - Check the Today page loads
 - Quick-add a TODO and delete it
 - If a migration was included, verify the schema banner appears on old DBs and the migration runs cleanly
@@ -146,4 +145,4 @@ Before diving into the code, read [docs-site/architecture.md](docs-site/architec
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [AGPL-3.0](LICENSE) license.
+By contributing, you agree that your contributions will be licensed under the [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) license.

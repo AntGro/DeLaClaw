@@ -13,11 +13,11 @@ flowchart TD
     end
 
     subgraph Drive["Google Drive"]
-        DJSON["Per-table JSON files<br/>in DeLaClaw/ folder"]
+        DJSON["Per-table JSON files<br/>in DeLaClaw/ folder<br/>(DeLaClawDev/ on dev)"]
     end
 
     subgraph GCal["Google Calendar"]
-        GCAL["DeLaClaw calendar<br/>(events)"]
+        GCAL["DeLaClaw calendar<br/>(DeLaClawDev on dev)<br/>(events)"]
     end
 
     UI -->|"1. Instant write"| MEM
@@ -32,6 +32,331 @@ flowchart TD
     MEM -->|"9. _onExternalChange<br/>→ refresh*()"| RENDER
 ```
 
+## Startup / Connect Flow (target design — all phases)
+
+What is fetched when the user connects, in order, drawn as columns so you can see
+*where* each step reads from — including the **Page** column, which shows what is
+rendered and when. Steps marked **planned** belong to phases 2–5 and are
+not implemented yet; everything else is shipped on `dev`.
+Names below are the Google implementation, but the shape is backend-agnostic: any
+OAuth2 token issuer + file storage maps 1:1 (e.g. KDrive auth + KDrive folders).
+The IndexedDB offline cache is not part of this flow — it only applies to
+local-server mode, never to the Drive backend. The calendar is never read at
+startup either: it is a write-only projection, synced on table flush.
+**1** covers auth, **2** covers what happens at login right after auth (the
+personal-data track, which loads the `groups` table alongside the other
+personal tables), and **3** covers the sharing startup track, which runs in
+parallel with **2**. `loadAll()` reads the already-loaded pointers and runs
+only in the sharing track, exactly once.
+
+### 1 · Auth
+
+```mermaid
+sequenceDiagram
+    participant App as "App (in-memory)"
+    participant Page as "Page (rendered)"
+    participant LS as "Local storage (browser)"
+    participant Auth as "Auth server (token issuer)"
+
+    App->>Page: "Show login screen + progress bar"
+    App->>LS: "Read active backend mode, last view, scoped prefs"
+    App->>Page: "Progress: signing in…"
+    App->>LS: "Check sessionStorage for a cached access token"
+
+    alt Token cached and still valid (~1h)
+        rect rgb(232, 245, 233)
+        LS-->>App: "Reuse cached token — no network auth"
+        end
+    else No token or expired
+        App->>Auth: "OAuth token request (consent popup if needed)"
+        alt Token granted
+            rect rgb(232, 245, 233)
+            Auth-->>App: "Access token (~1h lifetime)"
+            App->>LS: "Cache token in sessionStorage"
+            end
+        else Sign-in refused or blocked
+            rect rgb(253, 237, 236)
+            Auth-->>App: "Error (popup closed, access denied,<br/>Drive scope denied, pop-up or script blocked)"
+            App->>Page: "Login screen stays — specific error message<br/>(sign-in cancelled, Drive access needed, pop-up blocked…)<br/>Flow ends here — retry by clicking connect again"
+            end
+        end
+    end
+```
+
+### 2 · At login — right after auth
+
+Once the app holds a valid access token, login runs. In order:
+
+1. **Find-or-create the personal folder** (`DeLaClaw/`, `DeLaClawDev/` on dev).
+   On failure the login screen shows a generic connection error; retrying
+   re-runs find-or-create, so a folder created by a timed-out request is found
+   and reused — never duplicated.
+2. **List the folder's files.** This decides the branch: **existing install**
+   (table files found — a retry after a failed fresh install lands here too)
+   or **fresh install** (no table files at all).
+3. **Existing install: download every per-table JSON file in parallel**,
+   keeping each file's ETag and modifiedTime. A missing file is not a failure —
+   that table simply starts empty. One failed download aborts the whole load
+   (all-or-nothing) and returns to the login screen. The in-memory store is
+   created here, seeded with the downloaded tables — the migrations below
+   mutate it in place.
+4. **Read `schema_version` from settings.json** (missing → version 0). If any
+   migration is pending, the backup policy runs before the first one:
+   - **A `backup-v{B}.json` exists for the current version** — a previous batch
+     did not complete. The app downloads the backup, **replaces the in-memory
+     tables with the backup's content**, then overwrites every table file in
+     place from it (a table file missing from the folder is *created* from the
+     backup, not overwritten). The restore is authoritative — no ETag
+     preconditions — because the on-Drive state is known-bad partial-batch
+     data and the backup is the source of truth. The batch then re-runs from
+     the backup's version on this clean state. If the restore itself fails, the
+     backup is untouched (nothing is ever deleted before success) and the retry
+     restores again.
+   - **No backup, or a stale one** — delete any stale backups, snapshot the
+     current tables as `backup-v{currentVersion}.json`, then migrate. If the
+     snapshot upload fails, nothing on Drive has changed yet.
+5. **Run each pending migration, oldest first**: apply it to the in-memory
+   store, bump `schema_version` in memory, upload the changed table files.
+   `settings.json` is *not* written per migration. If an upload fails, the
+   backup is retained and `settings.json` still carries the pre-batch version,
+   so the retry restores from the backup and re-runs the whole batch.
+6. **Write `settings.json` once** with the final `schema_version` — the batch
+   completion marker — then **delete the backup**. A backup left on Drive always
+   means "a batch did not complete".
+7. **Fresh install: create the empty in-memory store, then create one JSON file
+   per table in parallel** (all except `settings.json`), seeding the category
+   tables with their protected default rows — then **write `settings.json` last** with `schema_version=latest` as
+   the completion marker. If the table creation fails midway, the retry lands
+   in the existing-install branch with no `schema_version` (version 0), so it
+   snapshots and runs all migrations — including the one that re-seeds the
+   protected category rows.
+8. **Hide the login screen, show the app shell, and render the current view
+   from memory.**
+9. **Start the 30s poll and the tab-focus poll** over the personal tables. The
+   calendar is never read at startup — it is a write-only projection. It
+   syncs on table flush, plus one startup reconciliation of the local
+   `gcal_sync` ledger (section 3) — no calendar listing involved.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
+sequenceDiagram
+    autonumber
+    box rgb(239,246,255) Browser tab
+    participant App as "App<br/>(in-memory)"
+    participant Page as "Page<br/>(rendered)"
+    participant CAL as "Calendar<br/>Sync"
+    end
+    box rgb(255,251,235) Google Drive
+    participant PF as "Personal folder<br/>(DeLaClaw/)"
+    end
+
+    App->>Page: "Progress: connecting…"
+    App->>PF: "Find-or-create DeLaClaw/ (DeLaClawDev/ on dev)"
+    rect rgb(253, 237, 236)
+    opt Creation or listing fails
+        PF-->>App: "Error"
+        App->>Page: "Login screen — generic connection error<br/>Retry re-runs find-or-create: a folder created by a timed-out request<br/>is found and reused, so no duplicate folder<br/>Flow ends here — back to the login screen"
+    end
+    end
+    App->>PF: "List folder files"
+
+    alt Existing install — or retry after a failed fresh install — (table files found)
+        App->>PF: "Download per-table JSON files in parallel (keep ETag + modifiedTime)"
+        rect rgb(253, 237, 236)
+        opt A download fails
+            PF-->>App: "Error"
+            App->>Page: "Login screen — generic connection error<br/>All-or-nothing: one failed table aborts the whole load<br/>(a missing file is not a failure — that table just starts empty)<br/>Flow ends here — back to the login screen"
+        end
+        end
+        App->>Page: "Progress: loading tables (per-table progress)"
+        App->>App: "Create in-memory store seeded with the downloaded tables"
+        App->>App: "Read schema_version from settings.json"
+        alt settings.json missing → version 0
+            App->>App: "Every migration is pending"
+        else schema_version older than latest
+            App->>App: "Only migrations newer than schema_version are pending"
+        else schema_version is latest
+            App->>App: "Nothing pending — skip to adapter creation"
+        end
+        opt At least one migration is pending
+            App->>App: "Look for backup-v*.json files from a previous attempt"
+            alt A backup-v{B}.json exists for the current schema_version<br/>(a previous batch did not complete — settings.json is written once, at the end of the batch)
+                App->>PF: "Overwrite every table file in place from the backup<br/>(never delete-then-restore)"
+                rect rgb(253, 237, 236)
+                opt The restore fails
+                    PF-->>App: "Error"
+                    App->>Page: "Login screen — generic connection error<br/>State on Drive: the backup is intact (nothing is ever deleted before success)<br/>Retry re-enters as an Existing install (branch above) → restores from the backup again<br/>Flow ends here — back to the login screen"
+                end
+                end
+                App->>App: "Re-run the batch from the backup's version on the clean restored state"
+            else No backup — or its batch completed (stale)
+                App->>PF: "Delete stale backups — upload full backup of the pre-migration Drive state<br/>(backup-v{currentVersion}.json)"
+                rect rgb(253, 237, 236)
+                opt The backup upload fails
+                    PF-->>App: "Error"
+                    App->>Page: "Login screen — generic connection error<br/>State on Drive: unchanged — the backup is the first write, nothing migrated yet<br/>Retry re-enters as an Existing install (branch above)<br/>Flow ends here — back to the login screen"
+                end
+                end
+            end
+            loop For each pending migration, oldest first
+                App->>App: "Apply the migration to the in-memory store,<br/>bump schema_version in memory"
+                App->>PF: "Upload the changed table files (settings.json is NOT written per migration)"
+                rect rgb(253, 237, 236)
+                opt A migration upload fails
+                    PF-->>App: "Error"
+                    App->>Page: "Login screen — generic connection error<br/>State on Drive: the pre-migration backup is retained —<br/>settings.json still carries the pre-batch schema_version (it is written once, at the end)<br/>Retry re-enters as an Existing install (branch above) → restores the tables<br/>from the backup and re-runs the batch from the backup's version<br/>Flow ends here — back to the login screen"
+                end
+                end
+            end
+            App->>PF: "Write settings.json once with the final schema_version — the batch completion marker"
+            rect rgb(253, 237, 236)
+            opt The settings.json write fails
+                PF-->>App: "Error"
+                App->>Page: "Login screen — generic connection error<br/>State on Drive: migration tables uploaded, settings.json still carries the pre-batch schema_version, backup-v{old}.json intact<br/>Retry re-enters as an Existing install (branch above) → restores the tables from the backup in place and re-runs the batch from the backup's version<br/>Flow ends here — back to the login screen"
+            end
+            end
+            App->>PF: "Delete the backup — the batch succeeded"
+            rect rgb(253, 237, 236)
+            opt The backup delete fails
+                Note over App,PF: "Failure is swallowed (console.warn) — no error crosses the wire"
+                App->>Page: "Hide login — show app shell (the batch already completed)<br/>State on Drive: backup-v{old}.json lingers — harmless, it is not a table file<br/>Next connect with pending migrations removes it via the stale-backup action<br/>With no pending migrations it stays in the folder"
+            end
+            end
+        end
+    else Fresh install (no table files)
+        App->>App: "Create empty in-memory store"
+        App->>PF: "(1) Create one JSON file per table in parallel (all except settings.json) —<br/>seed the category tables in memory with the protected default rows<br/>and flush them to Drive"
+        rect rgb(253, 237, 236)
+        opt Step 1 fails
+            PF-->>App: "Error"
+            App->>Page: "Login screen — generic connection error<br/>State on Drive: some table files exist, settings.json does NOT exist,<br/>no schema_version stamp anywhere<br/>Retry re-enters as an Existing install (branch above)<br/>Flow ends here — back to the login screen"
+        end
+        end
+        App->>PF: "(2) Write settings.json with schema_version=latest — the completion marker"
+        rect rgb(253, 237, 236)
+        opt Step 2 fails
+            PF-->>App: "Error"
+            App->>Page: "Login screen — generic connection error<br/>State on Drive: ALL table files exist, category tables already hold<br/>the seeded protected rows, only settings.json is missing<br/>Retry re-enters as an Existing install (branch above)<br/>Flow ends here — back to the login screen"
+        end
+        end
+    end
+
+    App->>Page: "Hide login — show app shell"
+    App->>Page: "Render current view from in-memory data (welcome / todos / …)"
+    App->>App: "Start 30s poll + tab-focus poll (personal tables) — local timer only, no Drive request"
+
+    Note over App,Page: "Calendar is never READ at startup (write-only projection)<br/>writes happen on table flush + one startup ledger reconciliation<br/>(local diff vs gcal_sync — no calendar listing)"
+```
+
+### 3 · Sharing startup
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
+sequenceDiagram
+    autonumber
+    box rgb(239,246,255) Browser tab
+    participant App as "App<br/>(in-memory)"
+    participant Page as "Page<br/>(rendered)"
+    participant CAL as "Calendar<br/>Sync"
+    end
+    box rgb(255,251,235) Google Drive
+    participant PF as "Personal folder<br/>(DeLaClaw/)"
+    participant OWN as "Owned shared folders<br/>(DeLaClaw-Shared-…)"
+    participant JOIN as "Joined group folders"
+    end
+
+    App->>Page: "Sharing nav appears immediately with loading state (before load finishes)"
+    App->>App: "Read groups-table rows (already loaded with personal tables)"
+    App->>OWN: "Per kind 'created' row:<br/>find the DeLaClaw-Shared-{groupId} folder by name"
+
+    rect rgb(253, 237, 236)
+    opt The folder name search fails
+        OWN-->>App: "Error"
+        App->>App: "Error is logged — the app keeps running<br/>Group skipped with a chip this cycle<br/>Retried on the next page load (the 15s poll does not re-attempt it)"
+    end
+    opt Folder not found (trashed or renamed on Drive)
+        App->>App: "Skipped chip with the stored row name<br/>The row stays until the group is deleted"
+    end
+    end
+
+    par Per found owned folder
+        App->>OWN: "Find group.json + todos/habits/lists.json in parallel"
+        rect rgb(253, 237, 236)
+        opt The file listing itself fails
+            OWN-->>App: "Error"
+            App->>App: "Group skipped this cycle — never treated as incomplete,<br/>never trashed (the folder couldn't be looked at properly)<br/>Retried on the next page load"
+        end
+        end
+        alt group.json missing on an owned folder (files deleted on Drive)
+            App->>App: "Skipped chip with the stored name —<br/>the user's own group is never silently dropped"
+        else group.json found
+            App->>OWN: "Download group.json + todos/habits/lists.json in parallel"
+            rect rgb(253, 237, 236)
+            opt Any required file (group.json, todos/habits/lists.json) fails to download
+                OWN-->>App: "Error for that file"
+                App->>App: "Group skipped this cycle — never partially loaded<br/>(a half-loaded group could show items as missing, and the user might recreate them,<br/>then the real file loads and there are duplicates)<br/>Shown with a 'skipped' chip in the Group tab sidebar<br/>Retried on the next page load — the 15s poll does not re-attempt it<br/>Other groups are unaffected"
+            end
+            end
+        end
+    and Per joined pointer
+        App->>JOIN: "Download group.json + todos/habits/lists.json via saved file IDs"
+        rect rgb(253, 237, 236)
+        opt Download fails with definite access loss<br/>(404, or 403 with a known access-loss reason)
+            App->>App: "Group purged: pointer dropped from memory,<br/>all local item pointers deleted outright (no dialog),<br/>groups-row delete staged"
+            App->>PF: "Debounced flush (~2s) rewrites groups.json +<br/>todos/habits/list_items.json without the purged rows"
+            App->>CAL: "Pointer-row deletes dirty the tables →<br/>on flush syncTable deletes their events (via gcal_sync)"
+            App->>Page: "Info toast — no longer have access to the group"
+        end
+        opt Download fails otherwise (transient — throttled or<br/>unknown-reason 403, 5xx, network blip)
+            App->>App: "Group skipped this cycle — never partially loaded<br/>and never purged (transient failures never purge)<br/>Shown with a 'skipped' chip in the Group tab sidebar<br/>Retried on the next page load — the 15s poll does not re-attempt it"
+        end
+        end
+    end
+
+    par Per loaded group
+        App->>App: "Init in-memory sync intents per item file (createdIds / deletedIds)"
+        App->>App: "normalizeEntry → _groups map"
+        opt Owned group — creator's tab: permission audit
+            App->>OWN: "List folder permissions"
+            rect rgb(253, 237, 236)
+            opt Writer grant with no member row in group.json
+                App->>OWN: "Revoke permission —<br/>orphan from a failed invite write<br/>or a failed revocation"
+            end
+            opt Permission list fails
+                App->>App: "Log and continue —<br/>the audit never fails the load"
+            end
+            end
+        end
+        opt Joined group, own member row still 'pending'
+            App->>JOIN: "Flip own row to 'joined' + re-upload group.json<br/>repairs a join whose pointer was saved but whose pending→joined upload failed (displayName falls back to the Google account name)<br/>Best-effort: retried next load, never fails startup"
+        end
+    end
+    App->>Page: "Render sharing pane (fills in if already open)"
+    App->>CAL: "reconcileLedger: diff every syncable TODO / habit / birthday<br/>against its gcal_sync entry (local only)"
+    alt Items with no ledger entry (entry write/upload was lost,<br/>or the sync never ran for them)
+        App->>CAL: "Mark dirty → syncTable creates the event<br/>409 = event already there → adopt it and record the entry"
+    else Nothing missing
+        App->>App: "No calendar API calls — purely local check"
+    end
+    rect rgb(253, 237, 236)
+    opt reconcileLedger throws
+        App->>App: "Error swallowed (console.warn) — the 15s poll still starts"
+    end
+    end
+    App->>OWN: "Poll every 15s (per-group files)"
+    App->>JOIN: "Poll every 15s (per-group files)"
+    App->>App: "Poll: a changed group.json name updates<br/>the local groups row too (creator rename)"
+    App->>Page: "On sharing-changed → re-render sharing UI"
+    App->>App: "sharing-changed → syncSharedTodos/Habits<br/>create pointers for new shared items"
+    App->>CAL: "Pointer inserts dirty the tables → on flush<br/>syncTable resolves dates through the payload →<br/>dated shared items get events titled<br/>[TODO][category][group] / [Habit][category][group]"
+    App->>CAL: "On later sharing-changed: diff payload fields + group name vs fingerprint → markCalDirty on real change<br/>drive syncTable directly (no local row is written, so no flush would consume the dirty marks)<br/>events created, patched or deleted (a creator rename re-titles via the group-name field)"
+
+    Note over App,JOIN: "a joined group's folder becoming unreachable (404, or 403<br/>with a known access-loss reason) purges the group: pointers deleted<br/>outright, no dialog, info toast — at startup and in the 15s poll.<br/>Throttled or unknown-reason 403s never purge."
+
+    rect rgb(255, 243, 205)
+    Note over App,OWN: "Planned · phase 4: startup sweep permanently deletes<br/>group folders whose deletedAt is older than 30 days"
+    end
+```
 ## Write Path (User Edits an Item)
 
 ```mermaid
@@ -70,6 +395,8 @@ sequenceDiagram
     else Item deleted or completed
         CAL->>CAL: Delete event via Calendar API
     end
+
+    Note over CAL: Shared rows resolve dates, name and group<br/>through the pointer from the sharing payload —<br/>the DB row itself carries no dates
 ```
 
 ## Polling Path (External Change from Another Device or Agent)
@@ -82,7 +409,7 @@ sequenceDiagram
     participant MEM as In-Memory Store
     participant UI as UI Refresh
 
-    POLL->>DRIVE: files.list(DeLaClaw/ folder)
+    POLL->>DRIVE: "files.list(DeLaClaw/ folder — DeLaClawDev/ on dev)"
     DRIVE-->>POLL: File list with modifiedTime
 
     POLL->>POLL: For each file:<br/>compare modifiedTime
@@ -112,15 +439,29 @@ sequenceDiagram
 Calendar sync never does a full scan on every flush. Instead, it tracks which specific items changed.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'primaryColor': '#ffffff', 'primaryBorderColor': '#cbd5e1', 'primaryTextColor': '#0f172a', 'lineColor': '#334155', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#cbd5e1'}}}%%
 flowchart LR
     subgraph Writes["On Every Write"]
+        direction TB
         W1["db.from('todos').update(...)"]
         W2["markCalDirty('todos', itemId)"]
         W1 --> W2
         W2 --> DS["_dirtyItems Map<br/>todos → Set { itemId }"]
     end
 
+    subgraph Shared["On sharing-changed (poll / join / startup)"]
+        direction TB
+        S1["_doSyncSharedTodos/Habits:<br/>diff payload fields + group name<br/>against fingerprint"]
+        S2["state.markCalDirty(table, pointerId)<br/>on real change only"]
+        S3["state.syncCalendarTable(table)<br/>driven directly — a rename/remote edit<br/>writes no local row, so no flush follows"]
+        S1 --> S2
+        S2 --> DS
+        S2 --> S3
+        S3 --> F2
+    end
+
     subgraph Flush["On Table Flush to Drive"]
+        direction TB
         F1["_onTableFlushed('todos')"]
         F2["syncTable('todos')"]
         F1 --> F2
@@ -128,15 +469,35 @@ flowchart LR
     end
 
     subgraph Sync["Per Dirty Item"]
-        DS2 --> CHECK{"Item has<br/>calendar event?"}
-        CHECK -->|"No event + item eligible"| CREATE["Create event"]
+        direction TB
+        DS2 --> RES{"Row has shared_id?"}
+        RES -->|"Yes"| PAYLOAD["Resolve dates/name/group<br/>from sharing payload"]
+        RES -->|"No"| ROW["Use DB row as-is"]
+        PAYLOAD --> CHECK{"Item has<br/>calendar event?"}
+        ROW --> CHECK
+        CHECK -->|"No event + item eligible"| CREATE["Create event<br/>[TODO][category][group]"]
         CHECK -->|"Event exists + item changed"| PATCH["Patch event"]
         CHECK -->|"Event exists + item done/deleted"| DELETE["Delete event"]
         CHECK -->|"Event exists + no change"| SKIP["Skip"]
+        CHECK -->|"Shared + sharing not loaded"| SKIP2["Skip — keep event"]
     end
+
+    subgraph ToggleOff["On Type Toggle OFF"]
+        direction TB
+        T1["Type toggle OFF"]
+        T2["deleteTypeEvents(type)"]
+        T3["Delete all events of the type<br/>+ clear gcal_sync entries"]
+        T1 --> T2
+        T2 --> T3
+    end
+
+    T2 -.->|"same per-table<br/>promise chain"| F2
 ```
 
 **Special cases:**
+- **Serialization** → `syncTable` and `deleteTypeEvents` run inside a per-table promise chain (`_withTableLock`); concurrent runs (flush-driven vs sharing-poll-driven, or either vs resync) serialize instead of interleaving on stale `gcal_sync` snapshots
+- **Shared rows** → dates/name/group resolve through the pointer from the sharing payload at sync time (single source of truth — nothing is copied onto the pointer row). If sharing isn't loaded yet, the row is skipped: its event is kept, never deleted.
+- **Shared-sync fingerprint** → on a real remote change (payload fields or group name), pointers are marked dirty and `syncTable` is driven directly — a rename/remote edit writes no local row, so no Drive flush would consume the marks
 - **Category rename** → `markCategoryRenamed(catTable)` marks all items of that type with `__all__` sentinel → full scan
 - **Bulk operation** (null ID) → `__all__` sentinel → full scan
 - **Category table flush** (e.g. `todo_categories`) → `CAT_TABLE_TO_ITEM_TABLE` maps it to the item table (`todos`) for sync
@@ -181,7 +542,8 @@ The sync bar reflects the current state of Drive persistence:
 
 - **Tab close / visibility hidden** → `forceSave()` fires with `keepalive: true` (skipped if payload > 64 KB)
 - **Flush failure** → table stays in `dirtyTables`, `scheduleSave` retries automatically
-- **ETag conflict (412)** → Drive adapter re-reads, merges by `updated_at` (newer wins per row), retries
+- **ETag conflict (412)** → Drive adapter re-reads and reconciles with in-memory sync intents (`createdIds`/`deletedIds`): a row absent remotely is a remote deletion unless this tab created it and hasn't uploaded it yet; present on both sides → newer `updated_at` wins. Key-value tables (`settings`, `prompts`) keep the key-based merge. Then retries
+- **Poll reconciles, doesn't overwrite** → a downloaded table is reconciled against the in-memory store with the same intent engine, so a deletion on another device propagates instead of being resurrected by a stale local copy
 - **Poll skips dirty tables** → prevents overwriting local edits that haven't flushed yet
 - **`isEditing()` guard** → external changes don't refresh UI while user is inline-editing
 - **Calendar sync disabled** → `syncTable` returns early if `prefs.enabled` is false; `_onTableFlushed` still fires but sync is a no-op

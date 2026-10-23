@@ -12,8 +12,7 @@ DeLaClaw is a zero-dependency, no-build, self-hosted personal dashboard. It runs
 - **Habits** — Recurring habit tracker with calendar view, streak stats, and sharing
 - **Flashcards** — Spaced-repetition flashcards and text revision decks
 - **Lists** — Shareable lists for anything that doesn't fit elsewhere
-- **Vestiaire** — Wardrobe inventory tracker
-- **Birthdays** — Birthday reminders with avatar photos
+- **Calendar** — Month, week, day and year views of TODOs, habits and birthdays (including birthday reminders with avatar photos)
 - **Sharing** — Share TODOs, habits, and lists with groups via shared Drive folders
 - **Google Calendar sync** — Optionally mirror habits, TODOs, and birthdays to a dedicated Google Calendar
 
@@ -34,7 +33,7 @@ Head to the [Setup Guide](setup.md) to pick a backend and start using DeLaClaw i
 - No accounts, no subscriptions, no tracking
 - Your data stays yours — self-host on Google Drive (free) or run locally
 - Zero build step — just open `index.html`
-- AGPL-3.0 licensed
+- Source-available under the PolyForm Noncommercial License 1.0.0 — free for noncommercial use
 
 ## Links
 

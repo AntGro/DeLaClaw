@@ -1,6 +1,6 @@
 // ===================================================================
 // DeLaClaw — Local REST API server (Bun + SQLite)
-// Drop-in replacement for Supabase PostgREST.
+// PostgREST-compatible REST API server.
 // Usage: bun run server/server.js [--port 3737] [--db server/last.db]
 // ===================================================================
 
@@ -8,6 +8,7 @@ import { Database } from "bun:sqlite";
 import { readFileSync, existsSync, statSync, copyFileSync } from "fs";
 import { join, dirname, extname } from "path";
 import { LOCAL_MIGRATIONS } from "../migrations/local-migrations.js";
+import { compareVersions } from "../migrations/version-compare.js";
 
 const PORT = parseInt(process.env.PORT || "3737");
 const DB_PATH = process.env.DB_PATH || join(dirname(import.meta.path), "last.db");
@@ -20,7 +21,7 @@ db.exec("PRAGMA foreign_keys = ON;");
 const schema = readFileSync(join(dirname(import.meta.path), "schema.sql"), "utf8");
 db.exec(schema);
 // Seed schema_version for fresh DBs (existing DBs keep their value via ON CONFLICT)
-db.exec(`INSERT INTO settings (key, value) VALUES ('schema_version', '1.000')
+db.exec(`INSERT INTO settings (key, value) VALUES ('schema_version', '1.0.0')
   ON CONFLICT (key) DO NOTHING;`);
 db.exec(`INSERT INTO settings (key, value) VALUES ('db_created_at', '"' || datetime('now') || '"')
   ON CONFLICT (key) DO NOTHING;`);
@@ -28,12 +29,12 @@ db.exec(`INSERT INTO settings (key, value) VALUES ('db_created_at', '"' || datet
 // ── Run pending migrations ──
 {
   const pendingVersions = Object.keys(LOCAL_MIGRATIONS)
-    .sort((a, b) => parseFloat(a) - parseFloat(b));
+    .sort(compareVersions);
 
   if (pendingVersions.length > 0) {
     const row = db.prepare("SELECT value FROM settings WHERE key = 'schema_version'").get();
     const currentVersion = row ? String(row.value) : '0';
-    const toRun = pendingVersions.filter(v => v > currentVersion);
+    const toRun = pendingVersions.filter(v => compareVersions(v, currentVersion) > 0);
 
     if (toRun.length > 0) {
       // Backup the DB file before any migration
@@ -48,7 +49,12 @@ db.exec(`INSERT INTO settings (key, value) VALUES ('db_created_at', '"' || datet
       for (const version of toRun) {
         try {
           db.exec("BEGIN TRANSACTION;");
-          db.exec(LOCAL_MIGRATIONS[version]);
+          const migration = LOCAL_MIGRATIONS[version];
+          // Most migrations are SQL strings; a function migration
+          // receives the db handle (data transforms SQL cannot
+          // express — e.g. 2.27.0's next_due recompute).
+          if (typeof migration === 'function') migration(db);
+          else db.exec(migration);
           db.exec(`UPDATE settings SET value = '${version}', updated_at = datetime('now') WHERE key = 'schema_version';`);
           db.exec("COMMIT;");
           console.log(`Migration ${version} applied successfully`);

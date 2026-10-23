@@ -1,8 +1,8 @@
 // ===================================================================
-// SHARING UI — Settings pane, share popovers, completion modal
+// SHARING UI — Group tab card, share popovers, completion modal
 // ===================================================================
 //
-// Renders the sharing settings pane (groups, invite codes, trusted
+// Renders the Group tab (groups, invite codes, trusted
 // contacts) and provides helpers for share badges, share-to-group
 // popovers, and multi-assignee completion modals used by
 // todos.js, habits.js, lists.js.
@@ -17,14 +17,29 @@
 //   - Join via invite code uses Google Picker for drive.file access
 // ===================================================================
 
-import state, { STAY_CONNECTED_KEY } from './state.js';
+import state from './state.js';
 import { t } from './i18n.js';
-import { esc, escQ, showToast, showConfirmAction, getSupabaseProjectRef, buildAuthSteps } from './utils.js';
+import { esc, escQ, showToast, showConfirmAction, isDesktopLike, setConfirmActionProgress } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { LOGOS } from './backend-logos.js';
 import { decodeInviteEnvelope } from './sharing-envelope.js';
 
 // ── Helpers ──────────────────────────────────────────────────────
+
+/**
+ * Standard busy styling for async buttons: disable + shimmer sweep via the
+ * shared `saving`/`is-pending` classes + aria-busy. Same visual language as
+ * guard() in main.js — use for every mutating action instead of ad-hoc
+ * opacity/text swaps.
+ */
+function setBtnBusy(btn, busy) {
+  if (!btn) return;
+  btn.disabled = busy;
+  btn.classList.toggle('saving', busy);
+  btn.classList.toggle('is-pending', busy);
+  if (busy) btn.setAttribute('aria-busy', 'true');
+  else btn.removeAttribute('aria-busy');
+}
 
 /** Generate a deterministic color from a stable member id. */
 function memberColor(seed) {
@@ -46,218 +61,114 @@ function initials(name, fallback = '?') {
 }
 
 function memberLabel(member) {
-  return member?.displayName || member?.invitedLabel || member?.name || member?.memberId || 'Member';
+  return member?.display_name || member?.invited_label || member?.name || member?.member_id || 'Member';
 }
 
-/** Extract Supabase project ref from URL (shared logic with main.js) */
+/**
+ * Members shown in the UI. Entries with status 'left' are tombstones kept in
+ * group.json only so the creator's poll can revoke their Drive access — they
+ * are never displayed (the member list must always reflect who has access).
+ */
+/** Members with access (excludes rows flipped to 'left'). Shared with the Group tab. */
+export function visibleMembers(group) {
+  return (group?.members || []).filter(m => m.status !== 'left');
+}
+
 /** Small avatar circle HTML. */
 function avatarDot(member, size = 24) {
   const label = memberLabel(member);
-  const color = memberColor(member?.memberId || label);
-  const ini = initials(label, member?.memberId);
+  const color = memberColor(member?.member_id || label);
+  const ini = initials(label, member?.member_id);
   return `<span class="sharing-avatar" style="width:${size}px;height:${size}px;background:${color};font-size:${Math.round(size * 0.42)}px" title="${esc(label)}">${esc(ini)}</span>`;
 }
 
-// ── Settings Pane ────────────────────────────────────────────────
+/**
+ * Render one group's management card (header, members, invite row, delete).
+ * Used by the Group tab — the data-action handlers are identical everywhere
+ * the card appears.
+ */
+export async function sharingGroupCardHtml(group) {
+  let currentMember = null;
+  try { currentMember = await state.sharing.getCurrentMember(group.id); } catch { currentMember = null; }
+  const isCreator = !!currentMember && currentMember.member_id === group.created_by;
+  const memberCount = visibleMembers(group).length;
+  const itemCount = state.sharing.getItems(group.id).length;
+  const memberStr = memberCount === 1 ? t('sharing.member') : t('sharing.members', memberCount);
+  const itemStr = itemCount === 1 ? t('sharing.shared_item') : t('sharing.shared_items', itemCount);
+  const inviteCode = isCreator ? state.sharing.getInviteLink(group.id) : null;
+  const invitePlaceholder = t('sharing.invite_placeholder');
 
-let _currentUser = null;
+  // Group health status
+  const healthStatus = state.sharing.getGroupHealthStatus?.(group.id) || 'healthy';
+  const isDisconnected = healthStatus !== 'healthy';
+  const disconnectedClass = isDisconnected ? ' sharing-group-disconnected' : '';
+  const disconnectedStamp = isDisconnected
+    ? `<span class="sharing-group-disconnected-stamp">${lucideIcon('wifi-off', 14, 'currentColor')} ${t('sharing.group_disconnected')}</span>`
+    : '';
 
-/** Show or hide the sharing nav button based on state.sharing availability. */
-export function updateSharingNavVisibility() {
-  const btn = document.getElementById('settingsNavSharingBtn');
-  if (!btn) return;
-  // Show sharing nav for Drive users with sharing, Supabase users (even if not yet authenticated), or demo
-  const activeMode = localStorage.getItem('claw_cc_active_mode');
-  btn.style.display = (state.sharing || activeMode === 'supabase' || activeMode === 'demo') ? '' : 'none';
-}
-
-/** Render the full sharing settings pane content. */
-export async function renderSharingPane() {
-  const container = document.getElementById('sharingPaneContent');
-  if (!container) return;
-
-  const activeMode = localStorage.getItem('claw_cc_active_mode');
-
-  // Drive sharing is not yet ready — show "coming soon" placeholder
-  if (activeMode === 'googledrive') {
-    container.innerHTML = `<div class="auth-inline-prompt">
-      <div class="auth-icon">${lucideIcon('clock', 28)}</div>
-      <h4>${t('sharing.coming_soon')}</h4>
-      <p class="auth-inline-hint">${t('sharing.coming_soon_hint')}</p>
-    </div>`;
-    return;
-  }
-
-  // Demo mode — sharing UI is visible but group creation is not available
-  if (activeMode === 'demo') {
-    container.innerHTML = `<div class="auth-inline-prompt">
-      <div class="auth-icon">${lucideIcon('users', 28)}</div>
-      <h4>${t('sharing.demo_title')}</h4>
-      <p class="auth-inline-hint">${t('sharing.demo_hint')}</p>
-    </div>`;
-    return;
-  }
-
-  if (!state.sharing) {
-    // Supabase without auth: show inline sign-in prompt (only if DB has auth tables)
-    const dbReady = parseFloat(state.dbSchemaVersion || '0') >= 1.294;
-    if (activeMode === 'supabase' && !state.authUser && dbReady) {
-      const creds = (() => { try { return JSON.parse(localStorage.getItem(STAY_CONNECTED_KEY) || '{}'); } catch { return {}; } })();
-      const projRef = getSupabaseProjectRef(creds.url || '') || null;
-      const authConfigUrl = projRef ? `https://supabase.com/dashboard/project/${projRef}/auth/url-configuration` : 'https://supabase.com/dashboard/projects';
-      const steps = buildAuthSteps('sharingAuth', authConfigUrl, { sendAction: 'send-auth-from-sharing', showStatus: true });
-      container.innerHTML = `<div class="auth-inline-prompt">
-        <div class="auth-icon">${lucideIcon('lock', 28)}</div>
-        <h4>${t('auth.sign_in_to_share')}</h4>
-        <p class="auth-inline-hint">${t('auth.sign_in_to_share_hint')}</p>
-        ${steps.html}
-      </div>`;
-      steps.wireUp(container);
-    } else if (activeMode === 'supabase' && state.authUser) {
-      // Authenticated but sharing adapter failed to initialise
-      const errMsg = state._sharingInitError ? esc(String(state._sharingInitError.message || state._sharingInitError)) : '';
-      const dbVer = esc(state.dbSchemaVersion || '?');
-      container.innerHTML = `<div class="auth-inline-prompt">
-        <div class="auth-icon">${lucideIcon('refresh-cw', 28)}</div>
-        <h4>${t('sharing.init_failed')}</h4>
-        <p class="auth-inline-hint">${t('sharing.init_failed_hint')}</p>
-        ${errMsg ? `<p class="setting-hint" style="font-size:0.75rem;opacity:0.6;margin-top:8px">Error: ${errMsg} (DB ${dbVer})</p>` : ''}
-      </div>`;
-    } else {
-      container.innerHTML = `<p class="setting-hint">${t('sharing.no_drive')}</p>`;
-    }
-    return;
-  }
-
-  // Show auth status for authenticated Supabase users
-  let authBadgeHtml = '';
-  if (activeMode === 'supabase' && state.authUser) {
-    const email = esc(state.authUser.email || '');
-    authBadgeHtml = `<div class="setting-group">
-      <div class="auth-signed-in-badge">${lucideIcon('shield-check', 14)} ${t('auth.signed_in_as', email)}</div>
-    </div>`;
-  }
-
-  // Get current user identity
-  try {
-    _currentUser = await state.sharing.getCurrentUser();
-  } catch { _currentUser = null; }
-
-  let html = authBadgeHtml;
-
-  // ── Groups section ──
-  const groups = state.sharing.getAllGroups();
-
-  html += `<div class="setting-group"><div class="setting-group-label">${t('sharing.groups')}</div>`;
-
-  if (groups.length === 0) {
-    html += `<p class="setting-hint">${t('sharing.no_groups_hint')}</p>`;
-  }
-
-  for (const group of groups) {
-    let currentMember = null;
-    try { currentMember = await state.sharing.getCurrentMember(group.id); } catch { currentMember = null; }
-    const isCreator = !!currentMember && currentMember.memberId === group.created_by;
-    const isJoined = state.sharing.isJoinedViaLink(group.id);
-    const memberCount = group.members?.length || 0;
-    const itemCount = state.sharing.getItems(group.id).length;
-    const memberStr = memberCount === 1 ? t('sharing.member') : t('sharing.members', memberCount);
-    const itemStr = itemCount === 1 ? t('sharing.shared_item') : t('sharing.shared_items', itemCount);
-    const inviteCode = isCreator ? state.sharing.getInviteLink(group.id) : null;
-    const invitePlaceholder = group.backendType === 'supabase' ? t('sharing.invite_name_placeholder') : t('sharing.invite_placeholder');
-
-    // Group health status
-    const healthStatus = state.sharing.getGroupHealthStatus?.(group.id) || 'healthy';
-    const isDisconnected = healthStatus !== 'healthy';
-    const disconnectedClass = isDisconnected ? ' sharing-group-disconnected' : '';
-    const disconnectedStamp = isDisconnected
-      ? `<span class="sharing-group-disconnected-stamp">${lucideIcon('wifi-off', 14, 'currentColor')} ${t('sharing.group_disconnected')}</span>`
-      : '';
-
-    html += `<div class="sharing-group-card${disconnectedClass}">
-      <div class="sharing-group-header">
-        <div class="sharing-group-info">
-          <h4>${esc(group.name)}${disconnectedStamp}</h4>
-          <span class="sharing-group-stats">${memberStr} \u00b7 ${itemStr}</span>
-        </div>
-        <div class="sharing-group-actions">
-          ${group.folderId ? `<a class="sharing-action-btn sharing-drive-link" href="https://drive.google.com/drive/folders/${encodeURIComponent(group.folderId)}" target="_blank" rel="noopener" title="${t('sharing.open_drive_folder')}">${LOGOS.googledrive(14)} ${t('sharing.open_drive_folder')}</a>` : ''}
-          ${inviteCode ? `<button class="sharing-action-btn sharing-copy-link-btn" data-action="sharing-copy-code" data-group-id="${esc(group.id)}" title="${t('sharing.copy_code')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('key', 14)} ${t('sharing.copy_code')}</button>` : ''}
-          ${!isCreator ? (isJoined ? `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-unjoin-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>` : `<button class="sharing-action-btn sharing-leave-btn" data-action="sharing-leave-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('log-out', 14)} ${t('sharing.leave')}</button>`) : ''}
-        </div>
+  let html = `<div class="sharing-group-card${disconnectedClass}">
+    <div class="sharing-group-header">
+      <div class="sharing-group-info">
+        <h4>${esc(group.name)}${disconnectedStamp}</h4>
+        <span class="sharing-group-stats">${memberStr} \u00b7 ${itemStr}</span>
       </div>
-      <div class="sharing-members">`;
+      <div class="sharing-group-actions">
+        ${group.folderId ? `<a class="sharing-action-btn sharing-action-btn-compact sharing-drive-link" href="https://drive.google.com/drive/folders/${encodeURIComponent(group.folderId)}" target="_blank" rel="noopener" title="${t('sharing.open_drive_folder')}" aria-label="${t('sharing.open_drive_folder')}">${LOGOS.googledrive(14)}</a>` : ''}
+        ${inviteCode ? `<button class="sharing-action-btn sharing-action-btn-compact sharing-copy-link-btn" data-action="sharing-copy-code" data-group-id="${esc(group.id)}" title="${t('sharing.copy_code')}" aria-label="${t('sharing.copy_code')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('key', 14)}</button>` : ''}
+        ${isCreator ? `<button class="sharing-action-btn sharing-action-btn-compact sharing-rename-btn" data-action="sharing-rename-group" data-group-id="${esc(group.id)}" title="${t('sharing.rename_group')}" aria-label="${t('sharing.rename_group')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('pencil', 14)}</button>` : ''}
+        ${!isCreator ? `<button class="sharing-action-btn sharing-action-btn-compact sharing-leave-btn" data-action="sharing-unjoin-group" data-group-id="${esc(group.id)}" title="${t('sharing.leave')}" aria-label="${t('sharing.leave')}"${isDisconnected ? ' disabled' : ''}>${lucideIcon('log-out', 14)}</button>` : ''}
+      </div>
+    </div>
+    <div class="sharing-members">`;
 
-    for (const member of (group.members || [])) {
-      const isYou = !!currentMember && member.memberId === currentMember.memberId;
-      const canRemove = isCreator && !isYou;
-      const hasJoined = member.status === 'joined' || member.role === 'owner' || member.role === 'creator' || !!member.joinedAt || !!member.joined_at;
-      const isCreatorMember = member.role === 'creator';
-      const label = memberLabel(member);
-      const statusHtml = isYou ? ` <span class="sharing-you">(${t('sharing.you')})</span>`
-        : isCreatorMember ? ` <span class="sharing-member-creator">${lucideIcon('crown', 12)} ${t('sharing.creator')}</span>`
-        : hasJoined ? ` <span class="sharing-member-joined">${lucideIcon('check', 12)}</span>`
-        : ` <span class="sharing-member-pending">${t('sharing.pending')}</span>`;
-      const canCopyCode = isCreator && !isYou && !hasJoined && member.token && state.sharing.getMemberInviteLink;
-      html += `<div class="sharing-member">
-          ${avatarDot(member, 22)}
-          <span class="sharing-member-email">${esc(label)}${statusHtml}</span>
-          ${isYou ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-edit-my-name" data-group-id="${esc(group.id)}" data-member-id="${esc(member.memberId)}" data-current-name="${esc(label)}" title="${t('sharing.edit_name')}" aria-label="${t('sharing.edit_name')}">${lucideIcon('pencil', 12)}</button>` : ''}
-          ${canCopyCode ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-copy-member-code" data-group-id="${esc(group.id)}" data-token="${esc(member.token)}" title="${t('sharing.copy_code')}" aria-label="${t('sharing.copy_code')}">${lucideIcon('key', 12)}</button>` : ''}
-          ${canRemove ? `<button class="sharing-remove-btn" data-action="sharing-remove-member" data-group-id="${esc(group.id)}" data-member-id="${esc(member.memberId)}" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
-        </div>`;
-    }
-
-    // Revoked members toggle (archive-toggle pattern)
-    const revokedMembers = state.sharing?.getRevokedMembers?.(group.id) || [];
-    if (isCreator && revokedMembers.length > 0) {
-      const toggleId = `revoked-toggle-${group.id}`;
-      const listId = `revoked-list-${group.id}`;
-      html += `<div class="archive-toggle" data-action="toggle-revoked-members" data-group-id="${esc(group.id)}" id="${toggleId}">
-          <span class="arrow" id="revoked-arrow-${esc(group.id)}">▶</span> ${t('sharing.removed')} (${revokedMembers.length})
-        </div>
-        <div class="archived-tasks" id="${listId}">`;
-      for (const member of revokedMembers) {
-        const label = memberLabel(member);
-        html += `<div class="sharing-member sharing-member-revoked">
-            ${avatarDot(member, 22)}
-            <span class="sharing-member-email">${esc(label)} <span class="sharing-member-revoked-tag">${t('sharing.revoked')}</span></span>
-          </div>`;
-      }
-      html += `</div>`;
-    }
-
-    html += `</div>
-      ${isCreator ? `<div class="sharing-invite-row">
-        <input type="text" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${invitePlaceholder}" data-action="sharing-invite-on-enter" data-group-id="${esc(group.id)}">
-        <button class="sharing-invite-btn" data-action="sharing-invite" data-group-id="${esc(group.id)}">${lucideIcon('user-plus', 14)} ${t('sharing.invite')}</button>
-      </div>` : ''}
-      ${isCreator ? `<button class="sharing-delete-btn" data-action="sharing-delete-group" data-group-id="${esc(group.id)}">${lucideIcon('trash-2', 14)} ${t('sharing.delete_group')}</button>` : ''}
-    </div>`;
+  for (const member of visibleMembers(group)) {
+    const isYou = !!currentMember && member.member_id === currentMember.member_id;
+    const canRemove = isCreator && !isYou;
+    const hasJoined = member.status === 'joined' || member.role === 'owner' || member.role === 'creator' || !!member.joined_at;
+    const isCreatorMember = member.role === 'creator';
+    const label = memberLabel(member);
+    const statusHtml = isYou ? ` <span class="sharing-you">(${t('sharing.you')})</span>`
+      : isCreatorMember ? ` <span class="sharing-member-creator">${lucideIcon('crown', 12)} ${t('sharing.creator')}</span>`
+      : hasJoined ? ` <span class="sharing-member-joined">${lucideIcon('check', 12)}</span>`
+      : ` <span class="sharing-member-pending">${t('sharing.pending')}</span>`;
+    const canCopyCode = isCreator && !isYou && !hasJoined && member.token && state.sharing.getMemberInviteLink;
+    html += `<div class="sharing-member">
+        ${avatarDot(member, 22)}
+        <span class="sharing-member-email">${esc(label)}${statusHtml}</span>
+        ${isYou ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-edit-my-name" data-group-id="${esc(group.id)}" data-member-id="${esc(member.member_id)}" data-current-name="${esc(label)}" title="${t('sharing.edit_name')}" aria-label="${t('sharing.edit_name')}">${lucideIcon('pencil', 12)}</button>` : ''}
+        ${canCopyCode ? `<button class="sharing-action-btn sharing-action-btn-compact" data-action="sharing-copy-member-code" data-group-id="${esc(group.id)}" data-token="${esc(member.token)}" title="${t('sharing.copy_code')}" aria-label="${t('sharing.copy_code')}">${lucideIcon('key', 12)}</button>` : ''}
+        ${canRemove ? `<button class="sharing-remove-btn" data-action="sharing-remove-member" data-group-id="${esc(group.id)}" data-member-id="${esc(member.member_id)}" title="${t('sharing.remove_member')}">${lucideIcon('x', 12)}</button>` : ''}
+      </div>`;
   }
 
   html += `</div>
-    <div class="sharing-bottom-actions">
-      <button class="sharing-action-btn" data-action="sharing-create-group">${lucideIcon('plus', 14)} ${t('sharing.create_group')}</button>
-      <button class="sharing-action-btn" data-action="sharing-open-join-code">${lucideIcon('log-in', 14)} ${t('sharing.join_group')}</button>
-    </div>`;
-
-  container.innerHTML = html;
+    ${isCreator ? `<div class="sharing-invite-row">
+      <input type="text" class="sharing-invite-input" id="sharingInvite-${esc(group.id)}" placeholder="${invitePlaceholder}" data-action="sharing-invite-on-enter" data-group-id="${esc(group.id)}">
+      <button class="sharing-invite-btn" data-action="sharing-invite" data-group-id="${esc(group.id)}">${lucideIcon('user-plus', 14)} ${t('sharing.invite')}</button>
+    </div>` : ''}
+    ${isCreator ? `<button class="sharing-delete-btn" data-action="sharing-delete-group" data-group-id="${esc(group.id)}">${lucideIcon('trash-2', 14)} ${t('sharing.delete_group')}</button>` : ''}
+  </div>`;
+  return html;
 }
 
+/** Render the full Group tab content. */
 // ── Actions (exposed on window) ─────────────────────────────────
 
 async function sharingCreateGroup() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingCreateGroupModal';
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('click', e => { if (e.target === overlay && !overlay.dataset.creating) overlay.remove(); });
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('users', 20)} ${t('sharing.create_group')}</h2>
     <label>${t('sharing.group_name')}</label>
     <input type="text" id="sharingNewGroupName" placeholder="${t('sharing.group_name_placeholder')}" maxlength="60" data-action="sharing-create-group-on-enter">
+    <div class="drive-progress" id="sharingCreateProgress" hidden>
+      <p class="drive-progress-text" id="sharingCreateProgressText"></p>
+      <div class="drive-progress-bar"><div class="drive-progress-fill" id="sharingCreateProgressFill"></div></div>
+    </div>
     <div class="modal-actions">
-      <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingCreateGroupModal">${t('common.cancel')}</button>
+      <button class="modal-cancel" id="sharingCreateGroupCancelBtn" data-action="close-modal" data-modal-id="sharingCreateGroupModal">${t('common.cancel')}</button>
       <button class="modal-save" id="sharingCreateGroupBtn" data-action="sharing-create-group-submit">${t('common.create')}</button>
     </div>
   </div>`;
@@ -266,31 +177,55 @@ async function sharingCreateGroup() {
 }
 
 async function sharingCreateGroupSubmit() {
+  const overlay = document.getElementById('sharingCreateGroupModal');
   const input = document.getElementById('sharingNewGroupName');
   const name = input?.value.trim();
-  if (!name) return;
+  if (!name || overlay?.dataset.creating) return;
   const btn = document.getElementById('sharingCreateGroupBtn');
+  const cancelBtn = document.getElementById('sharingCreateGroupCancelBtn');
+  const progressEl = document.getElementById('sharingCreateProgress');
+  const progressText = document.getElementById('sharingCreateProgressText');
+  const progressFill = document.getElementById('sharingCreateProgressFill');
+  // Lock the modal while the group files are being created
+  overlay.dataset.creating = '1';
+  if (input) input.disabled = true;
   if (btn) { btn.disabled = true; btn.classList.add('loading'); btn.textContent = t('sharing.creating_group'); }
+  if (cancelBtn) cancelBtn.disabled = true;
+  if (progressEl) progressEl.hidden = false;
+  const renderProgress = (ev) => {
+    if (!ev) return;
+    if (progressText) {
+      if (ev.step === 'itemFiles' && ev.total > 0) progressText.textContent = t('sharing.creating_files', ev.done, ev.total);
+      else if (ev.step === 'folder') progressText.textContent = t('sharing.creating_folder');
+      else if (ev.step === 'groupFile') progressText.textContent = t('sharing.writing_group');
+    }
+    if (progressFill) {
+      progressFill.style.width = (ev.step === 'itemFiles' && ev.total > 0)
+        ? `${Math.round((ev.done / ev.total) * 100)}%`
+        : '40%';
+    }
+  };
   try {
-    const group = await state.sharing.createGroup(name);
-    document.getElementById('sharingCreateGroupModal')?.remove();
+    const group = await state.sharing.createGroup(name, renderProgress);
+    overlay.remove();
     showToast(t('sharing.group_created'), 'success');
-    renderSharingPane();
+    window.renderGroups?.();
   } catch (e) {
     showToast(e.message, 'error');
+    delete overlay.dataset.creating;
+    if (input) input.disabled = false;
     if (btn) { btn.disabled = false; btn.classList.remove('loading'); btn.textContent = t('common.create'); }
+    if (cancelBtn) cancelBtn.disabled = false;
+    if (progressEl) progressEl.hidden = true;
   }
 }
 
 /** Show a modal with an invite code (after group creation or member invite). */
 function showInviteCodeModal(name, code, isNewGroup) {
-  const env = decodeInviteEnvelope(code);
-  const isSingleUse = env?.b !== 'googledrive';
   const title = isNewGroup ? t('sharing.group_created') : t('sharing.member_added');
   const hint = isNewGroup
     ? t('sharing.invite_code_hint', name)
     : t('sharing.member_code_hint', name);
-  const warn = `<p class="sharing-warning" style="margin-top:10px;font-size:0.82rem;color:var(--warn,#d97706);background:color-mix(in srgb,var(--warn,#d97706) 12%, transparent);border:1px solid color-mix(in srgb,var(--warn,#d97706) 30%, transparent);border-radius:8px;padding:8px 10px">${lucideIcon('shield-alert', 12)} ${t(isSingleUse ? 'sharing.invite_secret_warn' : 'sharing.invite_drive_warn')}</p>`;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingInviteCodeModal';
@@ -302,7 +237,6 @@ function showInviteCodeModal(name, code, isNewGroup) {
       <input id="sharingInviteCodeInput" class="sharing-code-input" type="text" readonly value="${escQ(code)}" data-action="select-all-on-click">
       <button class="sharing-invite-btn" data-action="sharing-copy-code-value">${lucideIcon('copy', 14)} ${t('sharing.copy')}</button>
     </div>
-    ${warn}
     <div class="modal-actions">
       <button class="modal-save" data-action="close-modal" data-modal-id="sharingInviteCodeModal">${t('common.close')}</button>
     </div>
@@ -344,13 +278,16 @@ async function sharingCopyMemberCode(groupId, token) {
   }
 }
 
-async function sharingInvite(groupId) {
-  const input = document.getElementById(`sharingInvite-${groupId}`);
+async function sharingInvite(groupId, btnEl, inputEl) {
+  // Resolve the invite input relative to the clicked element rather than a
+  // global id lookup, so the handler always reads the field the user typed in.
+  const row = btnEl?.closest('.sharing-invite-row') || inputEl?.closest('.sharing-invite-row');
+  const input = inputEl || row?.querySelector('.sharing-invite-input') || document.getElementById(`sharingInvite-${groupId}`);
   const name = input?.value.trim();
   if (!name) return;
-  const btn = input?.nextElementSibling;
+  const btn = btnEl || row?.querySelector('.sharing-invite-btn') || input?.nextElementSibling;
   if (btn?.disabled) return;
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; btn.setAttribute('aria-busy', 'true'); }
+  setBtnBusy(btn, true);
   try {
     const result = await state.sharing.inviteUser(groupId, name);
     input.value = '';
@@ -358,7 +295,7 @@ async function sharingInvite(groupId) {
       || (result?.token && state.sharing.getMemberInviteLink ? state.sharing.getMemberInviteLink(groupId, result.token, result.expiresAt) : null)
       || state.sharing.getInviteLink?.(groupId)
       || null;
-    renderSharingPane();
+    window.renderGroups?.();
     if (inviteCode) {
       showInviteCodeModal(name, inviteCode);
     } else {
@@ -366,44 +303,26 @@ async function sharingInvite(groupId) {
     }
   } catch (e) {
     showToast(e.message, 'error');
-    if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.removeAttribute('aria-busy'); }
+    setBtnBusy(btn, false);
   }
 }
 
-async function sharingRemoveMember(groupId, memberId) {
+async function sharingRemoveMember(groupId, member_id) {
   const group = state.sharing?.getGroup?.(groupId);
-  const member = (group?.members || []).find(m => m.memberId === memberId);
+  const member = (group?.members || []).find(m => m.member_id === member_id);
   const label = memberLabel(member);
   showConfirmAction(
     t('sharing.remove_member'),
     t('sharing.remove_member_confirm', label),
     async () => {
       try {
-        await state.sharing.removeUser(groupId, memberId);
+        await state.sharing.removeUser(groupId, member_id);
         showToast(t('sharing.member_removed'), 'info');
-        renderSharingPane();
-      } catch (e) { showToast(e.message, 'error'); }
-    }
-  );
-}
-
-async function sharingLeaveGroup(groupId) {
-  showConfirmAction(
-    t('sharing.leave'),
-    t('sharing.leave_confirm'),
-    async (keepCopies) => {
-      try {
-        if (keepCopies) {
-          await _convertGroupItemsToPersonal(groupId);
-        }
-        await state.sharing.leaveGroup(groupId);
-        showToast(t('sharing.left_group'), 'info');
-        renderSharingPane();
-        document.dispatchEvent(new CustomEvent('sharing-changed'));
+        window.renderGroups?.();
       } catch (e) { showToast(e.message, 'error'); }
     },
     null,
-    { toggleLabel: t('sharing.leave_keep_copies') }
+    { keepOpen: true, progressText: t('sharing.removing_member') }
   );
 }
 
@@ -414,22 +333,38 @@ async function sharingUnjoinGroup(groupId) {
     async (keepCopies) => {
       try {
         if (keepCopies) {
+          setConfirmActionProgress(t('sharing.deleting_converting_items'));
           await _convertGroupItemsToPersonal(groupId);
+          // The 'left' flip in unjoinGroup uploads group.json immediately,
+          // while table writes are debounced — force the converted tables to
+          // Drive first. Otherwise a hard crash between the flip and the
+          // flush would lose the kept copies after the flip went through.
+          await state.driveAdapter.flushTables?.();
         }
+        setConfirmActionProgress(t('sharing.leaving_group'));
         await state.sharing.unjoinGroup(groupId);
+        setConfirmActionProgress(t('sharing.refreshing_views'));
+        await _refreshViewsAfterItemsChanged();
         showToast(t('sharing.left_group'), 'info');
-        renderSharingPane();
+        window.renderGroups?.();
         document.dispatchEvent(new CustomEvent('sharing-changed'));
       } catch (e) { showToast(e.message, 'error'); }
     },
     null,
-    { toggleLabel: t('sharing.leave_keep_copies') }
+    {
+      toggleLabel: t('sharing.leave_keep_copies'),
+      variant: 'neutral',
+      btnText: t('sharing.leave'),
+      iconSvg: lucideIcon('log-out', 28),
+      btnIconSvg: lucideIcon('log-out', 15, 'currentColor'),
+      keepOpen: true,
+    }
   );
 }
 
-async function sharingEditMyName(groupId, memberId, currentName) {
+async function sharingEditMyName(groupId, member_id, currentName) {
   // Replace the member row with an inline input
-  const row = document.querySelector(`.sharing-member [data-action="sharing-edit-my-name"][data-group-id="${CSS.escape(groupId)}"][data-member-id="${CSS.escape(memberId)}"]`)?.closest('.sharing-member');
+  const row = document.querySelector(`.sharing-member [data-action="sharing-edit-my-name"][data-group-id="${CSS.escape(groupId)}"][data-member-id="${CSS.escape(member_id)}"]`)?.closest('.sharing-member');
   if (!row) return;
   const nameSpan = row.querySelector('.sharing-member-email');
   if (!nameSpan || nameSpan.querySelector('.sharing-edit-name-input')) return;
@@ -450,7 +385,7 @@ async function sharingEditMyName(groupId, memberId, currentName) {
     try {
       await state.sharing.updateMyDisplayName(groupId, newName);
       showToast(t('sharing.name_updated'), 'info');
-      renderSharingPane();
+      window.renderGroups?.();
     } catch (e) {
       showToast(e.message, 'error');
       nameSpan.innerHTML = prevHtml;
@@ -464,14 +399,87 @@ async function sharingEditMyName(groupId, memberId, currentName) {
   input.addEventListener('blur', save);
 }
 
+async function sharingRenameGroup(groupId, el) {
+  // Replace the group name heading with an inline editor (creator-only;
+  // the button is rendered only for creators): heading-sized input plus
+  // explicit confirm/cancel buttons.
+  const card = el?.closest('.sharing-group-card');
+  const h4 = card?.querySelector('.sharing-group-info h4');
+  if (!h4 || h4.querySelector('.sharing-rename-input')) return;
+  const currentName = state.sharing.getGroup(groupId)?.name || '';
+  const prevHtml = h4.innerHTML;
+  let settled = false;
+
+  h4.innerHTML = `<span class="sharing-rename-wrap">`
+    + `<input class="sharing-rename-input" type="text" value="${esc(currentName)}" maxlength="60" autocomplete="off" aria-label="${esc(t('sharing.rename_group'))}">`
+    + `<button type="button" class="sharing-rename-confirm" title="${esc(t('save'))}">${lucideIcon('check', 14)}</button>`
+    + `<button type="button" class="sharing-rename-cancel" title="${esc(t('cancel'))}">${lucideIcon('x', 14)}</button>`
+    + `</span>`;
+  const input = h4.querySelector('.sharing-rename-input');
+  const confirmBtn = h4.querySelector('.sharing-rename-confirm');
+  const cancelBtn = h4.querySelector('.sharing-rename-cancel');
+  if (!input || !confirmBtn || !cancelBtn) return;
+  input.focus();
+  input.select();
+
+  const setLocked = (locked) => {
+    input.disabled = locked;
+    confirmBtn.disabled = locked;
+    cancelBtn.disabled = locked;
+  };
+  const cancel = () => {
+    if (settled) return;
+    settled = true;
+    h4.innerHTML = prevHtml;
+  };
+  const save = async () => {
+    if (settled) return;
+    settled = true;
+    const newName = input.value.trim();
+    if (!newName || newName === currentName) {
+      h4.innerHTML = prevHtml;
+      return;
+    }
+    setLocked(true);
+    try {
+      await state.sharing.renameGroup(groupId, newName);
+      showToast(t('sharing.group_renamed'), 'success');
+      window.renderGroups?.();
+    } catch (e) {
+      showToast(e.message, 'error');
+      h4.innerHTML = prevHtml;
+    }
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); save(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  });
+  // Blur cancels — never saves. The pointerdown guard below keeps the input
+  // focused when a button is pressed, so the click reaches save()/cancel()
+  // instead of being swallowed by the blur.
+  input.addEventListener('blur', cancel);
+  confirmBtn.addEventListener('pointerdown', (e) => e.preventDefault());
+  cancelBtn.addEventListener('pointerdown', (e) => e.preventDefault());
+  confirmBtn.addEventListener('click', save);
+  cancelBtn.addEventListener('click', cancel);
+}
+
 // ── Group cleanup helpers ──────────────────────────────────────
 
 /**
  * Convert all items belonging to a group into personal items.
  * Nulls shared_id and shared_group_id; moves items in __shared__ category to General.
+ * Every DB call is throw-on-error: a silent conversion failure would let the
+ * leave proceed (flush + 'left' flip) while pointers still reference the group.
  */
 async function _convertGroupItemsToPersonal(groupId) {
   const nullShared = { shared_id: null, shared_group_id: null };
+  const dbThrow = async (promise, what) => {
+    const { data, error } = await promise;
+    if (error) throw new Error(`${what}: ${error.message || error}`);
+    return data;
+  };
 
   // Build a lookup of shared-layer data so we can enrich pointers (which store
   // text/name as '' locally) before severing the shared link.
@@ -483,8 +491,7 @@ async function _convertGroupItemsToPersonal(groupId) {
   }
 
   // Build a separate lookup for habits via getAllSharedHabits() which normalizes
-  // name/frequency_rule to top-level (Supabase keeps them inside payload) and
-  // merges completions from child items + legacy payload.
+  // name/frequency_rule to top-level and merges completions from child items + legacy payload.
   const sharedHabitLookup = new Map();
   if (state.sharing?.getAllSharedHabits) {
     for (const sh of state.sharing.getAllSharedHabits()) {
@@ -494,12 +501,15 @@ async function _convertGroupItemsToPersonal(groupId) {
 
   // ── Todos ──
   {
-    const { data: cats } = await state.db.from('todo_categories').select('id, name, is_protected');
+    const cats = await dbThrow(
+      state.db.from('todo_categories').select('id, name, is_protected'),
+      'load todo categories');
     const sharedCat = cats?.find(c => c.is_protected && c.name === '__shared__');
     const defaultCat = cats?.find(c => c.is_protected && c.name !== '__shared__');
 
-    const { data: rows } = await state.db.from('todos').select('id, text, shared_id, category_id')
-      .eq('shared_group_id', groupId);
+    const rows = await dbThrow(
+      state.db.from('todos').select('id, text, shared_id, category_id').eq('shared_group_id', groupId),
+      'load shared todos');
     for (const row of (rows || [])) {
       const sh = row.shared_id ? sharedLookup.get(row.shared_id) : null;
       const enriched = {};
@@ -513,18 +523,23 @@ async function _convertGroupItemsToPersonal(groupId) {
         enriched.category = '';
         enriched.category_id = defaultCat.id;
       }
-      await state.db.from('todos').update({ ...nullShared, ...enriched }).eq('id', row.id);
+      await dbThrow(
+        state.db.from('todos').update({ ...nullShared, ...enriched }).eq('id', row.id),
+        `convert todo ${row.id}`);
     }
   }
 
   // ── Habits ──
   {
-    const { data: cats } = await state.db.from('habit_categories').select('id, name, is_protected');
+    const cats = await dbThrow(
+      state.db.from('habit_categories').select('id, name, is_protected'),
+      'load habit categories');
     const sharedCat = cats?.find(c => c.is_protected && c.name === '__shared__');
     const defaultCat = cats?.find(c => c.is_protected && c.name !== '__shared__');
 
-    const { data: rows } = await state.db.from('habits').select('id, name, shared_id, category_id, frequency_rule')
-      .eq('shared_group_id', groupId);
+    const rows = await dbThrow(
+      state.db.from('habits').select('id, name, shared_id, category_id, frequency_rule').eq('shared_group_id', groupId),
+      'load shared habits');
     for (const row of (rows || [])) {
       const sh = row.shared_id ? sharedHabitLookup.get(row.shared_id) : null;
       const enriched = {};
@@ -536,17 +551,21 @@ async function _convertGroupItemsToPersonal(groupId) {
         enriched.category = '';
         enriched.category_id = defaultCat.id;
       }
-      await state.db.from('habits').update({ ...nullShared, ...enriched }).eq('id', row.id);
+      await dbThrow(
+        state.db.from('habits').update({ ...nullShared, ...enriched }).eq('id', row.id),
+        `convert habit ${row.id}`);
 
       // Restore completions from the shared layer — they were deleted locally
       // when the habit was originally shared.
       if (sh?.completions?.length && row.id) {
         for (const c of sh.completions) {
-          await state.db.from('habit_completions').insert({
-            habit_id: row.id,
-            completed_at: c.completed_at,
-            note: c.note || null,
-          });
+          await dbThrow(
+            state.db.from('habit_completions').insert({
+              habit_id: row.id,
+              completed_at: c.completed_at,
+              note: c.note || null,
+            }),
+            `restore completion for habit ${row.id}`);
         }
       }
     }
@@ -554,8 +573,9 @@ async function _convertGroupItemsToPersonal(groupId) {
 
   // ── List items ──
   {
-    const { data: rows } = await state.db.from('list_items').select('id, text, note, shared_id')
-      .eq('shared_group_id', groupId);
+    const rows = await dbThrow(
+      state.db.from('list_items').select('id, text, note, shared_id').eq('shared_group_id', groupId),
+      'load shared list items');
     for (const row of (rows || [])) {
       const sh = row.shared_id ? sharedLookup.get(row.shared_id) : null;
       const enriched = {};
@@ -563,9 +583,27 @@ async function _convertGroupItemsToPersonal(groupId) {
         enriched.text = sh.payload?.text || sh.payload?.title || row.text || '';
         if (sh.payload?.note != null) enriched.note = sh.payload.note;
       }
-      await state.db.from('list_items').update({ ...nullShared, ...enriched }).eq('id', row.id);
+      await dbThrow(
+        state.db.from('list_items').update({ ...nullShared, ...enriched }).eq('id', row.id),
+        `convert list item ${row.id}`);
     }
   }
+}
+
+/**
+ * Re-read the item views from the DB. Used after local item mutations that
+ * bypass the shared sync (keep-copies conversion, group item deletion): the
+ * conversion severs the shared link, so the sharing-changed sync detects no
+ * change and the in-memory caches would keep rendering stale group chips.
+ * Dynamic imports avoid a static cycle (todos/habits/lists import sharing-ui).
+ */
+async function _refreshViewsAfterItemsChanged() {
+  const [{ refreshTodos }, { refreshHabits }, { refreshLists }] = await Promise.all([
+    import('./todos.js'), import('./habits.js'), import('./lists.js'),
+  ]);
+  await refreshTodos();
+  await refreshHabits();
+  await refreshLists();
 }
 
 /**
@@ -589,19 +627,24 @@ async function sharingDeleteGroup(groupId) {
     async (keepItems) => {
       try {
         if (keepItems) {
+          setConfirmActionProgress(t('sharing.deleting_converting_items'));
           await _convertGroupItemsToPersonal(groupId);
         } else {
+          setConfirmActionProgress(t('sharing.deleting_items'));
           await _deleteGroupItems(groupId);
         }
+        setConfirmActionProgress(t('sharing.deleting_group'));
         await state.sharing.deleteGroup(groupId);
+        setConfirmActionProgress(t('sharing.refreshing_views'));
+        await _refreshViewsAfterItemsChanged();
         showToast(t('sharing.group_deleted'), 'info');
-        renderSharingPane();
+        window.renderGroups?.();
         // Refresh all pages to reflect changes
         document.dispatchEvent(new CustomEvent('sharing-changed'));
       } catch (e) { showToast(e.message, 'error'); }
     },
     detail,
-    { toggleLabel: t('sharing.delete_group_keep_items') }
+    { toggleLabel: t('sharing.delete_group_keep_items'), keepOpen: true }
   );
 }
 
@@ -630,67 +673,30 @@ export async function handleJoinCode(rawCode, opts = {}) {
   }
 
   const activeMode = localStorage.getItem('claw_cc_active_mode');
-  if (env.b === 'supabase' && activeMode !== 'supabase') {
-    showJoinCodeError(t('sharing.join_backend_supabase'), errEl);
-    return false;
-  }
   if (env.b === 'googledrive' && activeMode !== 'googledrive') {
     showJoinCodeError(t('sharing.join_backend_drive'), errEl);
     return false;
   }
 
-  const connectionRef = env.b === 'googledrive' ? env.f : code;
+  const connectionRef = env.f;
 
   // Check if already joined via this folderId / invite code.
   const existing = state.sharing.getGroupByFolderId?.(connectionRef);
   if (existing) {
     showToast(t('sharing.already_joined', existing.name || ''), 'info');
-    renderSharingPane();
+    window.renderGroups?.();
     return true;
-  }
-
-  // For Supabase, also check local group cache by group id before verifying token.
-  if (env.g) {
-    const alreadyJoined = state.sharing.getAllGroups?.()?.find(g => g.id === env.g);
-    if (alreadyJoined) {
-      // Check if the invite URL differs from the stored remote — owner may have migrated
-      if (env.u && state.sharing.reconnectGroup) {
-        const { data: jgRow } = await state.db.from('joined_groups').select('remote_url').eq('group_id', env.g).limit(1);
-        const storedUrl = jgRow?.[0]?.remote_url?.replace(/\/+$/, '');
-        if (storedUrl && storedUrl !== env.u?.replace(/\/+$/, '')) {
-          showReconnectConfirmModal(alreadyJoined, env);
-          return true;
-        }
-      }
-      showToast(t('sharing.already_joined', alreadyJoined.name || ''), 'info');
-      renderSharingPane();
-      return true;
-    }
-    // Group not loaded (remote unreachable?) but exists in joined_groups — check for reconnect
-    if (env.u && state.sharing.reconnectGroup) {
-      const { data: jgRow } = await state.db.from('joined_groups').select('remote_url,group_name').eq('group_id', env.g).limit(1);
-      if (jgRow?.[0] && jgRow[0].remote_url?.replace(/\/+$/, '') !== env.u?.replace(/\/+$/, '')) {
-        const stubGroup = { id: env.g, name: jgRow[0].group_name || env.g };
-        showReconnectConfirmModal(stubGroup, env);
-        return true;
-      }
-    }
   }
 
   const group = await state.sharing.tryDirectJoin(connectionRef);
   if (group) {
     if (group._pendingJoin) {
-      showJoinConfirmModal(group);
+      showJoinConfirmModal(group, (name) => state.sharing.joinWithFileIds(null, { display_name: name }));
     } else {
       showToast(t('sharing.joined_group', group.name || ''), 'success');
-      renderSharingPane();
+      window.renderGroups?.();
     }
     return true;
-  }
-
-  if (env.b === 'supabase') {
-    showJoinCodeError(t('sharing.join_code_used'), errEl);
-    return false;
   }
 
   if (!state.sharing.openJoinPicker) {
@@ -707,6 +713,22 @@ function sharingOpenJoinCodeModal() {
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingJoinCodeModal';
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  // Joining requires multi-selecting every group file in the Google file
+  // picker. Gate on pointing capability, not device identity: phones and
+  // tablets (coarse pointer, no hover) can't multi-select — the picker
+  // dismisses after a single tap — while touchscreen laptops (fine pointer
+  // + hover) can. Show a notice instead of the form when not desktop-like.
+  if (!isDesktopLike()) {
+    overlay.innerHTML = `<div class="modal">
+    <h2>${lucideIcon('log-in', 20)} ${t('sharing.join_group')}</h2>
+    <p>${t('sharing.join_not_available_on_touch')}</p>
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingJoinCodeModal">${t('common.close')}</button>
+    </div>
+  </div>`;
+    document.getElementById('app').appendChild(overlay);
+    return;
+  }
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('log-in', 20)} ${t('sharing.join_group')}</h2>
     <p>${t('sharing.join_code_hint')}</p>
@@ -734,7 +756,7 @@ async function sharingJoinCodeSubmit() {
     return;
   }
   if (btn?.disabled) return;
-  if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
+  if (btn) { setBtnBusy(btn, true); btn.textContent = t('common.loading'); }
   try {
     const ok = await handleJoinCode(code, { errorEl: errEl });
     if (ok) modal?.remove();
@@ -749,17 +771,20 @@ async function sharingJoinCodeSubmit() {
   }
 }
 
-function showJoinConfirmModal(group) {
+function showJoinConfirmModal(group, onConfirm) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingJoinConfirmModal';
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   const ownerLine = group._creatorName
     ? `<p class="sharing-join-owner">${lucideIcon('user', 14)} ${t('sharing.join_confirm_owner', esc(group._creatorName))}</p>` : '';
+  const hintLine = group.name
+    ? `<p>${t('sharing.join_confirm_hint', esc(group.name))}</p>` : '';
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('users', 20)} ${t('sharing.join_confirm_title')}</h2>
-    <p>${t('sharing.join_confirm_hint', esc(group.name || ''))}</p>
+    ${hintLine}
     ${ownerLine}
+    <label for="joinDisplayName" class="sharing-join-name-label">${t('sharing.join_confirm_name_label')}</label>
     <input type="text" id="joinDisplayName" class="sharing-invite-input"
       placeholder="${t('sharing.join_confirm_name')}"
       value="${esc(group._suggestedName || '')}" />
@@ -775,56 +800,25 @@ function showJoinConfirmModal(group) {
     const errEl = document.getElementById('joinConfirmError');
     if (errEl) errEl.style.display = 'none';
     if (btn?.disabled) return;
-    if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
+    if (btn) { setBtnBusy(btn, true); btn.textContent = t('common.loading'); }
     try {
-      const displayName = document.getElementById('joinDisplayName')?.value.trim() || '';
-      await state.sharing.joinWithFileIds(null, { displayName });
+      const display_name = document.getElementById('joinDisplayName')?.value.trim() || '';
+      const joined = await onConfirm(display_name);
       overlay.remove();
-      showToast(t('sharing.joined_group', group.name || ''), 'success');
-      renderSharingPane();
+      document.getElementById('sharingJoinModal')?.remove();
+      showToast(t('sharing.joined_group', joined?.name || group.name || ''), 'success');
+      window.renderGroups?.();
     } catch (e) {
       console.warn('join confirm failed:', e);
-      if (errEl) { errEl.textContent = t('sharing.join_failed'); errEl.style.display = ''; }
-      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}`; }
-    }
-  });
-}
-
-function showReconnectConfirmModal(group, env) {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay visible';
-  overlay.id = 'sharingReconnectModal';
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-  overlay.innerHTML = `<div class="modal">
-    <h2>${lucideIcon('refresh-cw', 20)} ${t('sharing.reconnect_title')}</h2>
-    <p>${t('sharing.reconnect_hint', esc(group.name || ''))}</p>
-    <div id="reconnectError" class="sharing-join-error" style="display:none"></div>
-    <div class="modal-actions">
-      <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingReconnectModal">${t('common.cancel')}</button>
-      <button class="modal-save" id="reconnectConfirmBtn">${lucideIcon('refresh-cw', 16)} ${t('sharing.reconnect_btn')}</button>
-    </div>
-  </div>`;
-  document.getElementById('app').appendChild(overlay);
-  document.getElementById('reconnectConfirmBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('reconnectConfirmBtn');
-    const errEl = document.getElementById('reconnectError');
-    if (errEl) errEl.style.display = 'none';
-    if (btn?.disabled) return;
-    if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
-    try {
-      await state.sharing.reconnectGroup(env.g, env.u, env.k, env.t);
-      overlay.remove();
-      showToast(t('sharing.reconnected', group.name || ''), 'success');
-      renderSharingPane();
-    } catch (e) {
-      console.warn('reconnect failed:', e);
-      if (errEl) { errEl.textContent = e.message || t('sharing.reconnect_failed'); errEl.style.display = ''; }
-      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('refresh-cw', 16)} ${t('sharing.reconnect_btn')}`; }
+      if (errEl) { errEl.textContent = e.message || t('sharing.join_failed'); errEl.style.display = ''; }
+      if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('log-in', 16)} ${t('sharing.join_confirm_btn')}`; }
     }
   });
 }
 
 function showJoinPickerModal(folderId) {
+  // The file count is derived from the required file set — never hard-coded.
+  const fileCount = state.sharing.getRequiredGroupFiles().length;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay visible';
   overlay.id = 'sharingJoinModal';
@@ -832,7 +826,7 @@ function showJoinPickerModal(folderId) {
   overlay.innerHTML = `<div class="modal">
     <h2>${lucideIcon('users', 20)} ${t('sharing.join_group')}</h2>
     <p>${t('sharing.join_picker_hint')}</p>
-    <p class="sharing-join-file-list">${t('sharing.join_expected_files')}</p>
+    <p class="sharing-join-file-list">${t('sharing.join_expected_files', fileCount)}</p>
     <div id="sharingJoinError" class="sharing-join-error" style="display:none"></div>
     <div class="modal-actions">
       <button class="modal-cancel" data-action="close-modal" data-modal-id="sharingJoinModal">${t('common.cancel')}</button>
@@ -851,22 +845,19 @@ async function sharingOpenJoinPicker(folderId) {
   const btn = document.getElementById('sharingJoinPickerBtn');
   const errEl = document.getElementById('sharingJoinError');
   if (errEl) errEl.style.display = 'none';
-  if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
+  if (btn) { setBtnBusy(btn, true); btn.textContent = t('common.loading'); }
 
   try {
     const docs = await state.sharing.openJoinPicker(folderId);
     if (!docs) {
-      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
+      if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
       return;
     }
 
-    const fileIds = {};
-    for (const d of docs) {
-      const key = d.name.replace('.json', '');
-      if (['group', 'todos', 'habits', 'lists'].includes(key) || /^extra_\d+$/.test(key)) {
-        fileIds[key] = d.id;
-      }
-    }
+    // Map picked docs to required file keys via the adapter (never hard-coded)
+    // so new required files are picked up automatically.
+    const requiredKeys = state.sharing.getRequiredGroupFiles();
+    const fileIds = state.sharing.mapDocsToFileIds(docs);
 
     if (!fileIds.group) {
       const folderDoc = docs.find(d => d.mimeType === 'application/vnd.google-apps.folder');
@@ -875,31 +866,36 @@ async function sharingOpenJoinPicker(folderId) {
         if (group) {
           document.getElementById('sharingJoinModal')?.remove();
           showToast(t('sharing.joined_group', group.name || ''), 'success');
-          renderSharingPane();
+          window.renderGroups?.();
           return;
         }
       }
       showJoinError(t('sharing.join_no_files'));
-      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
+      if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
       return;
     }
 
-    const required = ['group', 'todos', 'habits', 'lists'];
-    const missing = required.filter(k => !fileIds[k]);
+    // All required files (group + item files + placeholders) must be
+    // selected: a partial grant can never half-join — the pending →
+    // 'joined' flip is gated on the full set inside joinWithFileIds.
+    const missing = requiredKeys.filter(k => !fileIds[k]);
     if (missing.length > 0) {
       const names = missing.map(k => `${k}.json`).join(', ');
       showJoinError(t('sharing.join_missing_files', names));
-      if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
+      if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
       return;
     }
 
-    const group = await state.sharing.joinWithFileIds(folderId, fileIds);
-    document.getElementById('sharingJoinModal')?.remove();
-    showToast(t('sharing.joined_group', group?.name || ''), 'success');
-    renderSharingPane();
+    // Ask the joiner to choose their pseudo, then join (requires a pending invite).
+    const me = await state.sharing.getCurrentUser().catch(() => null);
+    showJoinConfirmModal(
+      { name: '', _suggestedName: me?.display_name || '' },
+      (name) => state.sharing.joinWithFileIds(folderId, fileIds, { display_name: name }),
+    );
+    if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
   } catch (e) {
     showJoinError(e.message || t('sharing.join_failed'));
-    if (btn) { btn.disabled = false; btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
+    if (btn) { setBtnBusy(btn, false); btn.innerHTML = `${lucideIcon('folder-open', 16)} ${t('sharing.select_files')}`; }
   }
 }
 
@@ -931,7 +927,7 @@ function showBadgeTooltip(badge) {
   const tip = document.createElement('div');
   tip.className = 'shared-badge-tooltip';
 
-  const activeMembers = group.members.filter(m => m.status !== 'revoked');
+  const activeMembers = visibleMembers(group);
   tip.innerHTML = activeMembers.map(m => {
     const label = memberLabel(m);
     return `<div class="shared-badge-tooltip-row">${avatarDot(m, 20)}<span>${esc(label)}</span></div>`;
@@ -1006,7 +1002,7 @@ export function assigneeDots(assignees, maxShow = 3) {
   let html = '<span class="assignee-dots">';
   const show = assignees.slice(0, maxShow);
   for (const a of show) {
-    const member = typeof a === 'string' ? { memberId: a, displayName: a } : a;
+    const member = typeof a === 'string' ? { member_id: a, display_name: a } : a;
     html += avatarDot(member, 18);
   }
   if (assignees.length > maxShow) {
@@ -1088,7 +1084,7 @@ export function openSharePopover(anchorEl, onShare, opts = {}) {
 
   const renderPopover = () => {
     const selectedGroup = groups.find(g => g.id === selectedGroupId) || groups[0];
-    const members = selectedGroup.members || [];
+    const members = visibleMembers(selectedGroup);
 
     popover.innerHTML = `
       <div class="share-popover-body">
@@ -1108,7 +1104,7 @@ export function openSharePopover(anchorEl, onShare, opts = {}) {
           <div class="share-popover-option-list share-popover-member-list">
             ${members.map(m => `
               <label class="share-popover-check">
-                <input type="checkbox" value="${esc(m.memberId)}" checked>
+                <input type="checkbox" value="${esc(m.member_id)}" checked>
                 ${esc(memberLabel(m))}
               </label>
             `).join('')}
@@ -1175,11 +1171,11 @@ export async function showCompletionModal(groupId, itemId, assignees, currentMem
   overlay.innerHTML = `<div class="modal sharing-completion-modal">
     <h2>${lucideIcon('circle-check', 20)} ${t('sharing.who_did_this')}</h2>
     <div class="sharing-completion-list">
-      ${assignees.map(memberId => {
-        const member = state.sharing?.getGroup?.(groupId)?.members?.find(m => m.memberId === memberId) || { memberId, displayName: memberId };
+      ${assignees.map(member_id => {
+        const member = state.sharing?.getGroup?.(groupId)?.members?.find(m => m.member_id === member_id) || { member_id, display_name: member_id };
         return `
         <label class="share-popover-check">
-          <input type="checkbox" value="${esc(memberId)}" ${memberId === currentMemberId ? 'checked' : ''}>
+          <input type="checkbox" value="${esc(member_id)}" ${member_id === currentMemberId ? 'checked' : ''}>
           ${esc(memberLabel(member))}
         </label>`;
       }).join('')}
@@ -1199,43 +1195,26 @@ async function sharingCompleteSubmit(groupId, itemId) {
   const doneBy = [...modal.querySelectorAll('.share-popover-check input:checked')].map(cb => cb.value);
   if (!doneBy.length) return;
   const btn = modal.querySelector('.modal-save');
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+  setBtnBusy(btn, true);
   try {
     await state.sharing.completeItem(groupId, itemId, doneBy);
     showToast(t('common.done') + '!', 'success');
     modal.remove();
   } catch (e) {
     showToast(e.message, 'error');
-    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+    setBtnBusy(btn, false);
   }
 }
 
-// ── i18n for settings pane labels ───────────────────────────────
-
-export function applySettingsI18n() {
-  const titleEl = document.getElementById('settingsPaneSharingTitle');
-  if (titleEl) titleEl.textContent = t('sharing.title');
-  const navEl = document.getElementById('settingsNavSharing');
-  if (navEl) navEl.textContent = t('sharing.title');
-}
-
-
 // ── Expose actions on window (CSP delegation handled in js/delegation.js) ──
-
-function toggleRevokedMembers(groupId) {
-  const container = document.getElementById(`revoked-list-${groupId}`);
-  const arrow = document.getElementById(`revoked-arrow-${groupId}`);
-  if (container) container.classList.toggle('visible');
-  if (arrow) arrow.classList.toggle('open');
-}
 
 window.sharingCreateGroup = sharingCreateGroup;
 window.sharingCreateGroupSubmit = sharingCreateGroupSubmit;
 window.sharingInvite = sharingInvite;
 window.sharingRemoveMember = sharingRemoveMember;
-window.sharingLeaveGroup = sharingLeaveGroup;
 window.sharingUnjoinGroup = sharingUnjoinGroup;
 window.sharingEditMyName = sharingEditMyName;
+window.sharingRenameGroup = sharingRenameGroup;
 window.sharingDeleteGroup = sharingDeleteGroup;
 window.sharingCopyCode = sharingCopyCode;
 window.sharingCopyMemberCode = sharingCopyMemberCode;
@@ -1246,11 +1225,10 @@ window.sharingCopyLink = sharingCopyCode;
 window.sharingCopyMemberLink = sharingCopyMemberCode;
 window.sharingCopyLinkValue = sharingCopyCodeValue;
 window.sharingOpenJoinPicker = sharingOpenJoinPicker;
-window.toggleRevokedMembers = toggleRevokedMembers;
 window.submitSharePopover = submitSharePopover;
 window.sharePopoverOpenSharing = function() {
   closeSharePopover();
-  if (typeof window.openSettings === 'function') window.openSettings('sharing');
-  else location.hash = '#settings/sharing';
+  if (typeof window.switchView === 'function') window.switchView('groups');
+  else location.hash = '#groups';
 };
 window.sharingCompleteSubmit = sharingCompleteSubmit;

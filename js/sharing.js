@@ -11,12 +11,16 @@
 //
 // Currently supported:
 //   - 'googledrive' → sharing-drive.js (createDriveSharing)
-//   - 'supabase'    → sharing-supabase.js (createSupabaseSharing)
 //   - 'demo'        → read-only stub (UI visible, group creation gated)
+//   - 'cache'       → read-only sharing from the offline-cache snapshot
+//                     (Drive auth lost; groups/items resolve, mutations
+//                     reject — see createCachedSharing)
 //
 // ===================================================================
 
 import { SHARING_INTERFACE, validateSharingAdapter } from './sharing-interface.js';
+import { encodeInviteEnvelope } from './sharing-envelope.js';
+import { makeReadOnlyError } from './adapters/offline-cache.js';
 
 // ── Demo stub ─────────────────────────────────────────────────────
 // Satisfies the full SharingInterface so state.sharing is truthy and
@@ -35,7 +39,6 @@ function createDemoSharingStub() {
       const isArrayQuery = [
         'getAllGroups', 'getItems', 'getAllSharedItems',
         'getAllSharedHabits', 'getAllSharedTodos', 'getAllSharedListItems',
-        'getRevokedMembers',
       ].includes(key);
       const isSyncQuery = ['getGroup', 'getGroupByFolderId', 'getInviteLink',
         'isJoinedViaLink', 'getCurrentMember', 'getAgentSafeGroup'].includes(key);
@@ -60,10 +63,78 @@ function createDemoSharingStub() {
   return stub;
 }
 
+// ── Cached (read-only) sharing ────────────────────────────────
+// Built from the snapshot blob main.js mirrors into the offline cache
+// whenever the live Drive sharing adapter loads or syncs. Blob shape:
+// { v, groups, itemsByGroup: { [groupId]: { todos, habits, lists } },
+//   currentUser, currentMemberIds: { [groupId]: memberId } } — groups
+// are the Drive adapter's public groups and the item arrays are its
+// per-group file contents, so reads match the live adapter's shapes.
+// Every mutation rejects with the shared read-only error; no polling.
+const SHARING_TYPE_KEY = { todo: 'todos', habit: 'habits', list_item: 'lists' };
+
+function createCachedSharing(blob) {
+  const groups = Array.isArray(blob?.groups) ? blob.groups : [];
+  const itemsByGroup = blob?.itemsByGroup || {};
+  const memberIds = blob?.currentMemberIds || {};
+  const stub = createDemoSharingStub();
+
+  const fileItems = (groupId, key) => itemsByGroup[groupId]?.[key] || [];
+  const allItems = (key) => {
+    const out = [];
+    for (const g of groups) {
+      for (const k of (key ? [key] : ['todos', 'habits', 'lists'])) {
+        for (const item of fileItems(g.id, k)) out.push({ ...item, group_id: g.id, group_name: g.name });
+      }
+    }
+    return out;
+  };
+
+  stub.loadAll = async () => groups;
+  stub.getAllGroups = () => groups;
+  stub.getGroup = (groupId) => groups.find(g => g.id === groupId) || null;
+  stub.getAgentSafeGroup = stub.getGroup;
+  stub.getGroupByFolderId = (folderId) => groups.find(g => g.folderId === folderId);
+  stub.getItems = (groupId, itemType) => {
+    if (itemType) return [...fileItems(groupId, SHARING_TYPE_KEY[itemType])];
+    const out = [];
+    for (const k of ['todos', 'habits', 'lists']) out.push(...fileItems(groupId, k));
+    return out;
+  };
+  stub.getAllSharedItems = (itemType) => allItems(itemType ? SHARING_TYPE_KEY[itemType] : null);
+  stub.getAllSharedTodos = () => allItems('todos');
+  stub.getAllSharedListItems = () => allItems('lists');
+  stub.getAllSharedHabits = () => allItems('habits').filter(i => i.item_type === 'habit' && i.completions !== undefined);
+  stub.getCurrentUser = () => blob?.currentUser || { display_name: 'Member', backendUserId: 'googledrive' };
+  stub.getCurrentMemberId = async (groupId) => memberIds[groupId] || null;
+  stub.getCurrentMember = (groupId) => {
+    const g = groups.find(g => g.id === groupId);
+    return g?.members?.find(m => m.member_id === memberIds[groupId]) || null;
+  };
+  stub.getInviteLink = (groupId) => {
+    const g = groups.find(g => g.id === groupId);
+    return g?.folderId ? encodeInviteEnvelope({ v: 1, b: 'googledrive', f: g.folderId }) : null;
+  };
+  stub.getMemberInviteLink = stub.getInviteLink;
+  stub.getRequiredGroupFiles = () => [];
+  stub.mapDocsToFileIds = () => ({});
+  stub.hasPendingCreate = () => false;
+  stub.poll = async () => false;
+
+  const rejectReadOnly = async () => { throw makeReadOnlyError(); };
+  for (const key of [
+    'createGroup', 'deleteGroup', 'renameGroup', 'deleteOwnedGroups', 'leaveJoinedGroups',
+    'inviteUser', 'removeUser', 'unjoinGroup', 'tryDirectJoin', 'joinWithFileIds', 'reconnectGroup',
+    'addItem', 'updateItem', 'deleteItem', 'completeItem', 'uncompleteItem',
+    'addSharedHabit', 'updateSharedHabit', 'deleteSharedHabit', 'addSharedHabitCompletion',
+  ]) stub[key] = rejectReadOnly;
+  return stub;
+}
+
 /**
  * Create a sharing adapter for the given backend type.
  *
- * @param {'googledrive'|'supabase'} backendType
+ * @param {'googledrive'|'demo'|'cache'} backendType
  * @param {Object} config — backend-specific configuration
  * @returns {Promise<SharingAdapter>}
  */
@@ -77,23 +148,19 @@ export async function createSharing(backendType, config = {}) {
         config.getToken,
         config.personalFolderId,
         config.capabilities,
+        config.db,
+        { onSyncActivity: config.onSyncActivity },
       );
-      break;
-    }
-
-    case 'supabase': {
-      const { createSupabaseSharing } = await import('./sharing-supabase.js');
-      adapter = await createSupabaseSharing(config.adapter, {
-        getAuthUser: config.getAuthUser,
-        supabaseUrl: config.supabaseUrl,
-        anonKey: config.anonKey,
-        capabilities: config.capabilities || {},
-      });
       break;
     }
 
     case 'demo': {
       adapter = createDemoSharingStub();
+      break;
+    }
+
+    case 'cache': {
+      adapter = createCachedSharing(config.snapshot);
       break;
     }
 

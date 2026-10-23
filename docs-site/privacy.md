@@ -14,8 +14,7 @@ DeLaClaw does not operate a central server. Depending on which backend mode you 
 
 DeLaClaw requests one or more Google scopes depending on your usage:
 
-- **`drive.file`** (default) — limits access strictly to files and folders that DeLaClaw itself creates. Used for personal data storage and backups.
-- **`drive`** (optional, for sharing auto-discovery) — broader access used only to discover folders that other DeLaClaw users have shared with you. Groups and invite codes work with the `drive.file` scope above; this broader scope is requested only if you use auto-discovery. DeLaClaw uses this access solely to list folders shared with you and read/write shared group data within those folders.
+- **`drive.file`** (default) — limits access strictly to files and folders that DeLaClaw itself creates. Used for personal data storage, backups, and the sharing feature (group folders are created and accessed under this scope; joining a group grants access to that group's files only).
 - **`calendar.app.created`** (optional) — limits access to calendars that DeLaClaw itself creates. Requested only when you enable Calendar sync in Settings. DeLaClaw creates a dedicated calendar — `DeLaClaw` on delaclaw.com, `DeLaClawDev` on dev/preview builds — and writes events for your habits, TODOs, and birthdays. It does not read or modify any other calendar.
 
 You can revoke any of these scopes at any time from your Google Account permissions page. Calendar sync can be disabled independently in Settings: this deletes all events from the DeLaClaw calendar (the empty calendar itself is kept so it can be reused if you re-enable sync).

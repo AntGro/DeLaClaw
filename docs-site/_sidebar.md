@@ -21,6 +21,8 @@
   - [ADR 0006 — Native app via Capacitor](adrs/0006-native-app-via-capacitor.md)
   - [ADR 0007 — CODEMAP + contracts](adrs/0007-ai-native-dependency-index-codemap.md)
   - [ADR 0008 — Category schema](adrs/0008-category-schema-fk-cascade-protected.md)
+  - [ADR 0009 — Cloudflare Pages hosting](adrs/0009-cloudflare-pages-hosting.md)
+  - [ADR 0010 — Nested sections](adrs/0010-nested-sections.md)
 - **Contributing**
   - [How to Contribute](contributing.md)
   - [Issue Templates](contributing.md?id=submitting-issues)

@@ -90,3 +90,10 @@ updated_at TEXT DEFAULT (datetime('now'))
 - **Human-readable slug IDs** — rejected for categories: couples ID to display name, renames become FK migrations. Kept for projects where IDs are user-facing.
 - **SET NULL on delete (orphan items)** — rejected: orphaned items with no category create UI confusion; user intent when deleting a category is to remove the bucket
 - **App-level-only protection for defaults** — rejected: a bug in JS could delete the default bucket; DB trigger is the safety net
+
+## Amendment (2026-10-23)
+
+Two changes since this ADR was written; the decisions above are unchanged:
+
+- **Vestiaire categories are gone.** The wardrobe migration (2.9.17) removed the vestiaire feature; its content moved into Lists. The category tables that remain are `todo_categories`, `habit_categories` and `flashcard_decks`, plus `lists`, whose rows are the Lists page's containers.
+- **Sections extend the model.** Category rows (and `lists` rows) gained `kind` and `parent_id` for nested sections — see [ADR 0010](0010-nested-sections.md). The item FK/CASCADE and protected-row rules above are unchanged; sections layer on top of the same tables.

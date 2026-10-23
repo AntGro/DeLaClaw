@@ -1,7 +1,7 @@
 # ADR 0004: Delegated agent access via hashed bearer tokens at adapter boundary
 
 Date: 2026-07-20
-Status: Accepted
+Status: Superseded in practice — the verification contract specified here was not implemented. Agent access shipped as adapter-level token management (issue, list, revoke) with the validation method still to be decided; the current invariants live in the agents feature contract (`.agents/contracts/agents.md`). The feature is also behind a release gate (coming soon) as of October 2026.
 
 ## Context
 

@@ -1,7 +1,7 @@
 # ADR 0001: No build step, vanilla JS, GitHub Pages + BYOB
 
 Date: 2026-07-20
-Status: Accepted
+Status: Accepted — the hosting part (GitHub Pages) is superseded by [ADR 0009](0009-cloudflare-pages-hosting.md); the no-build-step, vanilla JS and BYOB decisions stand.
 
 ## Context
 

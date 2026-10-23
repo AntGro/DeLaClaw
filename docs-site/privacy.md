@@ -15,10 +15,10 @@ DeLaClaw does not operate a central server. Depending on which backend mode you 
 DeLaClaw requests one or more Google scopes depending on your usage:
 
 - **`drive.file`** (default) — limits access strictly to files and folders that DeLaClaw itself creates. Used for personal data storage and backups.
-- **`drive`** (when sharing is enabled) — broader access required to discover and read folders shared with you by other DeLaClaw users. This scope is requested only when you explicitly enable the sharing feature. DeLaClaw uses this access solely to list folders shared with you and read/write shared group data within those folders.
+- **`drive`** (optional, for sharing auto-discovery) — broader access used only to discover folders that other DeLaClaw users have shared with you. Groups and invite codes work with the `drive.file` scope above; this broader scope is requested only if you use auto-discovery. DeLaClaw uses this access solely to list folders shared with you and read/write shared group data within those folders.
 - **`calendar.app.created`** (optional) — limits access to calendars that DeLaClaw itself creates. Requested only when you enable Calendar sync in Settings. DeLaClaw creates a dedicated calendar — `DeLaClaw` on delaclaw.com, `DeLaClawDev` on dev/preview builds — and writes events for your habits, TODOs, and birthdays. It does not read or modify any other calendar.
 
-You can revoke the broader Drive scope at any time by disabling sharing in Settings. Calendar sync can be disabled independently: this deletes all events from the DeLaClaw calendar (the empty calendar itself is kept so it can be reused if you re-enable sync).
+You can revoke any of these scopes at any time from your Google Account permissions page. Calendar sync can be disabled independently in Settings: this deletes all events from the DeLaClaw calendar (the empty calendar itself is kept so it can be reused if you re-enable sync).
 
 ## Sharing and user-to-user data exchange
 
@@ -26,8 +26,7 @@ DeLaClaw offers an optional sharing feature that lets you exchange TODOs, habits
 
 - You explicitly choose which items to share and with whom by creating sharing groups and inviting members by email.
 - Shared data (group metadata, shared TODOs, habits, and lists) is stored in shared Google Drive folders that all group members can access.
-- A **trusted contacts** system controls whose shared folders your app will load. Only folders from people you have added to your trusted contacts list are accepted; all others are automatically rejected.
-- Your trusted contacts list is stored in your own Google Drive (`DeLaClaw/trusted-contacts.json`, `DeLaClawDev/` on dev and preview builds) and is not shared with anyone.
+- Access is controlled by Google Drive's own folder permissions: the creator shares the group folder with its members, and joining a group requires an invite code issued by the creator.
 
 Sharing is entirely opt-in. If you do not enable sharing, no data is exchanged with other users.
 
@@ -40,7 +39,7 @@ Sharing is entirely opt-in. If you do not enable sharing, no data is exchanged w
 
 ## Analytics
 
-The hosted version at `delaclaw.com` includes **Cloudflare Web Analytics**, a privacy-focused analytics service that collects aggregate page-view metrics (no cookies, no client-side state, no personal data, no cross-site tracking). See [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/). If you self-host DeLaClaw, no analytics script is included unless you add one yourself.
+The hosted version at `delaclaw.com` includes **Cloudflare Web Analytics**, a privacy-focused analytics service that collects aggregate page-view metrics (no cookies, no client-side state, no personal data, no cross-site tracking). See [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
 
 DeLaClaw also keeps a `daily_visits` record in your own database — a single row counting the days you opened the app, your current day streak, your longest streak, and the dates of your first and most recent visit — to power the usage statistics shown in Settings. This data stays entirely in your chosen backend — it is never sent to any external service.
 
@@ -49,7 +48,7 @@ DeLaClaw also keeps a `daily_visits` record in your own database — a single ro
 DeLaClaw uses browser-standard storage mechanisms for local preferences:
 
 - **localStorage**: theme preference, language, active tab, stay-connected credentials, sharing preferences, and tab visibility/order settings.
-- **IndexedDB**: offline cache of your database tables, scoped by backend mode. Used to serve read-only data when the network is unavailable. Cleared automatically when you reconnect.
+- **IndexedDB**: offline cache of your database tables, scoped by backend mode and account. It serves read-only data when the network is unavailable and lets the app start while offline; it is refreshed on every successful sync and otherwise stays in your browser until you clear your browser's site data.
 - **Service Worker cache**: static app assets (HTML, CSS, JS, icons) for offline loading. Versioned and replaced on each update.
 
 None of this data leaves your browser.
@@ -64,8 +63,7 @@ When using DeLaClaw, your browser makes requests to:
 - **Google Static** (`www.gstatic.com`): Google Identity Services scripts used during Google Drive authentication. Subject to [Google's privacy policy](https://policies.google.com/privacy).
 - **Google Fonts** (`fonts.googleapis.com`): to load the DM Sans typeface. Subject to [Google's privacy policy](https://policies.google.com/privacy).
 - **Cloudflare Web Analytics** (`static.cloudflareinsights.com`): aggregate page-view metrics on the hosted version (no cookies, no personal data). Subject to [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
-- **GitHub Pages** (`delaclaw.com`): serves the static app files if you use the hosted version. Subject to [GitHub's privacy policy](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
-- **Cloudflare Pages** (`dev.delaclaw.pages.dev`): serves the development preview. Subject to [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
+- **Cloudflare Pages** (`delaclaw.com`, `dev.delaclaw.pages.dev`): serves the static app files for the hosted version and the development preview. Subject to [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
 
 No other external requests are made.
 
@@ -75,7 +73,7 @@ DeLaClaw does not sell, share, or transfer any user data to third parties for an
 
 ## Open source
 
-DeLaClaw is licensed under AGPL-3.0. The full source code is available at [github.com/AntGro/DeLaClaw](https://github.com/AntGro/DeLaClaw). You can inspect exactly what the app does, self-host it, and modify it.
+DeLaClaw is licensed under AGPL-3.0. The full source code is available at [github.com/AntGro/DeLaClaw](https://github.com/AntGro/DeLaClaw). You can inspect exactly what the app does and modify it.
 
 ## Changes
 

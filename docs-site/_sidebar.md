@@ -11,7 +11,7 @@
   - [Browser Support](browser-support.md)
   - [Performance](performance.md)
   - [Accessibility](accessibility.md)
-  - [Offline Support](architecture.md?id=offline-cache)
+  - [Offline Support](backends.md?id=6-offline-behavior)
 - **Decisions**
   - [ADR 0001 — No build step](adrs/0001-no-build-github-pages-byob.md)
   - [ADR 0002 — Pluggable backends](adrs/0002-byob-pluggable-backends.md)

@@ -25,6 +25,8 @@ All data loads into memory on connect and writes back to Drive with a 2-second d
 
 ## Local mode (Bun + SQLite)
 
+> **Note:** the Local backend is fully implemented, but the **Local** option is currently hidden on the login screen of the hosted app, so this mode cannot be selected there for now. The steps below describe how it works when enabled.
+
 ### 1. Install Bun
 
 ```bash

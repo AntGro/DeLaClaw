@@ -41,6 +41,10 @@ flowchart TB
 
 **Shared category (`__shared__`)** — items received from others always land in a protected `__shared__` category/list on the receiver's side. Items you share yourself stay in their current category.
 
+**Nested sections** — TODO, Habit and List categories can be organised into nested sections, but sections themselves are never shared: sharing is granted per bucket. A bucket inside a section can be shared like any other bucket; the section structure around it stays local to each member's device.
+
+**Snooze** — snoozing a shared TODO or habit applies group-wide: every member sees it snoozed until the chosen date, and it wakes for everyone on that date.
+
 **Sync intents** — each group entry keeps, per item file, two in-memory sets: locally created IDs not yet acknowledged by a successful upload (`createdIds`) and locally deleted IDs not yet acknowledged (`deletedIds`). Reconciliation consults them: a local item missing remotely is retained only with a pending create intent (otherwise it was deleted remotely and is dropped); a remote item missing locally is suppressed only with a pending delete intent (otherwise it is a remote creation and is accepted). Items present on both sides resolve by newer `updated_at`. Each upload captures the exact intents its payload represents and clears only those on success — an ID created while an upload is in flight stays pending, and failed uploads retain their intents. The logic lives in the backend-agnostic `sharing-file-reconcile.js`, shared by all file-based adapters; nothing is written to Drive, so there is nothing to prune.
 
 ## Backend-agnostic design

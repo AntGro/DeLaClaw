@@ -192,21 +192,36 @@ js/
     rest.js                Local Bun+SQLite REST adapter
     demo.js                In-memory adapter
     drive.js               Google Drive adapter (in-memory + per-table JSON persistence)
+    drive-backup-policy.js Pre-migration backup policy (pure)
     offline-cache.js       IndexedDB caching layer
   sharing.js               Sharing factory (Drive adapter)
   sharing-interface.js     Sharing adapter interface contract
   sharing-drive.js         Google Drive sharing adapter (per-table JSON)
   sharing-envelope.js      DLC1 invite-code encode/decode
+  sharing-file-reconcile.js  Sharing file reconciliation engine
+  sharing-mutation-queue.js  Queued sharing mutations
   sharing-ui.js            Sharing UI: Group tab, share popovers, completion modal
+  agents-ui.js             Settings > Agents pane
   delegation.js            Cross-module action delegation for shared items
   welcome.js               Today dashboard
   projects.js              Project boards + task management
   todos.js                 TODO management
   habits.js                Habit tracking
+  frequency-rule.js        Pure habit scheduling rules (next-due computation)
+  pending-next-due.js      Per-habit in-flight next-due publish tracking (pure)
   flashcards.js            Flashcard SRS + text memorization
+  scene-parse.js           Scene script parsing for text memorization (pure)
   birthdays.js             Birthday data + CRUD modals (no page; surfaces on Calendar)
   calendar.js              Calendar page (todos, habits, birthdays month grid)
+  calendar-pure.js         Pure calendar date/expansion logic
   lists.js                 Checklists
+  sections-pure.js         Nested-section tree logic for TODOs, Habits and Lists (pure)
+  daily-visits.js          Daily-visit aggregate tracking (pure)
+  drive-folders.js         Environment-aware Drive folder names
+  import-pure.js           Batch-import parsing helpers (pure)
+  todo-import.js           TODO validation for batch import
+  habit-import.js          Habit validation for batch import
+  batch-import.js          Shared batch-import building blocks
   i18n.js                  Translation strings (en/fr/es)
   icons.js                 Lucide icon rendering + path data
   utils.js                 Shared utilities (escaping, toasts, markdown)
@@ -247,7 +262,7 @@ Language is stored in `localStorage` and can be changed in Settings. The `t()` f
 
 `js/item-utils.js` provides reusable drag-and-drop reordering via long-press (150ms threshold). Both category nav buttons and bucket items (TODOs, Projects, Lists, Flashcard drafts) share the same UX:
 
-- **Activation**: long-press on touch/pointer (`LONG_PRESS_MS = 100`), not native HTML drag events
+- **Activation**: long-press on touch/pointer (`LONG_PRESS_MS = 150`), not native HTML drag events
 - **Visual**: the real item follows the cursor/finger; a placeholder gap shows the drop position; siblings slide with FLIP animation. No visible drag handles — shadow-only to indicate float
 - **Cross-container**: TODOs, Projects, Habits, and Lists support dragging items between categories/lists — drop updates the FK and re-numbers `sort_order` in both source and target containers
 - **Persistence**: `sort_order` updates are batched into a single DB write

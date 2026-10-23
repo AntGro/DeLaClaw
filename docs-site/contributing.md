@@ -114,7 +114,7 @@ Documentation improvements are always welcome. The main docs live in `docs/` and
 
 ## Releasing
 
-All changes land on `dev` first, which auto-deploys to [dev.delaclaw.pages.dev](https://dev.delaclaw.pages.dev). When `dev` is stable, merge it into `main` (which deploys to [delaclaw.com](https://delaclaw.com) via GitHub Pages).
+All changes land on `dev` first, which auto-deploys to [dev.delaclaw.pages.dev](https://dev.delaclaw.pages.dev). When `dev` is stable, merge it into `main` (which deploys to [delaclaw.com](https://delaclaw.com) via Cloudflare Pages).
 
 ### Pre-release checklist
 

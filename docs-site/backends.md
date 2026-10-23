@@ -155,6 +155,8 @@ No persistence, no sync. Data resets on page reload.
 
 ### Local (Bun + SQLite) — backend-first
 
+> The backend is fully implemented and supported by the adapter layer, but the **Local** option is currently hidden on the app's login screen, so end users cannot select it in the hosted app for now.
+
 ```mermaid
 flowchart TD
     A["view code"] -->|"db.from(table).update()"| B["HTTP POST to localhost"]

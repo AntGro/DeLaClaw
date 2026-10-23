@@ -155,9 +155,18 @@ export function computeNextDue(frequencyRule, lastDoneDate) {
     if (!isNaN(parseInt(parts[2], 10))) {
       const dom = parseInt(parts[2], 10);
       if (!dom || dom < 1 || dom > 31) return null;
-      let next = new Date(baseDay.getFullYear(), baseDay.getMonth(), dom);
-      if (next <= baseDay) next = new Date(baseDay.getFullYear(), baseDay.getMonth() + n, dom);
-      return localDateStr(next);
+      if (noHistory) {
+        let next = new Date(baseDay.getFullYear(), baseDay.getMonth(), dom);
+        if (next <= baseDay) next = new Date(baseDay.getFullYear(), baseDay.getMonth() + n, dom);
+        return localDateStr(next);
+      }
+      // A completion anchors the cycle in its own month and covers that
+      // month's occurrence — early, on the day, or late (the same premise
+      // as the early-completion skip in updateHabitNextDue). The next due
+      // is the day-of-month N months on, never a date later in the
+      // completion's own month: 'every 6 months on the 28th' done Aug 14
+      // is due Feb 28, not Aug 28.
+      return localDateStr(new Date(baseDay.getFullYear(), baseDay.getMonth() + n, dom));
     }
 
     // Weekday mode: every_N_months:N:first|last:Days
@@ -183,6 +192,15 @@ export function computeNextDue(frequencyRule, lastDoneDate) {
         return results.sort((a, b) => a - b);
       }
 
+      // With a completion, the same anchor rule as day-of-month mode:
+      // the completion covers its own month's occurrence(s), so the
+      // next due is N months on. Without history, the first occurrence
+      // from today stands.
+      if (!noHistory) {
+        const nextMonth = new Date(baseDay.getFullYear(), baseDay.getMonth() + n, 1);
+        const anchored = findPositionWeekdays(nextMonth.getFullYear(), nextMonth.getMonth(), dayIndices, position);
+        return anchored.length ? localDateStr(anchored[0]) : null;
+      }
       // Check current month for remaining candidates after baseDay
       let candidates = findPositionWeekdays(baseDay.getFullYear(), baseDay.getMonth(), dayIndices, position)
         .filter(d => d > baseDay);

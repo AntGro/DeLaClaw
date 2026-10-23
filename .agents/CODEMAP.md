@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-23T18:17:27.622Z from 50 modules (v2.30.3). Total LOC 36179. Do not hand-edit.
+> Generated 2026-10-23T22:40:29.978Z from 50 modules (v2.30.4). Total LOC 36197. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -43,11 +43,11 @@
 | sections-pure | 412 | - |  | calendar.js,habits.js,lists.js,todos.js | - |
 | demo | 310 | x |  | drive.js | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
+| frequency-rule | 231 | - | calendar-pure | habit-import.js,habits.js | - |
 | calendar-pure | 228 | - |  | calendar-sync.js,calendar.js,frequency-rule.js,habits.js | - |
 | sharing-file-reconcile | 217 | - |  | drive.js,sharing-drive.js | - |
 | scene-parse | 215 | text_line_progress,texts |  | flashcards.js | - |
 | groups | 214 | - | i18n,icons,sharing-ui,state | main.js | esc:3,window:4 |
-| frequency-rule | 213 | - | calendar-pure | habit-import.js,habits.js | - |
 | icons | 212 | - |  | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
 | agents-ui | 207 | agent_grants | db,i18n,icons,state | main.js | esc:31,window:5 |
 | storm3d | 185 | - |  | hero.js | - |

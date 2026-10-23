@@ -4,7 +4,7 @@ For any coding agent (Human, Claude, Cursor, Codex) working in this repo. This i
 
 ## 0. Purpose
 
-DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, vanilla JS (ES modules). Own your data: Google Drive | Local Bun+SQLite | Demo. PWA, offline-first via IndexedDB cache, dark/light, i18n (EN/FR/ES). The Supabase adapter remains in the codebase for migration support but is deprecated for new use.
+DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, vanilla JS (ES modules). Own your data: Google Drive | Local Bun+SQLite | Demo. PWA, dark/light, i18n (EN/FR/ES).
 
 ## 1. Core Product Principles
 
@@ -36,10 +36,10 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - Single responsibility: `utils.js` = generic helpers, `item-utils.js` = drag-drop + inline edit, `db.js` = activity tracking proxy only. Abstract first, implement second.
 
 **1.5 AI-native dependency index (CODEMAP) + Feature contracts — mandatory for agents**
-- Generated: `.agents/CODEMAP.json` (T2, ~25KB pretty / ~15KB compact) + `.agents/CODEMAP.md` (6KB matrix). Source: `scripts/generate-codemap.js`. Do not hand-edit.
+- Generated: `.agents/CODEMAP.json` + `.agents/CODEMAP.md` (human-readable matrix). Source: `scripts/generate-codemap.js`. Do not hand-edit. Sizes and counts live in CODEMAP itself — do not restate them here.
 - Contains per `js/*.js`: `entry`, `loc`, `tables`, `state`, `depends_on`, `dependents` (blast radius), `ui_components` (reusable CSS), `i18n_prefix`, `guards` (`guard`/`pendingSet`), `esc_count`, `window_exposed`.
-- 8 features: `todos`, `habits`, `projects`, `birthdays`, `vestiaire`, `flashcards`, `lists`, `welcome`. Core modules + 3 active adapters (`rest`, `demo`, `drive`) + 2 legacy adapters (`supabase`, `offline-cache` — migration support only). `welcome` aggregates all features. Exact counts live in CODEMAP itself.
-- Feature contracts: `.agents/contracts/*.md` — agent-only, NOT in `docs-site`. Captures invariants CODEMAP can't: single source of truth (`isStructuredRule()`), guard patterns, XSS fields, RLS policies, welcome edges, business rules. BEFORE editing a feature, agents MUST read `CODEMAP.json:features[feature]` + `contracts/<feature>.md` if present.
+- Features, core modules and adapters are enumerated in CODEMAP itself — it is the source of truth, so they are not listed here. `welcome` aggregates all features.
+- Feature contracts: `.agents/contracts/*.md` — agent-only, NOT in `docs-site`. Captures invariants CODEMAP can't: single source of truth (`isStructuredRule()`), guard patterns, XSS fields, welcome edges, business rules. BEFORE editing a feature, agents MUST read `CODEMAP.json:features[feature]` + `contracts/<feature>.md` if present.
 - Rule: BEFORE editing any `js/*.js`, agents MUST read `.agents/CODEMAP.json` → `features[feature]` and relevant `core` entries. Reuse `depends_on` + `ui_components`, check `dependents` for impact scope, follow `guards` per AGENTS 1.2, verify `esc_count`/`tables` for XSS/schema impact.
 - Freshness: pre-commit auto-regenerates JSON+MD and stages them. `tests/tests.js` will fail if JSON is out-of-date (CODEMAP freshness test). No manual sync.
 - Impact: `scripts/impact.js` reads staged diff + CODEMAP `dependents` to suggest `Checked:` trailer (e.g. `birthdays` change → `welcome [x]` + `xss [x]`). Pre-commit prints `[impact] Checked: …` hint; commit-msg prints full blast-radius report on failure.
@@ -62,24 +62,25 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 
 - **XSS**: No `innerHTML` with user data unless escaped. Wrap all user fields (`name`, `text`, `note`, `brand`, etc.) in `esc()` when interpolating into template literals. `renderMd()` and `truncateWithShowMore()` already esc internally, don't double-wrap. `showDeleteConfirm` uses `.textContent` (safe).
 - **Safe DOM for URLs**: TODO/project links with user-provided URLs must use safe allowlist check, not raw `innerHTML`.
-- **CSP hardening (sec-004)**: Vendor JS self-hosted in `vendor/` (`supabase@2.110.6`, `three@0.170.0`). No `cdn.jsdelivr.net` for app code. CSP meta in `index.html`: `default-src 'self'; script-src 'self' 'sha256-...importmap...' accounts.google.com apis.google.com gstatic cloudflareinsights; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes. Cloudflare Web Analytics beacon allowed in both `script-src` (`static.cloudflareinsights.com`) and `connect-src` (`cloudflareinsights.com`).
+- **CSP hardening (sec-004)**: Vendor JS self-hosted in `vendor/` (`three@0.170.0`). No `cdn.jsdelivr.net` for app code. CSP meta in `index.html`: `default-src 'self'; script-src 'self' 'sha256-...importmap...' accounts.google.com apis.google.com gstatic cloudflareinsights; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes. Cloudflare Web Analytics beacon allowed in both `script-src` (`static.cloudflareinsights.com`) and `connect-src` (`cloudflareinsights.com`).
 - **Google Identity exception**: GSI (`accounts.google.com/gsi/client` + `apis.google.com/js/api.js`) must stay CDN per Google ToS, no SRI allowed. Documented exception allowed only via CSP.
 
 ## 4. Backend & Data
 
-- Tables: canonical list lives in `server/schema.sql` (Local SQLite). `sql/supabase_schema.sql` is retained as a legacy reference for Supabase migration support. Personal tables, category/deck tables, and cross-backend tables (`daily_visits`, `joined_groups`, `agent_grants`) exist on all backends.
+- Tables: canonical list lives in `server/schema.sql` (Local SQLite). Personal tables, category/deck tables, and cross-backend tables (`daily_visits`, `groups`) exist on all backends; sharing tables (`sharing_groups`, `sharing_members`, `sharing_items`) are used by the Drive sharing adapter.
 - **Category integrity**: each category/deck table has one protected default row (`name=''`, `is_protected=1`). `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item FKs (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
-- Schema version in `settings` key `schema_version`, migrations in `migrations/`. Check `latest_compat` logic in `VERSION`.
+- Schema version in `settings` key `schema_version`, migrations in `migrations/`.
 - Base schema + migrations must be runnable in local SQLite (`server/schema.sql`).
-- Vendor: `scripts/update-vendor.sh [supabase_ver] [three_ver]` updates `vendor/` + `index.html` comment + `docs-site/attributions.md`. Weekly GitHub Action `vendor-check.yml` opens PR to `dev` if new versions.
+- Vendor: `scripts/update-vendor.sh [three_ver]` updates `vendor/` + `index.html` comment + `docs-site/attributions.md`. Weekly GitHub Action `vendor-check.yml` opens PR to `dev` if new versions.
 
 ## 5. Git, Versioning, Commit
 
 - **Target branch**: `dev` (preview at `dev.delaclaw.pages.dev`). `main` only when stable + user-approved. All PRs (including bot) target `dev`.
 - **Hooks**: ALWAYS `git config core.hooksPath .githooks` on fresh clone/subagent. Pre-commit bumps `VERSION` → updates `sw.js` CACHE_VERSION + ` .agents/CODEMAP.json/.md` (via `scripts/generate-codemap.js`) + prints `[impact] Checked: …` hint + blocks emoji. Commit-msg enforces `Checked:` trailer and on failure runs `scripts/impact.js --staged` to show blast radius from CODEMAP dependents and suggested trailer.
-- **VERSION file**: `latest` bumped every commit (X.YYY), `latest_compat` / `latest_compat_deprec` only on schema change. See `COMMIT_CHECKLIST.md`.
+- **VERSION file**: `latest` bumped every commit (X.Y.Z — patch per commit, minor on features, major on breaking schema). See `COMMIT_CHECKLIST.md`.
 - **Checked trailer**: Format `Checked: versioning [x], i18n [~], docs [~], readme [~], checklist [~], tests [~], welcome [~], prompts [~], xss [x]` — decide each individually, no batch-marking. `[x]` = diff touches area, `[~]` = does not. Bare item = rejected. Lesson v1.145: tests + xss left unmarked by inertia. Use CODEMAP `dependents` to assess `welcome` impact.
 - **Commit style**: `feat|fix|refactor|chore|ci|docs(scope): message`. Include test result (e.g. `N passed`) when relevant.
+- **Never suppress `git stash pop` output** — a failed pop (e.g. conflict with test-regenerated files) silently leaves work in the stash while the tree looks clean; lesson Sep 22, 2026: always check pop output and `git stash list` afterwards.
 
 ## 6. Testing
 
@@ -92,6 +93,6 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - `docs-site/attributions.md` must list all third-party assets with correct load source (vendor/ vs CDN). Update when vendor versions change.
 - `docs-site/setup.md`, `architecture.md`, `sharing.md`, `contributing.md` must stay in sync with adapter changes.
 - No personal info, workspace config, memory files in public repo.
-- **Mermaid diagrams** (`docs-site/`): read `.agents/skills/mermaid-diagrams.md` before creating or editing Mermaid diagrams.
+- **Mermaid diagrams** (`docs-site/`): read `.agents/skills/mermaid-diagrams.md` before creating or editing Mermaid diagrams. Validate every touched block with the Mermaid v10 parser (`mermaid.parse`, node + jsdom shim) before committing — a block missing its `sequenceDiagram` header fails to render with no useful error (lesson v2.9.6).
 
 Keep this file short, accurate, and alive. When you learn a durable lesson that prevents a bug, add it here.

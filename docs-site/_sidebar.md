@@ -11,7 +11,7 @@
   - [Browser Support](browser-support.md)
   - [Performance](performance.md)
   - [Accessibility](accessibility.md)
-  - [Offline Support](architecture.md?id=offline-cache)
+  - [Offline Support](backends.md?id=6-offline-behavior)
 - **Decisions**
   - [ADR 0001 — No build step](adrs/0001-no-build-github-pages-byob.md)
   - [ADR 0002 — Pluggable backends](adrs/0002-byob-pluggable-backends.md)
@@ -21,10 +21,12 @@
   - [ADR 0006 — Native app via Capacitor](adrs/0006-native-app-via-capacitor.md)
   - [ADR 0007 — CODEMAP + contracts](adrs/0007-ai-native-dependency-index-codemap.md)
   - [ADR 0008 — Category schema](adrs/0008-category-schema-fk-cascade-protected.md)
+  - [ADR 0009 — Cloudflare Pages hosting](adrs/0009-cloudflare-pages-hosting.md)
+  - [ADR 0010 — Nested sections](adrs/0010-nested-sections.md)
 - **Contributing**
   - [How to Contribute](contributing.md)
   - [Issue Templates](contributing.md?id=submitting-issues)
 - **Legal**
   - [Privacy](privacy.md)
   - [Attributions](attributions.md)
-  - [License (AGPL-3.0)](https://github.com/AntGro/DeLaClaw/blob/main/LICENSE)
+  - [License (PolyForm Noncommercial)](https://github.com/AntGro/DeLaClaw/blob/main/LICENSE)

@@ -11,8 +11,9 @@
 // ===================================================================
 
 import state from '../state.js';
+import { t } from '../i18n.js';
 
-const EXCLUDE      = new Set(['prompts', 'nvidia_usage']);
+const EXCLUDE      = new Set(['prompts']);
 const STRIP        = { birthdays: ['avatar_url'] };
 const IDB_NAME     = 'dlc-offline';
 const IDB_VERSION  = 1;
@@ -55,6 +56,33 @@ async function get(scope, table) {
   });
 }
 
+/** All cached entries for one scope: { table: { rows, ts } } */
+async function getScopeEntries(scope) {
+  const db = await idb();
+  const prefix = `${scope}:`;
+  return new Promise((resolve) => {
+    const out = {};
+    let tx;
+    try { tx = db.transaction(STORE, 'readonly'); } catch { resolve(out); return; }
+    const store = tx.objectStore(STORE);
+    const keysReq = store.getAllKeys();
+    keysReq.onsuccess = () => {
+      const keys = (keysReq.result || []).filter(k => typeof k === 'string' && k.startsWith(prefix));
+      if (keys.length === 0) { resolve(out); return; }
+      let pending = keys.length;
+      for (const key of keys) {
+        const getReq = store.get(key);
+        getReq.onsuccess = () => {
+          if (getReq.result) out[key.slice(prefix.length)] = getReq.result;
+          if (--pending === 0) resolve(out);
+        };
+        getReq.onerror = () => { if (--pending === 0) resolve(out); };
+      }
+    };
+    keysReq.onerror = () => resolve(out);
+  });
+}
+
 // ── Network-error detection ─────────────────────────────────────
 
 function isNetErr(err) {
@@ -83,7 +111,7 @@ function browserOffline() {
 async function tryCache(scope, table, onOk) {
   const c = await get(scope, table);
   if (c) {
-    // Online but DB unreachable → likely paused project (Supabase shuts down the instance)
+    // Online but DB unreachable → the local server may be down
     if (!browserOffline()) {
       state.pausedMode = true;
       showPausedBanner();
@@ -163,7 +191,7 @@ function cacheProxy(target, table, scope, isSelect) {
                 if (state.offlineMode) hideBanner();
                 if (state.pausedMode) hidePausedBanner();
               }
-              // Project paused (Supabase 540) → show paused banner, try cache
+              // DB unreachable (e.g. local server down) → show banner, try cache
               if (result?.error && isPausedErr(result.error)) {
                 if (!state.pausedMode) showPausedBanner();
                 const hit = await tryCache(scope, table, onOk);
@@ -215,7 +243,7 @@ function cacheProxy(target, table, scope, isSelect) {
  * Wrap an adapter so all .select() results are cached in IndexedDB.
  * New tables are included automatically.
  * @param {object} adapter  — any adapter with .from()
- * @param {string} scopeKey — unique cache scope (e.g. 'supabase:projectref')
+ * @param {string} scopeKey — unique cache scope (e.g. 'local:http://localhost:3737')
  */
 export function wrapWithOfflineCache(adapter, scopeKey) {
   const origFrom = adapter.from.bind(adapter);
@@ -225,6 +253,136 @@ export function wrapWithOfflineCache(adapter, scopeKey) {
     return cacheProxy(builder, table, scopeKey, false);
   };
   return adapter;
+}
+
+// ── Snapshot API (Drive read-only fallback) ─────────────────────
+// The Drive adapter mirrors every table it has confirmed on Drive
+// into this cache. If Google auth is later unobtainable, the app
+// boots from the snapshot in read-only mode: the data shown is the
+// latest online version, and mutations are blocked at every layer.
+
+/** Cache scope for one Google account's Drive data. */
+export function driveCacheScope(email) {
+  return `drive:${email || 'default'}`;
+}
+
+/** Cache one table's rows (same STRIP/EXCLUDE rules as select caching). */
+export async function cacheTableRows(scope, table, rows) {
+  if (EXCLUDE.has(table) || !Array.isArray(rows)) return;
+  await put(scope, table, rows);
+}
+
+/** Cache a whole { table: rows } snapshot, table by table. */
+export async function cacheSnapshot(scope, tables) {
+  for (const [table, rows] of Object.entries(tables || {})) {
+    try { await cacheTableRows(scope, table, rows); } catch (_) {}
+  }
+}
+
+/**
+ * Store the sharing snapshot blob (groups + per-group item files + the
+ * current member ids, built by main.js from the live sharing adapter)
+ * for a scope. Kept as a single pseudo-table row so it rides the same
+ * store as the table snapshots and comes back via loadCacheSnapshot().
+ */
+export async function cacheSharingSnapshot(scope, blob) {
+  if (!scope || !blob) return;
+  try { await put(scope, '__sharing__', [blob]); }
+  catch (e) { console.warn('[offline-cache] sharing snapshot failed:', e); }
+}
+
+/**
+ * Load a whole snapshot: { tables: { table: rows }, latestTs } or null
+ * when the scope has never been populated.
+ */
+export async function loadCacheSnapshot(scope) {
+  const entries = await getScopeEntries(scope);
+  const tables = {};
+  let latestTs = 0;
+  for (const [table, entry] of Object.entries(entries)) {
+    if (entry && Array.isArray(entry.rows)) {
+      tables[table] = entry.rows;
+      if (entry.ts > latestTs) latestTs = entry.ts;
+    }
+  }
+  if (Object.keys(tables).length === 0) return null;
+  return { tables, latestTs };
+}
+
+// ── Read-only mode ──────────────────────────────────────────────
+
+export const READ_ONLY_CODE = 'read_only';
+
+export function readOnlyError() {
+  return { message: t('toast.readonly_blocked'), code: READ_ONLY_CODE };
+}
+
+export function makeReadOnlyError() {
+  return Object.assign(new Error(t('toast.readonly_blocked')), { code: READ_ONLY_CODE });
+}
+
+/**
+ * Wrap an adapter so every mutation (insert/update/upsert/delete,
+ * bulkSortOrder, reseed) is rejected with a read_only error and the
+ * underlying store is never touched. Selects pass through unchanged.
+ */
+export function wrapReadOnlyAdapter(adapter) {
+  const origFrom = adapter.from.bind(adapter);
+  adapter.from = function (table) {
+    const builder = origFrom(table);
+    const origThen = builder.then.bind(builder);
+    builder.then = (resolve, reject) => {
+      if (builder._method && builder._method !== 'GET') {
+        resolve({ data: null, error: readOnlyError() });
+        return;
+      }
+      return origThen(resolve, reject);
+    };
+    return builder;
+  };
+  adapter.bulkSortOrder = async () => { throw makeReadOnlyError(); };
+  adapter.reseed = () => { throw makeReadOnlyError(); };
+  return adapter;
+}
+
+// ── Read-only banner ────────────────────────────────────────────
+
+let _readOnlySignIn = null;
+
+export function showReadOnlyBanner(ts, onSignIn) {
+  _readOnlySignIn = onSignIn || null;
+  if (document.getElementById('readOnlyBanner')) return;
+  const el = document.createElement('div');
+  el.id = 'readOnlyBanner';
+  el.className = 'offline-banner readonly-banner';
+  const span = document.createElement('span');
+  span.textContent = ts
+    ? `${t('menu.readonly_banner')} \u00B7 ${t('menu.readonly_last_synced', new Date(ts).toLocaleString())}`
+    : t('menu.readonly_banner');
+  el.appendChild(span);
+  if (onSignIn) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'readonly-signin-btn';
+    btn.textContent = t('menu.readonly_signin');
+    btn.addEventListener('click', () => { if (_readOnlySignIn) _readOnlySignIn(); });
+    el.appendChild(btn);
+  }
+  document.body.prepend(el);
+  document.body.classList.add('read-only-mode');
+  requestAnimationFrame(() => {
+    document.body.style.setProperty('--offline-banner-h', el.offsetHeight + 'px');
+  });
+}
+
+export function hideReadOnlyBanner() {
+  const el = document.getElementById('readOnlyBanner');
+  if (el) el.remove();
+  _readOnlySignIn = null;
+  document.body.classList.remove('read-only-mode');
+  if (!document.getElementById('offlineBanner') && !document.getElementById('pausedBanner')) {
+    document.body.style.removeProperty('--offline-banner-h');
+  }
 }
 
 // ── Offline banner ──────────────────────────────────────────────
@@ -253,31 +411,13 @@ function hideBanner() {
 
 // ── Paused-project banner ───────────────────────────────────────
 
-function _projectRef() {
-  const url = state.supabaseUrl || '';
-  const m = url.match(/^https?:\/\/([a-z0-9]+)\.supabase\.co/i);
-  return m ? m[1] : null;
-}
-
 function showPausedBanner() {
   if (document.getElementById('pausedBanner')) return;
   state.pausedMode = true;
   const el = document.createElement('div');
   el.id = 'pausedBanner';
   el.className = 'paused-banner';
-  const ref = _projectRef();
-  const link = ref
-    ? `https://supabase.com/dashboard/project/${ref}`
-    : 'https://supabase.com/dashboard/projects';
-  // Safe DOM: no innerHTML with URL interpolation (P0 sec-002)
-  el.textContent = '';
-  el.appendChild(document.createTextNode(`Can\u2019t reach your database \u2014 it may be paused \xB7 `));
-  const a = document.createElement('a');
-  a.href = link;
-  a.target = '_blank';
-  a.rel = 'noopener';
-  a.textContent = `Check on Supabase \u2197`;
-  el.appendChild(a);
+  el.textContent = `Can\u2019t reach your database \u2014 check that your local server is running \xB7 `;
   document.body.prepend(el);
   document.body.classList.add('paused-mode');
   requestAnimationFrame(() => {

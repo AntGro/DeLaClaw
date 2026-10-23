@@ -2,6 +2,7 @@ import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { DEFAULT_CATEGORY_PALETTE } from './state.js';
 import { APP_VERSION } from './version.js';
+import { layoutLevel } from './sections-pure.js';
 
 // ===================================================================
 // UTILS
@@ -9,29 +10,6 @@ import { APP_VERSION } from './version.js';
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML.replace(/"/g, '\x26quot;'); }
 function escQ(s) { return esc(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
 
-// ── Supabase key role detection (sec: reject service_role / sb_secret_ in localStorage) ──
-function getSupabaseKeyRole(key){
-  if(!key) return null;
-  const k = key.trim();
-  if(k.startsWith('sb_secret_')) return 'service_role';
-  if(k.startsWith('sb_publishable_')) return 'anon';
-  // legacy JWT: eyJ...
-  const parts = k.split('.');
-  if(parts.length===3){
-    try{
-      const b64 = parts[1].replace(/-/g,'+').replace(/_/g,'/');
-      const padded = b64 + '='.repeat((4 - b64.length % 4) % 4);
-      const json = JSON.parse(atob(padded));
-      return json.role || null;
-    }catch{ return null; }
-  }
-  return null;
-}
-
-function isServiceRoleKey(key){
-  const role = getSupabaseKeyRole(key);
-  return role==='service_role' || (key||'').trim().startsWith('sb_secret_');
-}
 function deepEqual(a, b) {
   if (a === b) return true;
   if (a == null || b == null) return false;
@@ -180,10 +158,17 @@ let _confirmActionCallback = null;
 let _confirmCancelCallback = null;
 let _confirmActionKeepOpen = false;
 let _confirmActionLocked = false;
+let _confirmActionProgressText = null;
 
 function showConfirmAction(title, message, onConfirm, detail, opts) {
   document.getElementById('confirmActionTitle').textContent = title;
-  document.getElementById('confirmActionMessage').textContent = message;
+  // Message is plain text by default. Callers whose message embeds a
+  // markdown-rendered value (list item text, habit name) pass
+  // opts.messageHtml with the value already run through renderMd —
+  // otherwise the raw [text](url) syntax shows in the modal.
+  const msgEl = document.getElementById('confirmActionMessage');
+  if (opts?.messageHtml) msgEl.innerHTML = message;
+  else msgEl.textContent = message;
   const detailEl = document.getElementById('confirmActionDetail');
   if (detail) {
     if (opts?.detailHtml) {
@@ -253,6 +238,7 @@ function showConfirmAction(title, message, onConfirm, detail, opts) {
   }
   _confirmActionCallback = onConfirm;
   _confirmActionKeepOpen = !!opts?.keepOpen;
+  _confirmActionProgressText = opts?.progressText || null;
   _confirmCancelCallback = opts?.onCancel || null;
   document.getElementById('confirmActionModal').classList.add('visible');
 }
@@ -265,6 +251,12 @@ function closeConfirmAction() {
   _confirmCancelCallback = null;
   _confirmActionKeepOpen = false;
   if (cancelCb) try { cancelCb(); } catch {}
+  // Reset busy state left by a keepOpen in-progress run
+  const busyBtn = document.getElementById('confirmActionBtn');
+  if (busyBtn) { busyBtn.classList.remove('loading'); busyBtn.disabled = false; }
+  const cancelBtn2 = document.getElementById('confirmActionCancelBtn');
+  if (cancelBtn2) cancelBtn2.style.display = '';
+  _confirmActionProgressText = null;
   // Reset variant
   const modal = document.querySelector('.confirm-action-modal');
   if (modal) modal.classList.remove('confirm-neutral');
@@ -310,11 +302,21 @@ async function executeConfirmAction() {
     const toggleChecked = toggleInput ? toggleInput.checked : false;
     _confirmCancelCallback = null; // confirm path — do not fire cancel
     if (keepOpen) {
-      // Lock modal open for progress display (e.g. account deletion)
+      // Lock the modal open with an in-progress effect (e.g. account
+      // deletion, member removal): the confirm button shows a spinner,
+      // Cancel is hidden, backdrop/Escape are blocked until the callback
+      // settles, then the modal closes itself.
       _confirmActionLocked = true;
       const btn = document.getElementById('confirmActionBtn');
       const cancelBtn = document.getElementById('confirmActionCancelBtn');
-      if (btn) btn.style.display = 'none';
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('loading');
+        if (_confirmActionProgressText) {
+          const btnTextEl = document.getElementById('confirmActionBtnText');
+          if (btnTextEl) btnTextEl.textContent = _confirmActionProgressText;
+        }
+      }
       if (cancelBtn) cancelBtn.style.display = 'none';
       const wordWrap = document.getElementById('confirmWordWrap');
       if (wordWrap) wordWrap.style.display = 'none';
@@ -324,6 +326,7 @@ async function executeConfirmAction() {
         await cb(toggleChecked);
       } finally {
         _confirmActionLocked = false;
+        closeConfirmAction();
       }
     } else {
       closeConfirmAction();
@@ -342,9 +345,6 @@ document.addEventListener('click', e => {
   if (e.target.id === 'snoozeModal') closeSnoozeModal();
   if (e.target.id === 'confirmActionModal') closeConfirmAction();
   if (e.target.id === 'addCategoryModal') closeAddCategoryModal();
-  if (e.target.id === 'addVestiaireModal') closeAddVestiaireModal();
-  if (e.target.id === 'editVestiaireModal') closeEditVestiaireModal();
-  if (e.target.id === 'addVestiaireCategoryModal') closeAddVestiaireCategoryModal();
   if (e.target.id === 'addHabitModal') closeAddHabitModal();
   if (e.target.id === 'editHabitModal') closeEditHabitModal();
   if (e.target.id === 'habitHistoryModal') closeHabitHistoryModal();
@@ -355,7 +355,7 @@ document.addEventListener('click', e => {
   if (e.target.id === 'editListModal') closeEditListModal();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeAddProjectModal(); closeEditProjectModal(); closeTaskExpandModal(); closeRevisionModal(); closePromptEditor(); closeProjectPrompt(); closeSnoozeModal(); closeConfirmAction(); closeAddCategoryModal(); if (window.closeAddVestiaireModal) closeAddVestiaireModal(); if (window.closeEditVestiaireModal) closeEditVestiaireModal(); if (window.closeAddVestiaireCategoryModal) closeAddVestiaireCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); if (window.closeMigrationModal) closeMigrationModal(); if (window.closeCompareModal) closeCompareModal(); }
+  if (e.key === 'Escape') { closeAddProjectModal(); closeEditProjectModal(); closeTaskExpandModal(); closeRevisionModal(); closePromptEditor(); closeProjectPrompt(); closeSnoozeModal(); closeConfirmAction(); closeAddCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); if (window.closeMigrationModal) closeMigrationModal(); if (window.closeCompareModal) closeCompareModal(); }
 });
 
 
@@ -425,7 +425,7 @@ function updateFooterStats(viewCountsGetter) {
     // Google Drive: show estimated data size from in-memory store
     statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} Google Drive · <span id="dbSizeMb">—</span></div>`;
   } else {
-    // Supabase / Local: show DB size with limit
+    // Local: show DB size with limit
     statsHtml += `<div class="db-stat">${lucideIcon('hard-drive', 14)} ${t('utils.db')}: <span id="dbSizeMb">—</span> / 500 MB</div>`;
   }
   // Sharing groups count
@@ -440,14 +440,8 @@ function updateFooterStats(viewCountsGetter) {
   statsHtml += `<div class="db-stat">${lucideIcon('git-branch', 14)} v${APP_VERSION} · DB v${dbVer}</div>`;
   container.innerHTML = statsHtml;
 
-  // Set dashboard link using the connected URL
-  const urlInput = document.getElementById('username');
-  if (urlInput && urlInput.value) {
-    const projectRef = urlInput.value.replace('https://', '').replace('.supabase.co', '');
-    document.getElementById('supabaseDashLink').href = `https://supabase.com/dashboard/project/${projectRef}`;
-  }
-  // Fetch DB size via RPC (only relevant for Supabase/Local backends).
-  // Some Supabase projects do not install the optional db_size_mb() function;
+  // Fetch DB size via RPC (only relevant for the Local backend).
+  // Some servers do not install the optional db_size_mb() function;
   // cache that capability miss so realtime footer refreshes do not spam 404s.
   if (state.db.connected && !state.demoMode && !state.driveMode) {
     const dbSizeState = dbSizeStateForCurrentBackend();
@@ -478,20 +472,30 @@ function updateFooterStats(viewCountsGetter) {
         });
     }
   }
-  // Estimate data size for Google Drive from in-memory store
-  if (state.driveMode && state.driveAdapter && state.driveAdapter._store) {
+  // Real stored byte total for Google Drive: personal folder + owned group
+  // folders (joined groups live on their creator's Drive and are excluded).
+  // Refreshed from file listings at startup, on each Drive poll, and after
+  // every upload — no in-memory estimation.
+  if (state.driveMode && state.driveAdapter) {
+    const el = document.getElementById('dbSizeMb');
+    if (!el) return;
+    const personal = state.driveAdapter.drivePersonalBytes;
+    const owned = typeof state.sharing?.getOwnedGroupsBytes === 'function'
+      ? state.sharing.getOwnedGroupsBytes() : 0;
+    const fmtBytes = (b) => b < 1024 * 1024 ? '<1MB' : `${Math.round(b / (1024 * 1024))} MB`;
+    if (typeof personal === 'number') {
+      const totalBytes = personal + (typeof owned === 'number' ? owned : 0);
+      el.textContent = fmtBytes(totalBytes);
+      return;
+    }
+    // Fallback: estimate from in-memory store (adapter predates byte tracking)
     try {
       const store = state.driveAdapter._store;
       let totalBytes = 0;
       for (const table of Object.keys(store)) {
         totalBytes += new Blob([JSON.stringify(store[table])]).size;
       }
-      const el = document.getElementById('dbSizeMb');
-      if (el) {
-        el.textContent = totalBytes < 1024 * 1024
-          ? `~${Math.max(1, Math.round(totalBytes / 1024))} KB`
-          : `~${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
-      }
+      el.textContent = `~${fmtBytes(totalBytes)}`;
     } catch { /* non-critical */ }
   }
 }
@@ -625,15 +629,73 @@ function balanceGrid(gridEl, { min = 400, max = 700, gap = 14 } = {}) {
 }
 
 // ===================================================================
-// fetchAll — paginated read that defeats PostgREST's 1000-row cap
-// ===================================================================
-// Supabase's PostgREST layer caps any unpaginated GET at `max-rows`
-// (default 1000). A plain `.from('x').select('*')` therefore silently
-// truncates to the first 1000 rows once a table grows past that — the
-// rows exist in the DB but never reach the client. This pages through
-// with .range() until a short page is returned, so every row loads.
+// Section Grid Layout — per-level even grid for nested sections.
 //
-// Backends differ: the Supabase adapter exposes .range(); the local
+// A level container's direct children carry data-node-kind
+// ('bucket' | 'section') and data-node-id. A section element contains
+// exactly one level container of its own (its direct child with class
+// 'section-level'). Layout is computed by sections-pure.layoutLevel:
+// blocks at this level share one width (container width / widest row,
+// clamped like balanceGrid), sections span the columns their footprint
+// needs and never split across rows. A section's own level is then laid
+// out capped at the span it was given, so a section is a true R×C
+// rectangle of this level's cells.
+// ===================================================================
+const _sectionGridObservers = new WeakMap();
+function _abstractDomNode(el) {
+  const node = { id: el.dataset.nodeId, kind: el.dataset.nodeKind === 'section' ? 'section' : 'bucket', children: [] };
+  if (node.kind === 'section') {
+    const inner = [...el.children].find(c => c.classList?.contains('section-level'));
+    if (inner) node.children = [...inner.children].filter(c => c.dataset?.nodeKind).map(_abstractDomNode);
+  }
+  return node;
+}
+function applySectionGrid(gridEl, { min = 400, max = 700, gap = 14 } = {}) {
+  if (!gridEl) return;
+  const applyContainer = (container, capOverride) => {
+    const els = [...container.children].filter(c => c.dataset?.nodeKind);
+    if (!els.length) { container.style.gridTemplateColumns = ''; return; }
+    const w = container.clientWidth;
+    if (!w) return;
+    const maxCols = capOverride != null
+      ? Math.max(1, capOverride)
+      : Math.max(1, Math.floor((w + gap) / (min + gap)));
+    const lay = layoutLevel(els.map(_abstractDomNode), maxCols);
+    const m = Math.max(1, lay.maxBlocks);
+    const colW = Math.min(max, (w - (m - 1) * gap) / m);
+    container.style.gridTemplateColumns = m <= 1 && !capOverride ? '1fr' : `repeat(${m}, ${colW}px)`;
+    els.forEach((el, i) => {
+      const p = lay.placements[i];
+      if (el.dataset.nodeKind === 'section' && p) {
+        el.style.gridColumn = `span ${p.cols}`;
+        el.dataset.spanCols = String(p.cols);
+      }
+    });
+    for (const el of els) {
+      if (el.dataset.nodeKind !== 'section') continue;
+      const inner = [...el.children].find(c => c.classList?.contains('section-level'));
+      if (inner) applyContainer(inner, Number(el.dataset.spanCols) || undefined);
+    }
+  };
+  const apply = () => applyContainer(gridEl, null);
+  apply();
+  if (!_sectionGridObservers.has(gridEl)) {
+    const ro = new ResizeObserver(apply);
+    ro.observe(gridEl);
+    _sectionGridObservers.set(gridEl, ro);
+  }
+}
+
+// ===================================================================
+// fetchAll — paginated read that defeats server-side row caps
+// ===================================================================
+// Some REST layers cap any unpaginated GET (PostgREST's default is
+// 1000 rows). A plain `.from('x').select('*')` therefore silently
+// truncates to the first rows once a table grows past that — the rows
+// exist in the DB but never reach the client. This pages through with
+// .range() until a short page is returned, so every row loads.
+//
+// Backends differ: only adapters that expose .range() page; the local
 // REST, demo, and Drive adapters load whole tables in one shot and
 // have no server-side row cap. So we only page when .range() exists,
 // and otherwise run the query once.
@@ -728,138 +790,19 @@ function isMobileUA() {
   return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 }
 
-// ── Settings accessor factory (DB + localStorage sync) ──────────
+
+
 /**
- * Create a synced accessor for a JSON object stored in the `settings` table
- * with localStorage fallback. Eliminates the load/save boilerplate duplicated
- * across todos, habits, lists, vestiaire, and flashcards.
- *
- * @param {string} dbKey  Key in the `settings` table
- * @param {string} lsKey  localStorage key
- * @returns {{ load: () => Promise<object>, save: (map: object) => Promise<void>, get: () => object }}
+ * True when the device offers a desktop-like pointing environment: a fine
+ * pointer (mouse/trackpad) plus hover. Touchscreen laptops qualify —
+ * what matters is capability, not device identity. Phones and tablets,
+ * where touch is the primary input, return false.
+ * Use this (not isTouchDevice/isMobileUA) when the deciding question is
+ * "can the user comfortably multi-select?", e.g. the Google Picker join.
  */
-function createSettingsAccessor(dbKey, lsKey) {
-  let _cache = {};
-
-  async function load() {
-    if (state.db.connected) {
-      try {
-        const { data } = await state.db.from('settings').select('value').eq('key', dbKey);
-        if (data && data.length > 0 && data[0].value) {
-          _cache = JSON.parse(data[0].value);
-          localStorage.setItem(lsKey, data[0].value);
-          return _cache;
-        }
-      } catch (e) { console.warn(`Could not load ${dbKey} from DB:`, e.message); }
-    }
-    try { _cache = JSON.parse(localStorage.getItem(lsKey) || '{}'); } catch { _cache = {}; }
-    return _cache;
-  }
-
-  async function save(map) {
-    _cache = map;
-    const json = JSON.stringify(map);
-    localStorage.setItem(lsKey, json);
-    if (state.db.connected) {
-      try {
-        const { data } = await state.db.from('settings')
-          .update({ value: json, updated_at: new Date().toISOString() })
-          .eq('key', dbKey).select();
-        if (!data || data.length === 0) {
-          await state.db.from('settings')
-            .insert({ key: dbKey, value: json, updated_at: new Date().toISOString() });
-        }
-      } catch (e) { console.warn(`Could not save ${dbKey} to DB:`, e.message); }
-    }
-  }
-
-  function get() { return _cache; }
-
-  return { load, save, get };
-}
-
-// ── Supabase project ref extraction ─────────────────────────────
-function getSupabaseProjectRef(url) {
-  if (!url) return null;
-  const m1 = url.match(/https?:\/\/([a-z0-9]{20,})\.supabase\.co/i);
-  if (m1) return m1[1];
-  const m2 = url.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
-  if (m2) return m2[1];
-  return null;
-}
-
-// ── Shared Supabase Site-URL + magic-link auth steps ────────────
-/**
- * Build the two-step Site URL confirmation + magic-link email HTML
- * shared by showAuthPrompt (main.js) and renderSharingPane (sharing-ui.js).
- *
- * @param {string} prefix   ID prefix for DOM elements ('auth' | 'sharingAuth')
- * @param {string} authConfigUrl  Supabase dashboard auth-config URL
- * @param {object} [opts]
- * @param {string} [opts.sendAction]  data-action attribute for the send button
- * @param {boolean} [opts.showStatus] append a status div after the send button
- * @returns {{ html: string, wireUp: (container: Element) => void }}
- */
-function buildAuthSteps(prefix, authConfigUrl, opts = {}) {
-  const siteOrigin = location.origin;
-  const sendAttrs = opts.sendAction ? ` data-action="${esc(opts.sendAction)}"` : '';
-  const statusHtml = opts.showStatus ? `\n        <div class="auth-inline-status" id="${prefix}Status" style="display:none"></div>` : '';
-  const errorClass = opts.showStatus ? 'auth-inline-error' : 'auth-error';
-  const html = `
-    <div class="auth-step" id="${prefix}Step1">
-      <div class="auth-step-header">
-        <span class="auth-step-num">1</span>
-        <span>${t('auth.step_site_url')}</span>
-      </div>
-      <p class="auth-step-detail">${t('auth.step_site_url_detail')}</p>
-      <div class="auth-site-url-value">
-        <code id="${prefix}SiteUrlValue">${esc(siteOrigin)}</code>
-        <button class="auth-copy-url-btn" id="${prefix}CopyUrlBtn" title="${t('sharing.copy')}">${lucideIcon('copy', 14)}</button>
-      </div>
-      <a class="auth-config-link" href="${authConfigUrl}" target="_blank" rel="noopener">${lucideIcon('external-link', 14)} ${t('auth.open_supabase_settings')}</a>
-      <label class="auth-toggle-label" id="${prefix}ConfirmLabel">
-        <input type="checkbox" id="${prefix}SiteUrlConfirm">
-        <span>${t('auth.site_url_confirmed')}</span>
-      </label>
-    </div>
-    <div class="auth-step auth-step-locked" id="${prefix}Step2">
-      <div class="auth-step-header">
-        <span class="auth-step-num">2</span>
-        <span>${t('auth.step_magic_link')}</span>
-      </div>
-      <div id="${prefix}Step2Body" style="display:none">
-        <input type="email" id="${prefix}Email" placeholder="${t('auth.email_placeholder')}" autocomplete="email">
-        <div class="${errorClass}" id="${prefix}Error" style="display:none"></div>
-        <button class="auth-send-btn" id="${prefix}SendBtn"${sendAttrs}>${t('auth.send_magic_link')}</button>${statusHtml}
-      </div>
-    </div>`;
-
-  function wireUp(container) {
-    const confirmBox = container.querySelector(`#${prefix}SiteUrlConfirm`);
-    const step2 = container.querySelector(`#${prefix}Step2`);
-    const step2Body = container.querySelector(`#${prefix}Step2Body`);
-    const copyBtn = container.querySelector(`#${prefix}CopyUrlBtn`);
-    const emailEl = container.querySelector(`#${prefix}Email`);
-    if (copyBtn) {
-      copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(siteOrigin).then(() => showToast(t('common.copied'), 'success'));
-      });
-    }
-    if (confirmBox) {
-      confirmBox.addEventListener('change', () => {
-        if (confirmBox.checked) {
-          step2.classList.remove('auth-step-locked');
-          step2Body.style.display = '';
-          if (emailEl) emailEl.focus();
-        } else {
-          step2.classList.add('auth-step-locked');
-          step2Body.style.display = 'none';
-        }
-      });
-    }
-  }
-
-  return { html, wireUp };
+function isDesktopLike() {
+  return window.matchMedia('(pointer: fine)').matches
+    && window.matchMedia('(hover: hover)').matches;
 }
 
 /**
@@ -895,8 +838,9 @@ async function backfillCategoryColors(table, catMap) {
 /** Map item type prefix to its view name */
 const DEEP_LINK_TYPE_MAP = {
   todo: 'todos', habit: 'habits', project: 'projects', task: 'projects',
-  birthday: 'birthdays', vest: 'vestiaire', flashcard: 'flashcards',
+  birthday: 'birthdays', flashcard: 'flashcards',
   list: 'lists', listitem: 'lists',
+  todocat: 'todos', habitcat: 'habits',
 };
 
 /** Parse a deep-link hash like #todo/abc123 → { type, id } or null */
@@ -949,6 +893,30 @@ function highlightItem(el) {
   el.addEventListener('animationend', () => el.classList.remove('deep-link-highlight'), { once: true });
 }
 
+/** Readable text color to sit ON a solid category color, following
+ *  the WCAG 2.x contrast model (relative luminance + contrast ratio).
+ *  Policy: white is preferred — headers are bold display text, so
+ *  white is kept whenever it clears the WCAG AA large-text floor of
+ *  3:1 against the color. Only genuinely pale colors, where white
+ *  falls below 3:1, switch to near-black (which then always clears
+ *  7:1). Picking "whichever ratio is higher" instead would flip
+ *  every saturated mid-tone (the whole category palette) to dark
+ *  text even though white is perfectly readable on them. Non-hex
+ *  input falls back to white (the historical header treatment).
+ *  Renderers expose the result as --cat-on-color next to --cat-color. */
+function onColorFor(color) {
+  const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(String(color || '').trim());
+  if (!m) return '#fff';
+  let h = m[1];
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  const lin = [0, 2, 4].map(i => {
+    const v = parseInt(h.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  const lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+  return 1.05 / (lum + 0.05) >= 3 ? '#fff' : '#111';
+}
+
 /** Pick the next palette color not yet used by any entry in `catMapOrArray`.
  *  Accepts a Map (values iterated) or an Array of objects with optional `.color`. */
 function nextPaletteColor(catMapOrArray) {
@@ -969,17 +937,57 @@ function autoResizeTextarea(ta, maxHeight = 120) {
 }
 window.autoResizeTextarea = autoResizeTextarea;
 
+// ── Preserve in-progress quick-add text across re-renders ──
+// A background sharing sync (or the 15s poll) can trigger a full view
+// re-render while the user is typing in a quick-add box. Snapshot the
+// current values (keyed per input) before replacing the DOM and restore
+// them after, so nothing the user typed is lost.
+function snapshotTextInputs(root, selector, keyAttr) {
+  const snap = { values: new Map(), focusKey: null };
+  if (!root) return snap;
+  root.querySelectorAll(selector).forEach(el => {
+    const key = el.getAttribute(keyAttr);
+    if (key == null) return;
+    if (el.value) snap.values.set(key, el.value);
+    if (document.activeElement === el) snap.focusKey = key;
+  });
+  return snap;
+}
+
+function restoreTextInputs(root, selector, keyAttr, snap) {
+  if (!root || !snap) return;
+  root.querySelectorAll(selector).forEach(el => {
+    const v = snap.values.get(el.getAttribute(keyAttr));
+    if (v !== undefined) el.value = v;
+  });
+  if (snap.focusKey != null) {
+    const el = root.querySelector(`${selector}[${keyAttr}="${CSS.escape(snap.focusKey)}"]`);
+    if (el) {
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }
+}
+
+// Update the confirm-action button label mid-run (keepOpen mode only).
+// Lets a long callback report which step is in progress, e.g.
+// setConfirmActionProgress(t('sharing.deleting_group')).
+function setConfirmActionProgress(text) {
+  if (!_confirmActionLocked) return;
+  const btnTextEl = document.getElementById('confirmActionBtnText');
+  if (btnTextEl) btnTextEl.textContent = text;
+}
+
 export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
-  showConfirmAction, closeConfirmAction, executeConfirmAction,
+  showConfirmAction, closeConfirmAction, executeConfirmAction, setConfirmActionProgress,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
-  isEditing, balanceGrid, fetchAll,
-  isInstalledPWA, deviceClass, isTouchDevice, isMobileUA,
-  getSupabaseKeyRole, isServiceRoleKey,
-  getSupabaseProjectRef, buildAuthSteps, createSettingsAccessor,
-  backfillCategoryColors, nextPaletteColor,
+  isEditing, balanceGrid, applySectionGrid, fetchAll,
+  isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, isDesktopLike,
+  backfillCategoryColors, nextPaletteColor, onColorFor,
   parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,
   autoResizeTextarea,
+  snapshotTextInputs, restoreTextInputs,
 };
 
 window.closeConfirmAction = closeConfirmAction;

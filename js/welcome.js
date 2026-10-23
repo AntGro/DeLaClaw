@@ -5,11 +5,13 @@ import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
-import { initItemHoverDelay, inlineEditText } from './item-utils.js';
-import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCategories } from './habits.js';
-import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCategories } from './todos.js';
+import { initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
+import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCatPath, getHabitCatOrderKey, getHabitCategories, isMyCreatedSharedHabit, isAutoHabit } from './habits.js';
+import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey, getTodoCategories } from './todos.js';
+import { compareOrderKeys } from './sections-pure.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
+import { parseLocalDate, isHabitSnoozed, toDateStr } from './calendar-pure.js';
 
 // ── Local data cache ──
 let wTodos = [];
@@ -20,7 +22,6 @@ let wTexts = [];
 let wTextProgress = [];
 let wBirthdays = [];
 let wProjectCount = 0;
-let wVestiaireCount = 0;
 
 // ── Helpers ──
 function startOfDay(d) {
@@ -96,7 +97,6 @@ async function refreshWelcome() {
   wBirthdays = state.allBirthdays;
   const archivedIds = state.archivedProjectIds || [];
   wProjectCount = state.PROJECTS.filter(p => !archivedIds.includes(p.id)).length;
-  wVestiaireCount = state.allVestiaire.length;
 }
 
 // ── Listen for todo mutations from the TODOs module ──
@@ -340,7 +340,11 @@ function renderFocusHabitItem(habit) {
       </div>
       <div class="habit-actions">
         <button data-habit-id="${esc(habit.id)}" data-action="welcome-mark-habit-done" title="${t('habits.mark_done')}" class="habit-done-btn">${lucideIcon("circle-check", 16)}</button>
+        <button data-action="open-habit-snooze-modal" data-id="${esc(habit.id)}" title="${t('habits.snooze')}">${lucideIcon("moon", 16)}</button>
         <button data-action="welcome-open-habit-history" data-habit-id="${esc(habit.id)}" title="${t('habits.habit_history')} (${completionCount})" class="habit-history-btn">${lucideIcon("clipboard-list", 16)} ${completionCount}</button>
+        ${!isShared && state.sharing ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
+        ${isShared && isMyCreatedSharedHabit(habit.shared_id) ? `<button data-action="unshare-habit" data-id="${esc(habit.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
+        ${isShared && !isMyCreatedSharedHabit(habit.shared_id) ? `<button data-action="copy-habit-to-personal" data-id="${esc(habit.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
         <button data-action="edit-habit-inline" data-habit-id="${esc(habit.id)}" title="${t('common.edit')}">${lucideIcon("pencil", 16)}</button>
         <button data-action="copy-item-link" data-link-type="habit" data-id="${esc(habit.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link", 16)}</button>
         <button data-action="welcome-delete-habit" data-habit-id="${esc(habit.id)}" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>
@@ -407,16 +411,19 @@ function renderWelcomeCalendar(allBirthdays, allHabits, todayStart) {
     });
 
     // Find habits due on this day
+    const calTodayStr = toDateStr(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate());
     const habitsOnDay = allHabits.filter(h => {
       if (h.is_draft || !h.next_due) return false;
-      const dueDay = startOfDay(new Date(h.next_due));
+      if (isHabitSnoozed(h, calTodayStr)) return false;
+      const dueDay = startOfDay(parseLocalDate(h.next_due));
       return dueDay.getTime() === dayStart.getTime();
     });
 
     // For overdue habits, show them on today
     const overdueOnDay = isToday ? allHabits.filter(h => {
       if (h.is_draft || !h.next_due) return false;
-      const dueDay = startOfDay(new Date(h.next_due));
+      if (isHabitSnoozed(h, calTodayStr)) return false;
+      const dueDay = startOfDay(parseLocalDate(h.next_due));
       return dueDay < todayStart;
     }) : [];
 
@@ -497,12 +504,15 @@ function renderWelcome() {
   });
 
   // ── 2. Habits due ──
+  const todayStr = toDateStr(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate());
   const habitsDue = wHabits.filter(c => {
     if (c.is_draft) return false;
     if (!c.next_due) return false;
-    return startOfDay(new Date(c.next_due)) <= todayStart;
+    if (isHabitSnoozed(c, todayStr)) return false;
+    if (isAutoHabit(c)) return false; // validates itself — nothing to do
+    return startOfDay(parseLocalDate(c.next_due)) <= todayStart;
   });
-  habitsDue.sort((a, b) => new Date(a.next_due) - new Date(b.next_due));
+  habitsDue.sort((a, b) => String(a.next_due).slice(0, 10).localeCompare(String(b.next_due).slice(0, 10))); // date-only strings sort chronologically
 
   // ── 3. Flashcards ──
   const dueCards = wFlashcards.filter(c => c.last_review && (!c.next_review || new Date(c.next_review) <= now));
@@ -547,7 +557,7 @@ function renderWelcome() {
   const todoPending = wTodos.filter(td => !td.done).length;
   html += `<button class="category-nav-btn" style="--cat-color:#22c55e" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-todos" title="${esc(t('welcome.focus_todos'))}">${lucideIcon('list-checks', 12, '#22c55e')} ${esc(t('welcome.focus_todos'))}${todoPending > 0 ? ' (' + todoPending + ')' : ''}</button>`;
   // Habits bucket
-  const habitsDueNavCount = wHabits.filter(c => !c.is_draft && c.next_due && startOfDay(new Date(c.next_due)) <= todayStart).length;
+  const habitsDueNavCount = wHabits.filter(c => !c.is_draft && c.next_due && startOfDay(parseLocalDate(c.next_due)) <= todayStart).length;
   html += `<button class="category-nav-btn" style="--cat-color:#ec4899" data-action="scroll-to-welcome-bucket" data-bucket-id="welcome-bucket-habits" title="${esc(t('welcome.habits_due'))}">${lucideIcon('repeat', 12, '#ec4899')} ${esc(t('welcome.habits_due'))}${habitsDueNavCount > 0 ? ' (' + habitsDueNavCount + ')' : ''}</button>`;
   // Flashcards bucket
   const fcDueNav = wFlashcards.filter(c => c.last_review && (!c.next_review || new Date(c.next_review) <= now)).length;
@@ -568,15 +578,16 @@ function renderWelcome() {
   // Focus TODOs section
   html += `<div class="welcome-section" id="welcome-bucket-todos" style="--cat-color:#22c55e">`;
   html += `<div class="welcome-section-header">${lucideIcon('list-checks', 18)} <span>${esc(t('welcome.focus_todos'))}</span></div>`;
-  // Quick-add TODO with category selector — always show all categories
+  // Quick-add TODO with category selector — buckets only (never
+  // sections), in tree order, labelled by full path
   const todoCatIds = Array.from(getTodoCategories().values())
-    .filter(c => c.name !== SHARED_CATEGORY)
-    .sort((a, b) => a.sort_order - b.sort_order)
+    .filter(c => c.name !== SHARED_CATEGORY && c.kind !== 'section')
+    .sort((a, b) => compareOrderKeys(getTodoCatOrderKey(a.id), getTodoCatOrderKey(b.id)))
     .map(c => c.id);
   html += `<div class="welcome-quick-add">`;
   html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
   for (const catId of todoCatIds) {
-    const label = getCatDisplayName(catId);
+    const label = getTodoCatPath(catId);
     html += `<option value="${esc(catId)}">${esc(label)}</option>`;
   }
   html += `</select>`;
@@ -598,7 +609,7 @@ function renderWelcome() {
     const catKeys = Object.keys(todosByCategory);
     for (const catId of catKeys) {
       const catColor = getCategoryColor(catId);
-      const catName = getCatDisplayName(catId);
+      const catName = getTodoCatPath(catId);
       if (catKeys.length > 1 || catName) {
         html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(catName)}</div>`;
       }
@@ -615,13 +626,13 @@ function renderWelcome() {
   html += `<div class="welcome-section-header">${lucideIcon('repeat', 18)} <span>${esc(t('welcome.habits_due'))}</span></div>`;
   // Quick-add Habit (opens modal pre-filled with name + category)
   const habitCatIds = Array.from(getHabitCategories().values())
-    .filter(c => c.name !== SHARED_CATEGORY)
-    .sort((a, b) => a.sort_order - b.sort_order)
+    .filter(c => c.name !== SHARED_CATEGORY && c.kind !== 'section')
+    .sort((a, b) => compareOrderKeys(getHabitCatOrderKey(a.id), getHabitCatOrderKey(b.id)))
     .map(c => c.id);
   html += `<div class="welcome-quick-add">`;
   html += `<select class="welcome-quick-cat-select" data-action="update-next-sibling-category">`;
   for (const catId of habitCatIds) {
-    const label = getHabitCatDisplayName(catId);
+    const label = getHabitCatPath(catId);
     html += `<option value="${esc(catId)}">${esc(label)}</option>`;
   }
   html += `</select>`;
@@ -642,7 +653,7 @@ function renderWelcome() {
     const habitCatKeys = Object.keys(habitsByCategory);
     for (const catId of habitCatKeys) {
       const catColor = getHabitCategoryColor(catId);
-      const catLabel = getHabitCatDisplayName(catId);
+      const catLabel = getHabitCatPath(catId);
       html += `<div class="welcome-todo-cat-label" style="--cat-color:${catColor}"><span class="welcome-todo-cat-dot"></span>${esc(catLabel)}</div>`;
       for (const ch of habitsByCategory[catId]) {
         html += renderFocusHabitItem(ch);
@@ -739,7 +750,10 @@ function renderWelcome() {
       const avatarHtml = b.avatar_url
         ? `<img src="${b.avatar_url}" alt="${esc(b.name)}" class="welcome-birthday-avatar-img">`
         : lucideIcon('user', 16);
-      html += `<div class="welcome-item" data-action="switch-view" data-view="birthdays">`;
+      const occDate = new Date(todayStart);
+      occDate.setDate(occDate.getDate() + b.daysUntil);
+      const occStr = occDate.getFullYear() + '-' + String(occDate.getMonth() + 1).padStart(2, '0') + '-' + String(occDate.getDate()).padStart(2, '0');
+      html += `<div class="welcome-item" data-action="open-welcome-birthday" data-date="${occStr}">`;
       html += `<div class="welcome-item-main">`;
       html += `<span class="welcome-birthday-avatar${b.daysUntil === 0 ? ' birthday-today-avatar' : ''}">${avatarHtml}</span>`;
       html += `<span class="welcome-item-text">${esc(b.name)}</span>`;
@@ -766,7 +780,6 @@ function renderWelcome() {
     { icon: 'circle-check', value: todosDoneWeek, label: t('welcome.todos_done_week'), color: '#10b981' },
     { icon: 'repeat', value: wHabitCompletionsWeek, label: t('welcome.habits_done_week'), color: '#ec4899' },
     { type: 'memory', color: '#06b6d4' },
-    { icon: 'shirt', value: wVestiaireCount, label: t('welcome.wardrobe_items'), color: '#8b5cf6' },
     { icon: 'layout-grid', value: wProjectCount, label: t('welcome.projects'), color: '#6366f1' },
   ];
   for (const s of stats) {
@@ -803,7 +816,11 @@ function renderWelcome() {
   html += `</div>`;
   html += `</div>`;
 
+  const scrollY = window.scrollY;
+  const innerScrolls = captureInnerScrollPositions(container);
   container.innerHTML = html;
+  window.scrollTo(0, scrollY);
+  restoreInnerScrollPositions(container, innerScrolls);
 
   // Init hover delay for focus TODO items (action buttons appear on hover/long-press)
   initWelcomeFocusHover();

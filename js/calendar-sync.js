@@ -1,7 +1,8 @@
 // ===================================================================
 // CALENDAR SYNC — sync habits, todos, birthdays to Google Calendar
 // ===================================================================
-// Creates a dedicated "DeLaClaw" calendar and maps items via the
+// Creates a dedicated "DeLaClaw" calendar ("DeLaClawDev" off-production,
+// via js/drive-folders.js) and maps items via the
 // gcal_sync table. Works with Drive and Demo backends only.
 // Demo mode: table + settings exist but no actual API calls.
 //
@@ -11,12 +12,14 @@
 // is the sole gate for whether sync fires.
 // ===================================================================
 
-import state from './state.js';
+import state, { SHARED_CATEGORY } from './state.js';
 import { t } from './i18n.js';
 import { showToast, showConfirmAction, closeConfirmAction } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { getTodoCategories } from './todos.js';
 import { getHabitCategories } from './habits.js';
+import { driveFolderSuffix, currentHostname } from './drive-folders.js';
+import { isHabitSnoozed } from './calendar-pure.js';
 
 const CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
 
@@ -58,7 +61,7 @@ export async function getCalSyncPrefs() {
 
 // ── Calendar CRUD (API) ─────────────────────────────────────────
 
-async function findOrCreateCalendar(token, name = 'DeLaClaw') {
+async function findOrCreateCalendar(token, name = `DeLaClaw${driveFolderSuffix(currentHostname())}`) {
   // Check if we already have a saved calendar ID
   const savedId = await getSetting('gcal_calendar_id');
   if (savedId) {
@@ -114,7 +117,96 @@ async function deleteEvent(token, calendarId, eventId) {
   }
 }
 
+// ── Calendar wipe ───────────────────────────────────────────────
+// Delete EVERY event in a calendar: paginated events.list (recurring
+// series come back as single masters; an explicit far-past timeMin keeps
+// overdue items in the listing) + batch deletes. All-or-nothing: throws
+// if any event survives, so callers never clear the gcal_sync ledger
+// while events remain. Also removes orphan events that have no ledger
+// row (e.g. event created, then the gcal_sync upload failed).
+
+async function wipeCalendarEvents(token, calendarId) {
+  const ids = [];
+  let pageToken = null;
+  do {
+    const params = new URLSearchParams({
+      maxResults: '2500',
+      singleEvents: 'false',
+      timeMin: '2000-01-01T00:00:00Z',
+      fields: 'items(id),nextPageToken',
+    });
+    if (pageToken) params.set('pageToken', pageToken);
+    const resp = await fetch(
+      `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
+      { headers: { 'Authorization': `Bearer ${token}` } });
+    if (resp.status === 404) return; // calendar gone — nothing to wipe
+    if (!resp.ok) throw new Error(`Event list failed: HTTP ${resp.status}`);
+    const body = await resp.json();
+    for (const it of (body.items || [])) if (it && it.id) ids.push(it.id);
+    pageToken = body.nextPageToken || null;
+  } while (pageToken);
+
+  const calPath = `/calendar/v3/calendars/${encodeURIComponent(calendarId)}`;
+  const ops = ids.map(id => ({ method: 'DELETE', path: `${calPath}/events/${encodeURIComponent(id)}` }));
+  const results = await sendBatch(token, ops);
+  const failed = [];
+  for (let i = 0; i < ids.length; i++) {
+    const s = results[i] ? (results[i].status || 0) : 0;
+    if (!((s >= 200 && s < 300) || s === 404 || s === 410)) failed.push(ids[i]);
+  }
+  if (failed.length > 0) throw new Error(`${failed.length} event(s) could not be deleted`);
+}
+
+// True while a calendar-wide wipe is in flight. _syncTableInner returns
+// early without consuming dirty sets, so events created mid-wipe keep
+// their dirty marks for the next run instead of being orphaned by the
+// ledger clear that follows the wipe.
+let _wipeRunning = false;
+
+/**
+ * Delete every event in the DeLaClaw calendar, whatever its origin
+ * (ledger rows, or orphans with no row). All-or-nothing: throws on
+ * failure, so the caller must keep the gcal_sync ledger intact on error.
+ */
+export async function wipeDeLaClawCalendar() {
+  if (state.demoMode) return;
+  const prefs = await getCalSyncPrefs();
+  if (!prefs.calendarId || !_getToken) return;
+  let token = null;
+  try { token = await _getToken(); } catch (_) { return; }
+  if (!token) return;
+  _wipeRunning = true;
+  try {
+    await wipeCalendarEvents(token, prefs.calendarId);
+  } finally {
+    _wipeRunning = false;
+  }
+}
+
+/** Remove every row from the gcal_sync ledger. */
+export async function clearSyncEntries() {
+  await state.db.from('gcal_sync').delete().neq('item_type', '__never__');
+}
+
 // ── gcal_sync table operations ──────────────────────────────────
+// The table is a bare set of live (item_type, item_id) pairs. The Google
+// event ID is derived from the item ID (dashes stripped from the UUID):
+// 32 hex chars, valid base32hex (a-v, 0-9). Rows written before the
+// deterministic-ID migration still carry gcal_event_id — it wins while
+// present so the migration's delete phase can address the old events.
+
+const EVENT_ID_RE = /^[a-v0-9]{5,1024}$/;
+
+/** Derive the Google event ID for an item, or null if the id is not a valid base. */
+export function deterministicEventId(itemId) {
+  const stripped = String(itemId).replace(/-/g, '');
+  return EVENT_ID_RE.test(stripped) ? stripped : null;
+}
+
+/** Event ID for a sync entry: stored id wins during the migration transition, else derived. */
+function eventIdForEntry(itemId, entry) {
+  return entry?.gcal_event_id || deterministicEventId(itemId);
+}
 
 async function getSyncEntry(itemType, itemId) {
   const { data } = await state.db.from('gcal_sync').select('*')
@@ -122,24 +214,9 @@ async function getSyncEntry(itemType, itemId) {
   return data;
 }
 
-async function upsertSyncEntry(itemType, itemId, eventId) {
-  await state.db.from('gcal_sync').upsert({
-    item_type: itemType,
-    item_id: itemId,
-    gcal_event_id: eventId,
-    last_synced_at: new Date().toISOString(),
-  }, { onConflict: 'item_type,item_id' });
-}
-
-// Fallback for adapters without composite onConflict: delete + insert
-async function upsertSyncEntryFallback(itemType, itemId, eventId) {
+async function upsertSyncEntry(itemType, itemId) {
   await state.db.from('gcal_sync').delete().eq('item_type', itemType).eq('item_id', itemId);
-  await state.db.from('gcal_sync').insert({
-    item_type: itemType,
-    item_id: itemId,
-    gcal_event_id: eventId,
-    last_synced_at: new Date().toISOString(),
-  });
+  await state.db.from('gcal_sync').insert({ item_type: itemType, item_id: itemId });
 }
 
 async function deleteSyncEntry(itemType, itemId) {
@@ -148,6 +225,41 @@ async function deleteSyncEntry(itemType, itemId) {
 
 // ── Item → Event conversion ─────────────────────────────────────
 
+/**
+ * All items of a type that should currently have a calendar event, plus the
+ * ids of shared rows whose sharing data isn't loaded yet ('deferred' —
+ * their events are kept as-is and never orphan-deleted).
+ */
+async function getSyncableItems(itemType) {
+  const items = [];
+  const deferredIds = new Set(); // shared rows skipped: keep their events, don't orphan-delete
+  const resolveRow = (type, row) => {
+    const r = resolveSharedRow(type, row);
+    if (r.status === 'deferred') { deferredIds.add(row.id); return null; }
+    if (r.status === 'gone') return null;
+    return r.item;
+  };
+  if (itemType === 'habit') {
+    const { data: habits } = await state.db.from('habits').select('*');
+    for (const h of (habits || [])) {
+      const item = resolveRow('habit', h);
+      if (item?.next_due && !isHabitSnoozed(item, toLocalDateStr(new Date()))) items.push({ id: item.id, item });
+    }
+  } else if (itemType === 'todo') {
+    const { data: todos } = await state.db.from('todos').select('*');
+    for (const td of (todos || [])) {
+      const item = resolveRow('todo', td);
+      if (item && !item.done && (item.due_date || item.snooze_until)) items.push({ id: item.id, item });
+    }
+  } else if (itemType === 'birthday') {
+    const { data: birthdays } = await state.db.from('birthdays').select('*');
+    for (const b of (birthdays || [])) {
+      if (b.date || b.birthday) items.push({ id: b.id, item: b });
+    }
+  }
+  return { items, deferredIds };
+}
+
 function getCatLabel(catMap, catId) {
   if (!catId) return '';
   const cat = catMap.get(catId);
@@ -155,18 +267,61 @@ function getCatLabel(catMap, catId) {
   return cat.shortname || cat.name || '';
 }
 
-/** Google all-day end.date is exclusive — return the day after. */
+/**
+ * Category label for a shared item's event title. Shared items keep
+ * per-member categories on the local pointer row — recategorizing writes
+ * only the pointer, never the shared payload. The payload/creator category
+ * is just the sharer's value at share time and is meaningless to other
+ * members, so a pointer with no real local category (received share, never
+ * recategorized: category_id null or the __shared__ pseudo-category) gets
+ * no category segment at all.
+ */
+function sharedItemCatLabel(item, catMap) {
+  const cat = item.category_id ? catMap.get(item.category_id) : null;
+  if (cat && cat.name !== SHARED_CATEGORY) return cat.shortname || cat.name || '';
+  return '';
+}
+
+/** Format a Date as YYYY-MM-DD in the device's local timezone. */
+function toLocalDateStr(d) {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+/**
+ * Calendar date (YYYY-MM-DD) for an event, in the device's local timezone.
+ * DeLaClaw stores deadlines as UTC ISO strings, but the calendar is a
+ * day-level projection in local time: slicing the UTC string directly puts
+ * post-midnight local deadlines (e.g. 00:30 BST) on the previous day, and
+ * the same UTC round-trip made nextDay() return the start date instead of
+ * the day after during BST. Date-only values (no time component) are
+ * already calendar dates and pass through unchanged.
+ */
+function localDateStr(value) {
+  const s = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s.slice(0, 10);
+  return toLocalDateStr(d);
+}
+
+/** Google all-day end.date is exclusive — return the day after (local time). */
 function nextDay(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  return toLocalDateStr(d);
 }
 
 function habitToEvent(habit) {
   if (!habit.next_due) return null;
-  const date = habit.next_due.slice(0, 10); // YYYY-MM-DD
-  const catLabel = getCatLabel(getHabitCategories(), habit.category_id);
-  const prefix = catLabel ? `[Habit][${catLabel}]` : '[Habit]';
+  // Actively snoozed habits produce no event (they return on the wake date,
+  // overdue — the sync then recreates the event at the stored next_due).
+  if (isHabitSnoozed(habit, toLocalDateStr(new Date()))) return null;
+  const date = localDateStr(habit.next_due); // YYYY-MM-DD, local time
+  // Shared habits: [Habit][category][group name]; personal: [Habit][category]
+  // The category is the member's own (local pointer row), not the creator's.
+  const prefix = habit._sharedGroupName
+    ? (() => { const catLabel = sharedItemCatLabel(habit, getHabitCategories()); return catLabel ? `[Habit][${catLabel}][${habit._sharedGroupName}]` : `[Habit][${habit._sharedGroupName}]`; })()
+    : (() => { const catLabel = getCatLabel(getHabitCategories(), habit.category_id); return catLabel ? `[Habit][${catLabel}]` : '[Habit]'; })();
   return {
     summary: `${prefix} ${habit.name}`,
     start: { date },
@@ -176,11 +331,14 @@ function habitToEvent(habit) {
 }
 
 function todoToEvent(todo) {
-  const date = todo.due_date || todo.snoozed_until;
+  const date = todo.due_date || todo.snooze_until;
   if (!date) return null;
-  const d = date.slice(0, 10);
-  const catLabel = getCatLabel(getTodoCategories(), todo.category_id);
-  const prefix = catLabel ? `[TODO][${catLabel}]` : '[TODO]';
+  const d = localDateStr(date); // YYYY-MM-DD in local time (stored value is UTC)
+  // Shared todos: [TODO][category][group name]; personal: [TODO][category]
+  // The category is the member's own (local pointer row), not the payload's.
+  const prefix = todo._sharedGroupName
+    ? (() => { const catLabel = sharedItemCatLabel(todo, getTodoCategories()); return catLabel ? `[TODO][${catLabel}][${todo._sharedGroupName}]` : `[TODO][${todo._sharedGroupName}]`; })()
+    : (() => { const catLabel = getCatLabel(getTodoCategories(), todo.category_id); return catLabel ? `[TODO][${catLabel}]` : '[TODO]'; })();
   return {
     summary: `${prefix} ${todo.text}`,
     start: { date: d },
@@ -300,38 +458,43 @@ export async function enableCalSync() {
 }
 
 /**
- * Disable calendar sync. Deletes all synced events from the
- * DeLaClaw calendar but keeps the calendar itself so it can
- * be reused on re-enable (avoids orphaned/duplicate calendars).
+ * Disable calendar sync. Deletes every event from the DeLaClaw calendar
+ * (wipe-based: ledger rows and orphans alike) but keeps the calendar
+ * itself so it can be reused on re-enable (avoids orphaned/duplicate
+ * calendars). All-or-nothing: on wipe failure the error propagates and both
+ * the ledger and the enabled flag are left untouched, so the user can retry
+ * from a consistent state. With deleteCalendar=true (account deletion) the
+ * whole calendar is deleted instead; the DELETE response is verified — any
+ * failure throws before the ledger or calendar ID are cleared, so a calendar
+ * full of user data can never silently orphan.
  */
 export async function disableCalSync({ deleteCalendar = false, onProgress } = {}) {
   if (!state.demoMode && _getToken) {
-    try {
-      const token = await _getToken();
-      const calId = await getSetting('gcal_calendar_id');
-      if (token && calId) {
-        if (deleteCalendar) {
-          // Account deletion — remove the entire calendar from Google
-          await fetch(`${CALENDAR_API}/calendars/${encodeURIComponent(calId)}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` },
-          });
-          // Clear all local sync entries
-          await state.db.from('gcal_sync').delete().neq('item_type', '__never__');
-        } else {
-          // Normal toggle — delete events but keep the calendar for re-use
-          const types = ['habit', 'todo', 'birthday'];
-          for (let i = 0; i < types.length; i++) {
-            if (onProgress) onProgress({ type: types[i], index: i, total: types.length });
-            try { await deleteTypeEvents(types[i]); } catch (_) { /* best effort */ }
-          }
-          if (onProgress) onProgress({ type: null, index: types.length, total: types.length, done: true });
+    const token = await _getToken();
+    const calId = await getSetting('gcal_calendar_id');
+    if (token && calId) {
+      if (deleteCalendar) {
+        // Account deletion — remove the entire calendar from Google
+        const res = await fetch(`${CALENDAR_API}/calendars/${encodeURIComponent(calId)}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok && res.status !== 404) {
+          throw new Error(`calendar delete failed: HTTP ${res.status}`);
         }
+        // Clear all local sync entries
+        await clearSyncEntries();
+      } else {
+        // Normal toggle — wipe every event, then clear the ledger
+        if (onProgress) onProgress({ type: null, index: 0, total: 1 });
+        await wipeDeLaClawCalendar();
+        await clearSyncEntries();
+        if (onProgress) onProgress({ type: null, index: 1, total: 1, done: true });
       }
-    } catch (_) { /* best effort */ }
+    }
   } else {
     // Demo or no token — just clear local sync entries
-    await state.db.from('gcal_sync').delete().neq('item_type', '__never__');
+    await clearSyncEntries();
   }
   await setSetting('gcal_sync_enabled', 'false');
   if (deleteCalendar) await setSetting('gcal_calendar_id', '');
@@ -352,6 +515,26 @@ const MAX_BATCH_SIZE = 50; // Google's limit per batch request
 // markDirty() is called from the adapter wrapper on every write.
 
 const _dirtyItems = new Map(); // table → Set<id>
+
+// ── Serialization ──
+// Calendar mutations (syncTable, deleteTypeEvents) snapshot the gcal_sync
+// map at their start and act on it at their end. Two concurrent runs
+// interleave at await points and act on stale snapshots: double-POST of the
+// same item, or one run clearing an entry the other just upserted (ghost /
+// duplicate events in Google Calendar, unrepairable afterwards). A per-table
+// promise chain serializes them: each call appends to the tail, a rejection
+// never breaks the chain, and a waiter re-runs afterwards, picking up any
+// dirty marks that arrived meanwhile.
+const _tableChains = new Map(); // table → tail promise
+
+function _withTableLock(tableName, fn) {
+  const prev = _tableChains.get(tableName) || Promise.resolve();
+  const cur = prev.catch(() => {}).then(fn);
+  _tableChains.set(tableName, cur);
+  const dropTail = () => { if (_tableChains.get(tableName) === cur) _tableChains.delete(tableName); };
+  cur.then(dropTail, dropTail);
+  return cur;
+}
 
 /**
  * Mark an item as dirty so the next flush syncs only it.
@@ -416,6 +599,9 @@ async function sendBatch(token, ops) {
         'Content-Type': `multipart/mixed; boundary=${boundary}`,
       },
       body,
+      // Lets the batch survive tab close on beforeunload/force-save flushes
+      // (64KB body limit — larger batches behave as before).
+      keepalive: true,
     });
 
     if (!resp.ok) {
@@ -442,19 +628,100 @@ async function sendBatch(token, ops) {
   return results;
 }
 
+// ── Shared-item resolution ────────────────────────────────────────────
+// Shared todos/habits live as pointer rows locally (empty text/name, no
+// dates); the real data sits in the sharing layer's payload. Resolve a
+// pointer into a calendar-ready row, or report why it can't be synced yet.
+
+/** Sentinel: shared row whose sharing data isn't loaded yet — skip it, never delete its event. */
+export const SHARED_NOT_READY = Symbol('shared-not-ready');
+
+function sharingLoaded() {
+  try { return state.sharing?.isReady?.() === true; }
+  catch { return false; }
+}
+
+function sharedGroupName(groupId) {
+  try {
+    if (typeof state.sharing?.getGroupName === 'function') {
+      return state.sharing.getGroupName(groupId) || null;
+    }
+    const g = state.sharing?.getAllGroups?.().find(x => x.id === groupId);
+    return g?.name || null;
+  } catch { return null; }
+}
+
+/**
+ * Resolve a DB row into the item the calendar should sync.
+ * Returns { status, item } where status is:
+ *  - 'personal' — not a shared row, use item as-is
+ *  - 'ready'    — shared row merged with its payload (item set)
+ *  - 'deferred' — shared row but sharing isn't loaded yet (skip, don't delete)
+ *  - 'gone'     — shared row whose item no longer exists remotely (delete event)
+ */
+function resolveSharedRow(itemType, row) {
+  if (!row?.shared_id) return { status: 'personal', item: row };
+  if (!sharingLoaded()) return { status: 'deferred' };
+  let sh = null;
+  try {
+    if (itemType === 'todo') {
+      sh = state.sharing.getAllSharedItems().find(i => i.item_type === 'todo' && i.id === row.shared_id) || null;
+    } else if (itemType === 'habit') {
+      sh = state.sharing.getAllSharedHabits().find(h => h.id === row.shared_id) || null;
+    }
+  } catch { sh = null; }
+  if (!sh) return { status: 'gone' };
+  const groupName = sharedGroupName(row.shared_group_id);
+  if (itemType === 'todo') {
+    return {
+      status: 'ready',
+      item: {
+        ...row,
+        text: sh.payload?.text || sh.payload?.title || '',
+        due_date: sh.payload?.due_date || null,
+        snooze_until: sh.payload?.snooze_until || null,
+        done: sh.done ? 1 : 0,
+        _sharedCategory: sh.payload?.category || '',
+        _sharedGroupName: groupName,
+      },
+    };
+  }
+  return {
+    status: 'ready',
+    item: {
+      ...row,
+      name: sh.name || '',
+      next_due: sh.next_due || null,
+      snoozed_until: sh.snoozed_until || null,
+      frequency_rule: sh.frequency_rule || '',
+      _sharedCategory: sh.creator_category || '',
+      _sharedGroupName: groupName,
+    },
+  };
+}
+
 /**
  * Look up one item by type + id from the DB. Works regardless of whether
  * the UI refresh functions have populated state arrays.
+ * Returns SHARED_NOT_READY for shared rows whose sharing data isn't loaded.
  */
 async function getActiveItemFromDb(itemType, itemId) {
   if (itemType === 'habit') {
     const { data } = await state.db.from('habits').select('*').eq('id', itemId);
     const h = data?.[0];
-    return (h && h.next_due) ? h : null;
+    if (!h) return null;
+    const r = resolveSharedRow('habit', h);
+    if (r.status === 'deferred') return SHARED_NOT_READY;
+    if (r.status === 'gone') return null;
+    return (r.item.next_due && !isHabitSnoozed(r.item, toLocalDateStr(new Date()))) ? r.item : null;
   } else if (itemType === 'todo') {
     const { data } = await state.db.from('todos').select('*').eq('id', itemId);
     const td = data?.[0];
-    return (td && !td.done && (td.due_date || td.snoozed_until)) ? td : null;
+    if (!td) return null;
+    const r = resolveSharedRow('todo', td);
+    if (r.status === 'deferred') return SHARED_NOT_READY;
+    if (r.status === 'gone') return null;
+    return (!r.item.done && (r.item.due_date || r.item.snooze_until)) ? r.item : null;
   } else if (itemType === 'birthday') {
     const { data } = await state.db.from('birthdays').select('*').eq('id', itemId);
     const b = data?.[0];
@@ -468,13 +735,18 @@ async function getActiveItemFromDb(itemType, itemId) {
  * Uses the dirty-item set to avoid scanning all items.
  * On first enable (empty gcal_sync), pushes all items.
  */
-export async function syncTable(tableName) {
+export function syncTable(tableName) {
+  return _withTableLock(tableName, () => _syncTableInner(tableName));
+}
+
+async function _syncTableInner(tableName) {
   const itemType = TABLE_TO_TYPE[tableName];
   if (!itemType) return;
 
   const prefs = await getCalSyncPrefs();
   if (!prefs.enabled || !prefs.calendarId || state.demoMode || !_getToken) return;
   if (!prefs[itemType + 's']) return;
+  if (_wipeRunning) return; // wipe in flight — keep dirty marks for the next run
 
   let token;
   try { token = await _getToken(); } catch (_) { return; }
@@ -494,23 +766,7 @@ export async function syncTable(tableName) {
 
   if (fullScan) {
     // Full push: all items with dates → create or update; orphaned sync entries → delete
-    const wantSync = [];
-    if (itemType === 'habit') {
-      const { data: habits } = await state.db.from('habits').select('*');
-      for (const h of (habits || [])) {
-        if (h.next_due) wantSync.push({ id: h.id, item: h });
-      }
-    } else if (itemType === 'todo') {
-      const { data: todos } = await state.db.from('todos').select('*');
-      for (const td of (todos || [])) {
-        if (!td.done && (td.due_date || td.snoozed_until)) wantSync.push({ id: td.id, item: td });
-      }
-    } else if (itemType === 'birthday') {
-      const { data: birthdays } = await state.db.from('birthdays').select('*');
-      for (const b of (birthdays || [])) {
-        if (b.date || b.birthday) wantSync.push({ id: b.id, item: b });
-      }
-    }
+    const { items: wantSync, deferredIds } = await getSyncableItems(itemType);
 
     const { data: syncEntries } = await state.db.from('gcal_sync').select('*').eq('item_type', itemType);
     const syncMap = new Map((syncEntries || []).map(e => [e.item_id, e]));
@@ -521,18 +777,23 @@ export async function syncTable(tableName) {
       const event = itemToEvent(itemType, item);
       if (!event) continue;
       const existing = syncMap.get(id);
-      if (existing?.gcal_event_id) {
-        ops.push({ method: 'PATCH', path: `${calPath}/events/${encodeURIComponent(existing.gcal_event_id)}`, body: event });
-        opMeta.push({ action: 'update', id, eventId: existing.gcal_event_id, event });
+      const existingEventId = existing && eventIdForEntry(id, existing);
+      if (existingEventId) {
+        ops.push({ method: 'PATCH', path: `${calPath}/events/${encodeURIComponent(existingEventId)}`, body: event });
+        opMeta.push({ action: 'update', id, eventId: existingEventId, event });
       } else {
-        ops.push({ method: 'POST', path: `${calPath}/events`, body: event });
-        opMeta.push({ action: 'create', id });
+        const newEventId = deterministicEventId(id);
+        if (!newEventId) { console.warn(`Calendar sync: skipping ${itemType} ${id} — id cannot map to an event id`); continue; }
+        ops.push({ method: 'POST', path: `${calPath}/events`, body: { ...event, id: newEventId } });
+        opMeta.push({ action: 'create', id, event });
       }
     }
 
     for (const [itemId, entry] of syncMap) {
-      if (handledIds.has(itemId)) continue;
-      ops.push({ method: 'DELETE', path: `${calPath}/events/${encodeURIComponent(entry.gcal_event_id)}` });
+      if (handledIds.has(itemId) || deferredIds.has(itemId)) continue;
+      const eventId = eventIdForEntry(itemId, entry);
+      if (!eventId) continue;
+      ops.push({ method: 'DELETE', path: `${calPath}/events/${encodeURIComponent(eventId)}` });
       opMeta.push({ action: 'delete', id: itemId });
     }
   } else {
@@ -541,21 +802,28 @@ export async function syncTable(tableName) {
       const syncEntry = await getSyncEntry(itemType, itemId);
       const item = await getActiveItemFromDb(itemType, itemId);
 
+      if (item === SHARED_NOT_READY) continue; // sharing not loaded yet — keep any existing event
+
       if (item) {
         const event = itemToEvent(itemType, item);
         if (!event) continue;
-        if (syncEntry?.gcal_event_id) {
+        const existingEventId = syncEntry && eventIdForEntry(itemId, syncEntry);
+        if (existingEventId) {
           // Update existing event
-          ops.push({ method: 'PATCH', path: `${calPath}/events/${encodeURIComponent(syncEntry.gcal_event_id)}`, body: event });
-          opMeta.push({ action: 'update', id: itemId, eventId: syncEntry.gcal_event_id, event });
+          ops.push({ method: 'PATCH', path: `${calPath}/events/${encodeURIComponent(existingEventId)}`, body: event });
+          opMeta.push({ action: 'update', id: itemId, eventId: existingEventId, event });
         } else {
-          // Create new event
-          ops.push({ method: 'POST', path: `${calPath}/events`, body: event });
-          opMeta.push({ action: 'create', id: itemId });
+          // Create new event with the deterministic id
+          const newEventId = deterministicEventId(itemId);
+          if (!newEventId) { console.warn(`Calendar sync: skipping ${itemType} ${itemId} — id cannot map to an event id`); continue; }
+          ops.push({ method: 'POST', path: `${calPath}/events`, body: { ...event, id: newEventId } });
+          opMeta.push({ action: 'create', id: itemId, event });
         }
-      } else if (syncEntry?.gcal_event_id) {
+      } else if (syncEntry) {
         // Item deleted or lost its date → remove event
-        ops.push({ method: 'DELETE', path: `${calPath}/events/${encodeURIComponent(syncEntry.gcal_event_id)}` });
+        const eventId = eventIdForEntry(itemId, syncEntry);
+        if (!eventId) continue;
+        ops.push({ method: 'DELETE', path: `${calPath}/events/${encodeURIComponent(eventId)}` });
         opMeta.push({ action: 'delete', id: itemId });
       }
     }
@@ -564,30 +832,90 @@ export async function syncTable(tableName) {
   if (ops.length === 0) return;
 
   // ── Execute batch ──
-  const results = await sendBatch(token, ops);
+  let results;
+  try {
+    results = await sendBatch(token, ops);
+  } catch (e) {
+    // Whole batch failed (e.g. network down): nothing was applied, so keep
+    // every attempted id dirty for a later run instead of dropping them.
+    requeueFailedOps(tableName, opMeta.map(m => m.id));
+    throw e;
+  }
 
   // ── Process results ──
+  const failedIds = new Set();
+  // Retryable: unknown outcome, rate-limited, or server error. Other 4xx are
+  // not retried — the request itself won't succeed on a later attempt.
+  const isRetryable = (s) => s === 0 || s === 429 || s >= 500;
   for (let i = 0; i < opMeta.length; i++) {
     const meta = opMeta[i];
     const result = results[i] || { status: 0, body: null };
+    const s = result.status;
+    const ok2xx = s >= 200 && s < 300;
 
     try {
       if (meta.action === 'create') {
-        if (result.status >= 200 && result.status < 300 && result.body?.id) {
-          await upsertSyncEntryFallback(itemType, meta.id, result.body.id);
+        if (ok2xx && result.body?.id) {
+          await upsertSyncEntry(itemType, meta.id);
+        } else if (s === 409) {
+          // The deterministic id is already taken: the event was created by
+          // an earlier attempt that never recorded its entry (crash between
+          // insert and entry write, or an interrupted id migration). Patch it
+          // into shape and record the entry — never create a duplicate.
+          const eventId = deterministicEventId(meta.id);
+          if (eventId && meta.event) {
+            try {
+              const patchResp = await fetch(`${CALENDAR_API}${calPath}/events/${encodeURIComponent(eventId)}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(meta.event),
+              });
+              if (patchResp.ok) await upsertSyncEntry(itemType, meta.id);
+              else failedIds.add(meta.id); // retried via the dirty set
+            } catch (_) {
+              failedIds.add(meta.id);
+            }
+          }
+        } else if (isRetryable(s)) {
+          failedIds.add(meta.id);
         }
       } else if (meta.action === 'delete') {
-        // Only clear sync entry if the delete actually succeeded (or event was already gone)
-        const s = result.status;
-        if (s === 0 || (s >= 200 && s < 300) || s === 404 || s === 410) {
+        // Only clear the sync entry if the delete actually succeeded (or the
+        // event was already gone). Status 0 means "no parseable result" — not
+        // success: keep the entry so a later run retries the delete (a 404
+        // then clears it).
+        if (ok2xx || s === 404 || s === 410) {
           await deleteSyncEntry(itemType, meta.id);
+        } else if (isRetryable(s)) {
+          failedIds.add(meta.id);
         }
+      } else if (meta.action === 'update') {
+        // update: sync entry stays as-is (event ID unchanged).
+        // 404: the event was deleted out-of-band (e.g. in Google Calendar) —
+        // keep the entry and don't retry (no resurrection, no retry loop).
+        if (!ok2xx && isRetryable(s)) failedIds.add(meta.id);
       }
-      // update: sync entry stays as-is (event ID unchanged)
     } catch (e) {
       console.warn(`Calendar sync failed for ${itemType} ${meta.id}:`, e);
+      failedIds.add(meta.id);
     }
   }
+  // Failed ops go back in the dirty set so a later syncTable run retries
+  // them. Without this the dirty set is consumed up front and a failed op
+  // (e.g. an event delete lost on a 500) is never retried.
+  requeueFailedOps(tableName, [...failedIds]);
+}
+
+/**
+ * Put ids back in the dirty set so a later syncTable run retries them.
+ * Targeted retry (never '__all__'): the diff logic re-derives the right op
+ * from the row + sync entry.
+ */
+function requeueFailedOps(tableName, ids) {
+  if (!ids.length) return;
+  if (!_dirtyItems.has(tableName)) _dirtyItems.set(tableName, new Set());
+  const set = _dirtyItems.get(tableName);
+  for (const id of ids) set.add(id);
 }
 
 /**
@@ -613,10 +941,46 @@ export async function reconcileAll(onProgress) {
 }
 
 /**
+ * Startup ledger reconciliation: for every syncable item (dated todo /
+ * habit / birthday), verify a gcal_sync ledger entry exists. Items without
+ * one — event created but the entry write/upload was lost, or the sync
+ * never ran for them — are marked dirty so the next syncTable run creates
+ * the event, or 409-adopts it when the event already exists. Purely local:
+ * no calendar API calls unless something is actually missing.
+ * Called once at startup, after the tables load and before polling starts.
+ */
+export async function reconcileLedger() {
+  const prefs = await getCalSyncPrefs();
+  if (!prefs.enabled || !prefs.calendarId || state.demoMode || !_getToken) return;
+
+  const types = [];
+  if (prefs.habits) types.push({ table: 'habits', type: 'habit' });
+  if (prefs.todos) types.push({ table: 'todos', type: 'todo' });
+  if (prefs.birthdays) types.push({ table: 'birthdays', type: 'birthday' });
+
+  for (const { table, type } of types) {
+    const { items } = await getSyncableItems(type);
+    if (!items.length) continue;
+    const { data: entries } = await state.db.from('gcal_sync').select('item_id').eq('item_type', type);
+    const have = new Set((entries || []).map(e => e.item_id));
+    let marked = false;
+    for (const { id } of items) {
+      if (!have.has(id)) { markDirty(table, id); marked = true; }
+    }
+    if (marked) await syncTable(table);
+  }
+}
+
+/**
  * Delete all calendar events for one item type and clear sync entries.
  * Called when a type toggle is turned off.
  */
-export async function deleteTypeEvents(itemType) {
+export function deleteTypeEvents(itemType) {
+  const tableName = { habit: 'habits', todo: 'todos', birthday: 'birthdays' }[itemType];
+  return _withTableLock(tableName, () => _deleteTypeEventsInner(itemType));
+}
+
+async function _deleteTypeEventsInner(itemType) {
   const prefs = await getCalSyncPrefs();
   if (!prefs.calendarId || state.demoMode || !_getToken) return;
 
@@ -631,18 +995,37 @@ export async function deleteTypeEvents(itemType) {
   if (!syncEntries || syncEntries.length === 0) return;
 
   // Build delete ops
-  const ops = syncEntries.map(e => ({
-    method: 'DELETE',
-    path: `${calPath}/events/${encodeURIComponent(e.gcal_event_id)}`,
-  }));
+  const ops = [];
+  for (const e of syncEntries) {
+    const eventId = eventIdForEntry(e.item_id, e);
+    if (!eventId) continue;
+    ops.push({
+      method: 'DELETE',
+      path: `${calPath}/events/${encodeURIComponent(eventId)}`,
+    });
+  }
 
-  const results = await sendBatch(token, ops);
+  const tableName = { habit: 'habits', todo: 'todos', birthday: 'birthdays' }[itemType];
+  let results;
+  try {
+    results = await sendBatch(token, ops);
+  } catch (_) {
+    // Batch failed wholesale (retryable): keep the ledger rows and requeue
+    // the ids so a later syncTable run retries the deletion.
+    for (const e of syncEntries) markDirty(tableName, e.item_id);
+    return;
+  }
 
-  // Only clear sync entries for successfully deleted events
+  // Only clear sync entries for events actually deleted (or already gone).
+  // Status 0 means "no parseable result" — not success: keep the entry and
+  // requeue the id so a later toggle-off retries the delete (a 404 then
+  // clears it).
   for (let i = 0; i < syncEntries.length; i++) {
     const s = results[i]?.status || 0;
-    if (s === 0 || (s >= 200 && s < 300) || s === 404 || s === 410) {
+    if ((s >= 200 && s < 300) || s === 404 || s === 410) {
       await deleteSyncEntry(itemType, syncEntries[i].item_id);
+    } else {
+      markDirty(tableName, syncEntries[i].item_id);
     }
   }
 }
@@ -690,4 +1073,130 @@ export async function resetCalendar() {
   const calId = await findOrCreateCalendar(token);
   await setSetting('gcal_calendar_id', calId);
   await reconcileAll();
+}
+
+// ── One-shot migration to deterministic event IDs ───────────────
+// Old gcal_sync rows map (item_type, item_id) → server-generated
+// gcal_event_id. New rows are bare (item_type, item_id) pairs; the event id
+// is derived from the item id.
+//
+// Row-driven gate: migration work remains iff a gcal_sync row still carries
+// a gcal_event_id. The migration verifies (or creates) the DeLaClaw
+// calendar, wipes it (paginated list + batch delete — this also removes
+// orphan events that have no ledger row), clears the ledger, then
+// repopulates it from the current items, so every event ends up at its
+// deterministic ID.
+//
+// Runs as a login gate (see connect() in main.js): 'deferred' blocks app
+// access until the next successful run. A 403 (calendar scope
+// missing/revoked) turns calendar sync off instead of blocking the app
+// forever — re-enabling it in Settings re-requests the scope. Safe to
+// re-run: any failure before the final flag aborts without marking done,
+// and the 409-on-create path heals partial runs (recreate → 409 → patch +
+// entry).
+
+const ID_MIGRATION_FLAG = 'gcal_event_id_migration';
+
+export async function migrateEventIdsToDeterministic() {
+  if (state.demoMode) return 'skipped';
+  let flag = null;
+  try { flag = await getSetting(ID_MIGRATION_FLAG); } catch (_) { return 'deferred'; }
+  if (flag === 'done') return 'done';
+
+  // Row-driven gate: any old-shaped row means work remains.
+  let oldRows = false;
+  try {
+    const { data } = await state.db.from('gcal_sync').select('gcal_event_id');
+    oldRows = (data || []).some(r => r.gcal_event_id);
+  } catch (_) { return 'deferred'; }
+  if (!oldRows) {
+    try { await setSetting(ID_MIGRATION_FLAG, 'done'); } catch (_) { return 'deferred'; }
+    return 'done';
+  }
+
+  let token = null;
+  try { token = _getToken ? await _getToken() : null; } catch (_) { return 'deferred'; }
+  if (!token) return 'deferred';
+
+  let calId;
+  try {
+    // Verify the saved calendar (or create it): also heals a stale calendarId.
+    calId = await findOrCreateCalendar(token);
+    const prefs0 = await getCalSyncPrefs();
+    if (calId !== prefs0.calendarId) await setSetting('gcal_calendar_id', calId);
+  } catch (e) {
+    if (String((e && e.message) || '').includes('403')) {
+      // Calendar scope missing/revoked: turn sync off rather than block the
+      // app forever. Re-enabling in Settings re-requests the scope.
+      try {
+        await clearSyncEntries();
+        await setSetting('gcal_sync_enabled', 'false');
+        await setSetting('gcal_scope_missing', 'true');
+        await setSetting(ID_MIGRATION_FLAG, 'done');
+      } catch (_) { return 'deferred'; }
+      return 'done';
+    }
+    return 'deferred';
+  }
+
+  try {
+    // Category maps must be loaded before (re)building event titles.
+    const { loadTodoCategories } = await import('./todos.js');
+    const { loadHabitCategories } = await import('./habits.js');
+    await loadTodoCategories();
+    await loadHabitCategories();
+
+    const prefs = await getCalSyncPrefs();
+    const types = [];
+    if (prefs.habits) types.push(['habit', 'habits']);
+    if (prefs.todos) types.push(['todo', 'todos']);
+    if (prefs.birthdays) types.push(['birthday', 'birthdays']);
+
+    // Precondition: every syncable item id must be derivable — fail before
+    // touching the calendar, never leave a half-wiped state.
+    for (const [itemType] of types) {
+      const { items } = await getSyncableItems(itemType);
+      for (const { id } of items) {
+        if (!deterministicEventId(id)) throw new Error(`non-derivable id for ${itemType} ${id}`);
+      }
+    }
+
+    // Wipe phase: delete every event in the calendar (ledger rows and
+    // orphans alike), then clear the ledger. All-or-nothing: a failed wipe
+    // throws before the ledger is touched.
+    _wipeRunning = true;
+    try {
+      await wipeCalendarEvents(token, calId);
+    } finally {
+      _wipeRunning = false;
+    }
+    await clearSyncEntries();
+
+    if (prefs.enabled) {
+      // Recreate phase: the normal sync machinery, now writing
+      // deterministic ids (full scan per enabled type).
+      for (const [, table] of types) {
+        markDirty(table, null);
+        await syncTable(table);
+      }
+
+      // Validation: no failed ops still pending (failures requeue into the
+      // dirty set) and every syncable item has a ledger row.
+      for (const [itemType, table] of types) {
+        const dirty = _dirtyItems.get(table);
+        if (dirty && dirty.size > 0) throw new Error(`${itemType} resync incomplete (${dirty.size} ids still dirty)`);
+        const { items } = await getSyncableItems(itemType);
+        const { data: entries } = await state.db.from('gcal_sync').select('item_id').eq('item_type', itemType);
+        const entryIds = new Set((entries || []).map(e => e.item_id));
+        const missing = items.filter(({ id }) => !entryIds.has(id)).length;
+        if (missing > 0) throw new Error(`${itemType} resync incomplete (${missing} items without ledger row)`);
+      }
+    }
+
+    await setSetting(ID_MIGRATION_FLAG, 'done');
+    return 'done';
+  } catch (e) {
+    console.warn('[cal-migration] deferred:', (e && e.message) || e);
+    return 'deferred';
+  }
 }

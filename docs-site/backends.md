@@ -12,8 +12,6 @@ DeLaClaw supports three backend adapters. This document is the single source of 
 | **Local** | SQLite (Bun server) | None | None (single-device) | N/A (is local) | ⚠️ Possible via REST |
 | **Demo** | In-memory | None | None | N/A | ❌ |
 
-> **Supabase backend support has been removed.** The Supabase adapter and client library remain in the codebase temporarily to support migration to Google Drive. The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
-
 ---
 
 ## 2. Adapter Contract
@@ -66,8 +64,6 @@ Three adapters, two schema definitions:
 
 These **must stay in sync**. The `draft` status bug (v1.105) was caused by the demo adapter missing statuses that existed in the SQL schema.
 
-`sql/supabase_schema.sql` remains in the repo as a legacy reference but is no longer canonical for active backends.
-
 ### Rules
 
 1. **`server/schema.sql` is canonical.** It defines every table, column, default, and CHECK constraint for active backends.
@@ -90,16 +86,29 @@ These **must stay in sync**. The `draft` status bug (v1.105) was caused by the d
 |  | **Google Drive** | **Local (Bun + SQLite)** | **Demo** |
 |---|---|---|---|
 | **Adapter** | `drive.js` — wraps the demo adapter with per-table Drive persistence, ETag-based conflict resolution, and polling for external changes | `rest.js` — plain HTTP client with chainable PostgREST-like API | `demo.js` — full in-memory query builder with CHECK constraints |
-| **Architecture** | Stores one JSON file per table in a `DeLaClaw/` Drive folder. Reads/writes hit in-memory store (instant). Debounced per-table write-back flushes to Drive after 2s of inactivity. Polls Drive every 30s for external changes | `server/server.js` — Bun REST server + static file server. SQLite schema applied on startup via `CREATE TABLE IF NOT EXISTS` | Seeded with localized sample data from `demo-data.js` (EN/FR/ES). All operations run against in-memory JS objects. Nothing persists across refresh |
+| **Architecture** | Stores one JSON file per table in a `DeLaClaw/` Drive folder (`DeLaClawDev/` on dev and preview builds). Reads/writes hit in-memory store (instant). Debounced per-table write-back flushes to Drive after 2s of inactivity. Polls Drive every 30s for external changes | `server/server.js` — Bun REST server + static file server. SQLite schema applied on startup via `CREATE TABLE IF NOT EXISTS` | Seeded with localized sample data from `demo-data.js` (EN/FR/ES). All operations run against in-memory JS objects. Nothing persists across refresh |
 | **Auth** | Google OAuth 2.0 via Google Identity Services. Scope: `drive.file` (only files created by the app) + optional `calendar.app.created` (only calendars created by the app, for [Calendar sync](sync-architecture.md)). "Stay connected" triggers silent re-auth on reload (`prompt: ''`); clears credentials on failure | None. ⚠️ Server binds to `0.0.0.0` by default, exposing the API to the local network | None |
 | **Session** | Token in memory. "Stay connected" saves client ID to localStorage | N/A | N/A |
-| **Sync** | Polls Drive every 30s via `files.list` — re-fetches only tables whose `modifiedTime` changed. Skips locally-dirty tables. External change callback available for UI refresh. Immediate poll also fires on tab focus / `visibilitychange` → visible | None. Single-server, single-device | N/A |
-| **Offline** | None. Initial Drive fetch failure → connect fails. Mid-session flush failure → changes lost on reload | N/A — data is local. Server process dying → connection errors | N/A |
+| **Sync** | Polls Drive every 30s via `files.list` — re-fetches only tables whose `modifiedTime` changed. Skips locally-dirty tables. External change callback available for UI refresh. Immediate poll also fires on window focus | None. Single-server, single-device | N/A |
+| **Offline** | Read-only fallback: every table confirmed on Drive is mirrored to an IndexedDB snapshot. If Google auth is unobtainable at startup, the app boots read-only from the snapshot (the latest online version); if the token dies mid-session, the app switches to read-only in place. Editing, moving and deleting are blocked until sign-in succeeds | N/A — data is local. Server process dying → connection errors | N/A |
 | **Agent support** | ✅ Agent reads/writes individual per-table JSON files via Drive API. Concurrent edits on different tables can't conflict. Same-table conflicts resolved via ETag optimistic locking (412 → merge by id, newer `updated_at` wins) | ⚠️ Possible in theory — REST API matches PostgREST shape. Not currently wired | ❌ N/A |
 | **Storage limits** | Free tier: 15 GB shared across Gmail/Drive/Photos. DeLaClaw JSON typically < 1 MB | SQLite limit: ~281 TB. Effectively unlimited | N/A |
 | **Security** | Inherits Google account security. `drive.file` scope → no access to user's other Drive files. `calendar.app.created` scope → no access to user's other calendars | No auth, no encryption at rest. Trusted local networks only. **TODO:** bind to `127.0.0.1`; add optional auth token | N/A |
 | **Setup** | Click "Connect with Google" → authorize → folder and data file created automatically | `cd server && bun run server.js`. Enter `http://localhost:3737` in login form | Click "Demo" on login screen, choose a sample dataset or start empty |
 | **Purpose** | Primary persistent backend — no database, no API keys, just a Google account. Optional Calendar sync projects habits, TODOs, and birthdays to a dedicated Google Calendar | Self-hosted option for privacy-conscious users on trusted networks | Try DeLaClaw without any backend. Also serves as the Drive adapter's query engine |
+
+### Drive folder naming — production vs preview builds
+
+The Drive backend derives its folder names from the hostname, so preview builds can
+never read or write production data:
+
+| Host | Personal folder | Backups folder | Shared root |
+|---|---|---|---|
+| `delaclaw.com` (production) | `DeLaClaw/` | `DeLaClaw Backups/` | `DeLaClaw-Shared/` |
+| anything else (`dev.delaclaw.pages.dev`, PR previews, `localhost`) | `DeLaClawDev/` | `DeLaClawDev Backups/` | `DeLaClawDev-Shared/` |
+
+Group subfolders follow the shared root (`DeLaClawDev-Shared-{groupId}` off-production).
+The rule lives in `js/drive-folders.js` — pure functions of the hostname.
 
 ---
 
@@ -146,6 +155,8 @@ No persistence, no sync. Data resets on page reload.
 
 ### Local (Bun + SQLite) — backend-first
 
+> The backend is fully implemented and supported by the adapter layer, but the **Local** option is currently hidden on the app's login screen, so end users cannot select it in the hosted app for now.
+
 ```mermaid
 flowchart TD
     A["view code"] -->|"db.from(table).update()"| B["HTTP POST to localhost"]
@@ -165,7 +176,7 @@ No realtime. Single-user, single-device.
 See `migrations/MIGRATION_GUIDE.md` for the full protocol. Key points:
 
 - **Single version number** shared between app (`VERSION` file) and DB (`settings.schema_version`).
-- **Migration files** named `<version>_<description>.sql` (e.g., `1.099_enable_realtime.sql`).
+- **Local/Drive migrations** in `migrations/local-migrations.js` and `migrations/drive-migrations.js`.
 - **Pre-commit hook** blocks commits without a VERSION bump; auto-generates `js/version.js`.
 
 ### Dev / prod workflow
@@ -190,7 +201,12 @@ See `migrations/MIGRATION_GUIDE.md` for the full protocol. Key points:
 
 ### Google Drive
 
-No offline support. If the network drops mid-session, in-memory state is preserved until the tab closes, but flushes to Drive will fail.
+The Drive adapter mirrors every table it has confirmed on Drive (initial load, each successful flush, each poll reconciliation) into an IndexedDB snapshot, scoped by Google account. Two failure shapes are handled:
+
+- **Auth unobtainable at startup** (expired/revoked token, dead Google session, GIS unreachable): if a snapshot exists, the app boots from it in read-only mode instead of failing the connect. A banner shows the last sync time and a Sign-in button; signing in reloads into a normal session. With no snapshot, connect fails as before.
+- **Token dies mid-session**: silent refresh is attempted first, as usual. Once the token is declared dead, the app switches to read-only mode in place — in-memory data (including not-yet-flushed changes, which flush on recovery) stays viewable, and a banner offers Sign-in.
+
+In read-only mode, mutations are blocked at every layer: the adapter rejects insert/update/upsert/delete, bulk sort-order writes and reseeds; the UI blocks mutating actions, drag-and-drop, inline editing and modal saves. One deliberate exception: flashcard and text revision sessions run normally — cards flip, lines reveal, sessions complete — but the ratings are session-local and never recorded (no FSRS update in memory or in the database), so everything stays due exactly as the last online version left it. Shared data is snapshotted too: whenever sharing loads or syncs, the groups, their item files and the current member ids are mirrored into the cache alongside the tables, and a cold-start read-only session initializes sharing from that snapshot, so shared items render read-only like everything else. (A snapshot written before group caching existed has no sharing data; its content-less shared pointer rows are dropped instead.) A mid-session read-only session keeps the live sharing adapter, so already-loaded shared items stay visible there as well. At boot the app also requests persistent storage (`navigator.storage.persist()`), asking the browser to exempt the service-worker cache and the snapshots from eviction. A plain network drop with a still-valid token is unchanged: in-memory state is preserved and flushes retry until they succeed.
 
 ### Local
 
@@ -208,17 +224,24 @@ A write queue (store pending writes in IndexedDB, replay on reconnect) would mak
 
 ## 7. Cross-Device Sync
 
-No active backend supports cross-device sync. Drive, Local, and Demo are effectively single-device.
+Multi-device sync is supported on the **Drive** backend. The per-table JSON files live in the user's Google Drive, so any number of devices signed into the same Google account read and write the same data. Changes made on one device appear on the others within the 30-second poll interval — under one minute in practice — and an immediate poll also fires when a tab regains focus.
 
 ### Conflict resolution
 
-Drive uses ETag-based optimistic locking for agent-vs-app conflicts (412 → re-read, merge by `updated_at`, retry). For concurrent same-user edits across devices, last write wins.
+When multiple devices are active at the same time:
+
+- **Poll path** — an idle device re-fetches tables whose `modifiedTime` changed on Drive and replaces the whole in-memory table with the remote version (last write wins per table). Locally-dirty tables are skipped until they flush.
+- **Flush path** — if an upload hits an ETag conflict (412), the adapter re-reads the remote table, merges record-by-record with newer `updated_at` winning, and retries the upload.
+
+This is same-account multi-device sync, not a multi-user model: there is no collaboration or per-user attribution. Two devices editing the same table inside the same poll window converge to last-write-wins (per table on poll, per record on flush conflict).
+
+**Local** (Bun server bound to one machine) and **Demo** (ephemeral in-memory) are single-device.
 
 ---
 
 ## 8. Agent Integration
 
-The agent interacts with DeLaClaw via the Google Drive API, reading and writing individual per-table JSON files in the `DeLaClaw/` Drive folder.
+The agent interacts with DeLaClaw via the Google Drive API, reading and writing individual per-table JSON files in the `DeLaClaw/` Drive folder (`DeLaClawDev/` on dev and preview builds).
 
 ### Current capabilities
 
@@ -279,7 +302,7 @@ The agent interacts with DeLaClaw via the Google Drive API, reading and writing 
 
 **Export options:**
 - **Download:** Browser download as `.json` file.
-- **Push to Drive:** Available when connected to Drive backend. Saves backup as a separate file in the `DeLaClaw/` folder.
+- **Push to Drive:** Available when connected to Drive backend. Saves a timestamped backup file in the `DeLaClaw Backups/` folder (`DeLaClawDev Backups/` on dev and preview builds).
 
 ### Import
 
@@ -330,11 +353,9 @@ Options:
 
 - **CHECK constraint parity test.** Verifies `demo.js CHECK_CONSTRAINTS` match the SQL CHECK constraints. Catches drift between adapters.
 
-### Integration tests (Playwright + local Bun server)
+### Removed (2026-09-12)
 
-- **Archive + delete flow:** Creates projects, archives one, deletes it, verifies remaining cards render.
-- **TODO priority flow:** Tests priority levels across the full lifecycle.
-- **Flashcard import flow:** Tests import with existing/new decks, zero-deck edge case.
+The Playwright integration tests (archive + delete flow, TODO priority flow, flashcard import flow, browser smoke test) were removed: the browser-automation tests were never run reliably, so the suite is static analysis only.
 
 ### Missing test coverage
 
@@ -359,7 +380,6 @@ Tables tracked in `BACKUP_TABLES` (import order):
 |-------|---------|-----------------|
 | `todo_categories` | TODO category containers | — |
 | `habit_categories` | Habit category containers | — |
-| `vestiaire_categories` | Wardrobe category containers | — |
 | `flashcard_decks` | Flashcard deck containers | — |
 | `projects` | Project cards | — |
 | `habits` | Habit definitions | — |
@@ -372,14 +392,12 @@ Tables tracked in `BACKUP_TABLES` (import order):
 | `flashcard_notes` | Draft flashcard proposals | — |
 | `text_line_progress` | Reading progress per line | `texts.id` |
 | `birthdays` | Birthday tracker | — |
-| `vestiaire` | Wardrobe items | `vestiaire_categories.id` |
 | `list_items` | Items within lists | `lists.id` |
 | `settings` | App settings (key/value) | — |
 | `prompts` | AI prompts (global + per-project) | — |
-| `nvidia_usage` | LLM API usage tracking | — |
-| `daily_visits` | Daily visit log | — |
+| `daily_visits` | Visit statistics (active days, streaks) | — |
 | `sharing_groups` | Shared group definitions | — |
 | `sharing_members` | Group membership | `sharing_groups.id` |
 | `sharing_items` | Shared items (TODOs, habits, list items) | `sharing_groups.id` |
-| `joined_groups` | Groups the user has joined | — |
-| `agent_grants` | AI agent permission grants | — |
+| `groups` | Joined-group pointers + created-group name records | — |
+

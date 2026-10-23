@@ -1,6 +1,6 @@
 # Setup Guide
 
-DeLaClaw supports four backend modes. Each stores data differently but provides the same user experience.
+DeLaClaw supports three backend modes. Each stores data differently but provides the same user experience.
 
 ## Demo mode (no setup)
 
@@ -19,15 +19,13 @@ The simplest persistent backend — no database, no API keys.
 1. Open [delaclaw.com](https://delaclaw.com) or serve `index.html` locally
 2. Select **Drive** in the backend picker and click **Connect with Google**
 3. Sign in with your Google account and grant the `drive.file` scope (lets DeLaClaw access only files it creates). You may also be offered a `calendar.app.created` permission — this is optional and enables [Google Calendar sync](sync-architecture.md). You can decline it and enable it later from Settings
-4. DeLaClaw creates a `DeLaClaw/` folder in your Google Drive containing one JSON file per table (e.g. `todos.json`, `habits.json`, `settings.json`)
+4. DeLaClaw creates a `DeLaClaw/` folder (`DeLaClawDev/` on dev and preview builds) in your Google Drive containing one JSON file per table (e.g. `todos.json`, `habits.json`, `settings.json`)
 
 All data loads into memory on connect and writes back to Drive with a 2-second debounce per table after each mutation. The JSON files are plain exports — you can download, inspect, or delete them from Drive at any time.
 
-## Supabase (deprecated)
-
-> **Supabase backend support has been removed.** Existing users who connect with their Supabase credentials will be offered a one-click migration to Google Drive or a data backup download. The Supabase adapter and client library remain in the codebase temporarily to support this migration path. The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
-
 ## Local mode (Bun + SQLite)
+
+> **Note:** the Local backend is fully implemented, but the **Local** option is currently hidden on the login screen of the hosted app, so this mode cannot be selected there for now. The steps below describe how it works when enabled.
 
 ### 1. Install Bun
 

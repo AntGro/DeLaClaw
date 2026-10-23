@@ -52,13 +52,14 @@ User jobs:
 - `sort_order` monotonic per list (for list ordering) and per item (within-list ordering)
 - Duplicate list names allowed (no unique constraint)
 - Inline edit: save on Enter/confirm, cancel on blur (standard DeLaClaw inline edit UX)
+- Wardrobe removal (v2.9.17): former wardrobe categories became lists named `<name>` inside a `Wardrobe` section (id `vest_wardrobe`); items in the protected default or an unknown category went to a `*` list inside the section (`vest_wardrobe_star`); item notes carry a `Brand / Make:` / `Size:` / `Color:` / `Status:` field block with only non-empty lines, then pre-existing notes after a blank line. Migrated ids are prefixed `vest_`. On the local backend the section kind/parent links are applied by 2.23.0, which adds those columns
 
 ## Adapter & Backend
 - `db.from('lists')`, `db.from('list_items')`
 - Offline-cache wraps
 
 ## Sharing
-- Supabase `sharing_items` type=`list_item`
+- Drive adapter shared items, type=`list_item`
 - `shareListItemFromAdd` — share from add modal
 - `shareExistingListItem` — share an existing item
 - `bulkShareList` — share all items in a list at once
@@ -85,3 +86,10 @@ User jobs:
 ## References
 - `CODEMAP.json:features[lists]`
 - Entry: `js/lists.js`
+
+## Nested Sections (v2.23.0)
+
+- The `lists` table itself holds both kinds: buckets (`kind='bucket'`, hold `list_items`) and sections (`kind='section'`, hold lists/sub-sections, never items). `parent_id` is a plain column, never a foreign key.
+- Same shared mechanism as TODOs/Habits: tree logic only in `js/sections-pure.js`, names unique per parent, per-group `sort_order`, path typing in add/edit creates or converts (items move to a `*` list on conversion).
+- The `__shared__` list is identified by name, is always a root bucket, and never enters a section; copy-to-personal fallbacks must skip section rows.
+- Section delete: move children up (at the section's position) or delete the subtree (items deleted per bucket first, sharing cleanup per bucket, as list delete).

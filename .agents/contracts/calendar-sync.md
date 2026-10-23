@@ -8,8 +8,9 @@ Calendar sync creates and maintains a dedicated **DeLaClaw** calendar in the use
 
 - **Drive backend**: fully operational (reuses the Drive OAuth token which includes `calendar.app.created` scope).
 - **Demo backend**: tables and settings exist, but no real Calendar API calls are made.
-- **Supabase backend**: removed — see `dev-latest-supabase-support` branch. Migration `1.809` (`gcal_sync` table) is frozen.
 - **Local SQLite**: not wired.
+
+Migration `1.809` (`gcal_sync` table) is frozen.
 
 ## Token
 
@@ -20,13 +21,14 @@ No separate OAuth flow. The Google token obtained during Drive sign-in includes 
 Only possible when calendar sync is not already enabled. On enable:
 
 1. Obtain the shared Google token from the Drive adapter.
-2. Find or create the dedicated **DeLaClaw** calendar (hardcoded name).
+2. Find or create the dedicated **DeLaClaw** calendar (name derived from the hostname: `DeLaClaw` on production, `DeLaClawDev` elsewhere).
 3. Store `gcal_sync_enabled=true` and the calendar ID in the `settings` key-value table.
 4. Run a full push of all enabled item types (habits, TODOs, birthdays).
 
 ## Opt-out
 
-Always deletes the DeLaClaw calendar (which removes all its events in Google Calendar). Sets `gcal_sync_enabled=false`. Cross-device: any device reading the shared settings will see sync as disabled.
+- **Master toggle off**: wipes every event in the DeLaClaw calendar (wipe-based: paginated list + batch delete, catching orphans with no ledger row), then clears the `gcal_sync` ledger. The calendar itself is kept for re-use (avoids orphaned/duplicate calendars). All-or-nothing: on wipe failure the error propagates and both the ledger and `gcal_sync_enabled` are left untouched, so the user can retry from a consistent state. Cross-device: any device reading the shared settings will see sync as disabled.
+- **Account deletion** (`deleteCalendar=true`): deletes the entire DeLaClaw calendar from Google, clears the ledger, clears the stored calendar ID. The calendar DELETE response is verified: any failure other than 404 (already gone) throws before the ledger or calendar ID are cleared, and the account-deletion flow aborts — a calendar full of user data can never silently orphan.
 
 ## Event format
 
@@ -40,11 +42,32 @@ If no category shortname exists, the category name is used. Birthdays have no ca
 
 All events are **all-day events** (date only, no specific time). Birthdays are **yearly recurring** (`RRULE:FREQ=YEARLY`).
 
+**Timezone rule:** deadlines are stored as UTC ISO strings, but the calendar is a day-level projection in the device's **local** timezone. Event dates are derived via `localDateStr()` — slicing the UTC string directly would put post-midnight local deadlines (e.g. 00:30 BST) on the previous day, and the same UTC round-trip once made `nextDay()` return the start date instead of the day after during BST. Date-only values (habits' `next_due`, birthdays) pass through unchanged.
+
 Each event carries `extendedProperties.private` with `delaclaw_type` and `delaclaw_id` for identification.
 
 ## ID mapping
 
-The `gcal_sync` table maps `(item_type, item_id)` → `gcal_event_id`. This is the only link between a DeLaClaw item and its Calendar event.
+Event IDs are **deterministic**: the Google event ID is the item's UUID with dashes stripped (32 hex chars — valid base32hex). The `gcal_sync` table is a bare set of live `(item_type, item_id)` pairs; the event ID is derived, never stored. Rows written before the deterministic-ID migration still carry `gcal_event_id`, which wins while present so the migration's delete phase can address the old events.
+
+Consequences:
+
+- A `409` on create means "this item's event already exists" (retry after a crash between insert and entry write, or an interrupted migration) — the handler PATCHes the existing event into shape and records the entry, never duplicates.
+- Cross-device races are safe: two tabs creating the same item's event converge on the same ID via 409 → patch.
+- `last_synced_at` was write-only (nothing read it) and is gone.
+
+One-shot migration (`migrateEventIdsToDeterministic`, runs as a **login gate** in `connect()` before the app shell shows — a deferred migration throws `cal_migration_failed` and returns to the login screen, like the schema migrations):
+
+1. **Row-driven gate**: migration work remains iff a `gcal_sync` row still carries `gcal_event_id` (inspects the rows, not the calendar prefs — sync-off with leftover rows is not "done").
+2. Verifies the saved calendar (or creates it — also heals a stale `gcal_calendar_id`).
+3. Loads the category maps (so rebuilt titles keep their `[Category]` prefixes), then checks every syncable item ID is derivable — fails before touching the calendar.
+4. **Wipe phase**: deletes every event in the calendar (paginated `events.list` with `singleEvents=false` + an explicit far-past `timeMin`, batch deletes of 50) — ledger rows and orphans alike — then clears the ledger. All-or-nothing: a failed wipe throws before the ledger is touched.
+5. **Recreate phase** (sync on only): full scan per enabled type via the normal `syncTable` path.
+6. **Validation**: dirty sets empty, every syncable item has a ledger row — only then sets `gcal_event_id_migration=done`.
+
+A 403 (calendar scope missing/revoked) turns calendar sync off instead of blocking the app forever: clears the ledger, sets `gcal_sync_enabled=false` + `gcal_scope_missing=true`, marks done; the app toasts how to re-enable (which re-requests the scope). Any other failure defers to the next login. Safe to re-run: the 409-on-create path heals partial runs (recreate → 409 → patch + entry).
+
+While a wipe is in flight (`_wipeRunning`), `syncTable` returns early without consuming dirty sets, so events created mid-wipe keep their dirty marks for the next run instead of being orphaned by the ledger clear.
 
 ## Sync model
 
@@ -104,8 +127,16 @@ Category tables (`habit_categories`, `todo_categories`) are separate from item t
 
 Each type (habits, TODOs, birthdays) has an independent toggle in settings (`gcal_sync_habits`, `gcal_sync_todos`, `gcal_sync_birthdays`). Defaults: all `true`.
 
-- **Disabling a type**: deletes all existing calendar events for that type and removes their `gcal_sync` entries. Future mutations of that type do not trigger calendar work. Cross-device.
+- **Disabling a type**: deletes all existing calendar events for that type (entry-based) and removes their `gcal_sync` entries. Failed deletes keep their entries and requeue the IDs so a later run retries. Future mutations of that type do not trigger calendar work. Cross-device.
 - **Re-enabling a type**: runs a full push of all items of that type.
+
+## Resynchronize
+
+The Resynchronize button (settings, shown while sync is active) is strictly equivalent to toggling sync off then on: wipe the calendar → clear the ledger → verify/create the calendar → full-push all types. Toggles are greyed out while it runs.
+
+## Startup ledger reconciliation
+
+Once at startup — after the tables load, before the sharing poll starts — `reconcileLedger()` diffs every syncable item (dated TODOs, habits, birthdays) against its `gcal_sync` entries. Items with no entry (event created but the entry write/upload was lost, or the sync never ran for them) are marked dirty and synced: the normal targeted path creates the event, or 409-adopts it when the event already exists. Purely local unless something is actually missing. Entries without items (the reverse direction) are left to Resynchronize, which deletes their orphaned events. An out-of-band event deletion in Google Calendar keeps its ledger entry, so it is never resurrected by this check.
 
 ## Batch API
 
@@ -113,7 +144,11 @@ Calendar operations are sent to Google's Calendar batch endpoint (`multipart/mix
 
 ## Error handling
 
-Fire-and-forget. If a Calendar API call fails (network, expired token), the event stays out of sync until the source item is next modified, which will retry the operation.
+Failed operations (network error, 429, 5xx) go back into the per-table dirty set and are retried on a later `syncTable` run — a failed op is never silently dropped. Other 4xx are not retried. Update on a 404 keeps the entry without resurrecting the event. Per-type deletion (`deleteTypeEvents`) requeues failed IDs the same way; entries are only cleared for events actually deleted (2xx/404/410).
+
+Calendar-wide wipes (migration, toggle-off, resync) are all-or-nothing: any event surviving the batch delete throws before the ledger is cleared, so the ledger always describes the calendar.
+
+`_wipeRunning` only stops syncs that have not started yet; a sync already awaiting a Google response is not recalled (a same-session race: e.g. toggling sync off while a create is in flight can leave one event behind). Deliberately accepted as-is (Sep 2026): the race window is a single API round-trip on an interactive action, and a global calendar lock was judged not worth the complexity. Cross-device races are outside any in-memory guard by design; deterministic IDs make concurrent writes converge.
 
 ## Settings storage
 
@@ -124,3 +159,5 @@ All calendar settings live in the shared `settings` key-value table (persisted t
 - `gcal_sync_habits` — type toggle
 - `gcal_sync_todos` — type toggle
 - `gcal_sync_birthdays` — type toggle
+- `gcal_scope_missing` — transient marker set by the migration gate when the calendar scope is missing (consumed at startup with a toast, then deleted)
+- `gcal_event_id_migration` — `done` once the deterministic-ID migration completed

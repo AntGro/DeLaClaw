@@ -65,7 +65,13 @@ User jobs:
 ### Early Completion & Next-Due
 - **`updateHabitNextDue` two-mode behavior:**
   - **Completion path** (`earlyGuard: true`, default): if the computed next-due ≤ current due date, recompute from the current due date — early-completion guard (e.g. `weekly:Fri` done on Wednesday → next Friday, not same Friday)
-  - **Manual edit path** (`earlyGuard: false`): `next_due = min(currentDue, computedDue)` — due date can move earlier but never double-advances. Used when editing last-done or changing frequency
+  - **No success-path re-render on shared chains**: the optimistic refresh already shows the published values (`_pendingSharedNextDue` makes `refreshHabits` trust the local recompute), so a second full re-render when the background chain settles would tear down in-flight inline edits and drags. Success handlers only release the pending id; failure handlers still re-render to roll the optimistic staging back.
+- **Immediate next_due on all shared mutation paths**: `_pendingSharedNextDue` (from `js/pending-next-due.js`) tracks shared habits with a next_due publish in flight; while present, `refreshHabits` trusts the locally recomputed value over (stale) shared storage, so the new due date renders immediately — not only once the debounced uploads land. All six chains (Done, inline last-done, edit modal, inline frequency edit, completion delete, completion date edit) register the id BEFORE the local recompute and release it on settlement; the whole pre-upload section (recompute AND actor lookup) is under the cleanup guarantee so the marker is never stranded. Reference-counted per habit id: overlapping mutations on the same habit cannot release each other's marker. The Done/inline-last-done/modal paths recompute from a `previewLastDoneLatest` preview of the staging result (pure mirror of `planLastDoneEdit`, handles the clear-date case) so the optimistic refresh shows the right date. The recomputed next_due is folded into the same staged shared mutation as the completion/content change (one debounced upload, not two): Done via `addSharedHabitCompletion`'s `next_due` opt, last-done via `setSharedHabitLastDone`'s `next_due` opt, inline freq via `sharedUpdates`, delete/date-edit via the combined `updateSharedHabit`, edit modal via a single `updateSharedHabit` carrying name/frequency/completions/next_due (completions computed by `computeSharedLastDoneCompletions`).
+- **No stale closure on the next_due publish**: ALL six background chains (Done, inline last-done, edit modal, inline frequency edit, completion delete, completion date edit) must publish `updateHabitNextDue`'s return value, never `habit.next_due` — the captured `habit` object goes stale when a refresh replaces `state.allHabits` mid-chain or races an edit session, which would publish the pre-edit due date.
+- **Pointer cleanup needs two strikes**: `syncSharedHabits` only deletes a local pointer after the shared item misses two consecutive syncs (`_syncMissStrikes`); a single empty read (transient skew around a flush) must never wipe pointers.
+- **Manual edit path** (`earlyGuard: false`): `next_due` is honestly recomputed from the asserted last-done date — no `min()`, no early-completion skip. A backdate can move it earlier (even overdue); asserting a recent completion moves it forward. No double-advance: edits rewrite the latest completion, never append one. Used when editing last-done or changing frequency
+- **No today-clamp in `computeNextDue`**: the computed date may be in the past — a habit neglected for more than one period is overdue, and the overdue badge/filter/counts exist for exactly that. (The old clamp made the overdue state unreachable.)
+- **`next_due` is a local calendar date, never a UTC instant**: stored as `YYYY-MM-DD` in the device's local timezone. A date-only string must never be parsed with `new Date()` (UTC midnight = the previous local day west of UTC) — readers use `parseLocalDate()` (`js/calendar-pure.js`), and sorting/comparison uses the plain string. `computeNextDue()` accepts both a full timestamp (marking done; converted to its local day) and a date-only string (stored `next_due`, picked last-done date, Calendar expansion cursor) through the same helper. Date-picked completions are stamped via `habitDateInputToIso()` (local noon). Bug history: west of UTC a daily habit still showed "due today" after being marked done, and Calendar expansion stalled after the first occurrence.
 - **Completion delete/edit recomputation:** deleting or editing a completion recomputes `next_due` from the habit's frequency rule and the new latest remaining completion (`earlyGuard: false`). Never blindly clears to null — always passes the real rule and latest date through `updateHabitNextDue`
 
 ### Draft Habits
@@ -73,6 +79,17 @@ User jobs:
 - "Save as draft" toggle in add modal
 - `promoteHabit()` converts draft → active (sets `is_draft = false`), then `next_due` is computed normally
 - Drafts are excluded from calendar view and Welcome aggregation
+
+### End Date & Finished Habits
+- Optional `end_date` (local `YYYY-MM-DD`, same convention as `next_due`): the last day an occurrence may be due. An occurrence exactly ON the end date is still due; only a recomputed next due **strictly after** it finishes the habit (`habitFinishedFor()` — pure string comparison)
+- Finishing is a **state, not a deletion**: `is_finished` set, `next_due` cleared, completion history kept, "Finished" badge instead of the due label, no Done button; manual delete unchanged. Finished habits stay in their category (and sink to the bottom via the null `next_due` sort)
+- Enforced **only** in `updateHabitNextDue()` (the single recompute choke point): completion, creation, last-done/frequency/end-date edits all finish — and revive — through it. Extending or clearing the end date revives the habit with an honestly recomputed `next_due`. Callers changing the end date in the same save pass it as the `endDate` option; shared chains publish the outcome via the `out` option (`out.isFinished`), never from a captured habit object
+- The end date is editable in the add modal, the edit modal, and the inline editor (a date row alongside frequency/category; clearing the input removes it). Inline saves recompute whenever frequency or end date changes — personal habits included (the v2.10.49–66 shared-immediacy refactor had narrowed the inline recompute to shared only, silently dropping it for personal frequency edits; restored with the end-date wiring)
+- Backup save/load carry the fields by construction: export is whole-row (`select('*')`), restore inserts rows wholesale (only `owner_id` stripped), and pre-feature backups get the fields defaulted by migration 2.18.0 on reseed
+- A habit whose final occurrence is never marked done stays overdue past its end date — finishing is triggered by recompute, not by the calendar
+- Free-text rules never auto-finish: their `next_due` is externally resolved, so the recompute preserves their previous finished state
+- Shared habits: `end_date` / `is_finished` are shared-canonical fields on the shared item, exactly like `frequency_rule` — all six mutation chains publish them in the same staged mutation as `next_due`, pointers mirror them from shared storage, and share/unshare/copy carry them across
+- Finished habits are excluded wherever drafts are (Welcome, Calendar, counts); since their `next_due` is null, due counts and calendar-sync exclude them by construction. Calendar expansion additionally caps occurrences at `end_date` for still-active habits (`expandHabitOccurrences`)
 
 ### Last-Done Editing
 - **`planLastDoneEdit` pure helper:** shared decision logic for editing last-done date. Both `setLocalHabitLastDone` (DB operations) and `setSharedHabitLastDone` (shared storage array) delegate to it. Returns `{ kept, toDelete, updateId, needsInsert }`
@@ -90,7 +107,7 @@ User jobs:
 - Offline-cache stores completions
 
 ## Sharing
-- Supabase sharing via `sharing_items` type=habits
+- Sharing via the Drive adapter (`sharing_items` equivalent in shared folder JSON, type=habits)
 - `syncSharedHabits()` merges completions by habit_id + date
 - Shared habit IDs are canonical: the shared record id is the value stored in every local pointer's `shared_id`
 - `creator_category` is origin metadata only. Local category placement remains personal and must not rewrite `creator_category`
@@ -123,3 +140,24 @@ User jobs:
 ## References
 - `CODEMAP.json:features[habits]`
 - Entry: `js/habits.js`
+
+## Snooze (v2.19.0)
+
+- A habit can be snoozed until a local date (`snoozed_until`, YYYY-MM-DD, same convention as `next_due`/`end_date`). It is snoozed strictly before that date and wakes ON it (`isHabitSnoozed()` in `js/calendar-pure.js`). Date-based only — no indefinite pause.
+- Snoozing NEVER touches `frequency_rule`, last done, completions, or `next_due`: **defer, not skip** (owner's call). A due date that passes during the window is simply overdue on return; the user marks it done or edits last-done to advance. By construction the snooze cannot interact with the end-date finish rule — do not add skip/advance logic.
+- While actively snoozed the habit is excluded from every due surface, exactly like drafts/finished: Habits page due filters (`habitDueStatus()` returns `'snoozed'`), Welcome due list and mini-calendar, the footer overdue count, Calendar page occurrences inside the window (occurrences on/after the wake date show), and Google Calendar sync (eligibility gates exclude it, so any existing event is removed by the normal orphan/targeted delete paths). The card stays in its category with a "Snoozed until …" line, no Done button, and an unsnooze (moon-off) button; changing the date means unsnooze first, then re-snooze (same rule as TODOs).
+- Shared habits: snooze is **group-wide**, like TODO snooze — the value lives on the shared item, `applyHabitSnooze()` publishes it via `updateSharedHabit`, and `refreshHabits` mirrors it onto pointers with its own row-sync comparison (independent of the next_due publish guard). Share/copy/unshare/bulk-share carry it across.
+
+## Automatic Habits (v2.20.0)
+
+- `is_auto` on the habit (shared-canonical, like `end_date`); `is_auto` / `auto: 1` marks roll-generated completions (local column / shared object field). Auto completions are unattributed (`completed_by` empty) and read-only in history — the roll re-validates from the schedule, so editing one is meaningless.
+- Predicate `isAutoHabit()`: flag set + not a draft + structured rule. Free-text rules can never be automatic in effect.
+- The roll runs inside `refreshHabits` (`rollAutoHabits`, re-entrancy-guarded): for each automatic, unfinished, not-actively-snoozed habit, `planAutoRoll` (pure, `calendar-pure.js`) steps the stored `next_due` with the same `computeNextDue` the Calendar expansion uses — one auto completion per occurrence strictly before today; today's occurrence is NOT pre-validated. The end-date finish rule applies to the stepped next occurrence; occurrences past `end_date` are never recorded.
+- No Done and no snooze buttons for automatic habits (an already-set snooze still defers the roll; it catches up on wake). Excluded from the Welcome due list; shown on the Calendar (day panel shows the Auto badge instead of Done) and synced to Google Calendar via `next_due` as usual.
+
+## Nested Sections (v2.23.0)
+
+- Same mechanism as TODOs, on `habit_categories` (see the TODOs contract): `kind`/`parent_id`, tree logic only in `js/sections-pure.js`, names unique per parent, per-group `sort_order`, path typing creates/converts (items move to a `*` bucket on conversion).
+- `populateHabitCategorySelect` and every other item-facing picker list buckets only, in tree order, labelled by full path — a habit can never be assigned to a section.
+- Section rename/move never calls `markCategoryRenamed('habit_categories')`; bucket labels are the only ones that appear in Google Calendar titles.
+- Section delete: move children up or delete subtree (explicit per-habit deletion so calendar dirty tracking fires, sharing cleanup per bucket, as category delete).

@@ -1,6 +1,8 @@
 // ===================================================================
 // LOCAL MIGRATIONS — SQLite DDL/DML for the Bun+SQLite backend
 // ===================================================================
+
+import { recomputeNextDueForMigration } from '../js/frequency-rule.js';
 // Each key is a version string. Migrations run in version order on
 // server startup when schema_version is behind.
 //
@@ -17,6 +19,9 @@
 //   2. The value is a SQL string — can contain multiple statements
 //   3. Do NOT include schema_version bump — the runner handles it
 //   4. Use SQLite-compatible syntax (not Postgres)
+//   (Exception: a value may be a JS function (db) => {} for data
+//   transforms SQL cannot express — the runner calls it inside the
+//   same transaction. 2.27.0 is the first.)
 //
 // Example:
 //   '1.140': `
@@ -66,26 +71,6 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE settings ADD COLUMN owner_id TEXT;
     ALTER TABLE prompts ADD COLUMN owner_id TEXT;
   `,
-  '1.297': `
-    CREATE TABLE IF NOT EXISTS joined_groups (
-      group_id TEXT PRIMARY KEY,
-      member_id TEXT NOT NULL,
-      token TEXT NOT NULL,
-      display_name TEXT,
-      group_name TEXT,
-      remote_backend_type TEXT NOT NULL,
-      remote_url TEXT,
-      remote_anon_key TEXT,
-      owner_id TEXT,
-      joined_at TEXT DEFAULT (datetime('now'))
-    );
-  `,
-  '1.301': `
-    ALTER TABLE joined_groups ADD COLUMN token_ciphertext TEXT;
-    ALTER TABLE joined_groups ADD COLUMN token_iv TEXT;
-    ALTER TABLE joined_groups ADD COLUMN remote_anon_key_ciphertext TEXT;
-    ALTER TABLE joined_groups ADD COLUMN remote_anon_key_iv TEXT;
-  `,
   '1.393': `
     CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_owner_id ON tasks(owner_id);
@@ -99,18 +84,12 @@ export const LOCAL_MIGRATIONS = {
     CREATE INDEX IF NOT EXISTS idx_list_items_owner_id ON list_items(owner_id);
     CREATE INDEX IF NOT EXISTS idx_prompts_owner_id ON prompts(owner_id);
     CREATE INDEX IF NOT EXISTS idx_settings_owner_id ON settings(owner_id);
-    CREATE INDEX IF NOT EXISTS idx_joined_groups_owner_id ON joined_groups(owner_id);
     CREATE INDEX IF NOT EXISTS idx_todos_shared_id ON todos(shared_id);
     CREATE INDEX IF NOT EXISTS idx_todos_shared_group_id ON todos(shared_group_id);
     CREATE INDEX IF NOT EXISTS idx_habits_shared_id ON habits(shared_id);
     CREATE INDEX IF NOT EXISTS idx_habits_shared_group_id ON habits(shared_group_id);
     CREATE INDEX IF NOT EXISTS idx_list_items_shared_id ON list_items(shared_id);
     CREATE INDEX IF NOT EXISTS idx_list_items_shared_group_id ON list_items(shared_group_id);
-  `,
-  '1.396': `
-    -- 1.396: drop plaintext fallback for joined_groups (assume >=1.301, ciphertext exists)
-    UPDATE joined_groups SET token = NULL, remote_anon_key = NULL WHERE token_ciphertext IS NOT NULL;
-    DELETE FROM joined_groups WHERE owner_id IS NULL;
   `,
   '1.398': `
     -- 1.398: owner-only for previously open tables
@@ -154,7 +133,7 @@ export const LOCAL_MIGRATIONS = {
     CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON agent_grants(token_hash);
   `,
   '1.436': `
-    -- Supabase sharing-only member identity migration; local backend has no sharing_members table.
+    -- sharing-only member identity migration; local backend has no sharing_members table.
     SELECT 1;
   `,
   '1.474': `
@@ -453,4 +432,194 @@ export const LOCAL_MIGRATIONS = {
     UPDATE habits SET frequency_rule = 'every_N_months:1:' || substr(frequency_rule, 17) WHERE frequency_rule LIKE 'monthly\_weekday:%' ESCAPE '\\';
     UPDATE habits SET frequency_rule = 'every_N_months:1:' || substr(frequency_rule, 9) WHERE frequency_rule LIKE 'monthly:%' AND frequency_rule NOT LIKE 'monthly_%' ESCAPE '\\';
   `,
+
+  '2.0.9': `
+    -- Drop tables for removed features (NVIDIA usage tracking, agent tokens)
+    DROP TABLE IF EXISTS nvidia_usage;
+    DROP TABLE IF EXISTS agent_grants;
+  `,
+
+  '2.0.10': `
+    -- Restore agent_grants (agents settings pane kept)
+    CREATE TABLE IF NOT EXISTS agent_grants (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      owner_id TEXT,
+      display_name TEXT NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'full',
+      last_used_at TEXT,
+      expires_at TEXT,
+      revoked_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_grants_owner_id ON agent_grants(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_grants_token_hash ON agent_grants(token_hash);
+  `,
+
+  '2.9.17': `
+    -- Wardrobe tab removed: migrate vestiaire_categories -> lists
+    -- inside a "Wardrobe" section (one list per category, named just
+    -- <name>) and vestiaire -> list_items, folding brand/size/color/
+    -- purchase status into the item note. kind/parent_id do not exist
+    -- yet at this version: the section row and its children are
+    -- inserted flat here and linked by 2.23.0, which adds the columns
+    -- (kind='section' for 'vest_wardrobe', parent_id for the rest).
+    -- Items in the protected default (or an unknown) category land
+    -- in a '*' list inside the section.
+    INSERT INTO lists (id, name, shortname, color, icon, sort_order, archived, owner_id, created_at, updated_at)
+    SELECT 'vest_wardrobe', 'Wardrobe', NULL, '#8b5cf6', NULL, 9999, 0, NULL, datetime('now'), datetime('now')
+    WHERE EXISTS (SELECT 1 FROM vestiaire)
+       OR EXISTS (SELECT 1 FROM vestiaire_categories WHERE is_protected = 0 AND name <> '');
+
+    INSERT INTO lists (id, name, shortname, color, icon, sort_order, archived, owner_id, created_at, updated_at)
+    SELECT 'vest_' || id, name, shortname, color, NULL, sort_order, 0, owner_id, created_at, updated_at
+    FROM vestiaire_categories
+    WHERE is_protected = 0 AND name <> '';
+
+    INSERT INTO lists (id, name, shortname, color, icon, sort_order, archived, owner_id, created_at, updated_at)
+    SELECT 'vest_wardrobe_star', '*', NULL, '#8b5cf6', NULL, 0, 0, NULL, datetime('now'), datetime('now')
+    WHERE EXISTS (
+      SELECT 1 FROM vestiaire v LEFT JOIN vestiaire_categories c ON c.id = v.category_id
+      WHERE NOT (c.is_protected = 0 AND c.name <> '')
+    );
+
+    WITH vest AS (
+      SELECT
+        v.id, v.category_id, v.name, v.sort_order, v.owner_id, v.created_at, v.updated_at,
+        v.note AS old_note,
+        CASE WHEN c.is_protected = 0 AND c.name <> '' THEN 'vest_' || v.category_id ELSE 'vest_wardrobe_star' END AS list_id,
+        rtrim(
+          (CASE WHEN v.brand IS NOT NULL AND v.brand <> '' THEN 'Brand / Make: ' || v.brand || char(10) ELSE '' END) ||
+          (CASE WHEN v.size IS NOT NULL AND v.size <> '' THEN 'Size: ' || v.size || char(10) ELSE '' END) ||
+          (CASE WHEN v.color IS NOT NULL AND v.color <> '' THEN 'Color: ' || v.color || char(10) ELSE '' END) ||
+          (CASE WHEN v.purchase_status = 'achete' THEN 'Status: Purchased' || char(10)
+                WHEN v.purchase_status = 'essaye' THEN 'Status: Tried' || char(10) ELSE '' END),
+          char(10)
+        ) AS block
+      FROM vestiaire v
+      LEFT JOIN vestiaire_categories c ON c.id = v.category_id
+    )
+    INSERT INTO list_items (id, list_id, text, checked, note, sort_order, shared_id, shared_group_id, owner_id, created_at, updated_at)
+    SELECT
+      'vest_' || id,
+      list_id,
+      name,
+      0,
+      CASE
+        WHEN block <> '' AND old_note IS NOT NULL AND old_note <> '' THEN block || char(10) || char(10) || old_note
+        WHEN block <> '' THEN block
+        ELSE COALESCE(old_note, '')
+      END,
+      sort_order, NULL, NULL, owner_id, created_at, updated_at
+    FROM vest;
+
+    DROP TABLE IF EXISTS vestiaire;
+    DROP TABLE IF EXISTS vestiaire_categories;
+  `,
+  '2.10.18': `
+    -- Scene (role-based) text revision: optional focus role per text
+    ALTER TABLE texts ADD COLUMN focus_role TEXT;
+    -- Persist deck type at creation (new-deck modal choice was dropped)
+    ALTER TABLE flashcard_decks ADD COLUMN deck_type TEXT;
+  `,
+  '2.10.43': `
+    -- Block nomenclature: rename text chunking settings
+    ALTER TABLE texts RENAME COLUMN lines_per_chunk TO blocks_per_chunk;
+    ALTER TABLE texts RENAME COLUMN context_lines TO context_blocks;
+  `,
+  '2.11.1': `
+    -- daily_visits: replace per-date rows with a single aggregate row.
+    -- current_streak is seeded from the trailing consecutive run ending at
+    -- the latest recorded visit (it self-corrects on the next connect);
+    -- max_streak is the longest consecutive run anywhere in the history
+    -- (gaps-and-islands: consecutive dates share julianday(d) - row_number).
+    CREATE TABLE IF NOT EXISTS daily_visits_new (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      num_active_days INTEGER NOT NULL DEFAULT 0,
+      current_streak INTEGER NOT NULL DEFAULT 0,
+      max_streak INTEGER NOT NULL DEFAULT 0,
+      last_connection_date TEXT
+    );
+    WITH dates(d) AS (SELECT DISTINCT visit_date FROM daily_visits),
+         mx(m) AS (SELECT MAX(visit_date) FROM daily_visits),
+         trailing(n) AS (
+           SELECT COUNT(*) FROM dates, mx
+           WHERE julianday(mx.m) - julianday(dates.d)
+               = (SELECT COUNT(*) - 1 FROM dates d2 WHERE d2.d BETWEEN dates.d AND mx.m)
+         ),
+         islands(maxlen) AS (
+           SELECT MAX(len) FROM (
+             SELECT COUNT(*) AS len FROM (
+               SELECT julianday(d) - ROW_NUMBER() OVER (ORDER BY d) AS grp FROM dates
+             ) GROUP BY grp
+           )
+         )
+    INSERT INTO daily_visits_new (id, created_at, num_active_days, current_streak, max_streak, last_connection_date)
+      SELECT 'singleton',
+             COALESCE((SELECT MIN(d) FROM dates), date('now')),
+             (SELECT COUNT(*) FROM dates),
+             COALESCE((SELECT n FROM trailing), 0),
+             COALESCE((SELECT maxlen FROM islands), 0),
+             (SELECT m FROM mx);
+    DROP TABLE daily_visits;
+    ALTER TABLE daily_visits_new RENAME TO daily_visits;
+  `,
+  '2.18.0': `
+    -- Habit end date: optional end_date (local YYYY-MM-DD) + is_finished
+    -- state, set when the recomputed next_due falls strictly past end_date.
+    ALTER TABLE habits ADD COLUMN end_date TEXT;
+    ALTER TABLE habits ADD COLUMN is_finished INTEGER DEFAULT 0;
+  `,
+  '2.19.0': `
+    -- Habit snooze: optional snoozed_until (local YYYY-MM-DD). The habit is
+    -- hidden from due surfaces strictly before that date and wakes on it;
+    -- next_due is never moved (defer, not skip).
+    ALTER TABLE habits ADD COLUMN snoozed_until TEXT;
+  `,
+  '2.20.0': `
+    -- Automatic habits: is_auto on habits (validates itself on schedule)
+    -- and on habit_completions (marks roll-generated completions).
+    ALTER TABLE habits ADD COLUMN is_auto INTEGER DEFAULT 0;
+    ALTER TABLE habit_completions ADD COLUMN is_auto INTEGER DEFAULT 0;
+  `,
+  '2.23.0': `
+    -- Nested sections: category/list rows gain kind ('bucket' default, or
+    -- 'section') and parent_id (NULL = top level). parent_id is a plain
+    -- column, deliberately not a foreign key, so backup restore needs no
+    -- parent-before-child ordering within a table.
+    ALTER TABLE todo_categories ADD COLUMN kind TEXT DEFAULT 'bucket';
+    ALTER TABLE todo_categories ADD COLUMN parent_id TEXT;
+    ALTER TABLE habit_categories ADD COLUMN kind TEXT DEFAULT 'bucket';
+    ALTER TABLE habit_categories ADD COLUMN parent_id TEXT;
+    ALTER TABLE lists ADD COLUMN kind TEXT DEFAULT 'bucket';
+    ALTER TABLE lists ADD COLUMN parent_id TEXT;
+    -- Wardrobe migration (2.9.17) ran before these columns existed:
+    -- promote its 'Wardrobe' row to a section and nest the migrated
+    -- lists (vest_*) under it.
+    UPDATE lists SET kind = 'section' WHERE id = 'vest_wardrobe';
+    UPDATE lists SET parent_id = 'vest_wardrobe'
+    WHERE substr(id, 1, 5) = 'vest_' AND id <> 'vest_wardrobe';
+  `,
+  // 2.27.0: recompute habits.next_due from (rule, latest completion) —
+  // same decision as the Drive migration, via the shared
+  // recomputeNextDueForMigration (js/frequency-rule.js). JS function
+  // migration: the runner calls it with the db handle, in the
+  // migration transaction.
+  '2.27.0': (db) => {
+    const habits = db.prepare('SELECT id, frequency_rule, next_due, end_date FROM habits').all();
+    const latestByHabit = new Map();
+    for (const c of db.prepare('SELECT habit_id, completed_at FROM habit_completions').all()) {
+      const ts = Date.parse(c.completed_at) || 0;
+      const cur = latestByHabit.get(c.habit_id);
+      if (!cur || ts >= cur.ts) latestByHabit.set(c.habit_id, { raw: c.completed_at, ts });
+    }
+    const upd = db.prepare('UPDATE habits SET next_due = ?, is_finished = ? WHERE id = ?');
+    for (const h of habits) {
+      const latest = latestByHabit.get(h.id);
+      const result = recomputeNextDueForMigration(h, latest ? latest.raw : null);
+      if (!result) continue;
+      upd.run(result.next_due, result.is_finished, h.id);
+    }
+  },
 };

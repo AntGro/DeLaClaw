@@ -155,22 +155,7 @@ console.log('── Birthdays ──');
   assert(check[0].avatar_url.startsWith('data:'), 'update birthday avatar');
 }
 
-// ── 9. Vestiaire ──
-console.log('── Vestiaire ──');
-{
-  const { error } = await adapter.from('vestiaire').insert({ name: 'E2E Shirt', brand: 'Uniqlo', category: 'Hauts', sort_order: 0 });
-  assert(!error, 'insert vestiaire');
-
-  const { data: items } = await adapter.from('vestiaire').select('*').order('sort_order', { ascending: true });
-  assert(items.length >= 1, 'select vestiaire ordered');
-
-  const item = items.find(v => v.name === 'E2E Shirt');
-  await adapter.from('vestiaire').update({ purchase_status: 'achete' }).eq('id', item.id);
-  const { data: check } = await adapter.from('vestiaire').select('*').eq('id', item.id);
-  assert(check[0].purchase_status === 'achete', 'update vestiaire status');
-}
-
-// ── 10. Settings (upsert) ──
+// ── 9. Settings (upsert) ──
 console.log('── Settings ──');
 {
   await adapter.from('settings').upsert({ key: 'nvidia_api_key', value: 'test-123', updated_at: new Date().toISOString() }, { onConflict: 'key' });

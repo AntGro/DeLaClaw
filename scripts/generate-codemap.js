@@ -29,12 +29,12 @@ const SHARED_CSS = [
 // Known tables (16 core + sharing + visits)
 const KNOWN_TABLES = [
   'projects','tasks','todos','habits','habit_completions','flashcards',
-  'flashcard_notes','texts','text_line_progress','birthdays','vestiaire',
+  'flashcard_notes','texts','text_line_progress','birthdays',
   'lists','list_items','settings','prompts','nvidia_usage',
-  'sharing_groups','sharing_members','sharing_items','joined_groups','daily_visits'
+  'sharing_groups','sharing_members','sharing_items','groups','daily_visits'
 ];
 
-const FEATURE_NAMES = ['todos','habits','projects','birthdays','vestiaire','flashcards','lists','welcome'];
+const FEATURE_NAMES = ['todos','habits','projects','birthdays','flashcards','lists','welcome'];
 
 function read(p){ try { return fs.readFileSync(p,'utf-8'); } catch { return ''; } }
 
@@ -49,7 +49,6 @@ function parseFile(filePath) {
   while ((m = importRe.exec(txt)) !== null) {
     // normalize: remove .js if present, keep full path
     let imp = m[1].replace(/\.js$/,'');
-    // 'supabase' adapter is 'adapters/supabase' vs 'supabase' — normalize to adapter name
     if (imp.startsWith('adapters/')) imp = imp.replace('adapters/','');
     imports.push(imp);
   }
@@ -122,7 +121,7 @@ const byImportName = {};
 allFiles.forEach(f=>{
   const base = f.name.replace('.js','');
   byImportName[base]=f;
-  // also adapters/supabase -> supabase
+  // also adapters/<name> -> <name>
   byImportName[f.file.replace('.js','').replace('js/','')]=f;
 });
 
@@ -130,7 +129,7 @@ const dependentsMap = {};
 allFiles.forEach(f=>{ dependentsMap[f.name]=[]; });
 allFiles.forEach(f=>{
   f.imports.forEach(imp=>{
-    // imp could be 'state', 'utils', 'adapters/supabase' normalized to 'supabase', 'rest', etc.
+    // imp could be 'state', 'utils', or an adapter name normalized from 'adapters/<name>'
     const key = imp.split('/').pop().replace('.js','');
     // find file matching key
     const target = allFiles.find(t=> t.name.replace('.js','')===key || t.file.endsWith(`${key}.js`));
@@ -171,16 +170,16 @@ allFiles.forEach(f=>{
 const tables = {};
 KNOWN_TABLES.forEach(t=>{
   const usedBy = allFiles.filter(f=>f.tables.includes(t)).map(f=>f.name.replace('.js','')).sort();
-  if (usedBy.length || ['projects','tasks','todos','habits','habit_completions','flashcards','flashcard_notes','texts','text_line_progress','birthdays','vestiaire','lists','list_items','settings','prompts'].includes(t)) {
+  if (usedBy.length || ['projects','tasks','todos','habits','habit_completions','flashcards','flashcard_notes','texts','text_line_progress','birthdays','lists','list_items','settings','prompts'].includes(t)) {
     tables[t]= { used_by: usedBy };
   }
 });
 
 // Version
-let version = '0.000';
+let version = '0.0.0';
 try {
   const vtxt = read(VERSION_FILE);
-  const mm = vtxt.match(/^latest=([0-9]+\.[0-9]+)/m);
+  const mm = vtxt.match(/^latest=([0-9]+\.[0-9]+\.[0-9]+)/m);
   if (mm) version = mm[1];
 } catch {}
 
@@ -253,7 +252,6 @@ md+=`\n## Adapters
 
 All business logic talks to \`db.js\` proxy. Implementations in \`js/adapters/\` must expose \`from(table).select/insert/update/delete\`.
 
-- supabase.js: PostgREST + Realtime + auth
 - rest.js: Bun+SQLite REST
 - demo.js: in-memory (seeded)
 - drive.js: in-memory + Drive JSON persistence

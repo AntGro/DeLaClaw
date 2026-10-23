@@ -3,7 +3,7 @@
 A personal life OS that runs in the browser. Your data lives in your Google Drive — no account, no server, no SaaS.
 
 [![Tests](https://github.com/AntGro/DeLaClaw/actions/workflows/test.yml/badge.svg)](https://github.com/AntGro/DeLaClaw/actions/workflows/test.yml)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-blue.svg)](LICENSE)
 [![Live Demo](https://img.shields.io/badge/demo-delaclaw.com-454dc6)](https://delaclaw.com)
 
 <p align="center">
@@ -23,9 +23,9 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 | **TODOs** | Categorized tasks with 5 priority levels, due dates, snooze, drag-and-drop reordering |
 | **Habits** | Recurring habits with flexible scheduling (structured rules + free text), completion tracking, streaks |
 | **Flashcards** | Spaced repetition (FSRS algorithm) with deck organization and text memorization mode |
-| **Birthdays** | Birthday tracker with countdowns and avatar support |
-| **Wardrobe** | Clothing inventory with brand, size, category, and purchase status tracking |
+| **Calendar** | Month, week, day and year views bringing together TODOs, habits and birthdays, with per-type filters |
 | **Lists** | General-purpose checklists with archival support |
+| **Group** | [COMING] Sharing-group management: members, invites, shared-item counts |
 
 ### Capabilities
 
@@ -72,21 +72,42 @@ js/
   main.js               App bootstrap, view switching, settings, footer
   state.js              Centralized state and constants
   db.js                 Adapter abstraction with Proxy-based activity tracking
-  auth.js               Google authentication flows
   adapters/
     demo.js             In-memory adapter with sample data
     drive.js            Google Drive adapter (in-memory + per-table JSON persistence)
+    drive-backup-policy.js  Pre-migration backup policy (pure)
+    rest.js             Local backend adapter (Bun + SQLite)
+    offline-cache.js    IndexedDB cache behind the read-only offline fallback
+  calendar.js           Calendar views (month/week/day/year)
+  calendar-pure.js      Pure calendar date/expansion logic
   calendar-sync.js      Google Calendar sync
   welcome.js            Today dashboard
   projects.js           Project boards and task management
   todos.js              TODO management
   habits.js             Habit tracking
+  frequency-rule.js     Pure habit scheduling rules (next-due computation)
+  pending-next-due.js   Per-habit in-flight next-due publish tracking (pure)
   flashcards.js         Flashcard SRS + text memorization
-  birthdays.js          Birthday tracker
-  vestiaire.js          Wardrobe inventory
+  scene-parse.js        Scene script parsing for text memorization (pure)
+  birthdays.js          Birthday views and modals (Calendar and Today)
   lists.js              Checklists
-  delegation.js         AI agent delegation and task routing
-  agents-ui.js          Agent grants and delegation UI
+  sections-pure.js      Nested-section tree logic for TODOs, Habits and Lists (pure)
+  groups.js             Sharing-group management tab
+  sharing.js            Sharing factory (selects the adapter by backend)
+  sharing-ui.js         Sharing and group UI
+  sharing-drive.js      Drive-backed sharing transport
+  sharing-interface.js  Sharing adapter interface
+  sharing-envelope.js   Invite-code envelope encoding
+  sharing-file-reconcile.js  Sharing file reconciliation engine
+  sharing-mutation-queue.js  Queued sharing mutations
+  agents-ui.js          Settings > Agents pane
+  daily-visits.js       Daily-visit aggregate tracking (pure)
+  drive-folders.js      Environment-aware Drive folder names
+  import-pure.js        Batch-import parsing helpers (pure)
+  todo-import.js        TODO validation for batch import
+  habit-import.js       Habit validation for batch import
+  batch-import.js       Shared batch-import building blocks
+  delegation.js         CSP-safe event delegation
   i18n.js               Translation strings (en/fr/es)
   icons.js              Lucide icon rendering
   utils.js              Shared utilities
@@ -112,10 +133,10 @@ See [docs-site/architecture.md](docs-site/architecture.md) for details.
 ## Testing
 
 ```bash
-node tests/tests.js
+bun tests/tests.js
 ```
 
-Tests covering unit logic, adapter compliance, and browser-based end-to-end flows. All tests must pass before pushing to `dev`.
+Tests covering unit logic, adapter compliance, import/export, and structural checks (XSS escaping, generated-index freshness). All tests must pass before pushing to `dev`.
 
 ## Contributing
 
@@ -123,15 +144,14 @@ See [Contributing](docs-site/contributing.md).
 
 ## License
 
-[AGPL-3.0](LICENSE) — see [NOTICE](NOTICE) for attribution requirements.
+[PolyForm Noncommercial 1.0.0](LICENSE) — see [NOTICE](NOTICE) for attribution requirements.
 
-DeLaClaw is free software. You can use, modify, and distribute it under the terms of the GNU Affero General Public License v3. If you run a modified version as a network service, you must make your source available to users of that service. Derivative works must credit DeLaClaw as described in the NOTICE file.
+DeLaClaw is source-available, not open source. You can use, modify, and distribute it for noncommercial purposes under the terms of the PolyForm Noncommercial License 1.0.0. Commercial use requires a separate license from the copyright holder. Versions released before October 2026 were distributed under AGPL-3.0 and remain available under those terms.
 
 ## Third-party
 
 - [Lucide](https://lucide.dev) icons (ISC License)
 - [DM Sans](https://fonts.google.com/specimen/DM+Sans) font (Open Font License)
-- [Supabase JS](https://github.com/supabase/supabase-js) client (MIT License)
 - [Three.js](https://threejs.org) for hero animations (MIT License)
 
 See [Attributions](docs-site/attributions.md) for full details.

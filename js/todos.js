@@ -1,6 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, fetchAll, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
+import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration, orderKeyOf, compareOrderKeys } from './sections-pure.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -20,6 +21,9 @@ let _defaultCatId = null;       // protected General row
 let _sharedCatId = null;        // protected __shared__ row
 const _myCreatedSharedIds = new Set(); // shared_ids where current user is creator
 
+let _todoCatByPath = new Map(); // lowercase full path ('Reading > Fiction') → row
+let _todoTree = { roots: [], byId: new Map() };
+
 async function loadTodoCategories() {
   const { data, error } = await state.db.from('todo_categories').select('*').order('sort_order', { ascending: true });
   if (error) { console.warn('loadTodoCategories error:', error); return; }
@@ -28,12 +32,111 @@ async function loadTodoCategories() {
   _defaultCatId = null;
   _sharedCatId = null;
   for (const row of (data || [])) {
+    normalizeSectionFields(row);
     _todoCatMap.set(row.id, row);
     _todoCatByName.set(row.name, row);
     if (row.is_protected && row.name === SHARED_CATEGORY) _sharedCatId = row.id;
     else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultCatId = row.id;
   }
+  _todoTree = buildSectionTree([..._todoCatMap.values()]);
+  _todoCatByPath.clear();
+  for (const node of _todoTree.byId.values()) {
+    _todoCatByPath.set(pathLabelOf(node, _todoTree.byId).toLowerCase(), node.row);
+  }
   await backfillCategoryColors('todo_categories', _todoCatMap);
+}
+
+/** Full display path of a category ('Reading > Fiction'); buckets at the
+ *  top level and the special rows keep their plain display name. */
+function getTodoCatPath(catId) {
+  const node = _todoTree.byId.get(catId);
+  if (!node || !node.parentId) return getCatDisplayName(catId);
+  return pathLabelOf(node, _todoTree.byId);
+}
+
+/** Tree ordering key for a category (see sections-pure.orderKeyOf). */
+function getTodoCatOrderKey(catId) {
+  const node = _todoTree.byId.get(catId);
+  return node ? orderKeyOf(node, _todoTree.byId) : [0];
+}
+
+// ── Nested sections ────────────────────────────────────────────────
+// Sections and buckets share the todo_categories table (kind +
+// parent_id). All helpers below reload the category maps after each
+// write so callers always resolve rows by (parent, name) against fresh
+// state, on every adapter.
+const SECTION_DEFAULT_COLOR = '#3b82f6';
+
+function todoChildRow(parentId, name) {
+  const target = (name || '').trim().toLowerCase();
+  for (const node of _todoTree.byId.values()) {
+    if ((node.parentId || null) === (parentId || null) && (node.row.name || '').trim().toLowerCase() === target) return node.row;
+  }
+  return null;
+}
+
+function nextTodoSortOrder(parentId) {
+  let max = -1;
+  for (const node of _todoTree.byId.values()) {
+    if ((node.parentId || null) === (parentId || null)) max = Math.max(max, Number(node.row.sort_order) || 0);
+  }
+  return max + 1;
+}
+
+/** Convert a bucket row into a section: its items move to a new '*'
+ *  bucket inside it (items never sit directly at section level). */
+async function convertTodoBucketToSection(cat) {
+  const { error } = await state.db.from('todo_categories').insert({
+    name: '*', shortname: null, color: cat.color || SECTION_DEFAULT_COLOR,
+    sort_order: 0, kind: 'bucket', parent_id: cat.id,
+  });
+  if (error) throw error;
+  await loadTodoCategories();
+  const star = todoChildRow(cat.id, '*');
+  // Without the '*' bucket there is nowhere safe to move the items;
+  // abort WITHOUT flipping kind (the bucket stays a bucket and its
+  // items stay visible) rather than orphaning them on a section.
+  if (!star) throw new Error('section-convert-star-missing');
+  await runBucketToSectionMigration(state.db, {
+    categoryTable: 'todo_categories', itemTable: 'todos', itemFk: 'category_id',
+    categoryId: cat.id, starId: star.id,
+    itemPatch: { category_id: star.id, category: '*' },
+    itemRollbackPatch: { category_id: cat.id, category: cat.name },
+    flipPatch: { kind: 'section' },
+  });
+  await loadTodoCategories();
+}
+
+/**
+ * Walk path segments from a starting parent, creating sections where
+ * missing and converting buckets where one blocks the path. Returns the
+ * id of the deepest section (or the starting parent when segments is
+ * empty). Throws when a segment would place a row inside itself or one
+ * of its own descendants (guardId).
+ */
+async function ensureTodoSectionChain(segments, startParentId = null, guardId = null) {
+  let parentId = startParentId || null;
+  for (const seg of (segments || [])) {
+    let row = todoChildRow(parentId, seg);
+    if (row && guardId && (row.id === guardId || descendantsOf(_todoTree.byId.get(guardId) || { children: [] }).some(n => n.id === row.id))) {
+      throw new Error('section-cycle');
+    }
+    if (!row) {
+      const { error } = await state.db.from('todo_categories').insert({
+        name: seg, shortname: null, color: SECTION_DEFAULT_COLOR,
+        sort_order: nextTodoSortOrder(parentId), kind: 'section', parent_id: parentId,
+      });
+      if (error) throw error;
+      await loadTodoCategories();
+      row = todoChildRow(parentId, seg);
+      if (!row) throw new Error('section-create-failed');
+    } else if (!isSectionRow(row)) {
+      await convertTodoBucketToSection(row);
+      row = _todoCatMap.get(row.id);
+    }
+    parentId = row.id;
+  }
+  return parentId;
 }
 
 function getTodoCategories() { return _todoCatMap; }
@@ -75,6 +178,7 @@ function openEditCategoryModal(catId) {
   document.getElementById('editCategoryName').value = cat.name;
   document.getElementById('editCategoryShortname').value = cat.shortname || '';
   document.getElementById('editCategoryColor').value = cat.color || GENERAL_CATEGORY_COLOR;
+  populateTodoParentSelect(cat);
   modal.classList.add('visible');
   setTimeout(() => document.getElementById('editCategoryName').focus(), 50);
 }
@@ -87,23 +191,47 @@ async function saveEditCategory() {
   const catId = document.getElementById('editCategoryOldName').value;
   const cat = _todoCatMap.get(catId);
   if (!cat) return;
-  const newName = document.getElementById('editCategoryName').value.trim();
+  const rawName = document.getElementById('editCategoryName').value.trim();
   const shortname = document.getElementById('editCategoryShortname').value.trim();
   const color = document.getElementById('editCategoryColor').value;
-  if (!newName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
 
-  // Update the DB row directly — no need to rename strings on items since they reference by ID
+  // The parent picker chooses the parent; typing a path in the name
+  // field overrides it (the last segment becomes the row's own name).
+  let targetName = rawName;
+  let targetParentId = document.getElementById('editCategoryParent')?.value || null;
+  if (!cat.is_protected && rawName.includes('>')) {
+    const segments = parseSectionPath(rawName);
+    if (!segments.length) { showToast(t('toast.name_required'), 'error'); return; }
+    targetName = segments[segments.length - 1];
+    try {
+      targetParentId = await ensureTodoSectionChain(segments.slice(0, -1), null, catId);
+    } catch (e) {
+      showToast(t('toast.name_required'), 'error');
+      return;
+    }
+  }
+  if (!targetName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
+  if (cat.is_protected) targetParentId = null;
+  if (!cat.is_protected && siblingNameTaken([..._todoCatMap.values()], targetParentId, targetName, catId)) {
+    showToast(t('toast.name_required'), 'error');
+    return;
+  }
+
+  // Update the DB row directly — items reference categories by ID, and
+  // a section rename needs no descendant writes (paths are derived).
   const oldShortname = cat.shortname;
   const oldName = cat.name;
-  const updates = { shortname: shortname || null, color };
-  if (!cat.is_protected) updates.name = newName;
+  const isSection = isSectionRow(cat);
+  const updates = { shortname: shortname || null, color, parent_id: targetParentId };
+  if (!cat.is_protected) updates.name = targetName;
+  if (targetParentId !== (cat.parent_id || null)) updates.sort_order = nextTodoSortOrder(targetParentId);
   await state.db.from('todo_categories').update(updates).eq('id', catId);
-  Object.assign(cat, updates);
-  _todoCatByName.clear();
-  for (const row of _todoCatMap.values()) _todoCatByName.set(row.name, row);
+  await loadTodoCategories();
 
-  // Calendar: only resync items if the label used in event summaries changed
-  if (updates.shortname !== oldShortname || updates.name !== oldName) {
+  // Calendar: bucket labels appear in event summaries, so a bucket
+  // rename resyncs. Sections never appear there — renaming or moving a
+  // section must not touch the calendar.
+  if (!isSection && (updates.shortname !== oldShortname || updates.name !== oldName)) {
     window.markCategoryRenamed?.('todo_categories');
   }
 
@@ -158,7 +286,7 @@ async function refreshTodos() {
       const memberIdPerGroup = new Map();
       const gidArr = [...groupIds];
       const members = await Promise.all(gidArr.map(gid => Promise.resolve(state.sharing.getCurrentMember(gid))));
-      gidArr.forEach((gid, i) => { if (members[i]?.memberId) memberIdPerGroup.set(gid, members[i].memberId); });
+      gidArr.forEach((gid, i) => { if (members[i]?.member_id) memberIdPerGroup.set(gid, members[i].member_id); });
       for (const todo of allTodos) {
         if (!todo._shared || !todo.shared_group_id) continue;
         const myId = memberIdPerGroup.get(todo.shared_group_id);
@@ -206,8 +334,6 @@ function getFilteredTodosForCategory(catId) {
     filtered = filtered.filter(t => t.done);
   } else if (todoFilter === 'snoozed') {
     filtered = filtered.filter(t => !t.done && t.snooze_until && new Date(t.snooze_until) > now);
-  } else if (todoFilter === 'outdated') {
-    filtered = filtered.filter(t => isTodoOutdated(t));
   }
 
   const sortBy = document.getElementById('todoSortBy')?.value || 'manual';
@@ -233,6 +359,10 @@ function renderTodos() {
   if (!grid) return;
   cleanupDragArtifacts();
 
+  // A background sharing sync can re-render while the user is typing in a
+  // quick-add box — keep the in-progress text (and focus) across the render.
+  const pendingInputs = snapshotTextInputs(grid, '.todo-cat-input', 'data-category');
+
   // Show page-level empty state when user has zero TODOs and no custom categories
   const catRows = Array.from(_todoCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
   if (allTodos.length === 0 && catRows.length <= 1) {
@@ -246,36 +376,32 @@ function renderTodos() {
     return;
   }
 
-  // Build category ID list in sort order
-  const categoryIdList = catRows.map(c => c.id);
+  // Root-level nodes (buckets + sections) in tree order. The Shared deck
+  // is a synthetic root bucket, always first, never inside a section.
+  const rootNodes = _todoTree.roots.filter(n => n.id !== _sharedCatId);
+  const rootIds = rootNodes.map(n => n.id);
+  const hasSharedItems = allTodos.some(td => catIdForTodo(td) === _sharedCatId);
+  const toolbarIds = hasSharedItems && _sharedCatId ? [_sharedCatId, ...rootIds] : rootIds;
 
-  // Dynamically include the Shared deck if any received items exist
-  const hasSharedItems = allTodos.some(t => catIdForTodo(t) === _sharedCatId);
-  if (hasSharedItems && _sharedCatId) categoryIdList.unshift(_sharedCatId);
-
-  // Render category navigation buttons in toolbar
-  renderCategoryToolbarButtons(categoryIdList);
+  renderCategoryToolbarButtons(toolbarIds);
   initTodoNavBtnReorder();
 
   let html = '';
-  for (const catId of categoryIdList) {
-    // Skip empty categories when searching
-    if (todoSearchQuery) {
-      const matchingItems = getFilteredTodosForCategory(catId);
-      const catName = getCatDisplayName(catId);
-      if (matchingItems.length === 0 && !catName.toLowerCase().includes(todoSearchQuery.toLowerCase())) continue;
-    }
-    html += renderCategoryCard(catId);
-  }
+  if (hasSharedItems && _sharedCatId) html += renderCategoryCard(_sharedCatId);
+  html += renderTodoLevel(rootNodes, false);
 
   const scrollY = window.scrollY;
   const innerScrolls = captureInnerScrollPositions(grid);
   grid.innerHTML = html;
   window.scrollTo(0, scrollY);
   restoreInnerScrollPositions(grid, innerScrolls);
+  restoreTextInputs(grid, '.todo-cat-input', 'data-category', pendingInputs);
 
-  // Init drag-and-drop for each card (individual TODO items)
-  categoryIdList.forEach(catId => {
+  // Init drag-and-drop for each bucket card (individual TODO items)
+  const bucketIds = [];
+  if (hasSharedItems && _sharedCatId) bucketIds.push(_sharedCatId);
+  for (const node of _todoTree.byId.values()) if (node.kind === 'bucket' && node.id !== _sharedCatId) bucketIds.push(node.id);
+  bucketIds.forEach(catId => {
     const domId = categoryToDomId(catId);
     initTodoDragDropForCard(domId);
     const catCard = document.getElementById(domId);
@@ -284,8 +410,78 @@ function renderTodos() {
       if (list) initTodoHoverDelay(list);
     }
   });
+  // Chip reorder inside each section (sibling group only)
+  for (const node of _todoTree.byId.values()) {
+    if (node.kind === 'section') initTodoSectionNavBtnReorder(node.id);
+  }
 
-  balanceGrid(grid);
+  applySectionGrid(grid);
+}
+
+/** Is a tree node visible under the current search query? */
+function todoNodeSearchVisible(node, ancestorMatched) {
+  if (!todoSearchQuery) return true;
+  const q = todoSearchQuery.toLowerCase();
+  const name = (node.row.name || '').toLowerCase();
+  if (ancestorMatched || name.includes(q)) return true;
+  if (node.kind === 'bucket') {
+    return getFilteredTodosForCategory(node.id).length > 0;
+  }
+  return node.children.some(c => todoNodeSearchVisible(c, false));
+}
+
+function renderTodoLevel(nodes, ancestorMatched) {
+  let html = '';
+  for (const node of nodes) {
+    if (!todoNodeSearchVisible(node, ancestorMatched)) continue;
+    const matched = ancestorMatched || (todoSearchQuery && (node.row.name || '').toLowerCase().includes(todoSearchQuery.toLowerCase()));
+    html += node.kind === 'section' ? renderTodoSection(node, matched) : renderCategoryCard(node.id);
+  }
+  return html;
+}
+
+function renderTodoSection(node, ancestorMatched = false) {
+  const cat = node.row;
+  const bucketIds = descendantBucketIds(node);
+  const total = allTodos.filter(td => bucketIds.includes(catIdForTodo(td))).length;
+  const pending = allTodos.filter(td => bucketIds.includes(catIdForTodo(td)) && !td.done).length;
+  const chips = node.children.map(child => {
+    const childCat = child.row;
+    const isSec = child.kind === 'section';
+    const count = isSec
+      ? allTodos.filter(td => descendantBucketIds(child).includes(catIdForTodo(td))).length
+      : allTodos.filter(td => catIdForTodo(td) === child.id).length;
+    const label = isSec ? (childCat.shortname || childCat.name || '') : (childCat.shortname || getCatDisplayName(child.id));
+    const title = isSec ? (childCat.name || '') : getCatDisplayName(child.id);
+    const color = childCat.color || GENERAL_CATEGORY_COLOR;
+    const action = isSec ? 'navigate-to-todo-section' : 'navigate-to-category';
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="${action}" data-category="${esc(child.id)}" title="${esc(title)}">${esc(label)} (${count})</button>`;
+  }).join('');
+  const childrenHtml = renderTodoLevel(node.children, ancestorMatched)
+    || `<p class="empty-msg">${t('common.section_empty')}</p>`;
+  return `<div class="section-block" id="todo-section-${esc(cat.id)}" data-node-kind="section" data-node-id="${esc(cat.id)}" style="--cat-color:${cat.color || SECTION_DEFAULT_COLOR};--cat-on-color:${onColorFor(cat.color || SECTION_DEFAULT_COLOR)}">
+    <div class="section-header" data-action="toggle-section-chips">
+      <div class="section-header-left">
+        <h3 class="section-name">${lucideIcon('folder', 16)} ${esc(cat.name || '')}</h3>
+        <span class="section-stats">${pending} ${t('todos.pending').toLowerCase()} · ${total}</span>
+      </div>
+      <div class="section-header-actions">
+        <button class="todo-cat-shortname-btn" data-action="open-add-category-in-section" data-category="${esc(cat.id)}" title="${esc(t('todos.add_category'))}">${lucideIcon('folder-plus', 14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="copy-item-link" data-link-type="todocat" data-id="${esc(cat.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="open-edit-category-modal" data-category="${esc(cat.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 14)}</button>
+        <button class="todo-cat-delete-btn" data-action="delete-section" data-category="${esc(cat.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 14)}</button>
+      </div>
+    </div>
+    <div class="category-nav-buttons section-chips${node.children.length > 1 ? '' : ' section-chips-collapsed'}" id="todoSectionChips-${esc(cat.id)}">${chips}</div>
+    <div class="section-level">${childrenHtml}</div>
+  </div>`;
+}
+
+function navigateToTodoSection(sectionId) {
+  const el = document.getElementById('todo-section-' + sectionId);
+  if (!el) return;
+  const cat = _todoCatMap.get(sectionId);
+  scrollToAndHighlight(el, cat?.color || SECTION_DEFAULT_COLOR);
 }
 
 function renderCategoryToolbarButtons(categoryIdList) {
@@ -295,11 +491,13 @@ function renderCategoryToolbarButtons(categoryIdList) {
     const cat = _todoCatMap.get(catId);
     if (!cat) return '';
     const isShared = cat.name === SHARED_CATEGORY;
+    const isSection = isSectionRow(cat);
     const name = getCatDisplayName(catId);
     const shortname = cat.shortname;
     const displayName = isShared ? t('sharing.shared') : (shortname || name);
     const color = cat.color || GENERAL_CATEGORY_COLOR;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-category" data-category="${esc(catId)}" title="Go to ${esc(name)}">${esc(displayName)}</button>`;
+    const action = isSection ? 'navigate-to-todo-section' : 'navigate-to-category';
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="${action}" data-category="${esc(catId)}" title="Go to ${esc(name)}">${esc(displayName)}</button>`;
   }).join('');
 }
 
@@ -348,7 +546,7 @@ function renderCategoryCard(catId) {
 
   // Show active todos based on filter; done section always available as collapsible
   let displayActive, displayDone;
-  if (todoFilter === 'outdated' || todoFilter === 'snoozed') {
+  if (todoFilter === 'snoozed') {
     displayActive = activeTodos;
     displayDone = [];
   } else {
@@ -410,7 +608,7 @@ function renderCategoryCard(catId) {
     </div>
     <div class="char-counter" id="todo-counter-${domId}"></div>`;
 
-  return `<div class="project-card" id="${domId}" data-category="${esc(catId)}" style="--cat-color:${catColor}">
+  return `<div class="project-card" id="${domId}" data-category="${esc(catId)}" data-node-kind="bucket" data-node-id="${esc(catId)}" style="--cat-color:${catColor};--cat-on-color:${onColorFor(catColor)}">
     <div class="todo-cat-header">
       <div class="todo-cat-header-left">
         ${catDragHandle}
@@ -431,22 +629,10 @@ function renderCategoryCard(catId) {
   </div>`;
 }
 
-const TODO_OUTDATED_DAYS = 7;
-
-function isTodoOutdated(td) {
-  if (td.done) return false;
-  if (!td.due_date) return false;
-  const now = new Date();
-  const ref = new Date(td.updated_at || td.created_at);
-  const diffDays = (now - ref) / (1000 * 60 * 60 * 24);
-  return diffDays >= TODO_OUTDATED_DAYS;
-}
-
 function renderTodoItem(td) {
   const now = new Date();
   const isOverdue = td.due_date && !td.done && new Date(td.due_date) < now;
   const isSnoozed = td.snooze_until && new Date(td.snooze_until) > now;
-  const isOutdated = isTodoOutdated(td);
   const isFlagged = td.priority && td.priority !== 'normal';
 
   // Priority button: opens picker popover
@@ -476,20 +662,12 @@ function renderTodoItem(td) {
     snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon",16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
   }
 
-  let outdatedInfo = '';
-  if (isOutdated && !td.done) {
-    const ref = new Date(td.updated_at || td.created_at);
-    const daysAgo = Math.floor((now - ref) / (1000 * 60 * 60 * 24));
-    outdatedInfo = `<span class="todo-outdated-badge">${t('todos.days_old', daysAgo)}</span>`;
-  }
-
   const priorityClass = isFlagged ? `todo-priority-${td.priority}` : '';
   const classes = [
     'bucket-item',
     'todo-item',
     td.done ? 'todo-done' : '',
     isOverdue ? 'todo-overdue' : '',
-    isOutdated ? 'todo-outdated' : '',
     priorityClass
   ].filter(Boolean).join(' ');
 
@@ -518,7 +696,7 @@ function renderTodoItem(td) {
         <button data-action="delete-todo" data-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
     </div>
-    ${dueDateStr || snoozeInfo || outdatedInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}${outdatedInfo}</div>` : ''}
+    ${dueDateStr || snoozeInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}</div>` : ''}
   </div>`;
 }
 
@@ -684,21 +862,30 @@ async function setTodoPriority(id, level) {
   const todo = allTodos.find(t => t.id === id);
 
   if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-    // ─── Shared: write only to Drive ───
-    try {
-      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
-      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-        payload: { ...currentPayload, priority: level },
-      });
-    } catch (e) { console.warn('Failed to update shared todo priority on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+    // ─── Shared: write only to Drive (optimistic — refresh on staging) ───
+    let onStaged;
+    const staged = new Promise(resolve => { onStaged = resolve; });
+    const label = t(`todos.priority_${level}`) || level;
+    const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+      payload: { text: todo.text, category: todo.category || '', priority: level },
+    }, { onStaged });
+    upload.then(
+      () => showToast(label, 'success'),
+      async (e) => {
+        console.warn('Failed to update shared todo priority on Drive:', e);
+        await refreshTodos();
+        showToast(t('toast.update_failed'), 'error');
+      }
+    );
+    await Promise.race([staged, upload.then(() => {}, () => {})]);
   } else {
     // ─── Normal: write to local DB ───
     const { error } = await state.db.from('todos').update({ priority: level }).eq('id', id);
     if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    const label = t(`todos.priority_${level}`) || level;
+    showToast(label, 'success');
   }
 
-  const label = t(`todos.priority_${level}`) || level;
-  showToast(label, 'success');
   await refreshTodos();
 }
 
@@ -742,19 +929,28 @@ async function toggleTodo(id, done, btnEl) {
     const todo = allTodos.find(t => t.id === id);
 
     if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-      try {
-        if (done) {
-          await state.sharing.completeItem(todo.shared_group_id, todo.shared_id);
-        } else {
-          await state.sharing.uncompleteItem(todo.shared_group_id, todo.shared_id);
+      // Optimistic: the sharing layer stages the change in memory (onStaged)
+      // and uploads in the background; a failed upload rolls the memory back.
+      let onStaged;
+      const staged = new Promise(resolve => { onStaged = resolve; });
+      const upload = done
+        ? state.sharing.completeItem(todo.shared_group_id, todo.shared_id, undefined, { onStaged })
+        : state.sharing.uncompleteItem(todo.shared_group_id, todo.shared_id, { onStaged });
+      upload.then(
+        () => showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success'),
+        async (e) => {
+          console.warn('Failed to toggle shared todo on Drive:', e);
+          await refreshTodos();
+          showToast(t('toast.update_failed'), 'error');
         }
-      } catch (e) { console.warn('Failed to toggle shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
+      );
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
     } else {
       const { error } = await state.db.from('todos').update({ done }).eq('id', id);
       if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+      showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
     }
 
-    showToast(done ? t('common.done') + '!' : t('common.reopen'), 'success');
     await refreshTodos();
   } finally {
     _pendingTodoToggles.delete(id);
@@ -768,14 +964,26 @@ async function deleteTodo(id) {
     'Delete this TODO? This cannot be undone.',
     async () => {
       const todo = allTodos.find(t => t.id === id);
+      const pointerRow = todo ? { ...todo } : null;
       const { error } = await state.db.from('todos').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
 
-      // Delete from Drive if shared (removes for all group members)
+      // Delete from Drive if shared (removes for all group members). The
+      // upload runs in the background; a failure restores the pointer row.
       if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-        try {
-          await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
-        } catch (e) { console.warn('Failed to delete shared todo from Drive:', e); }
+        let onStaged;
+        const staged = new Promise(resolve => { onStaged = resolve; });
+        const upload = state.sharing.deleteItem(todo.shared_group_id, todo.shared_id, { onStaged });
+        upload.then(
+          () => {},
+          async (e) => {
+            console.warn('Failed to delete shared todo from Drive:', e);
+            if (pointerRow) await state.db.from('todos').insert(pointerRow);
+            await refreshTodos();
+            showToast(t('toast.delete_failed'), 'error');
+          }
+        );
+        await Promise.race([staged, upload.then(() => {}, () => {})]);
       }
 
       // Animate item out before re-rendering
@@ -803,13 +1011,29 @@ async function deleteAllDoneTodos(catId) {
     t('todos.delete_all_done'),
     `Delete all ${doneTodos.length} completed TODO${doneTodos.length > 1 ? 's' : ''} in "${catName}"? This cannot be undone.`,
     async () => {
+      const pointerRows = [];
       for (const td of doneTodos) {
+        if (td.shared_id && td.shared_group_id) pointerRows.push({ ...td });
         await state.db.from('todos').delete().eq('id', td.id);
-        // Delete from Drive if shared
-        if (td.shared_id && td.shared_group_id && state.sharing) {
-          try { await state.sharing.deleteItem(td.shared_group_id, td.shared_id); }
-          catch (e) { console.warn('Failed to delete shared todo from Drive:', e); }
-        }
+      }
+      // Shared deletes upload in the background; failures restore the pointer rows.
+      if (state.sharing && pointerRows.length) {
+        (async () => {
+          const failed = [];
+          for (const pr of pointerRows) {
+            try {
+              await state.sharing.deleteItem(pr.shared_group_id, pr.shared_id);
+            } catch (e) {
+              console.warn('Failed to delete shared todo from Drive:', e);
+              failed.push(pr);
+            }
+          }
+          if (failed.length) {
+            for (const pr of failed) await state.db.from('todos').insert(pr);
+            await refreshTodos();
+            showToast(t('toast.delete_failed'), 'error');
+          }
+        })();
       }
       showToast(t('toast.deleted'), 'info');
       await refreshTodos();
@@ -864,7 +1088,12 @@ async function editTodoInline(id, itemEl) {
   catLabel.textContent = t('common.category');
   const catSelect = document.createElement('select');
   catSelect.className = 'inline-edit-input';
-  const catRows = Array.from(_todoCatMap.values()).filter(c => c.name !== SHARED_CATEGORY).sort((a, b) => a.sort_order - b.sort_order);
+  // Buckets only (a TODO can never sit in a section), tree order, full
+  // path labels so same-named buckets stay distinguishable.
+  const catRows = [..._todoTree.byId.values()]
+    .filter(n => n.kind === 'bucket' && n.id !== _sharedCatId)
+    .sort((a, b) => compareOrderKeys(orderKeyOf(a, _todoTree.byId), orderKeyOf(b, _todoTree.byId)))
+    .map(n => n.row);
   // Include Shared in dropdown if the todo is in the shared deck (so user can move it out)
   const todoCatId = catIdForTodo(todo);
   if (todoCatId === _sharedCatId) {
@@ -874,7 +1103,7 @@ async function editTodoInline(id, itemEl) {
   catRows.forEach(c => {
     const opt = document.createElement('option');
     opt.value = c.id;
-    opt.textContent = c.name === SHARED_CATEGORY ? t('sharing.shared') : (c.name === '' ? t('common.category_default') : c.name);
+    opt.textContent = c.name === SHARED_CATEGORY ? t('sharing.shared') : (c.name === '' ? t('common.category_default') : getTodoCatPath(c.id));
     if (c.id === todoCatId) opt.selected = true;
     catSelect.appendChild(opt);
   });
@@ -916,24 +1145,38 @@ async function editTodoInline(id, itemEl) {
       }
       if (Object.keys(updates).length > 0) {
         if (todo.shared_id && todo.shared_group_id && state.sharing) {
-          // ─── Shared: category to local pointer, text/priority/due_date to Drive ───
+          // ─── Shared: category to local pointer, text/priority/due_date to Drive (optimistic) ───
           if (updates.category_id !== undefined) {
             await state.db.from('todos').update({ category_id: updates.category_id, category: updates.category }).eq('id', id);
           }
-          try {
-            const driveUpdates = {};
-            if (updates.text) driveUpdates.text = updates.text;
-            if (updates.due_date !== undefined) driveUpdates.due_date = updates.due_date;
-            if (updates.priority) driveUpdates.priority = updates.priority;
-            if (Object.keys(driveUpdates).length > 0) {
-              const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
-              await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-                payload: { ...currentPayload, ...driveUpdates },
-              });
-            }
-          } catch (e) { console.warn('Failed to update shared todo on Drive:', e); showToast(t('toast.update_failed'), 'error'); return; }
-          Object.assign(todo, updates);
-          showToast(t('todos.todo_updated'), 'success');
+          const driveUpdates = {};
+          if (updates.text) driveUpdates.text = updates.text;
+          if (updates.due_date !== undefined) driveUpdates.due_date = updates.due_date;
+          if (updates.priority) driveUpdates.priority = updates.priority;
+          let failed = false;
+          if (Object.keys(driveUpdates).length > 0) {
+            const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
+            let onStaged;
+            const staged = new Promise(resolve => { onStaged = resolve; });
+            const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+              payload: { ...currentPayload, ...driveUpdates },
+            }, { onStaged });
+            upload.then(
+              () => showToast(t('todos.todo_updated'), 'success'),
+              async (e) => {
+                failed = true;
+                console.warn('Failed to update shared todo on Drive:', e);
+                await refreshTodos();
+                showToast(t('toast.update_failed'), 'error');
+              }
+            );
+            // Unblock on staging; a pre-staging failure is caught by the
+            // failure branch above, so don't hang here.
+            await Promise.race([staged, upload.then(() => {}, () => {})]);
+          } else {
+            showToast(t('todos.todo_updated'), 'success');
+          }
+          if (!failed) Object.assign(todo, updates);
         } else {
           // ─── Normal: write all to local DB ───
           const { error } = await state.db.from('todos').update(updates).eq('id', id);
@@ -963,7 +1206,9 @@ function editCategoryModalHTML() {
     <h2>${lucideIcon('pencil', 20)} ${t('todos.edit_category')}</h2>
     <input type="hidden" id="editCategoryOldName">
     <label>${t('todos.category_name')}</label>
-    <input type="text" id="editCategoryName" maxlength="40" data-action="save-edit-category-on-enter">
+    <input type="text" id="editCategoryName" maxlength="80" data-action="save-edit-category-on-enter">
+    <label>${t('common.section_parent')}</label>
+    <select id="editCategoryParent"></select>
     <div class="modal-row">
       <div class="modal-field">
         <label>${t('common.shortname')}</label>
@@ -979,6 +1224,24 @@ function editCategoryModalHTML() {
       <button class="modal-save" data-action="save-edit-category">${t('common.save')}</button>
     </div>
   </div>`;
+}
+
+/** Fill the edit modal's parent picker: Root + section rows, excluding
+ *  the row being edited and its descendants (never move into itself). */
+function populateTodoParentSelect(currentRow) {
+  const sel = document.getElementById('editCategoryParent');
+  if (!sel) return;
+  const excluded = new Set();
+  if (currentRow) {
+    excluded.add(currentRow.id);
+    const node = _todoTree.byId.get(currentRow.id);
+    if (node) for (const d of descendantsOf(node)) excluded.add(d.id);
+  }
+  const sections = [..._todoTree.byId.values()]
+    .filter(n => n.kind === 'section' && !excluded.has(n.id) && !n.row.is_protected);
+  sel.innerHTML = `<option value="">${esc(t('common.section_root'))}</option>` + sections
+    .map(n => `<option value="${esc(n.id)}">${esc(pathLabelOf(n, _todoTree.byId))}</option>`).join('');
+  sel.value = currentRow?.parent_id || '';
 }
 
 function initTodoModals() {
@@ -1003,16 +1266,29 @@ function initTodoModals() {
   m3.dataset.overlayClose = 'true';
   m3.innerHTML = editCategoryModalHTML();
   app.appendChild(m3);
+
+  // Section Delete Choice Modal
+  const m4 = document.createElement('div');
+  m4.className = 'modal-overlay'; m4.id = 'deleteSectionModal';
+  m4.dataset.action = 'close-delete-section-modal';
+  m4.dataset.overlayClose = 'true';
+  m4.innerHTML = deleteSectionModalHTML();
+  app.appendChild(m4);
 }
 
-function openAddCategoryModal() {
+function openAddCategoryModal(parentId = null) {
   const modal = document.getElementById('addCategoryModal');
   modal.innerHTML = addCategoryModalHTML();
+  modal.dataset.parentId = parentId || '';
   document.getElementById('newCategoryName').value = '';
   document.getElementById('newCategoryShortname').value = '';
   document.getElementById('newCategoryColor').value = nextPaletteColor(_todoCatMap);
   modal.classList.add('visible');
   setTimeout(() => document.getElementById('newCategoryName').focus(), 100);
+}
+
+function openAddCategoryInSection(sectionId) {
+  openAddCategoryModal(sectionId);
 }
 
 function closeAddCategoryModal() {
@@ -1021,23 +1297,31 @@ function closeAddCategoryModal() {
 
 async function saveNewCategory() {
   const input = document.getElementById('newCategoryName');
-  const name = input.value.trim();
-  if (!name) { showToast(t('toast.enter_name'), 'error'); return; }
+  const segments = parseSectionPath(input.value.trim());
+  if (!segments.length) { showToast(t('toast.enter_name'), 'error'); return; }
+  const modal = document.getElementById('addCategoryModal');
+  const startParentId = modal?.dataset.parentId || null;
+  const shortname = document.getElementById('newCategoryShortname').value.trim() || null;
+  const color = document.getElementById('newCategoryColor').value;
 
-  // Check for duplicates in existing categories
-  for (const cat of _todoCatMap.values()) {
-    if (cat.name.toLowerCase() === name.toLowerCase()) {
+  try {
+    // All but the last segment are sections (created / converted on the
+    // way); the last segment is the new bucket.
+    const parentId = await ensureTodoSectionChain(segments.slice(0, -1), startParentId);
+    const name = segments[segments.length - 1];
+    if (siblingNameTaken([..._todoCatMap.values()], parentId, name, null)) {
       showToast(t('toast.name_required'), 'error');
       return;
     }
+    const { error } = await state.db.from('todo_categories').insert({
+      name, shortname, color, sort_order: nextTodoSortOrder(parentId),
+      kind: 'bucket', parent_id: parentId,
+    });
+    if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
+  } catch (e) {
+    showToast(t('toast.failed_to_add') + ': ' + e.message, 'error');
+    return;
   }
-
-  const shortname = document.getElementById('newCategoryShortname').value.trim() || null;
-  const color = document.getElementById('newCategoryColor').value;
-  const sortOrder = Math.max(0, ...Array.from(_todoCatMap.values()).map(c => c.sort_order || 0)) + 1;
-
-  const { error } = await state.db.from('todo_categories').insert({ name, shortname, color, sort_order: sortOrder });
-  if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
 
   closeAddCategoryModal();
   showToast(t('toast.added'), 'success');
@@ -1053,26 +1337,151 @@ async function deleteCategory(catId) {
     : `Delete empty category "${cat.name}"?`;
 
   showConfirmAction(t('common.delete'), msg, async () => {
-    // Propagate deletion of shared items to sharing layer before CASCADE removes local rows
-    if (state.sharing) {
-      for (const todo of todosInCat) {
-        if (todo.shared_id && todo.shared_group_id) {
-          try { await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id); }
-          catch (e) { console.warn('Failed to delete shared todo:', e); }
-        }
-      }
-    }
-    // Explicitly delete items so calendar sync (markDirty) fires for each.
-    // SQL CASCADE would handle this on Supabase, but Drive/Demo have no FK enforcement.
+    // Snapshots for rollback.
+    const catRow = { ...cat };
+    const todoRows = todosInCat.map(td => ({ ...td }));
+    // Delete locally first to unblock the UI. Explicitly delete items so
+    // calendar sync (markDirty) fires for each. SQL CASCADE would handle this
+    // where the backend enforces FKs, but Drive/Demo have no FK enforcement.
     for (const todo of todosInCat) {
       await state.db.from('todos').delete().eq('id', todo.id);
     }
     await state.db.from('todo_categories').delete().eq('id', catId);
     showToast(t('toast.deleted'), 'info');
     await refreshTodos();
+    // Propagate deletion of shared items to the sharing layer in the
+    // background (sequential, etag order). A failure restores the category
+    // and its items locally.
+    if (state.sharing) {
+      const sharedTodos = todosInCat.filter(t => t.shared_id && t.shared_group_id);
+      if (sharedTodos.length) {
+        const upload = (async () => {
+          for (const todo of sharedTodos) {
+            await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
+          }
+        })();
+        upload.catch(async (e) => {
+          console.warn('Failed to delete shared todos from Drive:', e);
+          await state.db.from('todo_categories').insert(catRow);
+          for (const r of todoRows) await state.db.from('todos').insert(r);
+          await refreshTodos();
+          showToast(t('toast.delete_failed'), 'error');
+        });
+      }
+    }
   });
 }
 
+
+// ── Section delete ─────────────────────────────────────────────────
+// Empty sections delete directly. A non-empty section asks first:
+// delete the whole subtree, or move its children up one level.
+let _pendingTodoSectionDelete = null;
+
+function deleteSection(sectionId) {
+  const node = _todoTree.byId.get(sectionId);
+  const cat = _todoCatMap.get(sectionId);
+  if (!node || !cat || !isSectionRow(cat) || cat.is_protected) return;
+  if (!node.children.length) {
+    showConfirmAction(t('common.delete'), t('common.section_delete_empty', cat.name), async () => {
+      await state.db.from('todo_categories').delete().eq('id', sectionId);
+      showToast(t('toast.deleted'), 'info');
+      await refreshTodos();
+    });
+    return;
+  }
+  _pendingTodoSectionDelete = sectionId;
+  const modal = document.getElementById('deleteSectionModal');
+  if (!modal) return;
+  modal.innerHTML = deleteSectionModalHTML();
+  document.getElementById('deleteSectionName').textContent = cat.name;
+  modal.classList.add('visible');
+}
+
+function deleteSectionModalHTML() {
+  return `<div class="modal">
+    <h2>${lucideIcon('folder', 20)} ${t('common.section_delete_title')}</h2>
+    <p>${t('common.section_delete_msg')} <strong id="deleteSectionName"></strong></p>
+    <div class="modal-actions">
+      <button class="modal-cancel" data-action="close-delete-section-modal">${t('common.cancel')}</button>
+      <button class="btn" data-action="delete-section-move-up">${t('common.section_delete_move_up')}</button>
+      <button class="modal-save" data-action="delete-section-subtree">${t('common.section_delete_subtree')}</button>
+    </div>
+  </div>`;
+}
+
+function closeDeleteSectionModal() {
+  _pendingTodoSectionDelete = null;
+  document.getElementById('deleteSectionModal')?.classList.remove('visible');
+}
+
+async function deleteSectionMoveUp() {
+  const sectionId = _pendingTodoSectionDelete;
+  if (!sectionId) return;
+  _pendingTodoSectionDelete = null;
+  document.getElementById('deleteSectionModal')?.classList.remove('visible');
+  const node = _todoTree.byId.get(sectionId);
+  if (!node) return;
+  const parentId = node.parentId || null;
+  const parentChildren = [..._todoTree.byId.values()]
+    .filter(n => (n.parentId || null) === parentId)
+    .sort((a, b) => (Number(a.row.sort_order) || 0) - (Number(b.row.sort_order) || 0));
+  const moving = [...node.children];
+  const movingIds = new Set(moving.map(n => n.id));
+  const rest = parentChildren.filter(n => n.id !== sectionId);
+  const at = Math.max(0, parentChildren.findIndex(n => n.id === sectionId));
+  const finalOrder = [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+  for (let i = 0; i < finalOrder.length; i++) {
+    const n = finalOrder[i];
+    const updates = { sort_order: i };
+    if (movingIds.has(n.id)) updates.parent_id = parentId;
+    if (Number(n.row.sort_order) !== i || updates.parent_id !== undefined) {
+      await state.db.from('todo_categories').update(updates).eq('id', n.id);
+    }
+  }
+  await state.db.from('todo_categories').delete().eq('id', sectionId);
+  showToast(t('toast.deleted'), 'info');
+  await refreshTodos();
+}
+
+async function deleteSectionSubtree() {
+  const sectionId = _pendingTodoSectionDelete;
+  if (!sectionId) return;
+  _pendingTodoSectionDelete = null;
+  document.getElementById('deleteSectionModal')?.classList.remove('visible');
+  const node = _todoTree.byId.get(sectionId);
+  if (!node) return;
+  const subtree = [node, ...descendantsOf(node)];
+  const bucketIds = subtree.filter(n => n.kind === 'bucket').map(n => n.id);
+  const sectionIds = subtree.filter(n => n.kind === 'section').map(n => n.id).reverse();
+  // Snapshots for the sharing-failure rollback, like deleteCategory.
+  const catRows = subtree.map(n => ({ ...n.row }));
+  const itemRows = [];
+  for (const bid of bucketIds) {
+    const { data } = await state.db.from('todos').select('*').eq('category_id', bid);
+    for (const r of (data || [])) itemRows.push(r);
+  }
+  // Explicit per-item deletion so calendar dirty tracking fires.
+  for (const item of itemRows) await state.db.from('todos').delete().eq('id', item.id);
+  for (const bid of bucketIds) await state.db.from('todo_categories').delete().eq('id', bid);
+  for (const sid of sectionIds) await state.db.from('todo_categories').delete().eq('id', sid);
+  showToast(t('toast.deleted'), 'info');
+  await refreshTodos();
+  if (state.sharing) {
+    const sharedItems = itemRows.filter(t2 => t2.shared_id && t2.shared_group_id);
+    if (sharedItems.length) {
+      (async () => {
+        for (const item of sharedItems) await state.sharing.deleteItem(item.shared_group_id, item.shared_id);
+      })().catch(async (e) => {
+        console.warn('Failed to delete shared todos from Drive:', e);
+        for (const r of catRows) await state.db.from('todo_categories').insert(r);
+        for (const r of itemRows) await state.db.from('todos').insert(r);
+        await refreshTodos();
+        showToast(t('toast.delete_failed'), 'error');
+      });
+    }
+  }
+}
 
 // ===================================================================
 // SNOOZE MODAL
@@ -1121,19 +1530,31 @@ async function doSnooze(snoozeUntil) {
   snoozeBtns.forEach(b => { b.disabled = true; b.classList.add('is-pending'); });
 
   try {
+    const snoozedMsg = `${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
     if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-      // ─── Shared: write snooze to Drive payload ───
+      // ─── Shared: write snooze to Drive payload (optimistic — refresh on staging) ───
       const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
-      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+      let onStaged;
+      const staged = new Promise(resolve => { onStaged = resolve; });
+      const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
         payload: { ...currentPayload, snooze_until: snoozeUntil.toISOString() },
-      });
+      }, { onStaged });
+      upload.then(
+        () => showToast(snoozedMsg, 'success'),
+        async (e) => {
+          console.warn('Failed to snooze todo:', e);
+          await refreshTodos();
+          showToast(t('toast.update_failed'), 'error');
+        }
+      );
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
     } else {
       // ─── Normal: write to local DB ───
       const { error } = await state.db.from('todos').update({ snooze_until: snoozeUntil.toISOString() }).eq('id', taskId);
       if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+      showToast(snoozedMsg, 'success');
     }
     closeSnoozeModal();
-    showToast(`${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 'success');
     await refreshTodos();
   } catch (e) {
     console.warn('Failed to snooze todo:', e);
@@ -1143,28 +1564,48 @@ async function doSnooze(snoozeUntil) {
   }
 }
 
-async function unsnoozeTodo(id, el) {
-  const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unsnooze-todo"][data-id="${CSS.escape(id)}"]`);
-  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
-  try {
-    const todo = allTodos.find(t => t.id === id);
-    if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
-      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
-      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-        payload: { ...currentPayload, snooze_until: null },
-      });
-    } else {
-      const { error } = await state.db.from('todos').update({ snooze_until: null }).eq('id', id);
-      if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-    }
-    showToast(t('todos.unsnoozed'), 'success');
-    await refreshTodos();
-  } catch (e) {
-    console.warn('Failed to unsnooze todo:', e);
-    showToast(t('toast.update_failed'), 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
-  }
+function unsnoozeTodo(id, el) {
+  showConfirmAction(
+    t('todos.unsnooze_confirm_title'),
+    t('todos.unsnooze_confirm_msg'),
+    async () => {
+      const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="unsnooze-todo"][data-id="${CSS.escape(id)}"]`);
+      if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+      try {
+        const todo = allTodos.find(t => t.id === id);
+        if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
+          // ─── Shared: clear snooze in the Drive payload (optimistic) ───
+          const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
+          let onStaged;
+          const staged = new Promise(resolve => { onStaged = resolve; });
+          const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+            payload: { ...currentPayload, snooze_until: null },
+          }, { onStaged });
+          upload.then(
+            () => showToast(t('todos.unsnoozed'), 'success'),
+            async (e) => {
+              console.warn('Failed to unsnooze todo:', e);
+              await refreshTodos();
+              showToast(t('toast.update_failed'), 'error');
+            }
+          );
+          await Promise.race([staged, upload.then(() => {}, () => {})]);
+        } else {
+          const { error } = await state.db.from('todos').update({ snooze_until: null }).eq('id', id);
+          if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+          showToast(t('todos.unsnoozed'), 'success');
+        }
+        await refreshTodos();
+      } catch (e) {
+        console.warn('Failed to unsnooze todo:', e);
+        showToast(t('toast.update_failed'), 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); }
+      }
+    },
+    null,
+    { variant: 'neutral', btnText: t('todos.unsnooze'), iconSvg: lucideIcon('moon-off', 28), btnIconSvg: lucideIcon('moon-off', 15, 'currentColor') }
+  );
 }
 
 
@@ -1235,29 +1676,74 @@ function initTodoDragDropForCard(catId) {
 // ===================================================================
 // NAV BUTTON REORDER
 // ===================================================================
+async function reorderTodoSiblings(orderedIds) {
+  const reorderable = orderedIds.filter(id => id !== _sharedCatId);
+  const updates = [];
+  reorderable.forEach((id, i) => {
+    const cat = _todoCatMap.get(id);
+    if (cat && Number(cat.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
+  });
+  // Optimistic in-memory update (sort_order is per sibling group, so the
+  // index within the dragged chip row is the new order for that group)
+  reorderable.forEach((id, i) => { const cat = _todoCatMap.get(id); if (cat) cat.sort_order = i; });
+  await bulkSortOrder('todo_categories', updates);
+  await loadTodoCategories();
+  const grid = document.getElementById('todoCategoryGrid');
+  const snapshot = snapshotBuckets(grid);
+  renderTodos();
+  animateBucketsFromSnapshot(grid, snapshot, 600);
+  showToast(t('toast.reordered'), 'success');
+}
+
+/** Cross-section chip drag: drop a chip on another section's chips
+ *  row (insert at position) or on a section block (append), moving
+ *  the node — and its subtree, for a section — to the new parent. */
+function todoNavCrossDrop() {
+  return {
+    rootEl: document.getElementById('todosView'),
+    rowOwner: (rowEl) => rowEl.id === 'todoNavButtons' ? null
+      : rowEl.id.startsWith('todoSectionChips-') ? rowEl.id.slice('todoSectionChips-'.length) : undefined,
+    canDrop: (dragId, parentId) => {
+      const node = _todoTree.byId.get(dragId);
+      if (!node || (node.parentId || null) === (parentId || null)) return false;
+      return !planNodeMove([..._todoCatMap.values()], dragId, parentId, null).error;
+    },
+    onMove: (dragId, parentId, beforeId) => moveTodoNodeToParent(dragId, parentId, beforeId),
+  };
+}
+
+async function moveTodoNodeToParent(dragId, parentId, beforeId) {
+  const plan = planNodeMove([..._todoCatMap.values()], dragId, parentId, beforeId);
+  if (plan.error || !plan.updates?.length) return;
+  // Same FLIP glide as chip reordering: snapshot card positions at
+  // drop time, re-render, then animate every card from its old
+  // position to its new one.
+  const grid = document.getElementById('todoCategoryGrid');
+  const snapshot = snapshotBuckets(grid);
+  for (const u of plan.updates) {
+    await state.db.from('todo_categories').update({ parent_id: u.parent_id, sort_order: u.sort_order }).eq('id', u.id);
+  }
+  await refreshTodos();
+  animateBucketsFromSnapshot(grid, snapshot, 600);
+}
+
 function initTodoNavBtnReorder() {
   const skipIds = new Set();
   if (_sharedCatId) skipIds.add(_sharedCatId);
   initNavBtnReorder('todoNavButtons', {
     idAttr: 'category',
     skipIds,
-    async onReorder(orderedIds) {
-      const reorderable = orderedIds.filter(id => id !== _sharedCatId);
-      const updates = [];
-      reorderable.forEach((id, i) => {
-        const cat = _todoCatMap.get(id);
-        if (cat && Number(cat.sort_order ?? 0) !== i) updates.push({ id, sort_order: i });
-      });
-      // Optimistic in-memory update
-      reorderable.forEach((id, i) => { const cat = _todoCatMap.get(id); if (cat) cat.sort_order = i; });
-      await bulkSortOrder('todo_categories', updates);
-      await loadTodoCategories();
-      const grid = document.getElementById('todoCategoryGrid');
-      const snapshot = snapshotBuckets(grid);
-      renderTodos();
-      animateBucketsFromSnapshot(grid, snapshot, 600);
-      showToast(t('toast.reordered'), 'success');
-    },
+    onReorder: reorderTodoSiblings,
+    crossDrop: todoNavCrossDrop(),
+  });
+}
+
+function initTodoSectionNavBtnReorder(sectionId) {
+  initNavBtnReorder('todoSectionChips-' + sectionId, {
+    idAttr: 'category',
+    skipIds: new Set(),
+    onReorder: reorderTodoSiblings,
+    crossDrop: todoNavCrossDrop(),
   });
 }
 
@@ -1290,13 +1776,34 @@ function getTodos() { return allTodos; }
  * - Shared TODO deleted from Drive → delete local todo
  */
 let _syncingTodos = false;
+
+// Calendar sync: fingerprint of the shared-payload fields that feed calendar
+// events. Remote changes (another member edits a deadline) touch only the
+// shared payload, never the local pointer row, so the adapter's dirty
+// tracking can't see them — diff here and mark the pointer dirty instead.
+// The group name is included because calendar titles embed it ([TODO][Category][Group]).
+const _sharedTodoCalFp = new Map();
+// Last-seen updated_at per shared item: detects remote content edits, which
+// change the in-memory item (and therefore the rendered view) without
+// touching any local pointer row.
+const _sharedTodoSeenAt = new Map();
+function sharedTodoCalFingerprint(sh) {
+  return JSON.stringify([
+    sh.payload?.due_date || null,
+    sh.payload?.snooze_until || null,
+    sh.done ? 1 : 0,
+    sh.payload?.text || sh.payload?.title || '',
+    sh.payload?.category || '',
+    sh.group_name || '',
+  ]);
+}
 let _bulkShareInProgress = new Set();
 const _pendingShare = new Set();
 async function syncSharedTodos() {
-  if (_syncingTodos) return;
+  if (_syncingTodos) return false;
   _syncingTodos = true;
   try {
-    await _doSyncSharedTodos();
+    return await _doSyncSharedTodos();
   } finally {
     _syncingTodos = false;
   }
@@ -1326,6 +1833,10 @@ async function _doSyncSharedTodos() {
   // Create pointers for new shared TODOs
   for (const sh of allShared) {
     if (!localBySharedId.has(sh.id)) {
+      // Skip items this tab staged but hasn't planted a pointer for yet —
+      // the share flow inserts the real pointer right after staging. Without
+      // this the sync would plant a __shared__-category duplicate.
+      if (state.sharing.hasPendingCreate(sh.group_id, sh.id)) continue;
       // Double-check DB to avoid race with shareTodoFromAdd
       const { data: existing } = await state.db.from('todos').select('id').eq('shared_id', sh.id).limit(1);
       if (existing?.length) continue;
@@ -1338,6 +1849,27 @@ async function _doSyncSharedTodos() {
     }
   }
 
+  // ─── Calendar: mark pointers dirty when a remote change touched event fields ───
+  // (first sight only initializes the fingerprint — pointer creation already dirties)
+  // A rename or remote edit writes no local row, so no Drive flush would consume
+  // the dirty marks — drive the calendar sync directly when anything was marked.
+  let calDirtyMarked = false;
+  for (const sh of allShared) {
+    const fp = sharedTodoCalFingerprint(sh);
+    const prev = _sharedTodoCalFp.get(sh.id);
+    _sharedTodoCalFp.set(sh.id, fp);
+    if (prev !== undefined && prev !== fp) {
+      const pointer = localBySharedId.get(sh.id);
+      if (pointer) { state.markCalDirty?.('todos', pointer.id); calDirtyMarked = true; }
+    }
+    // Remote content edits bump updated_at on every mutation — a change here
+    // means the rendered item changed even though no pointer row moved.
+    const prevSeen = _sharedTodoSeenAt.get(sh.id);
+    _sharedTodoSeenAt.set(sh.id, sh.updated_at);
+    if (prevSeen !== undefined && prevSeen !== sh.updated_at) needsRefresh = true;
+  }
+  if (calDirtyMarked) await state.syncCalendarTable?.('todos');
+
   // ─── Cleanup: local shared todos whose shared_id no longer exists on remote ───
   for (const local of localShared) {
     if (!driveSharedIds.has(local.shared_id)) {
@@ -1345,18 +1877,17 @@ async function _doSyncSharedTodos() {
       if (group) {
         // Group exists but item gone from remote → delete local pointer
         await state.db.from('todos').delete().eq('id', local.id);
+        _sharedTodoSeenAt.delete(local.shared_id);
         needsRefresh = true;
-      } else if (state.sharing.isReady?.()) {
-        // Groups loaded but this one is gone → ask user before clearing
-        try { document.dispatchEvent(new CustomEvent('sharing-orphan-detected', { detail: { groupId: local.shared_group_id } })); } catch {}
+      } else {
+        // Group not loaded — transient skip, or the group was dropped and its
+        // pointers were already purged. Leave the pointer; the next sync
+        // re-evaluates it.
       }
-      // else: sharing not loaded yet — skip, will retry on next sync
     }
   }
 
-  if (needsRefresh) {
-    await refreshTodos();
-  }
+  return needsRefresh;
 }
 
 window.syncSharedTodos = syncSharedTodos;
@@ -1373,48 +1904,80 @@ async function shareTodoFromAdd(btn) {
   const guardKey = `add-${catId}`;
   if (_pendingShare.has(guardKey)) return;
 
-  openSharePopover(btn, async (groupId, assignees) => {
+  openSharePopover(btn, (groupId, assignees) => {
     if (_pendingShare.has(guardKey)) return;
     _pendingShare.add(guardKey);
     if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
-    try {
+
+    // Resolves once the shared item is staged in memory, before the Drive upload.
+    let onStaged;
+    let wasStaged = false;
+    const staged = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+
+    (async () => {
       const sharedId = crypto.randomUUID();
       const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catId);
       const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
-      const { data: localRow, error: localErr } = await state.db.from('todos').insert({
+
+      // Stage the shared item in memory first: this marks the created intent
+      // and the dirty type, so the poll skips it and the orphan-pointer
+      // cleanup can't see a pointer whose item isn't staged yet.
+      let localStaged = false;
+      let localRow = null;
+      const upload = state.sharing.addItem(groupId, {
+        id: sharedId,
+        item_type: 'todo',
+        payload: { text, category: cat?.name ?? '', priority },
+        assignees,
+        onStaged,
+      });
+      // The shared upload runs in the background: success toasts, failure
+      // rolls back only what was actually staged locally.
+      upload.then(
+        () => showToast(t('sharing.shared') + '!', 'success'),
+        async (driveErr) => {
+          if (localStaged && localRow?.id) {
+            await state.db.from('todos').delete().eq('id', localRow.id);
+            await refreshTodos();
+          }
+          input.value = text;
+          showToast(driveErr.message, 'error');
+        }
+      );
+
+      // Unblock the UI once the item is staged in memory — don't wait for the
+      // upload. If the upload fails before staging, the failure branch above
+      // handles the rollback, so don't hang here.
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
+      if (!wasStaged) return;
+
+      // Stage the local pointer row (fast local write).
+      const { data, error: localErr } = await state.db.from('todos').insert({
         text: '', priority: 'normal', done: false,
         category: cat?.name ?? '', category_id: catId,
         sort_order: minOrder,
         shared_id: sharedId,
         shared_group_id: groupId,
       }).select().single();
-      if (localErr) { showToast(localErr.message, 'error'); return; }
-
-      try {
-        await state.sharing.addItem(groupId, {
-          id: sharedId,
-          item_type: 'todo',
-          payload: { text, category: cat?.name ?? '', priority },
-          assignees,
-        });
-      } catch (driveErr) {
-        // Clean up local row since Drive write failed
-        if (localRow?.id) await state.db.from('todos').delete().eq('id', localRow.id);
-        throw driveErr;
+      if (localErr) {
+        // Back out the staged shared item — it hasn't uploaded yet.
+        state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+        showToast(localErr.message, 'error');
+        return;
       }
+      localRow = data;
+      localStaged = true;
 
       input.value = '';
       input.dataset.priority = 'low';
       const prioBtn = addRow.querySelector('.todo-add-priority-btn');
       if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'normal');
-      showToast(t('sharing.shared') + '!', 'success');
       await refreshTodos();
-    } catch (e) {
-      showToast(e.message, 'error');
-    } finally {
-      _pendingShare.delete(guardKey);
-      if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
-    }
+    })().catch(e => showToast(e.message, 'error'))
+      .finally(() => {
+        _pendingShare.delete(guardKey);
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+      });
   }, { showAssignees: false });
 }
 
@@ -1427,20 +1990,48 @@ async function shareExistingTodo(id, el) {
   if (!todo || todo.shared_id) return;
   const btn = el instanceof HTMLElement ? el : document.querySelector(`[data-action="share-existing-todo"][data-id="${CSS.escape(id)}"]`);
   if (!btn) return;
-  openSharePopover(btn, async (groupId) => {
+  openSharePopover(btn, (groupId) => {
     if (_pendingShare.has(id)) return;
     _pendingShare.add(id);
     if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
-    try {
+    (async () => {
       const sharedId = crypto.randomUUID();
       const cat = _todoCatMap.get(catIdForTodo(todo));
-      // 1. Create shared item on the sharing layer
-      await state.sharing.addItem(groupId, {
+      const payload = { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null };
+      // Keep the personal row: a failed upload restores it verbatim.
+      const personalRow = { ...todo };
+      // 1. Stage the shared item in memory first: this marks the created
+      // intent and the dirty type, so the poll skips it and the
+      // orphan-pointer cleanup can't see a pointer whose item isn't staged.
+      let onStaged;
+      let wasStaged = false;
+      const staged = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+      let locallyStaged = false;
+      const upload = state.sharing.addItem(groupId, {
         id: sharedId,
         item_type: 'todo',
-        payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', snooze_until: todo.snooze_until || null },
+        payload,
+        onStaged,
       });
-      // 2. Create local pointer — keep original sort_order so position stays
+      // 2. The shared upload runs in the background: success toasts, failure
+      // restores the personal item and drops the pointer — but only when the
+      // local staging below actually happened.
+      upload.then(
+        () => showToast(t('sharing.shared') + '!', 'success'),
+        async (driveErr) => {
+          if (locallyStaged) {
+            await state.db.from('todos').delete().eq('shared_id', sharedId);
+            await state.db.from('todos').insert(personalRow);
+            await refreshTodos();
+          }
+          showToast(driveErr.message, 'error');
+        }
+      );
+      // Unblock the UI on staging — don't wait for the upload. If the upload
+      // fails before staging, the failure branch above handles the rollback.
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
+      if (!wasStaged) return;
+      // 3. Stage locally — pointer in, personal item out — and refresh.
       const { error: ptrErr } = await state.db.from('todos').insert({
         text: '', priority: 'normal', done: false,
         category: cat?.name ?? '', category_id: catIdForTodo(todo),
@@ -1448,17 +2039,20 @@ async function shareExistingTodo(id, el) {
         shared_id: sharedId,
         shared_group_id: groupId,
       });
-      if (ptrErr) { showToast(ptrErr.message, 'error'); return; }
-      // 3. Delete the personal item
+      if (ptrErr) {
+        // Back out the staged shared item — it hasn't uploaded yet.
+        state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+        showToast(ptrErr.message, 'error');
+        return;
+      }
       await state.db.from('todos').delete().eq('id', todo.id);
-      showToast(t('sharing.shared') + '!', 'success');
+      locallyStaged = true;
       await refreshTodos();
-    } catch (e) {
-      showToast(e.message, 'error');
-    } finally {
-      _pendingShare.delete(id);
-      if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
-    }
+    })().catch(e => showToast(e.message, 'error'))
+      .finally(() => {
+        _pendingShare.delete(id);
+        if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+      });
   }, { showAssignees: false });
 }
 window.shareExistingTodo = shareExistingTodo;
@@ -1482,29 +2076,63 @@ async function bulkShareTodoCategory(catId, el) {
         _bulkShareInProgress.add(catId);
         if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
         try {
-          let shared = 0;
+          // Stage each item in the shared memory first, then plant the local
+          // pointer: the created intent and dirty type keep the poll and the
+          // orphan-pointer cleanup from misreading the in-between state. The
+          // debounced flush uploads everything in one go.
+          const staged = [];
           for (const todo of items) {
-            try {
-              const sharedId = crypto.randomUUID();
-              await state.sharing.addItem(groupId, {
-                id: sharedId,
-                item_type: 'todo',
-                payload: { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', snooze_until: todo.snooze_until || null },
-              });
-              const { error: ptrErr } = await state.db.from('todos').insert({
-                text: '', priority: 'normal', done: false,
-                category: cat?.name ?? '', category_id: catId,
-                sort_order: todo.sort_order ?? 0,
-                shared_id: sharedId,
-                shared_group_id: groupId,
-              });
-              if (ptrErr) continue;
-              await state.db.from('todos').delete().eq('id', todo.id);
-              shared++;
-            } catch (e) { console.error('[DeLaClaw] bulk share todo failed:', e); }
+            const sharedId = crypto.randomUUID();
+            const payload = { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null };
+            let onStaged;
+            let wasStaged = false;
+            const stagedP = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+            const upload = state.sharing.addItem(groupId, {
+              id: sharedId,
+              item_type: 'todo',
+              payload,
+              onStaged,
+            });
+            await Promise.race([stagedP, upload.then(() => {}, () => {})]);
+            if (!wasStaged) {
+              console.error('[DeLaClaw] bulk share todo staging failed:', sharedId);
+              continue;
+            }
+            const { error: ptrErr } = await state.db.from('todos').insert({
+              text: '', priority: 'normal', done: false,
+              category: cat?.name ?? '', category_id: catId,
+              sort_order: todo.sort_order ?? 0,
+              shared_id: sharedId,
+              shared_group_id: groupId,
+            });
+            if (ptrErr) {
+              // Back out the staged shared item — it hasn't uploaded yet.
+              state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+              continue;
+            }
+            await state.db.from('todos').delete().eq('id', todo.id);
+            staged.push({ todo: { ...todo }, sharedId, upload });
           }
-          if (shared > 0) showToast(t('sharing.share_all_done', shared), 'success');
+          // Unblock the UI on staging — the uploads run in the background.
           await refreshTodos();
+          _bulkShareInProgress.delete(catId);
+          if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
+          let ok = 0;
+          for (const s of staged) {
+            try {
+              await s.upload;
+              ok++;
+            } catch (e) {
+              console.error('[DeLaClaw] bulk share todo failed:', e);
+              // Roll the item back: drop the pointer, restore the personal row.
+              await state.db.from('todos').delete().eq('shared_id', s.sharedId);
+              await state.db.from('todos').insert(s.todo);
+            }
+          }
+          await refreshTodos();
+          if (ok === staged.length && ok > 0) showToast(t('sharing.share_all_done', ok), 'success');
+          else if (ok > 0) showToast(t('sharing.share_all_partial', ok, staged.length), 'error');
+          else if (staged.length > 0) showToast(t('toast.failed_to_add'), 'error');
         } finally {
           _bulkShareInProgress.delete(catId);
           if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }
@@ -1532,7 +2160,7 @@ async function unshareTodo(id, el) {
       try {
         const cat = _todoCatMap.get(catIdForTodo(todo));
         // 1. Create personal todo (same category, keep text/priority/note)
-        const { error: insErr } = await state.db.from('todos').insert({
+        const { data: personalRow, error: insErr } = await state.db.from('todos').insert({
           text: todo.text || '',
           priority: todo.priority || 'normal',
           done: todo.done ? 1 : 0,
@@ -1540,13 +2168,27 @@ async function unshareTodo(id, el) {
           category_id: catIdForTodo(todo),
           sort_order: todo.sort_order || 0,
           snooze_until: todo.snooze_until || null,
-        });
+        }).select().single();
         if (insErr) { showToast(insErr.message, 'error'); return; }
-        // 2. Delete shared item from sharing layer
-        await state.sharing.deleteItem(todo.shared_group_id, todo.shared_id);
-        // 3. Delete the local pointer
+        // 2. Delete the local pointer and refresh immediately; the shared
+        // item's Drive deletion runs in the background. A failure drops the
+        // personal copy again and restores the pointer row.
+        const pointerRow = { ...todo };
         await state.db.from('todos').delete().eq('id', todo.id);
-        showToast(t('sharing.unshared'), 'success');
+        let onStaged;
+        const staged = new Promise(resolve => { onStaged = resolve; });
+        const upload = state.sharing.deleteItem(todo.shared_group_id, todo.shared_id, { onStaged });
+        upload.then(
+          () => showToast(t('sharing.unshared'), 'success'),
+          async (e) => {
+            console.warn('Failed to unshare todo on Drive:', e);
+            if (personalRow?.id) await state.db.from('todos').delete().eq('id', personalRow.id);
+            await state.db.from('todos').insert(pointerRow);
+            await refreshTodos();
+            showToast(e.message, 'error');
+          }
+        );
+        await Promise.race([staged, upload.then(() => {}, () => {})]);
         await refreshTodos();
       } catch (e) {
         showToast(e.message, 'error');
@@ -1602,7 +2244,7 @@ document.addEventListener('input', e => {
   }
 });
 
-export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName };
+export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey };
 
 window.setTodoFilter = setTodoFilter;
 window.addTodoToCategory = addTodoToCategory;
@@ -1628,10 +2270,16 @@ window.snoozeFor = snoozeFor;
 window.submitSnooze = submitSnooze;
 window.unsnoozeTodo = unsnoozeTodo;
 window.openAddCategoryModal = openAddCategoryModal;
+window.openAddCategoryInSection = openAddCategoryInSection;
 window.closeAddCategoryModal = closeAddCategoryModal;
 window.saveNewCategory = saveNewCategory;
 window.deleteCategory = deleteCategory;
+window.deleteSection = deleteSection;
+window.closeDeleteSectionModal = closeDeleteSectionModal;
+window.deleteSectionMoveUp = deleteSectionMoveUp;
+window.deleteSectionSubtree = deleteSectionSubtree;
 window.navigateToCategory = navigateToCategory;
+window.navigateToTodoSection = navigateToTodoSection;
 window.updateTodoCharCounter = updateTodoCharCounter;
 window.openEditCategoryModal = openEditCategoryModal;
 window.closeEditCategoryModal = closeEditCategoryModal;
@@ -1653,7 +2301,214 @@ window.showTodoGeneralCard = function() {
     if (input) setTimeout(() => input.focus(), 100);
   }
   renderCategoryToolbarButtons([_defaultCatId]);
-  balanceGrid(grid);
+  applySectionGrid(grid);
 };
 window.filterTodos = function(e) { todoSearchQuery = e.target.value; renderTodos(); };
 window.renderTodos = renderTodos;
+
+
+// ===================================================================
+// TODO BATCH IMPORT
+// ===================================================================
+// Thin wrapper over the shared import shell (js/batch-import.js): builds
+// the TODO-specific config (prompt, validation, fields, creation) and
+// hands the modal mechanics to openBatchImportModal.
+// Per-item "category" names are created on confirm when they don't exist;
+// "group_id" must be a group the user belongs to (names aren't unique).
+// Calendar events come free: the Drive adapter marks every insert dirty and
+// the debounced flush runs syncTable('todos').
+
+function buildTodoImportPrompt(selectedCatNames, groups) {
+  const catLine = selectedCatNames.length > 0
+    ? `- "category": assign each TODO to exactly one of these categories: ${selectedCatNames.map(n => `"${n}"`).join(', ')}. If none fits, you may propose a new category name.`
+    : `- "category": a category name for the TODO (a short label like "Admin" or "Groceries").`;
+  const groupLine = (groups && groups.length > 0)
+    ? `- "group_id": only for TODOs shared with a group; use one of these group ids: ${groups.map(g => `"${g.name}" → "${g.id}"`).join(', ')}. Omit otherwise.`
+    : `- "group_id": only for TODOs shared with a group; omit otherwise (optional)`;
+  return `Convert the following text into TODOs for DeLaClaw, a personal task manager (delaclaw.com).
+
+Output a JSON array of objects, each with:
+- "title": string (required, the task)
+- "priority": one of "urgent", "high", "medium", "low", "normal" (optional, default "normal")
+- "due_date": ISO date or datetime, e.g. "2026-11-02" or "2026-11-02T18:00" (optional)
+- "snooze_until": ISO date or datetime (optional)
+${catLine}
+${groupLine}
+
+Example:
+[
+  { "title": "Renew passport", "priority": "high", "due_date": "2026-11-02", "category": "Admin" },
+  { "title": "Buy milk", "category": "Groceries" }
+]
+
+Output ONLY valid JSON, no markdown fences, no commentary.
+
+Paste your text below and I will convert it:`;
+}
+
+window.openTodoImportModal = async function() {
+  const { openBatchImportModal, ensureImportCategories, chunkedBatchInsert } = await import('./batch-import.js');
+  const { parseTodoImportJSON, validateTodoImportItem, TODO_IMPORT_PRIORITIES } = await import('./todo-import.js');
+
+  const cats = [..._todoTree.byId.values()]
+    .filter(n => n.kind === 'bucket' && n.id !== _sharedCatId && n.row.name !== '')
+    .sort((a, b) => compareOrderKeys(orderKeyOf(a, _todoTree.byId), orderKeyOf(b, _todoTree.byId)))
+    .map(n => ({ ...n.row, _path: pathLabelOf(n, _todoTree.byId) }));
+
+  const groups = (state.sharing && state.sharing.isReady()) ? state.sharing.getAllGroups() : [];
+
+  await openBatchImportModal({
+    modalId: 'importTodoModal',
+    title: t('todos.import_title'),
+    subtitle: t('todos.import_subtitle'),
+    convertTitle: t('todos.import_convert_title'),
+    convertDesc: t('todos.import_convert_desc'),
+    uploadTitle: t('todos.import_upload_title'),
+    uploadDesc: t('todos.import_upload_desc'),
+    categoriesLabel: t('todos.import_categories_label'),
+    selectAll: t('todos.import_select_all'),
+    deselectAll: t('todos.import_deselect_all'),
+    step1: t('todos.import_step1'),
+    copy: t('todos.import_copy'),
+    copied: t('todos.import_copied'),
+    step2: t('todos.import_step2'),
+    step3: t('todos.import_step3'),
+    pastePlaceholder: t('todos.import_paste_placeholder'),
+    uploadFile: t('todos.import_upload_file'),
+    review: t('todos.import_review'),
+    back: t('todos.import_back'),
+    backToPaste: t('todos.import_back_to_paste'),
+    ready: n => t('todos.import_ready', n),
+    andMore: n => t('todos.import_and_more', n),
+    reviewHeader: n => t('todos.import_review_header', n),
+    selectedCount: (a, b) => t('todos.import_selected_count', a, b),
+    confirm: n => t('todos.import_confirm', n),
+    importing: t('todos.import_importing'),
+    success: n => t('todos.import_success', n),
+    failedPrefix: t('todos.import_failed'),
+    newCategory: t('todos.import_new_category'),
+
+    categories: [{ name: '', display: t('common.category_default') },
+      ...cats.map(c => ({ name: c._path, display: c._path }))],
+    promptDefaultCategory: 'General',
+    groups: groups.map(g => ({ id: g.id, name: g.name })),
+    sharingReady: !!(state.sharing && state.sharing.isReady()),
+
+    buildPrompt: buildTodoImportPrompt,
+    parse: parseTodoImportJSON,
+    validate: validateTodoImportItem,
+    getTitle: it => it.title,
+    fields: [
+      { key: 'title', label: t('todos.import_field_title'), type: 'text' },
+      { key: 'priority', label: t('todos.import_field_priority'), type: 'select', options: TODO_IMPORT_PRIORITIES },
+      { key: 'due_date', label: t('todos.import_field_due'), type: 'datetime' },
+      { key: 'snooze_until', label: t('todos.import_field_snooze'), type: 'datetime' },
+      { key: 'category', label: t('todos.import_field_category'), type: 'datalist',
+        options: ['General', ...cats.map(c => c._path)] },
+      { key: 'group_id', label: t('todos.import_field_group'), type: 'grouplist' },
+    ],
+    previewMeta: (it) => {
+      const nc = (it.categoryIsNew && it.category) ? ` <span class="import-badge new-cat">${t('todos.import_new_category')}</span>` : '';
+      const grp = it.groupName ? ` <span class="import-badge">${esc(it.groupName)}</span>` : '';
+      const cat = it.category ? ` <span class="import-preview-cat">${esc(it.category)}</span>` : '';
+      return `${cat}${nc}${grp}`;
+    },
+    reviewBadges: (it, errors) => {
+      let html = '';
+      if (it.categoryIsNew && it.category) html += `<span class="import-badge new-cat">${t('todos.import_new_category')}: ${esc(it.category)}</span>`;
+      if (errors.length > 0) {
+        html += `<div class="import-item-errors">${errors.map(e => `<span>${esc(e.message)}</span>`).join('')}</div>`;
+      }
+      return html;
+    },
+
+    ensureCategories: (names) => ensureImportCategories(names, {
+      table: 'todo_categories', getMap: () => _todoCatMap, reload: loadTodoCategories,
+      getPathMap: () => _todoCatByPath,
+      ensurePath: async (pathName) => {
+        const segments = parseSectionPath(pathName);
+        if (segments.length < 2) return;
+        const parentId = await ensureTodoSectionChain(segments.slice(0, -1));
+        const name = segments[segments.length - 1];
+        if (!todoChildRow(parentId, name)) {
+          const { error } = await state.db.from('todo_categories').insert({
+            name, shortname: null, color: nextPaletteColor(_todoCatMap),
+            sort_order: nextTodoSortOrder(parentId), kind: 'bucket', parent_id: parentId,
+          });
+          if (error) throw new Error(error.message);
+          await loadTodoCategories();
+        }
+      },
+    }),
+
+    createItems: async (validItems, catMap) => {
+      const resolveCat = (name) => {
+        if (!name) return { id: _defaultCatId, name: '' };
+        const hit = catMap.get(name.toLowerCase());
+        return hit ? { id: hit.id, name: hit.name } : { id: _defaultCatId, name: '' };
+      };
+      // sort_order cursors: new TODOs go on top of their category (contract)
+      const orderCursor = new Map();
+      const nextOrder = (catId) => {
+        if (!orderCursor.has(catId)) {
+          const inCat = allTodos.filter(td => catIdForTodo(td) === catId);
+          orderCursor.set(catId, inCat.length > 0 ? Math.min(...inCat.map(td => td.sort_order || 0)) - 1 : 0);
+        }
+        const v = orderCursor.get(catId);
+        orderCursor.set(catId, v - 1);
+        return v;
+      };
+
+      const personalRows = [];
+      const sharedItems = [];
+      for (const it of validItems) {
+        const { id: catId, name: catName } = resolveCat(it.category);
+        if (it.group_id) sharedItems.push({ ...it, catId, catName });
+        else personalRows.push({
+          text: it.title, priority: it.priority,
+          due_date: it.due_date, snooze_until: it.snooze_until,
+          category: catName, category_id: catId,
+          sort_order: nextOrder(catId),
+        });
+      }
+
+      // Personal: batch insert (chunks of 100, like backup restore).
+      // The Drive adapter marks each insert dirty → the debounced flush
+      // runs syncTable('todos'), creating calendar events for due dates.
+      await chunkedBatchInsert('todos', personalRows);
+
+      // Shared: stage in group memory + local pointer row
+      // (same pattern as shareExistingTodo; the sharing poll uploads).
+      for (const it of sharedItems) {
+        const sharedId = crypto.randomUUID();
+        const payload = {
+          text: it.title, category: it.catName, priority: it.priority, note: '',
+          due_date: it.due_date, snooze_until: it.snooze_until,
+        };
+        let onStaged;
+        let wasStaged = false;
+        const stagedP = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+        const upload = state.sharing.addItem(it.group_id, { id: sharedId, item_type: 'todo', payload, onStaged });
+        await Promise.race([stagedP, upload.then(() => {}, () => {})]);
+        if (!wasStaged) throw new Error(`Could not stage "${it.title}" in the group`);
+        const { error: ptrErr } = await state.db.from('todos').insert({
+          text: '', priority: 'normal', done: 0,
+          category: it.catName, category_id: it.catId,
+          sort_order: nextOrder(it.catId),
+          shared_id: sharedId, shared_group_id: it.group_id,
+        });
+        if (ptrErr) {
+          state.sharing.deleteItem(it.group_id, sharedId).catch(() => {});
+          throw new Error(ptrErr.message);
+        }
+        upload.then(() => {}, async () => {
+          await state.db.from('todos').delete().eq('shared_id', sharedId);
+          await refreshTodos();
+          showToast(`${t('todos.import_failed')} "${it.title}"`, 'error');
+        });
+      }
+    },
+
+    afterCreate: refreshTodos,
+  });
+};

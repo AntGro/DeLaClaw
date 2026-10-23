@@ -34,7 +34,7 @@ These versions are determined by the most demanding features used (see below). O
 | `Set` / `Map` | All modern | Collections |
 | Dynamic `import()` | Chrome 63, Firefox 67, Safari 11.1 | Lazy module loading |
 | `crypto.randomUUID()` | Chrome 92, Firefox 95, Safari 15.4 | ID generation (items, completions, shared entries) |
-| `crypto.subtle` (WebCrypto) | All modern | AES-GCM encryption, SHA-256 hashing (`crypto-sync.js`, `auth.js`) |
+| `crypto.subtle` (WebCrypto) | All modern | SHA-256 hashing (member IDs) |
 | `ResizeObserver` | Chrome 64, Firefox 69, Safari 13.1 | Layout observation |
 | IndexedDB | All modern | Offline cache |
 | `navigator.onLine` | All modern | Offline detection |

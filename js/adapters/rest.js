@@ -1,5 +1,5 @@
 // ===================================================================
-// REST ADAPTER — drop-in replacement for the Supabase adapter
+// REST ADAPTER — PostgREST-compatible adapter for the local Bun+SQLite backend
 // ===================================================================
 // Exposes the same chainable interface: .from().select().eq().order()
 // Talks to the local REST server (server/server.js) via plain HTTP.
@@ -92,14 +92,14 @@ class QueryBuilder {
   }
 
   // After insert/update, re-enter select mode to return rows
-  // Supabase pattern: .insert({...}).select().single()
+  // PostgREST pattern: .insert({...}).select().single()
   _afterWrite() {
     this._returnRow = true;
     return this;
   }
 
   // Intercept: if called after insert/update, set return flag
-  // The real Supabase .select() after .insert() returns the inserted row
+  // The real .select() after .insert() returns the inserted row
   // We override select behavior when _method is not GET
   // This is handled by making select() context-aware:
 

@@ -36,10 +36,10 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - Single responsibility: `utils.js` = generic helpers, `item-utils.js` = drag-drop + inline edit, `db.js` = activity tracking proxy only. Abstract first, implement second.
 
 **1.5 AI-native dependency index (CODEMAP) + Feature contracts — mandatory for agents**
-- Generated: `.agents/CODEMAP.json` (T2, ~25KB pretty / ~15KB compact) + `.agents/CODEMAP.md` (6KB matrix). Source: `scripts/generate-codemap.js`. Do not hand-edit.
+- Generated: `.agents/CODEMAP.json` + `.agents/CODEMAP.md` (human-readable matrix). Source: `scripts/generate-codemap.js`. Do not hand-edit. Sizes and counts live in CODEMAP itself — do not restate them here.
 - Contains per `js/*.js`: `entry`, `loc`, `tables`, `state`, `depends_on`, `dependents` (blast radius), `ui_components` (reusable CSS), `i18n_prefix`, `guards` (`guard`/`pendingSet`), `esc_count`, `window_exposed`.
-- 7 features: `todos`, `habits`, `projects`, `birthdays`, `flashcards`, `lists`, `welcome`. Core modules + 4 adapters (`rest`, `demo`, `drive`, `offline-cache`). `welcome` aggregates all features. Exact counts live in CODEMAP itself.
-- Feature contracts: `.agents/contracts/*.md` — agent-only, NOT in `docs-site`. Captures invariants CODEMAP can't: single source of truth (`isStructuredRule()`), guard patterns, XSS fields, RLS policies, welcome edges, business rules. BEFORE editing a feature, agents MUST read `CODEMAP.json:features[feature]` + `contracts/<feature>.md` if present.
+- Features, core modules and adapters are enumerated in CODEMAP itself — it is the source of truth, so they are not listed here. `welcome` aggregates all features.
+- Feature contracts: `.agents/contracts/*.md` — agent-only, NOT in `docs-site`. Captures invariants CODEMAP can't: single source of truth (`isStructuredRule()`), guard patterns, XSS fields, welcome edges, business rules. BEFORE editing a feature, agents MUST read `CODEMAP.json:features[feature]` + `contracts/<feature>.md` if present.
 - Rule: BEFORE editing any `js/*.js`, agents MUST read `.agents/CODEMAP.json` → `features[feature]` and relevant `core` entries. Reuse `depends_on` + `ui_components`, check `dependents` for impact scope, follow `guards` per AGENTS 1.2, verify `esc_count`/`tables` for XSS/schema impact.
 - Freshness: pre-commit auto-regenerates JSON+MD and stages them. `tests/tests.js` will fail if JSON is out-of-date (CODEMAP freshness test). No manual sync.
 - Impact: `scripts/impact.js` reads staged diff + CODEMAP `dependents` to suggest `Checked:` trailer (e.g. `birthdays` change → `welcome [x]` + `xss [x]`). Pre-commit prints `[impact] Checked: …` hint; commit-msg prints full blast-radius report on failure.

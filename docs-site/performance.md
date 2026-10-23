@@ -57,7 +57,7 @@ Two resources block first paint:
 - **Self-host the font**: DM Sans could be served from `vendor/` to eliminate the Google Fonts DNS lookup and make the app fully self-contained.
 - **Lazy-load Three.js**: Three.js is only used for the hero landing page effect. Returning users who skip the hero don't need it. A dynamic `import()` on hero visibility would avoid loading it entirely for most sessions.
 - **Code splitting**: `demo-data.js` and `demo-chooser.js` are only needed in demo mode. `hero.js`, `storm3d.js`, and `logo.js` are only needed for the landing page. Dynamic imports could defer these.
-- **Minification**: a simple minification pass would reduce JS significantly. Not implemented because the project intentionally ships readable source (AGPL philosophy: users can inspect the code they run).
+- **Minification**: a simple minification pass would reduce JS significantly. Not implemented because the project intentionally ships readable source, so users can inspect the code they run.
 - **i18n splitting**: `i18n.js` includes all 3 languages. Could load only the active language and lazy-load others on switch.
 
 ## Runtime performance

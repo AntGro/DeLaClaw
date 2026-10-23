@@ -70,9 +70,9 @@ No other external requests are made.
 
 DeLaClaw does not sell, share, or transfer any user data to third parties for any purpose, including advertising, analytics, or AI training. The only data exchange is user-to-user sharing as described above, which you control entirely.
 
-## Open source
+## Source code
 
-DeLaClaw is licensed under AGPL-3.0. The full source code is available at [github.com/AntGro/DeLaClaw](https://github.com/AntGro/DeLaClaw). You can inspect exactly what the app does and modify it.
+DeLaClaw's source code is publicly available at [github.com/AntGro/DeLaClaw](https://github.com/AntGro/DeLaClaw) under the PolyForm Noncommercial License 1.0.0 — free for personal and other noncommercial use; commercial use requires permission. You can inspect exactly what the app does and modify it.
 
 ## Changes
 

@@ -33,7 +33,7 @@ Head to the [Setup Guide](setup.md) to pick a backend and start using DeLaClaw i
 - No accounts, no subscriptions, no tracking
 - Your data stays yours — self-host on Google Drive (free) or run locally
 - Zero build step — just open `index.html`
-- AGPL-3.0 licensed
+- Source-available under the PolyForm Noncommercial License 1.0.0 — free for noncommercial use
 
 ## Links
 

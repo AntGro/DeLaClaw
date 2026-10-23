@@ -29,4 +29,4 @@
 - **Legal**
   - [Privacy](privacy.md)
   - [Attributions](attributions.md)
-  - [License (AGPL-3.0)](https://github.com/AntGro/DeLaClaw/blob/main/LICENSE)
+  - [License (PolyForm Noncommercial)](https://github.com/AntGro/DeLaClaw/blob/main/LICENSE)

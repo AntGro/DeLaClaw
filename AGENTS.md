@@ -4,7 +4,7 @@ For any coding agent (Human, Claude, Cursor, Codex) working in this repo. This i
 
 ## 0. Purpose
 
-DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, vanilla JS (ES modules). Own your data: Google Drive | Local Bun+SQLite | Demo. PWA, dark/light, i18n (EN/FR/ES).
+DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no framework, vanilla JS (ES modules). Own your data: Google Drive | Local Bun+SQLite | Demo. PWA, dark/light, i18n (EN/FR/ES). Supabase support has been removed entirely (adapter, client library, auth module, sharing adapter). The pre-deprecation codebase is preserved on the `dev-latest-supabase-support` branch.
 
 ## 1. Core Product Principles
 
@@ -80,6 +80,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - **VERSION file**: `latest` bumped every commit (X.Y.Z — patch per commit, minor on features, major on breaking schema). See `COMMIT_CHECKLIST.md`.
 - **Checked trailer**: Format `Checked: versioning [x], i18n [~], docs [~], readme [~], checklist [~], tests [~], welcome [~], prompts [~], xss [x]` — decide each individually, no batch-marking. `[x]` = diff touches area, `[~]` = does not. Bare item = rejected. Lesson v1.145: tests + xss left unmarked by inertia. Use CODEMAP `dependents` to assess `welcome` impact.
 - **Commit style**: `feat|fix|refactor|chore|ci|docs(scope): message`. Include test result (e.g. `N passed`) when relevant.
+- **Never suppress `git stash pop` output** — a failed pop (e.g. conflict with test-regenerated files) silently leaves work in the stash while the tree looks clean; lesson Sep 22, 2026: always check pop output and `git stash list` afterwards.
 
 ## 6. Testing
 

@@ -6570,6 +6570,30 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'local 2.23.0 promotes the Wardrobe row to a section and nests the vest_* lists');
     });
 
+    test('computeNextDue: every_N_months anchors — a completion covers its own month', async () => {
+      const freq = await import(pathToFileURL(path.join(JS_DIR, 'frequency-rule.js')).href);
+      const { computeNextDue } = freq;
+      // Reported live-test case (Oct 23, 2026): 'every 6 months on the
+      // 28th' with last done Aug 14 read 'Overdue (Aug 28, 56d ago)' on
+      // creation — the old branch returned the 28th of the completion's
+      // own month and never applied the interval. The completion covers
+      // its month's occurrence; the next due is a full interval on.
+      assert(computeNextDue('every_N_months:6:28', '2026-08-14') === '2027-02-28',
+        'every 6 months on the 28th, done Aug 14 → Feb 28');
+      assert(computeNextDue('every_N_months:1:28', '2026-08-14') === '2026-09-28',
+        'monthly on the 28th, done Aug 14 (early) → Sep 28');
+      assert(computeNextDue('every_N_months:1:28', '2026-08-28') === '2026-09-28',
+        'monthly on the 28th, done on the day → Sep 28');
+      assert(computeNextDue('every_N_months:1:28', '2026-08-30') === '2026-09-28',
+        'monthly on the 28th, done Aug 30 (late) → Sep 28');
+      // An occurrence date as base (Calendar expansion cursor) is stable.
+      assert(computeNextDue('every_N_months:6:28', '2026-08-28') === '2027-02-28',
+        'stepping from an occurrence date advances a full interval');
+      // Weekday mode follows the same anchor rule.
+      assert(computeNextDue('every_N_months:6:first:Mon', '2026-08-01') === '2027-02-01',
+        'every 6 months first Monday, done Aug 1 → first Monday of Feb 2027');
+    });
+
     test('migration 2.27.0: habit next_due recompute (helper, Drive and Local)', async () => {
       const freq = await import(pathToFileURL(path.join(JS_DIR, 'frequency-rule.js')).href);
       const { recomputeNextDueForMigration } = freq;

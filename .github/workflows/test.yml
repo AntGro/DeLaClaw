@@ -17,7 +17,9 @@ jobs:
         with:
           node-version: '20'
 
+      - uses: oven-sh/setup-bun@v2
+
       - name: Run tests
-        run: node tests/tests.js
+        run: bun tests/tests.js
         env:
           CI: 'true'

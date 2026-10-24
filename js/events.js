@@ -1,8 +1,8 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
 import { esc, showToast, showConfirmAction, fetchAll } from './utils.js';
-import { t } from './i18n.js';
-import { wallTimeToInstant, instantToDateStr, instantToTimeStr, localTimeZone, toDateStr } from './calendar-pure.js';
+import { t, getLang } from './i18n.js';
+import { wallTimeToInstant, instantToDateStr, instantToTimeStr, localTimeZone, toDateStr, parseLocalDate, gmtOffsetLabel } from './calendar-pure.js';
 import { openSharePopover } from './sharing-ui.js';
 
 // ===================================================================
@@ -101,44 +101,72 @@ function eventPayload(ev) {
 // MODALS — ADD / EDIT (one field builder, two prefixes: new / edit)
 // ===================================================================
 
-function timezoneOptionsHTML(selected) {
+// Curated shortlist shown as its own group; the full IANA list follows.
+// Options carry the zone's GMT offset ON THE EVENT'S DATE (DST-aware).
+const COMMON_TIMEZONES = ['UTC', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Madrid',
+  'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+  'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney'];
+const _tzOptionsCache = new Map();
+
+function timezoneOptionsHTML(selected, dateStr) {
+  const sel = selected || localTimeZone();
+  const key = `${dateStr || ''}|${sel}`;
+  const cached = _tzOptionsCache.get(key);
+  if (cached) return cached;
   let zones = [];
   try { zones = Intl.supportedValuesOf('timeZone'); } catch { zones = []; }
-  if (!zones.length) zones = ['UTC', 'Europe/London', 'Europe/Paris', 'America/New_York', 'America/Los_Angeles', 'Asia/Tokyo', 'Australia/Sydney'];
-  const sel = selected || localTimeZone();
-  if (!zones.includes(sel)) zones = [sel, ...zones];
-  return zones.map(z => `<option value="${esc(z)}"${z === sel ? ' selected' : ''}>${esc(z.replace(/_/g, ' '))}</option>`).join('');
+  if (!zones.length) zones = [...COMMON_TIMEZONES];
+  const local = localTimeZone();
+  const label = (tz) => {
+    const off = gmtOffsetLabel(tz, dateStr);
+    return `${tz.replace(/_/g, ' ')}${off ? ` · ${off}` : ''}`;
+  };
+  const opt = (tz) => `<option value="${esc(tz)}"${tz === sel ? ' selected' : ''}>${esc(label(tz))}</option>`;
+  // The selected zone and the device zone are pinned above the groups so
+  // the common cases never need a scroll through ~400 entries.
+  const pinned = [...new Set([sel, local])];
+  const common = COMMON_TIMEZONES.filter(tz => !pinned.includes(tz) && zones.includes(tz));
+  const rest = zones.filter(tz => !pinned.includes(tz));
+  let html = pinned.map(opt).join('');
+  if (common.length) html += `<optgroup label="${esc(t('events.tz_common'))}">${common.map(opt).join('')}</optgroup>`;
+  html += `<optgroup label="${esc(t('events.tz_all'))}">${rest.map(opt).join('')}</optgroup>`;
+  if (_tzOptionsCache.size > 8) _tzOptionsCache.clear();
+  _tzOptionsCache.set(key, html);
+  return html;
 }
 
 function eventFieldsHTML(p) {
   return `
     <label>${t('events.title_label')}</label>
-    <input type="text" id="${p}EventTitle" placeholder="${t('events.title_placeholder')}" maxlength="200"
+    <input type="text" id="${p}EventTitle" class="event-title-input" placeholder="${t('events.title_placeholder')}" maxlength="200"
       data-action="save-${p}-event-on-enter">
+    <div class="event-mode" role="group" aria-label="${t('events.all_day')}">
+      <button type="button" data-action="event-set-mode" data-prefix="${p}" data-mode="timed">${lucideIcon('clock', 14)}<span>${t('events.timed')}</span></button>
+      <button type="button" data-action="event-set-mode" data-prefix="${p}" data-mode="allday">${lucideIcon('calendar-days', 14)}<span>${t('events.all_day')}</span></button>
+    </div>
+    <input type="checkbox" id="${p}EventAllDay" class="event-allday-state" tabindex="-1">
     <label>${t('events.date_label')}</label>
-    <input type="date" id="${p}EventDate">
-    <label class="event-allday-row">
-      <input type="checkbox" id="${p}EventAllDay" data-action="event-allday-toggle" data-prefix="${p}">
-      <span>${t('events.all_day')}</span>
-    </label>
+    <input type="date" id="${p}EventDate" data-action="event-field" data-prefix="${p}">
+    <div id="${p}EventEndDateRow" style="display:none">
+      <label>${t('events.end_date_label')}</label>
+      <input type="date" id="${p}EventEndDate" data-action="event-field" data-prefix="${p}">
+    </div>
     <div id="${p}EventTimeRow">
       <div class="event-time-grid">
         <div>
           <label>${t('events.start_label')}</label>
-          <input type="time" id="${p}EventStartTime" value="09:00">
+          <input type="time" id="${p}EventStartTime" value="09:00" data-action="event-field" data-prefix="${p}">
         </div>
+        <span class="event-time-arrow">${lucideIcon('arrow-right', 15)}</span>
         <div>
           <label>${t('events.end_label')}</label>
-          <input type="time" id="${p}EventEndTime" value="10:00">
+          <input type="time" id="${p}EventEndTime" value="10:00" data-action="event-field" data-prefix="${p}">
         </div>
       </div>
       <label>${t('events.timezone_label')}</label>
-      <select id="${p}EventTimezone"></select>
+      <select id="${p}EventTimezone" data-action="event-field" data-prefix="${p}"></select>
     </div>
-    <div id="${p}EventEndDateRow" style="display:none">
-      <label>${t('events.end_date_label')}</label>
-      <input type="date" id="${p}EventEndDate">
-    </div>
+    <div class="event-summary" id="${p}EventSummary" style="display:none"></div>
     <label>${t('events.note_label')}</label>
     <input type="text" id="${p}EventNote" placeholder="${t('events.note_placeholder')}" maxlength="1000">`;
 }
@@ -194,6 +222,8 @@ function toggleEventAllDay(prefix, checked) {
   const endRow = document.getElementById(`${prefix}EventEndDateRow`);
   if (timeRow) timeRow.style.display = checked ? 'none' : '';
   if (endRow) endRow.style.display = checked ? '' : 'none';
+  document.querySelectorAll(`[data-action="event-set-mode"][data-prefix="${prefix}"]`)
+    .forEach(b => b.classList.toggle('active', (b.dataset.mode === 'allday') === !!checked));
   if (checked) {
     const dateEl = document.getElementById(`${prefix}EventDate`);
     const endEl = document.getElementById(`${prefix}EventEndDate`);
@@ -201,10 +231,65 @@ function toggleEventAllDay(prefix, checked) {
   }
 }
 
+function setEventMode(prefix, mode) {
+  const cb = document.getElementById(`${prefix}EventAllDay`);
+  if (!cb) return;
+  cb.checked = mode === 'allday';
+  toggleEventAllDay(prefix, cb.checked);
+  updateEventSummary(prefix);
+}
+
+/**
+ * Live one-line summary of what will be created: the day and times as
+ * entered, plus — when the event's timezone differs from the device's —
+ * the converted local times. This is the instant model made visible
+ * before saving. Also keeps the timezone options' GMT offsets in sync
+ * with the chosen date (they shift with DST).
+ */
+function updateEventSummary(prefix) {
+  const el = document.getElementById(`${prefix}EventSummary`);
+  if (!el) return;
+  const date = document.getElementById(`${prefix}EventDate`)?.value;
+  const allDay = document.getElementById(`${prefix}EventAllDay`)?.checked;
+  const sel = document.getElementById(`${prefix}EventTimezone`);
+  if (sel && date) {
+    const cur = sel.value || localTimeZone();
+    const fresh = timezoneOptionsHTML(cur, date);
+    if (sel.innerHTML !== fresh) { sel.innerHTML = fresh; sel.value = cur; }
+  }
+  let html = '';
+  if (date) {
+    const fmtDay = (ds) => parseLocalDate(ds).toLocaleDateString(getLang(), { weekday: 'short', day: 'numeric', month: 'short' });
+    if (allDay) {
+      const end = document.getElementById(`${prefix}EventEndDate`)?.value || date;
+      html = end > date
+        ? `${esc(fmtDay(date))} → ${esc(fmtDay(end))} · ${t('events.all_day')} · ${t('events.days_n', Math.round((parseLocalDate(end) - parseLocalDate(date)) / 86400000) + 1)}`
+        : `${esc(fmtDay(date))} · ${t('events.all_day')}`;
+    } else {
+      const tz = sel?.value || localTimeZone();
+      const st = document.getElementById(`${prefix}EventStartTime`)?.value;
+      const et = document.getElementById(`${prefix}EventEndTime`)?.value;
+      if (st && et) {
+        const city = (z) => z.split('/').pop().replace(/_/g, ' ');
+        html = `${esc(fmtDay(date))} · ${esc(st)} – ${esc(et)} ${esc(city(tz))}`;
+        const local = localTimeZone();
+        if (tz !== local) {
+          const sI = wallTimeToInstant(date, st, tz);
+          const eI = wallTimeToInstant(date, et, tz);
+          if (sI && eI) html += ` <span class="event-summary-local">→ ${esc(instantToTimeStr(sI, local))} – ${esc(instantToTimeStr(eI, local))} ${esc(city(local))}</span>`;
+        }
+      }
+    }
+  }
+  el.innerHTML = html;
+  el.style.display = html ? '' : 'none';
+}
+
 function fillEventForm(prefix, ev, presetDate) {
   const tzSel = document.getElementById(`${prefix}EventTimezone`);
   const tz = ev?.timezone || localTimeZone();
-  if (tzSel) tzSel.innerHTML = timezoneOptionsHTML(tz);
+  const dateForTz = ev?.all_day ? (ev.start_date || presetDate) : (ev?.start_ts ? instantToDateStr(ev.start_ts, tz) : presetDate);
+  if (tzSel) tzSel.innerHTML = timezoneOptionsHTML(tz, dateForTz);
   document.getElementById(`${prefix}EventTitle`).value = ev?.title || '';
   document.getElementById(`${prefix}EventNote`).value = ev?.note || '';
   const allDay = !!ev?.all_day;
@@ -223,6 +308,8 @@ function fillEventForm(prefix, ev, presetDate) {
     document.getElementById(`${prefix}EventEndDate`).value = presetDate || '';
   }
   toggleEventAllDay(prefix, allDay);
+  if (tzSel) tzSel.value = tz;
+  updateEventSummary(prefix);
 }
 
 /** Read a form into event fields, or null (a toast explains why). */
@@ -251,6 +338,7 @@ function readEventForm(prefix) {
 function openAddEventModal(presetDate) {
   const modal = document.getElementById('addEventModal');
   modal.innerHTML = addEventModalHTML();
+  modal.style.setProperty('--cat-color', 'var(--event-color)');
   const now = new Date();
   fillEventForm('new', null, presetDate || toDateStr(now.getFullYear(), now.getMonth(), now.getDate()));
   modal.classList.add('visible');
@@ -266,6 +354,7 @@ function openEditEventModal(id) {
   if (!ev) return;
   const modal = document.getElementById('editEventModal');
   modal.innerHTML = editEventModalHTML();
+  modal.style.setProperty('--cat-color', 'var(--event-color)');
   document.getElementById('editEventId').value = id;
   fillEventForm('edit', ev, null);
   document.getElementById('editEventDeleteBtn').dataset.id = id;
@@ -593,6 +682,8 @@ window.closeEditEventModal = closeEditEventModal;
 window.saveEditEvent = saveEditEvent;
 window.deleteEvent = deleteEvent;
 window.toggleEventAllDay = toggleEventAllDay;
+window.setEventMode = setEventMode;
+window.updateEventSummary = updateEventSummary;
 window.shareEvent = shareEvent;
 window.unshareEvent = unshareEvent;
 window.copyEventToPersonal = copyEventToPersonal;

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-24T11:37:52.565Z from 51 modules (v2.31.0). Total LOC 37234. Do not hand-edit.
+> Generated 2026-10-24T16:06:15.705Z from 51 modules (v2.31.1). Total LOC 37345. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -28,28 +28,28 @@
 |--------|-----|--------|---------|------------|-------|
 | main | 3984 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
 | sharing-drive | 2530 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
-| i18n | 2523 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,calendar.js | pendingSet |
+| i18n | 2526 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,calendar.js | pendingSet |
 | drive | 1561 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | item-utils | 1358 | - | db,i18n,icons,state | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
 | calendar-sync | 1268 | birthdays,events,gcal_sync,habits,settings,todos | calendar-pure,drive-folders,habits,i18n | main.js | - |
 | sharing-ui | 1262 | events,habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | calendar.js,events.js,groups.js,habits.js | esc:38,guard+pendingSet,window:8 |
 | utils | 1001 | flashcards,x | i18n,icons,sections-pure,state | - | esc:7,window:6 |
 | calendar | 828 | - | calendar-pure,habits,i18n,icons | main.js | esc:20,window:8 |
-| events | 599 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:5,pendingSet,window:8 |
+| events | 690 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:17,pendingSet,window:8 |
 | batch-import | 559 | - | icons,import-pure,state,utils | - | esc:13 |
-| delegation | 528 | - |  | - | window:1 |
+| delegation | 530 | - |  | - | window:1 |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 464 | - | habits,i18n,icons,utils | - | - |
 | offline-cache | 439 | - | ./i18n,./state,i18n.js,state.js | drive.js,main.js,sharing.js | - |
 | sections-pure | 412 | - |  | calendar.js,habits.js,lists.js,todos.js | - |
-| calendar-pure | 361 | - |  | calendar-sync.js,calendar.js,events.js,frequency-rule.js | - |
+| calendar-pure | 375 | - |  | calendar-sync.js,calendar.js,events.js,frequency-rule.js | - |
 | demo | 310 | x |  | drive.js | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
 | frequency-rule | 231 | - | calendar-pure | habit-import.js,habits.js | - |
 | sharing-file-reconcile | 217 | - |  | drive.js,sharing-drive.js | - |
 | scene-parse | 215 | text_line_progress,texts |  | flashcards.js | - |
 | groups | 214 | - | i18n,icons,sharing-ui,state | main.js | esc:3,window:4 |
-| icons | 213 | - |  | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
+| icons | 214 | - |  | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
 | agents-ui | 207 | agent_grants | db,i18n,icons,state | main.js | esc:31,window:5 |
 | storm3d | 185 | - |  | hero.js | - |
 | sharing | 180 | - | offline-cache,sharing-drive,sharing-envelope,sharing-interface | - | - |

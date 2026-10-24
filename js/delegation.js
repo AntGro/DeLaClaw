@@ -332,7 +332,7 @@
       case 'share-event': callWindow('shareEvent', [getId(el), el]); break;
       case 'unshare-event': callWindow('unshareEvent', [getId(el), el]); break;
       case 'copy-event-to-personal': callWindow('copyEventToPersonal', [getId(el), el]); break;
-      case 'event-allday-toggle': callWindow('toggleEventAllDay', [el.dataset.prefix, el.checked]); break;
+      case 'event-set-mode': callWindow('setEventMode', [el.dataset.prefix, el.dataset.mode]); break;
       case 'pick-new-birthday-avatar': callWindow('pickNewBirthdayAvatar', []); break;
       case 'clear-new-birthday-avatar': callWindow('clearNewBirthdayAvatar', []); break;
       case 'close-add-birthday': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddBirthdayModal', []); break;
@@ -433,6 +433,7 @@
       case 'handle-model-change': callWindow('handleModelChange', []); break;
       case 'update-next-sibling-category': { var nxt = el.nextElementSibling; if (nxt && nxt.dataset) nxt.dataset.category = el.value; } break;
       case 'pick-calendar-day': callWindow('pickCalendarDay', [el.value]); break;
+      case 'event-field': callWindow('updateEventSummary', [el.dataset.prefix]); break;
       case 'update-proposed-deck': callWindow('updateProposedDeck', [el.dataset.id||el.dataset.todoId, el.value]); break;
       default: break;
     }
@@ -476,6 +477,7 @@
     if (isReadOnly()) return; // non-filter inputs are edit flows (silent: fires per keystroke)
     switch (action) {
       case 'update-scene-preview': callWindow('updateScenePreview', [el]); break;
+      case 'event-field': callWindow('updateEventSummary', [el.dataset.prefix]); break;
       default: break;
     }
   }

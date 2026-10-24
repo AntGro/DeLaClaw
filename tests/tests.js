@@ -4180,9 +4180,14 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('calendar-pure: event instant model — wall time, conversion, placement', async () => {
       const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
-      for (const fn of ['wallTimeToInstant', 'instantToDateStr', 'instantToTimeStr', 'eventSpan', 'eventDatesInRange']) {
+      for (const fn of ['wallTimeToInstant', 'instantToDateStr', 'instantToTimeStr', 'eventSpan', 'eventDatesInRange', 'gmtOffsetLabel']) {
         assert(typeof mod[fn] === 'function', `calendar-pure must export ${fn}`);
       }
+      // GMT offset labels are DST-aware (read on the event's date).
+      assert(mod.gmtOffsetLabel('Europe/Paris', '2026-10-24') === 'GMT+2', 'Paris in October is GMT+2');
+      assert(mod.gmtOffsetLabel('Europe/Paris', '2026-01-15') === 'GMT+1', 'Paris in January is GMT+1');
+      assert(mod.gmtOffsetLabel('America/New_York', '2026-10-24') === 'GMT-4', 'New York in October is GMT-4');
+      assert(mod.gmtOffsetLabel('Asia/Tokyo', '2026-10-24') === 'GMT+9', 'Tokyo is GMT+9');
       // Wall time -> instant, pinned to known offsets (Oct = CEST/BST,
       // Jan = CET/GMT): Paris 09:00 in October is 07:00Z.
       assert(mod.wallTimeToInstant('2026-10-24', '09:00', 'Europe/Paris') === '2026-10-24T07:00:00.000Z',
@@ -4248,7 +4253,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // View wiring: service worker precache, delegation cases, calendar collection
       assert(read('sw.js').includes("'js/events.js'"), 'sw precache must include js/events.js');
       const del = read('js/delegation.js');
-      for (const a of ['open-add-event', 'calendar-event-edit', 'save-new-event', 'save-edit-event', 'share-event', 'unshare-event', 'event-allday-toggle', 'toggle-cal-sync-events']) {
+      for (const a of ['open-add-event', 'calendar-event-edit', 'save-new-event', 'save-edit-event', 'share-event', 'unshare-event', 'event-set-mode', 'event-field', 'toggle-cal-sync-events']) {
         assert(del.includes(`case '${a}'`), `delegation must handle ${a}`);
       }
       const cal = read('js/calendar.js');

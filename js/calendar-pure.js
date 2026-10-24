@@ -348,6 +348,20 @@ export function addDays(dateStr, n) {
 /**
  * The 7 date strings ('YYYY-MM-DD') of the Monday-first week containing dateStr.
  */
+/**
+ * 'GMT+2' / 'GMT-4' style offset label for a zone on a date (DST-aware:
+ * the offset is read on the given date, default today). '' when the zone
+ * is unknown to Intl.
+ */
+export function gmtOffsetLabel(timeZone, dateStr) {
+  try {
+    const d = dateStr ? parseLocalDate(dateStr) : new Date();
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'shortOffset' }).formatToParts(d);
+    const part = parts.find(p => p.type === 'timeZoneName');
+    return part ? part.value : '';
+  } catch { return ''; }
+}
+
 export function getWeekDates(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d);

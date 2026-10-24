@@ -142,10 +142,6 @@ bun tests/tests.js
 
 Tests covering unit logic, adapter compliance, import/export, and structural checks (XSS escaping, generated-index freshness). All tests must pass before pushing to `dev`.
 
-## Contributing
-
-See [Contributing](docs-site/contributing.md).
-
 ## License
 
 [PolyForm Noncommercial 1.0.0](LICENSE) — see [NOTICE](NOTICE) for attribution requirements.

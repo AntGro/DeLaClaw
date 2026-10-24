@@ -2445,6 +2445,7 @@ button.cal-row { cursor: pointer; }
   white-space: nowrap;
 }
 .cal-row-sub { font-size: 0.75rem; color: var(--muted); }
+.cal-row-sub-overdue { color: var(--red); font-weight: 500; }
 .cal-row-avatar {
   width: 34px;
   height: 34px;

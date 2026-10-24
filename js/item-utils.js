@@ -596,7 +596,7 @@ export async function bulkSortOrder(tableName, updates) {
 // todo-cat-list, list-item-list, birthday-bucket-list)
 // lose their scrollTop. Capture before innerHTML, restore after.
 
-const SCROLLABLE_LIST_SELECTOR = '.task-list, .todo-cat-list, .list-item-list, .birthday-bucket-list, .welcome-items';
+const SCROLLABLE_LIST_SELECTOR = '.task-list, .todo-cat-list, .list-item-list, .birthday-bucket-list, .welcome-items, .cal-day-list';
 
 function scrollContainerKey(el) {
   if (el.id) return 'id:' + el.id;

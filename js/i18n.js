@@ -421,6 +421,8 @@ const T = {
       day: 'Day', week: 'Week', month: 'Month', year: 'Year',
       week_of: 'Week of {0}',
       only_next_due: 'Only the next occurrence can be marked done',
+      prev_day: 'Previous day',
+      next_day: 'Next day',
     },
     // ── Flashcards ──
     flashcards: {
@@ -1223,6 +1225,8 @@ const T = {
       no_events: 'Rien de prévu', turns: '{0} ans',
       day: 'Jour', week: 'Semaine', month: 'Mois', year: 'Année',
       only_next_due: 'Seule la prochaine occurrence peut être validée',
+      prev_day: 'Jour précédent',
+      next_day: 'Jour suivant',
       week_of: 'Semaine du {0}',
     },
     flashcards: {
@@ -2021,6 +2025,8 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       no_events: 'Nada programado', turns: 'Cumple {0}',
       day: 'Día', week: 'Semana', month: 'Mes', year: 'Año',
       only_next_due: 'Solo se puede completar la próxima ocurrencia',
+      prev_day: 'Día anterior',
+      next_day: 'Día siguiente',
       week_of: 'Semana del {0}',
     },
     flashcards: {

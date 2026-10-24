@@ -23,7 +23,7 @@
 //                 created_by: string|null, members: GroupMember[], folderId?: string }
 //
 // SharedItem    { id: string, group_id: string, group_name?: string,
-//                 item_type: 'todo'|'habit'|'list_item',
+//                 item_type: 'todo'|'habit'|'list_item'|'event',
 //                 payload?: object, assignees?: string[], done: boolean,
 //                 done_by?: string[], created_by: string, created_at: string,
 //                 updated_at: string }
@@ -83,6 +83,7 @@ export const SHARING_INTERFACE = {
   getAllSharedHabits:        'fn',   // () => SharedItem[]
   getAllSharedTodos:         'fn',   // () => SharedItem[]
   getAllSharedListItems:     'fn',   // () => SharedItem[]
+  getAllSharedEvents:        'fn',   // () => SharedItem[]
   hasPendingCreate:          'fn',   // (groupId, itemId) => boolean — true while this tab staged the item but no upload acknowledged it yet
 
   // ── Items — invite codes ────────────────────────────────────

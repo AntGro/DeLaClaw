@@ -14,7 +14,7 @@ import { getTodos, catIdForTodo, getCategoryColor, getTodoCatPath, getTodoCatOrd
 import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatPath, getHabitCatOrderKey, isAutoHabit } from './habits.js';
 import { compareOrderKeys } from './sections-pure.js';
 import { captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
-import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates, isHabitSnoozed, parseLocalDate, overdueDays } from './calendar-pure.js';
+import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates, isHabitSnoozed, parseLocalDate, overdueDays, eventDatesInRange, eventSpan, instantToTimeStr, localTimeZone } from './calendar-pure.js';
 
 let calYear;
 let calMonth; // 0-based
@@ -34,6 +34,7 @@ let calShow = { // type filters
   todo: _calPrefs.show?.todo !== false,
   habit: _calPrefs.show?.habit !== false,
   birthday: _calPrefs.show?.birthday !== false,
+  event: _calPrefs.show?.event !== false,
 };
 
 function saveCalPrefs() {
@@ -56,7 +57,7 @@ function syncCalendarToolbar() {
   });
 }
 
-const TYPE_ORDER = { todo: 0, habit: 1, birthday: 2 };
+const TYPE_ORDER = { event: 0, todo: 1, habit: 2, birthday: 3 };
 const MAX_CHIPS = 3;
 
 function setAnchor(dateStr) {
@@ -183,6 +184,36 @@ function collectRangeEvents(start, end) {
     }
   }
 
+  // Events: timed events are absolute instants — the days they occupy
+  // are computed in the VIEWER's timezone (calendar-pure), so the same
+  // event can sit on different dates for different viewers. Full-day
+  // events occupy their stored date range as-is.
+  if (calShow.event) {
+    const viewerTz = localTimeZone();
+    for (const ev of state.allEvents || []) {
+      const placements = eventDatesInRange(ev, start, end, viewerTz);
+      if (!placements.length) continue;
+      const evBase = {
+        type: 'event', id: ev.id, title: ev.title || '', sub: '',
+        catColor: 'var(--event-color)',
+        allDay: !!ev.all_day,
+        start_ts: ev.start_ts || null, end_ts: ev.end_ts || null,
+        start_date: ev.start_date || null, end_date: ev.end_date || null,
+        timezone: ev.timezone || null,
+        startTimeLabel: ev.all_day ? '' : instantToTimeStr(ev.start_ts, viewerTz),
+        shared_id: ev.shared_id || null, shared_group_id: ev.shared_group_id || null,
+      };
+      // The full span (not just the in-range part) drives the day
+      // modal's time-range label.
+      const span = eventSpan(ev, viewerTz);
+      evBase.spanStart = span ? span.startDate : placements[0].date;
+      evBase.spanEnd = span ? span.endDate : placements[placements.length - 1].date;
+      for (const p of placements) {
+        push(p.date, { ...evBase, startsHere: p.startsHere, endsHere: p.endsHere });
+      }
+    }
+  }
+
   for (const evs of map.values()) evs.sort((a, b) => TYPE_ORDER[a.type] - TYPE_ORDER[b.type]);
   return map;
 }
@@ -202,7 +233,9 @@ function chipHTML(ev, hidden) {
     ? `<img src="${esc(ev.avatar)}" alt="" class="cal-chip-avatar">`
     : `<i></i>`;
   // TODOs/habits render markdown like their own pages do; birthdays stay plain text
-  const title = ev.type === 'birthday' ? esc(ev.title) : renderMd(ev.title);
+  // Timed events prefix their start time (viewer timezone) on their first day.
+  const title = ev.type === 'birthday' ? esc(ev.title)
+    : renderMd(ev.type === 'event' && !ev.allDay && ev.startsHere && ev.startTimeLabel ? `${ev.startTimeLabel} ${ev.title}` : ev.title);
   // Shape encodes the type; background encodes the item's category color
   // (birthdays have no category → type color fallback).
   const catColor = ev.catColor || (ev.type === 'birthday' ? 'var(--pink)' : 'var(--accent)');
@@ -563,6 +596,30 @@ function calSharedBadge(ev) {
 // the due date and by how much it is overdue — not just the red border.
 // (Buckets: formatHabitDue's overdue line; TODOs use the same
 // date + days-ago composition with their own i18n keys.)
+function calShortDate(dateStr) {
+  return parseLocalDate(dateStr).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' });
+}
+
+// Time-range sub-line for an event row in the day modal, in the
+// viewer's timezone. Full-day: "All day" (plus the range when it
+// spans days). Timed: "09:00 – 10:00", or "Oct 24 23:00 → Oct 25
+// 01:00" when the converted span crosses midnight; the event's own
+// timezone is appended when it differs from the viewer's.
+function calEventSub(ev) {
+  const viewerTz = localTimeZone();
+  if (ev.allDay) {
+    if (!ev.end_date || ev.end_date === ev.start_date) return t('events.all_day');
+    return `${calShortDate(ev.start_date)} – ${calShortDate(ev.end_date)} · ${t('events.all_day')}`;
+  }
+  const startT = instantToTimeStr(ev.start_ts, viewerTz);
+  const endT = instantToTimeStr(ev.end_ts, viewerTz);
+  let label = (ev.spanStart && ev.spanEnd && ev.spanStart !== ev.spanEnd)
+    ? `${calShortDate(ev.spanStart)} ${startT} → ${calShortDate(ev.spanEnd)} ${endT}`
+    : `${startT} – ${endT}`;
+  if (ev.timezone && ev.timezone !== viewerTz) label += ` · ${ev.timezone.replace(/_/g, ' ')}`;
+  return label;
+}
+
 function calOverdueSub(ev) {
   if (!ev.overdue) return '';
   const dueStr = ev.type === 'todo' ? ev.dueDate : ev.next_due;
@@ -577,6 +634,13 @@ function calOverdueSub(ev) {
 }
 
 function dayPanelRow(ev, dateStr) {
+  if (ev.type === 'event') {
+    return `<button class="cal-row" data-action="calendar-event-edit" data-id="${esc(ev.id)}">
+      <span class="cal-row-avatar cal-row-icon">${lucideIcon(ev.allDay ? 'calendar-days' : 'clock', 15)}</span>
+      <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong><span class="cal-row-sub">${esc(calEventSub(ev))}</span></span>
+      ${lucideIcon('pencil', 15)}
+    </button>`;
+  }
   if (ev.type === 'birthday') {
     const thumb = ev.avatar
       ? `<img src="${esc(ev.avatar)}" alt="" class="cal-row-avatar">`
@@ -657,14 +721,21 @@ function calendarDayNav(dir) {
 function dayGroupsHTML(dateStr) {
   const events = collectRangeEvents(dateStr, dateStr).get(dateStr) || [];
   const groups = [
+    { type: 'event', label: t('calendar.events'), color: 'var(--event-color)', icon: 'calendar-days' },
     { type: 'habit', label: t('calendar.habits'), color: 'var(--green)', icon: 'repeat' },
     { type: 'todo', label: t('calendar.todos'), color: 'var(--accent)', icon: 'list-checks' },
     { type: 'birthday', label: t('calendar.birthdays'), color: 'var(--pink)', icon: 'cake' },
   ];
   let body = '';
   for (const g of groups) {
-    const evs = events.filter(e => e.type === g.type);
+    let evs = events.filter(e => e.type === g.type);
     if (!evs.length) continue;
+    if (g.type === 'event') {
+      // Full-day first, then by start instant (viewer-day order).
+      evs = [...evs].sort((a, b) =>
+        (a.allDay ? 0 : 1) - (b.allDay ? 0 : 1) ||
+        String(a.start_ts || a.start_date || '').localeCompare(String(b.start_ts || b.start_date || '')));
+    }
     let items = '';
     if (g.type === 'birthday') {
       items = evs.map(e => dayPanelRow(e, dateStr)).join('');
@@ -716,6 +787,7 @@ function renderCalendarDayPanel(dateStr) {
           title="${t('common.add')}" aria-expanded="false" aria-haspopup="true">${lucideIcon('plus', 16)}</button>
         <div class="calendar-add-menu" id="calendarDayAddMenu" style="display:none" role="menu">
           <button data-action="open-add-birthday" data-date="${dateStr}" role="menuitem">${lucideIcon('cake', 15)} <span>${t('birthdays.add_birthday')}</span></button>
+          <button data-action="open-add-event" data-date="${dateStr}" role="menuitem">${lucideIcon('calendar-plus', 15)} <span>${t('events.add_event')}</span></button>
         </div>
       </div>
     </div>

@@ -85,6 +85,126 @@ export function overdueDays(dueStr, todayStr) {
   return diff < 0 ? -diff : 0;
 }
 
+// ===================================================================
+// USER EVENTS — instant model (v2.31.0)
+// ===================================================================
+// Timed events store absolute instants (start_ts / end_ts, UTC ISO)
+// plus the IANA timezone they were entered in. Display converts to
+// the VIEWER's timezone: an event's days are the days its instant
+// interval overlaps in the viewer's timezone, so it can sit on a
+// different date for a viewer in another zone — standard calendar
+// semantics. Full-day events store an inclusive date range
+// (start_date..end_date) and never convert.
+
+const _tzFormatters = new Map();
+function _tzFormatter(timeZone) {
+  let fmt = _tzFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    });
+    _tzFormatters.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
+/** Wall-clock parts of an instant (ms since epoch) in a timezone. */
+function _zonedParts(ms, timeZone) {
+  const parts = _tzFormatter(timeZone).formatToParts(new Date(ms));
+  const out = {};
+  for (const p of parts) {
+    if (p.type !== 'literal') out[p.type] = Number(p.value);
+  }
+  return out; // { year, month, day, hour, minute, second }
+}
+
+/** The local timezone of the current runtime (IANA name). */
+export function localTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+/** 'YYYY-MM-DD' of an instant (ISO string) as seen in timeZone. */
+export function instantToDateStr(isoTs, timeZone) {
+  const ms = Date.parse(isoTs);
+  if (!Number.isFinite(ms)) return '';
+  const p = _zonedParts(ms, timeZone);
+  return toDateStr(p.year, p.month - 1, p.day);
+}
+
+/** 'HH:MM' of an instant (ISO string) as seen in timeZone. */
+export function instantToTimeStr(isoTs, timeZone) {
+  const ms = Date.parse(isoTs);
+  if (!Number.isFinite(ms)) return '';
+  const p = _zonedParts(ms, timeZone);
+  return `${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
+}
+
+/** UTC offset (ms) of timeZone at an instant: wall reading minus UTC. */
+function _tzOffsetMs(ms, timeZone) {
+  const p = _zonedParts(ms, timeZone);
+  const wallAsUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  return wallAsUTC - Math.floor(ms / 1000) * 1000;
+}
+
+/**
+ * The instant (UTC ISO string) corresponding to a wall-clock date +
+ * 'HH:MM' time in timeZone. Two-pass offset correction so the result
+ * is right on both sides of a DST transition; a wall time inside the
+ * spring-forward gap resolves to the nearest valid instant.
+ */
+export function wallTimeToInstant(dateStr, timeStr, timeZone) {
+  const [y, m, d] = String(dateStr || '').split('-').map(Number);
+  const [hh, mm] = String(timeStr || '00:00').split(':').map(Number);
+  if (!y || !m || !d) return '';
+  const wallAsUTC = Date.UTC(y, m - 1, d, hh || 0, mm || 0);
+  let instant = wallAsUTC - _tzOffsetMs(wallAsUTC, timeZone);
+  instant = wallAsUTC - _tzOffsetMs(instant, timeZone);
+  return new Date(instant).toISOString();
+}
+
+/**
+ * The full day span an event occupies for a viewer in viewerTz:
+ * { startDate, endDate } ('YYYY-MM-DD', inclusive) or null when the
+ * event carries no usable dates. Timed events: the days overlapped
+ * by [start_ts, end_ts) in viewerTz — an end exactly at local
+ * midnight does not claim the new day. Full-day: the stored range.
+ */
+export function eventSpan(ev, viewerTz) {
+  if (!ev) return null;
+  if (ev.all_day) {
+    if (!ev.start_date) return null;
+    return { startDate: ev.start_date, endDate: ev.end_date || ev.start_date };
+  }
+  if (!ev.start_ts || !ev.end_ts) return null;
+  const startDate = instantToDateStr(ev.start_ts, viewerTz);
+  const endMs = Date.parse(ev.end_ts);
+  if (!startDate || !Number.isFinite(endMs)) return null;
+  const endDate = instantToDateStr(new Date(endMs - 1).toISOString(), viewerTz);
+  return { startDate, endDate: endDate || startDate };
+}
+
+/**
+ * Placement of an event inside [rangeStart, rangeEnd] for a viewer in
+ * viewerTz: one entry per occupied day within the range —
+ * { date, startsHere, endsHere } — startsHere/endsHere mark the
+ * event's own first/last day (false on days where it merely
+ * continues through the range edge). Empty array when outside.
+ */
+export function eventDatesInRange(ev, rangeStart, rangeEnd, viewerTz) {
+  const span = eventSpan(ev, viewerTz);
+  if (!span) return [];
+  const start = span.startDate < rangeStart ? rangeStart : span.startDate;
+  const end = span.endDate > rangeEnd ? rangeEnd : span.endDate;
+  if (start > end) return [];
+  const out = [];
+  for (let d = start; ; d = addDays(d, 1)) {
+    out.push({ date: d, startsHere: d === span.startDate, endsHere: d === span.endDate });
+    if (d === end) break;
+  }
+  return out;
+}
+
 /**
  * Month grid: array of weeks; each week is 7 { date, inMonth } cells,
  * Monday-first, including leading/trailing days from adjacent months.

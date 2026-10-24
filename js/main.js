@@ -19,6 +19,7 @@ const SETTINGS_PANES = ['general', 'calendar', 'data', 'stats', 'agents', 'accou
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
 import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
 import { refreshBirthdays, initBirthdayModals } from './birthdays.js';
+import { refreshEvents, initEventModals, syncSharedEvents } from './events.js';
 import { renderCalendar } from './calendar.js';
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals, syncSharedListItems } from './lists.js';
@@ -711,6 +712,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Wrap all save/add/submit actions with guard() to prevent double-fire
   const guardedNames = [
     'saveNewBirthday', 'saveEditBirthday', 'removeAvatar',
+    'saveNewEvent', 'saveEditEvent',
     'saveNewDraft', 'saveEditedProposal', 'saveNewFlashcard', 'saveEditFlashcard',
     'saveNewText', 'saveEditText', 'submitFeedback', 'submitTextReview',
     'saveEditDeck',
@@ -1385,6 +1387,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       habits: () => refreshHabits(),
       habit_completions: () => refreshHabits(),
       birthdays: () => refreshBirthdays(),
+      events: () => refreshEvents(),
       flashcards: () => refreshFlashcards(),
       flashcard_notes: () => refreshFlashcards(),
       lists: () => refreshLists(),
@@ -1477,6 +1480,11 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   initBirthdayModals();
   await refreshBirthdays();
 
+  // Initialize Events
+  initEventModals();
+  if (state.sharing) await syncSharedEvents();
+  await refreshEvents();
+
   // Initialize Flashcards
   initFlashcardModals();
   await refreshFlashcards();
@@ -1512,6 +1520,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       if (await syncSharedTodos()) await refreshTodos();
       if (await syncSharedHabits()) await refreshHabits();
       if (await syncSharedListItems()) await refreshLists();
+      if (await syncSharedEvents()) await refreshEvents();
     } catch (e) {
       console.warn('sharing refresh:', e);
     }
@@ -1582,6 +1591,7 @@ function initDemoBanner() {
     await refreshTodos();
     await refreshHabits();
     await refreshBirthdays();
+    await refreshEvents();
     await refreshFlashcards();
     await refreshLists();
     refreshWelcome();
@@ -1806,6 +1816,7 @@ async function onLangSwitchDemo(lang) {
   await refreshTodos();
   await refreshHabits();
   await refreshBirthdays();
+  await refreshEvents();
   await refreshFlashcards();
   refreshWelcome();
   // Re-render banner text
@@ -2065,6 +2076,8 @@ function updateStaticLabels() {
   if (settingsCalSyncTodosLabel) settingsCalSyncTodosLabel.textContent = t('cal_sync.todos');
   const settingsCalSyncBirthdaysLabel = document.getElementById('settingsCalSyncBirthdaysLabel');
   if (settingsCalSyncBirthdaysLabel) settingsCalSyncBirthdaysLabel.textContent = t('cal_sync.birthdays');
+  const settingsCalSyncEventsLabel = document.getElementById('settingsCalSyncEventsLabel');
+  if (settingsCalSyncEventsLabel) settingsCalSyncEventsLabel.textContent = t('cal_sync.events');
   const settingsCalSyncResyncLabel = document.getElementById('settingsCalSyncResyncLabel');
   if (settingsCalSyncResyncLabel) settingsCalSyncResyncLabel.textContent = t('cal_sync.resync');
   const settingsTabsLabel = document.getElementById('settingsTabsLabel');
@@ -2128,6 +2141,10 @@ function updateStaticLabels() {
   }
   const calAddBirthday = document.getElementById('calendarAddBirthdayLabel');
   if (calAddBirthday) calAddBirthday.textContent = t('birthdays.add_birthday');
+  const calAddEvent = document.getElementById('calendarAddEventLabel');
+  if (calAddEvent) calAddEvent.textContent = t('events.add_event');
+  const calFE = document.getElementById('calendarFilterEvents');
+  if (calFE) calFE.textContent = t('calendar.events');
   const calFT = document.getElementById('calendarFilterTodos');
   if (calFT) calFT.textContent = t('calendar.todos');
   const calFH = document.getElementById('calendarFilterHabits');
@@ -3130,7 +3147,7 @@ async function performImport(file) {
     // The backup's own calendar keys are meaningless in this account, so we
     // always re-inject the pre-import values after reseed.
     const CAL_KEYS = ['gcal_sync_enabled', 'gcal_calendar_id',
-      'gcal_sync_habits', 'gcal_sync_todos', 'gcal_sync_birthdays'];
+      'gcal_sync_habits', 'gcal_sync_todos', 'gcal_sync_birthdays', 'gcal_sync_events'];
     const savedCalSettings = {};
     if (state.driveMode) {
       for (const k of CAL_KEYS) {
@@ -3143,7 +3160,7 @@ async function performImport(file) {
     //    gcal_sync records and settings from the in-memory store. ──
     const syncWasEnabled = savedCalSettings.gcal_sync_enabled === 'true';
     if (syncWasEnabled && savedCalSettings.gcal_calendar_id) {
-      for (const itemType of ['todo', 'habit', 'birthday']) {
+      for (const itemType of ['todo', 'habit', 'birthday', 'event']) {
         try { await deleteTypeEvents(itemType); } catch (_) { /* best effort */ }
       }
     }
@@ -3264,6 +3281,7 @@ async function performImport(file) {
       await refreshTodos();
       await refreshHabits();
       await refreshBirthdays();
+      await refreshEvents();
       await refreshFlashcards();
       await refreshLists();
       refreshWelcome();
@@ -3423,6 +3441,9 @@ function updateViewFooterStats() {
     },
     birthdays: () => [
       `${icon('cake')} Birthdays: ${state.allBirthdays.length}`,
+    ],
+    events: () => [
+      `${icon('calendar-days')} Events: ${(state.allEvents || []).length}`,
     ],
     flashcards: () => {
       const c = getFlashcardCounts();
@@ -3665,9 +3686,11 @@ async function updateCalSyncUI() {
   const hRow = document.querySelector('[data-action="toggle-cal-sync-habits"]');
   const tRow = document.querySelector('[data-action="toggle-cal-sync-todos"]');
   const bRow = document.querySelector('[data-action="toggle-cal-sync-birthdays"]');
+  const eRow = document.querySelector('[data-action="toggle-cal-sync-events"]');
   if (hRow) hRow.classList.toggle('checked', prefs.habits);
   if (tRow) tRow.classList.toggle('checked', prefs.todos);
   if (bRow) bRow.classList.toggle('checked', prefs.birthdays);
+  if (eRow) eRow.classList.toggle('checked', prefs.events);
   // Show calendar nav button only for Drive and Demo backends
   const calNavBtn = document.getElementById('settingsNavCalendarBtn');
   if (calNavBtn) calNavBtn.style.display = (state.demoMode || state.driveMode) ? '' : 'none';
@@ -3755,6 +3778,7 @@ async function resyncCalSync() {
     '[data-action="toggle-cal-sync-habits"]',
     '[data-action="toggle-cal-sync-todos"]',
     '[data-action="toggle-cal-sync-birthdays"]',
+    '[data-action="toggle-cal-sync-events"]',
   ].map(s => document.querySelector(s)).filter(Boolean);
   toggleRows.forEach(r => r.classList.add('is-pending'));
   const progressEl = document.getElementById('calSyncProgress');
@@ -3813,8 +3837,8 @@ async function toggleCalSyncSub(subKey) {
       { onConflict: 'key' }
     );
     await updateCalSyncUI();
-    // subKey is 'habits', 'todos', or 'birthdays' → item type is singular
-    const itemType = subKey.replace(/s$/, ''); // 'habit', 'todo', 'birthday'
+    // subKey is 'habits', 'todos', 'birthdays' or 'events' → item type is singular
+    const itemType = subKey.replace(/s$/, ''); // 'habit', 'todo', 'birthday', 'event'
     const label = t(`cal_sync.${subKey}`);
     const msgKey = newVal ? 'syncing_type' : 'removing_type';
     const doneKey = newVal ? 'sync_complete' : 'remove_complete';

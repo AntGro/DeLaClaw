@@ -55,7 +55,7 @@ All adapters return `{ data, error }` objects. Successful queries return `{ data
 
 Combines the demo adapter's in-memory query engine with Google Drive persistence. On connect, it authenticates via Google Identity Services (`drive.file` scope, plus optional `calendar.app.created` for [Calendar sync](sync-architecture.md)), finds or creates a `DeLaClaw/` folder (`DeLaClawDev/` on dev and preview builds), and loads per-table JSON files (e.g. `todos.json`, `habits.json`) into memory. All runtime queries hit the in-memory store (instant). On any mutation, a 2-second debounced write-back uploads the changed table to Drive as its own JSON file. The adapter exposes `forceSave()` for explicit flushes (called on `beforeunload` and `visibilitychange` → hidden), and `reseed()` for backup imports. A 30-second polling loop checks Drive for external changes; an immediate poll also fires on window focus (covers both tab switch-back and window switch-back).
 
-After a successful Drive flush, the optional Calendar sync module writes dirty items (habits, TODOs, birthdays) to a dedicated "DeLaClaw" Google Calendar ("DeLaClawDev" on dev and preview builds). See [Sync Architecture](sync-architecture.md) for the full flow.
+After a successful Drive flush, the optional Calendar sync module writes dirty items (habits, TODOs, birthdays, events) to a dedicated "DeLaClaw" Google Calendar ("DeLaClawDev" on dev and preview builds). See [Sync Architecture](sync-architecture.md) for the full flow.
 
 ## State management
 
@@ -108,6 +108,7 @@ The canonical table list lives in `server/schema.sql` (SQLite base schema).
 | `texts` | Full texts for memorization (chunked) | -- |
 | `text_line_progress` | Per-chunk SRS progress for texts | `text_id` -> `texts.id` |
 | `birthdays` | Birthday records with optional avatars | -- |
+| `events` | User calendar events: timed instants + entry timezone, or full-day date ranges | -- |
 | `lists` | Checklist containers | -- |
 | `list_items` | Items within lists | `list_id` -> `lists.id` |
 | `settings` | Key-value store (schema version, preferences) | -- |
@@ -212,7 +213,8 @@ js/
   flashcards.js            Flashcard SRS + text memorization
   scene-parse.js           Scene script parsing for text memorization (pure)
   birthdays.js             Birthday data + CRUD modals (no page; surfaces on Calendar)
-  calendar.js              Calendar page (todos, habits, birthdays month grid)
+  events.js                Event data + CRUD modals (no page; lives on Calendar)
+  calendar.js              Calendar page (todos, habits, birthdays, events month grid)
   calendar-pure.js         Pure calendar date/expansion logic
   lists.js                 Checklists
   sections-pure.js         Nested-section tree logic for TODOs, Habits and Lists (pure)

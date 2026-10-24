@@ -212,7 +212,7 @@ function en() {
     { id: 'demo-li-023', list_id: 'demo-list-011', text: 'Colosseum tickets', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, events: [], lists, list_items };
 }
 
 // ── FRENCH ──
@@ -343,7 +343,7 @@ function fr() {
   ];
 
   // Re-use same habit_completions (ids are the same, habit_ids match)
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, events: [], lists, list_items };
 }
 
 // ── SPANISH ──
@@ -473,7 +473,7 @@ function es() {
     { id: 'demo-li-023', list_id: 'demo-list-011', text: 'Entradas Coliseo', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, events: [], lists, list_items };
 }
 
 // ── MAIN EXPORT ──

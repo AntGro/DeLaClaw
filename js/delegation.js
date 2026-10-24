@@ -300,6 +300,7 @@
       case 'toggle-calendar-add': callWindow('toggleCalendarAddMenu', [el]); break;
       case 'edit-birthday-avatar': callWindow('handleAvatarClick', [el.dataset.id]); break;
       case 'calendar-birthday-edit': callWindow('closeCalendarDay', []); callWindow('openEditBirthdayModal', [el.dataset.id]); break;
+      case 'calendar-event-edit': callWindow('closeCalendarDay', []); callWindow('openEditEventModal', [el.dataset.id]); break;
       case 'calendar-toggle-todo': {
         var ctDone = el.dataset.done === 'true';
         var ctDate = el.dataset.date;
@@ -321,6 +322,17 @@
       }
       case 'open-edit-birthday': callWindow('openEditBirthdayModal', [getId(el)]); break;
       case 'delete-birthday': callWindow('deleteBirthday', [getId(el)]); break;
+      case 'open-add-event': callWindow('closeCalendarAddMenu', []); callWindow('closeCalendarDay', []); callWindow('openAddEventModal', [el.dataset.date]); break;
+      case 'open-edit-event': callWindow('openEditEventModal', [getId(el)]); break;
+      case 'delete-event': callWindow('deleteEvent', [getId(el)]); break;
+      case 'close-add-event': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddEventModal', []); break;
+      case 'save-new-event': callWindow('saveNewEvent', []); break;
+      case 'close-edit-event': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditEventModal', []); break;
+      case 'save-edit-event': callWindow('saveEditEvent', []); break;
+      case 'share-event': callWindow('shareEvent', [getId(el), el]); break;
+      case 'unshare-event': callWindow('unshareEvent', [getId(el), el]); break;
+      case 'copy-event-to-personal': callWindow('copyEventToPersonal', [getId(el), el]); break;
+      case 'event-allday-toggle': callWindow('toggleEventAllDay', [el.dataset.prefix, el.checked]); break;
       case 'pick-new-birthday-avatar': callWindow('pickNewBirthdayAvatar', []); break;
       case 'clear-new-birthday-avatar': callWindow('clearNewBirthdayAvatar', []); break;
       case 'close-add-birthday': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddBirthdayModal', []); break;
@@ -394,6 +406,7 @@
       case 'toggle-cal-sync-habits': callWindow('toggleCalSyncSub', ['habits']); break;
       case 'toggle-cal-sync-todos': callWindow('toggleCalSyncSub', ['todos']); break;
       case 'toggle-cal-sync-birthdays': callWindow('toggleCalSyncSub', ['birthdays']); break;
+      case 'toggle-cal-sync-events': callWindow('toggleCalSyncSub', ['events']); break;
       case 'resync-cal-sync': callWindow('resyncCalSync', []); break;
       default: {
         var camel = action.replace(/-([a-z])/g, function(_,c){ return c.toUpperCase(); });
@@ -486,6 +499,8 @@
         case 'save-new-list-on-enter': e.preventDefault(); callWindow('saveNewList', []); break;
         case 'save-edit-list-on-enter': e.preventDefault(); callWindow('saveEditList', []); break;
         case 'save-new-birthday-on-enter': e.preventDefault(); callWindow('saveNewBirthday', []); break;
+        case 'save-new-event-on-enter': e.preventDefault(); callWindow('saveNewEvent', []); break;
+        case 'save-edit-event-on-enter': e.preventDefault(); callWindow('saveEditEvent', []); break;
         case 'sharing-invite-on-enter': e.preventDefault(); if (window.sharingInvite) { var gid = el.dataset.groupId||el.dataset.id; window.sharingInvite(gid, null, el); } break;
         case 'sharing-create-group-on-enter': e.preventDefault(); callWindow('sharingCreateGroupSubmit', []); break;
         case 'sharing-join-code-on-enter': if ((e.ctrlKey || e.metaKey) && window.sharingJoinCodeSubmit) { e.preventDefault(); window.sharingJoinCodeSubmit(); } break;

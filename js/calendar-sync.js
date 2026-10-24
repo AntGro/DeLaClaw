@@ -1,5 +1,5 @@
 // ===================================================================
-// CALENDAR SYNC — sync habits, todos, birthdays to Google Calendar
+// CALENDAR SYNC — sync habits, todos, birthdays, events to Google Calendar
 // ===================================================================
 // Creates a dedicated "DeLaClaw" calendar ("DeLaClawDev" off-production,
 // via js/drive-folders.js) and maps items via the
@@ -43,12 +43,13 @@ export async function isCalSyncEnabled() {
 }
 
 export async function getCalSyncPrefs() {
-  const [enabled, calId, habits, todos, birthdays] = await Promise.all([
+  const [enabled, calId, habits, todos, birthdays, events] = await Promise.all([
     getSetting('gcal_sync_enabled'),
     getSetting('gcal_calendar_id'),
     getSetting('gcal_sync_habits'),
     getSetting('gcal_sync_todos'),
     getSetting('gcal_sync_birthdays'),
+    getSetting('gcal_sync_events'),
   ]);
   return {
     enabled: enabled === 'true',
@@ -56,6 +57,7 @@ export async function getCalSyncPrefs() {
     habits: habits !== 'false',   // default true
     todos: todos !== 'false',     // default true
     birthdays: birthdays !== 'false', // default true
+    events: events !== 'false',   // default true
   };
 }
 
@@ -256,6 +258,12 @@ async function getSyncableItems(itemType) {
     for (const b of (birthdays || [])) {
       if (b.date || b.birthday) items.push({ id: b.id, item: b });
     }
+  } else if (itemType === 'event') {
+    const { data: events } = await state.db.from('events').select('*');
+    for (const ev of (events || [])) {
+      const item = resolveRow('event', ev);
+      if (item && (item.start_ts || item.start_date)) items.push({ id: item.id, item });
+    }
   }
   return { items, deferredIds };
 }
@@ -347,6 +355,31 @@ function todoToEvent(todo) {
   };
 }
 
+function calEventToEvent(ev) {
+  // Shared events: [Event][group name]; personal: [Event]
+  const prefix = ev._sharedGroupName ? `[Event][${ev._sharedGroupName}]` : '[Event]';
+  const base = {
+    summary: `${prefix} ${ev.title || ''}`,
+    ...(ev.note ? { description: ev.note } : {}),
+    extendedProperties: { private: { delaclaw_type: 'event', delaclaw_id: ev.id } },
+  };
+  if (ev.all_day) {
+    if (!ev.start_date) return null;
+    // Google all-day end.date is exclusive: stored end is inclusive.
+    return {
+      ...base,
+      start: { date: ev.start_date },
+      end: { date: nextDay(ev.end_date || ev.start_date) },
+    };
+  }
+  if (!ev.start_ts || !ev.end_ts) return null;
+  return {
+    ...base,
+    start: { dateTime: ev.start_ts, ...(ev.timezone ? { timeZone: ev.timezone } : {}) },
+    end: { dateTime: ev.end_ts, ...(ev.timezone ? { timeZone: ev.timezone } : {}) },
+  };
+}
+
 function birthdayToEvent(birthday) {
   const dateStr = birthday.date || birthday.birthday;
   if (!dateStr) return null;
@@ -371,6 +404,7 @@ function itemToEvent(itemType, item) {
     case 'habit': return habitToEvent(item);
     case 'todo': return todoToEvent(item);
     case 'birthday': return birthdayToEvent(item);
+    case 'event': return calEventToEvent(item);
     default: return null;
   }
 }
@@ -502,7 +536,7 @@ export async function disableCalSync({ deleteCalendar = false, onProgress } = {}
 
 // ── Table-name → item-type mapping for Drive flush hook ─────────
 
-const TABLE_TO_TYPE = { todos: 'todo', habits: 'habit', birthdays: 'birthday' };
+const TABLE_TO_TYPE = { todos: 'todo', habits: 'habit', birthdays: 'birthday', events: 'event' };
 // Category tables → corresponding item table (shortname rename triggers full scan)
 export const CAT_TABLE_TO_ITEM_TABLE = { todo_categories: 'todos', habit_categories: 'habits' };
 const BATCH_ENDPOINT = 'https://www.googleapis.com/batch/calendar/v3';
@@ -668,6 +702,8 @@ function resolveSharedRow(itemType, row) {
       sh = state.sharing.getAllSharedItems().find(i => i.item_type === 'todo' && i.id === row.shared_id) || null;
     } else if (itemType === 'habit') {
       sh = state.sharing.getAllSharedHabits().find(h => h.id === row.shared_id) || null;
+    } else if (itemType === 'event') {
+      sh = state.sharing.getAllSharedItems().find(i => i.item_type === 'event' && i.id === row.shared_id) || null;
     }
   } catch { sh = null; }
   if (!sh) return { status: 'gone' };
@@ -682,6 +718,24 @@ function resolveSharedRow(itemType, row) {
         snooze_until: sh.payload?.snooze_until || null,
         done: sh.done ? 1 : 0,
         _sharedCategory: sh.payload?.category || '',
+        _sharedGroupName: groupName,
+      },
+    };
+  }
+  if (itemType === 'event') {
+    const p = sh.payload || {};
+    return {
+      status: 'ready',
+      item: {
+        ...row,
+        title: p.title || '',
+        note: p.note || null,
+        all_day: p.all_day ? 1 : 0,
+        start_ts: p.start_ts || null,
+        end_ts: p.end_ts || null,
+        start_date: p.start_date || null,
+        end_date: p.end_date || null,
+        timezone: p.timezone || null,
         _sharedGroupName: groupName,
       },
     };
@@ -726,6 +780,14 @@ async function getActiveItemFromDb(itemType, itemId) {
     const { data } = await state.db.from('birthdays').select('*').eq('id', itemId);
     const b = data?.[0];
     return (b && (b.date || b.birthday)) ? b : null;
+  } else if (itemType === 'event') {
+    const { data } = await state.db.from('events').select('*').eq('id', itemId);
+    const ev = data?.[0];
+    if (!ev) return null;
+    const r = resolveSharedRow('event', ev);
+    if (r.status === 'deferred') return SHARED_NOT_READY;
+    if (r.status === 'gone') return null;
+    return (r.item.start_ts || r.item.start_date) ? r.item : null;
   }
   return null;
 }
@@ -930,6 +992,7 @@ export async function reconcileAll(onProgress) {
   if (prefs.habits) types.push({ table: 'habits', type: 'habit' });
   if (prefs.todos) types.push({ table: 'todos', type: 'todo' });
   if (prefs.birthdays) types.push({ table: 'birthdays', type: 'birthday' });
+  if (prefs.events) types.push({ table: 'events', type: 'event' });
 
   for (let i = 0; i < types.length; i++) {
     const { table, type } = types[i];
@@ -957,6 +1020,7 @@ export async function reconcileLedger() {
   if (prefs.habits) types.push({ table: 'habits', type: 'habit' });
   if (prefs.todos) types.push({ table: 'todos', type: 'todo' });
   if (prefs.birthdays) types.push({ table: 'birthdays', type: 'birthday' });
+  if (prefs.events) types.push({ table: 'events', type: 'event' });
 
   for (const { table, type } of types) {
     const { items } = await getSyncableItems(type);
@@ -1151,6 +1215,7 @@ export async function migrateEventIdsToDeterministic() {
     if (prefs.habits) types.push(['habit', 'habits']);
     if (prefs.todos) types.push(['todo', 'todos']);
     if (prefs.birthdays) types.push(['birthday', 'birthdays']);
+    if (prefs.events) types.push(['event', 'events']);
 
     // Precondition: every syncable item id must be derivable — fail before
     // touching the calendar, never leave a half-wiped state.

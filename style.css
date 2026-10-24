@@ -8,6 +8,7 @@
   --accent: oklch(0.65 0.15 264);
   --accent-dim: oklch(0.65 0.15 264 / 0.15);
   --pink: #ec4899;
+  --event-color: oklch(0.62 0.13 195);
   --green: #10b981;
   --yellow: #eab308;
   --role-c0: oklch(0.72 0.15 55);
@@ -2342,12 +2343,14 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
   background: var(--cat-color, var(--accent));
   flex: none;
 }
-/* Type shape language: todo = square, habit = pill/circle, birthday = soft rect */
+/* Type shape language: todo = square, habit = pill/circle, birthday = soft rect, event = mid rect */
 .cal-chip.cal-todo { border-radius: 4px; }
 .cal-chip.cal-todo > i { border-radius: 2px; }
 .cal-chip.cal-habit { border-radius: 999px; }
 .cal-chip.cal-habit > i { border-radius: 50%; }
 .cal-chip.cal-birthday { border-radius: 8px; }
+.cal-chip.cal-event { border-radius: 6px; }
+.cal-chip.cal-event > i { border-radius: 3px; }
 .cal-more {
   font-size: 0.66rem;
   color: var(--muted);
@@ -2461,6 +2464,24 @@ button.cal-row { cursor: pointer; }
   font-weight: 700;
   color: var(--accent);
 }
+.cal-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--event-color);
+}
+/* Event modal form */
+.event-allday-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.event-time-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
 .cal-row .todo-done-btn,
 .cal-row .habit-done-btn {
   flex: none;
@@ -2525,6 +2546,7 @@ button.cal-row { cursor: pointer; }
   .cal-dot.cal-todo { background: var(--accent); }
   .cal-dot.cal-habit { background: var(--green); }
   .cal-dot.cal-birthday { background: var(--pink); }
+  .cal-dot.cal-event { background: var(--event-color); }
   .cal-day-num { font-size: 0.75rem; }
   .calendar-month-label { font-size: 0.95rem; }
   /* Week view on narrow screens: days wrap over two rows (4 + 3) so
@@ -2565,6 +2587,7 @@ button.cal-row { cursor: pointer; }
 .cal-swatch.cal-todo { background: var(--accent); }
 .cal-swatch.cal-habit { background: var(--green); }
 .cal-swatch.cal-birthday { background: var(--pink); }
+.cal-swatch.cal-event { background: var(--event-color); }
 .calendar-add-menu button .cal-check {
   margin-left: auto;
   visibility: hidden;
@@ -2677,6 +2700,7 @@ button.cal-row { cursor: pointer; }
 .cal-mini .cal-dot.cal-todo { background: var(--accent); }
 .cal-mini .cal-dot.cal-habit { background: var(--green); }
 .cal-mini .cal-dot.cal-birthday { background: var(--pink); }
+.cal-mini .cal-dot.cal-event { background: var(--event-color); }
 @media (max-width: 640px) {
   .cal-week-page .cal-day { min-height: 64px; }
   /* Deterministic 2 columns on phones (auto-fill behaved unpredictably) */

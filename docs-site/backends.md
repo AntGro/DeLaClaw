@@ -95,7 +95,7 @@ These **must stay in sync**. The `draft` status bug (v1.105) was caused by the d
 | **Storage limits** | Free tier: 15 GB shared across Gmail/Drive/Photos. DeLaClaw JSON typically < 1 MB | SQLite limit: ~281 TB. Effectively unlimited | N/A |
 | **Security** | Inherits Google account security. `drive.file` scope → no access to user's other Drive files. `calendar.app.created` scope → no access to user's other calendars | No auth, no encryption at rest. Trusted local networks only. **TODO:** bind to `127.0.0.1`; add optional auth token | N/A |
 | **Setup** | Click "Connect with Google" → authorize → folder and data file created automatically | `cd server && bun run server.js`. Enter `http://localhost:3737` in login form | Click "Demo" on login screen, choose a sample dataset or start empty |
-| **Purpose** | Primary persistent backend — no database, no API keys, just a Google account. Optional Calendar sync projects habits, TODOs, and birthdays to a dedicated Google Calendar | Self-hosted option for privacy-conscious users on trusted networks | Try DeLaClaw without any backend. Also serves as the Drive adapter's query engine |
+| **Purpose** | Primary persistent backend — no database, no API keys, just a Google account. Optional Calendar sync projects habits, TODOs, birthdays, and events to a dedicated Google Calendar | Self-hosted option for privacy-conscious users on trusted networks | Try DeLaClaw without any backend. Also serves as the Drive adapter's query engine |
 
 ### Drive folder naming — production vs preview builds
 
@@ -142,7 +142,7 @@ demo engine for query execution. Mutations mark the table dirty; a 2-second debo
 uploads the JSON file to Drive. Conflict resolution uses ETags (412 → re-read, merge by
 `updated_at`, retry). `forceSave()` flushes on `beforeunload` / `visibilitychange`.
 
-After a successful Drive flush, the Calendar sync module writes dirty items (habits, TODOs, birthdays) to the dedicated Google Calendar. For the full Drive + Calendar sync flow including dirty tracking and debounce, see [Sync Architecture](sync-architecture.md).
+After a successful Drive flush, the Calendar sync module writes dirty items (habits, TODOs, birthdays, events) to the dedicated Google Calendar. For the full Drive + Calendar sync flow including dirty tracking and debounce, see [Sync Architecture](sync-architecture.md).
 
 ### Demo — ephemeral in-memory
 
@@ -392,6 +392,7 @@ Tables tracked in `BACKUP_TABLES` (import order):
 | `flashcard_notes` | Draft flashcard proposals | — |
 | `text_line_progress` | Reading progress per line | `texts.id` |
 | `birthdays` | Birthday tracker | — |
+| `events` | Calendar events | — |
 | `list_items` | Items within lists | `lists.id` |
 | `settings` | App settings (key/value) | — |
 | `prompts` | AI prompts (global + per-project) | — |

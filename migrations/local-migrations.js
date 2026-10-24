@@ -622,4 +622,25 @@ export const LOCAL_MIGRATIONS = {
       upd.run(result.next_due, result.is_finished, h.id);
     }
   },
+  // 2.28.0: user calendar events (Calendar page + add menu). Timed
+  // events store absolute instants + their IANA timezone; full-day
+  // events store an inclusive date range. Same DDL as schema.sql.
+  '2.28.0': `
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      title TEXT NOT NULL,
+      note TEXT,
+      all_day INTEGER DEFAULT 0,
+      start_ts TEXT,
+      end_ts TEXT,
+      start_date TEXT,
+      end_date TEXT,
+      timezone TEXT,
+      shared_id TEXT,
+      shared_group_id TEXT,
+      owner_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `,
 };

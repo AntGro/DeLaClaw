@@ -12,6 +12,7 @@ const state = {
   allHabits: [],
   allHabitCompletions: [],
   allBirthdays: [],
+  allEvents: [],
   allLists: [],
   allListItems: [],
   currentView: 'projects',

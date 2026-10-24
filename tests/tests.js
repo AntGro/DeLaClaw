@@ -4178,6 +4178,84 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'calOverdueSub must compute the count via calendar-pure overdueDays');
     });
 
+    test('calendar-pure: event instant model — wall time, conversion, placement', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      for (const fn of ['wallTimeToInstant', 'instantToDateStr', 'instantToTimeStr', 'eventSpan', 'eventDatesInRange']) {
+        assert(typeof mod[fn] === 'function', `calendar-pure must export ${fn}`);
+      }
+      // Wall time -> instant, pinned to known offsets (Oct = CEST/BST,
+      // Jan = CET/GMT): Paris 09:00 in October is 07:00Z.
+      assert(mod.wallTimeToInstant('2026-10-24', '09:00', 'Europe/Paris') === '2026-10-24T07:00:00.000Z',
+        'Paris 09:00 (CEST, UTC+2) must be 07:00Z');
+      assert(mod.wallTimeToInstant('2026-10-24', '09:00', 'Europe/London') === '2026-10-24T08:00:00.000Z',
+        'London 09:00 (BST, UTC+1) must be 08:00Z');
+      assert(mod.wallTimeToInstant('2026-01-15', '09:00', 'Europe/Paris') === '2026-01-15T08:00:00.000Z',
+        'Paris 09:00 in January (CET, UTC+1) must be 08:00Z');
+      // Round trip through zones.
+      assert(mod.instantToTimeStr('2026-10-24T07:00:00.000Z', 'Europe/Paris') === '09:00',
+        '07:00Z must read 09:00 in Paris');
+      assert(mod.instantToDateStr('2026-10-24T23:30:00.000Z', 'America/New_York') === '2026-10-24',
+        '23:30Z is still Oct 24 in New York');
+      assert(mod.instantToDateStr('2026-10-24T23:30:00.000Z', 'Asia/Tokyo') === '2026-10-25',
+        '23:30Z is already Oct 25 in Tokyo');
+      // A Paris 23:00 -> 01:00 event (21:00Z -> 23:00Z): how many days,
+      // and which, depends on the viewer's timezone.
+      const night = { all_day: 0, start_ts: '2026-10-24T21:00:00.000Z', end_ts: '2026-10-24T23:00:00.000Z', timezone: 'Europe/Paris' };
+      const daysParis = mod.eventDatesInRange(night, '2026-10-01', '2026-10-31', 'Europe/Paris').map(x => x.date);
+      assert(JSON.stringify(daysParis) === JSON.stringify(['2026-10-24', '2026-10-25']),
+        'in Paris the event spans Oct 24 and Oct 25');
+      const daysLondon = mod.eventDatesInRange(night, '2026-10-01', '2026-10-31', 'Europe/London').map(x => x.date);
+      assert(JSON.stringify(daysLondon) === JSON.stringify(['2026-10-24']),
+        'in London it ends exactly at midnight, so it occupies Oct 24 only');
+      const daysTokyo = mod.eventDatesInRange(night, '2026-10-01', '2026-10-31', 'Asia/Tokyo').map(x => x.date);
+      assert(JSON.stringify(daysTokyo) === JSON.stringify(['2026-10-25']),
+        'in Tokyo it sits entirely on Oct 25');
+      // Continuation flags at the range edge.
+      const clipped = mod.eventDatesInRange(night, '2026-10-25', '2026-10-25', 'Europe/Paris');
+      assert(clipped.length === 1 && clipped[0].startsHere === false && clipped[0].endsHere === true,
+        'a range-clipped continuation day is not the event start, but is its end');
+      // Full-day span: stored range, no conversion, clipped to range.
+      const conf = { all_day: 1, start_date: '2026-10-24', end_date: '2026-10-26' };
+      const confDays = mod.eventDatesInRange(conf, '2026-10-01', '2026-10-31', 'America/New_York');
+      assert(confDays.length === 3 && confDays[0].startsHere && confDays[2].endsHere,
+        'a full-day event occupies its stored range in every timezone');
+      assert(mod.eventDatesInRange(conf, '2026-11-01', '2026-11-30', 'Europe/Paris').length === 0,
+        'an event outside the range places nothing');
+      assert(mod.eventSpan({ all_day: 0, start_ts: '', end_ts: '' }, 'Europe/Paris') === null,
+        'a timed event without instants has no span');
+    });
+
+    test('events: table, sharing and sync registration sweep', async () => {
+      const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf-8');
+      // Data layer: schema + both migrations + adapter registration
+      assert(read('server/schema.sql').includes('CREATE TABLE IF NOT EXISTS events'), 'schema.sql must create the events table');
+      assert(read('migrations/local-migrations.js').includes("'2.28.0'"), 'local migrations must carry 2.28.0 (events table)');
+      assert(read('migrations/drive-migrations.js').includes("'2.28.0'"), 'drive migrations must carry 2.28.0 (events table)');
+      assert(read('js/adapters/drive.js').includes("'birthdays', 'events', 'lists'"), 'DRIVE_TABLES must register events (events.json)');
+      assert(read('js/demo-data.js').includes('events: []'), 'demo data must register an (empty) events table');
+      // Sharing: interface + stub key map + Drive item types + convenience getter
+      assert(read('js/sharing-interface.js').includes('getAllSharedEvents'), 'sharing interface must require getAllSharedEvents');
+      assert(read('js/sharing.js').includes("event: 'events'"), 'sharing stub SHARING_TYPE_KEY must map event -> events');
+      assert(read('js/sharing-drive.js').includes("const ITEM_TYPES       = ['todos', 'habits', 'lists', 'events'];"), 'sharing-drive ITEM_TYPES must include events (group events.json)');
+      assert(read('js/sharing-drive.js').includes('getAllSharedEvents()'), 'sharing-drive must implement getAllSharedEvents');
+      // Calendar sync: prefs, table map, payload builder, syncable branch, settings key preserved on restore
+      const sync = read('js/calendar-sync.js');
+      assert(sync.includes("getSetting('gcal_sync_events')"), 'cal sync prefs must read gcal_sync_events');
+      assert(sync.includes("events: 'event'"), 'TABLE_TO_TYPE must map events -> event');
+      assert(sync.includes('function calEventToEvent('), 'cal sync must build event payloads');
+      assert(sync.includes("case 'event': return calEventToEvent(item);"), 'itemToEvent must dispatch events');
+      assert(sync.includes("if (prefs.events) types.push({ table: 'events', type: 'event' });"), 'reconcile flows must include events');
+      // View wiring: service worker precache, delegation cases, calendar collection
+      assert(read('sw.js').includes("'js/events.js'"), 'sw precache must include js/events.js');
+      const del = read('js/delegation.js');
+      for (const a of ['open-add-event', 'calendar-event-edit', 'save-new-event', 'save-edit-event', 'share-event', 'unshare-event', 'event-allday-toggle', 'toggle-cal-sync-events']) {
+        assert(del.includes(`case '${a}'`), `delegation must handle ${a}`);
+      }
+      const cal = read('js/calendar.js');
+      assert(cal.includes('eventDatesInRange(ev, start, end, viewerTz)'), 'calendar must place events via calendar-pure');
+      assert(cal.includes('state.allEvents'), 'calendar must read state.allEvents');
+    });
+
     test('calendar-pure: month grid, habit expansion, birthdays', async () => {
       const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
       const { toDateStr, getMonthGrid, expandHabitOccurrences, birthdayInMonth, birthdaysInRange, toggleShow, addDays, getWeekDates } = mod;

@@ -452,4 +452,10 @@ export const DRIVE_MIGRATIONS = {
       h.is_finished = result.is_finished;
     }
   },
+  '2.28.0': async (store) => {
+    // 2.28.0: user calendar events get their own per-table file
+    // (events.json), registered in DRIVE_TABLES. Existing stores
+    // simply start with an empty table.
+    if (!store.events) store.events = [];
+  },
 };

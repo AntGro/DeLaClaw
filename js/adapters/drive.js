@@ -49,7 +49,7 @@ const MAX_RETRIES = 2;
 const DRIVE_TABLES = [
   'projects', 'tasks', 'todos', 'habits', 'habit_completions',
   'flashcards', 'flashcard_notes', 'texts', 'text_line_progress',
-  'birthdays', 'lists', 'list_items',
+  'birthdays', 'events', 'lists', 'list_items',
   'settings', 'prompts', 'daily_visits',
   'todo_categories', 'habit_categories', 'flashcard_decks',
   'gcal_sync', 'agent_grants', 'groups',

@@ -4131,6 +4131,53 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(r.item.category === 'General' && !r.item.categoryIsNew, 'real "General" category must win');
     });
 
+    test('calendar day modal: overdue amounts + prev/next day navigation', () => {
+      const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+      // Overdue rows show the bucket-style label (due date + days ago)
+      // via one helper rendered by every row type (todo, habit, auto).
+      assert(cal.includes('function calOverdueSub(ev)'), 'day rows must compute an overdue sub-line');
+      assert((cal.match(/calOverdueSub\(ev\)/g) || []).length >= 4, 'every day-panel row type must render the overdue sub-line');
+      assert(cal.includes("t('todos.overdue')") && cal.includes("t('habits.overdue')"), 'overdue sub-line must use the bucket i18n keys');
+      // TODO events must carry their due date (the today mirror needs it).
+      assert(cal.includes('dueDate: d'), 'todo calendar events must carry dueDate');
+      // Prev/next day navigation from the modal header.
+      assert(cal.includes('function calendarDayNav(dir)'), 'day modal must expose calendarDayNav');
+      assert(cal.includes('data-action="calendar-day-nav"'), 'day modal header must render prev/next buttons');
+      // addDays is string-based ('YYYY-MM-DD' in, string out) — the nav
+      // must pass calPanelDate straight to it, never a Date object
+      // (live-test crash Oct 24, 2026: dateStr.split is not a function).
+      assert(cal.includes('addDays(calPanelDate'), 'calendarDayNav must pass the date string to addDays');
+      assert(!cal.includes('addDays(parseLocalDate'), 'calendarDayNav must not pass a Date to addDays');
+      // Same-day refreshes (e.g. after validating an item) must keep
+      // the scroll position via the shared capture/restore, like the
+      // standard buckets — not jump to the top of .cal-day-list.
+      assert(cal.includes('captureInnerScrollPositions(modal)') && cal.includes('restoreInnerScrollPositions(modal, scrollMap)'),
+        'day panel must capture/restore scroll on same-day re-renders');
+      const iu = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(iu.includes('.cal-day-list'), 'the shared scrollable-list selector must cover .cal-day-list');
+      const del = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+      assert(del.includes("case 'calendar-day-nav':"), 'delegation must route calendar-day-nav');
+      const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      assert((i18n.match(/prev_day:/g) || []).length === 3 && (i18n.match(/next_day:/g) || []).length === 3,
+        'prev_day/next_day must exist in all 3 locales');
+    });
+
+    test('calendar-pure: overdueDays boundaries (yesterday / today / tomorrow)', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      assert(typeof mod.overdueDays === 'function', 'calendar-pure must export overdueDays');
+      // Boundaries for the day-modal overdue sub-line (external review,
+      // Oct 24, 2026): due yesterday counts exactly 1 — never 0 — and
+      // due today or later counts 0, i.e. no sub-line is rendered.
+      assert(mod.overdueDays('2026-10-23', '2026-10-24') === 1, 'due yesterday must be exactly 1 day overdue');
+      assert(mod.overdueDays('2026-10-24', '2026-10-24') === 0, 'due today must not count as overdue');
+      assert(mod.overdueDays('2026-10-25', '2026-10-24') === 0, 'due tomorrow must not count as overdue');
+      assert(mod.overdueDays('2026-08-28', '2026-10-23') === 56, 'long spans must count whole days (the Aug 28 live example)');
+      assert(mod.overdueDays('', '2026-10-24') === 0, 'a missing due date must not count as overdue');
+      // The modal must actually delegate to the tested function.
+      assert(jsFiles['calendar.js'].includes('overdueDays(dueStr, todayStr())'),
+        'calOverdueSub must compute the count via calendar-pure overdueDays');
+    });
+
     test('calendar-pure: month grid, habit expansion, birthdays', async () => {
       const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
       const { toDateStr, getMonthGrid, expandHabitOccurrences, birthdayInMonth, birthdaysInRange, toggleShow, addDays, getWeekDates } = mod;
@@ -5746,6 +5793,19 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'per-op failures must be re-queued for a later syncTable run');
       assert(/const isRetryable = \(s\) => s === 0 \|\| s === 429 \|\| s >= 500/.test(cal),
         'only unknown/rate-limited/server-error outcomes are retried — other 4xx would loop forever');
+    });
+
+    test('calendar sync 409-recovery PATCH uses a correctly composed URL', () => {
+      const cal = jsFiles['calendar-sync.js'];
+      // CALENDAR_API already ends with /calendar/v3 and calPath (the
+      // batch-part path) starts with it — concatenating the two doubles
+      // the prefix and the request dies as a CORS error (live report
+      // Oct 24, 2026). Direct fetches must compose like every other
+      // call site: base + /calendars/<id>/events/<eventId>.
+      assert(!cal.includes('${CALENDAR_API}${calPath}'),
+        'no direct fetch may concatenate CALENDAR_API with the batch calPath — the /calendar/v3 prefix doubles');
+      assert(cal.includes("`${CALENDAR_API}/calendars/${encodeURIComponent(prefs.calendarId)}/events/${encodeURIComponent(eventId)}`"),
+        'the 409-recovery PATCH must target the composed calendars/events URL');
     });
 
     test('calendar sync no longer treats status 0 as a successful delete', () => {

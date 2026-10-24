@@ -57,7 +57,7 @@
     'show-todo-general-card': 1, 'calendar-prev': 1, 'calendar-next': 1, 'calendar-today': 1,
     'toggle-calendar-filter': 1, 'open-welcome-birthday': 1, 'set-calendar-view': 1,
     'open-calendar-picker': 1, 'pick-calendar-month': 1, 'pick-calendar-year': 1,
-    'open-calendar-day': 1, 'toggle-calendar-add': 1, 'navigate-to-list': 1,
+    'open-calendar-day': 1, 'calendar-day-nav': 1, 'toggle-calendar-add': 1, 'navigate-to-list': 1,
     'sharing-copy-code': 1, 'sharing-copy-link': 1, 'sharing-copy-member-code': 1,
     'sharing-copy-member-link': 1, 'sharing-copy-code-value': 1, 'sharing-copy-link-value': 1,
     'groups-select': 1, 'groups-back': 1, 'welcome-open-habit-history': 1,
@@ -296,6 +296,7 @@
       case 'pick-calendar-year': callWindow('pickCalendarYear', [el.dataset.year]); break;
       case 'open-calendar-day': callWindow('openCalendarDay', [el.dataset.date]); break;
       case 'close-calendar-day': callWindow('closeCalendarDay', []); break;
+      case 'calendar-day-nav': callWindow('calendarDayNav', [el.dataset.dir]); break;
       case 'toggle-calendar-add': callWindow('toggleCalendarAddMenu', [el]); break;
       case 'edit-birthday-avatar': callWindow('handleAvatarClick', [el.dataset.id]); break;
       case 'calendar-birthday-edit': callWindow('closeCalendarDay', []); callWindow('openEditBirthdayModal', [el.dataset.id]); break;

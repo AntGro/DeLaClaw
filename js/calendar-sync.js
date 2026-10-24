@@ -865,7 +865,7 @@ async function _syncTableInner(tableName) {
           const eventId = deterministicEventId(meta.id);
           if (eventId && meta.event) {
             try {
-              const patchResp = await fetch(`${CALENDAR_API}${calPath}/events/${encodeURIComponent(eventId)}`, {
+              const patchResp = await fetch(`${CALENDAR_API}/calendars/${encodeURIComponent(prefs.calendarId)}/events/${encodeURIComponent(eventId)}`, {
                 method: 'PATCH',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify(meta.event),

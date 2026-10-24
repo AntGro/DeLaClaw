@@ -73,6 +73,19 @@ export function parseLocalDate(value) {
 }
 
 /**
+ * Whole days by which a due date ('YYYY-MM-DD') is overdue relative to
+ * today ('YYYY-MM-DD'): 1 when due yesterday, 0 when due today or
+ * later. Computed on local midnights with rounding, so a 23h/25h
+ * daylight-saving day still counts as exactly one day. An invalid or
+ * missing date counts as 0 (not overdue).
+ */
+export function overdueDays(dueStr, todayStr) {
+  if (!dueStr || !todayStr) return 0;
+  const diff = Math.round((parseLocalDate(dueStr) - parseLocalDate(todayStr)) / 86400000);
+  return diff < 0 ? -diff : 0;
+}
+
+/**
  * Month grid: array of weeks; each week is 7 { date, inMonth } cells,
  * Monday-first, including leading/trailing days from adjacent months.
  * year: full year, month: 0-based.

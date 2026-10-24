@@ -41,7 +41,11 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 ## Screenshots
 
 <p align="center">
-  <img src="screenshots/projects.png" alt="Project boards" width="720">
+  <img src="screenshots/calendar.png" alt="Calendar month view" width="720">
+</p>
+
+<p align="center">
+  <img src="screenshots/todos.png" alt="TODOs" width="720">
 </p>
 
 ## Quick start

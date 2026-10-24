@@ -13,7 +13,8 @@ import { t, getLang } from './i18n.js';
 import { getTodos, catIdForTodo, getCategoryColor, getTodoCatPath, getTodoCatOrderKey } from './todos.js';
 import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatPath, getHabitCatOrderKey, isAutoHabit } from './habits.js';
 import { compareOrderKeys } from './sections-pure.js';
-import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates, isHabitSnoozed } from './calendar-pure.js';
+import { captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
+import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates, isHabitSnoozed, parseLocalDate, overdueDays } from './calendar-pure.js';
 
 let calYear;
 let calMonth; // 0-based
@@ -113,7 +114,7 @@ function collectRangeEvents(start, end) {
     if (!d) continue;
     const catId = catIdForTodo(td);
     const evBase = {
-      type: 'todo', id: td.id, title: td.text || '', sub: '',
+      type: 'todo', id: td.id, title: td.text || '', sub: '', dueDate: d,
       catId, catColor: getCategoryColor(catId), catName: getTodoCatPath(catId), catOrder: getTodoCatOrderKey(catId),
       shared_id: td.shared_id || null, shared_group_id: td.shared_group_id || null,
     };
@@ -558,6 +559,23 @@ function calSharedBadge(ev) {
   return sharedBadge(group?.name || '', ev.shared_group_id);
 }
 
+// Overdue rows carry the same information as the item's home bucket —
+// the due date and by how much it is overdue — not just the red border.
+// (Buckets: formatHabitDue's overdue line; TODOs use the same
+// date + days-ago composition with their own i18n keys.)
+function calOverdueSub(ev) {
+  if (!ev.overdue) return '';
+  const dueStr = ev.type === 'todo' ? ev.dueDate : ev.next_due;
+  if (!dueStr) return '';
+  const days = overdueDays(dueStr, todayStr());
+  if (days <= 0) return '';
+  const dateStr = parseLocalDate(dueStr).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' });
+  const label = ev.type === 'todo'
+    ? `${t('todos.overdue')} (${dateStr}, ${t('common.days_ago', days)})`
+    : `${t('habits.overdue')} (${dateStr}, ${t('habits.days_ago', days)})`;
+  return `<span class="cal-row-sub cal-row-sub-overdue">${lucideIcon('alert-triangle', 12)} ${label}</span>`;
+}
+
 function dayPanelRow(ev, dateStr) {
   if (ev.type === 'birthday') {
     const thumb = ev.avatar
@@ -571,7 +589,7 @@ function dayPanelRow(ev, dateStr) {
   }
   if (ev.type === 'todo') {
     return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
-      <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong></span>
+      <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong>${calOverdueSub(ev)}</span>
       <button class="todo-done-btn" data-todo-id="${esc(ev.id)}" data-action="calendar-toggle-todo"
         data-done="true" data-date="${dateStr}" title="${t('common.done')}">
         ${lucideIcon('circle-check', 18)}
@@ -585,7 +603,7 @@ function dayPanelRow(ev, dateStr) {
   // Automatic habits validate themselves — no Done button, just the badge.
   if (ev.is_auto) {
     return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
-      <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong></span>
+      <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong>${calOverdueSub(ev)}</span>
       <span class="habit-auto-badge">${lucideIcon('zap', 12)} ${t('habits.auto_badge')}</span>
     </div>`;
   }
@@ -598,7 +616,7 @@ function dayPanelRow(ev, dateStr) {
     ? `title="${t('common.done')}"`
     : `disabled title="${esc(t('calendar.only_next_due'))}"`;
   return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
-    <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong></span>
+    <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong>${calOverdueSub(ev)}</span>
     <button class="habit-done-btn" data-habit-id="${esc(ev.id)}" data-action="calendar-habit-done"
       data-date="${dateStr}" ${doneAttrs}>
       ${lucideIcon('circle-check', 18)}
@@ -626,6 +644,14 @@ function closeCalendarDay() {
   calPanelDate = null;
   const overlay = document.getElementById('calendarDayOverlay');
   if (overlay) overlay.remove();
+}
+
+// Prev/next day from inside the day modal: re-render the panel for the
+// adjacent date (the modal, its add menu and its rows all follow).
+function calendarDayNav(dir) {
+  if (!calPanelDate) return;
+  closeCalendarAddMenu();
+  renderCalendarDayPanel(addDays(calPanelDate, parseInt(dir, 10) || 0));
 }
 
 function dayGroupsHTML(dateStr) {
@@ -672,12 +698,19 @@ function dayGroupsHTML(dateStr) {
 function renderCalendarDayPanel(dateStr) {
   const modal = document.getElementById('calendarDayModal');
   if (!modal) return;
+  // Rebuilding via innerHTML recreates the .cal-day-list scroller at
+  // the top. On a same-day refresh (e.g. after validating an item)
+  // keep the scroll position, like the standard buckets do via the
+  // shared capture/restore; navigating to another day starts at top.
+  const scrollMap = calPanelDate === dateStr ? captureInnerScrollPositions(modal) : null;
   calPanelDate = dateStr;
   const title = fullDateStr(dateStr);
 
   modal.innerHTML = `
     <div class="cal-day-header">
+      <button class="btn" data-action="calendar-day-nav" data-dir="-1" title="${t('calendar.prev_day')}">${lucideIcon('chevron-left', 16)}</button>
       <h2>${esc(title)}</h2>
+      <button class="btn" data-action="calendar-day-nav" data-dir="1" title="${t('calendar.next_day')}">${lucideIcon('chevron-right', 16)}</button>
       <div class="calendar-add-wrap">
         <button class="btn" data-action="toggle-calendar-add" data-menu="calendarDayAddMenu"
           title="${t('common.add')}" aria-expanded="false" aria-haspopup="true">${lucideIcon('plus', 16)}</button>
@@ -690,6 +723,7 @@ function renderCalendarDayPanel(dateStr) {
     <div class="modal-actions">
       <button class="modal-cancel" data-action="close-calendar-day">${t('common.close')}</button>
     </div>`;
+  if (scrollMap) restoreInnerScrollPositions(modal, scrollMap);
 }
 
 export { renderCalendar };
@@ -717,4 +751,5 @@ window.toggleCalendarAddMenu = toggleCalendarAddMenu;
 window.closeCalendarAddMenu = closeCalendarAddMenu;
 window.openCalendarDay = openCalendarDay;
 window.closeCalendarDay = closeCalendarDay;
+window.calendarDayNav = calendarDayNav;
 window.renderCalendarDayPanel = renderCalendarDayPanel;

@@ -2479,6 +2479,11 @@ button.cal-row { cursor: pointer; }
   font-weight: 600;
   padding: 11px 12px;
 }
+/* Date fields size to their content — a date never needs the full row. */
+.modal input.date-input-narrow {
+  width: 190px;
+  max-width: 100%;
+}
 .event-mode {
   display: flex;
   gap: 3px;

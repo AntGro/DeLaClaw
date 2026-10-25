@@ -146,10 +146,10 @@ function eventFieldsHTML(p) {
     </div>
     <input type="checkbox" id="${p}EventAllDay" class="event-allday-state" tabindex="-1">
     <label>${t('events.date_label')}</label>
-    <input type="date" id="${p}EventDate" data-action="event-field" data-prefix="${p}">
+    <input type="date" id="${p}EventDate" class="date-input-narrow" data-action="event-field" data-prefix="${p}">
     <div id="${p}EventEndDateRow" style="display:none">
       <label>${t('events.end_date_label')}</label>
-      <input type="date" id="${p}EventEndDate" data-action="event-field" data-prefix="${p}">
+      <input type="date" id="${p}EventEndDate" class="date-input-narrow" data-action="event-field" data-prefix="${p}">
     </div>
     <div id="${p}EventTimeRow">
       <div class="event-time-grid">

@@ -47,12 +47,10 @@ function addBirthdayModalHTML() {
       <button type="button" class="btn new-birthday-avatar-clear" id="newBirthdayAvatarClear" data-action="clear-new-birthday-avatar">${lucideIcon('x', 14)} ${t('common.remove')}</button>
     </div>
     <div class="birthday-date-row">
-      <div class="birthday-date-field">
-        <label>${t('birthdays.birthday_label')}</label>
-        <input type="date" id="newBirthdayDate" class="date-input-narrow" data-action="birthday-field" data-prefix="new">
-      </div>
-      <div class="modal-live-summary" id="newBirthdaySummary" style="display:none"></div>
+      <label>${t('birthdays.birthday_label')}</label>
+      <input type="date" id="newBirthdayDate" class="modal-title-input" data-action="birthday-field" data-prefix="new">
     </div>
+    <div class="modal-live-summary" id="newBirthdaySummary" style="display:none"></div>
     <label>${t('birthdays.note_label')}</label>
     <input type="text" id="newBirthdayNote" placeholder="${t('birthdays.note_placeholder')}" maxlength="500">
     <div class="modal-actions">
@@ -74,12 +72,10 @@ function editBirthdayModalHTML() {
       </div>
     </div>
     <div class="birthday-date-row">
-      <div class="birthday-date-field">
-        <label>${t('birthdays.birthday_label')}</label>
-        <input type="date" id="editBirthdayDate" class="date-input-narrow" data-action="birthday-field" data-prefix="edit">
-      </div>
-      <div class="modal-live-summary" id="editBirthdaySummary" style="display:none"></div>
+      <label>${t('birthdays.birthday_label')}</label>
+      <input type="date" id="editBirthdayDate" class="modal-title-input" data-action="birthday-field" data-prefix="edit">
     </div>
+    <div class="modal-live-summary" id="editBirthdaySummary" style="display:none"></div>
     <label>${t('birthdays.note_label')}</label>
     <input type="text" id="editBirthdayNote" maxlength="500">
     <div class="modal-actions">

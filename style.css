@@ -1390,16 +1390,10 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .birthday-name-field{flex:1;min-width:0;}
 .birthday-name-field label{margin-top:0;}
 .birthday-photo-actions{display:flex;gap:8px;margin-top:8px;}
-/* Date and its summary share a row: the summary depends only on the
-   date, so it belongs beside it, filling the width the narrow date
-   field leaves free. Stacks on phones. */
-.birthday-date-row{display:flex;gap:12px;align-items:stretch;}
-.birthday-date-field{flex:none;}
-.birthday-date-row .modal-live-summary{flex:1;min-width:0;margin-top:0;align-items:center;}
-@media(max-width:480px){
-  .birthday-date-row{flex-direction:column;align-items:stretch;}
-  .birthday-date-row .modal-live-summary{margin-top:8px;}
-}
+/* The date box matches the name box exactly: same column (indented
+   past the avatar: 52px + 12px gap), same width, same size class. */
+.birthday-date-row{margin-left:64px;}
+.birthday-date-row .modal-title-input{width:100%;}
 .new-birthday-avatar-preview{width:48px;height:48px;border-radius:50%;background:var(--surface2);color:var(--muted);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;overflow:hidden;border:2px dashed var(--border);transition:border-color 0.15s;}
 .new-birthday-avatar-preview:hover{border-color:var(--accent);}
 .new-birthday-avatar-preview img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
@@ -2488,6 +2482,7 @@ button.cal-row { cursor: pointer; }
   font-size: 1rem;
   font-weight: 600;
   padding: 11px 12px;
+  height: 46px;
 }
 /* Date fields size to their content — a date never needs the full row. */
 .modal input.date-input-narrow {

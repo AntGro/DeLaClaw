@@ -4274,7 +4274,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(bdays.includes('class="modal-title-input"'), 'birthday name field must use the shared prominent title input');
       assert(bdays.includes('modal-live-summary'), 'birthday form must render the shared live summary');
       assert(bdays.includes('nextBirthdayOccurrence'), 'birthday summary must compute via calendar-pure');
-      assert(bdays.includes('birthday-date-row'), 'birthday date and summary must share a row container');
+      assert(bdays.includes('birthday-date-row'), 'birthday date must sit in the aligned name-column row');
       assert(del.includes("case 'birthday-field'"), 'delegation must route birthday-field to the summary updater');
     });
 

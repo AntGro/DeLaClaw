@@ -43,9 +43,8 @@ function addBirthdayModalHTML() {
           data-action="save-new-birthday-on-enter">
       </div>
     </div>
-    <div class="birthday-photo-actions">
-      <button type="button" class="btn new-birthday-avatar-btn" data-action="pick-new-birthday-avatar">${lucideIcon('upload', 14)} ${t('birthdays.upload_photo')}</button>
-      <button type="button" class="btn new-birthday-avatar-clear" id="newBirthdayAvatarClear" data-action="clear-new-birthday-avatar" style="display:none">${lucideIcon('x', 14)}</button>
+    <div class="birthday-photo-actions" id="newBirthdayPhotoActions" style="display:none">
+      <button type="button" class="btn new-birthday-avatar-clear" id="newBirthdayAvatarClear" data-action="clear-new-birthday-avatar">${lucideIcon('x', 14)} ${t('common.remove')}</button>
     </div>
     <label>${t('birthdays.birthday_label')}</label>
     <input type="date" id="newBirthdayDate" data-action="birthday-field" data-prefix="new">
@@ -234,7 +233,7 @@ function showCropModalForNew(file) {
       previewImg.src = newBirthdayAvatarDataUrl;
       previewImg.alt = 'avatar';
       preview.replaceChildren(previewImg);
-      document.getElementById('newBirthdayAvatarClear').style.display = '';
+      document.getElementById('newBirthdayPhotoActions').style.display = '';
       overlay.remove();
     } catch (err) {
       showToast('Crop failed: ' + err.message, 'error');
@@ -246,7 +245,8 @@ function clearNewBirthdayAvatar() {
   newBirthdayAvatarDataUrl = null;
   const preview = document.getElementById('newBirthdayAvatarPreview');
   preview.innerHTML = lucideIcon('user', 24);
-  document.getElementById('newBirthdayAvatarClear').style.display = 'none';
+  const actions = document.getElementById('newBirthdayPhotoActions');
+  if (actions) actions.style.display = 'none';
 }
 
 function openAddBirthdayModal(presetDate) {

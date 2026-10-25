@@ -10,7 +10,7 @@ const T = {
   en: {
     // ── Common ──
     common: {
-      save: 'Save', cancel: 'Cancel', delete: 'Delete', add: 'Add', edit: 'Edit',
+      save: 'Save', cancel: 'Cancel', delete: 'Delete', remove: 'Remove', add: 'Add', edit: 'Edit',
       close: 'Close', ok: 'OK', create: 'Create', name: 'Name', note: 'Note', notes: 'Notes', category: 'Category', list: 'List',
       search: 'Search', optional: 'optional', done: 'Done', undo: 'Undo', rename: 'Rename',
       update: 'Update', activate: 'Activate', confirm: 'Confirm', reopen: 'Reopen',
@@ -847,7 +847,7 @@ const T = {
   },
   fr: {
     common: {
-      save: 'Enregistrer', cancel: 'Annuler', delete: 'Supprimer', add: 'Ajouter', edit: 'Modifier',
+      save: 'Enregistrer', cancel: 'Annuler', delete: 'Supprimer', remove: 'Retirer', add: 'Ajouter', edit: 'Modifier',
       close: 'Fermer', ok: 'OK', create: 'Créer', name: 'Nom', note: 'Note', notes: 'Notes', category: 'Catégorie', list: 'Liste',
       search: 'Rechercher', optional: 'optionnel', done: 'Fait', undo: 'Annuler', rename: 'Renommer',
       update: 'Mettre à jour', activate: 'Activer', confirm: 'Confirmer', reopen: 'Rouvrir',
@@ -1665,7 +1665,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
   },
   es: {
     common: {
-      save: 'Guardar', cancel: 'Cancelar', delete: 'Eliminar', add: 'Añadir', edit: 'Editar',
+      save: 'Guardar', cancel: 'Cancelar', delete: 'Eliminar', remove: 'Quitar', add: 'Añadir', edit: 'Editar',
       close: 'Cerrar', ok: 'Aceptar', create: 'Crear', name: 'Nombre', note: 'Nota', notes: 'Notas', category: 'Categoría', list: 'Lista',
       search: 'Buscar', optional: 'opcional', done: 'Hecho', undo: 'Deshacer', rename: 'Renombrar',
       update: 'Actualizar', activate: 'Activar', confirm: 'Confirmar', reopen: 'Reabrir',

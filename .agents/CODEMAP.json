@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "2.31.2",
-    "generated_at": "2026-10-25T01:41:50.565Z",
+    "version": "2.31.3",
+    "generated_at": "2026-10-25T01:44:54.087Z",
     "loc_total": 37406,
     "files_scanned": 51,
     "tier": "T2-enriched",
@@ -38,7 +38,7 @@
       "i18n_prefix": "birthdays.",
       "guards": [],
       "esc_count": 9,
-      "i18n_count": 30,
+      "i18n_count": 31,
       "window_exposed": [
         "openAddBirthdayModal",
         "updateBirthdaySummary",

@@ -1385,15 +1385,13 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .avatar-crop-ring{position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 999px rgba(0,0,0,0.45);pointer-events:none;border:2px solid rgba(255,255,255,0.6);}
 .avatar-remove-btn{border-color:var(--red) !important;color:var(--red) !important;}
 .avatar-remove-btn:hover{background:var(--red) !important;color:#fff !important;}
-.birthday-form-head{display:flex;gap:12px;align-items:center;}
-.birthday-form-head .new-birthday-avatar-preview{width:52px;height:52px;}
-.birthday-name-field{flex:1;min-width:0;}
+/* Identity block: the avatar is vertically centered against the
+   name+date group and a touch larger than the list-row avatar. */
+.birthday-identity{display:flex;gap:12px;align-items:center;}
+.birthday-identity .new-birthday-avatar-preview{width:68px;height:68px;flex:none;}
+.birthday-identity-fields{flex:1;min-width:0;}
 .birthday-name-field label{margin-top:0;}
-.birthday-photo-actions{display:flex;gap:8px;margin-top:8px;}
-/* The date box matches the name box exactly: same column (indented
-   past the avatar: 52px + 12px gap), same width, same size class. */
-.birthday-date-row{margin-left:64px;}
-.birthday-date-row .modal-title-input{width:100%;}
+.birthday-photo-actions{display:flex;gap:8px;margin-top:8px;margin-left:80px;}
 .new-birthday-avatar-preview{width:48px;height:48px;border-radius:50%;background:var(--surface2);color:var(--muted);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;overflow:hidden;border:2px dashed var(--border);transition:border-color 0.15s;}
 .new-birthday-avatar-preview:hover{border-color:var(--accent);}
 .new-birthday-avatar-preview img{width:100%;height:100%;object-fit:cover;border-radius:50%;}

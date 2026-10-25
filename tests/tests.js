@@ -4275,6 +4275,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(bdays.includes('modal-live-summary'), 'birthday form must render the shared live summary');
       assert(bdays.includes('nextBirthdayOccurrence'), 'birthday summary must compute via calendar-pure');
       assert(bdays.includes('birthday-date-row'), 'birthday date must sit in the aligned name-column row');
+      assert(bdays.includes('birthday-identity'), 'avatar must group with the name+date fields (centered against them)');
       assert(del.includes("case 'birthday-field'"), 'delegation must route birthday-field to the summary updater');
     });
 

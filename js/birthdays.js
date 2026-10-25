@@ -35,20 +35,22 @@ async function refreshBirthdays() {
 function addBirthdayModalHTML() {
   return `<div class="modal">
     <h2>${lucideIcon('cake', 20)} ${t('birthdays.add_birthday')}</h2>
-    <div class="birthday-form-head">
-      <div class="new-birthday-avatar-preview" id="newBirthdayAvatarPreview" data-action="pick-new-birthday-avatar" title="${t('birthdays.upload_photo')}">${lucideIcon('user', 24)}</div>
-      <div class="birthday-name-field">
-        <label>${t('common.name')}</label>
-        <input type="text" id="newBirthdayName" class="modal-title-input" placeholder="${t('birthdays.name_placeholder')}" maxlength="200"
-          data-action="save-new-birthday-on-enter">
+    <div class="birthday-identity">
+      <div class="new-birthday-avatar-preview" id="newBirthdayAvatarPreview" data-action="pick-new-birthday-avatar" title="${t('birthdays.upload_photo')}">${lucideIcon('user', 30)}</div>
+      <div class="birthday-identity-fields">
+        <div class="birthday-name-field">
+          <label>${t('common.name')}</label>
+          <input type="text" id="newBirthdayName" class="modal-title-input" placeholder="${t('birthdays.name_placeholder')}" maxlength="200"
+            data-action="save-new-birthday-on-enter">
+        </div>
+        <div class="birthday-date-row">
+          <label>${t('birthdays.birthday_label')}</label>
+          <input type="date" id="newBirthdayDate" class="modal-title-input" data-action="birthday-field" data-prefix="new">
+        </div>
       </div>
     </div>
     <div class="birthday-photo-actions" id="newBirthdayPhotoActions" style="display:none">
       <button type="button" class="btn new-birthday-avatar-clear" id="newBirthdayAvatarClear" data-action="clear-new-birthday-avatar">${lucideIcon('x', 14)} ${t('common.remove')}</button>
-    </div>
-    <div class="birthday-date-row">
-      <label>${t('birthdays.birthday_label')}</label>
-      <input type="date" id="newBirthdayDate" class="modal-title-input" data-action="birthday-field" data-prefix="new">
     </div>
     <div class="modal-live-summary" id="newBirthdaySummary" style="display:none"></div>
     <label>${t('birthdays.note_label')}</label>
@@ -64,16 +66,18 @@ function editBirthdayModalHTML() {
   return `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('birthdays.edit_birthday')}</h2>
     <input type="hidden" id="editBirthdayId">
-    <div class="birthday-form-head">
+    <div class="birthday-identity">
       <div class="new-birthday-avatar-preview" id="editBirthdayAvatarPreview" data-action="edit-birthday-avatar" data-id="" title="${t('birthdays.upload_photo')}"></div>
-      <div class="birthday-name-field">
-        <label>${t('common.name')}</label>
-        <input type="text" id="editBirthdayName" class="modal-title-input" maxlength="200">
+      <div class="birthday-identity-fields">
+        <div class="birthday-name-field">
+          <label>${t('common.name')}</label>
+          <input type="text" id="editBirthdayName" class="modal-title-input" maxlength="200">
+        </div>
+        <div class="birthday-date-row">
+          <label>${t('birthdays.birthday_label')}</label>
+          <input type="date" id="editBirthdayDate" class="modal-title-input" data-action="birthday-field" data-prefix="edit">
+        </div>
       </div>
-    </div>
-    <div class="birthday-date-row">
-      <label>${t('birthdays.birthday_label')}</label>
-      <input type="date" id="editBirthdayDate" class="modal-title-input" data-action="birthday-field" data-prefix="edit">
     </div>
     <div class="modal-live-summary" id="editBirthdaySummary" style="display:none"></div>
     <label>${t('birthdays.note_label')}</label>
@@ -248,7 +252,7 @@ function showCropModalForNew(file) {
 function clearNewBirthdayAvatar() {
   newBirthdayAvatarDataUrl = null;
   const preview = document.getElementById('newBirthdayAvatarPreview');
-  preview.innerHTML = lucideIcon('user', 24);
+  preview.innerHTML = lucideIcon('user', 30);
   const actions = document.getElementById('newBirthdayPhotoActions');
   if (actions) actions.style.display = 'none';
 }
@@ -318,7 +322,7 @@ function setEditBirthdayAvatarPreview(avatarUrl) {
     img.alt = 'avatar';
     preview.appendChild(img);
   } else {
-    preview.innerHTML = lucideIcon('user', 24);
+    preview.innerHTML = lucideIcon('user', 30);
   }
 }
 

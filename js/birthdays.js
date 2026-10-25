@@ -1,7 +1,8 @@
 import { lucideIcon } from './icons.js';
 import state from './state.js';
 import { esc, showToast, showConfirmAction, fetchAll } from './utils.js';
-import { t } from './i18n.js';
+import { t, getLang } from './i18n.js';
+import { toDateStr, parseLocalDate, nextBirthdayOccurrence } from './calendar-pure.js';
 
 // ===================================================================
 // BIRTHDAYS — DATA & CRUD (no page: birthdays surface on the Calendar page)
@@ -34,19 +35,23 @@ async function refreshBirthdays() {
 function addBirthdayModalHTML() {
   return `<div class="modal">
     <h2>${lucideIcon('cake', 20)} ${t('birthdays.add_birthday')}</h2>
-    <label>${t('common.name')}</label>
-    <input type="text" id="newBirthdayName" placeholder="${t('birthdays.name_placeholder')}" maxlength="200"
-      data-action="save-new-birthday-on-enter">
-    <label>${t('birthdays.birthday_label')}</label>
-    <input type="date" id="newBirthdayDate">
-    <label>${t('birthdays.note_label')}</label>
-    <input type="text" id="newBirthdayNote" placeholder="${t('birthdays.note_placeholder')}" maxlength="500">
-    <label>${t('birthdays.upload_photo')}</label>
-    <div class="new-birthday-avatar-row">
-      <div class="new-birthday-avatar-preview" id="newBirthdayAvatarPreview" data-action="pick-new-birthday-avatar">${lucideIcon('user', 24)}</div>
+    <div class="birthday-form-head">
+      <div class="new-birthday-avatar-preview" id="newBirthdayAvatarPreview" data-action="pick-new-birthday-avatar" title="${t('birthdays.upload_photo')}">${lucideIcon('user', 24)}</div>
+      <div class="birthday-name-field">
+        <label>${t('common.name')}</label>
+        <input type="text" id="newBirthdayName" class="modal-title-input" placeholder="${t('birthdays.name_placeholder')}" maxlength="200"
+          data-action="save-new-birthday-on-enter">
+      </div>
+    </div>
+    <div class="birthday-photo-actions">
       <button type="button" class="btn new-birthday-avatar-btn" data-action="pick-new-birthday-avatar">${lucideIcon('upload', 14)} ${t('birthdays.upload_photo')}</button>
       <button type="button" class="btn new-birthday-avatar-clear" id="newBirthdayAvatarClear" data-action="clear-new-birthday-avatar" style="display:none">${lucideIcon('x', 14)}</button>
     </div>
+    <label>${t('birthdays.birthday_label')}</label>
+    <input type="date" id="newBirthdayDate" data-action="birthday-field" data-prefix="new">
+    <div class="modal-live-summary" id="newBirthdaySummary" style="display:none"></div>
+    <label>${t('birthdays.note_label')}</label>
+    <input type="text" id="newBirthdayNote" placeholder="${t('birthdays.note_placeholder')}" maxlength="500">
     <div class="modal-actions">
       <button class="modal-cancel" data-action="close-add-birthday">${t('common.cancel')}</button>
       <button class="modal-save" data-action="save-new-birthday">${t('common.add')}</button>
@@ -58,22 +63,49 @@ function editBirthdayModalHTML() {
   return `<div class="modal">
     <h2>${lucideIcon('pencil', 20)} ${t('birthdays.edit_birthday')}</h2>
     <input type="hidden" id="editBirthdayId">
-    <label>${t('common.name')}</label>
-    <input type="text" id="editBirthdayName" maxlength="200">
+    <div class="birthday-form-head">
+      <div class="new-birthday-avatar-preview" id="editBirthdayAvatarPreview" data-action="edit-birthday-avatar" data-id="" title="${t('birthdays.upload_photo')}"></div>
+      <div class="birthday-name-field">
+        <label>${t('common.name')}</label>
+        <input type="text" id="editBirthdayName" class="modal-title-input" maxlength="200">
+      </div>
+    </div>
     <label>${t('birthdays.birthday_label')}</label>
-    <input type="date" id="editBirthdayDate">
+    <input type="date" id="editBirthdayDate" data-action="birthday-field" data-prefix="edit">
+    <div class="modal-live-summary" id="editBirthdaySummary" style="display:none"></div>
     <label>${t('birthdays.note_label')}</label>
     <input type="text" id="editBirthdayNote" maxlength="500">
-    <label>${t('birthdays.upload_photo')}</label>
-    <div class="new-birthday-avatar-row">
-      <div class="new-birthday-avatar-preview" id="editBirthdayAvatarPreview" data-action="edit-birthday-avatar" data-id=""></div>
-    </div>
     <div class="modal-actions">
       <button class="modal-delete" data-action="delete-birthday" id="editBirthdayDeleteBtn" data-id="">${lucideIcon('trash-2', 14)} ${t('common.delete')}</button>
       <button class="modal-cancel" data-action="close-edit-birthday">${t('common.cancel')}</button>
       <button class="modal-save" data-action="save-edit-birthday">${t('common.save')}</button>
     </div>
   </div>`;
+}
+
+/**
+ * Live summary under the date field: the next occurrence, the age
+ * turned, and how far away it is — the same figures the calendar
+ * chip shows, visible before saving.
+ */
+function updateBirthdaySummary(prefix) {
+  const el = document.getElementById(`${prefix}BirthdaySummary`);
+  if (!el) return;
+  const dob = document.getElementById(`${prefix}BirthdayDate`)?.value;
+  let html = '';
+  if (dob) {
+    const now = new Date();
+    const today = toDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+    const occ = nextBirthdayOccurrence(dob, today);
+    if (occ) {
+      const fmt = parseLocalDate(occ.date).toLocaleDateString(getLang(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+      const days = Math.round((parseLocalDate(occ.date) - parseLocalDate(today)) / 86400000);
+      const when = days === 0 ? t('calendar.today') : days === 1 ? t('birthdays.tomorrow') : t('birthdays.in_days', days);
+      html = `${esc(fmt)} · ${t('calendar.turns', occ.turningAge)} <span class="modal-summary-local">· ${esc(when)}</span>`;
+    }
+  }
+  el.innerHTML = html;
+  el.style.display = html ? '' : 'none';
 }
 
 function initBirthdayModals() {
@@ -220,10 +252,12 @@ function clearNewBirthdayAvatar() {
 function openAddBirthdayModal(presetDate) {
   const modal = document.getElementById('addBirthdayModal');
   modal.innerHTML = addBirthdayModalHTML();
+  modal.style.setProperty('--cat-color', 'var(--pink)');
   document.getElementById('newBirthdayName').value = '';
   document.getElementById('newBirthdayDate').value = presetDate || '';
   document.getElementById('newBirthdayNote').value = '';
   clearNewBirthdayAvatar();
+  updateBirthdaySummary('new');
   modal.classList.add('visible');
   setTimeout(() => document.getElementById('newBirthdayName').focus(), 100);
 }
@@ -257,10 +291,12 @@ function openEditBirthdayModal(id) {
   if (!b) return;
   const modal = document.getElementById('editBirthdayModal');
   modal.innerHTML = editBirthdayModalHTML();
+  modal.style.setProperty('--cat-color', 'var(--pink)');
   document.getElementById('editBirthdayId').value = id;
   document.getElementById('editBirthdayName').value = b.name;
   document.getElementById('editBirthdayDate').value = b.birthday;
   document.getElementById('editBirthdayNote').value = b.note || '';
+  updateBirthdaySummary('edit');
   setEditBirthdayAvatarPreview(b.avatar_url);
   document.getElementById('editBirthdayAvatarPreview').dataset.id = id;
   document.getElementById('editBirthdayDeleteBtn').dataset.id = id;
@@ -544,6 +580,7 @@ export { refreshBirthdays, initBirthdayModals };
 
 // Window bindings for inline onclick handlers
 window.openAddBirthdayModal = openAddBirthdayModal;
+window.updateBirthdaySummary = updateBirthdaySummary;
 window.closeAddBirthdayModal = closeAddBirthdayModal;
 window.saveNewBirthday = saveNewBirthday;
 window.openEditBirthdayModal = openEditBirthdayModal;

@@ -418,6 +418,7 @@ const T = {
       note_placeholder: 'e.g. Likes books, allergic to nuts...',
       note_label: 'Note (optional)', birthday_label: 'Birthday',
       change_photo: 'Change photo', remove_photo: 'Remove photo', upload_photo: 'Upload photo', crop_photo: 'Crop photo',
+      tomorrow: 'tomorrow', in_days: 'in {0} days',
       photo_updated: 'Photo updated', photo_removed: 'Photo removed',
     },
     lists: {
@@ -1242,6 +1243,7 @@ const T = {
       note_placeholder: 'ex. Aime les livres, allergique aux noix...',
       note_label: 'Note (optionnel)', birthday_label: 'Date de naissance',
       change_photo: 'Changer la photo', remove_photo: 'Supprimer la photo', upload_photo: 'Ajouter une photo', crop_photo: 'Recadrer la photo',
+      tomorrow: 'demain', in_days: 'dans {0} jours',
       photo_updated: 'Photo mise à jour', photo_removed: 'Photo supprimée',
     },
     lists: {
@@ -2059,6 +2061,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       note_placeholder: 'ej. Le gustan los libros, alérgico a nueces...',
       note_label: 'Nota (opcional)', birthday_label: 'Fecha de nacimiento',
       change_photo: 'Cambiar foto', remove_photo: 'Eliminar foto', upload_photo: 'Subir foto', crop_photo: 'Recortar foto',
+      tomorrow: 'mañana', in_days: 'en {0} días',
       photo_updated: 'Foto actualizada', photo_removed: 'Foto eliminada',
     },
     // ── Lists ──

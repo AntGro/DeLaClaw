@@ -330,6 +330,25 @@ export function birthdaysInRange(birthdayStr, start, end) {
 }
 
 /**
+ * The next occurrence of a birthday on or after todayStr:
+ * { date, turningAge }, or null for an invalid date of birth. Uses the
+ * same construction as birthdayInMonth — a Feb 29 birthday rolls to
+ * Mar 1 on non-leap years, matching how the calendar places it.
+ */
+export function nextBirthdayOccurrence(dobStr, todayStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dobStr || '');
+  if (!m || !todayStr) return null;
+  const birthY = +m[1], mo = +m[2] - 1, da = +m[3];
+  const thisYear = +todayStr.slice(0, 4);
+  for (const y of [thisYear, thisYear + 1]) {
+    const occ = new Date(y, mo, da);
+    const ds = toDateStr(occ.getFullYear(), occ.getMonth(), occ.getDate());
+    if (ds >= todayStr) return { date: ds, turningAge: y - birthY };
+  }
+  return null;
+}
+
+/**
  * Toggle one key of a { todo, habit, birthday } visibility map.
  * Returns the same object reference when the type is unknown.
  */

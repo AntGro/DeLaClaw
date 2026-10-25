@@ -4183,6 +4183,15 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       for (const fn of ['wallTimeToInstant', 'instantToDateStr', 'instantToTimeStr', 'eventSpan', 'eventDatesInRange', 'gmtOffsetLabel']) {
         assert(typeof mod[fn] === 'function', `calendar-pure must export ${fn}`);
       }
+      // Next birthday occurrence (drives the birthday form's summary).
+      const nbo = mod.nextBirthdayOccurrence;
+      assert(typeof nbo === 'function', 'calendar-pure must export nextBirthdayOccurrence');
+      assert(JSON.stringify(nbo('1996-10-15', '2026-10-11')) === JSON.stringify({ date: '2026-10-15', turningAge: 30 }), 'next occurrence later this year');
+      assert(JSON.stringify(nbo('1996-10-15', '2026-10-15')) === JSON.stringify({ date: '2026-10-15', turningAge: 30 }), 'a birthday today IS the next occurrence');
+      assert(JSON.stringify(nbo('1996-10-15', '2026-10-16')) === JSON.stringify({ date: '2027-10-15', turningAge: 31 }), 'the day after, it rolls to next year');
+      assert(JSON.stringify(nbo('2000-02-29', '2027-01-10')) === JSON.stringify({ date: '2027-03-01', turningAge: 27 }), 'Feb 29 rolls to Mar 1 on non-leap years (same rule as birthdayInMonth)');
+      assert(JSON.stringify(nbo('2000-02-29', '2028-01-10')) === JSON.stringify({ date: '2028-02-29', turningAge: 28 }), 'Feb 29 stays Feb 29 on leap years');
+      assert(nbo('not-a-date', '2026-10-11') === null, 'invalid date of birth -> null');
       // GMT offset labels are DST-aware (read on the event's date).
       assert(mod.gmtOffsetLabel('Europe/Paris', '2026-10-24') === 'GMT+2', 'Paris in October is GMT+2');
       assert(mod.gmtOffsetLabel('Europe/Paris', '2026-01-15') === 'GMT+1', 'Paris in January is GMT+1');
@@ -4259,6 +4268,13 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const cal = read('js/calendar.js');
       assert(cal.includes('eventDatesInRange(ev, start, end, viewerTz)'), 'calendar must place events via calendar-pure');
       assert(cal.includes('state.allEvents'), 'calendar must read state.allEvents');
+      // Birthday form: colored header, shared title/summary classes, live summary wiring
+      const bdays = read('js/birthdays.js');
+      assert(bdays.includes("modal.style.setProperty('--cat-color', 'var(--pink)')"), 'birthday modals must take the pink colored header');
+      assert(bdays.includes('class="modal-title-input"'), 'birthday name field must use the shared prominent title input');
+      assert(bdays.includes('modal-live-summary'), 'birthday form must render the shared live summary');
+      assert(bdays.includes('nextBirthdayOccurrence'), 'birthday summary must compute via calendar-pure');
+      assert(del.includes("case 'birthday-field'"), 'delegation must route birthday-field to the summary updater');
     });
 
     test('calendar-pure: month grid, habit expansion, birthdays', async () => {

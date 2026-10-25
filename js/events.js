@@ -138,7 +138,7 @@ function timezoneOptionsHTML(selected, dateStr) {
 function eventFieldsHTML(p) {
   return `
     <label>${t('events.title_label')}</label>
-    <input type="text" id="${p}EventTitle" class="event-title-input" placeholder="${t('events.title_placeholder')}" maxlength="200"
+    <input type="text" id="${p}EventTitle" class="modal-title-input" placeholder="${t('events.title_placeholder')}" maxlength="200"
       data-action="save-${p}-event-on-enter">
     <div class="event-mode" role="group" aria-label="${t('events.all_day')}">
       <button type="button" data-action="event-set-mode" data-prefix="${p}" data-mode="timed">${lucideIcon('clock', 14)}<span>${t('events.timed')}</span></button>
@@ -166,7 +166,7 @@ function eventFieldsHTML(p) {
       <label>${t('events.timezone_label')}</label>
       <select id="${p}EventTimezone" data-action="event-field" data-prefix="${p}"></select>
     </div>
-    <div class="event-summary" id="${p}EventSummary" style="display:none"></div>
+    <div class="modal-live-summary" id="${p}EventSummary" style="display:none"></div>
     <label>${t('events.note_label')}</label>
     <input type="text" id="${p}EventNote" placeholder="${t('events.note_placeholder')}" maxlength="1000">`;
 }
@@ -276,7 +276,7 @@ function updateEventSummary(prefix) {
         if (tz !== local) {
           const sI = wallTimeToInstant(date, st, tz);
           const eI = wallTimeToInstant(date, et, tz);
-          if (sI && eI) html += ` <span class="event-summary-local">→ ${esc(instantToTimeStr(sI, local))} – ${esc(instantToTimeStr(eI, local))} ${esc(city(local))}</span>`;
+          if (sI && eI) html += ` <span class="modal-summary-local">→ ${esc(instantToTimeStr(sI, local))} – ${esc(instantToTimeStr(eI, local))} ${esc(city(local))}</span>`;
         }
       }
     }

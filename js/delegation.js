@@ -434,6 +434,7 @@
       case 'update-next-sibling-category': { var nxt = el.nextElementSibling; if (nxt && nxt.dataset) nxt.dataset.category = el.value; } break;
       case 'pick-calendar-day': callWindow('pickCalendarDay', [el.value]); break;
       case 'event-field': callWindow('updateEventSummary', [el.dataset.prefix]); break;
+      case 'birthday-field': callWindow('updateBirthdaySummary', [el.dataset.prefix]); break;
       case 'update-proposed-deck': callWindow('updateProposedDeck', [el.dataset.id||el.dataset.todoId, el.value]); break;
       default: break;
     }
@@ -478,6 +479,7 @@
     switch (action) {
       case 'update-scene-preview': callWindow('updateScenePreview', [el]); break;
       case 'event-field': callWindow('updateEventSummary', [el.dataset.prefix]); break;
+      case 'birthday-field': callWindow('updateBirthdaySummary', [el.dataset.prefix]); break;
       default: break;
     }
   }

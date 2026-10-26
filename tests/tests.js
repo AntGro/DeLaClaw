@@ -2310,6 +2310,26 @@ test('sw.js JS precache list matches source modules, with demo data explicit', (
   assert(stale.length === 0, `sw.js has stale JS precache entries: ${stale.join(', ')}`);
 });
 
+test('vendor three files: relative imports of vendored modules exist on disk and are precached', () => {
+  const root = path.join(__dirname, '..');
+  const sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf-8');
+  const vendorFiles = [
+    'vendor/three/build/three.module.js',
+    'vendor/three/build/three.core.js',
+    'vendor/three/examples/jsm/utils/BufferGeometryUtils.js',
+  ];
+  for (const file of vendorFiles) {
+    assert(fs.existsSync(path.join(root, file)), `vendored file missing: ${file}`);
+    const content = fs.readFileSync(path.join(root, file), 'utf-8');
+    const relImports = [...content.matchAll(/(?:from\s+|import\s+)['"](\.\/[^'"]+)['"]/g)].map(m => m[1]);
+    for (const rel of relImports) {
+      const resolved = path.posix.join(path.posix.dirname(file), rel);
+      assert(fs.existsSync(path.join(root, resolved)), `${file} imports ${rel} but ${resolved} is missing — update-vendor.sh must download it too`);
+      assert(sw.includes(`'${resolved}'`), `sw.js PRECACHE_URLS must list ${resolved} (imported by ${file})`);
+    }
+  }
+});
+
 test('Drive sharing invite code encodes folder id in DLC1 envelope', () => {
   const content = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
   assert(content.includes("b: 'googledrive'"), 'sharing-drive.js missing googledrive invite-code envelope');

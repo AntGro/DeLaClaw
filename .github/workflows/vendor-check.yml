@@ -33,7 +33,7 @@ jobs:
           chmod +x scripts/update-vendor.sh
           ./scripts/update-vendor.sh ${{ steps.check.outputs.latest_three }}
           # verify files exist
-          ls -lh vendor/three/build/three.module.js
+          ls -lh vendor/three/build/three.module.js vendor/three/build/three.core.js
           # run tests (non-critical, but catch breaking API)
           npm install -g bun 2>/dev/null || true
           ~/.bun/bin/bun tests/tests.js || bun tests/tests.js || true
@@ -51,12 +51,13 @@ jobs:
 
             Changes:
             - `vendor/three/build/three.module.js`
+            - `vendor/three/build/three.core.js`
             - `vendor/three/examples/jsm/utils/BufferGeometryUtils.js`
             - `index.html` comment
 
             Checklist for reviewer:
             - [ ] Check https://github.com/mrdoob/three.js/releases/tag/r${{ steps.check.outputs.latest_three }}
-            - [ ] `bun tests/tests.js` 142 passed (3 Playwright fail is pre-existing)
+            - [ ] `bun tests/tests.js` passes
             - [ ] Bump VERSION file (hook does sw.js CACHE_VERSION)
           commit-message: |
             chore(vendor): bump to three ${{ steps.check.outputs.latest_three }}

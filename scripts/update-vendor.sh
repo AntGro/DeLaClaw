@@ -17,6 +17,8 @@ echo "Updating to three@$THREE_VER"
 # three module + addons (skip if dir missing or version unchanged requested)
 if [ -n "$THREE_VER" ]; then
   curl -sSL "https://cdn.jsdelivr.net/npm/three@${THREE_VER}/build/three.module.js" -o vendor/three/build/three.module.js
+  # three >= 0.18x: three.module.js is a re-export shell over three.core.js — both files are required
+  curl -sSL "https://cdn.jsdelivr.net/npm/three@${THREE_VER}/build/three.core.js" -o vendor/three/build/three.core.js
   curl -sSL "https://cdn.jsdelivr.net/npm/three@${THREE_VER}/examples/jsm/utils/BufferGeometryUtils.js" -o vendor/three/examples/jsm/utils/BufferGeometryUtils.js
   echo "three $(wc -c < vendor/three/build/three.module.js) bytes"
 fi
@@ -40,7 +42,7 @@ fi
 # hashes for CSP/docs (optional)
 python3 << PY
 import hashlib, base64, pathlib
-for p in ["vendor/three/build/three.module.js"]:
+for p in ["vendor/three/build/three.module.js", "vendor/three/build/three.core.js"]:
     data=pathlib.Path(p).read_bytes()
     h=base64.b64encode(hashlib.sha384(data).digest()).decode()
     print(f"{p}: sha384-{h} ({len(data)} bytes)")

@@ -4288,6 +4288,16 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const cal = read('js/calendar.js');
       assert(cal.includes('eventDatesInRange(ev, start, end, viewerTz)'), 'calendar must place events via calendar-pure');
       assert(cal.includes('state.allEvents'), 'calendar must read state.allEvents');
+      // Event form v2: stacked schedule layers (constant modal height),
+      // multi-line note, share-at-creation, icon-only edit actions
+      const evjs = read('js/events.js');
+      assert(evjs.includes('event-schedule-layer'), 'event form must stack the timed/all-day layers (constant modal height)');
+      assert(evjs.includes('<textarea id="${p}EventNote"'), 'event note must be a multi-line textarea');
+      assert(evjs.includes('id="newEventGroup"'), 'add event form must offer a group select');
+      assert(evjs.includes('convertEventToShared'), 'share conversion must be shared by edit-share and create-share');
+      assert(evjs.includes("title=\"${t('common.delete')}\""), 'edit event delete button must be icon-only with a title');
+      assert(read('js/birthdays.js').includes('<textarea id="newBirthdayNote"'), 'birthday note must be a multi-line textarea');
+      assert(read('js/birthdays.js').includes('<textarea id="editBirthdayNote"'), 'edit birthday note must be a multi-line textarea');
       // Birthday form: colored header, shared title/summary classes, live summary wiring
       const bdays = read('js/birthdays.js');
       assert(bdays.includes("modal.style.setProperty('--cat-color', 'var(--pink)')"), 'birthday modals must take the pink colored header');

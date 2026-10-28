@@ -54,7 +54,7 @@ function addBirthdayModalHTML() {
     </div>
     <div class="modal-live-summary" id="newBirthdaySummary" style="display:none"></div>
     <label>${t('birthdays.note_label')}</label>
-    <input type="text" id="newBirthdayNote" placeholder="${t('birthdays.note_placeholder')}" maxlength="500">
+    <textarea id="newBirthdayNote" placeholder="${t('birthdays.note_placeholder')}" maxlength="500" rows="3"></textarea>
     <div class="modal-actions">
       <button class="modal-cancel" data-action="close-add-birthday">${t('common.cancel')}</button>
       <button class="modal-save" data-action="save-new-birthday">${t('common.add')}</button>
@@ -81,7 +81,7 @@ function editBirthdayModalHTML() {
     </div>
     <div class="modal-live-summary" id="editBirthdaySummary" style="display:none"></div>
     <label>${t('birthdays.note_label')}</label>
-    <input type="text" id="editBirthdayNote" maxlength="500">
+    <textarea id="editBirthdayNote" maxlength="500" rows="3"></textarea>
     <div class="modal-actions">
       <button class="modal-delete" data-action="delete-birthday" id="editBirthdayDeleteBtn" data-id="">${lucideIcon('trash-2', 14)} ${t('common.delete')}</button>
       <button class="modal-cancel" data-action="close-edit-birthday">${t('common.cancel')}</button>

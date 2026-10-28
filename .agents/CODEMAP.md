@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-26T23:32:43.849Z from 51 modules (v2.31.8). Total LOC 37414. Do not hand-edit.
+> Generated 2026-10-28T00:41:56.413Z from 51 modules (v2.32.0). Total LOC 37521. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,17 +27,17 @@
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
 | main | 3984 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:8,guard+pendingSet,window:8 |
+| i18n | 2535 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,calendar.js | pendingSet |
 | sharing-drive | 2530 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
-| i18n | 2529 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,calendar.js | pendingSet |
 | drive | 1561 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | item-utils | 1358 | - | db,i18n,icons,state | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
 | calendar-sync | 1268 | birthdays,events,gcal_sync,habits,settings,todos | calendar-pure,drive-folders,habits,i18n | main.js | - |
 | sharing-ui | 1262 | events,habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | calendar.js,events.js,groups.js,habits.js | esc:38,guard+pendingSet,window:8 |
 | utils | 1001 | flashcards,x | i18n,icons,sections-pure,state | - | esc:7,window:6 |
-| calendar | 828 | - | calendar-pure,habits,i18n,icons | main.js | esc:20,window:8 |
-| events | 690 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:17,pendingSet,window:8 |
+| calendar | 880 | - | calendar-pure,habits,i18n,icons | main.js | esc:21,window:8 |
+| events | 737 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:19,pendingSet,window:8 |
 | batch-import | 559 | - | icons,import-pure,state,utils | - | esc:13 |
-| delegation | 532 | - |  | - | window:1 |
+| delegation | 534 | - |  | - | window:1 |
 | hero | 473 | - | logo,storm3d | main.js | - |
 | demo-chooser | 464 | - | habits,i18n,icons,utils | - | - |
 | offline-cache | 439 | - | ./i18n,./state,i18n.js,state.js | drive.js,main.js,sharing.js | - |

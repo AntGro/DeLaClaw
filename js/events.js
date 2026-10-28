@@ -147,34 +147,40 @@ function eventFieldsHTML(p) {
     <input type="checkbox" id="${p}EventAllDay" class="event-allday-state" tabindex="-1">
     <label>${t('events.date_label')}</label>
     <input type="date" id="${p}EventDate" class="date-input-narrow" data-action="event-field" data-prefix="${p}">
-    <div id="${p}EventEndDateRow" style="display:none">
-      <label>${t('events.end_date_label')}</label>
-      <input type="date" id="${p}EventEndDate" class="date-input-narrow" data-action="event-field" data-prefix="${p}">
-    </div>
-    <div id="${p}EventTimeRow">
-      <div class="event-time-grid">
-        <div>
-          <label>${t('events.start_label')}</label>
-          <input type="time" id="${p}EventStartTime" value="09:00" data-action="event-field" data-prefix="${p}">
+    <div class="event-schedule-stack">
+      <div id="${p}EventTimeRow" class="event-schedule-layer">
+        <div class="event-time-grid">
+          <div>
+            <label>${t('events.start_label')}</label>
+            <input type="time" id="${p}EventStartTime" value="09:00" data-action="event-field" data-prefix="${p}">
+          </div>
+          <span class="event-time-arrow">${lucideIcon('arrow-right', 15)}</span>
+          <div>
+            <label>${t('events.end_label')}</label>
+            <input type="time" id="${p}EventEndTime" value="10:00" data-action="event-field" data-prefix="${p}">
+          </div>
         </div>
-        <span class="event-time-arrow">${lucideIcon('arrow-right', 15)}</span>
-        <div>
-          <label>${t('events.end_label')}</label>
-          <input type="time" id="${p}EventEndTime" value="10:00" data-action="event-field" data-prefix="${p}">
-        </div>
+        <label>${t('events.timezone_label')}</label>
+        <select id="${p}EventTimezone" data-action="event-field" data-prefix="${p}"></select>
       </div>
-      <label>${t('events.timezone_label')}</label>
-      <select id="${p}EventTimezone" data-action="event-field" data-prefix="${p}"></select>
+      <div id="${p}EventEndDateRow" class="event-schedule-layer layer-off" inert>
+        <label>${t('events.end_date_label')}</label>
+        <input type="date" id="${p}EventEndDate" class="date-input-narrow" data-action="event-field" data-prefix="${p}">
+      </div>
     </div>
     <div class="modal-live-summary" id="${p}EventSummary" style="display:none"></div>
     <label>${t('events.note_label')}</label>
-    <input type="text" id="${p}EventNote" placeholder="${t('events.note_placeholder')}" maxlength="1000">`;
+    <textarea id="${p}EventNote" placeholder="${t('events.note_placeholder')}" maxlength="1000" rows="3"></textarea>`;
 }
 
 function addEventModalHTML() {
   return `<div class="modal">
     <h2>${lucideIcon('calendar-plus', 20)} ${t('events.add_event')}</h2>
     ${eventFieldsHTML('new')}
+    <div id="newEventShareRow" style="display:none">
+      <label>${t('sharing.share_to')}</label>
+      <select id="newEventGroup"></select>
+    </div>
     <div class="modal-actions">
       <button class="modal-cancel" data-action="close-add-event">${t('common.cancel')}</button>
       <button class="modal-save" data-action="save-new-event">${t('common.add')}</button>
@@ -188,7 +194,7 @@ function editEventModalHTML() {
     <input type="hidden" id="editEventId">
     ${eventFieldsHTML('edit')}
     <div class="modal-actions">
-      <button class="modal-delete" data-action="delete-event" id="editEventDeleteBtn" data-id="">${lucideIcon('trash-2', 14)} ${t('common.delete')}</button>
+      <button class="modal-delete" data-action="delete-event" id="editEventDeleteBtn" data-id="" title="${t('common.delete')}" aria-label="${t('common.delete')}">${lucideIcon('trash-2', 15)}</button>
       <span id="editEventShareSlot"></span>
       <button class="modal-cancel" data-action="close-edit-event">${t('common.cancel')}</button>
       <button class="modal-save" data-action="save-edit-event">${t('common.save')}</button>
@@ -218,10 +224,13 @@ function initEventModals() {
 // ===================================================================
 
 function toggleEventAllDay(prefix, checked) {
+  // The two schedule layers share one grid cell (the stack always takes
+  // the taller timed layer's height), so the modal height is identical
+  // in Timed and All day modes — visibility swaps, layout never moves.
   const timeRow = document.getElementById(`${prefix}EventTimeRow`);
   const endRow = document.getElementById(`${prefix}EventEndDateRow`);
-  if (timeRow) timeRow.style.display = checked ? 'none' : '';
-  if (endRow) endRow.style.display = checked ? '' : 'none';
+  if (timeRow) { timeRow.classList.toggle('layer-off', checked); timeRow.inert = checked; }
+  if (endRow) { endRow.classList.toggle('layer-off', !checked); endRow.inert = !checked; }
   document.querySelectorAll(`[data-action="event-set-mode"][data-prefix="${prefix}"]`)
     .forEach(b => b.classList.toggle('active', (b.dataset.mode === 'allday') === !!checked));
   if (checked) {
@@ -339,6 +348,16 @@ function openAddEventModal(presetDate) {
   const modal = document.getElementById('addEventModal');
   modal.innerHTML = addEventModalHTML();
   modal.style.setProperty('--cat-color', 'var(--event-color)');
+  // Share-at-creation: only when sharing is up and the user belongs to
+  // at least one group — otherwise the row stays hidden entirely.
+  const shareRow = document.getElementById('newEventShareRow');
+  const groupSel = document.getElementById('newEventGroup');
+  const groups = (state.sharing && state.sharing.initialized) ? state.sharing.getAllGroups() : [];
+  if (shareRow && groupSel && groups.length) {
+    groupSel.innerHTML = `<option value="">${t('sharing.personal_option')}</option>` +
+      groups.map(g => `<option value="${esc(g.id)}">${esc(g.name || '')}</option>`).join('');
+    shareRow.style.display = '';
+  }
   const now = new Date();
   fillEventForm('new', null, presetDate || toDateStr(now.getFullYear(), now.getMonth(), now.getDate()));
   modal.classList.add('visible');
@@ -368,11 +387,11 @@ function renderEditEventShareSlot(ev) {
   if (!slot) return;
   if (!state.sharing) { slot.innerHTML = ''; return; }
   if (!ev.shared_id) {
-    slot.innerHTML = `<button class="btn" data-action="share-event" data-id="${esc(ev.id)}">${lucideIcon('share', 14)} ${t('sharing.share')}</button>`;
+    slot.innerHTML = `<button class="btn" data-action="share-event" data-id="${esc(ev.id)}" title="${t('sharing.share')}" aria-label="${t('sharing.share')}">${lucideIcon('share', 15)}</button>`;
   } else if (isMySharedEvent(ev)) {
-    slot.innerHTML = `<button class="btn" data-action="unshare-event" data-id="${esc(ev.id)}">${lucideIcon('share-off', 14)} ${t('sharing.unshare')}</button>`;
+    slot.innerHTML = `<button class="btn" data-action="unshare-event" data-id="${esc(ev.id)}" title="${t('sharing.unshare')}" aria-label="${t('sharing.unshare')}">${lucideIcon('share-off', 15)}</button>`;
   } else {
-    slot.innerHTML = `<button class="btn" data-action="copy-event-to-personal" data-id="${esc(ev.id)}">${lucideIcon('copy', 14)} ${t('sharing.copy_to_personal')}</button>`;
+    slot.innerHTML = `<button class="btn" data-action="copy-event-to-personal" data-id="${esc(ev.id)}" title="${t('sharing.copy_to_personal')}" aria-label="${t('sharing.copy_to_personal')}">${lucideIcon('copy', 15)}</button>`;
   }
 }
 
@@ -387,12 +406,27 @@ function closeEditEventModal() {
 async function saveNewEvent() {
   const fields = readEventForm('new');
   if (!fields) return;
-  const { error } = await state.db.from('events').insert(fields);
+  const shareRow = document.getElementById('newEventShareRow');
+  const groupId = (shareRow && shareRow.style.display !== 'none')
+    ? (document.getElementById('newEventGroup')?.value || '') : '';
+  const wantShare = !!(groupId && state.sharing);
+  // With a group chosen, the id is fixed client-side so the row can be
+  // converted to a shared pointer immediately after the insert.
+  const row = wantShare ? { id: crypto.randomUUID(), ...fields } : fields;
+  const { error } = await state.db.from('events').insert(row);
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
   closeAddEventModal();
   showToast(t('events.event_added', fields.title), 'success');
   await refreshEvents();
-  pokeCalendarSync();
+  if (wantShare) {
+    convertEventToShared(row, groupId).then(async (ok) => {
+      if (ok) showToast(t('sharing.shared') + '!', 'success');
+      await refreshEvents();
+      pokeCalendarSync();
+    }).catch(async (e) => { showToast(e.message, 'error'); await refreshEvents(); });
+  } else {
+    pokeCalendarSync();
+  }
 }
 
 async function saveEditEvent() {
@@ -453,6 +487,48 @@ function pokeCalendarSync() {
 // SHARING — share / unshare / copy (TODO pattern)
 // ===================================================================
 
+/**
+ * Convert a personal event row into a shared one in the given group:
+ * stage the item in the group's events.json, swap the local row for a
+ * pointer, and roll the swap back if the Drive upload fails after
+ * staging. Resolves true when the event ended up shared. Used by the
+ * edit modal's Share action and by Add Event's share-at-creation.
+ */
+async function convertEventToShared(ev, groupId) {
+  const sharedId = crypto.randomUUID();
+  const payload = eventPayload(ev);
+  const personalRow = { ...ev };
+  delete personalRow._shared;
+  let onStaged;
+  let wasStaged = false;
+  const staged = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
+  const upload = state.sharing.addItem(groupId, { id: sharedId, item_type: 'event', payload, onStaged });
+  upload.catch(() => {}); // handled via the awaits below
+  await Promise.race([staged, upload.then(() => {}, () => {})]);
+  if (!wasStaged) {
+    const err = await upload.then(() => null, (e) => e);
+    if (err) showToast(err.message, 'error');
+    return false;
+  }
+  const { error: ptrErr } = await state.db.from('events').insert({
+    title: '', all_day: 0, shared_id: sharedId, shared_group_id: groupId,
+  });
+  if (ptrErr) {
+    state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+    showToast(ptrErr.message, 'error');
+    return false;
+  }
+  await state.db.from('events').delete().eq('id', ev.id);
+  const uploaded = await upload.then(() => true, async (driveErr) => {
+    // Upload failed after the swap: restore the personal row.
+    await state.db.from('events').delete().eq('shared_id', sharedId);
+    await state.db.from('events').insert(personalRow);
+    showToast(driveErr.message, 'error');
+    return false;
+  });
+  return uploaded;
+}
+
 async function shareEvent(id, el) {
   if (!state.sharing) return;
   if (_pendingShare.has(id)) return;
@@ -464,43 +540,14 @@ async function shareEvent(id, el) {
     if (_pendingShare.has(id)) return;
     _pendingShare.add(id);
     btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true');
-    (async () => {
-      const sharedId = crypto.randomUUID();
-      const payload = eventPayload(ev);
-      const personalRow = { ...ev };
-      delete personalRow._shared;
-      let onStaged;
-      let wasStaged = false;
-      const staged = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
-      let locallyStaged = false;
-      const upload = state.sharing.addItem(groupId, { id: sharedId, item_type: 'event', payload, onStaged });
-      upload.then(
-        () => showToast(t('sharing.shared') + '!', 'success'),
-        async (driveErr) => {
-          if (locallyStaged) {
-            await state.db.from('events').delete().eq('shared_id', sharedId);
-            await state.db.from('events').insert(personalRow);
-            await refreshEvents();
-          }
-          showToast(driveErr.message, 'error');
-        }
-      );
-      await Promise.race([staged, upload.then(() => {}, () => {})]);
-      if (!wasStaged) return;
-      const { error: ptrErr } = await state.db.from('events').insert({
-        title: '', all_day: 0, shared_id: sharedId, shared_group_id: groupId,
-      });
-      if (ptrErr) {
-        state.sharing.deleteItem(groupId, sharedId).catch(() => {});
-        showToast(ptrErr.message, 'error');
-        return;
+    convertEventToShared(ev, groupId).then(async (ok) => {
+      if (ok) {
+        showToast(t('sharing.shared') + '!', 'success');
+        closeEditEventModal();
       }
-      await state.db.from('events').delete().eq('id', ev.id);
-      locallyStaged = true;
-      closeEditEventModal();
       await refreshEvents();
       pokeCalendarSync();
-    })().catch(e => showToast(e.message, 'error'))
+    }).catch(e => showToast(e.message, 'error'))
       .finally(() => {
         _pendingShare.delete(id);
         if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }

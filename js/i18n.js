@@ -436,6 +436,7 @@ const T = {
     calendar: {
       today: 'Today', birthdays: 'Birthdays', todos: 'TODOs', habits: 'Habits', events: 'Events',
       no_events: 'Nothing scheduled', turns: 'Turns {0}',
+      tomorrow: 'Tomorrow', yesterday: 'Yesterday', jump_to_date: 'Jump to date',
       day: 'Day', week: 'Week', month: 'Month', year: 'Year',
       week_of: 'Week of {0}',
       only_next_due: 'Only the next occurrence can be marked done',
@@ -650,6 +651,7 @@ const T = {
       no_groups_create_hint: 'No sharing group yet. Create one to start sharing items.',
       open_sharing_settings: 'Go to Groups',
       share_to: 'Share to',
+      personal_option: 'Personal',
       assign_to: 'Assign to',
       share: 'Share',
       shared: 'Shared',
@@ -1260,6 +1262,7 @@ const T = {
     calendar: {
       today: "Aujourd'hui", birthdays: 'Anniversaires', todos: 'TODOs', habits: 'Habitudes', events: 'Événements',
       no_events: 'Rien de prévu', turns: '{0} ans',
+      tomorrow: 'Demain', yesterday: 'Hier', jump_to_date: 'Aller à une date',
       day: 'Jour', week: 'Semaine', month: 'Mois', year: 'Année',
       only_next_due: 'Seule la prochaine occurrence peut être validée',
       prev_day: 'Jour précédent',
@@ -1468,6 +1471,7 @@ const T = {
       no_groups_create_hint: 'Aucun groupe. Cr\u00e9ez-en un pour commencer \u00e0 partager.',
       open_sharing_settings: 'Ouvrir l\u2019onglet Groupes',
       share_to: 'Partager dans',
+      personal_option: 'Personnel',
       assign_to: 'Assigner \u00e0',
       share: 'Partager',
       shared: 'Partag\u00e9',
@@ -2079,6 +2083,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
     calendar: {
       today: 'Hoy', birthdays: 'Cumpleaños', todos: 'TODOs', habits: 'Hábitos', events: 'Eventos',
       no_events: 'Nada programado', turns: 'Cumple {0}',
+      tomorrow: 'Mañana', yesterday: 'Ayer', jump_to_date: 'Ir a una fecha',
       day: 'Día', week: 'Semana', month: 'Mes', year: 'Año',
       only_next_due: 'Solo se puede completar la próxima ocurrencia',
       prev_day: 'Día anterior',
@@ -2287,6 +2292,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       no_groups_create_hint: 'Sin grupo a\u00fan. Crea uno para empezar a compartir.',
       open_sharing_settings: 'Ir a Grupos',
       share_to: 'Compartir en',
+      personal_option: 'Personal',
       assign_to: 'Asignar a',
       share: 'Compartir',
       shared: 'Compartido',

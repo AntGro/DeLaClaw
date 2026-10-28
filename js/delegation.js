@@ -297,6 +297,7 @@
       case 'open-calendar-day': callWindow('openCalendarDay', [el.dataset.date]); break;
       case 'close-calendar-day': callWindow('closeCalendarDay', []); break;
       case 'calendar-day-nav': callWindow('calendarDayNav', [el.dataset.dir]); break;
+      case 'calendar-day-jump': callWindow('openDayJumpPicker', []); break;
       case 'toggle-calendar-add': callWindow('toggleCalendarAddMenu', [el]); break;
       case 'edit-birthday-avatar': callWindow('handleAvatarClick', [el.dataset.id]); break;
       case 'calendar-birthday-edit': callWindow('closeCalendarDay', []); callWindow('openEditBirthdayModal', [el.dataset.id]); break;
@@ -433,6 +434,7 @@
       case 'handle-model-change': callWindow('handleModelChange', []); break;
       case 'update-next-sibling-category': { var nxt = el.nextElementSibling; if (nxt && nxt.dataset) nxt.dataset.category = el.value; } break;
       case 'pick-calendar-day': callWindow('pickCalendarDay', [el.value]); break;
+      case 'jump-to-calendar-day': callWindow('jumpToCalendarDay', [el.value]); break;
       case 'event-field': callWindow('updateEventSummary', [el.dataset.prefix]); break;
       case 'birthday-field': callWindow('updateBirthdaySummary', [el.dataset.prefix]); break;
       case 'update-proposed-deck': callWindow('updateProposedDeck', [el.dataset.id||el.dataset.todoId, el.value]); break;

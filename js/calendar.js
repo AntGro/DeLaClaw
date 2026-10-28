@@ -319,6 +319,52 @@ function fullDateStr(dateStr) {
   }).format(parseDateStr(dateStr));
 }
 
+/**
+ * Day-panel header parts: the main line (weekday, month, day) and a sub
+ * line with the year and where the day sits relative to today.
+ */
+function dayTitleParts(dateStr) {
+  const d = parseDateStr(dateStr);
+  const main = new Intl.DateTimeFormat(getLang(), {
+    weekday: 'long', day: 'numeric', month: 'long',
+  }).format(d);
+  const now = new Date();
+  const today = toDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((parseLocalDate(dateStr) - parseLocalDate(today)) / 86400000);
+  const rel = diff === 0 ? t('calendar.today')
+    : diff === 1 ? t('calendar.tomorrow')
+    : diff === -1 ? t('calendar.yesterday')
+    : diff > 1 ? t('common.in_days', diff)
+    : t('common.days_ago', Math.abs(diff));
+  return { main, sub: `${d.getFullYear()} · ${rel}` };
+}
+
+/** Jump the day panel (and the grid behind it) to an arbitrary date. */
+function jumpToCalendarDay(dateStr) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return;
+  setAnchor(dateStr);
+  renderCalendar();
+  renderCalendarDayPanel(dateStr);
+}
+
+/** Swap the panel title for a date input and open its native picker. */
+function openDayJumpPicker() {
+  const input = document.getElementById('calDayJumpInput');
+  const title = document.getElementById('calDayTitle');
+  if (!input || !title) return;
+  input.value = calPanelDate || '';
+  title.style.display = 'none';
+  input.style.display = '';
+  input.focus();
+  try { input.showPicker(); } catch { /* picker opens on click/focus instead */ }
+  input.addEventListener('blur', () => {
+    // Dismissed without choosing: restore the title.
+    if (input.value === calPanelDate && document.getElementById('calDayJumpInput') === input) {
+      renderCalendarDayPanel(calPanelDate);
+    }
+  }, { once: true });
+}
+
 function labelSeg(picker, text) {
   return `<button class="cal-label-seg" data-action="open-calendar-picker" data-picker="${picker}">${esc(text)}${lucideIcon('chevron-down', 12)}</button>`;
 }
@@ -775,12 +821,16 @@ function renderCalendarDayPanel(dateStr) {
   // shared capture/restore; navigating to another day starts at top.
   const scrollMap = calPanelDate === dateStr ? captureInnerScrollPositions(modal) : null;
   calPanelDate = dateStr;
-  const title = fullDateStr(dateStr);
+  const title = dayTitleParts(dateStr);
 
   modal.innerHTML = `
     <div class="cal-day-header">
       <button class="btn" data-action="calendar-day-nav" data-dir="-1" title="${t('calendar.prev_day')}">${lucideIcon('chevron-left', 16)}</button>
-      <h2>${esc(title)}</h2>
+      <button class="cal-day-title" id="calDayTitle" data-action="calendar-day-jump" title="${t('calendar.jump_to_date')}">
+        <span class="cal-day-title-main">${esc(title.main)}</span>
+        <span class="cal-day-title-sub">${esc(title.sub)}</span>
+      </button>
+      <input type="date" class="cal-day-jump-input" id="calDayJumpInput" data-action="jump-to-calendar-day" style="display:none" aria-label="${t('calendar.jump_to_date')}">
       <button class="btn" data-action="calendar-day-nav" data-dir="1" title="${t('calendar.next_day')}">${lucideIcon('chevron-right', 16)}</button>
       <div class="calendar-add-wrap">
         <button class="btn" data-action="toggle-calendar-add" data-menu="calendarDayAddMenu"
@@ -822,6 +872,8 @@ window.pickCalendarDay = pickCalendarDay;
 window.toggleCalendarAddMenu = toggleCalendarAddMenu;
 window.closeCalendarAddMenu = closeCalendarAddMenu;
 window.openCalendarDay = openCalendarDay;
+window.jumpToCalendarDay = jumpToCalendarDay;
+window.openDayJumpPicker = openDayJumpPicker;
 window.closeCalendarDay = closeCalendarDay;
 window.calendarDayNav = calendarDayNav;
 window.renderCalendarDayPanel = renderCalendarDayPanel;

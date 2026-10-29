@@ -4631,6 +4631,108 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       db2.close();
     });
 
+    test('drive migration 2.29.0 remaps dangling deck/category FKs by legacy string', async () => {
+      const { DRIVE_MIGRATIONS } =
+        await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+      const store = {
+        flashcard_decks: [
+          { id: '_default_flashcard_decks', name: '', is_protected: 1 },
+          { id: '_shared_flashcard_decks', name: '__shared__', is_protected: 1 },
+          { id: '_cat_721bb3d4', name: 'Histoire de France' },
+          { id: '_cat_56374e4e', name: 'Vocabulaire' },
+        ],
+        flashcards: [
+          // The reported case: legacy 'Général' row gone, string '' kept.
+          { id: 'c1', deck: '', deck_id: '_cat_72921675' },
+          { id: 'c2', deck: 'Histoire de France', deck_id: '_cat_721bb3d4' },
+          { id: 'c3', deck: 'Vocabulaire', deck_id: null },
+          { id: 'c4', deck: 'No Such Deck', deck_id: '_cat_deadbeef' },
+          { id: 'c5', deck: '__shared__', deck_id: '_cat_gone' },
+        ],
+        todo_categories: [
+          { id: '_default_todo_categories', name: '', is_protected: 1 },
+        ],
+        todos: [
+          { id: 't1', category: '', category_id: '_cat_gone' },
+          { id: 't2', category: '', category_id: '_default_todo_categories' },
+        ],
+        habit_categories: [
+          { id: '_default_habit_categories', name: '', is_protected: 1 },
+        ],
+        habits: [
+          { id: 'h1', category: 'Nope', category_id: '_cat_gone' },
+        ],
+      };
+      await DRIVE_MIGRATIONS['2.29.0'](store);
+      const byId = (rows) => Object.fromEntries(rows.map(r => [r.id, r]));
+      const cards = byId(store.flashcards);
+      assert(cards.c1.deck_id === '_default_flashcard_decks',
+        `orphan '' card must remap to the default deck, got ${cards.c1.deck_id}`);
+      assert(cards.c2.deck_id === '_cat_721bb3d4', 'resolving FK must be untouched');
+      assert(cards.c3.deck_id === '_cat_56374e4e', 'null FK must resolve by name');
+      assert(cards.c4.deck_id === '_cat_deadbeef',
+        'unmatched name must be left untouched, never guessed into General');
+      assert(cards.c5.deck_id === '_shared_flashcard_decks',
+        'shared-deck string must resolve to the shared row');
+      const todos = byId(store.todos);
+      assert(todos.t1.category_id === '_default_todo_categories',
+        'orphan TODO must remap to the default category');
+      assert(todos.t2.category_id === '_default_todo_categories', 'resolving TODO FK untouched');
+      assert(byId(store.habits).h1.category_id === '_cat_gone',
+        'unmatched habit name must be left untouched');
+      // Idempotency: a second run changes nothing.
+      const snapshot = JSON.stringify(store);
+      await DRIVE_MIGRATIONS['2.29.0'](store);
+      assert(JSON.stringify(store) === snapshot, 'second run must be a no-op');
+    });
+
+    test('local migration 2.29.0 remaps dangling deck/category FKs by legacy string', async () => {
+      // Runs the real SQL against old-schema tables. Needs bun:sqlite;
+      // skipped under plain node.
+      let Database;
+      try {
+        ({ Database } = await import('bun:sqlite'));
+      } catch {
+        console.log('  (skip: bun:sqlite unavailable)');
+        return;
+      }
+      const { LOCAL_MIGRATIONS } =
+        await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'local-migrations.js')).href);
+      const db = new Database(':memory:');
+      db.exec(`CREATE TABLE flashcard_decks (id TEXT PRIMARY KEY, name TEXT, is_protected INTEGER DEFAULT 0);
+        CREATE TABLE flashcards (id TEXT PRIMARY KEY, deck TEXT NOT NULL, deck_id TEXT);
+        CREATE TABLE texts (id TEXT PRIMARY KEY, deck TEXT NOT NULL, deck_id TEXT);
+        CREATE TABLE todo_categories (id TEXT PRIMARY KEY, name TEXT, is_protected INTEGER DEFAULT 0);
+        CREATE TABLE todos (id TEXT PRIMARY KEY, category TEXT DEFAULT '', category_id TEXT);
+        CREATE TABLE habit_categories (id TEXT PRIMARY KEY, name TEXT, is_protected INTEGER DEFAULT 0);
+        CREATE TABLE habits (id TEXT PRIMARY KEY, category TEXT DEFAULT '', category_id TEXT);`);
+      db.exec(`INSERT INTO flashcard_decks VALUES
+        ('_default_flashcard_decks', '', 1),
+        ('_cat_721bb3d4', 'Histoire de France', 0);
+        INSERT INTO flashcards VALUES
+        ('c1', '', '_cat_72921675'),
+        ('c2', 'Histoire de France', '_cat_721bb3d4'),
+        ('c3', 'No Such Deck', '_cat_deadbeef'),
+        ('c4', 'Histoire de France', NULL);
+        INSERT INTO texts VALUES ('x1', '', '_cat_72921675');
+        INSERT INTO todo_categories VALUES ('_default_todo_categories', '', 1);
+        INSERT INTO todos VALUES ('t1', '', '_cat_gone');
+        INSERT INTO habit_categories VALUES ('_default_habit_categories', '', 1);
+        INSERT INTO habits VALUES ('h1', 'Nope', '_cat_gone');`);
+      db.exec(LOCAL_MIGRATIONS['2.29.0']);
+      const fk = (table, id, col) =>
+        db.prepare(`SELECT ${col} FROM ${table} WHERE id = ?`).get(id)[col];
+      assert(fk('flashcards', 'c1', 'deck_id') === '_default_flashcard_decks',
+        'orphan card must remap to the default deck');
+      assert(fk('flashcards', 'c2', 'deck_id') === '_cat_721bb3d4', 'resolving FK untouched');
+      assert(fk('flashcards', 'c3', 'deck_id') === '_cat_deadbeef', 'unmatched name untouched');
+      assert(fk('flashcards', 'c4', 'deck_id') === '_cat_721bb3d4', 'null FK resolves by name');
+      assert(fk('texts', 'x1', 'deck_id') === '_default_flashcard_decks', 'orphan text remapped');
+      assert(fk('todos', 't1', 'category_id') === '_default_todo_categories', 'orphan TODO remapped');
+      assert(fk('habits', 'h1', 'category_id') === '_cat_gone', 'unmatched habit untouched');
+      db.close();
+    });
+
     test('main: sharing-changed not re-broadcast for local item mutations', () => {
       const main = jsFiles['main.js'];
       // Local item-* mutations are rendered optimistically by their callers;

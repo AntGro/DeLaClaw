@@ -643,4 +643,30 @@ export const LOCAL_MIGRATIONS = {
       updated_at TEXT DEFAULT (datetime('now'))
     );
   `,
+
+  // 2.29.0: repair dangling deck/category FKs (same repair as the
+  // Drive 2.29.0 migration; see its comment for the history). A FK
+  // that points at no row — or is NULL — is remapped by the legacy
+  // string: '' → the protected default row (ORDER BY is_protected
+  // DESC prefers it when duplicate '' rows exist), a name → the row
+  // with that name. FKs that already resolve, and names that match
+  // no row, are left untouched.
+  '2.29.0': `
+    UPDATE flashcards SET deck_id = (
+      SELECT id FROM flashcard_decks WHERE name = flashcards.deck ORDER BY is_protected DESC LIMIT 1
+    ) WHERE (deck_id IS NULL OR deck_id NOT IN (SELECT id FROM flashcard_decks))
+      AND EXISTS (SELECT 1 FROM flashcard_decks WHERE name = flashcards.deck);
+    UPDATE texts SET deck_id = (
+      SELECT id FROM flashcard_decks WHERE name = texts.deck ORDER BY is_protected DESC LIMIT 1
+    ) WHERE (deck_id IS NULL OR deck_id NOT IN (SELECT id FROM flashcard_decks))
+      AND EXISTS (SELECT 1 FROM flashcard_decks WHERE name = texts.deck);
+    UPDATE todos SET category_id = (
+      SELECT id FROM todo_categories WHERE name = todos.category ORDER BY is_protected DESC LIMIT 1
+    ) WHERE (category_id IS NULL OR category_id NOT IN (SELECT id FROM todo_categories))
+      AND EXISTS (SELECT 1 FROM todo_categories WHERE name = todos.category);
+    UPDATE habits SET category_id = (
+      SELECT id FROM habit_categories WHERE name = habits.category ORDER BY is_protected DESC LIMIT 1
+    ) WHERE (category_id IS NULL OR category_id NOT IN (SELECT id FROM habit_categories))
+      AND EXISTS (SELECT 1 FROM habit_categories WHERE name = habits.category);
+  `,
 };

@@ -458,4 +458,48 @@ export const DRIVE_MIGRATIONS = {
     // simply start with an empty table.
     if (!store.events) store.events = [];
   },
+  '2.29.0': async (store) => {
+    // 2.29.0: repair dangling deck/category FKs left by the 1.474 →
+    // 1.482 sequence: 1.474 created a deterministic deck row for the
+    // legacy 'Général' string (e.g. _cat_72921675) and 1.482 renamed
+    // the cards' deck string to '' without remapping the FK; the row
+    // itself is gone from stores that later deleted the duplicate, so
+    // those cards point at a deck that no longer exists and render in
+    // no bucket (grouping is by deck_id; a non-empty dangling FK
+    // short-circuits the name fallback in deckIdForCard/catIdFor*).
+    // Remap by the legacy string: '' → the protected default row, a
+    // name → the row with that name. FKs that already resolve, and
+    // names that match no row, are left untouched — never guess a
+    // named item into the default deck. Null FKs are repaired the
+    // same way. Idempotent: a second run finds no dangling FKs.
+    const specs = [
+      { table: 'flashcard_decks', items: [
+        { table: 'flashcards', field: 'deck', fk: 'deck_id' },
+        { table: 'texts', field: 'deck', fk: 'deck_id' },
+      ] },
+      { table: 'todo_categories', items: [
+        { table: 'todos', field: 'category', fk: 'category_id' },
+      ] },
+      { table: 'habit_categories', items: [
+        { table: 'habits', field: 'category', fk: 'category_id' },
+      ] },
+    ];
+    for (const { table, items } of specs) {
+      const rows = store[table] || [];
+      const ids = new Set(rows.map(r => r.id));
+      const defaultRow = rows.find(r => r.is_protected && r.name === '');
+      const byName = new Map();
+      for (const r of rows) if (!byName.has(r.name)) byName.set(r.name, r.id);
+      for (const { table: itemTable, field, fk } of items) {
+        for (const item of (store[itemTable] || [])) {
+          if (item[fk] && ids.has(item[fk])) continue;
+          const name = item[field] ?? '';
+          if (name === '' && defaultRow) { item[fk] = defaultRow.id; continue; }
+          const named = byName.get(name);
+          if (named) item[fk] = named;
+          // else: leave untouched (no row to resolve to)
+        }
+      }
+    }
+  },
 };

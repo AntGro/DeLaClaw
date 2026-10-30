@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-30T18:44:10.546Z from 51 modules (v2.32.4). Total LOC 37627. Do not hand-edit.
+> Generated 2026-10-30T18:54:43.227Z from 51 modules (v2.32.5). Total LOC 37639. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -36,10 +36,10 @@
 | utils | 1016 | flashcards,x | calendar-pure,i18n,icons,sections-pure | - | esc:7,window:6 |
 | calendar | 880 | - | calendar-pure,habits,i18n,icons | main.js | esc:21,window:8 |
 | events | 737 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:19,pendingSet,window:8 |
-| batch-import | 559 | - | icons,import-pure,state,utils | - | esc:13 |
+| batch-import | 564 | - | calendar-pure,icons,import-pure,state | - | esc:14 |
 | delegation | 534 | - |  | - | window:1 |
 | hero | 473 | - | logo,storm3d | main.js | - |
-| calendar-pure | 464 | - |  | birthdays.js,calendar-sync.js,calendar.js,events.js | - |
+| calendar-pure | 464 | - |  | batch-import.js,birthdays.js,calendar-sync.js,calendar.js | - |
 | demo-chooser | 464 | - | habits,i18n,icons,utils | - | - |
 | offline-cache | 439 | - | ./i18n,./state,i18n.js,state.js | drive.js,main.js,sharing.js | - |
 | sections-pure | 412 | - |  | calendar.js,habits.js,lists.js,todos.js | - |
@@ -56,9 +56,9 @@
 | rest | 162 | x |  | main.js | - |
 | habit-import | 143 | - | frequency-rule,import-pure | - | - |
 | sharing-interface | 136 | - |  | sharing.js | - |
+| import-pure | 135 | - |  | batch-import.js,habit-import.js,todo-import.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
-| import-pure | 130 | - |  | batch-import.js,habit-import.js,todo-import.js | - |
-| todo-import | 92 | - | import-pure | - | - |
+| todo-import | 94 | - | import-pure | - | - |
 | sharing-mutation-queue | 83 | - |  | sharing-drive.js | - |
 | daily-visits | 77 | - |  | main.js | - |
 | sharing-envelope | 67 | - |  | sharing-drive.js,sharing-ui.js,sharing.js | - |

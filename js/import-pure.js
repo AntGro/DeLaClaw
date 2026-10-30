@@ -42,8 +42,12 @@ export function parseImportArray(raw) {
  * Normalize a date value to an ISO-8601 string (or null when empty).
  * Accepts 'YYYY-MM-DD' (interpreted as local midnight) or any string the
  * Date constructor parses. Throws an Error when the value is not usable.
+ * With opts.preserveDateOnly, a valid 'YYYY-MM-DD' is returned as-is
+ * instead of being converted to midnight ISO (TODO due_date: date-only
+ * deadlines carry end-of-day semantics; timed fields such as snooze_until
+ * keep the default conversion).
  */
-export function normalizeImportDate(value, fieldName) {
+export function normalizeImportDate(value, fieldName, opts = {}) {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value !== 'string') {
     throw new Error(`"${fieldName}": expected a date string, got ${typeof value}`);
@@ -57,6 +61,7 @@ export function normalizeImportDate(value, fieldName) {
     if (d.getFullYear() !== +m[1] || d.getMonth() !== +m[2] - 1 || d.getDate() !== +m[3]) {
       throw new Error(`"${fieldName}": "${s}" is not a real calendar date`);
     }
+    if (opts.preserveDateOnly) return s;
   } else {
     d = new Date(s);
   }

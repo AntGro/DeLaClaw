@@ -11,7 +11,7 @@ import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCat
 import { compareOrderKeys } from './sections-pure.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
-import { parseLocalDate, isHabitSnoozed, toDateStr, isDateOnly, dueEffectiveEnd, isDueOverdue, compareDueDates } from './calendar-pure.js';
+import { parseLocalDate, isHabitSnoozed, toDateStr, isDateOnly, isDueOverdue, isDueSoon, compareDueDates } from './calendar-pure.js';
 
 // ── Local data cache ──
 let wTodos = [];
@@ -220,10 +220,9 @@ function renderFocusTodoItem(td) {
   let dueDateStr = '';
   if (td.due_date) {
     const dueLabel = isDateOnly(td.due_date) ? formatRelativeDay(td.due_date, now) : formatRelativeDate(new Date(td.due_date));
-    const diffH = Math.round((dueEffectiveEnd(td.due_date) - now) / (1000 * 60 * 60));
     if (isOverdue) {
       dueDateStr = `<span class="todo-due overdue">${lucideIcon('alert-triangle', 14)} ${t('todos.overdue')} (${dueLabel})</span>`;
-    } else if (diffH < 24) {
+    } else if (isDueSoon(td.due_date, now)) {
       dueDateStr = `<span class="todo-due due-soon">${lucideIcon("bell", 16)} ${t('todos.due')} ${dueLabel}</span>`;
     } else {
       dueDateStr = `<span class="todo-due">${lucideIcon("calendar", 16)} ${dueLabel}</span>`;

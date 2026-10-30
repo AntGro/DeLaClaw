@@ -121,6 +121,40 @@ export function compareDueDates(a, b) {
   return dueEffectiveEnd(a) - dueEffectiveEnd(b);
 }
 
+/**
+ * True when the value is a real calendar date, not just YYYY-MM-DD-shaped.
+ * '2026-02-31' matches the shape but is not a date; the Date constructor
+ * would silently normalize it to Mar 3, so the round-trip check rejects it.
+ */
+export function isValidDateOnly(value) {
+  if (!isDateOnly(value)) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+}
+
+/**
+ * Drop a date-only value that is not a real calendar date (→ null).
+ * Anything else passes through unchanged. Applied at read boundaries
+ * (TODO refresh, calendar-sync scan) so corrupt values from shared
+ * payloads or direct Drive writes never render as a different day.
+ * Batch import rejects such values outright (import-pure.js).
+ */
+export function dropInvalidDateOnly(value) {
+  return (isDateOnly(value) && !isValidDateOnly(value)) ? null : value;
+}
+
+/**
+ * Due-soon check: not overdue, and the effective end is within 24h.
+ * Compared in milliseconds, not rounded hours: rounding made deadlines
+ * 23.5–24h out (e.g. a date-only deadline due today, before 00:30)
+ * miss the due-soon bell.
+ */
+export function isDueSoon(due, now = new Date()) {
+  if (!due || isDueOverdue(due, now)) return false;
+  return dueEffectiveEnd(due) - now < 24 * 60 * 60 * 1000;
+}
+
 // ===================================================================
 // USER EVENTS — instant model (v2.31.0)
 // ===================================================================

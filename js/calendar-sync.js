@@ -19,7 +19,7 @@ import { lucideIcon } from './icons.js';
 import { getTodoCategories } from './todos.js';
 import { getHabitCategories } from './habits.js';
 import { driveFolderSuffix, currentHostname } from './drive-folders.js';
-import { isHabitSnoozed } from './calendar-pure.js';
+import { isHabitSnoozed, dropInvalidDateOnly } from './calendar-pure.js';
 
 const CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
 
@@ -251,6 +251,7 @@ async function getSyncableItems(itemType) {
     const { data: todos } = await state.db.from('todos').select('*');
     for (const td of (todos || [])) {
       const item = resolveRow('todo', td);
+      if (item?.due_date) item.due_date = dropInvalidDateOnly(item.due_date);
       if (item && !item.done && (item.due_date || item.snooze_until)) items.push({ id: item.id, item });
     }
   } else if (itemType === 'birthday') {

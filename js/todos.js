@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, formatRelativeDay, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
-import { isDateOnly, dueEffectiveEnd, isDueOverdue, compareDueDates } from './calendar-pure.js';
+import { isDateOnly, isDueOverdue, isDueSoon, compareDueDates, dropInvalidDateOnly } from './calendar-pure.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration, orderKeyOf, compareOrderKeys } from './sections-pure.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
@@ -298,6 +298,12 @@ async function refreshTodos() {
     // Drop shared pointers whose remote data couldn't be resolved
     allTodos = allTodos.filter(t => !t.shared_id || t._shared);
   }
+
+  // Drop date-only deadlines that are not real calendar dates (e.g.
+  // '2026-02-31' from a shared payload or a direct Drive write): they
+  // would otherwise normalize silently to a different day on render.
+  // In-memory only; the stored value is untouched until re-saved.
+  for (const td of allTodos) td.due_date = dropInvalidDateOnly(td.due_date);
 
   _lastRefreshTodos = Date.now();
 
@@ -647,10 +653,9 @@ function renderTodoItem(td) {
   let dueDateStr = '';
   if (td.due_date) {
     const dueLabel = isDateOnly(td.due_date) ? formatRelativeDay(td.due_date, now) : formatRelativeDate(new Date(td.due_date));
-    const diffH = Math.round((dueEffectiveEnd(td.due_date) - now) / (1000 * 60 * 60));
     if (isOverdue) {
       dueDateStr = `<span class="todo-due overdue">${lucideIcon('alert-triangle', 14)} ${t('todos.overdue')} (${dueLabel})</span>`;
-    } else if (diffH < 24) {
+    } else if (isDueSoon(td.due_date, now)) {
       dueDateStr = `<span class="todo-due due-soon">${lucideIcon("bell",16)} ${t('todos.due')} ${dueLabel}</span>`;
     } else {
       dueDateStr = `<span class="todo-due">${lucideIcon("calendar",16)} ${dueLabel}</span>`;

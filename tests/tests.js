@@ -4246,6 +4246,58 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'time input must have its narrower width rule');
     });
 
+    test('todos: due-soon uses milliseconds, not rounded hours (audit fix 1)', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      assert(typeof mod.isDueSoon === 'function', 'calendar-pure must export isDueSoon');
+      // The audit's case: date-only due today, 00:15 — 23.75h remain.
+      // Math.round gave 24h, so the bell was missed; ms comparison keeps it.
+      const early = new Date(2026, 9, 30, 0, 15, 0);
+      assert(mod.isDueSoon('2026-10-30', early) === true, 'date-only due today at 00:15 must be due-soon');
+      assert(mod.isDueSoon('2026-10-31', early) === false, 'date-only due tomorrow must not be due-soon');
+      const noon = new Date(2026, 9, 30, 12, 0, 0);
+      assert(mod.isDueSoon('2026-10-30', noon) === true, 'date-only due today at noon must be due-soon');
+      assert(mod.isDueSoon('2026-10-29', noon) === false, 'overdue must never be due-soon');
+      const timedSoon = new Date(2026, 9, 31, 0, 0, 0).toISOString(); // 23.75h from 00:15
+      assert(mod.isDueSoon(timedSoon, early) === true, 'timed 23.75h out must be due-soon (same rounding fix)');
+      const timedLater = new Date(2026, 9, 31, 0, 45, 0).toISOString(); // 24.5h from 00:15
+      assert(mod.isDueSoon(timedLater, early) === false, 'timed 24.5h out must not be due-soon');
+      const timedPast = new Date(2026, 9, 30, 10, 0, 0).toISOString();
+      assert(mod.isDueSoon(timedPast, noon) === false, 'timed past must not be due-soon');
+      assert(mod.isDueSoon(null, noon) === false, 'no deadline must never be due-soon');
+    });
+
+    test('todos: invalid date-only deadlines are dropped, not normalized (audit fix 2)', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      assert(typeof mod.isValidDateOnly === 'function', 'calendar-pure must export isValidDateOnly');
+      assert(typeof mod.dropInvalidDateOnly === 'function', 'calendar-pure must export dropInvalidDateOnly');
+      assert(mod.isValidDateOnly('2026-02-28') === true, 'real date must validate');
+      assert(mod.isValidDateOnly('2024-02-29') === true, 'leap-day must validate');
+      for (const bad of ['2026-02-31', '2026-02-29', '2026-13-01', '2026-00-10', '2026-01-00', '2026-1-1']) {
+        assert(mod.isValidDateOnly(bad) === false, `${bad} must not validate as a real calendar date`);
+      }
+      assert(mod.isValidDateOnly('2026-10-30T10:00:00.000Z') === false, 'timestamp must not count as date-only');
+      assert(mod.isValidDateOnly(null) === false && mod.isValidDateOnly('') === false, 'missing value must not validate');
+      assert(mod.dropInvalidDateOnly('2026-02-31') === null, 'invalid date-only must drop to null');
+      assert(mod.dropInvalidDateOnly('2026-10-30') === '2026-10-30', 'valid date-only must pass through');
+      const timed = new Date(2026, 9, 30, 10, 0, 0).toISOString();
+      assert(mod.dropInvalidDateOnly(timed) === timed, 'timed value must pass through');
+      assert(mod.dropInvalidDateOnly(null) === null, 'null must pass through as null');
+      // Wiring: both renders use the shared helper (no rounded-hour math left),
+      // and both read boundaries drop invalid date-only values.
+      const todos = jsFiles['todos.js'];
+      const welcome = jsFiles['welcome.js'];
+      assert(todos.includes('isDueSoon(td.due_date, now)') && welcome.includes('isDueSoon(td.due_date, now)'),
+        'both render paths must use isDueSoon');
+      assert(!todos.includes('Math.round((dueEffectiveEnd') && !welcome.includes('Math.round((dueEffectiveEnd'),
+        'rounded-hour due-soon math must be gone from both render paths');
+      assert(todos.includes('dropInvalidDateOnly(td.due_date)') && todos.includes('dropInvalidDateOnly'),
+        'refreshTodos must drop invalid date-only deadlines on read');
+      assert(jsFiles['calendar-sync.js'].includes('dropInvalidDateOnly(item.due_date)'),
+        'calendar-sync scan must drop invalid date-only deadlines');
+      assert(jsFiles['import-pure.js'].includes('is not a real calendar date'),
+        'batch import must reject non-real calendar dates outright');
+    });
+
     test('calendar-pure: event instant model — wall time, conversion, placement', async () => {
       const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
       for (const fn of ['wallTimeToInstant', 'instantToDateStr', 'instantToTimeStr', 'eventSpan', 'eventDatesInRange', 'gmtOffsetLabel']) {

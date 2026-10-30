@@ -58,7 +58,7 @@ User jobs:
 - `priority ∈ {urgent, high, medium, low, normal}`
 - `sort_order` monotonic per category
 - `status=done` preserved on reorder
-- `due_date` — optional; either a date-only `YYYY-MM-DD` string (due at the end of that local day, no time shown) or a UTC ISO timestamp. Past due_date highlights the item as overdue (date-only: only once its day has passed)
+- `due_date` — optional; either a date-only `YYYY-MM-DD` string (due at the end of that local day, no time shown) or a UTC ISO timestamp. Past due_date highlights the item as overdue (date-only: only once its day has passed). Date-only values that are not real calendar dates (e.g. `2026-02-31`) are dropped to null on read (`refreshTodos`, calendar-sync scan); batch import rejects them outright. Due-soon = effective end within 24h, compared in milliseconds (never rounded hours)
 - New TODOs inserted at top of category (min `sort_order - 1`)
 - Delete → trash, not hard delete from UI (adapter handles)
 

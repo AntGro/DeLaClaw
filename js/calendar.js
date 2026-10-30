@@ -57,7 +57,7 @@ function syncCalendarToolbar() {
   });
 }
 
-const TYPE_ORDER = { event: 0, todo: 1, habit: 2, birthday: 3 };
+const TYPE_ORDER = { birthday: 0, event: 1, todo: 2, habit: 3 };
 const MAX_CHIPS = 3;
 
 function setAnchor(dateStr) {

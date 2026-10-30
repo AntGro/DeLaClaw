@@ -21,8 +21,8 @@ export function parseTodoImportJSON(raw) {
 }
 
 /** Kept for symmetry with validateTodoImportItem; delegates to the shared date normalizer. */
-export function normalizeTodoImportDate(value, fieldName) {
-  return normalizeImportDate(value, fieldName);
+export function normalizeTodoImportDate(value, fieldName, opts) {
+  return normalizeImportDate(value, fieldName, opts);
 }
 
 /**
@@ -62,10 +62,12 @@ export function validateTodoImportItem(raw, index, ctx) {
   }
 
   // — dates —
+  // due_date preserves date-only strings (end-of-day semantics);
+  // snooze_until stays timed (local-midnight ISO for a bare date).
   let due_date = null;
   let snooze_until = null;
   try {
-    due_date = normalizeImportDate(raw.due_date, 'due_date');
+    due_date = normalizeImportDate(raw.due_date, 'due_date', { preserveDateOnly: true });
   } catch (e) {
     err('due_date', e.message);
   }

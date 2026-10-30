@@ -4151,6 +4151,38 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(r.item.category === 'General' && !r.item.categoryIsNew, 'real "General" category must win');
     });
 
+    test('todo-import: date-only due_date preserved, snooze stays ISO', async () => {
+      const imp = await import(pathToFileURL(path.join(JS_DIR, 'import-pure.js')).href);
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'todo-import.js')).href);
+      // Flag behavior on the shared normalizer (tz-safe expectations)
+      assert(imp.normalizeImportDate('2026-11-02', 'due_date', { preserveDateOnly: true }) === '2026-11-02',
+        'preserveDateOnly must return the date-only string as-is');
+      assert(imp.normalizeImportDate('2026-11-02', 'due_date') === new Date(2026, 10, 2).toISOString(),
+        'default must still convert to local-midnight ISO');
+      assert(imp.normalizeImportDate('2026-11-02T18:30', 'due_date', { preserveDateOnly: true }) === new Date('2026-11-02T18:30').toISOString(),
+        'flag must only affect the date-only branch');
+      let threw = false;
+      try { imp.normalizeImportDate('2026-02-31', 'due_date', { preserveDateOnly: true }); } catch { threw = true; }
+      assert(threw, 'invalid date-only must still be rejected with the flag on');
+      // Wrapper threads the option through
+      assert(mod.normalizeTodoImportDate('2026-11-02', 'due_date', { preserveDateOnly: true }) === '2026-11-02',
+        'wrapper must pass options through');
+      // Validate: due_date preserved, snooze_until converted
+      const ctx = { categoryNames: [], groupById: new Map(), sharingReady: false };
+      const r = mod.validateTodoImportItem({ title: 'X', due_date: '2026-11-02', snooze_until: '2026-11-02' }, 0, ctx);
+      assert(r.errors.length === 0, 'both dates valid: ' + JSON.stringify(r.errors));
+      assert(r.item.due_date === '2026-11-02', 'imported date-only due_date must stay date-only');
+      assert(r.item.snooze_until === new Date(2026, 10, 2).toISOString(), 'imported date-only snooze must stay local-midnight ISO');
+      // Review UI: datetime fields with date-only values render a date input
+      // (a datetime-local input would show a phantom UTC-midnight time).
+      const shell = jsFiles['batch-import.js'];
+      const fnStart = shell.indexOf('function renderFieldInput');
+      assert(fnStart !== -1, 'batch-import must have renderFieldInput');
+      const fnBody = shell.slice(fnStart, fnStart + 1500);
+      assert(fnBody.includes('isDateOnly(val)') && fnBody.includes('type="date"'),
+        'review datetime fields must branch to a date input for date-only values');
+    });
+
     test('calendar day modal: overdue amounts + prev/next day navigation', () => {
       const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
       // Overdue rows show the bucket-style label (due date + days ago)

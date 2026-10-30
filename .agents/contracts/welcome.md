@@ -42,6 +42,7 @@ Today / Welcome aggregation — focus TODOs, due habits, flashcard reviews, text
 - Flashcard reviews: due count per deck
 - **Text reading progress**: aggregates texts via `getTexts()` + `getTextProgress()` from flashcards module — shows reading completion status
 - Birthdays: next 7 days
+- **Calendar strip**: reuses the Calendar tab's week cells (`collectRangeEvents` + `dayCellHTML` from calendar.js) — same chips, same overdue mirrors, same day-panel modal on click. It always passes all-true types, so it never inherits the Calendar tab's funnel filter. Navigation (prev/next week, Today) uses a Welcome-owned offset (`wCalWeekOffset`) that never moves the Calendar tab's anchor and resets on `refreshWelcome()`; nav re-renders only the calendar section. Event mutations notify via `events-changed` (dispatched by `refreshEvents`), same pattern as todos/habits-changed.
 - `refreshWelcome()` must be called after any change to todos/habits/flashcards/texts/birthdays
 - `impact.js` suggests `welcome [x]` when any of those change — check blast radius
 

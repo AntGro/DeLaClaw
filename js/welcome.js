@@ -4,14 +4,14 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, formatRelativeDate, truncateWithShowMore } from './utils.js';
+import { esc, escQ, renderMd, formatRelativeDate, formatRelativeDay, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
 import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCatPath, getHabitCatOrderKey, getHabitCategories, isMyCreatedSharedHabit, isAutoHabit } from './habits.js';
 import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey, getTodoCategories } from './todos.js';
 import { compareOrderKeys } from './sections-pure.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
-import { parseLocalDate, isHabitSnoozed, toDateStr } from './calendar-pure.js';
+import { parseLocalDate, isHabitSnoozed, toDateStr, isDateOnly, dueEffectiveEnd, isDueOverdue, compareDueDates } from './calendar-pure.js';
 
 // ── Local data cache ──
 let wTodos = [];
@@ -206,7 +206,7 @@ window.welcomeSnooze = welcomeSnooze;
 function renderFocusTodoItem(td) {
   const now = new Date();
   const todayStart = startOfDay(now);
-  const isOverdue = td.due_date && !td.done && new Date(td.due_date) < now;
+  const isOverdue = td.due_date && !td.done && isDueOverdue(td.due_date, now);
   const isSnoozed = td.snooze_until && new Date(td.snooze_until) > now;
   const isFlagged = td.priority && td.priority !== 'normal';
 
@@ -219,15 +219,14 @@ function renderFocusTodoItem(td) {
 
   let dueDateStr = '';
   if (td.due_date) {
-    const d = new Date(td.due_date);
-    const diffMs = d - now;
-    const diffH = Math.round(diffMs / (1000 * 60 * 60));
+    const dueLabel = isDateOnly(td.due_date) ? formatRelativeDay(td.due_date, now) : formatRelativeDate(new Date(td.due_date));
+    const diffH = Math.round((dueEffectiveEnd(td.due_date) - now) / (1000 * 60 * 60));
     if (isOverdue) {
-      dueDateStr = `<span class="todo-due overdue">${lucideIcon('alert-triangle', 14)} ${t('todos.overdue')} (${formatRelativeDate(d)})</span>`;
+      dueDateStr = `<span class="todo-due overdue">${lucideIcon('alert-triangle', 14)} ${t('todos.overdue')} (${dueLabel})</span>`;
     } else if (diffH < 24) {
-      dueDateStr = `<span class="todo-due due-soon">${lucideIcon("bell", 16)} ${t('todos.due')} ${formatRelativeDate(d)}</span>`;
+      dueDateStr = `<span class="todo-due due-soon">${lucideIcon("bell", 16)} ${t('todos.due')} ${dueLabel}</span>`;
     } else {
-      dueDateStr = `<span class="todo-due">${lucideIcon("calendar", 16)} ${formatRelativeDate(d)}</span>`;
+      dueDateStr = `<span class="todo-due">${lucideIcon("calendar", 16)} ${dueLabel}</span>`;
     }
   }
 
@@ -486,7 +485,7 @@ function renderWelcome() {
     if (td.priority && td.priority !== 'normal') return true;
     // Deadline today or overdue
     if (td.due_date) {
-      const due = startOfDay(new Date(td.due_date));
+      const due = startOfDay(parseLocalDate(td.due_date));
       if (due <= todayStart) return true;
     }
     return false;
@@ -497,7 +496,7 @@ function renderWelcome() {
     const pa = priOrd[a.priority] ?? 4;
     const pb = priOrd[b.priority] ?? 4;
     if (pa !== pb) return pa - pb;
-    if (a.due_date && b.due_date) return new Date(a.due_date) - new Date(b.due_date);
+    if (a.due_date && b.due_date) return compareDueDates(a.due_date, b.due_date);
     if (a.due_date) return -1;
     if (b.due_date) return 1;
     return 0;

@@ -4198,6 +4198,54 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'calOverdueSub must compute the count via calendar-pure overdueDays');
     });
 
+    test('todos: date-only deadlines are due at end of day, timed keep instant semantics', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      for (const fn of ['isDateOnly', 'dueEffectiveEnd', 'isDueOverdue', 'compareDueDates']) {
+        assert(typeof mod[fn] === 'function', `calendar-pure must export ${fn}`);
+      }
+      assert(mod.isDateOnly('2026-10-30') === true, 'YYYY-MM-DD must count as date-only');
+      assert(mod.isDateOnly('2026-10-30T10:00:00.000Z') === false, 'ISO timestamp must not count as date-only');
+      assert(mod.isDateOnly(null) === false && mod.isDateOnly('') === false, 'missing value must not count as date-only');
+      const noon = new Date(2026, 9, 30, 12, 0, 0); // local noon, Oct 30
+      assert(mod.isDueOverdue('2026-10-30', noon) === false, 'date-only due today must not be overdue at noon');
+      assert(mod.isDueOverdue('2026-10-29', noon) === true, 'date-only due yesterday must be overdue');
+      assert(mod.isDueOverdue('2026-10-31', noon) === false, 'date-only due tomorrow must not be overdue');
+      assert(mod.isDueOverdue(null, noon) === false, 'no deadline must never be overdue');
+      const timedPast = new Date(2026, 9, 30, 10, 0, 0).toISOString();
+      const timedFuture = new Date(2026, 9, 30, 14, 0, 0).toISOString();
+      assert(mod.isDueOverdue(timedPast, noon) === true, 'timed past deadline must stay overdue');
+      assert(mod.isDueOverdue(timedFuture, noon) === false, 'timed future deadline must stay not overdue');
+      const timed9 = new Date(2026, 9, 30, 9, 0, 0).toISOString();
+      assert(mod.compareDueDates(timed9, '2026-10-30') < 0,
+        'timed morning deadline must sort before date-only same day (end of day)');
+      assert(mod.compareDueDates('2026-10-29', '2026-10-30') < 0, 'earlier date-only day must sort first');
+      assert(mod.compareDueDates('2026-10-30', '2026-10-30') === 0, 'same date-only day must tie');
+      const end = mod.dueEffectiveEnd('2026-10-30');
+      assert(end.getHours() === 23 && end.getMinutes() === 59 && end.getSeconds() === 59,
+        'date-only effective end must be 23:59:59 local');
+      assert(mod.dueEffectiveEnd(timed9).getTime() === new Date(timed9).getTime(),
+        'timed effective end must be the instant itself');
+    });
+
+    test('todos: inline edit uses date + optional time inputs; renders share date-only semantics', () => {
+      const todos = jsFiles['todos.js'];
+      const welcome = jsFiles['welcome.js'];
+      assert(todos.includes("deadlineDateInput.type = 'date'"), 'deadline edit must use a date input');
+      assert(todos.includes("deadlineTimeInput.type = 'time'"), 'deadline edit must use an optional time input');
+      assert(!todos.includes("deadlineInput.type = 'datetime-local'"),
+        'no datetime-local deadline input must remain');
+      assert(todos.includes('isDueOverdue(td.due_date, now)') && welcome.includes('isDueOverdue(td.due_date, now)'),
+        'both render paths must use the shared overdue helper');
+      assert(todos.includes('formatRelativeDay(td.due_date, now)') && welcome.includes('formatRelativeDay(td.due_date, now)'),
+        'both render paths must show date-only deadlines without a time');
+      assert(todos.includes('compareDueDates(a.due_date, b.due_date)') && welcome.includes('compareDueDates(a.due_date, b.due_date)'),
+        'both sorts must use the shared comparator');
+      assert(jsFiles['item-utils.js'].includes('input[type="time"]'),
+        'picker guard must cover the new time input');
+      assert(fs.readFileSync(STYLE_FILE, 'utf-8').includes('todo-edit-deadline-time'),
+        'time input must have its narrower width rule');
+    });
+
     test('calendar-pure: event instant model — wall time, conversion, placement', async () => {
       const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
       for (const fn of ['wallTimeToInstant', 'instantToDateStr', 'instantToTimeStr', 'eventSpan', 'eventDatesInRange', 'gmtOffsetLabel']) {

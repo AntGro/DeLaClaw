@@ -58,7 +58,7 @@ User jobs:
 - `priority ∈ {urgent, high, medium, low, normal}`
 - `sort_order` monotonic per category
 - `status=done` preserved on reorder
-- `due_date` — optional; past due_date highlights the item as overdue
+- `due_date` — optional; either a date-only `YYYY-MM-DD` string (due at the end of that local day, no time shown) or a UTC ISO timestamp. Past due_date highlights the item as overdue (date-only: only once its day has passed)
 - New TODOs inserted at top of category (min `sort_order - 1`)
 - Delete → trash, not hard delete from UI (adapter handles)
 

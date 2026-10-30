@@ -3,6 +3,7 @@ import { t, getLang } from './i18n.js';
 import state, { DEFAULT_CATEGORY_PALETTE } from './state.js';
 import { APP_VERSION } from './version.js';
 import { layoutLevel } from './sections-pure.js';
+import { parseLocalDate } from './calendar-pure.js';
 
 // ===================================================================
 // UTILS
@@ -543,6 +544,20 @@ function formatRelativeDate(d) {
   return t('common.date_at', dateStr, timeStr);
 }
 
+// Day-only variant of formatRelativeDate for date-only TODO deadlines:
+// same relative buckets, but no time is ever shown (none was set).
+function formatRelativeDay(dateStr, now = new Date()) {
+  const target = parseLocalDate(dateStr);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((target - today) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return t('common.today');
+  if (diffDays === 1) return t('common.tomorrow');
+  if (diffDays === -1) return t('common.yesterday');
+  if (diffDays > 1 && diffDays <= 7) return t('common.in_days', diffDays);
+  if (diffDays < -1 && diffDays >= -7) return t('common.days_ago', Math.abs(diffDays));
+  return target.toLocaleDateString(getLang(), { month: 'short', day: 'numeric' });
+}
+
 // ===================================================================
 // TRUNCATE WITH SHOW MORE (shared between projects & todos)
 // ===================================================================
@@ -979,7 +994,7 @@ function setConfirmActionProgress(text) {
 }
 
 export {
-  esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
+  esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate, formatRelativeDay,
   showConfirmAction, closeConfirmAction, executeConfirmAction, setConfirmActionProgress,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, applySectionGrid, fetchAll,

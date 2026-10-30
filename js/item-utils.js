@@ -826,12 +826,13 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     containerEl.addEventListener('mousedown', _containerMousedownHandler, true);
   }
 
-  // Native date-picker guard: on iOS, tapping "Done" blurs the date input
-  // and moves focus to <body>, which would otherwise trigger cancel. On
-  // desktop Chrome the picker has no confirm button, so clicking outside to
-  // dismiss it can also land outside the edit wrapper. Setting a short flag
-  // on date-input blur lets the focusout handler skip cancellation.
-  root.querySelectorAll('input[type="date"], input[type="datetime-local"]').forEach(di => {
+  // Native date/time-picker guard: on iOS, tapping "Done" blurs the date
+  // input and moves focus to <body>, which would otherwise trigger
+  // cancel. On desktop Chrome the picker has no confirm button, so
+  // clicking outside to dismiss it can also land outside the edit
+  // wrapper. Setting a short flag on date/time-input blur lets the
+  // focusout handler skip cancellation.
+  root.querySelectorAll('input[type="date"], input[type="datetime-local"], input[type="time"]').forEach(di => {
     di.addEventListener('blur', () => {
       _datePickerJustClosed = true;
       setTimeout(() => { _datePickerJustClosed = false; }, 300);

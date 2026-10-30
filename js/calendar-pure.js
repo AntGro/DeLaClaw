@@ -1,5 +1,6 @@
 // ===================================================================
-// calendar-pure.js — Dependency-free date logic for the Calendar page.
+// calendar-pure.js — Dependency-free date logic for the Calendar page
+// and TODO deadlines.
 //
 // No imports: safe to load in Node (tests) and in any browser module.
 // All dates are local 'YYYY-MM-DD' strings; weeks start on Monday.
@@ -83,6 +84,41 @@ export function overdueDays(dueStr, todayStr) {
   if (!dueStr || !todayStr) return 0;
   const diff = Math.round((parseLocalDate(dueStr) - parseLocalDate(todayStr)) / 86400000);
   return diff < 0 ? -diff : 0;
+}
+
+// ===================================================================
+// TODO DEADLINES — date-only vs timed
+// ===================================================================
+// A TODO deadline is either a date-only 'YYYY-MM-DD' string (no time
+// set) or a full UTC ISO timestamp. Date-only deadlines are due at
+// the END of their local day: not overdue during that day, and sorted
+// after that day's timed deadlines. Timed deadlines keep instant
+// semantics. Shared by the TODO list and Welcome render/sort paths
+// so both surfaces agree.
+
+/** True when the value is a date-only 'YYYY-MM-DD' string (no time). */
+export function isDateOnly(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+/** Effective end instant of a deadline: day end for date-only, itself for timed. */
+export function dueEffectiveEnd(due) {
+  if (isDateOnly(due)) {
+    const d = parseLocalDate(due);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  }
+  return new Date(due);
+}
+
+/** Overdue check for a deadline (falsy due → false). */
+export function isDueOverdue(due, now = new Date()) {
+  return !!due && dueEffectiveEnd(due) < now;
+}
+
+/** Compare two set deadlines (nulls handled by callers). */
+export function compareDueDates(a, b) {
+  return dueEffectiveEnd(a) - dueEffectiveEnd(b);
 }
 
 // ===================================================================

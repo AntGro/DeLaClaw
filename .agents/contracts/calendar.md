@@ -48,6 +48,16 @@ for the Google Calendar mirror.)
 - Gated by the `gcal_sync_events` setting (default on), alongside
   the habits/todos/birthdays toggles.
 
+## Grid ordering (Month/Week cells)
+
+- Chips in a day cell sort by type: **Birthdays, Events, TODOs, Habits**
+  (`TYPE_ORDER` in calendar.js, applied to every day's list). Within a
+  type the sort is stable, so items keep load order.
+- This also decides the +N overflow cutoff: chips past `MAX_CHIPS` hide
+  from the end, so Habits fall behind the counter first.
+- The day panel keeps its own section order (Events, Habits, TODOs,
+  Birthdays) — deliberately different from the grid.
+
 ## Explicitly out of scope (deferred by the user, Oct 24, 2026)
 
 - Recurrence, reminders, Welcome-page surfacing, demo sample events.

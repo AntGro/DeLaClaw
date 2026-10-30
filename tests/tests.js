@@ -4214,6 +4214,12 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'prev_day/next_day must exist in all 3 locales');
     });
 
+    test('calendar grid: chips sort Birthday > Events > TODOs > Habits', () => {
+      const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+      assert(cal.includes('const TYPE_ORDER = { birthday: 0, event: 1, todo: 2, habit: 3 };'),
+        'grid chips must sort Birthday first, then Events, TODOs, Habits last');
+    });
+
     test('calendar-pure: overdueDays boundaries (yesterday / today / tomorrow)', async () => {
       const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
       assert(typeof mod.overdueDays === 'function', 'calendar-pure must export overdueDays');

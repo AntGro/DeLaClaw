@@ -71,6 +71,10 @@ async function refreshEvents() {
   if (state.currentView === 'calendar' && window.renderCalendar) {
     window.renderCalendar();
   }
+  // Notify views that show events (Welcome listens; same pattern as
+  // todos-changed / habits-changed). Fires on every refresh, including
+  // init and background sync — listeners guard on their own view.
+  document.dispatchEvent(new CustomEvent('events-changed'));
 }
 
 function applyPayload(ev, p) {

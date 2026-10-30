@@ -97,7 +97,13 @@ function collectMonthEvents() {
   return collectRangeEvents(monthStartStr(), monthEndStr());
 }
 
-function collectRangeEvents(start, end) {
+/**
+ * Aggregate every item visible on the calendar between start and end
+ * (inclusive date strings). `show` overrides the Calendar tab's funnel
+ * filter; the Welcome strip passes all-true so its week never inherits
+ * a filter set on the Calendar tab. Defaults to the tab's filter.
+ */
+function collectRangeEvents(start, end, show = calShow) {
   const map = new Map(); // dateStr → [{ type, id, title, sub, avatar }]
   const push = (date, ev) => {
     if (!map.has(date)) map.set(date, []);
@@ -109,7 +115,7 @@ function collectRangeEvents(start, end) {
   // (it still needs doing today). Overdue instances are flagged for
   // the dashed-red highlight.
   for (const td of getTodos()) {
-    if (!calShow.todo) break;
+    if (!show.todo) break;
     if (td.done) continue;
     const d = (td.due_date || '').slice(0, 10);
     if (!d) continue;
@@ -127,7 +133,7 @@ function collectRangeEvents(start, end) {
   // Habits: every occurrence of structured rules within the month;
   // free-text rules pin a single occurrence on next_due.
   for (const h of state.allHabits || []) {
-    if (!calShow.habit) break;
+    if (!show.habit) break;
     if (h.is_draft) continue;
     if (h.is_finished) continue;
     const rule = normalizeFrequencyRule(h.frequency_rule || '');
@@ -175,7 +181,7 @@ function collectRangeEvents(start, end) {
 
   // Birthdays: yearly occurrence in every month the range spans
   for (const b of state.allBirthdays || []) {
-    if (!calShow.birthday) break;
+    if (!show.birthday) break;
     for (const occ of birthdaysInRange(b.birthday, start, end)) {
       push(occ.date, {
         type: 'birthday', id: b.id, title: b.name || '',
@@ -188,7 +194,7 @@ function collectRangeEvents(start, end) {
   // are computed in the VIEWER's timezone (calendar-pure), so the same
   // event can sit on different dates for different viewers. Full-day
   // events occupy their stored date range as-is.
-  if (calShow.event) {
+  if (show.event) {
     const viewerTz = localTimeZone();
     for (const ev of state.allEvents || []) {
       const placements = eventDatesInRange(ev, start, end, viewerTz);
@@ -848,7 +854,7 @@ function renderCalendarDayPanel(dateStr) {
   if (scrollMap) restoreInnerScrollPositions(modal, scrollMap);
 }
 
-export { renderCalendar };
+export { renderCalendar, collectRangeEvents, dayCellHTML };
 
 // Keep the grid fresh when todo/habit data changes elsewhere
 // (same pattern as the Welcome view); birthdays refresh via refreshBirthdays().

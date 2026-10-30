@@ -57,6 +57,10 @@ for the Google Calendar mirror.)
   from the end, so Habits fall behind the counter first.
 - The day panel keeps its own section order (Events, Habits, TODOs,
   Birthdays) — deliberately different from the grid.
+- `collectRangeEvents` / `dayCellHTML` are exported for the Welcome
+  strip. `collectRangeEvents` takes an optional `show` override (default:
+  the tab's funnel filter) — callers that must ignore the filter pass
+  all-true explicitly.
 
 ## Explicitly out of scope (deferred by the user, Oct 24, 2026)
 

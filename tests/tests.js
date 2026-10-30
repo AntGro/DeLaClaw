@@ -4220,6 +4220,64 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'grid chips must sort Birthday first, then Events, TODOs, Habits last');
     });
 
+    test('calendar: collectRangeEvents honors the show override', async () => {
+      // calendar.js touches DOM at import (listeners, esc, layout): stub it.
+      // Modules stay imported afterwards; their listeners hang off the stub.
+      const saved = { document: globalThis.document, localStorage: globalThis.localStorage, window: globalThis.window, addEventListener: globalThis.addEventListener };
+      const makeEscEl = () => {
+        const el = {}; let v = '';
+        Object.defineProperty(el, 'textContent', { set(x) { v = String(x ?? ''); }, get() { return v; } });
+        Object.defineProperty(el, 'innerHTML', { get() { return v; } });
+        return el;
+      };
+      globalThis.document = { addEventListener: () => {}, documentElement: { style: { setProperty: () => {} } }, body: { addEventListener: () => {} }, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, createElement: makeEscEl };
+      globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+      globalThis.window = globalThis;
+      globalThis.addEventListener = () => {};
+      try {
+        const cal = await import(pathToFileURL(path.join(JS_DIR, 'calendar.js')).href);
+        assert(typeof cal.collectRangeEvents === 'function' && typeof cal.dayCellHTML === 'function',
+          'calendar must export collectRangeEvents and dayCellHTML for reuse');
+        const state = (await import(pathToFileURL(path.join(JS_DIR, 'state.js')).href)).default;
+        const prev = state.allBirthdays;
+        state.allBirthdays = [{ id: 'b1', name: 'Test', birthday: '1990-10-28' }];
+        try {
+          const all = cal.collectRangeEvents('2026-10-26', '2026-11-01', { todo: true, habit: true, birthday: true, event: true });
+          assert((all.get('2026-10-28') || []).some(e => e.type === 'birthday'), 'birthday must appear with show.birthday true');
+          const none = cal.collectRangeEvents('2026-10-26', '2026-11-01', { todo: true, habit: true, birthday: false, event: true });
+          assert(!(none.get('2026-10-28') || []).some(e => e.type === 'birthday'), 'birthday must disappear with show.birthday false');
+          const cell = cal.dayCellHTML('2026-10-28', true, all, 'Wed');
+          assert(cell.includes('data-action="open-calendar-day"') && cell.includes('cal-birthday'),
+            'day cell must open the day panel and carry the birthday chip');
+        } finally {
+          state.allBirthdays = prev;
+        }
+      } finally {
+        for (const k of ['document', 'localStorage', 'window', 'addEventListener']) {
+          if (saved[k] === undefined) delete globalThis[k]; else globalThis[k] = saved[k];
+        }
+      }
+    });
+
+    test('welcome: calendar strip reuses week cells and nav', () => {
+      const w = jsFiles['welcome.js'];
+      assert(w.includes("from './calendar.js'") && w.includes('collectRangeEvents') && w.includes('dayCellHTML'),
+        'welcome strip must reuse the calendar tab renderers');
+      assert(w.includes('welcome-cal-nav') && w.includes('welcome-cal-today') && w.includes('wCalWeekOffset'),
+        'welcome strip must have week navigation with its own offset');
+      assert(!w.includes('bdOnDay') && !w.includes('welcome-cal-dots'),
+        'bespoke strip filtering (dots + 2 labels) must be gone');
+      const del = jsFiles['delegation.js'];
+      assert(del.includes("case 'welcome-cal-nav':") && del.includes("case 'welcome-cal-today':"),
+        'delegation must route welcome week nav');
+      const i18n = jsFiles['i18n.js'];
+      assert((i18n.match(/prev_week:/g) || []).length === 3 && (i18n.match(/next_week:/g) || []).length === 3,
+        'prev_week/next_week must exist in all 3 locales');
+      const ev = jsFiles['events.js'];
+      assert(ev.includes("CustomEvent('events-changed')"), 'event refreshes must notify views');
+      assert(w.includes("addEventListener('events-changed'"), 'welcome must refresh on event changes');
+    });
+
     test('calendar-pure: overdueDays boundaries (yesterday / today / tomorrow)', async () => {
       const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
       assert(typeof mod.overdueDays === 'function', 'calendar-pure must export overdueDays');
@@ -5316,7 +5374,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // Surfaces: Welcome list + mini calendar, footer overdue count,
       // Calendar page window filter, Google Calendar sync gates.
       assert(welcome.includes('if (isHabitSnoozed(c, todayStr)) return false;'), 'Welcome due list must exclude snoozed habits');
-      assert(welcome.includes('if (isHabitSnoozed(h, calTodayStr)) return false;'), 'Welcome mini calendar must exclude snoozed habits');
+      // Mini calendar now reuses collectRangeEvents (same snooze exclusion
+      // as the Calendar page, asserted below) instead of its own filter.
+      assert(welcome.includes('collectRangeEvents(dates[0], dates[6]'), 'Welcome mini calendar must reuse collectRangeEvents (snooze exclusion included)');
       assert(main.includes('!isHabitSnoozed(c, todayLocal)'), 'overdue count must exclude snoozed habits');
       assert(calendar.includes('!(snoozed && d < h.snoozed_until)'), 'Calendar page must hide occurrences inside the snooze window');
       assert(sync.includes('snoozed_until: sh.snoozed_until || null,'), 'calendar sync must resolve snoozed_until for shared habits');

@@ -55,6 +55,7 @@
     'navigate-to-flash-deck': 1, 'open-habit-history': 1, 'navigate-to-project': 1,
     'toggle-expand-project': 1, 'copy-project-title': 1, 'copy-item-link': 1,
     'show-todo-general-card': 1, 'calendar-prev': 1, 'calendar-next': 1, 'calendar-today': 1,
+    'welcome-cal-nav': 1, 'welcome-cal-today': 1,
     'toggle-calendar-filter': 1, 'open-welcome-birthday': 1, 'set-calendar-view': 1,
     'open-calendar-picker': 1, 'pick-calendar-month': 1, 'pick-calendar-year': 1,
     'open-calendar-day': 1, 'calendar-day-nav': 1, 'toggle-calendar-add': 1, 'navigate-to-list': 1,
@@ -288,6 +289,8 @@
       case 'calendar-prev': callWindow('calendarNav', [-1]); break;
       case 'calendar-next': callWindow('calendarNav', [1]); break;
       case 'calendar-today': callWindow('calendarToday', []); break;
+      case 'welcome-cal-nav': callWindow('welcomeCalNav', [parseInt(el.dataset.delta, 10) || 0]); break;
+      case 'welcome-cal-today': callWindow('welcomeCalToday', []); break;
       case 'toggle-calendar-filter': callWindow('toggleCalendarFilter', [el.dataset.filter]); break;
       case 'open-welcome-birthday': callWindow('openCalendarDate', [el.dataset.date]); break;
       case 'set-calendar-view': callWindow('closeCalendarAddMenu', []); callWindow('setCalendarView', [el.dataset.view, el.dataset]); break;

@@ -11,7 +11,8 @@ import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCat
 import { compareOrderKeys } from './sections-pure.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
-import { parseLocalDate, isHabitSnoozed, toDateStr, isDateOnly, isDueOverdue, isDueSoon, compareDueDates } from './calendar-pure.js';
+import { parseLocalDate, isHabitSnoozed, toDateStr, isDateOnly, isDueOverdue, isDueSoon, compareDueDates, addDays, getWeekDates } from './calendar-pure.js';
+import { collectRangeEvents, dayCellHTML } from './calendar.js';
 
 // ── Local data cache ──
 let wTodos = [];
@@ -22,6 +23,9 @@ let wTexts = [];
 let wTextProgress = [];
 let wBirthdays = [];
 let wProjectCount = 0;
+// Weeks from the current week shown in the Welcome calendar strip.
+// Welcome-owned: navigating here never moves the Calendar tab's anchor.
+let wCalWeekOffset = 0;
 
 // ── Helpers ──
 function startOfDay(d) {
@@ -85,6 +89,8 @@ function getAge(birthdayStr) {
 
 async function refreshWelcome() {
   if (!state.db.connected) return;
+  // Welcome is a today page: any data refresh re-anchors the strip.
+  wCalWeekOffset = 0;
   const now = new Date();
   const weekAgo = new Date(now.getTime() - 7 * 86400000);
 
@@ -108,6 +114,13 @@ document.addEventListener('todos-changed', () => {
 
 // ── Listen for habit mutations from the Habits module ──
 document.addEventListener('habits-changed', () => {
+  if (state.currentView === 'welcome') {
+    refreshWelcome().then(renderWelcome);
+  }
+});
+
+// ── Listen for event mutations from the Events module ──
+document.addEventListener('events-changed', () => {
   if (state.currentView === 'welcome') {
     refreshWelcome().then(renderWelcome);
   }
@@ -374,96 +387,47 @@ function initWelcomeFocusHabitHover() {
 }
 
 // ===================================================================
-// WELCOME — Calendar 7-day lookahead
-// ===================================================================
-function renderWelcomeCalendar(allBirthdays, allHabits, todayStart) {
+// WELCOME — Calendar week strip: the Calendar tab's week cells, reused.
+// Same chips (Birthday > Events > TODOs > Habits), same overdue mirrors,
+// same day-panel modal on click — no bespoke placement logic here.
+// All types, always: the strip never inherits the Calendar tab's funnel filter.
+function renderWelcomeCalendar() {
   const lang = getLang();
   const locale = lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB';
-  const days = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(todayStart);
-    d.setDate(d.getDate() + i);
-    days.push(d);
-  }
+  const now = new Date();
+  const today = toDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+  const dates = getWeekDates(addDays(today, wCalWeekOffset * 7));
+  const events = collectRangeEvents(dates[0], dates[6], { todo: true, habit: true, birthday: true, event: true });
+  const names = dates.map(d => parseLocalDate(d).toLocaleDateString(locale, { weekday: 'short' }).replace('.', ''));
 
-  // Month context — if the 7 days span two months, show both
-  const firstMonth = days[0].toLocaleDateString(locale, { month: 'long' });
-  const lastMonth = days[6].toLocaleDateString(locale, { month: 'long' });
+  // Month context — if the week spans two months, show both
+  const firstMonth = parseLocalDate(dates[0]).toLocaleDateString(locale, { month: 'long' });
+  const lastMonth = parseLocalDate(dates[6]).toLocaleDateString(locale, { month: 'long' });
   const monthLabel = firstMonth === lastMonth ? firstMonth : `${firstMonth} – ${lastMonth}`;
-  const yearLabel = days[0].getFullYear();
+  const yearLabel = parseLocalDate(dates[0]).getFullYear();
 
   let html = `<div class="welcome-section" id="welcome-bucket-calendar" style="--cat-color:var(--accent)">`;
-  html += `<div class="welcome-section-header">${lucideIcon('calendar-days', 18)} <span>${esc(t('welcome.coming_up'))}</span><span class="welcome-cal-month-ctx">${esc(monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1))} ${yearLabel}</span></div>`;
+  html += `<div class="welcome-section-header">${lucideIcon('calendar-days', 18)} <span>${esc(t('welcome.coming_up'))}</span><span class="welcome-cal-month-ctx">${esc(monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1))} ${yearLabel}</span>`;
+  html += `<span class="welcome-cal-nav"><button data-action="welcome-cal-nav" data-delta="-1" title="${esc(t('calendar.prev_week'))}">${lucideIcon('chevron-left', 16)}</button><button data-action="welcome-cal-today">${esc(t('calendar.today'))}</button><button data-action="welcome-cal-nav" data-delta="1" title="${esc(t('calendar.next_week'))}">${lucideIcon('chevron-right', 16)}</button></span></div>`;
   html += `<div class="welcome-calendar-strip">`;
-
-  for (const day of days) {
-    const dayStart = startOfDay(day);
-    const isToday = dayStart.getTime() === todayStart.getTime();
-    const dayName = day.toLocaleDateString(locale, { weekday: 'short' }).replace('.', '');
-    const dayNum = day.getDate();
-
-    // Find birthdays on this day
-    const bdOnDay = allBirthdays.filter(b => {
-      const bd = new Date(b.birthday + 'T00:00:00');
-      return bd.getMonth() === day.getMonth() && bd.getDate() === day.getDate();
-    });
-
-    // Find habits due on this day
-    const calTodayStr = toDateStr(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate());
-    const habitsOnDay = allHabits.filter(h => {
-      if (h.is_draft || !h.next_due) return false;
-      if (isHabitSnoozed(h, calTodayStr)) return false;
-      const dueDay = startOfDay(parseLocalDate(h.next_due));
-      return dueDay.getTime() === dayStart.getTime();
-    });
-
-    // For overdue habits, show them on today
-    const overdueOnDay = isToday ? allHabits.filter(h => {
-      if (h.is_draft || !h.next_due) return false;
-      if (isHabitSnoozed(h, calTodayStr)) return false;
-      const dueDay = startOfDay(parseLocalDate(h.next_due));
-      return dueDay < todayStart;
-    }) : [];
-
-    const allHabitsOnDay = [...overdueOnDay, ...habitsOnDay];
-
-    html += `<div class="welcome-cal-day${isToday ? ' is-today' : ''}${(day.getDay() === 0 || day.getDay() === 6) ? ' is-weekend' : ''}">`;
-    html += `<span class="welcome-cal-day-name">${esc(isToday ? t('welcome.cal_today') : dayName)}</span>`;
-    html += `<span class="welcome-cal-day-num${isToday ? ' today-num' : ''}">${dayNum}</span>`;
-    html += `<div class="welcome-cal-dots">`;
-    for (const b of bdOnDay) {
-      html += `<span class="welcome-cal-dot birthday" title="${esc(b.name)}"></span>`;
-    }
-    for (let idx = 0; idx < Math.min(allHabitsOnDay.length, 4); idx++) {
-      const hColor = getHabitCategoryColor(catIdForHabit(allHabitsOnDay[idx]));
-      html += `<span class="welcome-cal-dot habit" style="background:${hColor}" title="${esc(allHabitsOnDay[idx].name)}"></span>`;
-    }
-    html += `</div>`;
-
-    // Show item labels (max 2)
-    const items = [];
-    for (const b of bdOnDay) items.push({ type: 'birthday', name: b.name });
-    for (const h of allHabitsOnDay) {
-      const isOverdue = overdueOnDay.includes(h);
-      items.push({ type: isOverdue ? 'habit-overdue' : 'habit-due', name: h.name });
-    }
-    if (items.length > 0) {
-      html += `<div class="welcome-cal-day-items">`;
-      for (let k = 0; k < Math.min(items.length, 2); k++) {
-        html += `<span class="welcome-cal-item ${items[k].type}" title="${esc(items[k].name)}">${esc(items[k].name)}</span>`;
-      }
-      if (items.length > 2) {
-        html += `<span class="welcome-cal-item habit-due" style="opacity:0.7">+${items.length - 2}</span>`;
-      }
-      html += `</div>`;
-    }
-
-    html += `</div>`;
-  }
-
+  dates.forEach((date, i) => { html += dayCellHTML(date, true, events, names[i]); });
   html += `</div>`;
   html += `</div>`;
   return html;
+}
+
+// Week navigation re-renders only the calendar section, so scroll position
+// and anything typed elsewhere on the page survive it.
+function welcomeCalNav(delta) {
+  wCalWeekOffset += delta;
+  const el = document.getElementById('welcome-bucket-calendar');
+  if (el) el.outerHTML = renderWelcomeCalendar();
+}
+
+function welcomeCalToday() {
+  wCalWeekOffset = 0;
+  const el = document.getElementById('welcome-bucket-calendar');
+  if (el) el.outerHTML = renderWelcomeCalendar();
 }
 
 // ── Render ──
@@ -662,8 +626,8 @@ function renderWelcome() {
   html += `</div>`;
   html += `</div>`; // close welcome-grid
 
-  // Calendar — 7-day lookahead with birthdays + habits
-  html += renderWelcomeCalendar(wBirthdays, wHabits, todayStart);
+  // Calendar — week strip, same cells as the Calendar tab's week view
+  html += renderWelcomeCalendar();
 
   // Flashcards + Birthdays — second row grid
   html += `<div class="welcome-grid">`;
@@ -859,6 +823,8 @@ function scrollToWelcomeBucket(id) {
   }
 }
 window.scrollToWelcomeBucket = scrollToWelcomeBucket;
+window.welcomeCalNav = welcomeCalNav;
+window.welcomeCalToday = welcomeCalToday;
 
 // CSP delegation for welcome handled in js/delegation.js — no per-module listeners
 

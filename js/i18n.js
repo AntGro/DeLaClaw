@@ -443,6 +443,8 @@ const T = {
       only_next_due: 'Only the next occurrence can be marked done',
       prev_day: 'Previous day',
       next_day: 'Next day',
+      prev_week: 'Previous week',
+      next_week: 'Next week',
     },
     // ── Flashcards ──
     flashcards: {
@@ -1269,6 +1271,8 @@ const T = {
       only_next_due: 'Seule la prochaine occurrence peut être validée',
       prev_day: 'Jour précédent',
       next_day: 'Jour suivant',
+      prev_week: 'Semaine précédente',
+      next_week: 'Semaine suivante',
       week_of: 'Semaine du {0}',
     },
     flashcards: {
@@ -2091,6 +2095,8 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       only_next_due: 'Solo se puede completar la próxima ocurrencia',
       prev_day: 'Día anterior',
       next_day: 'Día siguiente',
+      prev_week: 'Semana anterior',
+      next_week: 'Semana siguiente',
       week_of: 'Semana del {0}',
     },
     flashcards: {

@@ -1,6 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, formatRelativeDay, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
+import { isDateOnly, dueEffectiveEnd, isDueOverdue, compareDueDates } from './calendar-pure.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration, orderKeyOf, compareOrderKeys } from './sections-pure.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
@@ -342,7 +343,7 @@ function getFilteredTodosForCategory(catId) {
       if (!a.due_date && !b.due_date) return 0;
       if (!a.due_date) return 1;
       if (!b.due_date) return -1;
-      return new Date(a.due_date) - new Date(b.due_date);
+      return compareDueDates(a.due_date, b.due_date);
     });
   } else if (sortBy === 'priority') {
     const prio = { urgent: 0, high: 1, medium: 2, low: 3, normal: 4 };
@@ -631,7 +632,7 @@ function renderCategoryCard(catId) {
 
 function renderTodoItem(td) {
   const now = new Date();
-  const isOverdue = td.due_date && !td.done && new Date(td.due_date) < now;
+  const isOverdue = td.due_date && !td.done && isDueOverdue(td.due_date, now);
   const isSnoozed = td.snooze_until && new Date(td.snooze_until) > now;
   const isFlagged = td.priority && td.priority !== 'normal';
 
@@ -645,15 +646,14 @@ function renderTodoItem(td) {
 
   let dueDateStr = '';
   if (td.due_date) {
-    const d = new Date(td.due_date);
-    const diffMs = d - now;
-    const diffH = Math.round(diffMs / (1000 * 60 * 60));
+    const dueLabel = isDateOnly(td.due_date) ? formatRelativeDay(td.due_date, now) : formatRelativeDate(new Date(td.due_date));
+    const diffH = Math.round((dueEffectiveEnd(td.due_date) - now) / (1000 * 60 * 60));
     if (isOverdue) {
-      dueDateStr = `<span class="todo-due overdue">${lucideIcon('alert-triangle', 14)} ${t('todos.overdue')} (${formatRelativeDate(d)})</span>`;
+      dueDateStr = `<span class="todo-due overdue">${lucideIcon('alert-triangle', 14)} ${t('todos.overdue')} (${dueLabel})</span>`;
     } else if (diffH < 24) {
-      dueDateStr = `<span class="todo-due due-soon">${lucideIcon("bell",16)} ${t('todos.due')} ${formatRelativeDate(d)}</span>`;
+      dueDateStr = `<span class="todo-due due-soon">${lucideIcon("bell",16)} ${t('todos.due')} ${dueLabel}</span>`;
     } else {
-      dueDateStr = `<span class="todo-due">${lucideIcon("calendar",16)} ${formatRelativeDate(d)}</span>`;
+      dueDateStr = `<span class="todo-due">${lucideIcon("calendar",16)} ${dueLabel}</span>`;
     }
   }
 
@@ -1057,27 +1057,39 @@ async function editTodoInline(id, itemEl) {
   const actionsEl = itemEl.querySelector('.todo-actions');
   if (actionsEl) actionsEl.classList.remove('visible');
 
-  // Build deadline date input as extra element
+  // Build deadline inputs as extra element: a date input plus an
+  // optional time input. Date set + time empty = date-only deadline
+  // (stored as 'YYYY-MM-DD', due at the end of that day).
   const deadlineRow = document.createElement('div');
   deadlineRow.className = 'todo-edit-deadline-row';
   const deadlineLabel = document.createElement('label');
   deadlineLabel.innerHTML = lucideIcon('calendar') + ' ' + t('todos.deadline') + ':';
   deadlineLabel.className = 'todo-edit-deadline-label';
-  const deadlineInput = document.createElement('input');
-  deadlineInput.type = 'datetime-local';
-  deadlineInput.className = 'todo-edit-deadline-input';
+  const deadlineDateInput = document.createElement('input');
+  deadlineDateInput.type = 'date';
+  deadlineDateInput.className = 'todo-edit-deadline-input';
+  const deadlineTimeInput = document.createElement('input');
+  deadlineTimeInput.type = 'time';
+  deadlineTimeInput.className = 'todo-edit-deadline-input todo-edit-deadline-time';
   if (todo.due_date) {
-    const d = new Date(todo.due_date);
-    deadlineInput.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    if (isDateOnly(todo.due_date)) {
+      deadlineDateInput.value = todo.due_date;
+    } else {
+      const d = new Date(todo.due_date);
+      const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      deadlineDateInput.value = local.slice(0, 10);
+      deadlineTimeInput.value = local.slice(11, 16);
+    }
   }
   const clearBtn = document.createElement('button');
   clearBtn.type = 'button';
   clearBtn.className = 'todo-edit-deadline-clear';
   clearBtn.textContent = '✕';
   clearBtn.title = t('common.close');
-  clearBtn.addEventListener('click', (e) => { e.stopPropagation(); deadlineInput.value = ''; });
+  clearBtn.addEventListener('click', (e) => { e.stopPropagation(); deadlineDateInput.value = ''; deadlineTimeInput.value = ''; });
   deadlineRow.appendChild(deadlineLabel);
-  deadlineRow.appendChild(deadlineInput);
+  deadlineRow.appendChild(deadlineDateInput);
+  deadlineRow.appendChild(deadlineTimeInput);
   deadlineRow.appendChild(clearBtn);
 
   // Category row
@@ -1121,7 +1133,8 @@ async function editTodoInline(id, itemEl) {
     extraEl: extras,
     containerEl: itemEl,
     collectExtra: () => {
-      const newDeadline = deadlineInput.value ? new Date(deadlineInput.value).toISOString() : null;
+      const newDeadline = !deadlineDateInput.value ? null
+        : (deadlineTimeInput.value ? new Date(`${deadlineDateInput.value}T${deadlineTimeInput.value}`).toISOString() : deadlineDateInput.value);
       const selectedCatId = catSelect.value;
       const selectedCat = _todoCatMap.get(selectedCatId);
       const flagBtn = itemEl.querySelector('.todo-flag-btn');

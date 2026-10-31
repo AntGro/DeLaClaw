@@ -492,6 +492,15 @@ test('style.css contains expected base selectors', () => {
   }
 });
 
+// #welcomeView is a flex item of #app.active (column flex) and its auto
+// margins override align-items:stretch, so without width:100% the container
+// shrink-wraps to the week's chip titles and changes width on week nav.
+test('style.css pins .welcome-container to full width (no flex shrink-wrap)', () => {
+  const rule = styleCss.match(/\.welcome-container\{([^}]*)\}/);
+  assert(rule, 'Missing .welcome-container rule');
+  assert(rule[1].includes('width:100%'), '.welcome-container must keep width:100%');
+});
+
 // ===================================================================
 // 10. No stray console.log left in production code (warnings only)
 // ===================================================================

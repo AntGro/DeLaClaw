@@ -43,6 +43,7 @@ Today / Welcome aggregation — focus TODOs, due habits, flashcard reviews, text
 - **Text reading progress**: aggregates texts via `getTexts()` + `getTextProgress()` from flashcards module — shows reading completion status
 - Birthdays: next 7 days
 - **Calendar strip**: reuses the Calendar tab's week cells (`collectRangeEvents` + `dayCellHTML` from calendar.js) — same chips, same overdue mirrors, same day-panel modal on click. It always passes all-true types, so it never inherits the Calendar tab's funnel filter. Navigation (prev/next week, Today) uses a Welcome-owned offset (`wCalWeekOffset`) that never moves the Calendar tab's anchor and resets on `refreshWelcome()`; nav re-renders only the calendar section. Event mutations notify via `events-changed` (dispatched by `refreshEvents`), same pattern as todos/habits-changed.
+- **Container width**: `.welcome-container` must keep `width:100%` alongside `max-width:1200px` + `margin:0 auto`. `#welcomeView` is a flex item of `#app.active` (column flex), and cross-axis auto margins override `align-items:stretch`, so without `width:100%` the container shrink-wraps to its content and its width follows the week's chip titles (wide on long-title weeks, narrow on short-title weeks). Do not remove it; `align-self:stretch` alone does not fix this.
 - `refreshWelcome()` must be called after any change to todos/habits/flashcards/texts/birthdays
 - `impact.js` suggests `welcome [x]` when any of those change — check blast radius
 

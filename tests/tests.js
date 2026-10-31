@@ -513,9 +513,11 @@ test('style.css shows Welcome strip titles on phones (not dots-only)', () => {
 });
 
 // The strip scrolls inside its capped section like .welcome-items does,
-// instead of clipping its bottom rows on phones.
+// instead of clipping its bottom rows on phones. Rows must stay
+// content-sized: a definite-height grid would otherwise compress them
+// (day cells have overflow:hidden, so their automatic minimum is 0).
 test('style.css lets the Welcome strip scroll inside its section', () => {
-  assert(styleCss.includes('.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;}'),
+  assert(styleCss.includes('.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;grid-auto-rows:max-content;}'),
     'Missing Welcome strip scroll rule');
 });
 

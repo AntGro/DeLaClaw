@@ -501,6 +501,17 @@ test('style.css pins .welcome-container to full width (no flex shrink-wrap)', ()
   assert(rule[1].includes('width:100%'), '.welcome-container must keep width:100%');
 });
 
+// Phone Welcome rows are full-width, so they show titles, not the
+// dots-only month-grid rule (which would render every busy day alike).
+test('style.css shows Welcome strip titles on phones (not dots-only)', () => {
+  assert(styleCss.includes('.welcome-calendar-strip .cal-chips{display:flex;}'),
+    'Missing Welcome phone chips override');
+  assert(styleCss.includes('.welcome-calendar-strip .cal-dots{display:none;}'),
+    'Missing Welcome phone dots override');
+  assert(styleCss.includes('.welcome-calendar-strip .cal-day-dow{display:block;}'),
+    'Missing Welcome phone weekday override');
+});
+
 // ===================================================================
 // 10. No stray console.log left in production code (warnings only)
 // ===================================================================

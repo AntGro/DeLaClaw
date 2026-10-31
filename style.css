@@ -1997,6 +1997,14 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 @media(max-width:600px){
   .welcome-calendar-strip{grid-template-columns:1fr;gap:4px;}
   .welcome-cal-month-ctx{display:none;}
+  /* Phone rows are full-width, so show titles like the Calendar tab's
+     narrow week view does, instead of the dots-only month-grid rule
+     (which would leave every busy day as an identical row of dots). */
+  .welcome-calendar-strip .cal-day{padding:6px;align-items:stretch;}
+  .welcome-calendar-strip .cal-chips{display:flex;}
+  .welcome-calendar-strip .cal-more{display:block;}
+  .welcome-calendar-strip .cal-dots{display:none;}
+  .welcome-calendar-strip .cal-day-dow{display:block;}
 }
 
 .env-badge{position:fixed;top:44px;left:14px;z-index:99;padding:2px 8px;border-radius:4px;font-size:0.65rem;font-weight:700;font-family:'DM Mono',monospace;letter-spacing:0.08em;opacity:0.7;pointer-events:none;background:var(--accent);color:#fff;}

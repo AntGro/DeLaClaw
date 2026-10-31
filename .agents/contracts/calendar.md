@@ -57,6 +57,10 @@ for the Google Calendar mirror.)
   from the end, so Habits fall behind the counter first.
 - The day panel keeps its own section order (Events, Habits, TODOs,
   Birthdays) — deliberately different from the grid.
+- The day panel title (`.cal-day-title-main`, via `dayTitleParts`) capitalizes
+  the weekday and month in all locales via `formatToParts` (Intl returns
+  them lowercase in French/Spanish); locale word order and particles stay
+  untouched. No-op in English.
 - `collectRangeEvents` / `dayCellHTML` are exported for the Welcome
   strip. `collectRangeEvents` takes an optional `show` override (default:
   the tab's funnel filter) — callers that must ignore the filter pass

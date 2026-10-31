@@ -1989,6 +1989,10 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 /* ─── Welcome Calendar Widget ─── */
 /* Cells are the Calendar tab's .cal-day cells, reused (see dayCellHTML). */
 .welcome-calendar-strip{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:6px;}
+/* Same scroll treatment as .welcome-items: when the strip outgrows the
+   section's capped height (phone single-column rows), it scrolls inside
+   the section instead of clipping. No effect when the strip fits. */
+.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;}
 .welcome-cal-month-ctx{font-size:0.78rem;color:var(--muted);font-weight:500;margin-left:auto;}
 .welcome-section[style*="--cat-color"] > .welcome-section-header .welcome-cal-month-ctx{color:#fff;font-weight:500;text-shadow:0 0 2px rgba(0,0,0,0.15);}
 .welcome-cal-nav{margin-left:auto;display:inline-flex;gap:4px;align-items:center;flex-shrink:0;}

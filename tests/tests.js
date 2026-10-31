@@ -512,6 +512,13 @@ test('style.css shows Welcome strip titles on phones (not dots-only)', () => {
     'Missing Welcome phone weekday override');
 });
 
+// The strip scrolls inside its capped section like .welcome-items does,
+// instead of clipping its bottom rows on phones.
+test('style.css lets the Welcome strip scroll inside its section', () => {
+  assert(styleCss.includes('.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;}'),
+    'Missing Welcome strip scroll rule');
+});
+
 // ===================================================================
 // 10. No stray console.log left in production code (warnings only)
 // ===================================================================
@@ -4296,6 +4303,19 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const ev = jsFiles['events.js'];
       assert(ev.includes("CustomEvent('events-changed')"), 'event refreshes must notify views');
       assert(w.includes("addEventListener('events-changed'"), 'welcome must refresh on event changes');
+      assert(!w.includes('getWeekDates'), 'welcome strip must not use the Mon-Sun week');
+      assert(w.includes('addDays(start, i)'), 'welcome strip must build a rolling today+6 window');
+    });
+
+    test('calendar: day panel title capitalizes weekday and month in all locales', () => {
+      const cal = jsFiles['calendar.js'];
+      const start = cal.indexOf('function dayTitleParts');
+      const end = cal.indexOf('\nfunction ', start + 1);
+      const fn = cal.slice(start, end);
+      assert(fn.includes('formatToParts'),
+        'dayTitleParts must use formatToParts to keep locale word order');
+      assert(fn.includes("p.type === 'weekday'") && fn.includes("p.type === 'month'"),
+        'dayTitleParts must capitalize the weekday and month parts');
     });
 
     test('calendar-pure: overdueDays boundaries (yesterday / today / tomorrow)', async () => {

@@ -11,7 +11,7 @@ import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCat
 import { compareOrderKeys } from './sections-pure.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
-import { parseLocalDate, isHabitSnoozed, toDateStr, isDateOnly, isDueOverdue, isDueSoon, compareDueDates, addDays, getWeekDates } from './calendar-pure.js';
+import { parseLocalDate, isHabitSnoozed, toDateStr, isDateOnly, isDueOverdue, isDueSoon, compareDueDates, addDays } from './calendar-pure.js';
 import { collectRangeEvents, dayCellHTML } from './calendar.js';
 
 // ── Local data cache ──
@@ -396,7 +396,10 @@ function renderWelcomeCalendar() {
   const locale = lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB';
   const now = new Date();
   const today = toDateStr(now.getFullYear(), now.getMonth(), now.getDate());
-  const dates = getWeekDates(addDays(today, wCalWeekOffset * 7));
+  // Rolling 7-day window: today + the next 6 days, not the Mon–Sun week.
+  // Prev/next shift the window by 7 days; Today resets the offset to 0.
+  const start = addDays(today, wCalWeekOffset * 7);
+  const dates = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const events = collectRangeEvents(dates[0], dates[6], { todo: true, habit: true, birthday: true, event: true });
   const names = dates.map(d => parseLocalDate(d).toLocaleDateString(locale, { weekday: 'short' }).replace('.', ''));
 

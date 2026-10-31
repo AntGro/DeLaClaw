@@ -331,9 +331,15 @@ function fullDateStr(dateStr) {
  */
 function dayTitleParts(dateStr) {
   const d = parseDateStr(dateStr);
+  // Capitalize the weekday and month in every locale: Intl returns them
+  // lowercase in French/Spanish ("lundi 2 novembre"). formatToParts keeps
+  // each locale's word order and particles ("2 de noviembre de") intact.
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
   const main = new Intl.DateTimeFormat(getLang(), {
     weekday: 'long', day: 'numeric', month: 'long',
-  }).format(d);
+  }).formatToParts(d)
+    .map((p) => (p.type === 'weekday' || p.type === 'month' ? cap(p.value) : p.value))
+    .join('');
   const now = new Date();
   const today = toDateStr(now.getFullYear(), now.getMonth(), now.getDate());
   const diff = Math.round((parseLocalDate(dateStr) - parseLocalDate(today)) / 86400000);

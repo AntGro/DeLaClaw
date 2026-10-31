@@ -1696,7 +1696,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 
 /* ===== WELCOME / TODAY VIEW ===== */
 /* Welcome page */
-.welcome-container{padding:1rem 1rem 40px;max-width:1200px;margin:0 auto;}
+.welcome-container{padding:1rem 1rem 40px;width:100%;max-width:1200px;margin:0 auto;}
 .welcome-header{margin-bottom:16px;text-align:center;display:flex;align-items:baseline;justify-content:center;gap:12px;flex-wrap:wrap;}
 .welcome-greeting{font-size:1.5rem;font-weight:600;letter-spacing:-0.3px;}
 .welcome-date{color:var(--muted);font-size:0.88rem;text-transform:capitalize;}

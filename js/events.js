@@ -365,11 +365,13 @@ function openAddEventModal(presetDate) {
   const now = new Date();
   fillEventForm('new', null, presetDate || toDateStr(now.getFullYear(), now.getMonth(), now.getDate()));
   modal.classList.add('visible');
+  if (window.setCalendarDayBehind) window.setCalendarDayBehind(true);
   setTimeout(() => document.getElementById('newEventTitle').focus(), 100);
 }
 
 function closeAddEventModal() {
   document.getElementById('addEventModal').classList.remove('visible');
+  if (window.setCalendarDayBehind) window.setCalendarDayBehind(false);
 }
 
 function openEditEventModal(id) {
@@ -383,6 +385,7 @@ function openEditEventModal(id) {
   document.getElementById('editEventDeleteBtn').dataset.id = id;
   renderEditEventShareSlot(ev);
   modal.classList.add('visible');
+  if (window.setCalendarDayBehind) window.setCalendarDayBehind(true);
   setTimeout(() => document.getElementById('editEventTitle').focus(), 100);
 }
 
@@ -401,6 +404,7 @@ function renderEditEventShareSlot(ev) {
 
 function closeEditEventModal() {
   document.getElementById('editEventModal').classList.remove('visible');
+  if (window.setCalendarDayBehind) window.setCalendarDayBehind(false);
 }
 
 // ===================================================================
@@ -472,7 +476,6 @@ async function deleteEvent(id) {
       const { error } = await state.db.from('events').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
       closeEditEventModal();
-      if (window.closeCalendarDay) window.closeCalendarDay();
       showToast(t('events.event_removed'), 'info');
       await refreshEvents();
       pokeCalendarSync();

@@ -746,6 +746,37 @@ function dayPanelRow(ev, dateStr) {
   </div>`;
 }
 
+// Background scroll lock while the day modal is open (same pattern as
+// Settings: the body is fixed at the current scroll offset, so the page
+// behind the modal cannot scroll on Welcome or Calendar). Owned by the
+// day modal via a flag, so closing it never steals another modal's lock.
+function lockDayModalScroll() {
+  if (document.body.dataset.dayModalScroll) return;
+  const scrollY = window.scrollY;
+  document.body.classList.add('no-scroll');
+  document.body.style.top = `-${scrollY}px`;
+  document.body.dataset.dayModalScrollY = scrollY;
+  document.body.dataset.dayModalScroll = '1';
+}
+
+function unlockDayModalScroll() {
+  if (!document.body.dataset.dayModalScroll) return;
+  document.body.classList.remove('no-scroll');
+  const scrollY = parseInt(document.body.dataset.dayModalScrollY || '0', 10);
+  document.body.style.top = '';
+  delete document.body.dataset.dayModalScrollY;
+  delete document.body.dataset.dayModalScroll;
+  window.scrollTo(0, scrollY);
+}
+
+// Stacking: when an item modal opens above the day modal, the day modal
+// stays open underneath, blurred and below the item overlay, instead of
+// closing. Exiting the item modal restores it to the front.
+function setCalendarDayBehind(on) {
+  const overlay = document.getElementById('calendarDayOverlay');
+  if (overlay) overlay.classList.toggle('cal-day-behind', !!on);
+}
+
 function openCalendarDay(dateStr) {
   closeCalendarAddMenu();
   calPanelDate = dateStr;
@@ -760,12 +791,14 @@ function openCalendarDay(dateStr) {
   });
   document.getElementById('app').appendChild(overlay);
   renderCalendarDayPanel(dateStr);
+  lockDayModalScroll();
 }
 
 function closeCalendarDay() {
   calPanelDate = null;
   const overlay = document.getElementById('calendarDayOverlay');
   if (overlay) overlay.remove();
+  unlockDayModalScroll();
 }
 
 // Prev/next day from inside the day modal: re-render the panel for the
@@ -871,6 +904,16 @@ document.addEventListener('habits-changed', () => {
   if (state.currentView === 'calendar') renderCalendar();
 });
 
+// Keep an open day panel in sync on views where the refresh functions
+// don't re-render the grid (Welcome): on the Calendar tab,
+// renderCalendar() inside refreshEvents()/refreshBirthdays() already
+// re-renders the panel, so this skips that view to avoid double work.
+for (const evt of ['events-changed', 'birthdays-changed']) {
+  document.addEventListener(evt, () => {
+    if (calPanelDate && state.currentView !== 'calendar') renderCalendarDayPanel(calPanelDate);
+  });
+}
+
 window.renderCalendar = renderCalendar;
 window.calendarNav = calendarNav;
 window.calendarToday = calendarToday;
@@ -887,5 +930,6 @@ window.openCalendarDay = openCalendarDay;
 window.jumpToCalendarDay = jumpToCalendarDay;
 window.openDayJumpPicker = openDayJumpPicker;
 window.closeCalendarDay = closeCalendarDay;
+window.setCalendarDayBehind = setCalendarDayBehind;
 window.calendarDayNav = calendarDayNav;
 window.renderCalendarDayPanel = renderCalendarDayPanel;

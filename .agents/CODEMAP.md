@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-10-31T19:57:46.211Z from 51 modules (v2.32.11). Total LOC 37633. Do not hand-edit.
+> Generated 2026-11-01T01:02:15.420Z from 51 modules (v2.32.12). Total LOC 37681. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -14,7 +14,7 @@
 
 | Feature | LOC | Tables | State | Depends | Dependents | UI | Guards | esc | i18n |
 |---------|-----|--------|-------|---------|------------|----|--------|-----|------|
-| birthdays | 607 | birthdays | allBirthdays,currentView,db,js | calendar-pure,i18n,icons,state,utils | main.js | modal,btn,toast | - | 9 | 31 |
+| birthdays | 608 | birthdays | allBirthdays,currentView,db,js | calendar-pure,i18n,icons,state,utils | main.js | modal,btn,toast | - | 9 | 31 |
 | flashcards | 2941 | flashcard_decks,flashcard_notes,flashcards,text_line_progress,texts | currentView,db,js,readOnlyMode | i18n,icons,item-utils,logo,scene-parse,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,card-header,empty-state,toast | pendingSet | 91 | 152 |
 | habits | 3595 | habit_categories,habit_completions,habits | _historyHabitId,allHabitCompletions,allHabits,currentView,db,js,markCalDirty,sharing | calendar-pure,frequency-rule,i18n,icons,item-utils,pending-next-due,sections-pure,sharing-ui,state,utils | calendar-sync.js,calendar.js,demo-chooser.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 60 | 136 |
 | lists | 1881 | list_items,lists | allListItems,allLists,currentView,db,js,sharing | i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | pendingSet | 41 | 49 |
@@ -34,8 +34,8 @@
 | calendar-sync | 1269 | birthdays,events,gcal_sync,habits,settings,todos | calendar-pure,drive-folders,habits,i18n | main.js | - |
 | sharing-ui | 1262 | events,habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | calendar.js,events.js,groups.js,habits.js | esc:38,guard+pendingSet,window:8 |
 | utils | 1016 | flashcards,x | calendar-pure,i18n,icons,sections-pure | - | esc:7,window:6 |
-| calendar | 892 | - | calendar-pure,habits,i18n,icons | main.js,welcome.js | esc:21,window:8 |
-| events | 741 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:19,pendingSet,window:8 |
+| calendar | 936 | - | calendar-pure,habits,i18n,icons | main.js,welcome.js | esc:21,window:8 |
+| events | 744 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:19,pendingSet,window:8 |
 | batch-import | 564 | - | calendar-pure,icons,import-pure,state | - | esc:14 |
 | delegation | 537 | - |  | - | window:1 |
 | hero | 473 | - | logo,storm3d | main.js | - |

@@ -521,6 +521,47 @@ test('style.css lets the Welcome strip scroll inside its section', () => {
     'Missing Welcome strip scroll rule');
 });
 
+// Day modal: the page behind it must not scroll (Welcome and Calendar
+// share the modal), and opening an item modal from it must stack above
+// it — blurred behind — instead of closing it, so exiting the item
+// modal returns to the day modal with the updated item.
+test('day modal locks background scroll and stacks item modals above it', () => {
+  const cal = jsFiles['calendar.js'];
+  assert(cal.includes('function lockDayModalScroll()') && cal.includes('function unlockDayModalScroll()'),
+    'Missing day modal scroll-lock helpers');
+  assert(cal.includes('lockDayModalScroll();') && cal.includes('unlockDayModalScroll();'),
+    'Day modal open/close must lock/unlock background scroll');
+  assert(cal.includes('dataset.dayModalScroll'),
+    'Scroll lock must be owned by the day modal (flag), not shared');
+  assert(cal.includes('function setCalendarDayBehind(on)'),
+    'Missing setCalendarDayBehind helper');
+  assert(styleCss.includes('#calendarDayOverlay.cal-day-behind{z-index:150;}'),
+    'Behind day modal must sit below the item overlay (z-index 200)');
+  assert(styleCss.includes('#calendarDayOverlay.cal-day-behind .modal{filter:blur(4px);}'),
+    'Behind day modal must be blurred');
+  const del = jsFiles['delegation.js'];
+  for (const action of ['open-add-birthday', 'calendar-birthday-edit', 'calendar-event-edit', 'open-add-event']) {
+    const lines = del.split('\n').filter(l => l.includes(`case '${action}'`));
+    assert(lines.length > 0, `Missing delegation case ${action}`);
+    assert(lines.every(l => !l.includes('closeCalendarDay')),
+      `${action} must not close the day modal anymore`);
+  }
+  for (const f of ['events.js', 'birthdays.js']) {
+    const src = jsFiles[f];
+    assert(src.includes('setCalendarDayBehind(true)') && src.includes('setCalendarDayBehind(false)'),
+      `${f} item modals must set/clear the behind state`);
+    assert(!src.includes('closeCalendarDay'),
+      `${f} must not close the day modal on any path`);
+  }
+  // An open panel on Welcome refreshes when items change there (the
+  // Calendar tab is covered by renderCalendar in the refresh functions).
+  assert(cal.includes("['events-changed', 'birthdays-changed']") &&
+    cal.includes("state.currentView !== 'calendar') renderCalendarDayPanel(calPanelDate)"),
+    'Open day panel must sync on event/birthday changes off the Calendar tab');
+  assert(jsFiles['birthdays.js'].includes("dispatchEvent(new CustomEvent('birthdays-changed'))"),
+    'refreshBirthdays must dispatch birthdays-changed like refreshEvents does');
+});
+
 // ===================================================================
 // 10. No stray console.log left in production code (warnings only)
 // ===================================================================

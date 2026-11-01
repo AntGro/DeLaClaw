@@ -26,6 +26,9 @@ async function refreshBirthdays() {
   if (state.currentView === 'calendar' && window.renderCalendar) {
     window.renderCalendar();
   }
+  // Mirror refreshEvents' events-changed: lets an open day panel refresh
+  // on views where the grid isn't re-rendered (Welcome).
+  document.dispatchEvent(new CustomEvent('birthdays-changed'));
 }
 
 // ===================================================================
@@ -267,11 +270,13 @@ function openAddBirthdayModal(presetDate) {
   clearNewBirthdayAvatar();
   updateBirthdaySummary('new');
   modal.classList.add('visible');
+  if (window.setCalendarDayBehind) window.setCalendarDayBehind(true);
   setTimeout(() => document.getElementById('newBirthdayName').focus(), 100);
 }
 
 function closeAddBirthdayModal() {
   document.getElementById('addBirthdayModal').classList.remove('visible');
+  if (window.setCalendarDayBehind) window.setCalendarDayBehind(false);
 }
 
 async function saveNewBirthday() {
@@ -309,6 +314,7 @@ function openEditBirthdayModal(id) {
   document.getElementById('editBirthdayAvatarPreview').dataset.id = id;
   document.getElementById('editBirthdayDeleteBtn').dataset.id = id;
   modal.classList.add('visible');
+  if (window.setCalendarDayBehind) window.setCalendarDayBehind(true);
   setTimeout(() => document.getElementById('editBirthdayName').focus(), 100);
 }
 
@@ -328,6 +334,7 @@ function setEditBirthdayAvatarPreview(avatarUrl) {
 
 function closeEditBirthdayModal() {
   document.getElementById('editBirthdayModal').classList.remove('visible');
+  if (window.setCalendarDayBehind) window.setCalendarDayBehind(false);
 }
 
 async function saveEditBirthday() {
@@ -359,17 +366,11 @@ async function deleteBirthday(id) {
       const { error } = await state.db.from('birthdays').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
       closeEditBirthdayModal();
-      closeCalendarDayPanel();
       showToast(t('birthdays.birthday_removed'), 'info');
       await refreshBirthdays();
     }
   );
 }
-
-function closeCalendarDayPanel() {
-  if (window.closeCalendarDay) window.closeCalendarDay();
-}
-
 
 // ===================================================================
 // AVATAR — Upload / View / Delete

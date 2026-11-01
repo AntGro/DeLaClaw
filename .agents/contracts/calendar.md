@@ -66,6 +66,29 @@ for the Google Calendar mirror.)
   the tab's funnel filter) — callers that must ignore the filter pass
   all-true explicitly.
 
+## Day modal (v2.32.12)
+
+- **Background scroll lock**: opening the day modal locks page scroll
+  (body fixed at the saved offset, same pattern as Settings) on both
+  Welcome and Calendar; closing it restores the position. The lock is
+  owned by the day modal via a flag, so it never steals another
+  modal's lock.
+- **Stacked item modals**: opening an event/birthday add/edit modal
+  from the day modal does NOT close it. The day modal stays open
+  underneath, blurred and below the item overlay
+  (`#calendarDayOverlay.cal-day-behind`, z-index 150 under the item
+  overlay's 200). Every exit path (cancel / save / delete) goes
+  through the item modal's close function, which clears the behind
+  state — so the user returns to the day modal, never to the tab view.
+  Delete paths no longer close the day modal either.
+- **Panel freshness**: an open day panel re-renders after add/edit/
+  delete. On the Calendar tab `renderCalendar()` inside
+  `refreshEvents()`/`refreshBirthdays()` covers it; on other views
+  (Welcome) listeners on `events-changed`/`birthdays-changed`
+  re-render the panel (`refreshBirthdays` dispatches
+  `birthdays-changed`, mirroring `events-changed`). Same-day refreshes
+  preserve the panel's scroll position.
+
 ## Explicitly out of scope (deferred by the user, Oct 24, 2026)
 
 - Recurrence, reminders, Welcome-page surfacing, demo sample events.

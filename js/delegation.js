@@ -122,7 +122,7 @@
       case 'unshare-habit': callWindow('unshareHabit', [getId(el), el]); break;
       case 'copy-habit-to-personal': callWindow('copyHabitToPersonal', [getId(el), el]); break;
       case 'open-add-habit-category': callWindow('openAddHabitCategoryModal', []); break;
-      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('closeCalendarDay', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
+      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
       case 'open-add-flash-deck': callWindow('openAddFlashDeckModal', []); break;
       case 'open-add-list': callWindow('openAddListModal', []); break;
       case 'open-import': callWindow('openImportModal', []); break;
@@ -284,7 +284,7 @@
       case 'delete-all-archived-tasks': callWindow('deleteAllArchivedTasks', []); break;
       case 'approve-task-and-close': { var atId = el.dataset.taskId||getId(el); var atSt = el.dataset.status; if (window.updateTaskStatus) window.updateTaskStatus(atId, atSt, el); callWindow('closeRevisionModal', []); } break;
       case 'close-and-open-revision': { var coId = el.dataset.taskId||getId(el); var coSt = el.dataset.status; if (window.updateTaskStatus) window.updateTaskStatus(coId, coSt, el); callWindow('closeRevisionModal', []); if (window.openRevisionModal) setTimeout(function(){ window.openRevisionModal(coId); }, 120); } break;
-      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('closeCalendarDay', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
+      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
       case 'handle-avatar-click': callWindow('handleAvatarClick', [getId(el)]); break;
       case 'calendar-prev': callWindow('calendarNav', [-1]); break;
       case 'calendar-next': callWindow('calendarNav', [1]); break;
@@ -303,8 +303,8 @@
       case 'calendar-day-jump': callWindow('openDayJumpPicker', []); break;
       case 'toggle-calendar-add': callWindow('toggleCalendarAddMenu', [el]); break;
       case 'edit-birthday-avatar': callWindow('handleAvatarClick', [el.dataset.id]); break;
-      case 'calendar-birthday-edit': callWindow('closeCalendarDay', []); callWindow('openEditBirthdayModal', [el.dataset.id]); break;
-      case 'calendar-event-edit': callWindow('closeCalendarDay', []); callWindow('openEditEventModal', [el.dataset.id]); break;
+      case 'calendar-birthday-edit': callWindow('openEditBirthdayModal', [el.dataset.id]); break;
+      case 'calendar-event-edit': callWindow('openEditEventModal', [el.dataset.id]); break;
       case 'calendar-toggle-todo': {
         var ctDone = el.dataset.done === 'true';
         var ctDate = el.dataset.date;
@@ -326,7 +326,7 @@
       }
       case 'open-edit-birthday': callWindow('openEditBirthdayModal', [getId(el)]); break;
       case 'delete-birthday': callWindow('deleteBirthday', [getId(el)]); break;
-      case 'open-add-event': callWindow('closeCalendarAddMenu', []); callWindow('closeCalendarDay', []); callWindow('openAddEventModal', [el.dataset.date]); break;
+      case 'open-add-event': callWindow('closeCalendarAddMenu', []); callWindow('openAddEventModal', [el.dataset.date]); break;
       case 'open-edit-event': callWindow('openEditEventModal', [getId(el)]); break;
       case 'delete-event': callWindow('deleteEvent', [getId(el)]); break;
       case 'close-add-event': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddEventModal', []); break;

@@ -773,6 +773,10 @@ body.paused-mode:has(.schema-banner) .schema-banner{top:var(--paused-banner-h,36
 /* ===== ADD PROJECT MODAL ===== */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:200;align-items:center;justify-content:center;}
 .modal-overlay.visible{display:flex;animation:overlayFadeIn 0.2s ease-out;}
+/* Day modal kept open behind an item modal: below the item overlay
+   (z-index 200) and blurred, so exiting the item modal returns to it. */
+#calendarDayOverlay.cal-day-behind{z-index:150;}
+#calendarDayOverlay.cal-day-behind .modal{filter:blur(4px);}
 #confirmActionModal{z-index:9900;}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 60px rgba(100,108,255,0.05);max-height:85vh;overflow-y:auto;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);animation:modalSlideIn 0.25s ease-out;}
 /* Category-colored modal: solid header, tinted body */

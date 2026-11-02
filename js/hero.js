@@ -10,10 +10,16 @@ const easeCubicOut = t => 1 - Math.pow(1 - t, 3);
 
 let heroEl, stormSvg, stormBg, ticking = false;
 let destroyed = false;
+// Landing rotation: latched when shrinking starts, so the target
+// cannot jump mid-landing as scroll progress increases.
+let landRotStart = null, landRotTarget = null;
 
 // Storm phase boundaries (tuned for 300vh spacer / 2 panels)
 const STORM_OPEN_END  = 0.20;   // step 1->2 completes
 const STORM_SHRINK    = 0.75;   // start shrinking
+// The storm is 7-fold symmetric: rotating by 360/7 maps the pattern
+// exactly onto itself, so landing on a multiple looks identical to 0°.
+const STORM_SYM = 360 / 7;
 
 // Features panel fade-out end — skip link vanishes right after
 const FEAT_FADE_END   = 0.66;
@@ -47,6 +53,17 @@ function render() {
   // landT normalizes to 1.0 at HANDOFF so visual interpolations fully converge before the swap
   const landT = clamp(shrinkT / HANDOFF, 0, 1);
 
+  // Rotation keeps increasing with scroll; during landing it eases
+  // forward to the next symmetry multiple, never back to 0.
+  if (shrinkT > 0) {
+    if (landRotTarget === null) {
+      landRotStart = p * 60;
+      landRotTarget = Math.ceil(landRotStart / STORM_SYM - 1e-6) * STORM_SYM;
+    }
+  } else {
+    landRotStart = landRotTarget = null;
+  }
+
   // ── Storm parameters ──
   let step, sw, gamma;
   if (p < STORM_OPEN_END) {
@@ -77,9 +94,9 @@ function render() {
   const gateOverlaps = gateTop < stormBottom;
 
   if (shrinkT <= 0) {
-    // Full size, centered — hold rotation at STORM_SHRINK cap if past it
+    // Full size, centered — rotation keeps increasing with scroll
     stormBg.style.setProperty('--hero-storm-size', '58vmin');
-    const baseRot = 'rotate(' + (Math.min(p, STORM_SHRINK) * 60) + 'deg)';
+    const baseRot = 'rotate(' + (p * 60) + 'deg)';
     stormSvg.style.transform = baseRot;
     stormBg.style.opacity = '1';
     stormBg.style.zIndex = gateOverlaps ? '11' : '';
@@ -104,8 +121,9 @@ function render() {
       stormSvg.style.filter = 'none';
     }
 
-    // Rotation winds down to 0
-    const rot = lerp(STORM_SHRINK * 60, 0, easeOut(landT));
+    // Rotation eases forward to the latched symmetry angle — visually
+    // identical to the unrotated gate logo at the swap
+    const rot = lerp(landRotStart, landRotTarget, easeOut(landT));
 
     // Translate toward #stormTarget center
     const gCx = targetRect.left + targetRect.width / 2;
@@ -375,6 +393,7 @@ export function destroyHero() {
   window.removeEventListener('scroll', onScroll);
   window.removeEventListener('resize', onScroll);
   heroEl = stormSvg = stormBg = null;
+  landRotStart = landRotTarget = null;
   // Restore gate title visibility
   const nt = document.getElementById('gateTitle');
   if (nt) nt.style.visibility = '';

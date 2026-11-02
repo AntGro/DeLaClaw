@@ -80,7 +80,7 @@ function render() {
     // Lazy-init the canvas storm and build it once
     if (!storm2dBuilt) {
       storm2d.init(stormCanvas);
-      storm2d.build(7, 2, 10, 18);
+      storm2d.build(7, 2, 10);
       storm2dBuilt = true;
     }
 
@@ -99,7 +99,7 @@ function render() {
 
     // Gentle tilt reveals depth; Z-spin matches the SVG's CSS rotation
     // During crossfade (fade<1): stay perfectly flat to match the 2D SVG
-    // After crossfade: tilt and yaw vary continuously to show off the depth
+    // After crossfade: tilt and yaw vary continuously to show off the tilt and sheen
     const moveT = clamp((p - STORM_3D_END) / 0.10, 0, 1);
     const tiltBase = easeOut(moveT) * 0.22;                       // ramp to ~12.5°
     // Continuous oscillation — unclamped so it keeps moving through shrink

@@ -1,10 +1,10 @@
 // ===================================================================
 // Storm 2D — vanilla Canvas 2D storm logo for the hero scroll
 // Drop-in replacement for storm3d.js: same exports, no WebGL,
-// no external library. The 3D extrusion is faked with stacked,
-// dark-to-light layers offset along the tilt direction, so the
-// shape reads flat (identical to the SVG) when untilted and gains
-// depth as it tilts — exactly the motion hero.js drives.
+// no external library. Deliberately flat 2D: no fake extrusion.
+// Style comes from a tilt-driven halo (grows as the storm tilts,
+// invisible when flat so it matches the SVG exactly) and a sheen
+// sweep from a fixed on-screen light as the storm spins.
 // ===================================================================
 
 const R0 = 180;
@@ -14,7 +14,6 @@ let ready = false;
 let built = false;
 let path = null;
 let halfW = 5;
-let depth = 18;
 
 export function init(c) {
   if (ready) return;
@@ -27,11 +26,12 @@ export function init(c) {
  * Build (or rebuild) the storm path.
  * Same geometry as the old extruded mesh: an outer ring plus N
  * chord quads, all of half-width sw/2 around the R0 circle.
+ * The depth argument is accepted for interface parity and unused:
+ * this renderer stays flat 2D.
  */
-export function build(N, step, sw, d) {
+export function build(N, step, sw) {
   if (!ready) return;
   halfW = sw / 2;
-  depth = d;
   path = new Path2D();
 
   // Ring — annulus, outer clockwise, inner counter-clockwise (hole).
@@ -72,13 +72,6 @@ export function resize() {
   }
 }
 
-function lerpColor(c1, c2, t) {
-  const r = Math.round(c1[0] + (c2[0] - c1[0]) * t);
-  const g = Math.round(c1[1] + (c2[1] - c1[1]) * t);
-  const b = Math.round(c1[2] + (c2[2] - c1[2]) * t);
-  return `rgb(${r},${g},${b})`;
-}
-
 /**
  * Render one frame.
  * @param {number} tiltX — X rotation in radians (pitch)
@@ -100,33 +93,44 @@ export function frame(tiltX, tiltY, spinZ) {
   const fit = Math.min(w, h) / 400;
   ctx.translate(w / 2, h / 2);
   ctx.rotate(spinZ);
-  // Small-angle stand-in for 3D pitch/yaw: squash along each axis.
+  // Small-angle stand-in for pitch/yaw: squash along each axis.
+  // This is a plain 2D scale, like the CSS transforms on the SVG.
   ctx.scale(Math.max(Math.cos(tiltY), 0.01), Math.max(Math.cos(tiltX), 0.01));
   ctx.scale(fit, fit);
 
-  // Faked extrusion: stacked layers from the tilt offset back to
-  // the top face. Untilted, the offset is zero and the shape is
-  // a single flat face, matching the SVG exactly.
-  const layers = Math.max(2, Math.round(depth / 3));
-  const ex = tiltY * depth * 0.6;
-  const ey = -tiltX * depth * 0.6;
-  const dark = [49, 46, 129];   // indigo-900
-  const flat = [99, 102, 241];  // indigo-500, the old material color
-  for (let i = 0; i < layers - 1; i++) {
-    const t = i / (layers - 1);
+  const tiltMag = Math.sqrt(tiltX * tiltX + tiltY * tiltY);
+
+  // Halo — a flat, slightly enlarged copy behind the face, fading
+  // in with tilt. Invisible when flat, so the shape matches the
+  // SVG exactly during the crossfade.
+  if (tiltMag > 0.01) {
     ctx.save();
-    ctx.translate(ex * (1 - t), ey * (1 - t));
-    ctx.fillStyle = lerpColor(dark, flat, t);
+    ctx.scale(1 + tiltMag * 0.06, 1 + tiltMag * 0.06);
+    ctx.fillStyle = `rgba(99,102,241,${Math.min(0.35, tiltMag * 1.2).toFixed(3)})`;
     ctx.fill(path, 'nonzero');
     ctx.restore();
   }
 
-  // Top face — vertical gradient for a lit-surface feel.
+  // Face — vertical gradient for a lit-surface feel.
   const grad = ctx.createLinearGradient(0, -R0, 0, R0);
   grad.addColorStop(0, '#818cf8');
   grad.addColorStop(0.5, '#6366f1');
   grad.addColorStop(1, '#4f46e5');
   ctx.fillStyle = grad;
+  ctx.fill(path, 'nonzero');
+
+  // Sheen — a diagonal band from a fixed on-screen light. The
+  // gradient endpoints are counter-rotated by spinZ so the light
+  // stays put on screen while the storm spins under it, sweeping
+  // the highlight across the face.
+  const c = Math.cos(spinZ), s = Math.sin(spinZ);
+  const ax = c * -R0 + s * -R0, ay = -s * -R0 + c * -R0;
+  const bx = c * R0 + s * R0, by = -s * R0 + c * R0;
+  const sheen = ctx.createLinearGradient(ax, ay, bx, by);
+  sheen.addColorStop(0, 'rgba(255,255,255,0)');
+  sheen.addColorStop(0.5, 'rgba(255,255,255,0.16)');
+  sheen.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sheen;
   ctx.fill(path, 'nonzero');
 }
 

@@ -20,6 +20,8 @@ const STORM_SHRINK    = 0.75;   // start shrinking
 // The storm is 7-fold symmetric: rotating by 360/7 maps the pattern
 // exactly onto itself, so landing on a multiple looks identical to 0°.
 const STORM_SYM = 360 / 7;
+// enterT when shrinkT reaches HANDOFF: easeCubicOut(e) = 0.95.
+const ENTERT_HANDOFF = 1 - Math.cbrt(0.05);
 
 // Features panel fade-out end — skip link vanishes right after
 const FEAT_FADE_END   = 0.66;
@@ -46,8 +48,9 @@ function render() {
   const targetOnScreen = targetRect && targetRect.top < window.innerHeight;
   const HANDOFF = 0.95;  // visibility-swap threshold
   let shrinkT = 0;  // 0 = no shrink, reaches ~0.99 at max scroll
+  let enterT = 0;     // raw float progress, linear in scroll
   if (p > STORM_SHRINK && targetOnScreen) {
-    const enterT = clamp(1 - targetRect.top / window.innerHeight, 0, 1);
+    enterT = clamp(1 - targetRect.top / window.innerHeight, 0, 1);
     shrinkT = easeCubicOut(enterT);
   }
   // landT normalizes to 1.0 at HANDOFF so visual interpolations fully converge before the swap
@@ -121,9 +124,12 @@ function render() {
       stormSvg.style.filter = 'none';
     }
 
-    // Rotation eases forward to the latched symmetry angle — visually
-    // identical to the unrotated gate logo at the swap
-    const rot = lerp(landRotStart, landRotTarget, easeOut(landT));
+    // Rotation moves forward to the latched symmetry angle at a
+    // constant rate in scroll — linear in enterT, never eased, so it
+    // keeps turning for the whole float and arrives exactly on target
+    // at the swap (visually identical to the unrotated gate logo)
+    const rot = lerp(landRotStart, landRotTarget,
+      clamp(enterT / ENTERT_HANDOFF, 0, 1));
 
     // Translate toward #stormTarget center
     const gCx = targetRect.left + targetRect.width / 2;

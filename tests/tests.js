@@ -521,6 +521,19 @@ test('style.css lets the Welcome strip scroll inside its section', () => {
     'Missing Welcome strip scroll rule');
 });
 
+// Collapsed row actions must not lay out: max-width:0 alone still lays
+// their buttons out past the viewport edge on every row (measured 244
+// elements past 390px), which iOS Safari pans to. display:none keeps
+// them out of layout until .visible restores the grid.
+test('collapsed row actions use display:none, not max-width:0 alone', () => {
+  for (const cls of ['task-actions', 'habit-actions', 'todo-actions', 'birthday-actions', 'list-item-actions']) {
+    assert(styleCss.includes(`.${cls}{display:none;`),
+      `${cls} must be display:none when collapsed`);
+    assert(styleCss.includes(`.${cls}.visible{display:grid;`),
+      `${cls}.visible must restore the grid`);
+  }
+});
+
 // Day modal: the page behind it must not scroll (Welcome and Calendar
 // share the modal), and opening an item modal from it must stack above
 // it — blurred behind — instead of closing it, so exiting the item

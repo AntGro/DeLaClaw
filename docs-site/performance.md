@@ -37,7 +37,7 @@ None — no external JS libraries are vendored since three.js was dropped (Nov 2
 3. Google Fonts CSS + font files — render-blocking (FOUT mitigated by `display=swap`)
 4. `js/main.js` + all ES module imports — deferred (`type="module"`)
 5. `manifest.json` + PWA icons
-6. Canvas 2D storm (`storm2d.js`) — lazy, only when the hero landing page is shown
+6. Hero storm SVG — generated inline by logo.js, no extra asset
 
 After first load, the service worker serves all assets from cache (network-first strategy with precache fallback).
 

@@ -17,7 +17,7 @@ Framework + bundler would add build complexity, supply-chain risk, and break the
 
 - Single-page app, vanilla JS ES modules, no build step
 - `index.html` is the entry — open it via GitHub Pages, no bundler
-- No vendored JS since Nov 2026 (three.js dropped; the hero storm is vanilla Canvas 2D) — Google Identity remains the only CDN exception (ToS requires CDN, explicitly allowed via CSP)
+- No vendored JS since Nov 2026 (three.js dropped; the hero storm is a single SVG from logo.js) — Google Identity remains the only CDN exception (ToS requires CDN, explicitly allowed via CSP)
 - PWA via `sw.js` with exact `PRECACHE_URLS`, `CACHE_VERSION` bumped by hook
 - Backend abstraction via `js/db.js` proxy — same surface for REST / Drive / Demo (BYOB)
 

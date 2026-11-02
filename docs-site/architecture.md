@@ -230,8 +230,7 @@ js/
   item-utils.js            Drag-and-drop, inline editing, hover actions
   backend-logos.js         Backend picker logo SVGs
   hero.js                  Landing page animations
-  logo.js                  Logo animation engine
-  storm2d.js               Vanilla Canvas 2D hero storm (tilt/spin, no external library)
+  logo.js                  Logo animation engine (hero storm SVG + gate logo)
   demo-chooser.js          Demo dataset selector UI
   demo-data.js             Sample data for demo mode
   bootstrap.js             ES module loader (extracted from inline script)

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-11-02T23:31:41.090Z from 51 modules (v2.32.15). Total LOC 37641. Do not hand-edit.
+> Generated 2026-11-02T23:39:12.213Z from 50 modules (v2.32.16). Total LOC 37434. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -22,7 +22,7 @@
 | todos | 2533 | todo_categories,todos | currentView,db,js,markCalDirty,sharing,syncCalendarTable | calendar-pure,i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | calendar-sync.js,calendar.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 51 | 103 |
 | welcome | 834 | - | PROJECTS,allBirthdays,allHabitCompletions,allHabits,archivedProjectIds,currentView,db,js | calendar,calendar-pure,flashcards,habits,i18n,icons,item-utils,sections-pure,sharing-ui,state,todos,utils | main.js | modal,app-header,btn | pendingSet | 81 | 49 |
 
-## Core modules (44)
+## Core modules (43)
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
@@ -38,11 +38,11 @@
 | events | 744 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:19,pendingSet,window:8 |
 | batch-import | 564 | - | calendar-pure,icons,import-pure,state | - | esc:14 |
 | delegation | 537 | - |  | - | window:1 |
-| hero | 473 | - | logo,storm2d | main.js | - |
 | calendar-pure | 464 | - |  | batch-import.js,birthdays.js,calendar-sync.js,calendar.js | - |
 | demo-chooser | 464 | - | habits,i18n,icons,utils | - | - |
 | offline-cache | 439 | - | ./i18n,./state,i18n.js,state.js | drive.js,main.js,sharing.js | - |
 | sections-pure | 412 | - |  | calendar.js,habits.js,lists.js,todos.js | - |
+| hero | 411 | - | logo | main.js | - |
 | demo | 310 | x |  | drive.js | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
 | frequency-rule | 231 | - | calendar-pure | habit-import.js,habits.js | - |
@@ -53,7 +53,6 @@
 | agents-ui | 207 | agent_grants | db,i18n,icons,state | main.js | esc:31,window:5 |
 | sharing | 180 | - | offline-cache,sharing-drive,sharing-envelope,sharing-interface | - | - |
 | rest | 162 | x |  | main.js | - |
-| storm2d | 145 | - |  | hero.js | - |
 | habit-import | 143 | - | frequency-rule,import-pure | - | - |
 | sharing-interface | 136 | - |  | sharing.js | - |
 | import-pure | 135 | - |  | batch-import.js,habit-import.js,todo-import.js | - |

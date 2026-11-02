@@ -7,10 +7,10 @@ Vendor versions are checked weekly by the `vendor-check` GitHub Action, which op
 ## Libraries
 
 ### Three.js
-- **Package**: `three` v0.186.1
+- **Package**: `three` v0.187.0
 - **License**: MIT
 - **Source**: https://github.com/mrdoob/three.js
-- **Loaded from**: `vendor/three/build/three.module.js` + `vendor/three/build/three.core.js` + `vendor/three/examples/jsm/utils/BufferGeometryUtils.js` (self-hosted ESM copy, originally `cdn.jsdelivr.net/npm/three@0.186.1`)
+- **Loaded from**: `vendor/three/build/three.module.js` + `vendor/three/build/three.core.js` + `vendor/three/examples/jsm/utils/BufferGeometryUtils.js` (self-hosted ESM copy, originally `cdn.jsdelivr.net/npm/three@0.187.0`)
 - **Purpose**: 3D extruded heptagram on the landing/hero page
 
 ### Google Identity Services

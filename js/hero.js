@@ -2,7 +2,7 @@
 // DeLaClaw Hero — scroll-driven Storm animation
 // ===================================================================
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
-import * as storm3d from './storm3d.js';
+import * as storm2d from './storm2d.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -12,7 +12,7 @@ const easeCubicOut = t => 1 - Math.pow(1 - t, 3);
 
 let heroEl, stormSvg, stormBg, stormCanvas, ticking = false;
 let destroyed = false;
-let storm3dBuilt = false;
+let storm2dBuilt = false;
 
 // Storm phase boundaries (tuned for 300vh spacer / 2 panels)
 const STORM_OPEN_END  = 0.20;   // step 1->2 completes
@@ -77,11 +77,11 @@ function render() {
 
   // ── 3D crossfade ──
   if (stormCanvas && p >= STORM_3D_START) {
-    // Lazy-init Three.js and build mesh once
-    if (!storm3dBuilt) {
-      storm3d.init(stormCanvas);
-      storm3d.build(7, 2, 10, 18);
-      storm3dBuilt = true;
+    // Lazy-init the canvas storm and build it once
+    if (!storm2dBuilt) {
+      storm2d.init(stormCanvas);
+      storm2d.build(7, 2, 10, 18);
+      storm2dBuilt = true;
     }
 
     // Forward crossfade: SVG → canvas
@@ -99,7 +99,7 @@ function render() {
 
     // Gentle tilt reveals depth; Z-spin matches the SVG's CSS rotation
     // During crossfade (fade<1): stay perfectly flat to match the 2D SVG
-    // After crossfade: tilt and yaw vary continuously to show off the 3D
+    // After crossfade: tilt and yaw vary continuously to show off the depth
     const moveT = clamp((p - STORM_3D_END) / 0.10, 0, 1);
     const tiltBase = easeOut(moveT) * 0.22;                       // ramp to ~12.5°
     // Continuous oscillation — unclamped so it keeps moving through shrink
@@ -121,7 +121,7 @@ function render() {
     }
     const spinZ = -cssRotDeg * Math.PI / 180;             // negate: CSS rotates CW, Three.js Z rotates CCW
 
-    storm3d.frame(tiltX, spinY, spinZ);
+    storm2d.frame(tiltX, spinY, spinZ);
   } else if (stormCanvas) {
     stormCanvas.style.opacity = '0';
     stormSvg.style.opacity = '1';
@@ -387,7 +387,7 @@ export function initHero() {
   if (!heroEl || heroEl.style.display === 'none') return;
   stormSvg = document.getElementById('heroStorm');
   stormBg  = document.getElementById('heroStormBg');
-  stormCanvas = document.getElementById('heroStorm3d');
+  stormCanvas = document.getElementById('heroStorm2d');
   if (!stormSvg || !stormBg) return;
   // Ensure gate logo SVG exists in the DOM (hidden while hero flies)
   injectGateLogo();
@@ -435,8 +435,8 @@ export function destroyHero() {
   window.removeEventListener('scroll', onScroll);
   window.removeEventListener('resize', onScroll);
   heroEl = stormSvg = stormBg = stormCanvas = null;
-  if (storm3dBuilt) { storm3d.dispose(); }
-  storm3dBuilt = false;
+  if (storm2dBuilt) { storm2d.dispose(); }
+  storm2dBuilt = false;
   // Restore gate title visibility
   const nt = document.getElementById('gateTitle');
   if (nt) nt.style.visibility = '';

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-11-02T00:03:00.554Z from 51 modules (v2.32.13). Total LOC 37681. Do not hand-edit.
+> Generated 2026-11-02T23:26:56.214Z from 51 modules (v2.32.14). Total LOC 37637. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -38,7 +38,7 @@
 | events | 744 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:19,pendingSet,window:8 |
 | batch-import | 564 | - | calendar-pure,icons,import-pure,state | - | esc:14 |
 | delegation | 537 | - |  | - | window:1 |
-| hero | 473 | - | logo,storm3d | main.js | - |
+| hero | 473 | - | logo,storm2d | main.js | - |
 | calendar-pure | 464 | - |  | batch-import.js,birthdays.js,calendar-sync.js,calendar.js | - |
 | demo-chooser | 464 | - | habits,i18n,icons,utils | - | - |
 | offline-cache | 439 | - | ./i18n,./state,i18n.js,state.js | drive.js,main.js,sharing.js | - |
@@ -51,10 +51,10 @@
 | groups | 214 | - | i18n,icons,sharing-ui,state | main.js | esc:3,window:4 |
 | icons | 214 | - |  | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
 | agents-ui | 207 | agent_grants | db,i18n,icons,state | main.js | esc:31,window:5 |
-| storm3d | 185 | - |  | hero.js | - |
 | sharing | 180 | - | offline-cache,sharing-drive,sharing-envelope,sharing-interface | - | - |
 | rest | 162 | x |  | main.js | - |
 | habit-import | 143 | - | frequency-rule,import-pure | - | - |
+| storm2d | 141 | - |  | hero.js | - |
 | sharing-interface | 136 | - |  | sharing.js | - |
 | import-pure | 135 | - |  | batch-import.js,habit-import.js,todo-import.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |

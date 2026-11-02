@@ -62,7 +62,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 
 - **XSS**: No `innerHTML` with user data unless escaped. Wrap all user fields (`name`, `text`, `note`, `brand`, etc.) in `esc()` when interpolating into template literals. `renderMd()` and `truncateWithShowMore()` already esc internally, don't double-wrap. `showDeleteConfirm` uses `.textContent` (safe).
 - **Safe DOM for URLs**: TODO/project links with user-provided URLs must use safe allowlist check, not raw `innerHTML`.
-- **CSP hardening (sec-004)**: Vendor JS self-hosted in `vendor/` (`three@0.170.0`). No `cdn.jsdelivr.net` for app code. CSP meta in `index.html`: `default-src 'self'; script-src 'self' 'sha256-...importmap...' accounts.google.com apis.google.com gstatic cloudflareinsights; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes. Cloudflare Web Analytics beacon allowed in both `script-src` (`static.cloudflareinsights.com`) and `connect-src` (`cloudflareinsights.com`).
+- **CSP hardening (sec-004)**: No vendored JS and no `cdn.jsdelivr.net` for app code since three.js was dropped (Nov 2026) — the hero storm is vanilla Canvas 2D. CSP meta in `index.html`: `default-src 'self'; script-src 'self' accounts.google.com apis.google.com gstatic cloudflareinsights; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes. Cloudflare Web Analytics beacon allowed in both `script-src` (`static.cloudflareinsights.com`) and `connect-src` (`cloudflareinsights.com`).
 - **Google Identity exception**: GSI (`accounts.google.com/gsi/client` + `apis.google.com/js/api.js`) must stay CDN per Google ToS, no SRI allowed. Documented exception allowed only via CSP.
 
 ## 4. Backend & Data
@@ -71,7 +71,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - **Category integrity**: each category/deck table has one protected default row (`name=''`, `is_protected=1`). `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item FKs (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
 - Schema version in `settings` key `schema_version`, migrations in `migrations/`.
 - Base schema + migrations must be runnable in local SQLite (`server/schema.sql`).
-- Vendor: `scripts/update-vendor.sh [three_ver]` updates `vendor/` + `index.html` comment + `docs-site/attributions.md`. Weekly GitHub Action `vendor-check.yml` opens PR to `dev` if new versions.
+- Vendor: none since three.js was dropped (Nov 2026) — the `vendor/` directory, `scripts/update-vendor.sh`, and the weekly `vendor-check.yml` action were all removed with it.
 
 ## 5. Git, Versioning, Commit
 

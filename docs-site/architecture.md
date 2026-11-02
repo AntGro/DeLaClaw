@@ -231,7 +231,7 @@ js/
   backend-logos.js         Backend picker logo SVGs
   hero.js                  Landing page animations
   logo.js                  Logo animation engine
-  storm3d.js               Three.js hero particle effect
+  storm2d.js               Vanilla Canvas 2D hero storm (tilt/spin, no external library)
   demo-chooser.js          Demo dataset selector UI
   demo-data.js             Sample data for demo mode
   bootstrap.js             ES module loader (extracted from inline script)

@@ -18,13 +18,9 @@ Feature modules live in `js/` and adapters in `js/adapters/`. The largest module
 
 A single `style.css` covers both themes (dark and light), all pages, and all responsive breakpoints.
 
-### Vendor libraries (self-hosted)
+### Vendor libraries
 
-| Library | Location | Notes |
-|---|---|---|
-| Three.js v0.170.0 | `vendor/three/` | Loaded via import map, used only for the hero landing page |
-
-Both were moved from CDN to self-hosted as part of CSP hardening. See `attributions.md` for versions and licenses.
+None — no external JS libraries are vendored since three.js was dropped (Nov 2026); the hero storm is vanilla Canvas 2D. See `attributions.md` for the remaining third-party assets.
 
 ### External resources (CDN)
 
@@ -41,7 +37,7 @@ Both were moved from CDN to self-hosted as part of CSP hardening. See `attributi
 3. Google Fonts CSS + font files — render-blocking (FOUT mitigated by `display=swap`)
 4. `js/main.js` + all ES module imports — deferred (`type="module"`)
 5. `manifest.json` + PWA icons
-6. Three.js from `vendor/three/` — lazy, only when the hero landing page is shown
+6. Canvas 2D storm (`storm2d.js`) — lazy, only when the hero landing page is shown
 
 After first load, the service worker serves all assets from cache (network-first strategy with precache fallback).
 
@@ -55,8 +51,7 @@ Two resources block first paint:
 ### Potential improvements (not implemented)
 
 - **Self-host the font**: DM Sans could be served from `vendor/` to eliminate the Google Fonts DNS lookup and make the app fully self-contained.
-- **Lazy-load Three.js**: Three.js is only used for the hero landing page effect. Returning users who skip the hero don't need it. A dynamic `import()` on hero visibility would avoid loading it entirely for most sessions.
-- **Code splitting**: `demo-data.js` and `demo-chooser.js` are only needed in demo mode. `hero.js`, `storm3d.js`, and `logo.js` are only needed for the landing page. Dynamic imports could defer these.
+- **Code splitting**: `demo-data.js` and `demo-chooser.js` are only needed in demo mode. `hero.js`, `storm2d.js`, and `logo.js` are only needed for the landing page. Dynamic imports could defer these.
 - **Minification**: a simple minification pass would reduce JS significantly. Not implemented because the project intentionally ships readable source, so users can inspect the code they run.
 - **i18n splitting**: `i18n.js` includes all 3 languages. Could load only the active language and lazy-load others on switch.
 

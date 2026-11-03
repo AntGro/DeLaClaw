@@ -6,13 +6,13 @@
 // ===================================================================
 
 import state, { CALENDAR_PREFS_KEY } from './state.js';
-import { esc, renderMd, showToast } from './utils.js';
-import { initItemHoverDelay, inlineEditText } from './item-utils.js';
+import { esc, renderMd } from './utils.js';
+import { initItemHoverDelay } from './item-utils.js';
 import { lucideIcon } from './icons.js';
 import { sharedBadge } from './sharing-ui.js';
 import { t, getLang } from './i18n.js';
-import { getTodos, catIdForTodo, getCategoryColor, getTodoCatPath, getTodoCatOrderKey } from './todos.js';
-import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatPath, getHabitCatOrderKey, isAutoHabit } from './habits.js';
+import { getTodos, catIdForTodo, getCategoryColor, getTodoCatPath, getTodoCatOrderKey, editTodoInline } from './todos.js';
+import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatPath, getHabitCatOrderKey, isAutoHabit, editHabitInline } from './habits.js';
 import { compareOrderKeys } from './sections-pure.js';
 import { captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
 import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates, isHabitSnoozed, parseLocalDate, overdueDays, eventDatesInRange, eventSpan, instantToTimeStr, localTimeZone } from './calendar-pure.js';
@@ -767,78 +767,24 @@ function refreshCalendarSurfaces() {
   if (calPanelDate) renderCalendarDayPanel(calPanelDate);
 }
 
-async function saveCalendarTodoText(id, newText) {
-  const todo = getTodos().find(td => td.id === id);
-  if (!todo) return;
-  if (todo.shared_id && todo.shared_group_id && state.sharing) {
-    try {
-      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-        payload: { text: newText, category: todo.category || '', priority: todo.priority || 'normal' },
-      });
-      Object.assign(todo, { text: newText });
-      showToast(t('todos.todo_updated'), 'success');
-    } catch (e) {
-      console.warn('Failed to update shared todo from calendar:', e);
-      showToast(t('toast.update_failed'), 'error');
-    }
-  } else {
-    const { error } = await state.db.from('todos').update({ text: newText }).eq('id', id);
-    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-    Object.assign(todo, { text: newText });
-    showToast(t('todos.todo_updated'), 'success');
-  }
-}
-
-async function saveCalendarHabitName(id, newName) {
-  const habit = (state.allHabits || []).find(h => h.id === id);
-  if (!habit) return;
-  if (habit.shared_id && habit.shared_group_id && state.sharing) {
-    try {
-      await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { name: newName });
-      Object.assign(habit, { name: newName });
-      showToast(t('toast.updated'), 'success');
-    } catch (e) {
-      console.warn('Failed to update shared habit from calendar:', e);
-      showToast(t('toast.update_failed'), 'error');
-    }
-  } else {
-    const { error } = await state.db.from('habits').update({ name: newName }).eq('id', id);
-    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
-    Object.assign(habit, { name: newName });
-    showToast(t('toast.updated'), 'success');
-  }
-}
-
-// Text-only inline edit (no deadline/category extras — those live on the
-// TODOs/Habits pages). The panel re-render restores markdown rendering.
+// Calendar rows open the SAME inline editors as the TODOs/Habits tabs
+// (text + deadline + category for TODOs; name + frequency + category +
+// end date for habits), anchored on the row title, refreshing the
+// calendar surfaces instead of the native views on finish.
 function editCalendarTodoInline(row, id) {
-  const todo = getTodos().find(td => td.id === id);
-  if (!todo) return;
   const titleEl = row.querySelector('.cal-row-main strong');
-  if (!titleEl || titleEl.dataset.editing) return;
+  if (!titleEl) return;
   const actionsEl = row.querySelector('.cal-row-actions');
   if (actionsEl) actionsEl.classList.remove('visible');
-  inlineEditText(titleEl, todo.text || '', {
-    maxLength: 2000,
-    containerEl: row,
-    saveFn: async (newText) => { await saveCalendarTodoText(id, newText); },
-    refreshFn: async () => { refreshCalendarSurfaces(); },
-  });
+  editTodoInline(id, row, { textEl: titleEl, containerEl: row, refreshFn: refreshCalendarSurfaces });
 }
 
 function editCalendarHabitInline(row, id) {
-  const habit = (state.allHabits || []).find(h => h.id === id);
-  if (!habit) return;
   const titleEl = row.querySelector('.cal-row-main strong');
-  if (!titleEl || titleEl.dataset.editing) return;
+  if (!titleEl) return;
   const actionsEl = row.querySelector('.cal-row-actions');
   if (actionsEl) actionsEl.classList.remove('visible');
-  inlineEditText(titleEl, habit.name || '', {
-    maxLength: 1000,
-    containerEl: row,
-    saveFn: async (newName) => { await saveCalendarHabitName(id, newName); },
-    refreshFn: async () => { refreshCalendarSurfaces(); },
-  });
+  editHabitInline(id, row, { nameEl: titleEl, containerEl: row, refreshFn: refreshCalendarSurfaces });
 }
 
 function editCalendarRowInline(row, type, id) {

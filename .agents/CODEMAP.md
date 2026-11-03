@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-11-03T03:11:08.721Z from 50 modules (v2.32.26). Total LOC 37608. Do not hand-edit.
+> Generated 2026-11-03T03:26:55.270Z from 50 modules (v2.32.27). Total LOC 37554. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -33,8 +33,8 @@
 | item-utils | 1359 | - | db,i18n,icons,state | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
 | calendar-sync | 1269 | birthdays,events,gcal_sync,habits,settings,todos | calendar-pure,drive-folders,habits,i18n | main.js | - |
 | sharing-ui | 1262 | events,habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | calendar.js,events.js,groups.js,habits.js | esc:38,guard+pendingSet,window:8 |
-| calendar | 1058 | habits,todos | calendar-pure,habits,i18n,icons | main.js,welcome.js | esc:26,window:8 |
 | utils | 1016 | flashcards,x | calendar-pure,i18n,icons,sections-pure | - | esc:7,window:6 |
+| calendar | 1004 | - | calendar-pure,habits,i18n,icons | main.js,welcome.js | esc:26,window:8 |
 | events | 744 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:19,pendingSet,window:8 |
 | batch-import | 564 | - | calendar-pure,icons,import-pure,state | - | esc:14 |
 | delegation | 542 | - |  | - | window:1 |
@@ -80,7 +80,7 @@
 | flashcards | flashcards, utils |
 | groups | sharing-drive |
 | habit_completions | habits, sharing-ui |
-| habits | calendar, calendar-sync, habits, sharing-ui |
+| habits | calendar-sync, habits, sharing-ui |
 | list_items | lists, sharing-ui |
 | lists | lists |
 | projects | db, main, projects |
@@ -89,7 +89,7 @@
 | tasks | projects |
 | text_line_progress | flashcards, scene-parse |
 | texts | flashcards, scene-parse |
-| todos | calendar, calendar-sync, sharing-ui, todos |
+| todos | calendar-sync, sharing-ui, todos |
 
 ## Adapters
 

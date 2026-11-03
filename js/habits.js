@@ -1726,12 +1726,12 @@ async function saveNewHabit() {
   await refreshHabits();
 }
 
-function editHabitInline(habitId, itemEl) {
+function editHabitInline(habitId, itemEl, opts = {}) {
   const habit = state.allHabits.find(c => c.id === habitId);
   if (!habit) return;
-  const nameEl = itemEl
+  const nameEl = opts.nameEl || (itemEl
     ? itemEl.querySelector('.habit-name')
-    : document.querySelector(`.habit-item[data-habit-id="${habitId}"] .habit-name`);
+    : document.querySelector(`.habit-item[data-habit-id="${habitId}"] .habit-name`));
   if (!nameEl) return;
 
   // Hide actions while editing
@@ -1793,7 +1793,7 @@ function editHabitInline(habitId, itemEl) {
   inlineEditText(nameEl, habit.name, {
     maxLength: 1000,
     extraEl: extras,
-    containerEl: nameEl.closest('.habit-item'),
+    containerEl: opts.containerEl || nameEl.closest('.habit-item'),
     collectExtra: () => ({
       frequency_rule: getFrequencyFromPicker(freqContainer),
       category_id: catSelect.value || _defaultHabitCatId,
@@ -1894,7 +1894,7 @@ function editHabitInline(habitId, itemEl) {
         showToast(t('habits.habit_updated'), 'success');
       }
     },
-    refreshFn: refreshHabits,
+    refreshFn: opts.refreshFn || refreshHabits,
   });
 }
 
@@ -2905,7 +2905,7 @@ document.addEventListener('input', e => {
   }
 });
 
-export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, habitFinishedFor, initHabitHoverDelay, isStructuredRule, normalizeFrequencyRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName, getHabitCatPath, getHabitCatOrderKey, computeNextDue, isMyCreatedSharedHabit };
+export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, habitFinishedFor, initHabitHoverDelay, isStructuredRule, normalizeFrequencyRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName, getHabitCatPath, getHabitCatOrderKey, computeNextDue, isMyCreatedSharedHabit, editHabitInline };
 
 window.setHabitFilter = setHabitFilter;
 window.openAddHabitModal = openAddHabitModal;

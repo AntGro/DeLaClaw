@@ -1046,12 +1046,12 @@ async function deleteAllDoneTodos(catId) {
   );
 }
 
-async function editTodoInline(id, itemEl) {
+async function editTodoInline(id, itemEl, opts = {}) {
   const todo = allTodos.find(t => t.id === id);
   if (!todo) return;
   if (!itemEl) itemEl = document.querySelector(`.todo-item[data-todo-id="${id}"]`);
   if (!itemEl) return;
-  const textEl = itemEl.querySelector('.todo-text');
+  const textEl = opts.textEl || itemEl.querySelector('.todo-text');
   if (!textEl || textEl.dataset.editing) return;
 
   // Clear any stale pending priority from a previous cancelled edit
@@ -1136,7 +1136,7 @@ async function editTodoInline(id, itemEl) {
   inlineEditText(textEl, todo.text, {
     maxLength: 2000,
     extraEl: extras,
-    containerEl: itemEl,
+    containerEl: opts.containerEl || itemEl,
     collectExtra: () => {
       const newDeadline = !deadlineDateInput.value ? null
         : (deadlineTimeInput.value ? new Date(`${deadlineDateInput.value}T${deadlineTimeInput.value}`).toISOString() : deadlineDateInput.value);
@@ -1204,7 +1204,7 @@ async function editTodoInline(id, itemEl) {
         }
       }
     },
-    refreshFn: refreshTodos,
+    refreshFn: opts.refreshFn || refreshTodos,
   });
 }
 
@@ -2262,7 +2262,7 @@ document.addEventListener('input', e => {
   }
 });
 
-export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey };
+export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey, editTodoInline };
 
 window.setTodoFilter = setTodoFilter;
 window.addTodoToCategory = addTodoToCategory;

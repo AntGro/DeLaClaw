@@ -40,6 +40,7 @@ quick-add shows the same counter but relies on the input cap alone.
 | Sharing member rename | 50 |
 | Agent name | 80 |
 | Habit custom frequency-rule free text | 300 |
+| List item note (inline edit) | 1000000 |
 
 The sharing group name limit is enforced at the backend boundary as well as
 in the input field, so it holds even if the input cap is bypassed.

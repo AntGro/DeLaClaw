@@ -1,5 +1,5 @@
 import { lucideIcon } from './icons.js';
-import state from './state.js';
+import state, { LIST_NOTE_MAX_LEN } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, applySectionGrid, truncateWithShowMore, fetchAll, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration } from './sections-pure.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
@@ -710,6 +710,7 @@ function editListItemInlineFull(id) {
   input.value = item.note || '';
   input.placeholder = t('lists.note_placeholder');
   input.rows = 1;
+  input.maxLength = LIST_NOTE_MAX_LEN;
   input.style.overflow = 'hidden';
   input.style.resize = 'none';
   input.style.width = '100%';

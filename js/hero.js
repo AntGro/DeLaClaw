@@ -32,6 +32,16 @@ function getProgress() {
   return maxScroll > 0 ? clamp(window.scrollY / maxScroll, 0, 1) : 0;
 }
 
+// Same ratio, NOT clamped: keeps growing past the hero's own range
+// until the gate comes on screen. Capped at 1.5 so a missing gate
+// logo cannot spin the storm forever. Rotation only — every other
+// phase boundary keeps using the clamped p.
+function getRawProgress() {
+  if (!heroEl) return 0;
+  const maxScroll = heroEl.offsetHeight - window.innerHeight;
+  return maxScroll > 0 ? Math.min(window.scrollY / maxScroll, 1.5) : 0;
+}
+
 function vmin58() {
   return Math.min(window.innerWidth, window.innerHeight) * 0.58;
 }
@@ -60,7 +70,7 @@ function render() {
   // forward to the next symmetry multiple, never back to 0.
   if (shrinkT > 0) {
     if (landRotTarget === null) {
-      landRotStart = p * 60;
+      landRotStart = getRawProgress() * 60;
       landRotTarget = Math.ceil(landRotStart / STORM_SYM - 1e-6) * STORM_SYM;
     }
   } else {
@@ -97,9 +107,11 @@ function render() {
   const gateOverlaps = gateTop < stormBottom;
 
   if (shrinkT <= 0) {
-    // Full size, centered — rotation keeps increasing with scroll
+    // Full size, centered — rotation keeps increasing with scroll,
+    // including past the hero's own range (dead zone before the gate
+    // comes on screen), so it never sits frozen while scrolling
     stormBg.style.setProperty('--hero-storm-size', '58vmin');
-    const baseRot = 'rotate(' + (p * 60) + 'deg)';
+    const baseRot = 'rotate(' + (getRawProgress() * 60) + 'deg)';
     stormSvg.style.transform = baseRot;
     stormBg.style.opacity = '1';
     stormBg.style.zIndex = gateOverlaps ? '11' : '';

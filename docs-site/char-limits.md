@@ -16,7 +16,7 @@ enforced at the backend boundary.
 | Project task input | 5000 |
 | Project task inline edit | 5000 |
 | Habit quick-add (Habits page) | 1000 |
-| Habit quick-add (Welcome) | 200 |
+| Habit quick-add (Welcome) | 1000 |
 | Habit add/edit (name) | 1000 |
 | Habit inline edit (name) | 1000 |
 | Habit completion note edit | 500 |
@@ -29,8 +29,8 @@ quick-add shows the same counter but relies on the input cap alone.
 
 | Field | Limit |
 | --- | --- |
-| TODO / habit / list category, create | name 40, shortname 20 |
-| TODO / habit / list category, edit | name 80, shortname 20 |
+| TODO / habit category, create | name 80, shortname 20 |
+| TODO / habit category, edit | name 80, shortname 20 |
 | Project shortname (create, edit) | 20 |
 | List name (create, edit) | 100, shortname 20 |
 | Deck shortname (create) | 20 |
@@ -43,11 +43,6 @@ quick-add shows the same counter but relies on the input cap alone.
 
 The sharing group name limit is enforced at the backend boundary as well as
 in the input field, so it holds even if the input cap is bypassed.
-
-## Current differences
-
-- Habit quick-add is 1000 on the Habits page but 200 on Welcome.
-- Category names are 40 on create but 80 on edit (TODOs, habits, lists).
 
 ## No limit
 

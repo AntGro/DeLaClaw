@@ -601,7 +601,7 @@ function renderWelcome() {
     html += `<option value="${esc(catId)}">${esc(label)}</option>`;
   }
   html += `</select>`;
-  html += `<input type="text" placeholder="${esc(t('habits.quick_add_placeholder'))}" maxlength="200" class="todo-cat-input habit-add-input" data-category="${esc(habitCatIds[0] || '')}" data-action="welcome-quick-add-habit-on-enter">`;
+  html += `<input type="text" placeholder="${esc(t('habits.quick_add_placeholder'))}" maxlength="1000" class="todo-cat-input habit-add-input" data-category="${esc(habitCatIds[0] || '')}" data-action="welcome-quick-add-habit-on-enter">`;
   html += `<button data-action="welcome-add-habit-from-quick">+</button>`;
   html += `</div>`;
   if (habitsDue.length === 0) {

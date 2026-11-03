@@ -53,6 +53,6 @@ have no maximum length.
 
 ## Display truncation (not input limits)
 
-Project plan notes and responses (500, with show-more), flashcard fronts in
+Project plan notes and responses (500, with show-more), list item notes (500, with show-more), flashcard fronts in
 list views (90), draft content in list views (120), calendar day chips (3).
 These only affect how much is shown, not how much can be entered.

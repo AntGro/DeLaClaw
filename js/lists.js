@@ -1,5 +1,5 @@
 import { lucideIcon } from './icons.js';
-import state, { LIST_NOTE_MAX_LEN } from './state.js';
+import state, { LIST_NOTE_MAX_LEN, MAX_META_DISPLAY } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, applySectionGrid, truncateWithShowMore, fetchAll, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration } from './sections-pure.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
@@ -467,7 +467,7 @@ function renderListItem(item) {
     ? lucideIcon('check-square', 16, 'var(--accent)')
     : lucideIcon('square', 16, 'var(--muted)');
   const noteHtml = item.note
-    ? `<div class="list-item-note">${renderMd(item.note)}</div>`
+    ? `<div class="list-item-note">${truncateWithShowMore(item.note, MAX_META_DISPLAY, item.id, 'listnote')}</div>`
     : '';
 
   // Shared list item badge

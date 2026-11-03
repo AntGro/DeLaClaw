@@ -3314,6 +3314,10 @@ window.importBackup = importBackup;
 // currentView is in state
 
 function switchView(view, skipHash) {
+  // Re-clicking the current tab scrolls to the top (after the re-render
+  // below, since Habits/Memory restore the page scroll position while
+  // rendering — scrolling first would be undone).
+  const sameTab = view === state.currentView;
   // Animate header logo on page transition
   const headerLogo = document.querySelector('.header-logo');
   if (headerLogo && view !== state.currentView) {
@@ -3406,6 +3410,10 @@ function switchView(view, skipHash) {
   if (activeTab) activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
 
   updateViewFooterStats();
+
+  if (sameTab && window.scrollY > 0) {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 }
 
 // ===================================================================

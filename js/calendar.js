@@ -6,7 +6,8 @@
 // ===================================================================
 
 import state, { CALENDAR_PREFS_KEY } from './state.js';
-import { esc, renderMd } from './utils.js';
+import { esc, renderMd, showToast } from './utils.js';
+import { initItemHoverDelay, inlineEditText } from './item-utils.js';
 import { lucideIcon } from './icons.js';
 import { sharedBadge } from './sharing-ui.js';
 import { t, getLang } from './i18n.js';
@@ -529,6 +530,7 @@ function renderYearView(grid) {
 
 function renderDayView(grid) {
   grid.innerHTML = `<div class="cal-dayview">${dayGroupsHTML(calDate)}</div>`;
+  initCalDayRowBehaviors(grid);
 }
 
 // -------------------------------------------------------------------
@@ -710,8 +712,9 @@ function dayPanelRow(ev, dateStr) {
     </button>`;
   }
   if (ev.type === 'todo') {
-    return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
+    return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}" data-cal-type="todo" data-cal-id="${esc(ev.id)}">
       <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong>${calOverdueSub(ev)}</span>
+      ${calRowActions('todo', ev.id)}
       <button class="todo-done-btn" data-todo-id="${esc(ev.id)}" data-action="calendar-toggle-todo"
         data-done="true" data-date="${dateStr}" title="${t('common.done')}">
         ${lucideIcon('circle-check', 18)}
@@ -724,8 +727,9 @@ function dayPanelRow(ev, dateStr) {
   // habit's current due date, stamped today).
   // Automatic habits validate themselves — no Done button, just the badge.
   if (ev.is_auto) {
-    return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
+    return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}" data-cal-type="habit" data-cal-id="${esc(ev.id)}">
       <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong>${calOverdueSub(ev)}</span>
+      ${calRowActions('habit', ev.id)}
       <span class="habit-auto-badge">${lucideIcon('zap', 12)} ${t('habits.auto_badge')}</span>
     </div>`;
   }
@@ -737,13 +741,129 @@ function dayPanelRow(ev, dateStr) {
   const doneAttrs = canComplete
     ? `title="${t('common.done')}"`
     : `disabled title="${esc(t('calendar.only_next_due'))}"`;
-  return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
+  return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}" data-cal-type="habit" data-cal-id="${esc(ev.id)}">
     <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong>${calOverdueSub(ev)}</span>
+    ${calRowActions('habit', ev.id)}
     <button class="habit-done-btn" data-habit-id="${esc(ev.id)}" data-action="calendar-habit-done"
       data-date="${dateStr}" ${doneAttrs}>
       ${lucideIcon('circle-check', 18)}
     </button>
   </div>`;
+}
+
+// Actions menu for TODO/habit day rows (same reveal pattern as the other
+// containers). Events/birthdays keep their single-click edit + permanent
+// pencil icon, so they get no menu — their dblclick is already an edit.
+function calRowActions(type, id) {
+  return `<div class="cal-row-actions">
+    <button data-action="calendar-edit-row" data-cal-type="${type}" data-cal-id="${esc(id)}" title="${t('common.edit')}">${lucideIcon('pencil', 15)}</button>
+    <button data-action="copy-item-link" data-link-type="${type}" data-id="${esc(id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 15)}</button>
+  </div>`;
+}
+
+// Same refresh pair the Done handlers use: grid + open day panel.
+function refreshCalendarSurfaces() {
+  renderCalendar();
+  if (calPanelDate) renderCalendarDayPanel(calPanelDate);
+}
+
+async function saveCalendarTodoText(id, newText) {
+  const todo = getTodos().find(td => td.id === id);
+  if (!todo) return;
+  if (todo.shared_id && todo.shared_group_id && state.sharing) {
+    try {
+      await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+        payload: { text: newText, category: todo.category || '', priority: todo.priority || 'normal' },
+      });
+      Object.assign(todo, { text: newText });
+      showToast(t('todos.todo_updated'), 'success');
+    } catch (e) {
+      console.warn('Failed to update shared todo from calendar:', e);
+      showToast(t('toast.update_failed'), 'error');
+    }
+  } else {
+    const { error } = await state.db.from('todos').update({ text: newText }).eq('id', id);
+    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    Object.assign(todo, { text: newText });
+    showToast(t('todos.todo_updated'), 'success');
+  }
+}
+
+async function saveCalendarHabitName(id, newName) {
+  const habit = (state.allHabits || []).find(h => h.id === id);
+  if (!habit) return;
+  if (habit.shared_id && habit.shared_group_id && state.sharing) {
+    try {
+      await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { name: newName });
+      Object.assign(habit, { name: newName });
+      showToast(t('toast.updated'), 'success');
+    } catch (e) {
+      console.warn('Failed to update shared habit from calendar:', e);
+      showToast(t('toast.update_failed'), 'error');
+    }
+  } else {
+    const { error } = await state.db.from('habits').update({ name: newName }).eq('id', id);
+    if (error) { showToast(t('toast.update_failed'), 'error'); return; }
+    Object.assign(habit, { name: newName });
+    showToast(t('toast.updated'), 'success');
+  }
+}
+
+// Text-only inline edit (no deadline/category extras — those live on the
+// TODOs/Habits pages). The panel re-render restores markdown rendering.
+function editCalendarTodoInline(row, id) {
+  const todo = getTodos().find(td => td.id === id);
+  if (!todo) return;
+  const titleEl = row.querySelector('.cal-row-main strong');
+  if (!titleEl || titleEl.dataset.editing) return;
+  const actionsEl = row.querySelector('.cal-row-actions');
+  if (actionsEl) actionsEl.classList.remove('visible');
+  inlineEditText(titleEl, todo.text || '', {
+    maxLength: 2000,
+    containerEl: row,
+    saveFn: async (newText) => { await saveCalendarTodoText(id, newText); },
+    refreshFn: async () => { refreshCalendarSurfaces(); },
+  });
+}
+
+function editCalendarHabitInline(row, id) {
+  const habit = (state.allHabits || []).find(h => h.id === id);
+  if (!habit) return;
+  const titleEl = row.querySelector('.cal-row-main strong');
+  if (!titleEl || titleEl.dataset.editing) return;
+  const actionsEl = row.querySelector('.cal-row-actions');
+  if (actionsEl) actionsEl.classList.remove('visible');
+  inlineEditText(titleEl, habit.name || '', {
+    maxLength: 1000,
+    containerEl: row,
+    saveFn: async (newName) => { await saveCalendarHabitName(id, newName); },
+    refreshFn: async () => { refreshCalendarSurfaces(); },
+  });
+}
+
+function editCalendarRowInline(row, type, id) {
+  if (type === 'todo') editCalendarTodoInline(row, id);
+  else if (type === 'habit') editCalendarHabitInline(row, id);
+}
+
+// Shared hover/click reveal + dblclick edit, wired after every day render
+// (the panel rebuilds via innerHTML, so listeners must be re-attached).
+// Event/birthday rows carry no menu and no cal type, so dblclick ignores
+// them — their single click already opens the edit modal.
+function initCalDayRowBehaviors(container) {
+  if (!container) return;
+  initItemHoverDelay(container, {
+    itemSelector: '.cal-row',
+    actionsSelector: '.cal-row-actions',
+    rowSelector: '.cal-row-main',
+    textSelector: '.cal-row-main',
+    editingSelector: '.task-edit-input, .todo-edit-wrapper',
+    onDblClick: (row) => {
+      if (row.dataset.calType && row.dataset.calId) {
+        editCalendarRowInline(row, row.dataset.calType, row.dataset.calId);
+      }
+    },
+  });
 }
 
 // Background scroll lock while the day modal is open (same pattern as
@@ -891,6 +1011,7 @@ function renderCalendarDayPanel(dateStr) {
       <button class="modal-cancel" data-action="close-calendar-day">${t('common.close')}</button>
     </div>`;
   if (scrollMap) restoreInnerScrollPositions(modal, scrollMap);
+  initCalDayRowBehaviors(modal);
 }
 
 export { renderCalendar, collectRangeEvents, dayCellHTML };
@@ -933,3 +1054,4 @@ window.closeCalendarDay = closeCalendarDay;
 window.setCalendarDayBehind = setCalendarDayBehind;
 window.calendarDayNav = calendarDayNav;
 window.renderCalendarDayPanel = renderCalendarDayPanel;
+window.editCalendarRowInline = editCalendarRowInline;

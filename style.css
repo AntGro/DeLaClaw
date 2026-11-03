@@ -2604,6 +2604,10 @@ button.cal-row { cursor: pointer; }
 /* Overdue items (due-date instance and today's mirror) are flagged
    with a red dashed border in the day panel and in grid chips. */
 .cal-row-overdue { border-color: var(--red); border-style: dashed; }
+.cal-row-actions{display:none;grid-template-columns:auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
+.cal-row-actions.visible{display:grid;max-width:120px;opacity:1;pointer-events:auto;}
+.cal-row-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;white-space:nowrap;}
+.cal-row-actions button:hover{background:var(--surface2);}
 
 /* Delete button inside modals */
 .modal-actions .modal-delete {

@@ -315,6 +315,11 @@
           });
         break;
       }
+      case 'calendar-edit-row': {
+        const row = el.closest('.cal-row');
+        if (row) callWindow('editCalendarRowInline', [row, el.dataset.calType, el.dataset.calId]);
+        break;
+      }
       case 'calendar-habit-done': {
         var chDate = el.dataset.date;
         Promise.resolve(window.markHabitDone ? window.markHabitDone(el.dataset.habitId, el) : null)

@@ -12,6 +12,7 @@
   - [Performance](performance.md)
   - [Accessibility](accessibility.md)
   - [Offline Support](backends.md?id=6-offline-behavior)
+  - [Character Limits](char-limits.md)
 - **Decisions**
   - [ADR 0001 — No build step](adrs/0001-no-build-github-pages-byob.md)
   - [ADR 0002 — Pluggable backends](adrs/0002-byob-pluggable-backends.md)

@@ -134,6 +134,13 @@ export function initItemHoverDelay(container, {
         item.addEventListener('mouseenter', () => {
           hoverTimer = setTimeout(() => {
             if (item.querySelector(editingSelector)) return;
+            // A chunk panel open on this item owns the hover: revealing
+            // the row actions would shift the bar under the panel.
+            if (item.classList.contains('chunk-panel-open')) return;
+            // Hovering a segment must open the panel, never the row
+            // actions — even if the item timer fires first (both delays
+            // are 2s, so the order is a race).
+            if (item.querySelector('.tr-seg:hover')) return;
             actions.classList.add('visible');
           }, 2000);
         });
@@ -141,11 +148,16 @@ export function initItemHoverDelay(container, {
         item.addEventListener('mouseleave', () => {
           if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
           if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
-          actions.classList.remove('visible');
+          // While a chunk panel is open the actions are frozen: hiding
+          // them here would shift the bar under the panel. The panel
+          // close unfreezes them (hiding them if the pointer has left
+          // the item by then).
+          if (!item.classList.contains('chunk-panel-open')) actions.classList.remove('visible');
         });
 
         item.addEventListener('click', (e) => {
           if (e.target.closest(actionsSelector)) return;
+          if (e.target.closest('.tr-seg')) return;
           if (item.querySelector(editingSelector)) return;
           if (clickTimer) clearTimeout(clickTimer);
           clickTimer = setTimeout(() => {

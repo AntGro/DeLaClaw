@@ -131,7 +131,8 @@ function setDemoCategoriesFromData(data) {
     names.forEach((name, idx) => {
       // Nested sections: a category given as a path ('Reading > Fiction')
       // becomes a section chain plus a leaf bucket, so demo data can show
-      // the feature. Decks never take this path.
+      // the feature. Decks take this path too since flashcard sections
+      // landed (the Geography sample section).
       const segments = allowPaths ? name.split('>').map(s => s.trim()).filter(Boolean) : [name];
       if (segments.length <= 1) {
         const row = mkRow(name, 'bucket', null);
@@ -160,7 +161,7 @@ function setDemoCategoriesFromData(data) {
 
   const todoLookup = buildCatRows(data.todos, 'category', 'todo_categories', true);
   const habitLookup = buildCatRows(data.habits, 'category', 'habit_categories', true);
-  const deckLookup = buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks');
+  const deckLookup = buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks', true);
 
   // Enrich items with category_id / deck_id (fall back to default row).
   // A path category ('Reading > Fiction') resolves to its leaf bucket;
@@ -714,7 +715,7 @@ document.addEventListener('DOMContentLoaded', () => {
     'saveNewBirthday', 'saveEditBirthday', 'removeAvatar',
     'saveNewEvent', 'saveEditEvent',
     'saveNewDraft', 'saveEditedProposal', 'saveNewFlashcard', 'saveEditFlashcard',
-    'saveNewText', 'saveEditText', 'submitFeedback', 'submitTextReview',
+    'saveNewText', 'saveEditText', 'saveEditChunk', 'submitFeedback', 'submitTextReview',
     'saveEditDeck',
     'saveNewHabit', 'saveEditHabit', 'saveHabitCompletion', 'addHabitFromInput',
     'saveNewHabitCategory', 'saveEditHabitCategory',

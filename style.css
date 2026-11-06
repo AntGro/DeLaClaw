@@ -635,14 +635,9 @@ input,select,button{font-family:inherit;}
 .task-row{display:flex;align-items:center;gap:9px;}
 .task-text{flex:1;font-size:0.88rem;line-height:1.35;cursor:default;}
 .task-text[ondblclick]{cursor:text;}
-/* Collapsed row actions must not lay out at all: max-width:0 alone
-   still lays the grid's buttons out past the viewport edge on every
-   row (measured 244 elements past 390px), which iOS Safari pans to.
-   display:none keeps them out of layout until .visible restores the
-   grid; the slide animation becomes instant (display isn't animatable). */
-.task-actions{display:none;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
+.task-actions{display:grid;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
 .task-actions:has(:nth-child(4)):not(:has(:nth-child(5))){grid-template-columns:auto auto;}
-.task-actions.visible{display:grid;max-width:120px;opacity:1;pointer-events:auto;}
+.task-actions.visible{max-width:120px;opacity:1;pointer-events:auto;}
 .task-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;}
 .task-actions button:hover{background:var(--surface2);}
 .task-meta{margin-top:5px;padding-left:18px;display:flex;flex-direction:column;gap:3px;}
@@ -782,9 +777,9 @@ body.paused-mode:has(.schema-banner) .schema-banner{top:var(--paused-banner-h,36
 #calendarDayOverlay.cal-day-behind{z-index:150;}
 #calendarDayOverlay.cal-day-behind .modal{filter:blur(4px);}
 #confirmActionModal{z-index:9900;}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 60px rgba(100,108,255,0.05);max-height:85vh;overflow-y:auto;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);animation:modalSlideIn 0.25s ease-out;}
+.modal{background:var(--dropdown-bg);border:1px solid var(--border);border-radius:16px;padding:28px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 60px rgba(100,108,255,0.05);max-height:85vh;overflow-y:auto;animation:modalSlideIn 0.25s ease-out;}
 /* Category-colored modal: solid header, tinted body */
-.modal-overlay[style*="--cat-color"] .modal{background:color-mix(in srgb, var(--cat-color) 6%, var(--surface));border-color:color-mix(in srgb, var(--cat-color) 20%, var(--border));}
+.modal-overlay[style*="--cat-color"] .modal{background:color-mix(in srgb, var(--cat-color) 6%, var(--dropdown-bg));border-color:color-mix(in srgb, var(--cat-color) 20%, var(--border));}
 .modal-overlay[style*="--cat-color"] .modal h2{background:var(--cat-color);color:#fff;margin:-28px -28px 16px -28px;padding:20px 28px;border-radius:16px 16px 0 0;}
 .modal-overlay[style*="--cat-color"] .modal h2 svg.lucide-icon{stroke:#fff;}
 
@@ -925,9 +920,9 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .habit-name{font-size:0.88rem;font-weight:600;line-height:1.3;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;}
 .habit-frequency{font-size:0.75rem;color:var(--muted);font-style:italic;}
 
-.habit-actions{display:none;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
+.habit-actions{display:grid;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
 .habit-actions:has(:nth-child(4)):not(:has(:nth-child(5))){grid-template-columns:auto auto;}
-.habit-actions.visible{display:grid;max-width:120px;opacity:1;pointer-events:auto;}
+.habit-actions.visible{max-width:120px;opacity:1;pointer-events:auto;}
 .habit-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;white-space:nowrap;}
 .habit-actions button:hover{background:var(--surface2);}
 .habit-done-btn{font-size:0.92rem !important;}
@@ -1267,9 +1262,9 @@ body.chip-drag-active .section-chips-collapsed,.section-chips-collapsed.section-
 
 .todo-text{flex:1;min-width:0;overflow-wrap:break-word;word-break:break-word;font-size:0.86rem;line-height:1.35;cursor:default;white-space:pre-wrap;}
 .todo-text[ondblclick]{cursor:text;}
-.todo-actions{display:none;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
+.todo-actions{display:grid;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
 .todo-actions:has(:nth-child(4)):not(:has(:nth-child(5))){grid-template-columns:auto auto;}
-.todo-actions.visible{display:grid;max-width:120px;opacity:1;pointer-events:auto;}
+.todo-actions.visible{max-width:120px;opacity:1;pointer-events:auto;}
 .todo-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;}
 .todo-actions button:hover{background:var(--surface2);}
 
@@ -1421,10 +1416,10 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .birthday-age{font-size:0.78rem;color:var(--muted);opacity:0.75;}
 .birthday-note{font-size:0.78rem;color:var(--muted);font-style:italic;opacity:0.75;}
 
-.birthday-actions{display:none;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
+.birthday-actions{display:grid;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
 .birthday-actions:has(:nth-child(4)):not(:has(:nth-child(5))){grid-template-columns:auto auto;}
-.birthday-actions.visible{display:grid;max-width:120px;opacity:1;pointer-events:auto;}
-.birthday-actions.visible{display:grid;max-width:80px;opacity:1;pointer-events:auto;}
+.birthday-actions.visible{max-width:120px;opacity:1;pointer-events:auto;}
+.birthday-actions.visible{max-width:80px;opacity:1;pointer-events:auto;}
 .birthday-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;}
 .birthday-actions button:hover{background:var(--surface2);}
 
@@ -1515,8 +1510,49 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .tr-author { color:var(--muted); font-weight:400; }
 .tr-meta { font-size:0.75rem; color:var(--muted); display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
 .tr-due-badge { background:color-mix(in srgb, var(--fc-due) 15%, transparent); color:var(--fc-due); padding:1px 6px; border-radius:4px; font-weight:600; font-size:0.68rem; }
-.tr-progress-bar { display:flex; gap:2px; margin-top:3px; height:3px; border-radius:2px; overflow:hidden; }
-.tr-seg { flex:1; border-radius:1px; }
+.tr-progress-wrap { width:100%; margin-top:4px; }
+.tr-progress-bar { display:flex; gap:2px; border-radius:2px; overflow:hidden; }
+.tr-progress-bar:not(.tr-bar-expanded) .tr-seg:nth-child(n+17) { display:none; }
+.tr-progress-bar.tr-bar-expanded { flex-wrap:wrap; }
+.tr-progress-bar.tr-bar-expanded .tr-seg { flex:0 0 16px; }
+.tr-seg { flex:1 1 16px; min-width:16px; height:16px; border:0; padding:0; border-radius:2px; cursor:pointer; }
+.tr-seg:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.tr-bar-toggle { display:inline-flex; align-items:center; gap:6px; margin-top:6px; padding:6px 12px; background:var(--accent-dim); border:1px solid var(--accent); border-radius:999px; color:var(--text); font-size:0.78rem; font-weight:600; cursor:pointer; }
+.tr-bar-toggle:hover { filter:brightness(1.15); }
+.tr-bar-toggle svg { flex:0 0 auto; }
+.tr-chunk-panel { position:fixed; z-index:210; width:280px; max-width:calc(100vw - 16px); max-height:calc(100vh - 16px); overflow-y:auto; background:var(--dropdown-bg); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 32px rgba(0,0,0,0.35); padding:12px; }
+.tr-chunk-panel-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.tr-chunk-panel-title { flex:1; min-width:0; font-size:0.85rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tr-chunk-panel-nav { display:inline-flex; align-items:center; gap:2px; flex:0 0 auto; background:none; border:none; color:var(--accent); font-size:0.82rem; font-weight:600; cursor:pointer; padding:4px 0; }
+.tr-chunk-panel-close { flex:0 0 auto; background:none; border:none; color:var(--muted); cursor:pointer; padding:4px; border-radius:6px; display:inline-flex; }
+.tr-chunk-panel-close:hover { color:var(--text); background:var(--surface2); }
+.tr-chunk-panel-actions { display:flex; flex-direction:column; gap:6px; }
+.tr-chunk-panel-btn { display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:9px 12px; color:var(--text); font-size:0.85rem; cursor:pointer; }
+.tr-chunk-panel-btn:hover { background:var(--surface2); }
+.tr-chunk-panel-btn:disabled { opacity:0.5; cursor:default; }
+.tr-chunk-panel-note { font-size:0.78rem; color:var(--muted); margin-top:8px; line-height:1.5; }
+.tr-chunk-panel-stats { display:flex; flex-direction:column; gap:6px; margin:10px 0 4px; font-size:0.82rem; }
+.tr-chunk-stat-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.tr-chunk-viz { display:flex; align-items:center; gap:14px; margin:2px 0 10px; }
+.tr-chunk-viz-recall { display:flex; flex-direction:column; align-items:center; gap:4px; flex:0 0 auto; }
+.tr-chunk-ring { position:relative; width:76px; height:76px; }
+.tr-chunk-ring-svg { width:76px; height:76px; display:block; }
+.tr-chunk-ring-center { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:1.05rem; font-weight:700; }
+.tr-chunk-viz-label { font-size:0.72rem; color:var(--muted); }
+.tr-chunk-viz-status { flex:1; display:flex; justify-content:flex-end; }
+.tr-chunk-status-badge { background:color-mix(in srgb, var(--status-color) 15%, transparent); color:var(--status-color); font-size:0.78rem; font-weight:600; padding:4px 10px; border-radius:999px; }
+.tr-chunk-curve-wrap { margin:2px 0 4px; }
+.tr-chunk-curve { width:100%; height:auto; display:block; }
+.tr-chunk-curve-label { font-size:8px; fill:var(--muted); }
+.tr-chunk-curve-axis { display:flex; justify-content:space-between; font-size:0.7rem; color:var(--muted); margin-top:2px; }
+.tr-chunk-bar { height:6px; border-radius:3px; background:var(--border); overflow:hidden; margin-top:-2px; }
+.tr-chunk-bar span { display:block; height:100%; background:var(--fc-mastered); border-radius:3px; }
+.tr-chunk-dots { display:flex; gap:3px; margin-top:-2px; }
+.tr-chunk-dots span { flex:1; height:6px; border-radius:3px; background:var(--border); }
+.tr-chunk-dots span.filled { background:var(--accent); }
+.tr-chunk-stats { display:flex; flex-wrap:wrap; gap:6px 20px; margin:14px 0 4px; font-size:0.82rem; }
+.tr-chunk-stat-label { color:var(--muted); margin-right:4px; }
+.tr-chunk-note { font-size:0.82rem; color:var(--muted); margin:10px 0 0; line-height:1.5; }
 .tr-seg-new { background:color-mix(in srgb, var(--fc-new) 30%, transparent); }
 .tr-seg-due { background:color-mix(in srgb, var(--fc-due) 50%, transparent); }
 .tr-seg-ok { background:var(--fc-ok); }
@@ -1887,9 +1923,9 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .list-item-text{font-size:0.88rem;font-weight:500;}
 .list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;white-space:pre-line;}
 .list-check-btn{background:none;border:none;cursor:pointer;padding:2px;flex-shrink:0;}
-.list-item-actions{display:none;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
+.list-item-actions{display:grid;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
 .list-item-actions.cols-2{grid-template-columns:auto auto;}
-.list-item-actions.visible{display:grid;max-width:120px;opacity:1;pointer-events:auto;}
+.list-item-actions.visible{max-width:120px;opacity:1;pointer-events:auto;}
 .list-item-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;}
 .list-item-actions button:hover{background:var(--surface2);}
 .list-quick-add{padding:10px 16px 10px;display:flex;gap:6px;align-items:flex-end;}
@@ -2604,8 +2640,8 @@ button.cal-row { cursor: pointer; }
 /* Overdue items (due-date instance and today's mirror) are flagged
    with a red dashed border in the day panel and in grid chips. */
 .cal-row-overdue { border-color: var(--red); border-style: dashed; }
-.cal-row-actions{display:none;grid-template-columns:auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
-.cal-row-actions.visible{display:grid;max-width:120px;opacity:1;pointer-events:auto;}
+.cal-row-actions{display:grid;grid-template-columns:auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
+.cal-row-actions.visible{max-width:120px;opacity:1;pointer-events:auto;}
 .cal-row-actions button{background:none;border:none;cursor:pointer;font-size:0.82rem;padding:3px 5px;border-radius:4px;transition:background 0.15s;white-space:nowrap;}
 .cal-row-actions button:hover{background:var(--surface2);}
 

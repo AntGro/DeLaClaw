@@ -138,11 +138,11 @@ function en() {
   const habit_completions = sharedHabitCompletions();
 
   const flashcards = [
-    // Deck: World Capitals
-    { id: 'demo-fc-001', deck: 'World Capitals', front: 'What is the capital of South Korea?', back: 'Seoul', status: 'mastered', next_review: dateOnly(30), created_at: d(-40), updated_at: d(-5) },
-    { id: 'demo-fc-002', deck: 'World Capitals', front: 'What is the capital of Australia?', back: 'Canberra (not Sydney)', status: 'ok', next_review: dateOnly(7), created_at: d(-40), updated_at: d(-3) },
-    { id: 'demo-fc-003', deck: 'World Capitals', front: 'What is the capital of Brazil?', back: 'Brasília', status: 'due', next_review: dateOnly(-1), created_at: d(-38), updated_at: d(-10) },
-    { id: 'demo-fc-004', deck: 'World Capitals', front: 'What is the capital of Canada?', back: 'Ottawa', status: 'new', next_review: null, created_at: d(-5), updated_at: d(-5) },
+    // Deck: World Capitals, nested under a Geography section sample
+    { id: 'demo-fc-001', deck: 'Geography > World Capitals', front: 'What is the capital of South Korea?', back: 'Seoul', status: 'mastered', next_review: dateOnly(30), created_at: d(-40), updated_at: d(-5) },
+    { id: 'demo-fc-002', deck: 'Geography > World Capitals', front: 'What is the capital of Australia?', back: 'Canberra (not Sydney)', status: 'ok', next_review: dateOnly(7), created_at: d(-40), updated_at: d(-3) },
+    { id: 'demo-fc-003', deck: 'Geography > World Capitals', front: 'What is the capital of Brazil?', back: 'Brasília', status: 'due', next_review: dateOnly(-1), created_at: d(-38), updated_at: d(-10) },
+    { id: 'demo-fc-004', deck: 'Geography > World Capitals', front: 'What is the capital of Canada?', back: 'Ottawa', status: 'new', next_review: null, created_at: d(-5), updated_at: d(-5) },
     // Deck: Vocabulary
     { id: 'demo-fc-005', deck: 'Vocabulary', front: 'Ephemeral', back: 'Lasting for a very short time. "The ephemeral beauty of cherry blossoms."', status: 'ok', next_review: dateOnly(5), created_at: d(-30), updated_at: d(-4) },
     { id: 'demo-fc-006', deck: 'Vocabulary', front: 'Ubiquitous', back: 'Present, appearing, or found everywhere. "Smartphones have become ubiquitous."', status: 'mastered', next_review: dateOnly(20), created_at: d(-30), updated_at: d(-8) },

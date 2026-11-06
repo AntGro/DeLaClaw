@@ -525,12 +525,14 @@ test('style.css lets the Welcome strip scroll inside its section', () => {
 // their buttons out past the viewport edge on every row (measured 244
 // elements past 390px), which iOS Safari pans to. display:none keeps
 // them out of layout until .visible restores the grid.
-test('collapsed row actions use display:none, not max-width:0 alone', () => {
+test('collapsed row actions stay display:grid so the reveal slides smoothly', () => {
   for (const cls of ['task-actions', 'habit-actions', 'todo-actions', 'birthday-actions', 'list-item-actions']) {
-    assert(styleCss.includes(`.${cls}{display:none;`),
-      `${cls} must be display:none when collapsed`);
-    assert(styleCss.includes(`.${cls}.visible{display:grid;`),
-      `${cls}.visible must restore the grid`);
+    assert(styleCss.includes(`.${cls}{display:grid;`),
+      `${cls} must stay display:grid when collapsed, or the max-width/opacity transition never runs`);
+    assert(!styleCss.includes(`.${cls}{display:none;`),
+      `${cls} must not be display:none when collapsed: display is not animatable, so the slide-in becomes instant`);
+    assert(!styleCss.includes(`.${cls}.visible{display:grid;`),
+      `${cls}.visible must not flip display: it only widens the already-rendered grid`);
   }
 });
 
@@ -3810,6 +3812,164 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'repair must not stage inserted rows when the backend insert failed');
     });
 
+    test('chunk panel: revise mode is FSRS for due/new, practice for not-due (incl. same-day)', async () => {
+      const { isChunkDue, chunkReviseMode, isSameLocalDay } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const now = new Date(2026, 10, 4, 10, 0, 0);
+      const todayMorning = new Date(2026, 10, 4, 9, 0, 0).toISOString();
+      const tomorrow = new Date(2026, 10, 5, 10, 0, 0).toISOString();
+      const yesterday = new Date(2026, 10, 3, 10, 0, 0).toISOString();
+      const threeDaysAgo = new Date(2026, 10, 1, 10, 0, 0).toISOString();
+      assert(isChunkDue({}), 'never-reviewed chunk is due');
+      assert(chunkReviseMode({}) === 'fsrs', 'new chunk revises with an FSRS update');
+      assert(chunkReviseMode({ last_review: yesterday, next_review: yesterday }, now) === 'fsrs',
+        'past-due chunk revises with an FSRS update');
+      assert(chunkReviseMode({ last_review: yesterday, next_review: null }, now) === 'fsrs',
+        'missing next review counts as due, matching the pickers');
+      assert(isSameLocalDay(todayMorning, now), 'same local calendar day, not UTC date');
+      assert(!isSameLocalDay(yesterday, now), 'yesterday is not today');
+      assert(chunkReviseMode({ last_review: todayMorning, next_review: tomorrow }, now) === 'practice',
+        'a chunk already revised today revises without touching stats');
+      assert(chunkReviseMode({ last_review: threeDaysAgo, next_review: tomorrow }, now) === 'practice',
+        'any not-due chunk revises as practice only (agreed rule)');
+      assert(!isChunkDue({ last_review: threeDaysAgo, next_review: tomorrow }, now),
+        'not-due chunk is not due');
+    });
+
+    test('chunk panel: plain chunk edit rewords one chunk, refuses boundary shifts', async () => {
+      const { applyChunkEdit, getTextChunks } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const lines = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
+      const tx = { content: lines.join('\n'), blocks_per_chunk: 4, focus_role: null };
+      const oldChunks = getTextChunks(tx);
+      assert(oldChunks.length === 3, '12 lines at 4 per chunk give 3 chunks');
+      const edited = ['line 5', 'line 6 edited', 'line 7', 'line 8'].join('\n');
+      const res = applyChunkEdit(tx, 1, edited);
+      assert(res.ok && res.changed, 'rewording one chunk succeeds and reports changed');
+      const newChunks = getTextChunks({ ...tx, content: res.content });
+      assert(newChunks[0] === oldChunks[0] && newChunks[2] === oldChunks[2],
+        'chunks before and after the edited chunk stay byte-identical');
+      assert(newChunks[1].includes('line 6 edited'), 'edited chunk carries the new wording');
+      const noop = applyChunkEdit(tx, 1, oldChunks[1]);
+      assert(noop.ok && !noop.changed, 'saving an unchanged chunk reports no change (no reset)');
+      assert(!applyChunkEdit(tx, 1, ['line 5', 'line 6', 'line 7', 'line 8', 'extra'].join('\n')).ok,
+        'adding a line to a chunk is refused: it would shift later chunks');
+      assert(!applyChunkEdit(tx, 1, ['line 5', '', 'line 7', 'line 8'].join('\n')).ok,
+        'blanking a counted line is refused: it would shift later chunks');
+      assert(applyChunkEdit(tx, 1, ['line 5', '', 'line 7', 'line 8'].join('\n')).reason === 'boundary_shift',
+        'boundary-shift refusal names its reason');
+      assert(!applyChunkEdit(tx, 3, 'x').ok, 'out-of-range chunk index is refused');
+    });
+
+    test('chunk panel: scene chunk edit rewords one block, preserves the rest', async () => {
+      const { applyChunkEdit, getTextChunks, sceneBlockText, parseSceneContent } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const content = '<RODRIGUE: line one>\nIgnored line outside blocks\n<CHIMÈNE: line two>\n<RODRIGUE: line three>\n<**He exits**>';
+      const tx = { content, blocks_per_chunk: 2, focus_role: 'RODRIGUE' };
+      const oldChunks = getTextChunks(tx);
+      assert(oldChunks.length === 2, '4 blocks at 2 per chunk give 2 chunks');
+      assert(sceneBlockText(oldChunks[0][0]) === 'line one', 'first block text');
+      const res = applyChunkEdit(tx, 0, ['line one edited', 'line two']);
+      assert(res.ok && res.changed, 'rewording one scene block succeeds');
+      assert(res.content.includes('Ignored line outside blocks'),
+        'text between blocks is preserved byte-for-byte');
+      const newChunks = getTextChunks({ ...tx, content: res.content });
+      assert(newChunks[1].length === oldChunks[1].length
+        && newChunks[1].every((ln, i) => ln.speaker === oldChunks[1][i].speaker
+          && JSON.stringify(ln.segments) === JSON.stringify(oldChunks[1][i].segments)),
+        'the later chunk is parsed identically after the edit');
+      assert(!applyChunkEdit(tx, 0, ['only one block']).ok,
+        'wrong block count is refused');
+      const asideTx = { content: '<RODRIGUE: I speak **aside** now>', blocks_per_chunk: 4, focus_role: 'RODRIGUE' };
+      const asideChunk = getTextChunks(asideTx)[0];
+      assert(sceneBlockText(asideChunk[0]) === 'I speak **aside** now',
+        'inline directions survive a block-text round-trip');
+      assert(applyChunkEdit(asideTx, 0, [sceneBlockText(asideChunk[0])]).changed === false,
+        're-saving a block unchanged is a no-op');
+      const dirRes = applyChunkEdit(tx, 1, ['line three', 'He exits slowly']);
+      assert(dirRes.ok && dirRes.content.includes('<**He exits slowly**>'),
+        'direction blocks keep their ** wrapper when reworded');
+    });
+
+    test('chunk panel: segments, delegation and chunk i18n are wired', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const delegationJs = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+      const itemUtilsJs = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(flashJs.includes('data-action="open-chunk-panel"'),
+        'segments must carry the chunk-panel action');
+      assert(!flashJs.includes('chunkMenuModal') && !flashJs.includes('openChunkMenu'),
+        'the chunk modal is gone: only Edit opens a modal, stats live in the panel');
+      assert(flashJs.includes('data-action="toggle-chunk-bar"'),
+        'bars over the collapsed count must offer show-more');
+      assert(flashJs.includes('window.openChunkPanel') && flashJs.includes('window.showChunkStats')
+        && flashJs.includes('window.closeChunkPanel') && flashJs.includes('window.reviseChunk')
+        && flashJs.includes('window.openEditChunkModal') && flashJs.includes('window.saveEditChunk'),
+        'chunk panel, stats view, targeted revise, chunk edit and chunk save must exist');
+      assert(flashJs.includes('lockFlashModalScroll()'),
+        'the chunk edit modal must lock background scroll');
+      assert(flashJs.includes('chunkReviseMode(chunk'),
+        'targeted revise must route through the pure revise-mode rule');
+      assert(flashJs.includes('applyChunkEdit(tx, chunkIndex, edited)'),
+        'chunk save must route through the pure splice validator');
+      for (const action of ['open-chunk-panel', 'show-chunk-stats', 'back-to-chunk-panel', 'close-chunk-panel', 'toggle-chunk-bar', 'revise-chunk', 'open-edit-chunk', 'save-edit-chunk']) {
+        assert(delegationJs.includes(`case '${action}':`),
+          `delegation must have an explicit case for ${action}, not only the default fallback`);
+      }
+      assert(itemUtilsJs.includes("item.classList.contains('chunk-panel-open')"),
+        'the row-action hover timer must skip panel-open items');
+      assert(itemUtilsJs.includes("e.target.closest('.tr-seg')"),
+        'segment clicks must not trigger the row actions');
+      assert(itemUtilsJs.includes("item.querySelector('.tr-seg:hover')"),
+        'the row-action timer must not show actions when the pointer is on a segment');
+      assert(itemUtilsJs.includes("if (!item.classList.contains('chunk-panel-open')) actions.classList.remove('visible')"),
+        'mouseleave must not hide actions frozen by an open chunk panel');
+      assert(!css.includes('.tr-text-item.chunk-panel-open .todo-actions'),
+        'an open panel must not force-hide already-visible row actions');
+      assert(flashJs.includes('_chunkPanelSegChain') && flashJs.includes("matches(':hover')"),
+        'moving within the bar must switch panels at once, and closing the panel must only hide actions once the pointer left the item');
+      assert(/\.tr-seg \{[^}]*min-width:\s*16px/.test(css) && /\.tr-seg \{[^}]*height:\s*16px/.test(css),
+        'segments must be at least 16px in both dimensions to be tappable');
+      assert(css.includes('.tr-bar-expanded'), 'expanded bars must wrap instead of overflowing');
+      assert(/\.tr-bar-toggle \{[^}]*border-radius:\s*999px/.test(css)
+        && /\.tr-bar-toggle \{[^}]*background:\s*var\(--accent-dim\)/.test(css),
+        'show-more/less must be a visible pill, not muted plain text');
+      assert(css.includes('.tr-chunk-panel') && css.includes('.tr-chunk-panel-stats'),
+        'the panel and its inline stats view must be styled');
+      assert(!flashJs.includes('chunkPreviewHtml') && !flashJs.includes('tr-chunk-preview'),
+        'the stats view shows only stats: the chunk text preview is gone');
+      assert(flashJs.includes('chunkRecallCurveSvg') && flashJs.includes('tr-chunk-ring')
+        && flashJs.includes('tr-chunk-curve') && flashJs.includes('tr-chunk-bar') && flashJs.includes('tr-chunk-dots'),
+        'the stats view must visualise recall (ring + decay curve) and stability/difficulty (bars)');
+      assert(flashJs.includes('CHUNK_PANEL_HOVER_DELAY_MS = 2000') && flashJs.includes('_chunkPanelHoverTimer'),
+        'hover must wait 2s before opening the panel; clicks still open it at once');
+      // Frozen side (2.32.36): near the bottom the short options view
+      // fits below the segment while the tall stats view does not, so
+      // re-deciding the flip on Show stats jumped the panel above the
+      // segment — the cursor was left hovering neither panel nor
+      // segment and the mouseout timer closed the stats panel. The
+      // side is now decided once, from the opening view, and kept for
+      // the panel's lifetime (the taller view grows within its side,
+      // clamped to the viewport).
+      assert(flashJs.includes("if (!_chunkPanelSide)"),
+        'chunk panel positioning must freeze the side on first position');
+      assert(flashJs.includes("_chunkPanelSide = (below < h && rect.top - gap > below) ? 'above' : 'below'"),
+        'the frozen side must use the same flip rule as the opening position');
+      assert(flashJs.includes("_chunkPanelSide === 'above'"),
+        'later renders must reuse the frozen side instead of re-flipping');
+      assert(flashJs.includes("  _chunkPanelSide = null;"),
+        'closing the panel must reset the frozen side for the next open');
+      assert(/\.modal\{[^}]*background:\s*var\(--dropdown-bg\)/.test(css),
+        'modals must use an opaque background, not the translucent surface');
+      assert(!/\.modal\{[^}]*backdrop-filter/.test(css),
+        'modals must not blur the page through themselves');
+      const i18nJs = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      for (const key of ['chunk_title', 'chunk_revise', 'chunk_edit', 'chunk_show_more', 'chunk_show_less', 'chunk_show_stats', 'chunk_back', 'chunk_no_reviews', 'chunk_edit_boundary', 'chunk_practice_note']) {
+        assert((i18nJs.match(new RegExp(`${key}:`, 'g')) || []).length >= 3,
+          `chunk i18n key ${key} must exist in EN, FR and ES`);
+      }
+    });
+
     test('scene revision: masked bubbles hide content length; leading cues auto-reveal', async () => {
       const { leadingRevealCount } =
         await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
@@ -6853,9 +7013,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(dl.placements[0].cols >= 1 && dl.placements[0].cols <= 3, 'nested sections lay out within the cap');
     });
 
-    test('sections: schema + migrations carry kind/parent_id on all three tables', () => {
+    test('sections: schema + migrations carry kind/parent_id on all four tables', () => {
       const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
-      for (const table of ['todo_categories', 'habit_categories', 'lists']) {
+      for (const table of ['todo_categories', 'habit_categories', 'lists', 'flashcard_decks']) {
         const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS ${table}`);
         assert(start >= 0, `schema.sql missing ${table}`);
         const ddl = schema.slice(start, schema.indexOf(');', start));
@@ -6871,6 +7031,13 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         assert(local.includes(`ALTER TABLE ${table} ADD COLUMN kind`), `local migration must add kind to ${table}`);
         assert(local.includes(`ALTER TABLE ${table} ADD COLUMN parent_id`), `local migration must add parent_id to ${table}`);
       }
+      // Flashcard decks joined sections later (2.32.34), same shape:
+      // existing decks become top-level buckets, nothing moves.
+      assert(local.includes("'2.32.34'"), 'local migrations must include 2.32.34');
+      assert(local.includes('ALTER TABLE flashcard_decks ADD COLUMN kind'), 'local migration must add kind to flashcard_decks');
+      assert(local.includes('ALTER TABLE flashcard_decks ADD COLUMN parent_id'), 'local migration must add parent_id to flashcard_decks');
+      assert(drive.includes("'2.32.34'"), 'drive migrations must include 2.32.34');
+      assert(drive.includes('store.flashcard_decks'), 'drive 2.32.34 must backfill flashcard_decks');
       const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
       assert(sw.includes("'js/sections-pure.js'"), 'sw.js precache must include sections-pure.js');
     });
@@ -6897,6 +7064,63 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // Backup exports whole rows, so kind/parent_id travel with no change
       const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
       assert(mainSrc.includes("select('*')") || mainSrc.includes('select("*")'), 'backup must stay whole-row');
+    });
+
+    test('flashcard sections: tree render, bucket-only pickers, section delete, nav drag', () => {
+      const src = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      assert(src.includes("from './sections-pure.js'"), 'flashcards must import sections-pure');
+      for (const fn of ['buildSectionTree', 'planNodeMove', 'siblingNameTaken', 'parseSectionPath']) {
+        assert(src.includes(fn), `flashcards must use sections-pure ${fn}`);
+      }
+      assert(src.includes('function renderFlashSection'), 'flashcards must render section blocks');
+      assert(src.includes('data-node-kind="section"'), 'flashcard section blocks must carry node-kind');
+      assert(src.includes('open-add-flash-deck-in-section'), 'section headers must offer add-deck-in-section');
+      assert(src.includes('delete-flash-section'), 'section headers must offer delete section');
+      assert(src.includes('deleteFlashSectionMoveUp'), 'flashcards must offer move-up on section delete');
+      assert(src.includes('deleteFlashSectionSubtree'), 'flashcards must offer subtree delete on section delete');
+      assert(src.includes('moveDeckNodeToParent'), 'flashcards must move decks between sections');
+      assert(src.includes('flashSectionChips-'), 'flashcards must render per-section chips rows');
+      // Bucket-only pickers with path labels
+      assert(src.includes('proposalDeckOptions'), 'proposal pickers must use path-valued bucket options');
+      const editOpts = src.slice(src.indexOf('function deckOptionsForEdit'));
+      assert(editOpts.slice(0, editOpts.indexOf('function ', 10)).includes("n.kind === 'bucket'"),
+        'deckOptionsForEdit must list buckets only (sections excluded via the tree)');
+      // Sibling-scoped names: creation via path syntax, rename guarded,
+      // legacy name map resolves first-wins so duplicates stay stable.
+      assert(src.includes('ensureFlashSectionChain'), 'deck creation must build the section chain');
+      assert(src.includes("siblingNameTaken([..._deckMap.values()]"), 'deck names must be sibling-scoped');
+      assert(src.includes('if (!_deckByName.has(row.name))'), 'deck name map must be first-wins');
+      // Rename via path syntax (2.32.35): renaming deck B to 'A > B'
+      // must nest B under A, like creation and like Lists/TODOs/Habits
+      // renames — the old code stored the literal 'A > B' as the name.
+      const editDeck = src.slice(src.indexOf('window.saveEditDeck'));
+      assert(editDeck.includes("rawName.includes('>')"), 'deck rename must detect a typed path');
+      assert(editDeck.includes('ensureFlashSectionChain(segments.slice(0, -1), null, deckId)'),
+        'deck rename must build the section chain with the deck as cycle guard');
+      assert(editDeck.includes('parent_id: targetParentId'), 'deck rename must persist the new parent');
+      assert(editDeck.includes('nextFlashSortOrder(targetParentId)'), 'deck rename must re-sort at the end of the new parent');
+      assert(editDeck.includes('siblingNameTaken([..._deckMap.values()], targetParentId, targetName, deckId)'),
+        'deck rename must check sibling uniqueness in the target parent (covers same-name moves too)');
+      // The chain guard: a rename path resolving inside the row itself
+      // or one of its descendants must throw instead of creating a cycle.
+      const chain = src.slice(src.indexOf('async function ensureFlashSectionChain'));
+      assert(chain.includes('guardId = null'), 'section chain builder must take a cycle guard');
+      assert(chain.includes("throw new Error('section-cycle')"), 'section chain builder must refuse a path through the guarded row');
+      // Nav drag mirrors Lists: top nav + chips rows share crossDrop.
+      assert(src.includes('flashDeckCrossDrop'), 'flashcards must support cross-section chip drag');
+      // Delegation + read-only navigation
+      const del = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+      for (const a of ['navigate-to-flash-section', 'open-add-flash-deck-in-section', 'delete-flash-section',
+        'delete-flash-section-move-up', 'delete-flash-section-subtree']) {
+        assert(del.includes(`'${a}'`), `delegation must handle ${a}`);
+      }
+      assert(del.includes("'navigate-to-flash-section': 1"), 'section navigation must stay read-only allowed');
+      // Demo showcases one nested deck; derivation understands paths.
+      const demo = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
+      assert(demo.includes("deck: 'Geography > World Capitals'"), 'demo must nest a deck under a section sample');
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes("buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks', true)"),
+        'demo deck rows must be built with path support');
     });
 
     test('sections: demo data showcases nesting in all three languages', () => {

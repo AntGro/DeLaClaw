@@ -2343,6 +2343,20 @@ test('drive adapter passes login_hint to the GIS token client', () => {
     'drive.js: the Google account email must be captured from the Drive about API after auth');
 });
 
+test('drive adapter re-auth never forces the GIS account chooser', () => {
+  const drive = fs.readFileSync(path.join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf-8');
+  const start = drive.indexOf('function getGoogleAccessToken(');
+  const end = drive.indexOf('// ── Drive API helpers ──', start);
+  assert(start !== -1 && end !== -1, 'drive.js: getGoogleAccessToken block not found');
+  const fn = drive.slice(start, end);
+  // GIS defaults prompt to 'select_account', which forces the account
+  // chooser even when login_hint is set — every request must pass ''.
+  assert(fn.includes("requestAccessToken({ prompt: '' })"),
+    'drive.js: getGoogleAccessToken must pass prompt \'\' so login_hint can skip the chooser');
+  assert(!/requestAccessToken\(\s*\)/.test(fn),
+    'drive.js: getGoogleAccessToken must not call requestAccessToken() with no args (GIS default prompt is select_account)');
+});
+
 test('disconnect clears the stored login_hint email', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf-8');
   const start = main.indexOf('function clearStayConnectedCreds()');

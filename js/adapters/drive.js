@@ -234,13 +234,12 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
         reject(new Error(err.type || 'auth_error'));
       },
     });
-    if (promptIfNeeded) {
-      client.requestAccessToken();
-    } else {
-      // '' shows consent UI at once if needed; background popups are
-      // prevented by the tab-usability gate above, not by this parameter.
-      client.requestAccessToken({ prompt: '' });
-    }
+    // Always prompt: '' — the GIS default is 'select_account', which forces
+    // the account chooser even when login_hint is set. '' shows consent UI
+    // at once if needed (no session / no consent yet), and otherwise goes
+    // straight to the hinted account. Background popups are prevented by
+    // the tab-usability gate above, not by this parameter.
+    client.requestAccessToken({ prompt: '' });
   }).finally(() => {
     _pendingPromise = null;
     _pendingClientId = null;

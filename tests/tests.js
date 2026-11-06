@@ -2335,7 +2335,7 @@ test('drive adapter passes login_hint to the GIS token client', () => {
   const end = drive.indexOf('// ── Drive API helpers ──', start);
   assert(start !== -1 && end !== -1, 'drive.js: getGoogleAccessToken block not found');
   const fn = drive.slice(start, end);
-  assert(fn.includes('initTokenClient({') && fn.includes('hint: getStoredDriveEmail()'),
+  assert(fn.includes('initTokenClient({') && fn.includes('login_hint: getStoredDriveEmail()'),
     'drive.js: initTokenClient must pass the stored Google account email as login_hint');
   assert(drive.includes("localStorage.getItem(_DRIVE_EMAIL_KEY)") || drive.includes("localStorage.getItem('claw_drive_email')") || drive.includes('_DRIVE_EMAIL_KEY'),
     'drive.js: the login_hint email must be persisted in localStorage (survives PWA restarts)');

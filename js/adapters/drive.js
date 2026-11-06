@@ -210,7 +210,7 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: getDriveScope(),
-      hint: getStoredDriveEmail(),
+      login_hint: getStoredDriveEmail(),
       callback: (resp) => {
         if (resp.error) {
           reject(new Error(resp.error));

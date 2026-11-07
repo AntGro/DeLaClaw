@@ -1954,6 +1954,7 @@ function updateStaticLabels() {
     'habitsView': 'common.search',
     'flashcardsView': 'flashcards.search_placeholder',
     'listsView': 'lists.search_placeholder',
+    'calendarView': 'common.search',
   };
   for (const [viewId, key] of Object.entries(searchMap)) {
     const view = document.getElementById(viewId);

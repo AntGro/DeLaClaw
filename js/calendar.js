@@ -37,6 +37,9 @@ let calShow = { // type filters
   birthday: _calPrefs.show?.birthday !== false,
   event: _calPrefs.show?.event !== false,
 };
+// Search query — session-only, deliberately never persisted (unlike the
+// view/filters above): a reload starts unfiltered, like other tabs.
+let calSearch = '';
 
 function saveCalPrefs() {
   try { localStorage.setItem(CALENDAR_PREFS_KEY, JSON.stringify({ view: calView, show: calShow })); } catch {}
@@ -95,7 +98,7 @@ function monthEndStr() {
 // -------------------------------------------------------------------
 
 function collectMonthEvents() {
-  return collectRangeEvents(monthStartStr(), monthEndStr());
+  return collectRangeEvents(monthStartStr(), monthEndStr(), calShow, calSearch);
 }
 
 /**
@@ -103,8 +106,13 @@ function collectMonthEvents() {
  * (inclusive date strings). `show` overrides the Calendar tab's funnel
  * filter; the Welcome strip passes all-true so its week never inherits
  * a filter set on the Calendar tab. Defaults to the tab's filter.
+ * `search` is a lowercased query: when non-empty, only items whose
+ * title/name contains it are kept. Title/name only — notes are not
+ * matched (they are not collected here) and neither are category
+ * names. The Welcome strip never passes a query, so a search on the
+ * Calendar tab never leaks into Welcome.
  */
-function collectRangeEvents(start, end, show = calShow) {
+function collectRangeEvents(start, end, show = calShow, search = '') {
   const map = new Map(); // dateStr → [{ type, id, title, sub, avatar }]
   const push = (date, ev) => {
     if (!map.has(date)) map.set(date, []);
@@ -222,6 +230,13 @@ function collectRangeEvents(start, end, show = calShow) {
   }
 
   for (const evs of map.values()) evs.sort((a, b) => TYPE_ORDER[a.type] - TYPE_ORDER[b.type]);
+  if (search) {
+    for (const [date, evs] of map) {
+      const kept = evs.filter(ev => (ev.title || '').toLowerCase().includes(search));
+      if (kept.length) map.set(date, kept);
+      else map.delete(date);
+    }
+  }
   return map;
 }
 
@@ -491,7 +506,7 @@ function renderMonthView(grid) {
 
 function renderWeekView(grid) {
   const dates = getWeekDates(calDate);
-  const events = collectRangeEvents(dates[0], dates[6]);
+  const events = collectRangeEvents(dates[0], dates[6], calShow, calSearch);
   const names = weekdayNames();
   let html = `<div class="cal-weekdays">${names.map(w => `<span>${esc(w)}</span>`).join('')}</div>`;
   html += '<div class="cal-week cal-week-page">';
@@ -505,7 +520,7 @@ function monthShortName(m) {
 }
 
 function renderYearView(grid) {
-  const events = collectRangeEvents(`${calYear}-01-01`, `${calYear}-12-31`);
+  const events = collectRangeEvents(`${calYear}-01-01`, `${calYear}-12-31`, calShow, calSearch);
   let html = '<div class="cal-year">';
   for (let m = 0; m < 12; m++) {
     html += `<div class="cal-mini">
@@ -581,6 +596,16 @@ function toggleCalendarFilter(type) {
   calShow = next;
   saveCalPrefs();
   syncCalendarToolbar();
+  renderCalendar();
+}
+
+// Calendar search: the query is session-only (never persisted) and the
+// input lives in the static toolbar, so re-rendering the grid never
+// steals its focus. The generic toggle-search/clear-search actions own
+// the wrapper: collapsing an empty input dispatches an input event,
+// which lands here with an empty value and clears the filter.
+function filterCalendarSearch(e) {
+  calSearch = (e.target?.value || '').trim().toLowerCase();
   renderCalendar();
 }
 
@@ -876,7 +901,7 @@ function calendarDayNav(dir) {
 }
 
 function dayGroupsHTML(dateStr) {
-  const events = collectRangeEvents(dateStr, dateStr).get(dateStr) || [];
+  const events = collectRangeEvents(dateStr, dateStr, calShow, calSearch).get(dateStr) || [];
   const groups = [
     { type: 'event', label: t('calendar.events'), color: 'var(--event-color)', icon: 'calendar-days' },
     { type: 'habit', label: t('calendar.habits'), color: 'var(--green)', icon: 'repeat' },
@@ -985,6 +1010,7 @@ window.renderCalendar = renderCalendar;
 window.calendarNav = calendarNav;
 window.calendarToday = calendarToday;
 window.toggleCalendarFilter = toggleCalendarFilter;
+window.filterCalendarSearch = filterCalendarSearch;
 window.openCalendarDate = openCalendarDate;
 window.setCalendarView = setCalendarView;
 window.openCalendarPicker = openCalendarPicker;

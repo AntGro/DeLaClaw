@@ -404,6 +404,10 @@ bun run server.js</pre>
             <button data-action="open-add-event" role="menuitem"><span data-icon="calendar-plus" data-size="15"></span> <span id="calendarAddEventLabel">Event</span></button>
           </div>
         </div>
+        <div class="search-wrapper">
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search…" data-action="filter-calendar-search"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
+        </div>
       </div>
     </div>
     <div class="main-content">

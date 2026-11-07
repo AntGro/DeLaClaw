@@ -481,6 +481,7 @@
           case 'filter-habits': callWindow('filterHabits', [e]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [e]); break;
           case 'filter-lists': callWindow('filterLists', [e]); break;
+          case 'filter-calendar-search': callWindow('filterCalendarSearch', [e]); break;
           default: break;
         }
         return;
@@ -496,6 +497,7 @@
           case 'filter-habits': callWindow('filterHabits', [fakeEvt]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [fakeEvt]); break;
           case 'filter-lists': callWindow('filterLists', [fakeEvt]); break;
+          case 'filter-calendar-search': callWindow('filterCalendarSearch', [fakeEvt]); break;
           default: break;
         }
       }, 150);

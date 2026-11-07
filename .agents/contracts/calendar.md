@@ -66,6 +66,28 @@ for the Google Calendar mirror.)
   the tab's funnel filter) — callers that must ignore the filter pass
   all-true explicitly.
 
+## Calendar search (v2.32.42)
+
+- The toggle is the shared `.search-wrapper` (same UX as the other
+  tabs: search icon, input + clear ×, collapse on blur when empty),
+  in the toolbar-right next to the + add button — not with the funnel
+  filter on the left. The placeholder/title come from `common.search`
+  via the `searchMap` in main.js.
+- Matching is title/name only, case-insensitive substring on the
+  collected `title` (`(ev.title || '').toLowerCase().includes(search)`).
+  Notes are never matched — they are not collected — and neither are
+  category names.
+- The query is session-only (`calSearch` module var, never persisted):
+  a reload starts unfiltered. Closing the input clears the query
+  (blur-collapse of an empty input dispatches an input event, which
+  clears the filter; the × clears it and keeps the input open).
+- Filtering happens in `collectRangeEvents(start, end, show, search)`,
+  whose 4th parameter defaults to `''` (no filter). The four Calendar
+  tab call sites (month, week, year, day panel) pass `calSearch`; the
+  Welcome strip never passes a query, so a tab search never leaks
+  into Welcome. Filtering applies after the type sort, so chip order
+  and the +N cutoff follow the filtered set.
+
 ## Day modal (v2.32.12)
 
 - **Background scroll lock**: opening the day modal locks page scroll

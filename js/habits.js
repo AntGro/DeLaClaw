@@ -236,7 +236,7 @@ async function saveEditHabitCategory() {
 // source of truth, re-exported below); local helpers follow.
 
 import { STRUCTURED_PREFIXES, DOW_KEYS, DOW_JS, isStructuredRule, normalizeFrequencyRule, computeNextDue, localDateStr } from './frequency-rule.js';
-import { parseLocalDate, isHabitSnoozed, toDateStr, planAutoRoll } from './calendar-pure.js';
+import { parseLocalDate, isHabitSnoozed, toDateStr, planAutoRoll, nextSaturdayStr } from './calendar-pure.js';
 // (re-exported in the export list at the bottom of this file)
 
 function formatFrequency(rule) {
@@ -1458,7 +1458,7 @@ function editHabitModalHTML() {
 }
 
 function habitSnoozeModalHTML() {
-  return `<div class="modal snooze-modal"><h2>${lucideIcon("moon",20)} ${t('habits.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('habits.snooze_hint')}</p><div class="snooze-options"><button data-action="habit-snooze-for" data-amount="1" data-unit="d">${t('habits.snooze_tomorrow')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="w">${t('habits.snooze_1w')}</button><button data-action="habit-snooze-for" data-amount="2" data-unit="w">${t('habits.snooze_2w')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="M">${t('habits.snooze_1m')}</button></div><label style="margin-top:12px;">${t('habits.snooze_custom')}</label><input type="date" id="habitSnoozeCustomDate" class="snooze-date-input"><input type="hidden" id="habitSnoozeId"><div class="modal-actions"><button class="modal-cancel" data-action="close-habit-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-habit-snooze">${t('habits.snooze')}</button></div></div>`;
+  return `<div class="modal snooze-modal"><h2>${lucideIcon("moon",20)} ${t('habits.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('habits.snooze_hint')}</p><div class="snooze-options"><button data-action="habit-snooze-for" data-amount="1" data-unit="d">${t('habits.snooze_tomorrow')}</button><button data-action="habit-snooze-for" data-unit="weekend">${t('habits.snooze_weekend')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="w">${t('habits.snooze_1w')}</button><button data-action="habit-snooze-for" data-amount="2" data-unit="w">${t('habits.snooze_2w')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="M">${t('habits.snooze_1m')}</button></div><label style="margin-top:12px;">${t('habits.snooze_custom')}</label><input type="date" id="habitSnoozeCustomDate" class="snooze-date-input"><input type="hidden" id="habitSnoozeId"><div class="modal-actions"><button class="modal-cancel" data-action="close-habit-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-habit-snooze">${t('habits.snooze')}</button></div></div>`;
 }
 
 function habitHistoryModalHTML() {
@@ -3333,6 +3333,9 @@ async function applyHabitSnooze(habitId, snoozedUntil) {
 function habitSnoozeFor(amount, unit) {
   const habitId = document.getElementById('habitSnoozeId')?.value;
   if (!habitId) return;
+  // The coming Saturday (a date, so the habit wakes ON it like every
+  // other habit snooze).
+  if (unit === 'weekend') { applyHabitSnooze(habitId, nextSaturdayStr(habitTodayStr())); return; }
   const target = new Date();
   if (unit === 'd') target.setDate(target.getDate() + amount);
   else if (unit === 'w') target.setDate(target.getDate() + amount * 7);

@@ -5714,6 +5714,54 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'demo Water the plants habit must be snoozed in all three languages');
     });
 
+    test('snooze: "This week-end" preset on TODOs and habits + hourly options hidden without a timed deadline (2.32.44)', async () => {
+      const { nextSaturdayStr } =
+        await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      // The coming Saturday, strictly after today: this week's Saturday
+      // Mon–Fri, next Saturday on Sat (today would wake at once) and Sun
+      // (this week's Saturday has passed). Week of Nov 2–8, 2026.
+      for (const [from, expected] of [
+        ['2026-11-02', '2026-11-07'], // Monday
+        ['2026-11-03', '2026-11-07'],
+        ['2026-11-04', '2026-11-07'],
+        ['2026-11-05', '2026-11-07'],
+        ['2026-11-06', '2026-11-07'], // Friday
+        ['2026-11-07', '2026-11-14'], // Saturday → next Saturday
+        ['2026-11-08', '2026-11-14'], // Sunday → next Saturday
+      ]) {
+        assert(nextSaturdayStr(from) === expected, `nextSaturdayStr(${from}) must be ${expected}`);
+      }
+      // Both modals offer the preset, after the day presets.
+      const todos = jsFiles['todos.js'];
+      const habits = jsFiles['habits.js'];
+      assert(todos.includes('<button data-action="snooze-for" data-unit="weekend">${t(\'todos.snooze_weekend\')}</button>'),
+        'TODO snooze modal must offer This week-end');
+      assert(habits.includes('<button data-action="habit-snooze-for" data-unit="weekend">${t(\'habits.snooze_weekend\')}</button>'),
+        'habit snooze modal must offer This week-end');
+      // TODO wakes Saturday 9am (like the other day-anchored presets);
+      // habit wakes ON the Saturday date.
+      const snoozeStart = todos.indexOf('async function snoozeFor');
+      const snoozeBlock = todos.slice(snoozeStart, todos.indexOf('async function submitSnooze', snoozeStart));
+      assert(snoozeBlock.includes("} else if (unit === 'weekend') {"),
+        'snoozeFor must handle the weekend unit');
+      assert(snoozeBlock.includes('nextSaturdayStr(toDateStr(now.getFullYear(), now.getMonth(), now.getDate()))') && snoozeBlock.includes('target.setHours(9, 0, 0, 0);'),
+        'snoozeFor must target the coming Saturday at 9am');
+      assert(habits.includes("if (unit === 'weekend') { applyHabitSnooze(habitId, nextSaturdayStr(habitTodayStr())); return; }"),
+        'habitSnoozeFor must snooze to the coming Saturday date');
+      // Hourly options hide unless the TODO deadline carries a time
+      // (date-only or absent deadline → no 1h/3h).
+      assert(todos.includes("const hasTimedDeadline = !!(todo?.due_date && !isDateOnly(todo.due_date));"),
+        'openSnoozeModal must detect a timed deadline via isDateOnly');
+      assert(todos.includes("modal.querySelectorAll('[data-action=\"snooze-for\"][data-unit=\"h\"]')"),
+        'openSnoozeModal must toggle the 1h/3h buttons');
+      // The label exists in all three languages for both sections.
+      const i18n = fs.readFileSync(path.join(__dirname, '..', 'js', 'i18n.js'), 'utf-8');
+      for (const key of ["snooze_weekend: 'This week-end'", "snooze_weekend: 'Ce week-end'", "snooze_weekend: 'Este fin de semana'"]) {
+        assert((i18n.match(new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length === 2,
+          `i18n must carry ${key} for both todos and habits`);
+      }
+    });
+
     test('migrations add habit snoozed_until (2.19.0)', () => {
       const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
       assert(schema.includes('snoozed_until TEXT'),

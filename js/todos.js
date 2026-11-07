@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, formatRelativeDay, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
-import { isDateOnly, isDueOverdue, isDueSoon, compareDueDates, dropInvalidDateOnly } from './calendar-pure.js';
+import { isDateOnly, isDueOverdue, isDueSoon, compareDueDates, dropInvalidDateOnly, nextSaturdayStr, parseLocalDate, toDateStr } from './calendar-pure.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration, orderKeyOf, compareOrderKeys } from './sections-pure.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
@@ -1219,7 +1219,7 @@ async function editTodoInline(id, itemEl, opts = {}) {
 // CATEGORY MANAGEMENT
 // ===================================================================
 function snoozeModalHTML() {
-  return `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button data-action="snooze-for" data-amount="1" data-unit="h">${t('todos.snooze_1h')}</button><button data-action="snooze-for" data-amount="3" data-unit="h">${t('todos.snooze_3h')}</button><button data-action="snooze-for" data-amount="1" data-unit="d">${t('todos.snooze_1d')}</button><button data-action="snooze-for" data-amount="3" data-unit="d">${t('todos.snooze_3d')}</button><button data-action="snooze-for" data-amount="7" data-unit="d">${t('todos.snooze_1w')}</button><button data-action="snooze-for" data-amount="1" data-unit="M">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">${t('todos.snooze_custom')}</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" data-action="close-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-snooze">${t('todos.snooze')}</button></div></div>`;
+  return `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button data-action="snooze-for" data-amount="1" data-unit="h">${t('todos.snooze_1h')}</button><button data-action="snooze-for" data-amount="3" data-unit="h">${t('todos.snooze_3h')}</button><button data-action="snooze-for" data-amount="1" data-unit="d">${t('todos.snooze_1d')}</button><button data-action="snooze-for" data-amount="3" data-unit="d">${t('todos.snooze_3d')}</button><button data-action="snooze-for" data-unit="weekend">${t('todos.snooze_weekend')}</button><button data-action="snooze-for" data-amount="7" data-unit="d">${t('todos.snooze_1w')}</button><button data-action="snooze-for" data-amount="1" data-unit="M">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">${t('todos.snooze_custom')}</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" data-action="close-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-snooze">${t('todos.snooze')}</button></div></div>`;
 }
 
 function addCategoryModalHTML() {
@@ -1516,6 +1516,11 @@ function openSnoozeModal(todoId) {
   modal.innerHTML = snoozeModalHTML();
   document.getElementById('snoozeTaskId').value = todoId;
   document.getElementById('snoozeCustomDate').value = '';
+  // Hourly snoozes only make sense for a deadline with a specific hour:
+  // a date-only (or absent) deadline hides the 1h/3h options.
+  const todo = allTodos.find(t => t.id === todoId);
+  const hasTimedDeadline = !!(todo?.due_date && !isDateOnly(todo.due_date));
+  modal.querySelectorAll('[data-action="snooze-for"][data-unit="h"]').forEach(b => { b.style.display = hasTimedDeadline ? '' : 'none'; });
   modal.classList.add('visible');
 }
 
@@ -1528,6 +1533,10 @@ async function snoozeFor(amount, unit) {
   let target;
   if (unit === 'h') {
     target = new Date(now.getTime() + amount * 60 * 60 * 1000);
+  } else if (unit === 'weekend') {
+    // The coming Saturday, waking at 9am like the other day-anchored presets.
+    target = parseLocalDate(nextSaturdayStr(toDateStr(now.getFullYear(), now.getMonth(), now.getDate())));
+    target.setHours(9, 0, 0, 0);
   } else if (unit === 'd') {
     target = new Date(now.getTime() + amount * 24 * 60 * 60 * 1000);
     if (amount === 1) { target.setHours(9, 0, 0, 0); }

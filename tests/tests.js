@@ -7205,6 +7205,51 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
+    test('category/list duplicate name (2.32.41): exact "already exists" toast on every tab', () => {
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      // All six duplicate-name rejections (create + rename on TODOs,
+      // Habits and Lists) name the item and the level — a duplicate is
+      // not a missing name. Lists say "List", the other two "Category".
+      for (const [name, src, key, count] of [
+        ['todos.js', todosSrc, 'category_exists_at_level', 2],
+        ['habits.js', habitsSrc, 'category_exists_at_level', 2],
+        ['lists.js', listsSrc, 'list_exists_at_level', 2],
+      ]) {
+        assert((src.match(new RegExp(key, 'g')) || []).length === count,
+          `${name} must report a duplicate name with the ${key} toast at both create and rename`);
+      }
+      assert(todosSrc.includes("if (!cat.is_protected && siblingNameTaken([..._todoCatMap.values()], targetParentId, targetName, catId)) {\n    showToast(t('toast.category_exists_at_level', targetName), 'error');"),
+        'renaming a TODO category onto a sibling name must toast Category "<name>" already exists at that level');
+      assert(todosSrc.includes("if (siblingNameTaken([..._todoCatMap.values()], parentId, name, null)) {\n      showToast(t('toast.category_exists_at_level', name), 'error');"),
+        'creating a TODO category with a sibling name must toast Category "<name>" already exists at that level');
+      assert(habitsSrc.includes("if (!cat.is_protected && siblingNameTaken([..._habitCatMap.values()], targetParentId, targetName, catId)) {\n    showToast(t('toast.category_exists_at_level', targetName), 'error');"),
+        'renaming a habit category onto a sibling name must toast Category "<name>" already exists at that level');
+      assert(habitsSrc.includes("if (siblingNameTaken([..._habitCatMap.values()], parentId, name, null)) {\n      showToast(t('toast.category_exists_at_level', name), 'error'); return;"),
+        'creating a habit category with a sibling name must toast Category "<name>" already exists at that level');
+      assert(listsSrc.includes("if (siblingNameTaken(state.allLists || [], parentId, name, null)) {\n      showToast(t('toast.list_exists_at_level', name), 'error'); return;"),
+        'creating a list with a sibling name must toast List "<name>" already exists at that level');
+      assert(listsSrc.includes("if (siblingNameTaken(state.allLists || [], targetParentId, targetName, id)) {\n    showToast(t('toast.list_exists_at_level', targetName), 'error'); return;"),
+        'renaming a list onto a sibling name must toast List "<name>" already exists at that level');
+      // Both keys exist in all three locales and carry the name slot;
+      // the old habits-only key (no name, no level) is gone.
+      for (const [lang, key, text] of [
+        ['EN', 'category_exists_at_level', 'Category "{0}" already exists at that level'],
+        ['FR', 'category_exists_at_level', 'La catégorie « {0} » existe déjà à ce niveau'],
+        ['ES', 'category_exists_at_level', 'La categoría "{0}" ya existe en este nivel'],
+        ['EN', 'list_exists_at_level', 'List "{0}" already exists at that level'],
+        ['FR', 'list_exists_at_level', 'La liste « {0} » existe déjà à ce niveau'],
+        ['ES', 'list_exists_at_level', 'La lista "{0}" ya existe en este nivel'],
+      ]) {
+        assert(i18nSrc.includes(`${key}: '${text}'`),
+          `toast.${key} must be defined in ${lang}`);
+      }
+      assert(!i18nSrc.includes("category_exists: '"),
+        'the old habits.category_exists key (no name, no level) must be removed now that habit creation uses the shared toast');
+    });
+
     test('sections: demo data showcases nesting in all three languages', () => {
       const demo = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
       // TODO categories are derived from item category strings in demo

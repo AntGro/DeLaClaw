@@ -200,7 +200,7 @@ async function saveEditHabitCategory() {
   if (!targetName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
   if (cat.is_protected) targetParentId = null;
   if (!cat.is_protected && siblingNameTaken([..._habitCatMap.values()], targetParentId, targetName, catId)) {
-    showToast(t('toast.name_required'), 'error');
+    showToast(t('toast.category_exists_at_level', targetName), 'error');
     return;
   }
 
@@ -2561,7 +2561,7 @@ async function saveNewHabitCategory() {
   try {
     const parentId = await ensureHabitSectionChain(segments.slice(0, -1), startParentId);
     if (siblingNameTaken([..._habitCatMap.values()], parentId, name, null)) {
-      showToast(t('habits.category_exists'), 'error'); return;
+      showToast(t('toast.category_exists_at_level', name), 'error'); return;
     }
     const { error } = await state.db.from('habit_categories').insert({
       name, shortname, color, sort_order: nextHabitSortOrder(parentId),

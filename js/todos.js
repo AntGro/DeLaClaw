@@ -1,6 +1,6 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, formatRelativeDay, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, formatRelativeDay, formatSnoozeUntil, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { isDateOnly, isDueOverdue, isDueSoon, compareDueDates, dropInvalidDateOnly, nextSaturdayStr, parseLocalDate, toDateStr } from './calendar-pure.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration, orderKeyOf, compareOrderKeys } from './sections-pure.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
@@ -671,7 +671,7 @@ function renderTodoItem(td) {
 
   let snoozeInfo = '';
   if (isSnoozed) {
-    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon",16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
+    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon",16)} ${t('todos.snoozed_until')} ${formatSnoozeUntil(td.snooze_until)}</span>`;
   }
 
   const priorityClass = isFlagged ? `todo-priority-${td.priority}` : '';
@@ -1534,9 +1534,10 @@ async function snoozeFor(amount, unit) {
   if (unit === 'h') {
     target = new Date(now.getTime() + amount * 60 * 60 * 1000);
   } else if (unit === 'weekend') {
-    // The coming Saturday, waking at 9am like the other day-anchored presets.
+    // The coming Saturday, day only: no time is set, so the item wakes
+    // at the start of Saturday. (parseLocalDate already lands on local
+    // midnight.)
     target = parseLocalDate(nextSaturdayStr(toDateStr(now.getFullYear(), now.getMonth(), now.getDate())));
-    target.setHours(9, 0, 0, 0);
   } else if (unit === 'd') {
     target = new Date(now.getTime() + amount * 24 * 60 * 60 * 1000);
     if (amount === 1) { target.setHours(9, 0, 0, 0); }
@@ -1564,7 +1565,7 @@ async function doSnooze(snoozeUntil) {
   snoozeBtns.forEach(b => { b.disabled = true; b.classList.add('is-pending'); });
 
   try {
-    const snoozedMsg = `${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+    const snoozedMsg = `${t('todos.snoozed_until')} ${formatSnoozeUntil(snoozeUntil)}`;
     if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
       // ─── Shared: write snooze to Drive payload (optimistic — refresh on staging) ───
       const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };

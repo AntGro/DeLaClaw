@@ -4,7 +4,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, formatRelativeDate, formatRelativeDay, truncateWithShowMore } from './utils.js';
+import { esc, escQ, renderMd, formatRelativeDate, formatRelativeDay, formatSnoozeUntil, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
 import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCatPath, getHabitCatOrderKey, getHabitCategories, isMyCreatedSharedHabit, isAutoHabit } from './habits.js';
 import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey, getTodoCategories } from './todos.js';
@@ -244,7 +244,7 @@ function renderFocusTodoItem(td) {
 
   let snoozeInfo = '';
   if (isSnoozed) {
-    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon", 16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
+    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon", 16)} ${t('todos.snoozed_until')} ${formatSnoozeUntil(td.snooze_until)}</span>`;
   }
 
   const classes = [

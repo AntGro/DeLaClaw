@@ -7137,6 +7137,50 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'demo deck rows must be built with path support');
     });
 
+    test('review findings 1+2 (2.32.39): renames are checked writes on every page', () => {
+      const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      // Flashcards: the deck update is checked before any item update,
+      // and a failed item update rolls the deck row back to its pre-edit
+      // values — the rename is one logical operation, with no success
+      // toast and the modal left open on failure.
+      const editDeck = flashSrc.slice(flashSrc.indexOf('window.saveEditDeck'));
+      assert(editDeck.includes("const { error: deckError } = await state.db.from('flashcard_decks').update(updates)"),
+        'deck rename must capture the deck update error');
+      assert(editDeck.includes('if (deckError) { showToast(t(\'toast.update_failed\')'),
+        'deck rename must report a failed deck update and return before mutating anything');
+      assert(editDeck.includes("const { error: cardsError } = await state.db.from('flashcards').update({ deck: targetName })"),
+        'deck rename must capture the card name-cache update error');
+      assert(editDeck.includes("const { error: textsError } = await state.db.from('texts').update({ deck: targetName })"),
+        'deck rename must capture the text name-cache update error');
+      assert(editDeck.includes('rollbackDeckRow(deckId, deckRow)'),
+        'a failed item update must roll the deck row back to its pre-edit values');
+      assert(flashSrc.includes('async function rollbackDeckRow(deckId, deckRow)'),
+        'the deck rollback helper must restore name/shortname/color/parent/sort_order from the pre-edit row');
+      // TODOs and Habits: the single category update is checked, like
+      // Lists already was — a failed rename reports failure instead of
+      // silently keeping the old row and toasting success.
+      for (const [name, src, table] of [
+        ['todos.js', todosSrc, 'todo_categories'],
+        ['habits.js', habitsSrc, 'habit_categories'],
+        ['lists.js', listsSrc, 'lists'],
+      ]) {
+        assert(src.includes(`const { error } = await state.db.from('${table}').update(updates)`),
+          `${name} rename must capture the category update error`);
+        assert(src.includes("if (error) { showToast(t('toast.update_failed')"),
+          `${name} rename must report a failed update and return before closing the modal`);
+      }
+      // A section-chain failure is reported for what it is: a cycle is
+      // a validation error, anything else is a failed conversion write
+      // (a rename/create must not blame the name for a DB failure).
+      const cycleCount = [flashSrc, todosSrc, habitsSrc]
+        .reduce((n, src) => n + (src.match(/e\?\.message === 'section-cycle'/g) || []).length, 0);
+      assert(cycleCount === 4,
+        'all four rename/create chain catches must distinguish a cycle from a conversion failure');
+    });
+
     test('sections: demo data showcases nesting in all three languages', () => {
       const demo = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
       // TODO categories are derived from item category strings in demo
@@ -7615,6 +7659,86 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
       assert(!listsSrc.includes('list.shortname = null;'),
         'list conversion must not null the shortname in memory (sections keep short names since v2.25.0)');
+    });
+
+    test('sections-pure: runDeckToSectionMigration — checked writes, flip last, id-precise rollback', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const spec = { deckId: 'DECK', deckName: 'Old', targetId: 'GENERAL', targetName: '' };
+      // Fake query-builder db: records calls, fails the Nth call when failAt > 0.
+      // select returns the ids that the bulk moves would touch.
+      const fakeDb = (failAt) => {
+        const calls = [];
+        const fail = () => (calls.length === failAt ? new Error('injected-' + calls.length) : null);
+        const record = (entry) => { calls.push(entry); return Promise.resolve({ error: fail() }); };
+        return {
+          calls,
+          from: (table) => ({
+            select: (_cols) => ({
+              eq: (col, val) => {
+                calls.push({ op: 'select', table, col, val });
+                const error = fail();
+                return Promise.resolve({
+                  data: error ? null : (table === 'flashcards' ? [{ id: 'c1' }, { id: 'c2' }] : [{ id: 't1' }]),
+                  error,
+                });
+              },
+            }),
+            update: (patch) => ({ eq: (col, val) => record({ op: 'update', table, patch, col, val }) }),
+          }),
+        };
+      };
+      // Success: two id captures, two bulk moves, flip last — exactly five writes, in order.
+      let db = fakeDb(0);
+      await m.runDeckToSectionMigration(db, spec);
+      assert(db.calls.length === 5, 'success path must be exactly five calls');
+      assert(db.calls[0].op === 'select' && db.calls[0].table === 'flashcards', 'first call captures the deck\'s card ids');
+      assert(db.calls[1].op === 'select' && db.calls[1].table === 'texts', 'second call captures the deck\'s text ids');
+      assert(db.calls[2].table === 'flashcards' && db.calls[2].col === 'deck_id' && db.calls[2].val === 'DECK'
+        && db.calls[2].patch.deck_id === 'GENERAL', 'third call bulk-moves the cards to the default deck');
+      assert(db.calls[3].table === 'texts' && db.calls[3].patch.deck_id === 'GENERAL',
+        'fourth call bulk-moves the texts to the default deck');
+      assert(db.calls[4].table === 'flashcard_decks' && db.calls[4].patch.kind === 'section',
+        'the kind flip is the last write');
+      // A failed id capture throws before any move.
+      db = fakeDb(1);
+      let threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 1, 'a failed card-id capture must abort before any move');
+      // A failed card move throws, and the flip is never attempted.
+      db = fakeDb(3);
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 3, 'a failed card move must abort before the text move and the flip');
+      // A failed text move throws after rolling the cards back — by id,
+      // so the default deck's own items are untouched.
+      db = fakeDb(4);
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 6, 'a failed text move must roll the cards back before rethrowing');
+      assert(db.calls[4].op === 'update' && db.calls[4].table === 'flashcards' && db.calls[4].col === 'id'
+        && db.calls[4].val === 'c1' && db.calls[4].patch.deck_id === 'DECK' && db.calls[4].patch.deck === 'Old',
+        'rollback moves the first card back to the original deck, by id');
+      assert(db.calls[5].col === 'id' && db.calls[5].val === 'c2',
+        'rollback moves the second card back too');
+      assert(!db.calls.some(c => c.table === 'flashcard_decks'),
+        'a failed text move must never reach the kind flip');
+      // A failed flip throws after rolling both tables back, cards first.
+      db = fakeDb(5);
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 8, 'a failed flip must roll both tables back before rethrowing');
+      assert(db.calls[5].table === 'flashcards' && db.calls[5].col === 'id' && db.calls[5].val === 'c1',
+        'flip rollback moves the cards back first');
+      assert(db.calls[7].table === 'texts' && db.calls[7].col === 'id' && db.calls[7].val === 't1'
+        && db.calls[7].patch.deck_id === 'DECK', 'flip rollback moves the texts back last');
+      // flashcards.js is wired to the helper, with no unchecked bulk
+      // move left in the conversion.
+      const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      assert(flashSrc.includes('runDeckToSectionMigration(state.db'),
+        'deck conversion must run through the checked migration helper');
+      const conv = flashSrc.slice(flashSrc.indexOf('async function convertDeckToSection'));
+      assert(!conv.slice(0, conv.indexOf('async function ', 10)).includes("await state.db.from('flashcards').update"),
+        'convertDeckToSection must not bulk-move cards itself');
     });
 
     test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {

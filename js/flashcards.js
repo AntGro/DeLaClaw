@@ -5,7 +5,7 @@ import { esc, escQ, showToast, showConfirmAction, applySectionGrid, fetchAll, is
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneBlockText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap, persistTextEdit, leadingRevealCount, trailingRevealCount, getTextChunks, isChunkDue, chunkReviseMode, applyChunkEdit } from './scene-parse.js';
-import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, descendantBucketIds, descendantsOf, siblingNameTaken, planNodeMove, resolveSectionPath, parseSectionPath, flattenTree } from './sections-pure.js';
+import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, descendantBucketIds, descendantsOf, siblingNameTaken, planNodeMove, resolveSectionPath, parseSectionPath, flattenTree, runDeckToSectionMigration } from './sections-pure.js';
 
 // ===================================================================
 // FLASHCARDS — Spaced Repetition (Algo-style intervals)
@@ -1235,15 +1235,16 @@ function flashChildRow(parentId, name) {
 }
 
 // Convert a bucket deck into a section: its cards and texts move to the
-// default deck first, then the row flips to kind='section'. Items move
-// first so a failed flip can never strand items inside a section row,
-// where deck buckets never render them.
+// default deck first, then the row flips to kind='section'. The sequence
+// runs through runDeckToSectionMigration (checked writes, flip last,
+// id-precise rollback), so a failed move can never strand items inside
+// a section row, where deck buckets never render them.
 async function convertDeckToSection(row) {
   const targetId = _defaultDeckId;
   const targetName = _deckMap.get(targetId)?.name ?? '';
-  await state.db.from('flashcards').update({ deck_id: targetId, deck: targetName }).eq('deck_id', row.id);
-  await state.db.from('texts').update({ deck_id: targetId, deck: targetName }).eq('deck_id', row.id);
-  await state.db.from('flashcard_decks').update({ kind: 'section', updated_at: new Date().toISOString() }).eq('id', row.id);
+  await runDeckToSectionMigration(state.db, {
+    deckId: row.id, deckName: row.name ?? '', targetId, targetName,
+  });
   row.kind = 'section';
   await loadFlashcardDecks();
 }
@@ -1342,7 +1343,10 @@ window.saveNewFlashDeck = async function() {
     try {
       parentId = await ensureFlashSectionChain(segments.slice(0, -1), startParentId);
     } catch (e) {
-      showToast(t('toast.name_required'), 'error');
+      // A cycle is a validation error (same toast as before); anything
+      // else is a failed conversion write and must say so.
+      if (e?.message === 'section-cycle') showToast(t('toast.name_required'), 'error');
+      else showToast(t('toast.update_failed') + ': ' + (e?.message || e), 'error');
       return;
     }
     // Names are unique among siblings only, like the other pages —
@@ -3757,6 +3761,20 @@ window.closeEditDeckModal = function() {
   const m = document.getElementById('editDeckModal'); if (m) m.remove();
 };
 
+// Restore a deck row to its pre-edit values after a failed item update
+// during rename: the rename is one logical operation, so a half-synced
+// name cache must not outlive a rolled-back rename. deckRow is still
+// pre-edit here (Object.assign runs only after every write succeeds).
+// Returns the rollback's own error (null on success) so the caller can
+// report a failed rollback instead of the item error it was covering.
+async function rollbackDeckRow(deckId, deckRow) {
+  const { error } = await state.db.from('flashcard_decks').update({
+    name: deckRow.name, shortname: deckRow.shortname, color: deckRow.color,
+    parent_id: deckRow.parent_id ?? null, sort_order: deckRow.sort_order,
+  }).eq('id', deckId);
+  return error;
+}
+
 window.saveEditDeck = async function() {
   const deckId = document.getElementById('editDeckId').value;
   const deckRow = _deckMap.get(deckId);
@@ -3777,7 +3795,10 @@ window.saveEditDeck = async function() {
     try {
       targetParentId = await ensureFlashSectionChain(segments.slice(0, -1), null, deckId);
     } catch (e) {
-      showToast(t('toast.name_required'), 'error');
+      // A cycle is a validation error (same toast as before); anything
+      // else is a failed conversion write and must say so.
+      if (e?.message === 'section-cycle') showToast(t('toast.name_required'), 'error');
+      else showToast(t('toast.update_failed') + ': ' + (e?.message || e), 'error');
       return;
     }
   }
@@ -3793,13 +3814,28 @@ window.saveEditDeck = async function() {
   const updates = { shortname: shortname || null, color, parent_id: targetParentId };
   if (!deckRow.is_protected) updates.name = targetName;
   if (targetParentId !== (deckRow.parent_id ?? null)) updates.sort_order = nextFlashSortOrder(targetParentId);
-  await state.db.from('flashcard_decks').update(updates).eq('id', deckId);
+  // Checked writes: the rename is one logical operation. A failed deck
+  // update reports failure (modal stays open, nothing mutates), and a
+  // failed item update rolls the deck row back to its pre-edit values —
+  // no success toast and no local mutation until every write succeeds.
+  const { error: deckError } = await state.db.from('flashcard_decks').update(updates).eq('id', deckId);
+  if (deckError) { showToast(t('toast.update_failed') + ': ' + deckError.message, 'error'); return; }
 
   // Update items' deck name string if name changed (grouping is by deck_id;
   // this just keeps the display cache accurate for every card in the deck)
   if (!deckRow.is_protected && targetName !== deckRow.name) {
-    await state.db.from('flashcards').update({ deck: targetName }).eq('deck_id', deckId);
-    await state.db.from('texts').update({ deck: targetName }).eq('deck_id', deckId);
+    const { error: cardsError } = await state.db.from('flashcards').update({ deck: targetName }).eq('deck_id', deckId);
+    if (cardsError) {
+      const rbError = await rollbackDeckRow(deckId, deckRow);
+      showToast(t('toast.update_failed') + ': ' + (rbError?.message || cardsError.message), 'error');
+      return;
+    }
+    const { error: textsError } = await state.db.from('texts').update({ deck: targetName }).eq('deck_id', deckId);
+    if (textsError) {
+      const rbError = await rollbackDeckRow(deckId, deckRow);
+      showToast(t('toast.update_failed') + ': ' + (rbError?.message || textsError.message), 'error');
+      return;
+    }
   }
 
   Object.assign(deckRow, updates);

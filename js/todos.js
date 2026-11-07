@@ -207,7 +207,10 @@ async function saveEditCategory() {
     try {
       targetParentId = await ensureTodoSectionChain(segments.slice(0, -1), null, catId);
     } catch (e) {
-      showToast(t('toast.name_required'), 'error');
+      // A cycle is a validation error (same toast as before); anything
+      // else is a failed conversion write and must say so.
+      if (e?.message === 'section-cycle') showToast(t('toast.name_required'), 'error');
+      else showToast(t('toast.update_failed') + ': ' + (e?.message || e), 'error');
       return;
     }
   }
@@ -226,7 +229,11 @@ async function saveEditCategory() {
   const updates = { shortname: shortname || null, color, parent_id: targetParentId };
   if (!cat.is_protected) updates.name = targetName;
   if (targetParentId !== (cat.parent_id || null)) updates.sort_order = nextTodoSortOrder(targetParentId);
-  await state.db.from('todo_categories').update(updates).eq('id', catId);
+  // Checked write (like saveEditList): a failed rename must report
+  // failure — modal stays open, no reload, no calendar resync, no
+  // success toast — instead of silently keeping the old row.
+  const { error } = await state.db.from('todo_categories').update(updates).eq('id', catId);
+  if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
   await loadTodoCategories();
 
   // Calendar: bucket labels appear in event summaries, so a bucket

@@ -160,4 +160,5 @@ User jobs:
 - Same mechanism as TODOs, on `habit_categories` (see the TODOs contract): `kind`/`parent_id`, tree logic only in `js/sections-pure.js`, names unique per parent, per-group `sort_order`, path typing creates/converts (items move to a `*` bucket on conversion).
 - `populateHabitCategorySelect` and every other item-facing picker list buckets only, in tree order, labelled by full path — a habit can never be assigned to a section.
 - Section rename/move never calls `markCategoryRenamed('habit_categories')`; bucket labels are the only ones that appear in Google Calendar titles.
+- **Renames are checked writes (2.32.39):** the category update error is checked before reload, calendar resync, modal close or success toast — a failed rename reports failure with the modal left open (same rule as `saveEditList`, and as the deck rename in flashcards).
 - Section delete: move children up or delete subtree (explicit per-habit deletion so calendar dirty tracking fires, sharing cleanup per bucket, as category delete).

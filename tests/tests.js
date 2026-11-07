@@ -5738,14 +5738,27 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'TODO snooze modal must offer This week-end');
       assert(habits.includes('<button data-action="habit-snooze-for" data-unit="weekend">${t(\'habits.snooze_weekend\')}</button>'),
         'habit snooze modal must offer This week-end');
-      // TODO wakes Saturday 9am (like the other day-anchored presets);
+      // TODO wakes at the start of Saturday — day only, no time is set;
       // habit wakes ON the Saturday date.
       const snoozeStart = todos.indexOf('async function snoozeFor');
       const snoozeBlock = todos.slice(snoozeStart, todos.indexOf('async function submitSnooze', snoozeStart));
       assert(snoozeBlock.includes("} else if (unit === 'weekend') {"),
         'snoozeFor must handle the weekend unit');
-      assert(snoozeBlock.includes('nextSaturdayStr(toDateStr(now.getFullYear(), now.getMonth(), now.getDate()))') && snoozeBlock.includes('target.setHours(9, 0, 0, 0);'),
-        'snoozeFor must target the coming Saturday at 9am');
+      assert(snoozeBlock.includes('nextSaturdayStr(toDateStr(now.getFullYear(), now.getMonth(), now.getDate()))'),
+        'snoozeFor must target the coming Saturday');
+      const weekendStart = snoozeBlock.indexOf("} else if (unit === 'weekend') {");
+      const weekendBlock = snoozeBlock.slice(weekendStart, snoozeBlock.indexOf("} else if (unit === 'd')", weekendStart));
+      assert(!weekendBlock.includes('setHours'), 'the weekend preset must not set a time — day only');
+      // A snooze landing exactly at midnight shows just the day, no time
+      // (toast + item labels on both the TODOs page and Welcome).
+      const utils = fs.readFileSync(path.join(__dirname, '..', 'js', 'utils.js'), 'utf-8');
+      assert(utils.includes('function formatSnoozeUntil(value)'), 'a midnight-aware snooze formatter must exist');
+      assert(utils.includes("if (date.getHours() !== 0 || date.getMinutes() !== 0)"), 'the formatter must add the time only when it is not midnight');
+      assert(todos.includes('formatSnoozeUntil(snoozeUntil)') && todos.includes('formatSnoozeUntil(td.snooze_until)'),
+        'TODO toast and item label must use the midnight-aware format');
+      const welcome = jsFiles['welcome.js'];
+      assert(welcome.includes('formatSnoozeUntil(td.snooze_until)'),
+        'Welcome TODO label must use the midnight-aware format');
       assert(habits.includes("if (unit === 'weekend') { applyHabitSnooze(habitId, nextSaturdayStr(habitTodayStr())); return; }"),
         'habitSnoozeFor must snooze to the coming Saturday date');
       // Hourly options hide unless the TODO deadline carries a time

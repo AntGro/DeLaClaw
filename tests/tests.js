@@ -7181,6 +7181,30 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'all four rename/create chain catches must distinguish a cycle from a conversion failure');
     });
 
+    test('deck duplicate name (2.32.40): exact "already exists" toast, not "Name required"', () => {
+      const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      // Both duplicate-name rejections (create and rename) name the deck
+      // and the level — a duplicate is not a missing name.
+      assert((flashSrc.match(/deck_exists_at_level/g) || []).length === 2,
+        'create and rename must both report a duplicate deck name with the deck_exists_at_level toast');
+      const newDeck = flashSrc.slice(flashSrc.indexOf('window.saveNewFlashDeck'));
+      assert(newDeck.includes("if (siblingNameTaken([..._deckMap.values()], parentId, name, null)) {\n      showToast(t('flashcards.deck_exists_at_level', name), 'error');"),
+        'creating a deck with a sibling name must toast Deck "<name>" already exists at that level');
+      const editDeck = flashSrc.slice(flashSrc.indexOf('window.saveEditDeck'));
+      assert(editDeck.includes("&& siblingNameTaken([..._deckMap.values()], targetParentId, targetName, deckId)) {\n    showToast(t('flashcards.deck_exists_at_level', targetName), 'error');"),
+        'renaming a deck onto a sibling name must toast Deck "<name>" already exists at that level');
+      // The key exists in all three locales and carries the name slot.
+      for (const [lang, text] of [
+        ['EN', 'Deck "{0}" already exists at that level'],
+        ['FR', 'Le paquet « {0} » existe déjà à ce niveau'],
+        ['ES', 'El mazo "{0}" ya existe en este nivel'],
+      ]) {
+        assert(i18nSrc.includes(`deck_exists_at_level: '${text}'`),
+          `flashcards.deck_exists_at_level must be defined in ${lang}`);
+      }
+    });
+
     test('sections: demo data showcases nesting in all three languages', () => {
       const demo = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
       // TODO categories are derived from item category strings in demo

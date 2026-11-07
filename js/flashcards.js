@@ -1352,7 +1352,7 @@ window.saveNewFlashDeck = async function() {
     // Names are unique among siblings only, like the other pages —
     // the same name may exist in another section.
     if (siblingNameTaken([..._deckMap.values()], parentId, name, null)) {
-      showToast(t('toast.name_required'), 'error');
+      showToast(t('flashcards.deck_exists_at_level', name), 'error');
       return;
     }
     const sortOrder = nextFlashSortOrder(parentId);
@@ -3807,7 +3807,7 @@ window.saveEditDeck = async function() {
   // it); previously a rename could silently duplicate any deck name.
   if (!deckRow.is_protected && (targetName !== deckRow.name || targetParentId !== (deckRow.parent_id ?? null))
     && siblingNameTaken([..._deckMap.values()], targetParentId, targetName, deckId)) {
-    showToast(t('toast.name_required'), 'error');
+    showToast(t('flashcards.deck_exists_at_level', targetName), 'error');
     return;
   }
 

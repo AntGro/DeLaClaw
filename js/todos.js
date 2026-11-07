@@ -217,7 +217,7 @@ async function saveEditCategory() {
   if (!targetName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
   if (cat.is_protected) targetParentId = null;
   if (!cat.is_protected && siblingNameTaken([..._todoCatMap.values()], targetParentId, targetName, catId)) {
-    showToast(t('toast.name_required'), 'error');
+    showToast(t('toast.category_exists_at_level', targetName), 'error');
     return;
   }
 
@@ -1335,7 +1335,7 @@ async function saveNewCategory() {
     const parentId = await ensureTodoSectionChain(segments.slice(0, -1), startParentId);
     const name = segments[segments.length - 1];
     if (siblingNameTaken([..._todoCatMap.values()], parentId, name, null)) {
-      showToast(t('toast.name_required'), 'error');
+      showToast(t('toast.category_exists_at_level', name), 'error');
       return;
     }
     const { error } = await state.db.from('todo_categories').insert({

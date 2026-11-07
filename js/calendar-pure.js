@@ -435,6 +435,19 @@ export function addDays(dateStr, n) {
 }
 
 /**
+ * 'YYYY-MM-DD' of the coming Saturday strictly after the given local
+ * date: this week's Saturday (Mon–Fri), next Saturday when the date is
+ * already a Saturday (snoozing to today would wake at once) or a Sunday
+ * (this week's Saturday has passed). Used by the "This week-end"
+ * snooze presets on TODOs and habits.
+ */
+export function nextSaturdayStr(dateStr) {
+  const d = parseLocalDate(dateStr);
+  const add = ((6 - d.getDay() + 7) % 7) || 7;
+  return addDays(dateStr, add);
+}
+
+/**
  * The 7 date strings ('YYYY-MM-DD') of the Monday-first week containing dateStr.
  */
 /**

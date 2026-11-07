@@ -64,7 +64,9 @@ User jobs:
 
 ### Snooze
 - `snooze_until` — filters TODO out of pending view until date passes
-- Preset options: 1h, 3h, 1d, 3d, 1w, 1m + custom datetime picker
+- Preset options: 1h, 3h, 1d, 3d, this week-end, 1w, 1m + custom datetime picker
+- "This week-end" snoozes to the coming Saturday at 9am (`nextSaturdayStr` in `js/calendar-pure.js`: strictly after today, so on a Saturday it is next Saturday)
+- The 1h/3h options only show when the TODO has a deadline with a specific hour (a UTC ISO `due_date`); a date-only or absent deadline hides them (`openSnoozeModal`)
 - Snoozed items show moon icon with date; unsnooze button (moon-off icon) opens a confirmation modal before clearing `snooze_until`
 - Changing snooze date requires unsnoozing first, then re-snoozing
 

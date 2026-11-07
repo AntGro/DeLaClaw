@@ -4496,6 +4496,82 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
+    test('calendar search (2.32.42): title-only match, notes never matched, Welcome excluded', async () => {
+      // Same DOM stubs as the show-override test above (calendar.js
+      // touches DOM at import).
+      const saved = { document: globalThis.document, localStorage: globalThis.localStorage, window: globalThis.window, addEventListener: globalThis.addEventListener };
+      const makeEscEl = () => {
+        const el = {}; let v = '';
+        Object.defineProperty(el, 'textContent', { set(x) { v = String(x ?? ''); }, get() { return v; } });
+        Object.defineProperty(el, 'innerHTML', { get() { return v; } });
+        return el;
+      };
+      globalThis.document = { addEventListener: () => {}, documentElement: { style: { setProperty: () => {} } }, body: { addEventListener: () => {} }, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, createElement: makeEscEl };
+      globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+      globalThis.window = globalThis;
+      globalThis.addEventListener = () => {};
+      try {
+        const cal = await import(pathToFileURL(path.join(JS_DIR, 'calendar.js')).href);
+        const state = (await import(pathToFileURL(path.join(JS_DIR, 'state.js')).href)).default;
+        const prevB = state.allBirthdays, prevE = state.allEvents;
+        state.allBirthdays = [{ id: 'b1', name: 'Alice Test', birthday: '1990-10-28' }];
+        state.allEvents = [{ id: 'e1', title: 'Dentist appointment', note: 'bring insurance card', all_day: 1, start_date: '2026-10-28', end_date: '2026-10-28', start_ts: null, end_ts: null, timezone: null }];
+        try {
+          const show = { todo: true, habit: true, birthday: true, event: true };
+          const day = (map) => map.get('2026-10-28') || [];
+          // Title match, case-insensitive.
+          const alice = cal.collectRangeEvents('2026-10-26', '2026-11-01', show, 'alice');
+          assert(day(alice).some(e => e.type === 'birthday' && e.title === 'Alice Test'), 'search must match a birthday by name, case-insensitively');
+          const dentist = cal.collectRangeEvents('2026-10-26', '2026-11-01', show, 'dentist');
+          assert(day(dentist).some(e => e.type === 'event'), 'search must match an event by title');
+          // Notes are never matched — the word lives only in the note.
+          const insurance = cal.collectRangeEvents('2026-10-26', '2026-11-01', show, 'insurance');
+          assert(!day(insurance).some(e => e.type === 'event'), 'search must not match an event note');
+          assert(!day(insurance).length, 'a note-only match must leave the day empty');
+          // No query: everything shows.
+          const all = cal.collectRangeEvents('2026-10-26', '2026-11-01', show);
+          assert(day(all).some(e => e.type === 'birthday') && day(all).some(e => e.type === 'event'), 'empty search must show everything');
+        } finally {
+          state.allBirthdays = prevB;
+          state.allEvents = prevE;
+        }
+        // Wiring: the four tab call sites pass the session query, the
+        // Welcome strip never does, and the input reuses the shared
+        // search-wrapper UX in the toolbar-right with the add button.
+        const calSrc = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+        assert(calSrc.includes("return collectRangeEvents(monthStartStr(), monthEndStr(), calShow, calSearch);"),
+          'month view must pass the search query');
+        assert(calSrc.includes("collectRangeEvents(dates[0], dates[6], calShow, calSearch)"),
+          'week view must pass the search query');
+        assert(calSrc.includes("collectRangeEvents(`${calYear}-01-01`, `${calYear}-12-31`, calShow, calSearch)"),
+          'year view must pass the search query');
+        assert(calSrc.includes("collectRangeEvents(dateStr, dateStr, calShow, calSearch)"),
+          'day view/panel must pass the search query');
+        assert(calSrc.includes("const kept = evs.filter(ev => (ev.title || '').toLowerCase().includes(search));"),
+          'the filter must consult the title only — notes and category names are never read');
+        assert(calSrc.includes("JSON.stringify({ view: calView, show: calShow })"),
+          'calendar prefs must persist only view and filters, never the search query');
+        const welcomeSrc = fs.readFileSync(path.join(JS_DIR, 'welcome.js'), 'utf-8');
+        assert(welcomeSrc.includes("collectRangeEvents(dates[0], dates[6], { todo: true, habit: true, birthday: true, event: true })"),
+          'the Welcome strip must call collectRangeEvents without a search query');
+        const calView = indexHtml.slice(indexHtml.indexOf('id="calendarView"'));
+        assert(calView.includes('class="search-wrapper"') && calView.includes('data-action="toggle-search"') && calView.includes('data-action="filter-calendar-search"'),
+          'the calendar toolbar must reuse the shared search-wrapper (toggle + input)');
+        assert(calView.indexOf('class="search-wrapper"') > calView.indexOf('id="calendarAddBtn"'),
+          'the search must sit in the toolbar-right with the add button, not with the funnel filter');
+        const del = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+        assert((del.match(/case 'filter-calendar-search':/g) || []).length === 2,
+          'delegation must route filter-calendar-search both immediately (cleared) and debounced (typing)');
+        const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+        assert(main.includes("'calendarView': 'common.search'"),
+          'the calendar search placeholder/title must come from common.search via the searchMap');
+      } finally {
+        for (const k of ['document', 'localStorage', 'window', 'addEventListener']) {
+          if (saved[k] === undefined) delete globalThis[k]; else globalThis[k] = saved[k];
+        }
+      }
+    });
+
     test('welcome: calendar strip reuses week cells and nav', () => {
       const w = jsFiles['welcome.js'];
       assert(w.includes("from './calendar.js'") && w.includes('collectRangeEvents') && w.includes('dayCellHTML'),

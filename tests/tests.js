@@ -4788,7 +4788,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(read('migrations/local-migrations.js').includes("'2.28.0'"), 'local migrations must carry 2.28.0 (events table)');
       assert(read('migrations/drive-migrations.js').includes("'2.28.0'"), 'drive migrations must carry 2.28.0 (events table)');
       assert(read('js/adapters/drive.js').includes("'birthdays', 'events', 'lists'"), 'DRIVE_TABLES must register events (events.json)');
-      assert(read('js/demo-data.js').includes('events: []'), 'demo data must register an (empty) events table');
+      assert(read('js/demo-data.js').includes('const events = ['), 'demo data must register the events table');
       // Sharing: interface + stub key map + Drive item types + convenience getter
       assert(read('js/sharing-interface.js').includes('getAllSharedEvents'), 'sharing interface must require getAllSharedEvents');
       assert(read('js/sharing.js').includes("event: 'events'"), 'sharing stub SHARING_TYPE_KEY must map event -> events');
@@ -7359,6 +7359,47 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(mainSrc.includes("buildCatRows(data.habits, 'category', 'habit_categories', true)"),
         'demo habit categories must be built with path support');
       assert(mainSrc.includes("kind === 'section' ? '#3b82f6'"), 'demo derivation must create section rows in the bold default section color');
+    });
+
+    test('demo events (2.32.43): sampled data seeds events, chooser prompt teaches them', () => {
+      const demo = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
+      // Five events per language, same ids and relative dates, translated
+      // titles/notes: 3 timed + 2 full-day (one multi-day) per variant.
+      assert((demo.match(/id: 'demo-ev-/g) || []).length === 15,
+        'demo data must seed 5 events in each of the 3 languages');
+      assert((demo.match(/all_day: 0, start_ts: wallTimeToInstant/g) || []).length === 9,
+        'demo data must seed 3 timed events per language');
+      assert((demo.match(/all_day: 1, start_ts: null/g) || []).length === 6,
+        'demo data must seed 2 full-day events per language');
+      assert((demo.match(/start_date: dateOnly\(3\), end_date: dateOnly\(5\)/g) || []).length === 3,
+        'demo data must include a multi-day full-day event in each language');
+      for (const title of ['Dinner with Alex', 'Book club meeting', 'Weekend trip to the coast', 'Dentist appointment', 'Moving day',
+        'Dîner avec Alex', 'Club de lecture', 'Week-end à la côte', 'Rendez-vous dentiste', 'Jour du déménagement',
+        'Cena con Alex', 'Fin de semana en la costa', 'Cita con el dentista', 'Día de la mudanza']) {
+        assert(demo.includes(`title: '${title}'`), `demo data must include the event "${title}"`);
+      }
+      // Timed events are built in the viewer's timezone from a local
+      // time, never from a raw UTC timestamp.
+      assert(demo.includes("import { localTimeZone, wallTimeToInstant } from './calendar-pure.js';"),
+        'demo data must build timed events via wallTimeToInstant in the viewer timezone');
+      assert(demo.includes('birthdays: [], events: [],'),
+        'getEmptyData must keep the events table key (empty)');
+      // The personalised-demo prompt teaches events too: schema, a
+      // paragraph in each language, parsing and normalisation.
+      const chooser = fs.readFileSync(path.join(JS_DIR, 'demo-chooser.js'), 'utf-8');
+      assert(chooser.includes('"events": [') && chooser.includes('"all_day": true') && chooser.includes('"start_time": "HH:MM"'),
+        'demo chooser schema must describe both event shapes (full-day range and timed with timezone)');
+      for (const [lang, text] of [
+        ['EN', '**Events.** Include a few calendar events'],
+        ['FR', '**Événements.** Inclus quelques événements'],
+        ['ES', '**Eventos.** Incluye algunos eventos'],
+      ]) {
+        assert(chooser.includes(text), `demo chooser prompt must ask for events in ${lang}`);
+      }
+      assert(chooser.includes("['projects', 'tasks', 'todos', 'habits', 'flashcards', 'birthdays', 'events', 'lists', 'list_items']"),
+        'parseCustomJSON must recognise the events table');
+      assert(chooser.includes('wallTimeToInstant(r.date, r.start_time, r.timezone)') && chooser.includes('r.all_day = r.all_day ? 1 : 0'),
+        'normalizeCustomData must convert LLM event times to UTC instants and coerce all_day to 0/1');
     });
 
     test('sections: section chips navigate via explicit delegation cases, sections have copy-link', () => {

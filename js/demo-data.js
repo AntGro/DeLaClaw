@@ -7,8 +7,10 @@
 
 import { computeNextDue } from './habits.js';
 import { parseSceneContent, splitSceneIntoChunks } from './scene-parse.js';
+import { localTimeZone, wallTimeToInstant } from './calendar-pure.js';
 const _now = new Date();
 const _todayStr = _now.toISOString().slice(0, 10);
+const _tz = localTimeZone();
 const d = (offset) => {
   const dt = new Date(_now);
   dt.setDate(dt.getDate() + offset);
@@ -170,6 +172,14 @@ function en() {
     { id: 'demo-bd-006', name: 'Carlos Reyes', birthday: '1987-11-07', note: 'Met at the conference', avatar_url: null, created_at: d(-30), updated_at: d(-30) },
   ];
 
+  const events = [
+    { id: 'demo-ev-001', title: 'Dinner with Alex', note: 'Try the new Italian place on Green Street', all_day: 0, start_ts: wallTimeToInstant(dateOnly(0), '19:00', _tz), end_ts: wallTimeToInstant(dateOnly(0), '20:30', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-ev-002', title: 'Book club meeting', note: 'Discussing "Klara and the Sun" — bring notes', all_day: 0, start_ts: wallTimeToInstant(dateOnly(1), '18:30', _tz), end_ts: wallTimeToInstant(dateOnly(1), '20:00', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-3), updated_at: d(-3) },
+    { id: 'demo-ev-003', title: 'Weekend trip to the coast', note: 'Pack Friday evening; check the train times', all_day: 1, start_ts: null, end_ts: null, start_date: dateOnly(3), end_date: dateOnly(5), timezone: null, created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-ev-004', title: 'Dentist appointment', note: 'Bring insurance card', all_day: 0, start_ts: wallTimeToInstant(dateOnly(7), '09:30', _tz), end_ts: wallTimeToInstant(dateOnly(7), '10:15', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-ev-005', title: 'Moving day', note: 'Van booked for 9am', all_day: 1, start_ts: null, end_ts: null, start_date: dateOnly(14), end_date: dateOnly(14), timezone: null, created_at: d(-12), updated_at: d(-12) },
+  ];
+
 
   const lists = [
     { id: 'demo-list-001', name: 'Travel Destinations', shortname: 'Travel', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
@@ -212,7 +222,7 @@ function en() {
     { id: 'demo-li-023', list_id: 'demo-list-011', text: 'Colosseum tickets', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, events: [], lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, events, lists, list_items };
 }
 
 // ── FRENCH ──
@@ -301,6 +311,14 @@ function fr() {
     { id: 'demo-bd-006', name: 'Carlos Reyes', birthday: '1987-11-07', note: 'Rencontré à la conférence', avatar_url: null, created_at: d(-30), updated_at: d(-30) },
   ];
 
+  const events = [
+    { id: 'demo-ev-001', title: 'Dîner avec Alex', note: 'Essayer le nouveau restaurant italien rue Verte', all_day: 0, start_ts: wallTimeToInstant(dateOnly(0), '19:00', _tz), end_ts: wallTimeToInstant(dateOnly(0), '20:30', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-ev-002', title: 'Club de lecture', note: 'On discute de « Klara et le Soleil » — apporter ses notes', all_day: 0, start_ts: wallTimeToInstant(dateOnly(1), '18:30', _tz), end_ts: wallTimeToInstant(dateOnly(1), '20:00', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-3), updated_at: d(-3) },
+    { id: 'demo-ev-003', title: 'Week-end à la côte', note: 'Préparer les bagages vendredi soir ; vérifier les horaires de train', all_day: 1, start_ts: null, end_ts: null, start_date: dateOnly(3), end_date: dateOnly(5), timezone: null, created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-ev-004', title: 'Rendez-vous dentiste', note: 'Apporter la carte Vitale', all_day: 0, start_ts: wallTimeToInstant(dateOnly(7), '09:30', _tz), end_ts: wallTimeToInstant(dateOnly(7), '10:15', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-ev-005', title: 'Jour du déménagement', note: 'Camion réservé pour 9h', all_day: 1, start_ts: null, end_ts: null, start_date: dateOnly(14), end_date: dateOnly(14), timezone: null, created_at: d(-12), updated_at: d(-12) },
+  ];
+
 
   const lists = [
     { id: 'demo-list-001', name: 'Destinations de voyage', shortname: 'Voyage', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
@@ -343,7 +361,7 @@ function fr() {
   ];
 
   // Re-use same habit_completions (ids are the same, habit_ids match)
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, events: [], lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, events, lists, list_items };
 }
 
 // ── SPANISH ──
@@ -432,6 +450,14 @@ function es() {
     { id: 'demo-bd-006', name: 'Carlos Reyes', birthday: '1987-11-07', note: 'Lo conocí en la conferencia', avatar_url: null, created_at: d(-30), updated_at: d(-30) },
   ];
 
+  const events = [
+    { id: 'demo-ev-001', title: 'Cena con Alex', note: 'Probar el nuevo restaurante italiano de la calle Verde', all_day: 0, start_ts: wallTimeToInstant(dateOnly(0), '19:00', _tz), end_ts: wallTimeToInstant(dateOnly(0), '20:30', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-ev-002', title: 'Club de lectura', note: 'Hablamos de «Klara y el Sol» — llevar apuntes', all_day: 0, start_ts: wallTimeToInstant(dateOnly(1), '18:30', _tz), end_ts: wallTimeToInstant(dateOnly(1), '20:00', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-3), updated_at: d(-3) },
+    { id: 'demo-ev-003', title: 'Fin de semana en la costa', note: 'Preparar las maletas el viernes por la noche; revisar los horarios de tren', all_day: 1, start_ts: null, end_ts: null, start_date: dateOnly(3), end_date: dateOnly(5), timezone: null, created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-ev-004', title: 'Cita con el dentista', note: 'Llevar la tarjeta del seguro', all_day: 0, start_ts: wallTimeToInstant(dateOnly(7), '09:30', _tz), end_ts: wallTimeToInstant(dateOnly(7), '10:15', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-10), updated_at: d(-10) },
+    { id: 'demo-ev-005', title: 'Día de la mudanza', note: 'Furgoneta reservada para las 9', all_day: 1, start_ts: null, end_ts: null, start_date: dateOnly(14), end_date: dateOnly(14), timezone: null, created_at: d(-12), updated_at: d(-12) },
+  ];
+
 
   const lists = [
     { id: 'demo-list-001', name: 'Destinos de viaje', shortname: 'Viajes', color: '#14b8a6', icon: 'map-pin', sort_order: 0, archived: 0, created_at: d(-30), updated_at: d(-2) },
@@ -473,7 +499,7 @@ function es() {
     { id: 'demo-li-023', list_id: 'demo-list-011', text: 'Entradas Coliseo', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, events: [], lists, list_items };
+  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, events, lists, list_items };
 }
 
 // ── MAIN EXPORT ──
@@ -629,7 +655,7 @@ Entonces empecemos.
 export function getEmptyData() {
   return {
     projects: [], tasks: [], todos: [], habits: [], habit_completions: [],
-    flashcards: [], flashcard_notes: [], birthdays: [],
+    flashcards: [], flashcard_notes: [], birthdays: [], events: [],
     lists: [], list_items: [],
     settings: [], prompts: [], texts: [], text_line_progress: [], daily_visits: [],
     todo_categories: [], habit_categories: [], flashcard_decks: [],

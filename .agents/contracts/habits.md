@@ -144,6 +144,7 @@ User jobs:
 ## Snooze (v2.19.0)
 
 - A habit can be snoozed until a local date (`snoozed_until`, YYYY-MM-DD, same convention as `next_due`/`end_date`). It is snoozed strictly before that date and wakes ON it (`isHabitSnoozed()` in `js/calendar-pure.js`). Date-based only — no indefinite pause.
+- Presets are tomorrow / this week-end / 1 week / 2 weeks / 1 month + a custom future date; "This week-end" snoozes to the coming Saturday (`nextSaturdayStr` in `js/calendar-pure.js`: strictly after today, so on a Saturday it is next Saturday).
 - Snoozing NEVER touches `frequency_rule`, last done, completions, or `next_due`: **defer, not skip** (owner's call). A due date that passes during the window is simply overdue on return; the user marks it done or edits last-done to advance. By construction the snooze cannot interact with the end-date finish rule — do not add skip/advance logic.
 - While actively snoozed the habit is excluded from every due surface, exactly like drafts/finished: Habits page due filters (`habitDueStatus()` returns `'snoozed'`), Welcome due list and mini-calendar, the footer overdue count, Calendar page occurrences inside the window (occurrences on/after the wake date show), and Google Calendar sync (eligibility gates exclude it, so any existing event is removed by the normal orphan/targeted delete paths). The card stays in its category with a "Snoozed until …" line, no Done button, and an unsnooze (moon-off) button; changing the date means unsnooze first, then re-snooze (same rule as TODOs).
 - Shared habits: snooze is **group-wide**, like TODO snooze — the value lives on the shared item, `applyHabitSnooze()` publishes it via `updateSharedHabit`, and `refreshHabits` mirrors it onto pointers with its own row-sync comparison (independent of the next_due publish guard). Share/copy/unshare/bulk-share carry it across.
@@ -159,5 +160,7 @@ User jobs:
 
 - Same mechanism as TODOs, on `habit_categories` (see the TODOs contract): `kind`/`parent_id`, tree logic only in `js/sections-pure.js`, names unique per parent, per-group `sort_order`, path typing creates/converts (items move to a `*` bucket on conversion).
 - `populateHabitCategorySelect` and every other item-facing picker list buckets only, in tree order, labelled by full path — a habit can never be assigned to a section.
+- Bucket headers carry a copy-link button (`habitcat` deep link, same as the section header) — shown unconditionally; the link resolves via `#habitsView [data-node-id]`
 - Section rename/move never calls `markCategoryRenamed('habit_categories')`; bucket labels are the only ones that appear in Google Calendar titles.
+- **Renames are checked writes (2.32.39):** the category update error is checked before reload, calendar resync, modal close or success toast — a failed rename reports failure with the modal left open (same rule as `saveEditList`, and as the deck rename in flashcards).
 - Section delete: move children up or delete subtree (explicit per-habit deletion so calendar dirty tracking fires, sharing cleanup per bucket, as category delete).

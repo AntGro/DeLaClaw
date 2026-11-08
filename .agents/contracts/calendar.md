@@ -63,8 +63,44 @@ for the Google Calendar mirror.)
   untouched. No-op in English.
 - `collectRangeEvents` / `dayCellHTML` are exported for the Welcome
   strip. `collectRangeEvents` takes an optional `show` override (default:
-  the tab's funnel filter) — callers that must ignore the filter pass
+  the tab's funnel filter) — the strip uses the default, so its cells
+  agree with the day panel; a caller that must ignore the filter passes
   all-true explicitly.
+
+## Calendar search (v2.32.42)
+
+- The toggle is the shared `.search-wrapper` (same UX as the other
+  tabs: search icon, input + clear ×, collapse on blur when empty),
+  in the toolbar-right next to the + add button — not with the funnel
+  filter on the left. The placeholder/title come from `common.search`
+  via the `searchMap` in main.js.
+- Matching is title/name only, case-insensitive substring on the
+  collected `title` (`(ev.title || '').toLowerCase().includes(search)`).
+  Notes are never matched — they are not collected — and neither are
+  category names.
+- The query is session-only (`calSearch` module var, never persisted):
+  a reload starts unfiltered. Closing the input clears the query
+  (blur-collapse of an empty input dispatches an input event, which
+  clears the filter; the × clears it and keeps the input open).
+- Filtering happens in `collectRangeEvents(start, end, show, search)`,
+  whose 4th parameter defaults to `''` (no filter). The four Calendar
+  tab call sites (month, week, year, day panel) pass `calSearch`; the
+  Welcome strip never passes a query, so a tab search never leaks
+  into Welcome. Filtering applies after the type sort, so chip order
+  and the +N cutoff follow the filtered set.
+- **Filter-status disc**: the funnel button keeps its plain `.btn`
+  shape and size; only its background is one radial sector per
+  filterable type (`buildFilterDiscBackground` in calendar-pure.js,
+  driven by `CAL_FILTER_TYPES` in calendar.js, in menu order
+  clockwise from the top) — pale (the type colour at 15% over the
+  surface) when shown, the neutral button background
+  (`var(--surface2)`) when filtered out, so it reads as switched
+  off. Display-only: toggling stays in the funnel menu. The icon
+  keeps the button's own colour with no halo. The sector width comes
+  from the list length, never a hard-coded count — adding a type is
+  one entry in `CAL_FILTER_TYPES` plus its funnel toggle, its
+  `calShow` default and its `collectRangeEvents` branch.
+  `syncCalendarToolbar` repaints the disc on every filter change.
 
 ## Day modal (v2.32.12)
 

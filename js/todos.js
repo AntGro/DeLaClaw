@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, formatRelativeDay, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
-import { isDateOnly, isDueOverdue, isDueSoon, compareDueDates, dropInvalidDateOnly } from './calendar-pure.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, formatRelativeDay, formatSnoozeUntil, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
+import { isDateOnly, isDueOverdue, isDueSoon, compareDueDates, dropInvalidDateOnly, nextSaturdayStr, parseLocalDate, toDateStr } from './calendar-pure.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration, orderKeyOf, compareOrderKeys } from './sections-pure.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
@@ -207,14 +207,17 @@ async function saveEditCategory() {
     try {
       targetParentId = await ensureTodoSectionChain(segments.slice(0, -1), null, catId);
     } catch (e) {
-      showToast(t('toast.name_required'), 'error');
+      // A cycle is a validation error (same toast as before); anything
+      // else is a failed conversion write and must say so.
+      if (e?.message === 'section-cycle') showToast(t('toast.name_required'), 'error');
+      else showToast(t('toast.update_failed') + ': ' + (e?.message || e), 'error');
       return;
     }
   }
   if (!targetName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
   if (cat.is_protected) targetParentId = null;
   if (!cat.is_protected && siblingNameTaken([..._todoCatMap.values()], targetParentId, targetName, catId)) {
-    showToast(t('toast.name_required'), 'error');
+    showToast(t('toast.category_exists_at_level', targetName), 'error');
     return;
   }
 
@@ -226,7 +229,11 @@ async function saveEditCategory() {
   const updates = { shortname: shortname || null, color, parent_id: targetParentId };
   if (!cat.is_protected) updates.name = targetName;
   if (targetParentId !== (cat.parent_id || null)) updates.sort_order = nextTodoSortOrder(targetParentId);
-  await state.db.from('todo_categories').update(updates).eq('id', catId);
+  // Checked write (like saveEditList): a failed rename must report
+  // failure — modal stays open, no reload, no calendar resync, no
+  // success toast — instead of silently keeping the old row.
+  const { error } = await state.db.from('todo_categories').update(updates).eq('id', catId);
+  if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
   await loadTodoCategories();
 
   // Calendar: bucket labels appear in event summaries, so a bucket
@@ -567,6 +574,12 @@ function renderCategoryCard(catId) {
     ? `<button class="todo-cat-delete-btn" data-action="delete-category" data-category="${esc(catId)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
     : '';
 
+  // Copy-link for the bucket itself: the todocat deep link already
+  // resolves buckets via #todosView [data-node-id] (the section header
+  // has the same button for sections); shown unconditionally, every
+  // bucket is linkable, including General and protected ones.
+  const copyLinkBtn = `<button class="todo-cat-shortname-btn" data-action="copy-item-link" data-link-type="todocat" data-id="${esc(catId)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>`;
+
   const activeEmptyMsg = displayActive.length === 0
     ? `<p class="empty-msg">${todoFilter === 'pending' ? t('todos.all_caught_up') : t('todos.no_items')}</p>`
     : '';
@@ -625,7 +638,7 @@ function renderCategoryCard(catId) {
         </div>
       </div>
       <div class="todo-cat-header-actions">
-        ${shareAllBtn}${shortnameBtn}${deleteBtn}
+        ${shareAllBtn}${copyLinkBtn}${shortnameBtn}${deleteBtn}
       </div>
     </div>
     ${addRow}
@@ -664,7 +677,7 @@ function renderTodoItem(td) {
 
   let snoozeInfo = '';
   if (isSnoozed) {
-    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon",16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
+    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon",16)} ${t('todos.snoozed_until')} ${formatSnoozeUntil(td.snooze_until)}</span>`;
   }
 
   const priorityClass = isFlagged ? `todo-priority-${td.priority}` : '';
@@ -1092,10 +1105,22 @@ async function editTodoInline(id, itemEl, opts = {}) {
   clearBtn.textContent = '✕';
   clearBtn.title = t('common.close');
   clearBtn.addEventListener('click', (e) => { e.stopPropagation(); deadlineDateInput.value = ''; deadlineTimeInput.value = ''; });
+  // The label sits beside a wrapping fields block, so it stays
+  // vertically centred across both lines when the time drops below
+  // the date. The date never stretches (minimum required width, so
+  // its calendar icon stays next to the date). The time + clear stay
+  // grouped: they always wrap together and right-align on the second
+  // line via margin-left:auto on the group.
+  const deadlineFields = document.createElement('div');
+  deadlineFields.className = 'todo-edit-deadline-fields';
+  const deadlineTimeGroup = document.createElement('div');
+  deadlineTimeGroup.className = 'todo-edit-deadline-time-group';
+  deadlineTimeGroup.appendChild(deadlineTimeInput);
+  deadlineTimeGroup.appendChild(clearBtn);
+  deadlineFields.appendChild(deadlineDateInput);
+  deadlineFields.appendChild(deadlineTimeGroup);
   deadlineRow.appendChild(deadlineLabel);
-  deadlineRow.appendChild(deadlineDateInput);
-  deadlineRow.appendChild(deadlineTimeInput);
-  deadlineRow.appendChild(clearBtn);
+  deadlineRow.appendChild(deadlineFields);
 
   // Category row
   const catRow = document.createElement('div');
@@ -1212,7 +1237,7 @@ async function editTodoInline(id, itemEl, opts = {}) {
 // CATEGORY MANAGEMENT
 // ===================================================================
 function snoozeModalHTML() {
-  return `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button data-action="snooze-for" data-amount="1" data-unit="h">${t('todos.snooze_1h')}</button><button data-action="snooze-for" data-amount="3" data-unit="h">${t('todos.snooze_3h')}</button><button data-action="snooze-for" data-amount="1" data-unit="d">${t('todos.snooze_1d')}</button><button data-action="snooze-for" data-amount="3" data-unit="d">${t('todos.snooze_3d')}</button><button data-action="snooze-for" data-amount="7" data-unit="d">${t('todos.snooze_1w')}</button><button data-action="snooze-for" data-amount="1" data-unit="M">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">${t('todos.snooze_custom')}</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" data-action="close-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-snooze">${t('todos.snooze')}</button></div></div>`;
+  return `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button data-action="snooze-for" data-amount="1" data-unit="h">${t('todos.snooze_1h')}</button><button data-action="snooze-for" data-amount="3" data-unit="h">${t('todos.snooze_3h')}</button><button data-action="snooze-for" data-amount="1" data-unit="d">${t('todos.snooze_1d')}</button><button data-action="snooze-for" data-amount="3" data-unit="d">${t('todos.snooze_3d')}</button><button data-action="snooze-for" data-unit="weekend">${t('todos.snooze_weekend')}</button><button data-action="snooze-for" data-amount="7" data-unit="d">${t('todos.snooze_1w')}</button><button data-action="snooze-for" data-amount="1" data-unit="M">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">${t('todos.snooze_custom')}</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" data-action="close-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-snooze">${t('todos.snooze')}</button></div></div>`;
 }
 
 function addCategoryModalHTML() {
@@ -1328,7 +1353,7 @@ async function saveNewCategory() {
     const parentId = await ensureTodoSectionChain(segments.slice(0, -1), startParentId);
     const name = segments[segments.length - 1];
     if (siblingNameTaken([..._todoCatMap.values()], parentId, name, null)) {
-      showToast(t('toast.name_required'), 'error');
+      showToast(t('toast.category_exists_at_level', name), 'error');
       return;
     }
     const { error } = await state.db.from('todo_categories').insert({
@@ -1509,6 +1534,11 @@ function openSnoozeModal(todoId) {
   modal.innerHTML = snoozeModalHTML();
   document.getElementById('snoozeTaskId').value = todoId;
   document.getElementById('snoozeCustomDate').value = '';
+  // Hourly snoozes only make sense for a deadline with a specific hour:
+  // a date-only (or absent) deadline hides the 1h/3h options.
+  const todo = allTodos.find(t => t.id === todoId);
+  const hasTimedDeadline = !!(todo?.due_date && !isDateOnly(todo.due_date));
+  modal.querySelectorAll('[data-action="snooze-for"][data-unit="h"]').forEach(b => { b.style.display = hasTimedDeadline ? '' : 'none'; });
   modal.classList.add('visible');
 }
 
@@ -1521,6 +1551,11 @@ async function snoozeFor(amount, unit) {
   let target;
   if (unit === 'h') {
     target = new Date(now.getTime() + amount * 60 * 60 * 1000);
+  } else if (unit === 'weekend') {
+    // The coming Saturday, day only: no time is set, so the item wakes
+    // at the start of Saturday. (parseLocalDate already lands on local
+    // midnight.)
+    target = parseLocalDate(nextSaturdayStr(toDateStr(now.getFullYear(), now.getMonth(), now.getDate())));
   } else if (unit === 'd') {
     target = new Date(now.getTime() + amount * 24 * 60 * 60 * 1000);
     if (amount === 1) { target.setHours(9, 0, 0, 0); }
@@ -1548,7 +1583,7 @@ async function doSnooze(snoozeUntil) {
   snoozeBtns.forEach(b => { b.disabled = true; b.classList.add('is-pending'); });
 
   try {
-    const snoozedMsg = `${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+    const snoozedMsg = `${t('todos.snoozed_until')} ${formatSnoozeUntil(snoozeUntil)}`;
     if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
       // ─── Shared: write snooze to Drive payload (optimistic — refresh on staging) ───
       const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };

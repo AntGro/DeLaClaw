@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS flashcard_decks (
   color TEXT,
   sort_order INTEGER DEFAULT 0,
   is_protected INTEGER DEFAULT 0,
+  kind TEXT DEFAULT 'bucket',
+  parent_id TEXT,
   deck_type TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),

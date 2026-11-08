@@ -558,6 +558,16 @@ function formatRelativeDay(dateStr, now = new Date()) {
   return target.toLocaleDateString(getLang(), { month: 'short', day: 'numeric' });
 }
 
+// Snooze-until display: a snooze that lands exactly at midnight is
+// day-only (no time was set, e.g. the "This week-end" preset) — show
+// just the day. Any other time shows date + time as before.
+function formatSnoozeUntil(value) {
+  const date = new Date(value);
+  const opts = { month: 'short', day: 'numeric' };
+  if (date.getHours() !== 0 || date.getMinutes() !== 0) { opts.hour = '2-digit'; opts.minute = '2-digit'; }
+  return date.toLocaleString(getLang(), opts);
+}
+
 // ===================================================================
 // TRUNCATE WITH SHOW MORE (shared between projects & todos)
 // ===================================================================
@@ -856,6 +866,8 @@ const DEEP_LINK_TYPE_MAP = {
   birthday: 'birthdays', flashcard: 'flashcards',
   list: 'lists', listitem: 'lists',
   todocat: 'todos', habitcat: 'habits',
+  flashsection: 'flashcards', flashdeck: 'flashcards',
+  flashtext: 'flashcards', flashdraft: 'flashcards',
 };
 
 /** Parse a deep-link hash like #todo/abc123 → { type, id } or null */
@@ -994,7 +1006,7 @@ function setConfirmActionProgress(text) {
 }
 
 export {
-  esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate, formatRelativeDay,
+  esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate, formatRelativeDay, formatSnoozeUntil,
   showConfirmAction, closeConfirmAction, executeConfirmAction, setConfirmActionProgress,
   updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, applySectionGrid, fetchAll,

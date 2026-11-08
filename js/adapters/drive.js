@@ -210,7 +210,7 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: getDriveScope(),
-      hint: getStoredDriveEmail(),
+      login_hint: getStoredDriveEmail(),
       callback: (resp) => {
         if (resp.error) {
           reject(new Error(resp.error));
@@ -234,13 +234,12 @@ function getGoogleAccessToken(clientId, promptIfNeeded = true) {
         reject(new Error(err.type || 'auth_error'));
       },
     });
-    if (promptIfNeeded) {
-      client.requestAccessToken();
-    } else {
-      // '' shows consent UI at once if needed; background popups are
-      // prevented by the tab-usability gate above, not by this parameter.
-      client.requestAccessToken({ prompt: '' });
-    }
+    // Always prompt: '' — the GIS default is 'select_account', which forces
+    // the account chooser even when login_hint is set. '' shows consent UI
+    // at once if needed (no session / no consent yet), and otherwise goes
+    // straight to the hinted account. Background popups are prevented by
+    // the tab-usability gate above, not by this parameter.
+    client.requestAccessToken({ prompt: '' });
   }).finally(() => {
     _pendingPromise = null;
     _pendingClientId = null;
@@ -1554,6 +1553,11 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   snapshotAllToCache();
 
   startPolling();
+
+  // Show the sync bar from connect: it was created lazily on the first
+  // sync event, so a fresh load with no mutations showed no bar at all
+  // until the first change (it only appeared once something went dirty).
+  updateSyncBarState();
 
   emit('ready');
   return adapter;

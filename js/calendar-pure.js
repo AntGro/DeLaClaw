@@ -427,11 +427,47 @@ export function toggleShow(show, type) {
   return { ...show, [type]: !show[type] };
 }
 
+/**
+ * Filter-status disc background: one radial sector per filterable
+ * calendar type, in list order clockwise from the top (a conic
+ * gradient starts at the top and runs clockwise, so the separators
+ * fall at multiples of 2π/K). A shown type gets its colour pale (15%
+ * over the surface); a filtered-out type gets the neutral button
+ * background (var(--surface2)), so it reads as switched off. The
+ * sector width comes from the list length — never hard-code a count:
+ * adding a type is one entry in the caller's list (plus its funnel
+ * toggle, its calShow default and its collectRangeEvents branch).
+ */
+export function buildFilterDiscBackground(types, show) {
+  if (!types.length) return 'none';
+  const step = 100 / types.length;
+  const sectors = types.map((t, i) => {
+    const color = show && show[t.key] === false
+      ? 'var(--surface2)'
+      : `color-mix(in srgb, ${t.color} 15%, var(--surface))`;
+    return `${color} ${i * step}% ${(i + 1) * step}%`;
+  });
+  return `conic-gradient(${sectors.join(', ')})`;
+}
+
 /** Add n days to a 'YYYY-MM-DD' string (n may be negative). */
 export function addDays(dateStr, n) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d + n);
   return toDateStr(dt.getFullYear(), dt.getMonth(), dt.getDate());
+}
+
+/**
+ * 'YYYY-MM-DD' of the coming Saturday strictly after the given local
+ * date: this week's Saturday (Mon–Fri), next Saturday when the date is
+ * already a Saturday (snoozing to today would wake at once) or a Sunday
+ * (this week's Saturday has passed). Used by the "This week-end"
+ * snooze presets on TODOs and habits.
+ */
+export function nextSaturdayStr(dateStr) {
+  const d = parseLocalDate(dateStr);
+  const add = ((6 - d.getDay() + 7) % 7) || 7;
+  return addDays(dateStr, add);
 }
 
 /**

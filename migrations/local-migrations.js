@@ -669,4 +669,13 @@ export const LOCAL_MIGRATIONS = {
     ) WHERE (category_id IS NULL OR category_id NOT IN (SELECT id FROM habit_categories))
       AND EXISTS (SELECT 1 FROM habit_categories WHERE name = habits.category);
   `,
+
+  // 2.32.34: flashcard decks gain sections, like the other category
+  // tables since 2.23.0 — kind ('bucket' default, or 'section') and
+  // parent_id (NULL = top level, plain column, not a foreign key).
+  // Existing decks all become top-level buckets, so nothing moves.
+  '2.32.34': `
+    ALTER TABLE flashcard_decks ADD COLUMN kind TEXT DEFAULT 'bucket';
+    ALTER TABLE flashcard_decks ADD COLUMN parent_id TEXT;
+  `,
 };

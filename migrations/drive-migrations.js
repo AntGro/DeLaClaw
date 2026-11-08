@@ -502,4 +502,13 @@ export const DRIVE_MIGRATIONS = {
       }
     }
   },
+  '2.32.34': async (store) => {
+    // 2.32.34: flashcard decks gain sections, like the other category
+    // tables since 2.23.0. Existing decks all become top-level
+    // buckets, so nothing moves.
+    for (const row of (store.flashcard_decks || [])) {
+      if (row.kind == null) row.kind = 'bucket';
+      if (row.parent_id === undefined) row.parent_id = null;
+    }
+  },
 };

@@ -131,7 +131,8 @@ function setDemoCategoriesFromData(data) {
     names.forEach((name, idx) => {
       // Nested sections: a category given as a path ('Reading > Fiction')
       // becomes a section chain plus a leaf bucket, so demo data can show
-      // the feature. Decks never take this path.
+      // the feature. Decks take this path too since flashcard sections
+      // landed (the Geography sample section).
       const segments = allowPaths ? name.split('>').map(s => s.trim()).filter(Boolean) : [name];
       if (segments.length <= 1) {
         const row = mkRow(name, 'bucket', null);
@@ -160,7 +161,7 @@ function setDemoCategoriesFromData(data) {
 
   const todoLookup = buildCatRows(data.todos, 'category', 'todo_categories', true);
   const habitLookup = buildCatRows(data.habits, 'category', 'habit_categories', true);
-  const deckLookup = buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks');
+  const deckLookup = buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks', true);
 
   // Enrich items with category_id / deck_id (fall back to default row).
   // A path category ('Reading > Fiction') resolves to its leaf bucket;
@@ -432,9 +433,11 @@ function initGate() {
   // Check if returning from signup overlay with a pre-selected backend
   const signupMode = localStorage.getItem('claw_signup_mode');
   localStorage.removeItem('claw_signup_mode');
-  // Set login hash (user is on the login page) — preserve #setup if present
-  // Skip hero when returning from signup — go straight to the login form
-  if (window.location.hash !== '#setup' && !signupMode) {
+  // Set login hash (user is on the login page) — preserve #setup if present,
+  // and preserve a deep-link hash (#type/id): it must survive the gate so
+  // handleStartupDeepLink can still navigate to the linked item after
+  // login/demo entry (a cold-pasted link otherwise dies here).
+  if (window.location.hash !== '#setup' && !signupMode && !parseDeepLink(window.location.hash)) {
     history.replaceState(null, '', '#login');
     showHero();
   }
@@ -714,7 +717,7 @@ document.addEventListener('DOMContentLoaded', () => {
     'saveNewBirthday', 'saveEditBirthday', 'removeAvatar',
     'saveNewEvent', 'saveEditEvent',
     'saveNewDraft', 'saveEditedProposal', 'saveNewFlashcard', 'saveEditFlashcard',
-    'saveNewText', 'saveEditText', 'submitFeedback', 'submitTextReview',
+    'saveNewText', 'saveEditText', 'saveEditChunk', 'submitFeedback', 'submitTextReview',
     'saveEditDeck',
     'saveNewHabit', 'saveEditHabit', 'saveHabitCompletion', 'addHabitFromInput',
     'saveNewHabitCategory', 'saveEditHabitCategory',
@@ -1268,7 +1271,10 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     const firstVisible = getVisibleTabs()[0];
     savedView = firstVisible ? firstVisible.key : 'welcome';
   }
-  switchView(savedView, isSettingsHash);
+  switchView(savedView, isSettingsHash || !!parseDeepLink(location.hash));
+  // A deep-link hash must survive this switchView: its hash sync would
+  // otherwise replace #type/id with #<view> before handleStartupDeepLink
+  // (after data load) reads it, so a cold-pasted link would never navigate.
 
   // Listen for back/forward navigation
   window.addEventListener('hashchange', () => {
@@ -1529,6 +1535,15 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     if (footerGc && state.sharing) {
       const gc = state.sharing.getAllGroups().length;
       footerGc.innerHTML = `${lucideIcon('users', 14)} ${gc} group${gc !== 1 ? 's' : ''}`;
+    }
+  });
+
+  // A birthday added from the Welcome page must appear in its Upcoming
+  // Birthdays bucket right away when it falls in the next 7 days —
+  // refreshBirthdays only re-renders the Calendar tab itself.
+  document.addEventListener('birthdays-changed', () => {
+    if (state.currentView === 'welcome') {
+      refreshWelcome().then(() => renderWelcome());
     }
   });
 
@@ -1953,6 +1968,7 @@ function updateStaticLabels() {
     'habitsView': 'common.search',
     'flashcardsView': 'flashcards.search_placeholder',
     'listsView': 'lists.search_placeholder',
+    'calendarView': 'common.search',
   };
   for (const [viewId, key] of Object.entries(searchMap)) {
     const view = document.getElementById(viewId);
@@ -3568,7 +3584,9 @@ function navigateToItem(type, id) {
   if (!view) { showToast(t('common.item_not_found'), 'error'); return; }
 
   if (state.currentView !== view) {
-    switchView(view);
+    // Keep the deep-link hash: the URL must go on pointing at the item
+    // (a refresh re-lands on it) instead of being replaced by #<view>.
+    switchView(view, true);
   }
   let attempts = 0;
   const maxAttempts = 3;
@@ -3597,6 +3615,10 @@ function findItemElement(type, id) {
     birthday: `.birthday-card[data-id="${eid}"]`,
     vest: `[data-vest-id="${eid}"]`,
     flashcard: `[data-card-id="${eid}"]`,
+    flashsection: `#flashcardsView [data-node-id="${eid}"]`,
+    flashdeck: `#flashcardsView [data-node-id="${eid}"]`,
+    flashtext: `[data-text-id="${eid}"]`,
+    flashdraft: `[data-draft-id="${eid}"]`,
     list: `[data-list-id="${eid}"]`,
     listitem: `[data-item-id="${eid}"]`,
     todocat: `#todosView [data-node-id="${eid}"]`,

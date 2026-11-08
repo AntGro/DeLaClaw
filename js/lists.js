@@ -1093,7 +1093,7 @@ async function saveNewList() {
   try {
     const parentId = await ensureListSectionChain(segments.slice(0, -1), startParentId);
     if (siblingNameTaken(state.allLists || [], parentId, name, null)) {
-      showToast(t('toast.name_required'), 'error'); return;
+      showToast(t('toast.list_exists_at_level', name), 'error'); return;
     }
     const { error } = await state.db.from('lists').insert({
       name,
@@ -1171,7 +1171,7 @@ async function saveEditList() {
   }
   if (!targetName) { showToast(t('toast.enter_name'), 'error'); return; }
   if (siblingNameTaken(state.allLists || [], targetParentId, targetName, id)) {
-    showToast(t('toast.name_required'), 'error'); return;
+    showToast(t('toast.list_exists_at_level', targetName), 'error'); return;
   }
   const isSection = isSectionRow(list);
   const updates = {

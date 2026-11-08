@@ -387,7 +387,7 @@ bun run server.js</pre>
           </div>
         </div>
         <div class="calendar-add-wrap">
-          <button class="btn" data-action="toggle-calendar-add" data-menu="calendarFilterMenu" title="Filter" aria-expanded="false" aria-haspopup="true"><span data-icon="funnel" data-size="16"></span></button>
+          <button class="btn cal-filter-btn" data-action="toggle-calendar-add" data-menu="calendarFilterMenu" title="Filter" aria-expanded="false" aria-haspopup="true"><span data-icon="funnel" data-size="16"></span></button>
           <div class="calendar-add-menu" id="calendarFilterMenu" style="display:none" role="menu">
             <button data-action="toggle-calendar-filter" data-filter="todo" class="active" role="menuitemcheckbox" aria-checked="true"><i class="cal-swatch cal-todo"></i><span id="calendarFilterTodos">TODOs</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
             <button data-action="toggle-calendar-filter" data-filter="habit" class="active" role="menuitemcheckbox" aria-checked="true"><i class="cal-swatch cal-habit"></i><span id="calendarFilterHabits">Habits</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
@@ -403,6 +403,10 @@ bun run server.js</pre>
             <button data-action="open-add-birthday" role="menuitem"><span data-icon="cake" data-size="15"></span> <span id="calendarAddBirthdayLabel">Birthday</span></button>
             <button data-action="open-add-event" role="menuitem"><span data-icon="calendar-plus" data-size="15"></span> <span id="calendarAddEventLabel">Event</span></button>
           </div>
+        </div>
+        <div class="search-wrapper">
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search…" data-action="filter-calendar-search"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>

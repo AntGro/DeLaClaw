@@ -15,7 +15,7 @@ import { getTodos, catIdForTodo, getCategoryColor, getTodoCatPath, getTodoCatOrd
 import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatPath, getHabitCatOrderKey, isAutoHabit, editHabitInline } from './habits.js';
 import { compareOrderKeys } from './sections-pure.js';
 import { captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
-import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates, isHabitSnoozed, parseLocalDate, overdueDays, eventDatesInRange, eventSpan, instantToTimeStr, localTimeZone } from './calendar-pure.js';
+import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, buildFilterDiscBackground, addDays, getWeekDates, isHabitSnoozed, parseLocalDate, overdueDays, eventDatesInRange, eventSpan, instantToTimeStr, localTimeZone } from './calendar-pure.js';
 
 let calYear;
 let calMonth; // 0-based
@@ -37,6 +37,21 @@ let calShow = { // type filters
   birthday: _calPrefs.show?.birthday !== false,
   event: _calPrefs.show?.event !== false,
 };
+// Filterable calendar types, in disc order (clockwise from the top).
+// The filter disc, the funnel menu and the funnel filter all read this
+// order. Adding a type: one entry here, its funnel toggle in index.html,
+// its calShow default above and its collectRangeEvents branch below —
+// the disc re-computes its sectors from this list, no count anywhere
+// is hard-coded.
+const CAL_FILTER_TYPES = [
+  { key: 'todo', color: 'var(--accent)' },
+  { key: 'habit', color: 'var(--green)' },
+  { key: 'birthday', color: 'var(--pink)' },
+  { key: 'event', color: 'var(--event-color)' },
+];
+// Search query — session-only, deliberately never persisted (unlike the
+// view/filters above): a reload starts unfiltered, like other tabs.
+let calSearch = '';
 
 function saveCalPrefs() {
   try { localStorage.setItem(CALENDAR_PREFS_KEY, JSON.stringify({ view: calView, show: calShow })); } catch {}
@@ -56,6 +71,9 @@ function syncCalendarToolbar() {
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-checked', String(active));
   });
+  // Filter disc: the funnel button's background shows one sector per
+  // type — saturated when shown, pale when filtered out.
+  document.querySelector('.cal-filter-btn')?.style.setProperty('--cal-disc', buildFilterDiscBackground(CAL_FILTER_TYPES, calShow));
 }
 
 const TYPE_ORDER = { birthday: 0, event: 1, todo: 2, habit: 3 };
@@ -95,16 +113,22 @@ function monthEndStr() {
 // -------------------------------------------------------------------
 
 function collectMonthEvents() {
-  return collectRangeEvents(monthStartStr(), monthEndStr());
+  return collectRangeEvents(monthStartStr(), monthEndStr(), calShow, calSearch);
 }
 
 /**
  * Aggregate every item visible on the calendar between start and end
  * (inclusive date strings). `show` overrides the Calendar tab's funnel
- * filter; the Welcome strip passes all-true so its week never inherits
- * a filter set on the Calendar tab. Defaults to the tab's filter.
+ * filter. Defaults to the tab's filter, which the Welcome strip also
+ * uses, so a strip cell never shows an item its day panel would hide.
+ * Callers that must ignore the filter pass all-true explicitly.
+ * `search` is a lowercased query: when non-empty, only items whose
+ * title/name contains it are kept. Title/name only — notes are not
+ * matched (they are not collected here) and neither are category
+ * names. The Welcome strip never passes a query, so a search on the
+ * Calendar tab never leaks into Welcome.
  */
-function collectRangeEvents(start, end, show = calShow) {
+function collectRangeEvents(start, end, show = calShow, search = '') {
   const map = new Map(); // dateStr → [{ type, id, title, sub, avatar }]
   const push = (date, ev) => {
     if (!map.has(date)) map.set(date, []);
@@ -222,6 +246,13 @@ function collectRangeEvents(start, end, show = calShow) {
   }
 
   for (const evs of map.values()) evs.sort((a, b) => TYPE_ORDER[a.type] - TYPE_ORDER[b.type]);
+  if (search) {
+    for (const [date, evs] of map) {
+      const kept = evs.filter(ev => (ev.title || '').toLowerCase().includes(search));
+      if (kept.length) map.set(date, kept);
+      else map.delete(date);
+    }
+  }
   return map;
 }
 
@@ -491,7 +522,7 @@ function renderMonthView(grid) {
 
 function renderWeekView(grid) {
   const dates = getWeekDates(calDate);
-  const events = collectRangeEvents(dates[0], dates[6]);
+  const events = collectRangeEvents(dates[0], dates[6], calShow, calSearch);
   const names = weekdayNames();
   let html = `<div class="cal-weekdays">${names.map(w => `<span>${esc(w)}</span>`).join('')}</div>`;
   html += '<div class="cal-week cal-week-page">';
@@ -505,7 +536,7 @@ function monthShortName(m) {
 }
 
 function renderYearView(grid) {
-  const events = collectRangeEvents(`${calYear}-01-01`, `${calYear}-12-31`);
+  const events = collectRangeEvents(`${calYear}-01-01`, `${calYear}-12-31`, calShow, calSearch);
   let html = '<div class="cal-year">';
   for (let m = 0; m < 12; m++) {
     html += `<div class="cal-mini">
@@ -581,6 +612,16 @@ function toggleCalendarFilter(type) {
   calShow = next;
   saveCalPrefs();
   syncCalendarToolbar();
+  renderCalendar();
+}
+
+// Calendar search: the query is session-only (never persisted) and the
+// input lives in the static toolbar, so re-rendering the grid never
+// steals its focus. The generic toggle-search/clear-search actions own
+// the wrapper: collapsing an empty input dispatches an input event,
+// which lands here with an empty value and clears the filter.
+function filterCalendarSearch(e) {
+  calSearch = (e.target?.value || '').trim().toLowerCase();
   renderCalendar();
 }
 
@@ -876,7 +917,7 @@ function calendarDayNav(dir) {
 }
 
 function dayGroupsHTML(dateStr) {
-  const events = collectRangeEvents(dateStr, dateStr).get(dateStr) || [];
+  const events = collectRangeEvents(dateStr, dateStr, calShow, calSearch).get(dateStr) || [];
   const groups = [
     { type: 'event', label: t('calendar.events'), color: 'var(--event-color)', icon: 'calendar-days' },
     { type: 'habit', label: t('calendar.habits'), color: 'var(--green)', icon: 'repeat' },
@@ -985,6 +1026,7 @@ window.renderCalendar = renderCalendar;
 window.calendarNav = calendarNav;
 window.calendarToday = calendarToday;
 window.toggleCalendarFilter = toggleCalendarFilter;
+window.filterCalendarSearch = filterCalendarSearch;
 window.openCalendarDate = openCalendarDate;
 window.setCalendarView = setCalendarView;
 window.openCalendarPicker = openCalendarPicker;

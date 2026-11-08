@@ -4,7 +4,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, formatRelativeDate, formatRelativeDay, truncateWithShowMore } from './utils.js';
+import { esc, escQ, renderMd, formatRelativeDate, formatRelativeDay, formatSnoozeUntil, truncateWithShowMore } from './utils.js';
 import { initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
 import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCatPath, getHabitCatOrderKey, getHabitCategories, isMyCreatedSharedHabit, isAutoHabit } from './habits.js';
 import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey, getTodoCategories } from './todos.js';
@@ -244,7 +244,7 @@ function renderFocusTodoItem(td) {
 
   let snoozeInfo = '';
   if (isSnoozed) {
-    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon", 16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
+    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon", 16)} ${t('todos.snoozed_until')} ${formatSnoozeUntil(td.snooze_until)}</span>`;
   }
 
   const classes = [
@@ -363,7 +363,7 @@ function renderFocusHabitItem(habit) {
     </div>
     <div class="habit-meta">
       ${dueHtml}
-      <span class="habit-last-done">${lastDoneStr}</span>
+      ${!habit.is_draft ? `<span class="habit-last-done habit-last-done-editable" data-action="edit-habit-last-done" data-id="${esc(habit.id)}" title="${t('habits.click_to_edit_last_done')}">${lastDoneStr}</span>` : ''}
     </div>
   </div>`;
 }
@@ -390,7 +390,10 @@ function initWelcomeFocusHabitHover() {
 // WELCOME — Calendar week strip: the Calendar tab's week cells, reused.
 // Same chips (Birthday > Events > TODOs > Habits), same overdue mirrors,
 // same day-panel modal on click — no bespoke placement logic here.
-// All types, always: the strip never inherits the Calendar tab's funnel filter.
+// Same filter as the Calendar tab: the strip uses the tab's funnel
+// filter (no override), so a day cell never shows an item its day
+// panel would hide. It never passes a search query, so a search on
+// the Calendar tab never leaks into Welcome.
 function renderWelcomeCalendar() {
   const lang = getLang();
   const locale = lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB';
@@ -400,7 +403,7 @@ function renderWelcomeCalendar() {
   // Prev/next shift the window by 7 days; Today resets the offset to 0.
   const start = addDays(today, wCalWeekOffset * 7);
   const dates = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-  const events = collectRangeEvents(dates[0], dates[6], { todo: true, habit: true, birthday: true, event: true });
+  const events = collectRangeEvents(dates[0], dates[6]);
   const names = dates.map(d => parseLocalDate(d).toLocaleDateString(locale, { weekday: 'short' }).replace('.', ''));
 
   // Month context — if the week spans two months, show both
@@ -705,7 +708,7 @@ function renderWelcome() {
 
   // Upcoming birthdays
   html += `<div class="welcome-section" id="welcome-bucket-birthdays" style="--cat-color:#f97316">`;
-  html += `<div class="welcome-section-header">${lucideIcon('cake', 18)} <span>${esc(t('welcome.upcoming_birthdays'))}</span></div>`;
+  html += `<div class="welcome-section-header">${lucideIcon('cake', 18)} <span>${esc(t('welcome.upcoming_birthdays'))}</span><span class="welcome-cal-nav"><button data-action="open-add-birthday" title="${esc(t('birthdays.add_birthday'))}" aria-label="${esc(t('birthdays.add_birthday'))}">${lucideIcon('plus', 16)}</button></span></div>`;
   if (upcomingBDs.length > 0) {
     html += `<div class="welcome-items">`;
     for (const b of upcomingBDs) {
@@ -740,12 +743,19 @@ function renderWelcome() {
   html += `<div class="welcome-section" id="welcome-bucket-stats" style="--cat-color:var(--accent)">`;
   html += `<div class="welcome-section-header">${lucideIcon('bar-chart-3', 18)} <span>${esc(t('welcome.stats'))}</span></div>`;
   html += `<div class="welcome-stats-grid">`;
+  // Events in the next 7 days (today + 6, the strip's window at offset 0) —
+  // distinct events only: a multi-day event places one entry per day it occupies.
+  const eventsNext7 = new Set();
+  for (const evs of collectRangeEvents(todayStr, addDays(todayStr, 6)).values()) {
+    for (const ev of evs) if (ev.type === 'event') eventsNext7.add(ev.id);
+  }
   const stats = [
     { icon: 'list-checks', value: todosPending, label: t('welcome.todos_pending'), color: '#22c55e' },
     { icon: 'circle-check', value: todosDoneWeek, label: t('welcome.todos_done_week'), color: '#10b981' },
     { icon: 'repeat', value: wHabitCompletionsWeek, label: t('welcome.habits_done_week'), color: '#ec4899' },
     { type: 'memory', color: '#06b6d4' },
     { icon: 'layout-grid', value: wProjectCount, label: t('welcome.projects'), color: '#6366f1' },
+    { icon: 'calendar-days', value: eventsNext7.size, label: t('welcome.events_next_7_days'), color: 'var(--event-color)' },
   ];
   for (const s of stats) {
     html += `<div class="welcome-stat-card" style="--stat-color:${s.color}">`;

@@ -52,7 +52,7 @@
     'navigate-to-category': 1, 'toggle-done-todos': 1, 'navigate-to-habit-category': 1,
     'navigate-to-todo-section': 1, 'navigate-to-habit-section': 1, 'navigate-to-list-section': 1,
     'toggle-section-chips': 1,
-    'navigate-to-flash-deck': 1, 'open-habit-history': 1, 'navigate-to-project': 1,
+    'navigate-to-flash-deck': 1, 'navigate-to-flash-section': 1, 'open-habit-history': 1, 'navigate-to-project': 1,
     'toggle-expand-project': 1, 'copy-project-title': 1, 'copy-item-link': 1,
     'show-todo-general-card': 1, 'calendar-prev': 1, 'calendar-next': 1, 'calendar-today': 1,
     'welcome-cal-nav': 1, 'welcome-cal-today': 1,
@@ -71,7 +71,8 @@
     // written or applied to the in-memory schedule.
     'start-practice': 1, 'reveal-card': 1, 'rate-card': 1, 'continue-free-practice': 1,
     'start-text-practice': 1, 'start-text-practice-for-text': 1, 'handle-line-click': 1,
-    'submit-text-review': 1, 'continue-text-same-text': 1
+    'submit-text-review': 1, 'continue-text-same-text': 1,
+    'open-chunk-panel': 1, 'show-chunk-stats': 1, 'back-to-chunk-panel': 1, 'toggle-chunk-bar': 1, 'revise-chunk': 1
   };
   function readOnlyAllows(action) {
     // 'close-and-open-revision' mutates (task status) despite its prefix.
@@ -220,6 +221,12 @@
       case 'save-habit-completion': callWindow('saveHabitCompletion', [el.dataset.id||getId(el)]); break;
       case 'cancel-edit-completion': callWindow('cancelEditCompletion', [el.dataset.id||getId(el)]); break;
       case 'navigate-to-flash-deck': callWindow('navigateToFlashDeck', [el.dataset.deck||getId(el)]); break;
+      case 'navigate-to-flash-section': callWindow('navigateToFlashSection', [el.dataset.deck||getId(el)]); break;
+      case 'open-add-flash-deck-in-section': callWindow('openAddFlashDeckModal', [el.dataset.deck||getId(el)]); break;
+      case 'delete-flash-section': callWindow('deleteFlashSection', [el.dataset.deck||getId(el)]); break;
+      case 'close-delete-flash-section-modal': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeDeleteFlashSectionModal', []); break;
+      case 'delete-flash-section-move-up': callWindow('deleteFlashSectionMoveUp', []); break;
+      case 'delete-flash-section-subtree': callWindow('deleteFlashSectionSubtree', []); break;
       case 'quick-add-draft': callWindow('quickAddDraft', []); break;
       case 'update-proposed-deck': callWindow('updateProposedDeck', [getId(el), el.value||el.dataset.deck]); break;
       case 'accept-proposal': callWindow('acceptProposal', [getId(el)]); break;
@@ -256,6 +263,15 @@
       case 'start-text-practice-for-text': callWindow('startTextPracticeForText', [getId(el)]); break;
       case 'open-edit-text': callWindow('openEditTextModal', [getId(el)]); break;
       case 'delete-text': callWindow('deleteText', [getId(el)]); break;
+      case 'open-chunk-panel': callWindow('openChunkPanel', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10), el]); break;
+      case 'show-chunk-stats': callWindow('showChunkStats', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
+      case 'back-to-chunk-panel': callWindow('backToChunkPanel', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
+      case 'close-chunk-panel': callWindow('closeChunkPanel', []); break;
+      case 'toggle-chunk-bar': callWindow('toggleChunkBar', [el.dataset.textId, el]); break;
+      case 'revise-chunk': callWindow('reviseChunk', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
+      case 'open-edit-chunk': callWindow('openEditChunkModal', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
+      case 'close-edit-chunk': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditChunkModal', []); break;
+      case 'save-edit-chunk': callWindow('saveEditChunk', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
       case 'close-add-text': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddTextModal', []); break;
       case 'save-new-text': callWindow('saveNewText', []); break;
       case 'close-edit-text': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditTextModal', []); break;
@@ -465,6 +481,7 @@
           case 'filter-habits': callWindow('filterHabits', [e]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [e]); break;
           case 'filter-lists': callWindow('filterLists', [e]); break;
+          case 'filter-calendar-search': callWindow('filterCalendarSearch', [e]); break;
           default: break;
         }
         return;
@@ -480,6 +497,7 @@
           case 'filter-habits': callWindow('filterHabits', [fakeEvt]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [fakeEvt]); break;
           case 'filter-lists': callWindow('filterLists', [fakeEvt]); break;
+          case 'filter-calendar-search': callWindow('filterCalendarSearch', [fakeEvt]); break;
           default: break;
         }
       }, 150);

@@ -409,3 +409,54 @@ export async function runBucketToSectionMigration(db, spec) {
   } catch (_) { /* best effort — the flip error is the one that matters */ }
   throw flip.error;
 }
+
+// Move one row back to its pre-migration deck, by id. The adapter
+// surface has no .in(), so one update per id — failure path only.
+async function rollbackDeckItems(db, table, ids, deckId, deckName) {
+  for (const id of ids) {
+    try {
+      await db.from(table).update({ deck_id: deckId, deck: deckName }).eq('id', id);
+    } catch (_) { /* best effort — the original error is the one that matters */ }
+  }
+}
+
+/**
+ * The write sequence of a flashcard deck → section conversion: the
+ * deck's cards and texts move to the default deck first, then the row
+ * flips to kind='section'.
+ *
+ * Same ordering-and-checks safety as runBucketToSectionMigration, but
+ * the shape differs: two item tables, and the destination is the
+ * shared default deck rather than a fresh '*' bucket. Every result
+ * is checked and the kind flip runs only after both moves succeed,
+ * so a failed move can never strand items inside a section row. The
+ * destination already holds items, so the rollback is id-precise:
+ * the moved rows' ids are captured first and only those rows move
+ * back — a rollback by destination would move the default deck's own
+ * items too. Rollback is best effort: even if it fails, every item
+ * sits in a visible bucket (the default deck or the original one),
+ * and the original error is the one thrown.
+ *
+ * spec: { deckId, deckName, targetId, targetName }
+ */
+export async function runDeckToSectionMigration(db, spec) {
+  const { deckId, deckName, targetId, targetName } = spec;
+  const cards = await db.from('flashcards').select('id').eq('deck_id', deckId);
+  if (cards.error) throw cards.error;
+  const texts = await db.from('texts').select('id').eq('deck_id', deckId);
+  if (texts.error) throw texts.error;
+  const cardIds = (cards.data || []).map(r => r.id);
+  const textIds = (texts.data || []).map(r => r.id);
+  const moveCards = await db.from('flashcards').update({ deck_id: targetId, deck: targetName }).eq('deck_id', deckId);
+  if (moveCards.error) throw moveCards.error;
+  const moveTexts = await db.from('texts').update({ deck_id: targetId, deck: targetName }).eq('deck_id', deckId);
+  if (moveTexts.error) {
+    await rollbackDeckItems(db, 'flashcards', cardIds, deckId, deckName);
+    throw moveTexts.error;
+  }
+  const flip = await db.from('flashcard_decks').update({ kind: 'section', updated_at: new Date().toISOString() }).eq('id', deckId);
+  if (!flip.error) return;
+  await rollbackDeckItems(db, 'flashcards', cardIds, deckId, deckName);
+  await rollbackDeckItems(db, 'texts', textIds, deckId, deckName);
+  throw flip.error;
+}

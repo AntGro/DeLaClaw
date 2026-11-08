@@ -8137,10 +8137,12 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         itemRollbackPatch: { category_id: 'CAT', category: 'Reading' },
         flipPatch: { kind: 'section' },
       };
-      // Fake query-builder db: records calls, fails the Nth call when failAt > 0.
+      // Fake query-builder db: records calls, fails the Nth call when failAt > 0
+      // (or the listed calls when failAt is an array).
       const fakeDb = (failAt) => {
         const calls = [];
-        const record = (entry) => { calls.push(entry); return Promise.resolve({ error: calls.length === failAt ? new Error('injected-' + calls.length) : null }); };
+        const failSet = new Set(Array.isArray(failAt) ? failAt : [failAt]);
+        const record = (entry) => { calls.push(entry); return Promise.resolve({ error: failSet.has(calls.length) ? new Error('injected-' + calls.length) : null }); };
         return {
           calls,
           from: (table) => ({
@@ -8172,6 +8174,18 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'rollback bulk-moves the items back to the original bucket');
       assert(db.calls[3].op === 'delete' && db.calls[3].table === 'todo_categories' && db.calls[3].val === 'STAR',
         'rollback deletes the star bucket');
+      // Flip fails AND the rollback update fails: the star bucket must
+      // NOT be deleted — deleting it while items still point at it
+      // would orphan them on Drive and cascade-delete them on Local.
+      // The adapter reports failures as { error }, never by throwing,
+      // so the result must be checked, not merely awaited.
+      db = fakeDb([2, 3]);
+      threw = null;
+      try { await m.runBucketToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 3, 'a failed rollback must stop before the star-bucket delete');
+      assert(db.calls[2].op === 'update' && db.calls[2].table === 'todos' && db.calls[2].val === 'STAR',
+        'the third call is the rollback update, and no delete follows it');
+      assert(String(threw.message).includes('rollback'), 'the thrown error must report the failed rollback, not just the flip');
       // Views are wired to the helper, with no per-item loop left.
       for (const [name, src] of [
         ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8')],
@@ -8189,11 +8203,13 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     test('sections-pure: runDeckToSectionMigration — checked writes, flip last, id-precise rollback', async () => {
       const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
       const spec = { deckId: 'DECK', deckName: 'Old', targetId: 'GENERAL', targetName: '' };
-      // Fake query-builder db: records calls, fails the Nth call when failAt > 0.
+      // Fake query-builder db: records calls, fails the Nth call when failAt > 0
+      // (or the listed calls when failAt is an array).
       // select returns the ids that the bulk moves would touch.
       const fakeDb = (failAt) => {
         const calls = [];
-        const fail = () => (calls.length === failAt ? new Error('injected-' + calls.length) : null);
+        const failSet = new Set(Array.isArray(failAt) ? failAt : [failAt]);
+        const fail = () => (failSet.has(calls.length) ? new Error('injected-' + calls.length) : null);
         const record = (entry) => { calls.push(entry); return Promise.resolve({ error: fail() }); };
         return {
           calls,
@@ -8256,6 +8272,14 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'flip rollback moves the cards back first');
       assert(db.calls[7].table === 'texts' && db.calls[7].col === 'id' && db.calls[7].val === 't1'
         && db.calls[7].patch.deck_id === 'DECK', 'flip rollback moves the texts back last');
+      // A failed flip whose card rollback also fails: every rollback row
+      // is still attempted, and the thrown error reports the rollback
+      // failure alongside the flip failure.
+      db = fakeDb([5, 6]);
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 8, 'a failed rollback must not cut the remaining rollback rows short');
+      assert(String(threw.message).includes('rollback'), 'the thrown error must report the failed rollback, not just the flip');
       // flashcards.js is wired to the helper, with no unchecked bulk
       // move left in the conversion.
       const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');

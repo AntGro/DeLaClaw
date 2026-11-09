@@ -7819,11 +7819,27 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('sections: border + header color, adaptive titles, list button parity', () => {
       const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
-      // The section color appears as the block's border (2px) and as
-      // the solid header band at full strength; the body background
-      // stays transparent (bucket cards keep their own surface/tint).
-      assert(css.includes('.section-block{border:2px solid var(--cat-color);border-radius:12px;padding:10px;background:transparent'),
-        'section block must be a colored border on a transparent background');
+      // The section color appears as the block's border (5px, all four
+      // sides — the top border stays: without it the pale body shows
+      // through a tiny gap at the top corners, where the header alone
+      // cannot cover the strip between the padding-box and border-box
+      // corners) and as the solid header band at full strength; the
+      // body background is a very pale (6%) tint of the same color,
+      // and the block's top corners are 11px to match the header's.
+      assert(css.includes('.section-block{border:5px solid var(--cat-color);border-radius:11px;padding:10px;background:color-mix(in srgb, var(--cat-color) 6%, var(--surface))'),
+        'section block must be a 5px colored border on a 6% pale tint background');
+      assert(!css.includes('.section-block .section-block'),
+        'no nested override: a section keeps its 5px border at any depth — the thick border marks sections (containers of buckets), the thin border marks leaf buckets');
+      assert(css.includes('padding:10px 14px;border-radius:6px 6px 0 0;'),
+        'section header top corners must be 6px (11px outer minus the 5px border), matching the padding-box corner');
+      assert(css.includes('.project-card[style*="--cat-color"]{border-top:none;border-radius:11px;'),
+        'bucket cards keep the thin neutral border with 11px top corners');
+      assert(!css.includes('.project-card[style*="--cat-color"]{border:5px'),
+        'the 5px border is sections-only, not buckets');
+      assert(css.includes('.welcome-section[style*="--cat-color"]{border-top:none;border-radius:11px;'),
+        'Welcome sections keep the thin neutral border with 11px top corners');
+      assert(!css.includes('.welcome-section[style*="--cat-color"]{border:5px'),
+        'the 5px border is sections-only, not Welcome sections');
       assert(!css.includes('var(--cat-color) 12%, transparent);display:flex;flex-direction:column;gap:10px'),
         'the old 12%-over-transparent section background must be gone');
       assert(!css.includes('padding:10px;background:var(--cat-color);display:flex'),

@@ -274,8 +274,8 @@ function chipHTML(ev, hidden) {
   // Timed events prefix their start time (viewer timezone) on their first day.
   const title = ev.type === 'birthday' ? esc(ev.title)
     : renderMd(ev.type === 'event' && !ev.allDay && ev.startsHere && ev.startTimeLabel ? `${ev.startTimeLabel} ${ev.title}` : ev.title);
-  // Shape encodes the type; background encodes the item's category color
-  // (birthdays have no category → type color fallback).
+  // Background encodes the item's category color (birthdays have no
+  // category → type color fallback); all chips share a 2px corner.
   const catColor = ev.catColor || (ev.type === 'birthday' ? 'var(--pink)' : 'var(--accent)');
   return `<span class="cal-chip cal-${ev.type}${ev.overdue ? ' cal-chip-overdue' : ''}" style="--cat-color:${catColor}"${hidden ? ' data-hidden=""' : ''}>${icon}<span>${title}</span></span>`;
 }

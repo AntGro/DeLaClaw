@@ -583,10 +583,11 @@ input,select,button{font-family:inherit;}
 /* ===== PROJECT GRID ===== */
 .project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:14px;justify-content:center;}
 .project-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;transition:all 0.25s ease;max-height:min(100vh, max(750px, 50vh));max-width:max(50vw,800px);container-type:inline-size;}
+.project-card:hover{box-shadow:0 4px 20px rgba(0,0,0,0.15),0 0 0 1px var(--accent-dim);}
+.project-card[style*="--cat-color"]{border-top:none;border-radius:11px;background:color-mix(in srgb, var(--cat-color) 6%, var(--surface));}
+/* Drag states sit after the colored rule so the dashed border survives it (same specificity, later wins). */
 .project-card.dragging{opacity:0.4;border:2px dashed var(--accent);}
 .project-card.drag-over{box-shadow:0 0 0 2px var(--accent);border-color:var(--accent);}
-.project-card:hover{box-shadow:0 4px 20px rgba(0,0,0,0.15),0 0 0 1px var(--accent-dim);}
-.project-card[style*="--cat-color"]{border-top:none;background:color-mix(in srgb, var(--cat-color) 6%, var(--surface));}
 .project-card[style*="--cat-color"]:hover{box-shadow:0 4px 20px color-mix(in srgb, var(--cat-color) 12%, transparent),0 0 0 1px color-mix(in srgb, var(--cat-color) 30%, var(--border));}
 /* ── Colored card headers (unified across all pages) ──
    Text on the solid color is --cat-on-color (set by renderers via
@@ -1193,8 +1194,16 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
    clearly) and as the solid header band at full strength; the body
    background stays transparent so the bucket cards float inside
    the outline. Header text uses --cat-on-color like bucket headers. */
-.section-block{border:2px solid var(--cat-color);border-radius:12px;padding:10px;background:transparent;display:flex;flex-direction:column;gap:10px;min-width:0;}
-.section-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;background:var(--cat-color);color:var(--cat-on-color,#fff);margin:-10px -10px 0;padding:10px 14px;border-radius:10px 10px 0 0;}
+/* The top border stays: with border-top:none the header alone cannot
+   cover the strip between the padding-box corner and the border-box
+   corner, and the pale body shows through there as a tiny gap. The
+   5px top border (same color as the header) closes it. */
+.section-block{border:5px solid var(--cat-color);border-radius:11px;padding:10px;background:color-mix(in srgb, var(--cat-color) 6%, var(--surface));display:flex;flex-direction:column;gap:10px;min-width:0;}
+/* The header's top radius is the INNER corner radius (11px outer
+   minus the 5px border = 6px), not the outer 11px: with 11px the
+   header's arc sits outside the padding-box corner and the pale body
+   shows through a tiny crescent between the two arcs. */
+.section-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;background:var(--cat-color);color:var(--cat-on-color,#fff);margin:-10px -10px 0;padding:10px 14px;border-radius:6px 6px 0 0;}
 .section-header-left{display:flex;align-items:baseline;gap:8px;min-width:0;}
 .section-name{font-size:1rem;font-weight:700;color:var(--cat-on-color,#fff);margin:0;display:flex;align-items:center;gap:6px;}
 .section-name svg{color:var(--cat-on-color,#fff);flex:none;}
@@ -1757,7 +1766,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 
 .welcome-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
 .welcome-section{border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:14px;background:var(--surface);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);display:flex;flex-direction:column;max-height:min(100vh, max(750px, 50vh));overflow:hidden;}
-.welcome-section[style*="--cat-color"]{background:color-mix(in srgb, var(--cat-color) 6%, var(--surface));}
+.welcome-section[style*="--cat-color"]{border-top:none;border-radius:11px;background:color-mix(in srgb, var(--cat-color) 6%, var(--surface));}
 .welcome-section[style*="--cat-color"]:hover{box-shadow:0 4px 20px color-mix(in srgb, var(--cat-color) 12%, transparent),0 0 0 1px color-mix(in srgb, var(--cat-color) 30%, var(--border));}
 .welcome-grid .welcome-section{margin-bottom:0;}
 .welcome-section-header{display:flex;align-items:center;gap:8px;font-weight:600;font-size:0.95rem;margin-bottom:12px;flex-shrink:0;}
@@ -2383,16 +2392,17 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
   display: flex;
   align-items: flex-start;
   gap: 5px;
-  font-size: 0.68rem;
+  font-size: 0.85rem;
   line-height: 1.3;
   padding: 1px 6px;
-  border-radius: 6px;
+  border-radius: 2px;
   background: color-mix(in srgb, var(--cat-color, var(--accent)) 14%, transparent);
   overflow: hidden;
   min-width: 0;
 }
 .cal-chip-overdue { outline: 1px dashed var(--red); outline-offset: -1px; }
-.cal-chip > i, .cal-chip > img { margin-top: 4px; }
+.cal-chip > i { margin-top: 4px; }
+.cal-chip > img { align-self: center; }
 .cal-chip > span {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -2406,15 +2416,11 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
   height: 6px;
   background: var(--cat-color, var(--accent));
   flex: none;
+  border-radius: 1px;
 }
-/* Type shape language: todo = square, habit = pill/circle, birthday = soft rect, event = mid rect */
-.cal-chip.cal-todo { border-radius: 4px; }
-.cal-chip.cal-todo > i { border-radius: 2px; }
-.cal-chip.cal-habit { border-radius: 999px; }
-.cal-chip.cal-habit > i { border-radius: 50%; }
-.cal-chip.cal-birthday { border-radius: 8px; }
-.cal-chip.cal-event { border-radius: 6px; }
-.cal-chip.cal-event > i { border-radius: 3px; }
+/* All calendar chips share one 2px corner — the per-type shapes (todo
+   square, habit pill, birthday/event rects) were flattened to a uniform
+   2px radius; type is told by colour alone now. */
 .cal-more {
   font-size: 0.66rem;
   color: var(--muted);
@@ -2488,7 +2494,7 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: 2px;
   background: var(--surface);
   border: 1px solid transparent;
   color: var(--text);

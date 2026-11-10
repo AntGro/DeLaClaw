@@ -948,16 +948,23 @@ test('Cancelled inline edit skips its refresh when a newer edit has started', ()
   // the first edit, whose deferred refresh is only scheduled after its
   // fade-out — so the upfront clearTimeout in inlineEditText cannot
   // cancel it, and the stale refresh would re-render and destroy the
-  // new edit. finishEdit must therefore skip the refresh when a newer
-  // edit is active.
+  // new edit. finishEdit must therefore refresh only if its generation
+  // is still the latest: _activeInlineEdit alone is not enough, since
+  // it is cleared as soon as the newer edit starts finishing.
   const itemUtils = jsFiles['item-utils.js'];
+  assert(itemUtils.includes('let _inlineEditGeneration = 0;'),
+    'item-utils.js must track a monotonic inline-edit generation');
+  assert(itemUtils.includes('const myGeneration = ++_inlineEditGeneration;'),
+    'item-utils.js must capture each edit\'s generation at start');
   const restoreIdx = itemUtils.indexOf('root.replaceWith(spanEl);');
   assert(restoreIdx !== -1, 'item-utils.js: finishEdit must restore the span with root.replaceWith(spanEl)');
   const deferIdx = itemUtils.indexOf('if (deferRefresh) {', restoreIdx);
   assert(deferIdx !== -1, 'item-utils.js: finishEdit must have a deferred-refresh branch');
   const between = itemUtils.slice(restoreIdx, deferIdx);
-  assert(between.includes('if (_activeInlineEdit) return;'),
-    'item-utils.js: finishEdit must return early when _activeInlineEdit is set, so a stale refresh never re-renders over a newer edit');
+  assert(between.includes('if (myGeneration !== _inlineEditGeneration) return;'),
+    'item-utils.js: finishEdit must return early when a newer edit has started, so a stale refresh never re-renders over it');
+  assert(itemUtils.includes('if (myGeneration === _inlineEditGeneration) refreshFn();'),
+    'item-utils.js: the deferred refresh timer must re-check the generation when it fires');
 });
 
 // ===================================================================

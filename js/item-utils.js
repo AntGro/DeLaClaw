@@ -709,10 +709,20 @@ export function scrollToAndHighlight(element, color, durationMs = 1500) {
 let _activeInlineEdit = null;
 let _inlineEditRefreshTimer = null;
 let _datePickerJustClosed = false;
+// Monotonic edit generation: incremented on every inlineEditText()
+// start. A finishing edit refreshes only if its generation is still
+// the latest — a newer edit may have started (and even finished)
+// while this one faded out, and a stale refresh must not pre-empt
+// or duplicate the newer edit's own refresh.
+let _inlineEditGeneration = 0;
 
 export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refreshFn, extraEl, onStart, onFinish, collectExtra, multiline, containerEl }) {
   if (state.readOnlyMode) return; // read-only: no inline editing
   if (spanEl.dataset.editing) return;
+
+  // Capture this edit's generation (see finishEdit): a refresh is
+  // stale once any newer edit has started.
+  const myGeneration = ++_inlineEditGeneration;
 
   // Cancel any other active inline edit first (discard + restore span)
   if (_activeInlineEdit) {
@@ -800,18 +810,18 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     spanEl.textContent = save && trimmed ? trimmed : originalText;
     root.replaceWith(spanEl);
 
-    // A newer edit may have started while this one faded out (e.g.
-    // double-clicking a second item right after the first): its own
-    // finish will refresh, so this stale refresh must not run — it
-    // would re-render and destroy the new edit. The upfront
-    // clearTimeout in inlineEditText cannot cover this case, because
-    // the deferred timer is only created below, after the fade-out.
-    if (_activeInlineEdit) return;
+    // Refresh only if this is still the newest edit: a newer edit may
+    // have started — and even finished — while this one faded out, and
+    // the upfront clearTimeout cannot cover a timer that is only
+    // created below, after the fade-out. The newer edit's own finish
+    // refreshes instead. (_activeInlineEdit is not enough here: it is
+    // cleared as soon as the newer edit starts finishing.)
+    if (myGeneration !== _inlineEditGeneration) return;
     if (deferRefresh) {
       // Defer refresh — will be cancelled if another edit starts soon
       _inlineEditRefreshTimer = setTimeout(() => {
         _inlineEditRefreshTimer = null;
-        refreshFn();
+        if (myGeneration === _inlineEditGeneration) refreshFn();
       }, 350);
     } else {
       await refreshFn();

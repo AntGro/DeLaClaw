@@ -672,13 +672,13 @@ test('welcome quick-add rows fit narrow buckets', () => {
   assert(button[1].includes('flex-shrink:0'), '.welcome-quick-add buttons must never shrink: the + button is the first thing cut when the row overflows');
 });
 
-// Below ~780px a two-column card is too narrow for the quick-add to
+// Below ~854px a two-column card is too narrow for the quick-add to
 // fit on one line, so the grid must go single-column there instead of
 // wrapping the quick-add row.
 test('welcome grid goes single-column before the quick-add would wrap', () => {
   const mq = styleCss.match(/@media\(max-width:(\d+)px\)\{\s*\.welcome-grid\{grid-template-columns:1fr;\}/);
   assert(mq, 'Missing a single-column media query for .welcome-grid');
-  assert(Number(mq[1]) >= 780, `.welcome-grid must go single-column at 780px or above (measured: the quick-add starts wrapping at 770px and fits exactly at 780px); got ${mq[1]}px`);
+  assert(Number(mq[1]) >= 854, `.welcome-grid must go single-column at 854px or above (measured: the quick-add starts wrapping at 852px and fits exactly at 854px); got ${mq[1]}px`);
 });
 
 // Collapsed row actions must not lay out: max-width:0 alone still lays

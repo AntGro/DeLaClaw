@@ -1866,11 +1866,12 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
   .welcome-section .habit-info,.welcome-section .todo-text{min-width:0;overflow:hidden;text-overflow:ellipsis;}
 }
 
-/* Below ~780px a two-column card is too narrow for the quick-add to
-   fit on one line (measured: it starts wrapping at 770px, fitting
-   exactly at 780px), so the grid goes single-column instead of
-   wrapping the quick-add row. */
-@media(max-width:800px){
+/* Below ~854px a two-column card is too narrow for the quick-add to
+   fit on one line (measured: the + button drops to a second row at
+   852px, fitting exactly at 854px — the calendar button added in
+   v2.32.78 moved it up from 780px), so the grid goes single-column
+   instead of wrapping the quick-add row. */
+@media(max-width:880px){
   .welcome-grid{grid-template-columns:1fr;}
 }
 

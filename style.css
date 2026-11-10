@@ -2798,7 +2798,9 @@ button.cal-row { cursor: pointer; }
 .modal-wide.cal-day-modal { width: 1200px; max-width: 94vw; }
 .cal-day-sections {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  /* Columns never narrower than 360px: below ~840px viewport the grid
+     drops to a single column instead of squeezing two narrow ones. */
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   gap: 12px;
   align-items: start;
 }

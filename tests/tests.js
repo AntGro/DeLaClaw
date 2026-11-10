@@ -2401,6 +2401,8 @@ test('Day modal is wide enough for three columns, and inline edits size to conte
   const css = fs.readFileSync(path.resolve(__dirname, '..', 'style.css'), 'utf8');
   assert(css.includes('.modal-wide.cal-day-modal { width: 1200px; max-width: 94vw; }'),
     'the day modal must be 1200px wide on desktop so its three columns are not squeezed');
+  assert(css.includes('grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));'),
+    'day-modal columns must be at least 360px wide, so narrow viewports drop to a single column instead of two squeezed ones');
   assert(css.includes('.modal.modal-wide textarea:not(.task-edit-input){min-height:200px;resize:none;}'),
     'the wide-modal textarea floor must not apply to inline-edit fields, which size to their content');
   assert(css.includes('.modal textarea:not(.task-edit-input){width:100%;'),

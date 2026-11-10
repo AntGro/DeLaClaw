@@ -2522,6 +2522,12 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
 }
 button.cal-row { cursor: pointer; }
 .cal-row:hover { border-color: var(--accent-dim); background: var(--surface2); }
+/* While a habit/todo row is being edited inline, its Done button is
+   hidden — marking done mid-edit makes no sense, and the button would
+   sit beside the tall edit form. The wrapper is removed when the edit
+   ends, so the button comes back on its own. */
+.cal-row:has(.todo-edit-wrapper) .habit-done-btn,
+.cal-row:has(.todo-edit-wrapper) .todo-done-btn { display: none; }
 .cal-row-main {
   flex: 1;
   min-width: 0;

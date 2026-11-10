@@ -2407,6 +2407,10 @@ test('Day modal is wide enough for three columns, and inline edits size to conte
     'the wide-modal textarea floor must not apply to inline-edit fields, which size to their content');
   assert(css.includes('.modal textarea:not(.task-edit-input){width:100%;'),
     'the generic modal textarea floor (80px) must not apply to inline-edit fields either');
+  assert(css.includes('.cal-row:has(.todo-edit-wrapper) .habit-done-btn,'),
+    'a day row being edited inline must hide its habit Done button');
+  assert(css.includes('.cal-row:has(.todo-edit-wrapper) .todo-done-btn { display: none; }'),
+    'a day row being edited inline must hide its todo Done button');
 });
 
 

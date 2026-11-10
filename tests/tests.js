@@ -681,6 +681,22 @@ test('welcome grid goes single-column before the quick-add would wrap', () => {
   assert(Number(mq[1]) >= 854, `.welcome-grid must go single-column at 854px or above (measured: the quick-add starts wrapping at 852px and fits exactly at 854px); got ${mq[1]}px`);
 });
 
+// The quick-add row must also fit on one line in single-column mode
+// at phone widths: flex line collection uses the hypothetical sizes
+// (select cap + input floor), so at 393px the + button wrapped even
+// after the grid went single-column — 120 + 120 + 98 buttons + 24
+// gaps = 362px against a 347px row. The ≤600px overrides must bring
+// that total inside a 360px viewport's row (360 - 24 container - 20
+// section padding = 316px).
+test('welcome quick-add fits on one line at phone widths', () => {
+  const selectCaps = [...styleCss.matchAll(/\.welcome-quick-cat-select\{[^}]*max-width:(\d+)px/g)].map(m => Number(m[1]));
+  const inputFloors = [...styleCss.matchAll(/\.welcome-quick-add input\{[^}]*min-width:(\d+)px/g)].map(m => Number(m[1]));
+  assert(selectCaps.length > 0, 'Missing .welcome-quick-cat-select max-width');
+  assert(inputFloors.length > 0, 'Missing .welcome-quick-add input min-width');
+  const total = Math.min(...selectCaps) + Math.min(...inputFloors) + 98 + 24;
+  assert(total <= 316, `Welcome quick-add hypothetical total must fit a 360px row (316px): select cap ${Math.min(...selectCaps)} + input floor ${Math.min(...inputFloors)} + 98 buttons + 24 gaps = ${total}px`);
+});
+
 // Collapsed row actions must not lay out: max-width:0 alone still lays
 // their buttons out past the viewport edge on every row (measured 244
 // elements past 390px), which iOS Safari pans to. display:none keeps

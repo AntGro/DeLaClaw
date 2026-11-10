@@ -2413,6 +2413,36 @@ test('Day modal is wide enough for three columns, and inline edits size to conte
     'a day row being edited inline must hide its todo Done button');
 });
 
+test('TODO quick-add supports a deadline and a 4000-character cap', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const stateSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'state.js'), 'utf8');
+  assert(stateSrc.includes('export const TODO_MAX_LEN = 4000;'),
+    'the TODO name cap must be 4000 characters');
+  const todosSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'todos.js'), 'utf8');
+  assert(!todosSrc.includes('maxlength="2000"') && !todosSrc.includes('maxLength: 2000'),
+    'no TODO name field may still cap at 2000');
+  assert(todosSrc.includes('maxlength="${TODO_MAX_LEN}"'),
+    'the bucket quick-add must cap the name at TODO_MAX_LEN');
+  assert(todosSrc.includes('maxLength: TODO_MAX_LEN'),
+    'the TODO inline edit must cap the name at TODO_MAX_LEN');
+  assert(todosSrc.includes('todo-add-deadline-btn') && todosSrc.includes('data-action="open-quick-add-deadline-picker"'),
+    'the bucket quick-add must offer a deadline button');
+  assert(todosSrc.includes('inputEl.dataset.deadline') && todosSrc.includes('newTodo.due_date = deadline'),
+    'adding a TODO must carry the quick-add deadline into due_date');
+  const welcomeSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'welcome.js'), 'utf8');
+  assert(welcomeSrc.includes('maxlength="${TODO_MAX_LEN}"'),
+    'the Welcome quick-add must cap the name at TODO_MAX_LEN');
+  assert(welcomeSrc.includes('todo-add-deadline-btn'),
+    'the Welcome quick-add must offer a deadline button');
+  const css = fs.readFileSync(path.resolve(__dirname, '..', 'style.css'), 'utf8');
+  assert(css.includes('.deadline-picker{position:fixed;'),
+    'the deadline picker popover must be styled');
+  const delSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'delegation.js'), 'utf8');
+  assert(delSrc.includes("case 'add-todo-to-category': if (window.updateTodoCharCounter)"),
+    'typing in the bucket quick-add must update the character counter');
+});
+
 
 test('Drag clones are globally tagged and cleaned before drag-enabled re-renders', () => {
   const itemUtils = jsFiles['item-utils.js'];

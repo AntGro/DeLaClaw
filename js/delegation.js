@@ -167,6 +167,7 @@
       case 'toggle-done-todos': callWindow('toggleDoneTodos', [el.dataset.catId || getCat(el)]); break;
       case 'open-edit-category-modal': callWindow('openEditCategoryModal', [getCat(el)]); break;
       case 'open-quick-add-priority-picker': callWindow('openQuickAddPriorityPicker', [el, e]); break;
+      case 'open-quick-add-deadline-picker': callWindow('openQuickAddDeadlinePicker', [el, e]); break;
       case 'add-todo-to-category': break; // textarea only — creation handled on Enter keydown, not click
       case 'add-todo-from-add-row': { var inp = el.closest('.todo-cat-add')?.querySelector('.todo-cat-input'); if (inp) callWindow('addTodoToCategory', [inp]); } break;
       case 'share-todo-from-add': callWindow('shareTodoFromAdd', [el]); break;
@@ -508,6 +509,7 @@
       case 'update-scene-preview': callWindow('updateScenePreview', [el]); break;
       case 'event-field': callWindow('updateEventSummary', [el.dataset.prefix]); break;
       case 'birthday-field': callWindow('updateBirthdaySummary', [el.dataset.prefix]); break;
+      case 'add-todo-to-category': if (window.updateTodoCharCounter) window.updateTodoCharCounter(el); break;
       default: break;
     }
   }

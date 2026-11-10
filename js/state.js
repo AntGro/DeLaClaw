@@ -48,7 +48,7 @@ export const COMING_SOON = { groups: true, agents: true };
 export const STAY_CONNECTED_KEY = 'claw_cc_stay_connected';
 export const MAX_TEXT_LEN = 5000;
 export const MAX_META_DISPLAY = 500;
-export const TODO_MAX_LEN = 2000;
+export const TODO_MAX_LEN = 4000;
 export const LIST_NOTE_MAX_LEN = 1000000;
 
 // ── Default category palette ──

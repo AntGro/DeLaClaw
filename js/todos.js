@@ -621,8 +621,9 @@ function renderCategoryCard(catId) {
   const headerIcon = isSharedDeck ? `${lucideIcon('users', 16)} ` : '';
 
   const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
-      <textarea placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(catId)}" data-priority="normal" data-action="add-todo-to-category" rows="1" style="resize:none;overflow:hidden;"></textarea>
+      <textarea placeholder="${t('todos.add_todo_placeholder')}" maxlength="${TODO_MAX_LEN}" class="todo-cat-input" data-category="${esc(catId)}" data-priority="normal" data-action="add-todo-to-category" rows="1" style="resize:none;overflow:hidden;"></textarea>
       <button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('circle-off', 16, 'var(--muted)')}</button>
+      <button class="todo-add-deadline-btn" data-action="open-quick-add-deadline-picker" title="${esc(t('todos.set_deadline'))}">${lucideIcon('calendar', 16, 'var(--muted)')}</button>
       <button data-action="add-todo-from-add-row">${lucideIcon('plus', 16)}</button>
       ${state.sharing ? `<button class="sharing-share-btn" data-action="share-todo-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
     </div>
@@ -801,6 +802,7 @@ function openQuickAddPriorityPicker(btn, event) {
   const existing = document.getElementById('priorityPickerPopover');
   if (existing) { closePriorityPicker(); return; }
   closePriorityPicker();
+  closeDeadlinePicker();
   _lastQuickAddPrioBtn = btn;
   const rect = btn.getBoundingClientRect();
   const container = btn.closest('.todo-cat-add, .welcome-quick-add');
@@ -852,6 +854,86 @@ function setQuickAddPriority(optionEl, level) {
 }
 
 let _lastQuickAddPrioBtn = null;
+
+// ── Quick-add deadline picker ──────────────────────────────────────
+// Mirrors the priority picker: a popover anchored to the calendar
+// button in the quick-add row. The chosen date lives on the input's
+// dataset.deadline until the TODO is added (then it is reset, like
+// the priority). Only one quick-add popover is open at a time.
+let _lastQuickAddDeadlineBtn = null;
+let _deadlinePickerDocClick = null;
+let _deadlinePickerKeydown = null;
+
+function closeDeadlinePicker() {
+  const el = document.getElementById('deadlinePickerPopover');
+  if (el) el.remove();
+  if (_deadlinePickerDocClick) { document.removeEventListener('click', _deadlinePickerDocClick); _deadlinePickerDocClick = null; }
+  if (_deadlinePickerKeydown) { document.removeEventListener('keydown', _deadlinePickerKeydown); _deadlinePickerKeydown = null; }
+  window.removeEventListener('scroll', closeDeadlinePicker, { capture: true });
+}
+
+function updateQuickAddDeadlineBtn(btn, dateStr) {
+  btn.innerHTML = lucideIcon('calendar', 16, dateStr ? 'var(--accent)' : 'var(--muted)');
+  btn.title = dateStr ? `${t('todos.deadline')}: ${dateStr}` : t('todos.set_deadline');
+  btn.classList.toggle('has-deadline', !!dateStr);
+}
+
+function setQuickAddDeadline(dateStr) {
+  if (!_lastQuickAddDeadlineBtn) return;
+  const container = _lastQuickAddDeadlineBtn.closest('.todo-cat-add, .welcome-quick-add');
+  const inputEl = container?.querySelector('.todo-cat-input');
+  if (inputEl) {
+    if (dateStr) inputEl.dataset.deadline = dateStr;
+    else delete inputEl.dataset.deadline;
+  }
+  updateQuickAddDeadlineBtn(_lastQuickAddDeadlineBtn, dateStr);
+}
+
+function openQuickAddDeadlinePicker(btn, event) {
+  event.stopPropagation();
+  const existing = document.getElementById('deadlinePickerPopover');
+  if (existing) { closeDeadlinePicker(); return; }
+  closeDeadlinePicker();
+  closePriorityPicker();
+  _lastQuickAddDeadlineBtn = btn;
+  const rect = btn.getBoundingClientRect();
+  const container = btn.closest('.todo-cat-add, .welcome-quick-add');
+  const inputEl = container?.querySelector('.todo-cat-input');
+  const current = inputEl?.dataset.deadline || '';
+
+  const picker = document.createElement('div');
+  picker.className = 'deadline-picker';
+  picker.id = 'deadlinePickerPopover';
+  picker.innerHTML = `<input type="date" id="quickAddDeadlineInput" value="${esc(current)}" aria-label="${esc(t('todos.deadline'))}">`
+    + (current ? `<button type="button" class="deadline-picker-clear">${esc(t('todos.clear_deadline'))}</button>` : '');
+  document.body.appendChild(picker);
+
+  const dateInput = picker.querySelector('#quickAddDeadlineInput');
+  dateInput.addEventListener('change', () => { setQuickAddDeadline(dateInput.value); closeDeadlinePicker(); });
+  const clearBtn = picker.querySelector('.deadline-picker-clear');
+  if (clearBtn) clearBtn.addEventListener('click', () => { setQuickAddDeadline(''); closeDeadlinePicker(); });
+
+  const ph = picker.offsetHeight;
+  let top = rect.bottom + 4;
+  let left = rect.left;
+  if (top + ph > window.innerHeight - 8) top = rect.top - ph - 4;
+  if (left + picker.offsetWidth > window.innerWidth - 8) left = window.innerWidth - picker.offsetWidth - 8;
+  picker.style.top = top + 'px';
+  picker.style.left = left + 'px';
+
+  // Outside clicks close — but clicks inside the picker (on the date
+  // input) must not, or the native date popup could never be used.
+  _deadlinePickerDocClick = (e) => {
+    const p = document.getElementById('deadlinePickerPopover');
+    if (p && !p.contains(e.target) && !_lastQuickAddDeadlineBtn?.contains(e.target)) closeDeadlinePicker();
+  };
+  _deadlinePickerKeydown = (e) => { if (e.key === 'Escape') closeDeadlinePicker(); };
+  setTimeout(() => {
+    document.addEventListener('click', _deadlinePickerDocClick);
+    document.addEventListener('keydown', _deadlinePickerKeydown);
+    window.addEventListener('scroll', closeDeadlinePicker, { once: true, capture: true });
+  }, 0);
+}
 
 async function setTodoPriority(id, level) {
   closePriorityPicker();
@@ -914,18 +996,24 @@ async function addTodoToCategory(inputEl) {
   const catId = inputEl.dataset.category || _defaultCatId;
   const cat = _todoCatMap.get(catId);
   const priority = inputEl.dataset.priority || 'normal';
+  const deadline = inputEl.dataset.deadline || '';
 
   const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catId);
   const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
 
-  const { error } = await state.db.from('todos').insert({ text, priority, category: cat?.name ?? '', category_id: catId, sort_order: minOrder });
+  const newTodo = { text, priority, category: cat?.name ?? '', category_id: catId, sort_order: minOrder };
+  if (deadline) newTodo.due_date = deadline;
+  const { error } = await state.db.from('todos').insert(newTodo);
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
   inputEl.value = '';
   if (inputEl.tagName === 'TEXTAREA') { inputEl.style.height = ''; }
-  // Reset priority to medium after adding
+  // Reset priority + deadline after adding
   inputEl.dataset.priority = 'normal';
+  delete inputEl.dataset.deadline;
   const prioBtn = inputEl.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.todo-add-priority-btn');
   if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'normal');
+  const dlBtn = inputEl.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.todo-add-deadline-btn');
+  if (dlBtn) updateQuickAddDeadlineBtn(dlBtn, '');
   showToast(t('toast.added'), 'success');
   await refreshTodos();
 }
@@ -1159,7 +1247,7 @@ async function editTodoInline(id, itemEl, opts = {}) {
   extras.appendChild(catRow);
 
   inlineEditText(textEl, todo.text, {
-    maxLength: 2000,
+    maxLength: TODO_MAX_LEN,
     extraEl: extras,
     containerEl: opts.containerEl || itemEl,
     collectExtra: () => {
@@ -2313,6 +2401,9 @@ window.deleteAllDoneTodos = deleteAllDoneTodos;
 window.openPriorityPicker = openPriorityPicker;
 window.openQuickAddPriorityPicker = openQuickAddPriorityPicker;
 window.setQuickAddPriority = setQuickAddPriority;
+window.openQuickAddDeadlinePicker = openQuickAddDeadlinePicker;
+window.setQuickAddDeadline = setQuickAddDeadline;
+window.closeDeadlinePicker = closeDeadlinePicker;
 window.updateQuickAddPriorityBtn = updateQuickAddPriorityBtn;
 window.setTodoPriority = setTodoPriority;
 window.closePriorityPicker = closePriorityPicker;

@@ -797,7 +797,11 @@ body.paused-mode:has(.schema-banner) .schema-banner{top:var(--paused-banner-h,36
 
 /* ===== WIDE MODAL VARIANT (for text-heavy content) ===== */
 .modal-wide{max-width:90vw;width:680px;min-width:440px;overflow-y:auto;position:relative;}
-.modal.modal-wide textarea{min-height:200px;resize:none;}
+/* The 200px floor is for long-form text in wide modals (flashcard text
+   editor). Inline-edit name fields (.task-edit-input) size themselves
+   to their content via autoSize() and must not inherit it — inside the
+   day modal it forced a one-line habit name into a 200px box. */
+.modal.modal-wide textarea:not(.task-edit-input){min-height:200px;resize:none;}
 .textarea-resize-wrap{position:relative;}
 .textarea-resize-grip{position:absolute;bottom:0;right:0;width:18px;height:18px;cursor:nwse-resize;z-index:5;}
 .textarea-resize-grip::before,.textarea-resize-grip::after{content:'';position:absolute;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);opacity:0.4;pointer-events:none;}
@@ -825,7 +829,7 @@ body.paused-mode:has(.schema-banner) .schema-banner{top:var(--paused-banner-h,36
 .modal label{display:block;font-size:0.78rem;color:var(--muted);margin-bottom:4px;margin-top:10px;}
 .modal input{width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.86rem;outline:none;transition:border-color 0.2s,box-shadow 0.2s;}
 .modal input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(100,108,255,0.1);}
-.modal textarea{width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.86rem;font-family:inherit;resize:vertical;outline:none;line-height:1.5;min-height:80px;transition:border-color 0.2s,box-shadow 0.2s;}
+.modal textarea:not(.task-edit-input){width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.86rem;font-family:inherit;resize:vertical;outline:none;line-height:1.5;min-height:80px;transition:border-color 0.2s,box-shadow 0.2s;}
 .modal textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(100,108,255,0.1);}
 .modal select{width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.86rem;outline:none;cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px;padding-right:32px;}
 .modal select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(100,108,255,0.1);}
@@ -2791,7 +2795,7 @@ button.cal-row { cursor: pointer; }
 .calendar-add-menu button[data-action="toggle-calendar-filter"]:not(.active) { opacity: 0.55; }
 
 /* Calendar: day panel sections reuse the welcome bucket look */
-.modal-wide.cal-day-modal { width: 980px; max-width: 94vw; }
+.modal-wide.cal-day-modal { width: 1200px; max-width: 94vw; }
 .cal-day-sections {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));

@@ -2395,6 +2395,18 @@ test('Item drags show a grabbing cursor while armed', () => {
     'item drags must toggle the item-drag-active body class on activation and on finish');
 });
 
+test('Day modal is wide enough for three columns, and inline edits size to content', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const css = fs.readFileSync(path.resolve(__dirname, '..', 'style.css'), 'utf8');
+  assert(css.includes('.modal-wide.cal-day-modal { width: 1200px; max-width: 94vw; }'),
+    'the day modal must be 1200px wide on desktop so its three columns are not squeezed');
+  assert(css.includes('.modal.modal-wide textarea:not(.task-edit-input){min-height:200px;resize:none;}'),
+    'the wide-modal textarea floor must not apply to inline-edit fields, which size to their content');
+  assert(css.includes('.modal textarea:not(.task-edit-input){width:100%;'),
+    'the generic modal textarea floor (80px) must not apply to inline-edit fields either');
+});
+
 
 test('Drag clones are globally tagged and cleaned before drag-enabled re-renders', () => {
   const itemUtils = jsFiles['item-utils.js'];

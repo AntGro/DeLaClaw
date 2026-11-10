@@ -800,6 +800,13 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     spanEl.textContent = save && trimmed ? trimmed : originalText;
     root.replaceWith(spanEl);
 
+    // A newer edit may have started while this one faded out (e.g.
+    // double-clicking a second item right after the first): its own
+    // finish will refresh, so this stale refresh must not run — it
+    // would re-render and destroy the new edit. The upfront
+    // clearTimeout in inlineEditText cannot cover this case, because
+    // the deferred timer is only created below, after the fade-out.
+    if (_activeInlineEdit) return;
     if (deferRefresh) {
       // Defer refresh — will be cancelled if another edit starts soon
       _inlineEditRefreshTimer = setTimeout(() => {

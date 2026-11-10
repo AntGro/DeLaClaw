@@ -941,6 +941,26 @@ test('Inline edit textareas set flex:none to prevent column-flex height bug', ()
 });
 
 // ===================================================================
+// 22b. A cancelled inline edit must not refresh over a newer edit
+// ===================================================================
+test('Cancelled inline edit skips its refresh when a newer edit has started', () => {
+  // Double-clicking a second item while a first edit is open cancels
+  // the first edit, whose deferred refresh is only scheduled after its
+  // fade-out — so the upfront clearTimeout in inlineEditText cannot
+  // cancel it, and the stale refresh would re-render and destroy the
+  // new edit. finishEdit must therefore skip the refresh when a newer
+  // edit is active.
+  const itemUtils = jsFiles['item-utils.js'];
+  const restoreIdx = itemUtils.indexOf('root.replaceWith(spanEl);');
+  assert(restoreIdx !== -1, 'item-utils.js: finishEdit must restore the span with root.replaceWith(spanEl)');
+  const deferIdx = itemUtils.indexOf('if (deferRefresh) {', restoreIdx);
+  assert(deferIdx !== -1, 'item-utils.js: finishEdit must have a deferred-refresh branch');
+  const between = itemUtils.slice(restoreIdx, deferIdx);
+  assert(between.includes('if (_activeInlineEdit) return;'),
+    'item-utils.js: finishEdit must return early when _activeInlineEdit is set, so a stale refresh never re-renders over a newer edit');
+});
+
+// ===================================================================
 // 23. Welcome habit dblclick calls canonical window.editHabitInline (not a local duplicate)
 // ===================================================================
 test('Welcome habit dblclick calls canonical window.editHabitInline', () => {

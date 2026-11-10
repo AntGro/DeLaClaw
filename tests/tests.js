@@ -2381,6 +2381,20 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
   }
 });
 
+test('Item drags show a grabbing cursor while armed', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const css = fs.readFileSync(path.resolve(__dirname, '..', 'style.css'), 'utf8');
+  assert(css.includes('.item-dragging{cursor:grabbing;}'),
+    'the dragged item must read grabbing once the long-press arms the drag');
+  assert(css.includes('body.item-drag-active,body.item-drag-active *{cursor:grabbing;}'),
+    'the cursor must stay grabbing everywhere while an item drag runs, not just over the dragged item');
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'item-utils.js'), 'utf8');
+  assert(src.includes("document.body.classList.add('item-drag-active')")
+    && src.includes("document.body.classList.remove('item-drag-active')"),
+    'item drags must toggle the item-drag-active body class on activation and on finish');
+});
+
 
 test('Drag clones are globally tagged and cleaned before drag-enabled re-renders', () => {
   const itemUtils = jsFiles['item-utils.js'];

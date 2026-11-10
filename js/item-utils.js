@@ -45,6 +45,7 @@ function removeDragArtifacts() {
   document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
   document.body.style.userSelect = '';
   document.body.style.webkitUserSelect = '';
+  document.body.classList.remove('item-drag-active');
   setDragging(false);
 }
 
@@ -310,6 +311,7 @@ export function initItemDragDrop(container, {
 
       dragState = null;
       setDragging(false);
+      document.body.classList.remove('item-drag-active');
       cleanup(true);
 
       if (changed) {
@@ -355,6 +357,7 @@ export function initItemDragDrop(container, {
         activated = true;
         e.preventDefault();
         setDragging(true);
+        document.body.classList.add('item-drag-active');
         document.body.style.userSelect = 'none';
         document.body.style.webkitUserSelect = 'none';
 

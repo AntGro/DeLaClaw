@@ -575,6 +575,10 @@ input,select,button{font-family:inherit;}
 .bucket-item.dragging{opacity:0.4;border:1px dashed var(--accent);}
 .bucket-item.drag-over{border-top:2px solid var(--accent);}
 .bucket-item.item-dragging{box-shadow:0 4px 16px rgba(0,0,0,0.25);background:var(--surface);border-radius:8px;}
+/* The dragged item itself reads grabbing once the long-press arms the
+   drag — generic class, so it covers every item type (todo, task,
+   habit, list, flashcard draft), not just .bucket-item rows. */
+.item-dragging{cursor:grabbing;}
 .item-drag-placeholder{border-radius:8px;background:color-mix(in srgb, var(--accent) 8%, transparent);transition:height 0.15s ease;flex-shrink:0;}
 .item-removing{opacity:0;padding-top:0 !important;padding-bottom:0 !important;margin-top:0 !important;margin-bottom:0 !important;border-top-width:0 !important;border-bottom-width:0 !important;transition:opacity 0.15s ease,height 0.2s ease 0.05s,padding 0.2s ease 0.05s,margin 0.2s ease 0.05s,border-width 0.2s ease 0.05s;pointer-events:none;}
 .bucket-item-actions{display:flex;gap:4px;opacity:0;transition:opacity 0.15s;}
@@ -1232,6 +1236,10 @@ body.chip-drag-active .section-chips-collapsed,.section-chips-collapsed.section-
    other chips — so it is clear dragging is ready. Removed with the
    body class when the drag finishes. */
 body.chip-drag-active,body.chip-drag-active *{cursor:grabbing;}
+/* Same for item drags (reorder within a bucket, or move to another
+   section): grabbing everywhere while the drag runs, so the cursor
+   never flicks back over drop targets or other items. */
+body.item-drag-active,body.item-drag-active *{cursor:grabbing;}
 .section-level{display:grid;gap:14px;justify-content:center;align-items:start;}
 .section-level>.empty-msg{grid-column:1/-1;text-align:center;}
 

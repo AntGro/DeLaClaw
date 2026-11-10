@@ -909,7 +909,22 @@ function openQuickAddDeadlinePicker(btn, event) {
   document.body.appendChild(picker);
 
   const dateInput = picker.querySelector('#quickAddDeadlineInput');
-  dateInput.addEventListener('change', () => { setQuickAddDeadline(dateInput.value); closeDeadlinePicker(); });
+  // Chrome fires `change` on a date input on the very first keystroke
+  // that yields a complete value — typing "2" in the year of
+  // 2026-11-11 commits "0002-11-11" at once — so closing on every
+  // `change` kills the popover before the year can be fully typed.
+  // Only a change that did not just follow an editing keystroke came
+  // from the native calendar popup: that one closes the popover; a
+  // typed change just commits the value and leaves the popover open.
+  let lastEditKeydownAt = 0;
+  dateInput.addEventListener('keydown', (e) => {
+    if (/^[0-9]$/.test(e.key) || e.key === 'Backspace' || e.key === 'Delete') lastEditKeydownAt = Date.now();
+  });
+  dateInput.addEventListener('change', () => {
+    const typed = Date.now() - lastEditKeydownAt < 200;
+    setQuickAddDeadline(dateInput.value);
+    if (!typed) closeDeadlinePicker();
+  });
   const clearBtn = picker.querySelector('.deadline-picker-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => { setQuickAddDeadline(''); closeDeadlinePicker(); });
 

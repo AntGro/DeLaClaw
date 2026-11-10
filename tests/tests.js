@@ -2428,6 +2428,8 @@ test('TODO quick-add supports a deadline and a 4000-character cap', () => {
     'the TODO inline edit must cap the name at TODO_MAX_LEN');
   assert(todosSrc.includes('todo-add-deadline-btn') && todosSrc.includes('data-action="open-quick-add-deadline-picker"'),
     'the bucket quick-add must offer a deadline button');
+  assert(todosSrc.includes('lastEditKeydownAt') && todosSrc.includes('if (!typed) closeDeadlinePicker();'),
+    'the deadline picker must not close on a typed change: Chrome fires change on the first keystroke that yields a complete value (typing "2" in the year commits 0002), so only a change without a just-prior editing keystroke (a calendar-popup pick) may close it');
   assert(todosSrc.includes('inputEl.dataset.deadline') && todosSrc.includes('newTodo.due_date = deadline'),
     'adding a TODO must carry the quick-add deadline into due_date');
   const welcomeSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'welcome.js'), 'utf8');

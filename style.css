@@ -1187,7 +1187,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .category-nav-buttons{display:flex;gap:5px;flex-wrap:wrap;align-items:center;justify-content:center;padding:8px 1rem 0 1rem;}
 .category-nav-btn{padding:3px 8px;border-radius:12px;border:none;background:color-mix(in srgb,var(--cat-color,var(--accent)) 12%,var(--surface));color:color-mix(in srgb,var(--cat-color,var(--accent)) 80%,var(--text));cursor:pointer;font-size:0.85rem;font-weight:600;transition:all 0.2s;font-family:inherit;white-space:nowrap;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;-webkit-user-select:none;}
 .category-nav-btn:hover{background:color-mix(in srgb,var(--cat-color,var(--accent)) 8%,var(--surface));}
-.category-nav-btn.nav-btn-dragging{box-shadow:0 2px 12px rgba(0,0,0,0.25);}
+.category-nav-btn.nav-btn-dragging{box-shadow:0 2px 12px rgba(0,0,0,0.25);cursor:grabbing;}
 
 /* ── Nested sections (TODOs / Habits / Lists) ──
    The section color appears as the block's border (2px, so it reads
@@ -1227,6 +1227,11 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
    as drags start and end. */
 .section-chips-collapsed{max-height:0;min-height:0;opacity:0;visibility:hidden;overflow:hidden;transition:max-height .25s ease,min-height .25s ease,opacity .2s ease,visibility 0s linear .25s;}
 body.chip-drag-active .section-chips-collapsed,.section-chips-collapsed.section-chips-open{max-height:40px;min-height:30px;opacity:1;visibility:visible;transition:max-height .25s ease,min-height .25s ease,opacity .2s ease,visibility 0s;}
+/* While a chip drag is armed (long-press threshold reached) the cursor
+   reads grabbing everywhere — over the dragged chip, drop targets and
+   other chips — so it is clear dragging is ready. Removed with the
+   body class when the drag finishes. */
+body.chip-drag-active,body.chip-drag-active *{cursor:grabbing;}
 .section-level{display:grid;gap:14px;justify-content:center;align-items:start;}
 .section-level>.empty-msg{grid-column:1/-1;text-align:center;}
 

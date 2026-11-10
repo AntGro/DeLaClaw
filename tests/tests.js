@@ -8461,6 +8461,10 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(itemUtilsSrc.includes("document.body.classList.add('chip-drag-active')")
         && itemUtilsSrc.includes("document.body.classList.remove('chip-drag-active')"),
         'chip drags must toggle the chip-drag-active body class on activation and on finish');
+      assert(css.includes('.category-nav-btn.nav-btn-dragging{box-shadow:0 2px 12px rgba(0,0,0,0.25);cursor:grabbing;}'),
+        'the dragged chip must read grabbing once the long-press arms the drag');
+      assert(css.includes('body.chip-drag-active,body.chip-drag-active *{cursor:grabbing;}'),
+        'the cursor must stay grabbing everywhere while a chip drag runs, not just over the dragged chip');
       assert(itemUtilsSrc.includes('allBtns().length < 2 && !crossDrop'),
         'single-chip rows must still initialise when crossDrop is configured (their chip can be dragged out)');
       const itemUtils = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');

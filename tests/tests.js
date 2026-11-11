@@ -2656,6 +2656,34 @@ test('settings_backup_incomplete exists in EN, FR and ES', () => {
   }
 });
 
+test('copy-backup option copies the backup as text, gated to under 10 MB', () => {
+  const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  const delegationSrc = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  // Third export option in Settings > Data.
+  assert(indexHtml.includes('data-action="copy-backup"'), 'index.html must offer a copy-backup button');
+  assert(delegationSrc.includes("case 'copy-backup': callWindow('copyBackup', [])"), 'delegation must route copy-backup to copyBackup');
+  // Same strict generation path as the download, then clipboard.
+  assert(mainSrc.includes('async function copyBackup()'), 'main.js must define copyBackup');
+  assert(mainSrc.includes('BACKUP_COPY_MAX_BYTES = 10 * 1024 * 1024'), 'copy gate must be 10 MB');
+  assert(mainSrc.includes('new Blob([json]).size >= BACKUP_COPY_MAX_BYTES'), 'copyBackup must measure the JSON byte size against the gate');
+  assert(mainSrc.includes('navigator.clipboard.writeText(json)'), 'copyBackup must write the JSON to the clipboard');
+  // Labels in all three languages.
+  for (const [lang, key, text] of [
+    ['EN', 'settings_copy_backup_btn', 'Copy backup as text'],
+    ['FR', 'settings_copy_backup_btn', 'Copier la sauvegarde en texte'],
+    ['ES', 'settings_copy_backup_btn', 'Copiar la copia como texto'],
+    ['EN', 'settings_backup_copied', 'Backup copied to clipboard.'],
+    ['FR', 'settings_backup_copied', 'Sauvegarde copiée dans le presse-papiers.'],
+    ['ES', 'settings_backup_copied', 'Copia copiada al portapapeles.'],
+    ['EN', 'settings_backup_too_large', 'Backup is too large to copy'],
+    ['FR', 'settings_backup_too_large', 'Sauvegarde trop volumineuse'],
+    ['ES', 'settings_backup_too_large', 'La copia es demasiado grande'],
+  ]) {
+    assert(i18n.includes(`${key}: '${text}`), `i18n ${lang} must define ${key}`);
+  }
+});
+
 // ===================================================================
 // AUTH & SHARING: Migration files exist
 // ===================================================================

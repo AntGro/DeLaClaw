@@ -48,7 +48,7 @@
     'switch-view': 1, 'set-project-filter': 1, 'set-todo-filter': 1, 'set-habit-filter': 1,
     'set-flashcard-filter': 1, 'sort-projects': 1, 'sort-todos': 1, 'sort-habits': 1,
     'sort-flashcards': 1, 'sort-lists': 1, 'toggle-archived': 1, 'toggle-search': 1,
-    'clear-search': 1, 'switch-settings-pane': 1, 'toggle-theme': 1, 'export-backup': 1,
+    'clear-search': 1, 'switch-settings-pane': 1, 'toggle-theme': 1, 'export-backup': 1, 'copy-backup': 1,
     'navigate-to-category': 1, 'toggle-done-todos': 1, 'navigate-to-habit-category': 1,
     'navigate-to-todo-section': 1, 'navigate-to-habit-section': 1, 'navigate-to-list-section': 1,
     'toggle-section-chips': 1,
@@ -153,6 +153,7 @@
       case 'toggle-theme': callWindow('toggleTheme', []); break;
       case 'export-backup': callWindow('exportBackup', []); break;
       case 'export-to-drive': callWindow('exportToGoogleDrive', []); break;
+      case 'copy-backup': callWindow('copyBackup', []); break;
       case 'import-backup': callWindow('importBackup', []); break;
       case 'show-todo-general-card': callWindow('showTodoGeneralCard', []); break;
       case 'navigate-to-category': callWindow('navigateToCategory', [getCat(el)]); break;

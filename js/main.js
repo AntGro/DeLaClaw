@@ -2138,6 +2138,8 @@ function updateStaticLabels() {
   if (settingsExportBtn) settingsExportBtn.textContent = t('menu.settings_export_btn');
   const settingsDriveExportBtn = document.getElementById('settingsDriveExportBtn');
   if (settingsDriveExportBtn) settingsDriveExportBtn.textContent = t('menu.settings_drive_export_btn');
+  const settingsCopyBackupBtn = document.getElementById('settingsCopyBackupBtn');
+  if (settingsCopyBackupBtn) settingsCopyBackupBtn.textContent = t('menu.settings_copy_backup_btn');
   const settingsRestoreLabel = document.getElementById('settingsRestoreLabel');
   if (settingsRestoreLabel) settingsRestoreLabel.textContent = t('menu.settings_restore');
   const settingsRestoreHint = document.getElementById('settingsRestoreHint');
@@ -2991,6 +2993,33 @@ async function exportBackup() {
   }
 }
 
+// Clipboard copies are gated to small backups: a multi-MB JSON string is
+// unwieldy to paste anywhere, and a huge clipboard write can stall the tab.
+const BACKUP_COPY_MAX_BYTES = 10 * 1024 * 1024;
+
+async function copyBackup() {
+  const btn = document.querySelector('.settings-data-btn[data-action="copy-backup"]');
+  if (btn) btn.disabled = true;
+  try {
+    // Same strict generation path as the download: an incomplete backup
+    // throws here, so nothing is copied.
+    const backup = await generateBackupJSON();
+    const json = JSON.stringify(backup, null, 2);
+    if (new Blob([json]).size >= BACKUP_COPY_MAX_BYTES) {
+      showToast(t('menu.settings_backup_too_large'));
+      return;
+    }
+    await navigator.clipboard.writeText(json);
+    showToast(t('menu.settings_backup_copied'));
+  } catch (e) {
+    console.error('Copy backup failed:', e);
+    // An incomplete backup names the missing tables; anything else is generic.
+    showToast(e.failedTables?.length ? e.message : t('menu.settings_backup_error'));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 const GOOGLE_CLIENT_ID = '883846698493-5v6hfn0vvnq7mn5gua454cgvibbgqt8i.apps.googleusercontent.com';
 
 function getGoogleAccessToken() {
@@ -3346,6 +3375,7 @@ async function performImport(file) {
 }
 
 window.exportBackup = exportBackup;
+window.copyBackup = copyBackup;
 window.importBackup = importBackup;
 
 

@@ -61,7 +61,7 @@ ${freqRules}
 
 **Flashcards.** Generate smart, educational flashcards tailored to my interests or knowledge areas. Each card: one precise question → one concise factual answer (1–2 sentences). Avoid trivially obvious questions. Vary the decks (e.g. general knowledge, vocabulary, history, science, professional topics). For non-English terms or cultural topics, keep question and answer in the relevant language.
 
-Respond ONLY with valid JSON — no markdown fences, no commentary.
+Return the JSON in a \`\`\`json fenced code block and nothing else.
 
 ${schema}`,
 
@@ -80,7 +80,7 @@ ${freqRules}
 
 **Flashcards.** Génère des flashcards éducatives et adaptées à mes centres d'intérêt. Chaque carte : une question précise → une réponse factuelle concise (1–2 phrases). Évite les questions triviales. Varie les decks (culture générale, vocabulaire, histoire, sciences, sujets professionnels). Pour les termes ou sujets culturels français, garde question et réponse en français.
 
-Réponds UNIQUEMENT avec du JSON valide — pas de blocs markdown, pas de commentaire.
+Renvoie le JSON dans un bloc de code \`\`\`json, et rien d'autre.
 
 ${schema}`,
 
@@ -99,7 +99,7 @@ ${freqRules}
 
 **Flashcards.** Genera flashcards educativas adaptadas a mis intereses o áreas de conocimiento. Cada tarjeta: una pregunta precisa → una respuesta factual concisa (1–2 frases). Evita preguntas triviales. Varía los mazos (cultura general, vocabulario, historia, ciencia, temas profesionales). Para términos o temas culturales en español, mantén pregunta y respuesta en español.
 
-Responde SOLO con JSON válido — sin bloques markdown, sin comentarios.
+Devuelve el JSON en un bloque de código \`\`\`json, y nada más.
 
 ${schema}`,
   };

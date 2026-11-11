@@ -155,6 +155,9 @@
       case 'export-to-drive': callWindow('exportToGoogleDrive', []); break;
       case 'copy-backup': callWindow('copyBackup', []); break;
       case 'import-backup': callWindow('importBackup', []); break;
+      case 'import-backup-paste': callWindow('openPasteBackupModal', []); break;
+      case 'close-paste-backup-modal': callWindow('closePasteBackupModal', []); break;
+      case 'confirm-paste-backup': callWindow('confirmPasteBackup', []); break;
       case 'show-todo-general-card': callWindow('showTodoGeneralCard', []); break;
       case 'navigate-to-category': callWindow('navigateToCategory', [getCat(el)]); break;
       case 'navigate-to-todo-section': callWindow('navigateToTodoSection', [getCat(el)]); break;

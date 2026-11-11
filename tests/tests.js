@@ -2684,6 +2684,35 @@ test('copy-backup option copies the backup as text, gated to under 10 MB', () =>
   }
 });
 
+test('import-backup-paste reuses the same parser as the file import', () => {
+  const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  const delegationSrc = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  // Second import option in Settings > Data.
+  assert(indexHtml.includes('data-action="import-backup-paste"'), 'index.html must offer an import-backup-paste button');
+  assert(delegationSrc.includes("case 'import-backup-paste': callWindow('openPasteBackupModal', [])"), 'delegation must route import-backup-paste to openPasteBackupModal');
+  // One shared restore: the file entry reads text, then both go through it.
+  assert(mainSrc.includes('async function performImportFromText(text)'), 'main.js must define performImportFromText');
+  assert(/async function performImport\(file\)[\s\S]*?performImportFromText\(await file\.text\(\)\)/.test(mainSrc), 'performImport must feed the file text into performImportFromText');
+  assert(mainSrc.includes('() => performImportFromText(text)'), 'the paste confirm must restore through performImportFromText');
+  // The paste modal is a textarea + the same destructive confirm as the file flow.
+  assert(mainSrc.includes('id="pasteBackupText"'), 'the paste modal must have a textarea');
+  assert(mainSrc.includes('restoreConfirmOpts()'), 'the paste confirm must reuse the file import confirm options');
+  // Double-submit guard on the paste confirm.
+  assert(/guardedNames = \[[\s\S]*?'confirmPasteBackup'/.test(mainSrc), 'confirmPasteBackup must be in the guard() list');
+  // Labels in all three languages.
+  for (const [lang, key, text] of [
+    ['EN', 'settings_paste_backup_btn', 'Paste backup text'],
+    ['FR', 'settings_paste_backup_btn', 'Coller une sauvegarde en texte'],
+    ['ES', 'settings_paste_backup_btn', 'Pegar texto de copia'],
+    ['EN', 'settings_paste_backup_title', 'Import from pasted text'],
+    ['FR', 'settings_paste_backup_title', 'Importer depuis un texte collé'],
+    ['ES', 'settings_paste_backup_title', 'Importar desde texto pegado'],
+  ]) {
+    assert(i18n.includes(`${key}: '${text}`), `i18n ${lang} must define ${key}`);
+  }
+});
+
 // ===================================================================
 // AUTH & SHARING: Migration files exist
 // ===================================================================

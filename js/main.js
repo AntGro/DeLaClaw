@@ -726,7 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
     'saveNewList', 'saveEditList',
     'addTask', 'saveNewProject', 'saveEditProject', 'submitRevision',
     'saveNewCategory', 'saveEditCategory', 'snoozeFor', 'submitSnooze', 'habitSnoozeFor', 'submitHabitSnooze', 'addTodoToCategory',
-    'executeConfirmAction',
+    'executeConfirmAction', 'confirmPasteBackup',
     'quickAddDraft', 'quickAddListItem',
     'saveGlobalPrompt', 'saveProjectPrompt',
   ];
@@ -2146,6 +2146,8 @@ function updateStaticLabels() {
   if (settingsRestoreHint) settingsRestoreHint.textContent = t('menu.settings_restore_hint');
   const settingsImportBtn = document.getElementById('settingsImportBtn');
   if (settingsImportBtn) settingsImportBtn.textContent = t('menu.settings_import_btn');
+  const settingsPasteBackupBtn = document.getElementById('settingsPasteBackupBtn');
+  if (settingsPasteBackupBtn) settingsPasteBackupBtn.textContent = t('menu.settings_paste_backup_btn');
   // Flashcard toolbar buttons
   const flashPracticeBtn = document.getElementById('flashcardPracticeAllBtn');
   if (flashPracticeBtn) {
@@ -3170,6 +3172,15 @@ async function exportToGoogleDrive() {
 
 window.exportToGoogleDrive = exportToGoogleDrive;
 
+// Shared destructive-restore confirm (file and pasted-text imports alike).
+function restoreConfirmOpts() {
+  return {
+    btnText: t('menu.settings_restore') || 'Restore',
+    iconSvg: '<svg class="confirm-action-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+    btnIconSvg: '<svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+  };
+}
+
 function importBackup() {
   const input = document.getElementById('backupFileInput');
   if (!input) return;
@@ -3182,19 +3193,21 @@ function importBackup() {
       t('menu.settings_restore_confirm'),
       () => performImport(file),
       null,
-      {
-        btnText: t('menu.settings_restore') || 'Restore',
-        iconSvg: '<svg class="confirm-action-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
-        btnIconSvg: '<svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
-      }
+      restoreConfirmOpts()
     );
   }, { once: true });
   input.click();
 }
 
 async function performImport(file) {
-  const btn = document.querySelector('.settings-data-btn[data-action="import-backup"]');
-  if (btn) btn.disabled = true;
+  return performImportFromText(await file.text());
+}
+
+// The parser is shared by the file import and the pasted-text import:
+// both feed the same JSON text in, and the same restore runs.
+async function performImportFromText(text) {
+  const btns = document.querySelectorAll('.settings-data-btn[data-action="import-backup"], .settings-data-btn[data-action="import-backup-paste"]');
+  btns.forEach(b => b.disabled = true);
 
   const progressEl = document.getElementById('importProgress');
   const progressText = document.getElementById('importProgressText');
@@ -3207,8 +3220,13 @@ async function performImport(file) {
   const hideProgress = () => { if (progressEl) progressEl.style.display = 'none'; };
 
   try {
-    const text = await file.text();
-    const backup = JSON.parse(text);
+    let backup;
+    try {
+      backup = JSON.parse(text);
+    } catch {
+      showToast(t('menu.settings_restore_invalid'));
+      return;
+    }
     if (!backup._meta || backup._meta.version !== 1) {
       showToast(t('menu.settings_restore_invalid'));
       return;
@@ -3370,13 +3388,56 @@ async function performImport(file) {
     showToast(t('menu.settings_restore_error'));
   } finally {
     hideProgress();
-    if (btn) btn.disabled = false;
+    btns.forEach(b => b.disabled = false);
   }
 }
 
 window.exportBackup = exportBackup;
 window.copyBackup = copyBackup;
+// ── Import from pasted text ──────────────────────────────────────────
+
+function openPasteBackupModal() {
+  document.getElementById('pasteBackupOverlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'pasteBackupOverlay';
+  overlay.className = 'modal-overlay visible';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closePasteBackupModal(); });
+  overlay.innerHTML = `<div class="modal modal-wide">
+    <h2>${esc(t('menu.settings_paste_backup_title'))}</h2>
+    <textarea id="pasteBackupText" rows="10" placeholder="${esc(t('menu.settings_paste_backup_placeholder'))}"></textarea>
+    <div class="modal-actions">
+      <button type="button" class="modal-cancel" data-action="close-paste-backup-modal">${esc(t('common.cancel'))}</button>
+      <button type="button" class="modal-save" data-action="confirm-paste-backup">${esc(t('menu.settings_import_btn'))}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('pasteBackupText')?.focus();
+}
+
+function closePasteBackupModal() {
+  document.getElementById('pasteBackupOverlay')?.remove();
+}
+
+function confirmPasteBackup() {
+  const text = (document.getElementById('pasteBackupText')?.value || '').trim();
+  if (!text) {
+    showToast(t('menu.settings_paste_backup_empty'));
+    return;
+  }
+  closePasteBackupModal();
+  showConfirmAction(
+    t('menu.settings_restore'),
+    t('menu.settings_restore_confirm'),
+    () => performImportFromText(text),
+    null,
+    restoreConfirmOpts()
+  );
+}
+
 window.importBackup = importBackup;
+window.openPasteBackupModal = openPasteBackupModal;
+window.closePasteBackupModal = closePasteBackupModal;
+window.confirmPasteBackup = confirmPasteBackup;
 
 
 // ===================================================================

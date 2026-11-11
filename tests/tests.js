@@ -392,6 +392,20 @@ test('Footer DB size RPC caches missing optional capability', () => {
     'updateFooterStats should have a single guarded db_size_mb call site');
 });
 
+test('Footer identity links are rendered once from a shared definition', () => {
+  const utils = jsFiles['utils.js'];
+  assert(utils.includes('function renderFooterIdentity'), 'utils.js must define renderFooterIdentity');
+  assert(utils.includes("querySelectorAll('.footer-links')"), 'footer links must fill every .footer-links container');
+  assert(utils.includes('getFullYear()'), 'footer copyright year must be dynamic');
+  assert(utils.includes('`© ${year} DeLaClaw · v${APP_VERSION}`'), 'gate footer must show the app version');
+  const main = jsFiles['main.js'];
+  assert(main.includes('renderFooterIdentity'), 'main.js must import and call renderFooterIdentity');
+  assert(!indexHtml.includes('github.com/AntGro/DeLaClaw/blob/main/LICENSE'),
+    'footer links must not be hardcoded in index.html');
+  assert(!indexHtml.includes('docs.delaclaw.com/#/privacy'),
+    'footer links must not be hardcoded in index.html');
+});
+
 test('Shared TODO sync reads local pointers from DB, not startup cache', () => {
   const todos = jsFiles['todos.js'];
   assert(todos.includes("state.db.from('todos').select('id,shared_id,shared_group_id')"),
@@ -2483,6 +2497,20 @@ test('TODO quick-add supports a deadline and a 4000-character cap', () => {
   const css = fs.readFileSync(path.resolve(__dirname, '..', 'style.css'), 'utf8');
   assert(css.includes('.deadline-picker{position:fixed;'),
     'the deadline picker popover must be styled');
+  assert(css.includes('max-width:calc(100vw - 16px);'),
+    'the deadline picker must be capped to the viewport: on iOS the native date control widens the popover past its measured width and it would otherwise run off the right edge');
+  assert(todosSrc.includes('requestAnimationFrame(positionPicker)'),
+    'the deadline picker must re-measure on the next frame: on iOS the native date control only gets its final width after first layout, so the synchronous clamp can undershoot');
+  // The picker input uses the inline-edit deadline input's sizing
+  // (flex-basis auto, 120px floor, no width:100%): that input renders
+  // fine on iPhone, while width:100% inside the narrow popover let
+  // iOS's native date control paint past the popover's right edge.
+  const pickerInput = css.match(/\.deadline-picker input\[type="date"\]\{[^}]*\}/);
+  assert(pickerInput, 'Missing .deadline-picker input rule');
+  assert(pickerInput[0].includes('flex:0 1 auto;min-width:120px;'),
+    'the deadline picker input must use the inline-edit sizing (flex:0 1 auto; min-width:120px)');
+  assert(!pickerInput[0].includes('width:100%'),
+    'the deadline picker input must not have width:100%: it sizes the input to the narrow popover instead of its intrinsic width');
   const delSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'delegation.js'), 'utf8');
   assert(delSrc.includes("case 'add-todo-to-category': if (window.updateTodoCharCounter)"),
     'typing in the bucket quick-add must update the character counter');
@@ -2579,6 +2607,51 @@ test('CHECK constraints match across Demo adapter and SQLite schema', () => {
 
   assertSameValues(demoProposalStatus, sqliteProposalStatus,
     'Demo flashcard_notes.proposal_status', 'SQLite flashcard_notes.proposal_status');
+});
+
+test('BACKUP_TABLES covers every schema table except derived/credential tables', () => {
+  const sqliteSrc = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'schema.sql'), 'utf8');
+  const mainSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'main.js'), 'utf8');
+
+  // Tables in the canonical SQLite schema.
+  const schemaTables = [...sqliteSrc.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map(m => m[1]);
+
+  // BACKUP_TABLES in js/main.js (export/import order).
+  const backupMatch = mainSrc.match(/const BACKUP_TABLES = \[([\s\S]*?)\];/);
+  assert(backupMatch, 'Could not find BACKUP_TABLES in main.js');
+  const backupTables = [...backupMatch[1].matchAll(/'(\w+)'/g)].map(m => m[1]);
+
+  // Excluded by design: gcal_sync is a derived ledger rebuilt on connect
+  // (reconcileLedger); agent_grants holds token hashes that must never
+  // travel in a backup export. Sharing tables live only on Drive, so they
+  // are listed in BACKUP_TABLES although they are not in schema.sql.
+  const excluded = new Set(['gcal_sync', 'agent_grants']);
+  const sharingTables = new Set(['sharing_groups', 'sharing_members', 'sharing_items', 'groups']);
+  for (const t of schemaTables) {
+    if (excluded.has(t)) continue;
+    assert(backupTables.includes(t), `BACKUP_TABLES is missing schema table '${t}' — exports would silently drop it`);
+  }
+  for (const t of backupTables) {
+    assert(schemaTables.includes(t) || sharingTables.has(t), `BACKUP_TABLES lists unknown table '${t}'`);
+  }
+});
+
+test('generateBackupJSON retries once, then throws naming the failed tables', () => {
+  const mainSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'main.js'), 'utf8');
+  // A failed table is retried once (fetchTableWithRetry) instead of skipped.
+  assert(mainSrc.includes('fetchTableWithRetry'), 'main.js must retry a failed backup table once');
+  // The export aborts with the failed table names attached — no partial file.
+  assert(/generateBackupJSON[\s\S]*?failed\.push\(table\)/.test(mainSrc), 'generateBackupJSON must collect failed tables');
+  assert(/if \(failed\.length\)[\s\S]*?throw/.test(mainSrc), 'generateBackupJSON must throw when a table failed after retry');
+  assert(mainSrc.includes('err.failedTables = failed'), 'the thrown error must carry failedTables for the toast');
+  assert(mainSrc.includes("e.failedTables?.length ? e.message"), 'exportBackup must show the incomplete message naming the tables');
+});
+
+test('settings_backup_incomplete exists in EN, FR and ES', () => {
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  for (const [lang, text] of [['EN', 'Backup incomplete'], ['FR', 'Sauvegarde incomplète'], ['ES', 'Copia de seguridad incompleta']]) {
+    assert(i18n.includes(`settings_backup_incomplete: '${text}`), `i18n ${lang} must define settings_backup_incomplete`);
+  }
 });
 
 // ===================================================================
@@ -5810,10 +5883,13 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('habit end date: backup save/load carry whole habit rows (no field allowlist)', () => {
       const main = jsFiles['main.js'];
-      // Save: generateBackupJSON exports select('*') per table, habits
+      // Save: backup export fetches select('*') per table, habits
       // included — end_date / is_finished ride along with every other field.
-      assert(main.includes("'habits'") && /backup\[table\] = await fetchAll\(\(\) => state\.db\.from\(table\)\.select\('\*'\)\)/.test(main),
+      // (The fetch goes through fetchTableWithRetry, which retries once.)
+      assert(main.includes("'habits'") && /fetchAll\(\(\) => state\.db\.from\(table\)\.select\('\*'\)\)/.test(main),
         'backup save must export full habit rows via select(*)');
+      assert(/backup\[table\] = await fetchTableWithRetry\(table\)/.test(main),
+        'generateBackupJSON must fetch each table through the retrying helper');
       // Load: restore inserts rows wholesale, stripping only owner_id.
       assert(main.includes('const { owner_id, ...rest } = r;'),
         'backup restore must strip only owner_id, keeping end_date / is_finished');

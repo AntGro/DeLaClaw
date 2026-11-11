@@ -1,6 +1,6 @@
 # Third-Party Attributions
 
-DeLaClaw uses the following third-party software and assets. No npm dependencies are installed at runtime. No external libraries are vendored; only Google Identity must remain on CDN per Google ToS (no SRI allowed).
+DeLaClaw uses the following third-party software and assets. No npm dependencies are installed at runtime. No external libraries are vendored; only Google Identity and the Google API client must remain on CDN per Google ToS (no SRI allowed).
 
 ## Libraries
 
@@ -15,8 +15,8 @@ DeLaClaw uses the following third-party software and assets. No npm dependencies
 - **Library**: `apis.google.com/js/api.js`
 - **License**: Google APIs Terms of Service
 - **Source**: https://developers.google.com/api-client-library/javascript
-- **Loaded from**: `apis.google.com` (CDN, loaded on demand for Drive backend)
-- **Purpose**: Google Drive API file operations (read/write/list user app data)
+- **Loaded from**: `apis.google.com` (CDN — the script loads on every page; the Picker module itself loads on demand when joining a group)
+- **Purpose**: Google Picker used when joining a sharing group
 
 ## Fonts
 

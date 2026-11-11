@@ -9,8 +9,8 @@ enforced at the backend boundary.
 
 | Surface | Limit |
 | --- | --- |
-| TODO quick-add (TODOs page, Welcome) | 2000 |
-| TODO inline edit | 2000 |
+| TODO quick-add (TODOs page, Welcome) | 4000 |
+| TODO inline edit | 4000 |
 | List item quick-add | 2000 |
 | List item inline edit | 2000 |
 | Project task input | 5000 |

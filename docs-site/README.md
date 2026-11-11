@@ -2,19 +2,19 @@
 
 > A personal command center you own.
 
-DeLaClaw is a zero-dependency, no-build, self-hosted personal dashboard. It runs entirely in the browser as vanilla JavaScript ES modules, with pluggable backends — Google Drive, local SQLite, or in-memory demo.
+DeLaClaw is a no-build, self-hosted personal dashboard. It runs entirely in the browser as vanilla JavaScript ES modules, with pluggable backends — Google Drive, local SQLite, or in-memory demo.
 
 ## Features
 
-- **Today** — Aggregated daily view: focus TODOs, due habits, flashcard reviews, upcoming birthdays
-- **Projects & Tasks** — Project boards with task workflows (todo → in-progress → review → approved)
+- **Today** — Aggregated daily view: focus TODOs, due habits, memory reviews, upcoming birthdays
+- **Projects & Tasks** — Project boards with task workflows (todo → in-progress → review → approved, plus revision for rework)
 - **TODOs** — Categorised to-do lists with snooze, priority, deadlines, and sharing
 - **Habits** — Recurring habit tracker with calendar view, streak stats, and sharing
-- **Flashcards** — Spaced-repetition flashcards and text revision decks
+- **Memory** — Spaced-repetition flashcards and text revision decks
 - **Lists** — Shareable lists for anything that doesn't fit elsewhere
-- **Calendar** — Month, week, day and year views of TODOs, habits and birthdays (including birthday reminders with avatar photos)
+- **Calendar** — Month, week, day and year views of TODOs, habits, birthdays and your own events (including birthday reminders with avatar photos)
 - **Sharing** — Share TODOs, habits, and lists with groups via shared Drive folders
-- **Google Calendar sync** — Optionally mirror habits, TODOs, and birthdays to a dedicated Google Calendar
+- **Google Calendar sync** — Optionally mirror habits, TODOs, birthdays, and events to a dedicated Google Calendar
 
 ## Highlights
 
@@ -32,7 +32,7 @@ Head to the [Setup Guide](setup.md) to pick a backend and start using DeLaClaw i
 
 - No accounts, no subscriptions, no tracking
 - Your data stays yours — self-host on Google Drive (free) or run locally
-- Zero build step — just open `index.html`
+- Zero build step — serve the files over HTTP (any static server) and open `index.html`; `file://` doesn't work because ES modules are blocked by CORS
 - Source-available under the PolyForm Noncommercial License 1.0.0 — free for noncommercial use
 
 ## Links

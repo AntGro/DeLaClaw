@@ -1,19 +1,17 @@
 # Browser Support
 
-Last updated: 2026-08-21
-
 ## Minimum requirements
 
 DeLaClaw uses modern web APIs extensively. The minimum supported browsers are:
 
 | Browser | Minimum version | Release date |
 |---|---|---|
-| Chrome | 105+ | Aug 2022 |
-| Edge | 105+ | Aug 2022 |
+| Chrome | 111+ | Mar 2023 |
+| Edge | 111+ | Mar 2023 |
 | Firefox | 121+ | Dec 2023 |
-| Safari | 17.0+ | Sep 2023 |
-| Safari iOS | 17.0+ | Sep 2023 |
-| Chrome Android | 105+ | Aug 2022 |
+| Safari | 16.2+ | Dec 2022 |
+| Safari iOS | 16.2+ | Dec 2022 |
+| Chrome Android | 111+ | Mar 2023 |
 | Samsung Internet | 20.0+ | Mar 2023 |
 
 These versions are determined by the most demanding features used (see below). Older browsers will fail silently or show broken layouts.
@@ -23,7 +21,6 @@ These versions are determined by the most demanding features used (see below). O
 | Feature | Minimum support | Used for |
 |---|---|---|
 | ES Modules (`import`/`export`) | All modern | Module system |
-| Import Maps (`<script type="importmap">`) | Chrome 89, Firefox 108, Safari 16.4 | Three.js loading |
 | `async`/`await` | All modern | Database operations |
 | Optional chaining (`?.`) | Chrome 80, Firefox 72, Safari 13.1 | Null-safe property access |
 | Nullish coalescing (`??`) | Chrome 80, Firefox 72, Safari 13.1 | Default values |
@@ -66,7 +63,6 @@ The most demanding features that determine the minimum browser versions:
 
 1. **`:has()` in CSS** — requires Firefox 121 (Dec 2023), Chrome 105 (Aug 2022), Safari 15.4. This is the strictest requirement for Firefox. Used across multiple pages for conditional styling (inline edit states, banner stacking, action grid layouts).
 2. **`oklch()` and `color-mix()`** — require Chrome 111, Firefox 113. Used for accent colors and dynamic theming.
-3. **Import Maps** — require Firefox 108, Safari 16.4.
 
 ## Known issues
 

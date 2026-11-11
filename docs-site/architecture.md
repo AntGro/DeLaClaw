@@ -32,7 +32,7 @@ A thin abstraction exposing:
 
 - `db.from(table)` — returns a chainable query builder (select/insert/update/delete)
 - `db.channel(name)` — real-time subscriptions (returns a no-op channel on all active backends)
-- `db.rpc(fn, params)` — remote procedure calls (returns a no-op on all active backends)
+- `db.rpc(fn, params)` — remote procedure calls (REST posts to `/rest/v1/rpc/<fn>`; Demo and Drive return a no-op)
 
 Every call to `db.from()` wraps the result in a `tracked()` Proxy. This Proxy intercepts `.then()` to drive the activity indicator: the header logo spins while a query is in flight, and flashes red on error.
 
@@ -137,7 +137,7 @@ Sections are purely local: they are never shared to a group (sharing stays per b
 ### CHECK constraints
 
 CHECK constraints are enforced at the database level:
-- `tasks.status`: `todo`, `in-progress`, `review`, `approved`, `revision`
+- `tasks.status`: `draft`, `todo`, `in-progress`, `review`, `approved`, `revision`, `idea`, `idea-shipped`, `idea-plan-requested`
 - `todos.priority`: `urgent`, `high`, `medium`, `low`, `normal`
 - `flashcard_notes.proposal_status`: `pending`, `ready`, `accepted`, `rejected`
 
@@ -160,7 +160,7 @@ On install, the SW calls `skipWaiting()`. On activate, it purges old caches and 
 The `VERSION` file at the repo root is the single source of truth:
 
 ```
-latest=1.016
+latest=2.32.89
 ```
 
 The pre-commit hook (`.githooks/pre-commit`):
@@ -181,7 +181,7 @@ style.css                  All styles (dark + light themes, responsive)
 sw.js                      Service worker
 manifest.json              PWA manifest
 VERSION                    Version source of truth
-CNAME                      GitHub Pages custom domain
+CNAME                      Leftover GitHub Pages artifact (Cloudflare Pages ignores it)
 
 js/
   main.js                  Bootstrap, view switching, settings, login, footer
@@ -202,6 +202,7 @@ js/
   sharing-file-reconcile.js  Sharing file reconciliation engine
   sharing-mutation-queue.js  Queued sharing mutations
   sharing-ui.js            Sharing UI: Group tab, share popovers, completion modal
+  groups.js                Sharing-group management tab (behind the coming-soon gate)
   agents-ui.js             Settings > Agents pane
   delegation.js            Cross-module action delegation for shared items
   welcome.js               Today dashboard

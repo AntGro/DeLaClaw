@@ -40,8 +40,7 @@ rendered and when. Steps marked **planned** belong to phases 2–5 and are
 not implemented yet; everything else is shipped on `dev`.
 Names below are the Google implementation, but the shape is backend-agnostic: any
 OAuth2 token issuer + file storage maps 1:1 (e.g. KDrive auth + KDrive folders).
-The IndexedDB offline cache is not part of this flow — it only applies to
-local-server mode, never to the Drive backend. The calendar is never read at
+The IndexedDB offline cache is not part of this flow — it only applies when Drive auth is unobtainable, in which case the app boots read-only from the snapshot instead of failing the connect (see `backends.md` §6). The calendar is never read at
 startup either: it is a write-only projection, synced on table flush.
 **1** covers auth, **2** covers what happens at login right after auth (the
 personal-data track, which loads the `groups` table alongside the other

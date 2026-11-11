@@ -45,8 +45,8 @@ These are the fields agents need to make safe, informed edits.
 
 **Dual format — JSON + MD:**
 
-- `CODEMAP.json` (~25KB) is machine-readable — agents parse it programmatically to check dependents, tables, and guards before editing.
-- `CODEMAP.md` (~6KB) is a human-scannable matrix for quick visual reference.
+- `CODEMAP.json` is machine-readable — agents parse it programmatically to check dependents, tables, and guards before editing.
+- `CODEMAP.md` is a human-scannable matrix for quick visual reference.
 
 Both are generated from the same script in the same pass, so the second format has zero additional maintenance cost.
 
@@ -59,9 +59,9 @@ Both are generated from the same script in the same pass, so the second format h
 
 `scripts/impact.js` reads staged diffs and CODEMAP `dependents` to suggest the `Checked:` trailer for commits. The pre-commit hook prints the suggestion; the commit-msg hook enforces the trailer format. This automates blast-radius awareness — changing `todos.js` surfaces that `welcome.js` and `main.js` are dependents and should be checked.
 
-### Feature contracts: business invariants CODEMAP can't extract
+### Feature and core contracts: business invariants CODEMAP can't extract
 
-Feature contracts (`.agents/contracts/*.md`) sit alongside CODEMAP and capture what static analysis cannot:
+Contracts (`.agents/contracts/*.md`) sit alongside CODEMAP and capture what static analysis cannot — they cover CODEMAP features and core modules alike:
 
 - Guard patterns and their rationale (why `_pendingTodoToggles` exists, what race it prevents)
 - XSS-sensitive field lists (which user fields need `esc()`)

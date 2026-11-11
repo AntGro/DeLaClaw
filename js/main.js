@@ -11,7 +11,7 @@ import { wrapWithOfflineCache, loadCacheSnapshot, driveCacheScope, showReadOnlyB
 import { DRIVE_SCOPE_FILE, clearStoredDriveEmail, getStoredDriveEmail } from './adapters/drive.js';
 import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, reconcileLedger as reconcileCalendarLedger, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
-import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
+import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, renderFooterIdentity, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
 
@@ -227,6 +227,7 @@ function hydrateIcons() {
     span.outerHTML = lucideIcon(name, size, color);
   });
 }
+renderFooterIdentity();
 hydrateIcons();
 
 // ===================================================================
@@ -2926,7 +2927,7 @@ const BACKUP_TABLES = [
   'projects', 'habits', 'texts', 'lists',
   // child / independent tables
   'todos', 'tasks', 'habit_completions', 'flashcards', 'flashcard_notes',
-  'text_line_progress', 'birthdays', 'list_items',
+  'text_line_progress', 'birthdays', 'events', 'list_items',
   'settings', 'prompts', 'daily_visits',
   // sharing: owned groups (creator side) — FK order: groups → members → items
   'sharing_groups', 'sharing_members', 'sharing_items',
@@ -2934,13 +2935,36 @@ const BACKUP_TABLES = [
   'groups',
 ];
 
+async function fetchTableWithRetry(table) {
+  try {
+    return await fetchAll(() => state.db.from(table).select('*'));
+  } catch (e) {
+    // One retry for a transient failure (e.g. a dropped Local request);
+    // a second failure propagates to the caller, which records the table.
+    console.warn(`Retrying ${table} after export error:`, e.message);
+    await new Promise(r => setTimeout(r, 500));
+    return fetchAll(() => state.db.from(table).select('*'));
+  }
+}
+
 async function generateBackupJSON() {
   const backup = { _meta: { version: 1, exported_at: new Date().toISOString(), tables: [] } };
+  const failed = [];
   for (const table of BACKUP_TABLES) {
     try {
-      backup[table] = await fetchAll(() => state.db.from(table).select('*'));
+      backup[table] = await fetchTableWithRetry(table);
       backup._meta.tables.push(table);
-    } catch (e) { console.warn(`Skipping ${table}:`, e.message); }
+    } catch (e) {
+      console.warn(`Skipping ${table}:`, e.message);
+      failed.push(table);
+    }
+  }
+  if (failed.length) {
+    // Strict: never report a partial backup as a success. Both callers
+    // abort on this throw, so no file is downloaded or pushed to Drive.
+    const err = new Error(t('menu.settings_backup_incomplete', failed.join(', ')));
+    err.failedTables = failed;
+    throw err;
   }
   return backup;
 }
@@ -2960,7 +2984,8 @@ async function exportBackup() {
     showToast(t('menu.settings_backup_done'));
   } catch (e) {
     console.error('Export failed:', e);
-    showToast(t('menu.settings_backup_error'));
+    // An incomplete backup names the missing tables; anything else is generic.
+    showToast(e.failedTables?.length ? e.message : t('menu.settings_backup_error'));
   } finally {
     if (btn) btn.disabled = false;
   }

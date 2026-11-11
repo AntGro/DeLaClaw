@@ -406,6 +406,31 @@ function setDbSizeText(text) {
   if (el) el.textContent = text;
 }
 
+// Footer identity links — single definition shared by the gate footer and
+// the app footer, so the two can never drift apart. Icons are inlined via
+// lucideIcon with an explicit 'currentColor': LUCIDE_COLORS would otherwise
+// paint book-open/github in brand colours. Labels keep their data-i18n
+// spans so a language switch re-translates them like any other static text.
+const FOOTER_LINKS = [
+  { href: 'https://docs.delaclaw.com/#/', icon: 'book-open', key: 'utils.footer_docs' },
+  { href: 'https://github.com/AntGro/DeLaClaw', icon: 'github', label: 'GitHub' },
+  { href: 'https://github.com/AntGro/DeLaClaw/blob/main/LICENSE', icon: 'scale', key: 'utils.footer_license' },
+  { href: 'https://docs.delaclaw.com/#/privacy', icon: 'shield', key: 'utils.footer_privacy' },
+];
+
+function renderFooterIdentity() {
+  const linksHtml = FOOTER_LINKS.map(l => {
+    const label = l.key ? `<span data-i18n="${l.key}">${t(l.key)}</span>` : esc(l.label);
+    return `<a href="${l.href}" target="_blank" rel="noopener" class="footer-link">${lucideIcon(l.icon, 13, 'currentColor')} ${label}</a>`;
+  }).join('<span class="footer-sep">·</span>');
+  document.querySelectorAll('.footer-links').forEach(el => { el.innerHTML = linksHtml; });
+  const year = new Date().getFullYear();
+  const gateCopy = document.querySelector('.gate-footer .footer-copyright');
+  if (gateCopy) gateCopy.textContent = `© ${year} DeLaClaw · v${APP_VERSION}`;
+  const appCopy = document.querySelector('.site-footer .footer-copyright');
+  if (appCopy) appCopy.textContent = `© ${year} DeLaClaw`;
+}
+
 function updateFooterStats(viewCountsGetter) {
   const container = document.getElementById('dbStatsContainer');
   if (!container) return;
@@ -1008,7 +1033,7 @@ function setConfirmActionProgress(text) {
 export {
   esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate, formatRelativeDay, formatSnoozeUntil,
   showConfirmAction, closeConfirmAction, executeConfirmAction, setConfirmActionProgress,
-  updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
+  updateFooterStats, renderFooterIdentity, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, applySectionGrid, fetchAll,
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, isDesktopLike,
   backfillCategoryColors, nextPaletteColor, onColorFor,

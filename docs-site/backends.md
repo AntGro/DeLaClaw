@@ -67,7 +67,7 @@ These **must stay in sync**. The `draft` status bug (v1.105) was caused by the d
 ### Rules
 
 1. **`server/schema.sql` is canonical.** It defines every table, column, default, and CHECK constraint for active backends.
-2. **`js/adapters/demo.js` `CHECK_CONSTRAINTS`** must match the SQL CHECK constraints exactly. Test 31 enforces this automatically.
+2. **`js/adapters/demo.js` `CHECK_CONSTRAINTS`** must match the SQL CHECK constraints exactly. The `Demo CHECK_CONSTRAINTS …` tests in `tests/tests.js` enforce this automatically.
 3. **Drive adapter** reuses the demo adapter's `DemoQueryBuilder` — no separate schema needed.
 
 ### Column defaults
@@ -192,7 +192,7 @@ See `migrations/MIGRATION_GUIDE.md` for the full protocol. Key points:
 
 ### Backend-specific notes
 
-- **Local:** `server/schema.sql` uses `CREATE TABLE IF NOT EXISTS` — new columns require a migration or DB reset. Auto-migration on server start is possible but not implemented.
+- **Local:** `server/schema.sql` uses `CREATE TABLE IF NOT EXISTS` — new columns require a migration or DB reset. Auto-migration runs on server start: `server.js` applies pending `LOCAL_MIGRATIONS` in version order when `schema_version` is behind, backing up the `.db` file first.
 - **Drive / Demo:** Schema is implicit (in-memory objects). New columns just appear as `undefined` in old data — the app should handle missing fields gracefully.
 
 ---
@@ -245,7 +245,7 @@ The agent interacts with DeLaClaw via the Google Drive API, reading and writing 
 
 ### Current capabilities
 
-- **Task pickup:** Heartbeat fetches `status=todo` and `status=revision` tasks, works on them, sets `status=review` with `hatch_response`.
+- **Task pickup:** the Heartbeat fetches `status=todo` and `status=revision` tasks from the agent task queue, works on them, sets `status=review` with `hatch_response`.
 - **Flashcard proposals:** Heartbeat fetches `proposal_status=pending` drafts, generates Q/A pairs, sets `proposal_status=ready`.
 - **Habit `next_due`:** Heartbeat computes `next_due` for free-text frequency rules.
 - **Prompts:** Reads global + per-project prompts from the `prompts` table for task context.
@@ -303,6 +303,8 @@ The agent interacts with DeLaClaw via the Google Drive API, reading and writing 
 **Export options:**
 - **Download:** Browser download as `.json` file.
 - **Push to Drive:** Available when connected to Drive backend. Saves a timestamped backup file in the `DeLaClaw Backups/` folder (`DeLaClawDev Backups/` on dev and preview builds).
+
+If a table fails to export, it is retried once after a short delay; if it still fails, the export aborts with an error naming the tables — no partial backup file is produced or uploaded.
 
 ### Import
 

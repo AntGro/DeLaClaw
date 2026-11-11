@@ -18,11 +18,11 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 
 | Module | Description |
 |---|---|
-| **Today** | Daily briefing: focus TODOs, due habits, flashcard reviews, upcoming birthdays, stats |
+| **Today** | Daily briefing: focus TODOs, due habits, memory reviews, upcoming birthdays, stats |
 | **Projects** | Kanban-style project boards with task statuses, links, and drag-and-drop |
 | **TODOs** | Categorized tasks with 5 priority levels, due dates, snooze, drag-and-drop reordering |
 | **Habits** | Recurring habits with flexible scheduling (structured rules + free text), completion tracking, streaks |
-| **Flashcards** | Spaced repetition (FSRS algorithm) with deck organization and text memorization mode |
+| **Memory** | Spaced repetition (FSRS algorithm) with deck organization and text memorization mode |
 | **Calendar** | Month, week, day and year views bringing together TODOs, habits, birthdays and your own events, with per-type filters |
 | **Lists** | General-purpose checklists with archival support |
 | **Group** | [COMING] Sharing-group management: members, invites, shared-item counts |
@@ -120,7 +120,6 @@ js/
   backend-logos.js      Backend brand icons (SVG)
   hero.js               Landing page animations
   logo.js               Logo animation engine
-  storm3d.js            Three.js hero effect
   bootstrap.js          Extracted inline init script (CSP-safe)
   sw-register.js        Service worker registration (CSP-safe)
   version.js            Auto-generated version constant

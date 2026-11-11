@@ -928,13 +928,24 @@ function openQuickAddDeadlinePicker(btn, event) {
   const clearBtn = picker.querySelector('.deadline-picker-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => { setQuickAddDeadline(''); closeDeadlinePicker(); });
 
-  const ph = picker.offsetHeight;
-  let top = rect.bottom + 4;
-  let left = rect.left;
-  if (top + ph > window.innerHeight - 8) top = rect.top - ph - 4;
-  if (left + picker.offsetWidth > window.innerWidth - 8) left = window.innerWidth - picker.offsetWidth - 8;
-  picker.style.top = top + 'px';
-  picker.style.left = left + 'px';
+  // Position the popover below the button, clamped inside the viewport.
+  // Measure again on the next frame: on iOS the native date control
+  // only gets its final width after first layout, so the popover can
+  // widen past the synchronous measurement and run off the right edge
+  // (measured on a real iPhone: the clamp ran on ~179px, the popover
+  // rendered ~200px+ wide).
+  const positionPicker = () => {
+    if (!document.getElementById('deadlinePickerPopover')) return;
+    const ph = picker.offsetHeight;
+    let top = rect.bottom + 4;
+    let left = rect.left;
+    if (top + ph > window.innerHeight - 8) top = rect.top - ph - 4;
+    if (left + picker.offsetWidth > window.innerWidth - 8) left = window.innerWidth - picker.offsetWidth - 8;
+    picker.style.top = top + 'px';
+    picker.style.left = left + 'px';
+  };
+  positionPicker();
+  requestAnimationFrame(positionPicker);
 
   // Outside clicks close — but clicks inside the picker (on the date
   // input) must not, or the native date popup could never be used.

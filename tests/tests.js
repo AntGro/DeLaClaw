@@ -82,7 +82,9 @@ test('Balanced backticks in JS files (excluding markdown processors)', () => {
   const skipFiles = new Set(['utils.js']);
   for (const [name, content] of Object.entries(jsFiles)) {
     if (skipFiles.has(name)) continue;
-    const count = (content.match(/`/g) || []).length;
+    // Escaped backticks (\`) are literal characters inside template literals
+    // (e.g. the ```json fence in the demo generation prompt), not delimiters
+    const count = (content.replace(/\\`/g, '').match(/`/g) || []).length;
     if (count % 2 !== 0) {
       throw new Error(`${name} has ${count} backticks (odd — likely unclosed template literal)`);
     }

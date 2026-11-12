@@ -15,7 +15,7 @@ PWA installation works well on Android and reasonably on iOS, but native app dis
 - **Discoverability** — app store presence, search indexing.
 - **OS integration** — biometrics (Face ID / fingerprint for app lock), share sheet, home screen widgets.
 
-The question is which wrapper technology best fits DeLaClaw's architecture: no framework, no build step, ~17k LOC vanilla JS with ES module imports.
+The question is which wrapper technology best fits DeLaClaw's architecture: no framework, no build step, vanilla JS with ES module imports.
 
 ## Decision
 
@@ -34,7 +34,7 @@ Use **Capacitor** (by Ionic) to wrap the existing web app in a native shell for 
 | Option | Verdict |
 |---|---|
 | **TWA (Trusted Web Activity)** | Android-only. Minimal effort but no iOS support, no native API access. Too limited. |
-| **Tauri 2.0** | Lighter binaries, Rust-based. Mobile support is newer, plugin ecosystem thinner. Higher setup complexity for marginal gains on a ~17k LOC app. |
+| **Tauri 2.0** | Lighter binaries, Rust-based. Mobile support is newer, plugin ecosystem thinner. Higher setup complexity for marginal gains on an app of this size. |
 | **React Native / Flutter** | Full rewrite. Contradicts ADR-0001 (no framework, no build step). Not viable. |
 | **PWA only** | Current state. Works, but no push notifications on iOS, no App Store presence, limited OS integration. |
 

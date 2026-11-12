@@ -1,5 +1,5 @@
 import { lucideIcon } from './icons.js';
-import state from './state.js';
+import state, { LIST_NOTE_MAX_LEN, MAX_META_DISPLAY } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, applySectionGrid, truncateWithShowMore, fetchAll, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration } from './sections-pure.js';
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
@@ -467,7 +467,7 @@ function renderListItem(item) {
     ? lucideIcon('check-square', 16, 'var(--accent)')
     : lucideIcon('square', 16, 'var(--muted)');
   const noteHtml = item.note
-    ? `<div class="list-item-note">${renderMd(item.note)}</div>`
+    ? `<div class="list-item-note">${truncateWithShowMore(item.note, MAX_META_DISPLAY, item.id, 'listnote')}</div>`
     : '';
 
   // Shared list item badge
@@ -710,6 +710,7 @@ function editListItemInlineFull(id) {
   input.value = item.note || '';
   input.placeholder = t('lists.note_placeholder');
   input.rows = 1;
+  input.maxLength = LIST_NOTE_MAX_LEN;
   input.style.overflow = 'hidden';
   input.style.resize = 'none';
   input.style.width = '100%';
@@ -1092,7 +1093,7 @@ async function saveNewList() {
   try {
     const parentId = await ensureListSectionChain(segments.slice(0, -1), startParentId);
     if (siblingNameTaken(state.allLists || [], parentId, name, null)) {
-      showToast(t('toast.name_required'), 'error'); return;
+      showToast(t('toast.list_exists_at_level', name), 'error'); return;
     }
     const { error } = await state.db.from('lists').insert({
       name,
@@ -1170,7 +1171,7 @@ async function saveEditList() {
   }
   if (!targetName) { showToast(t('toast.enter_name'), 'error'); return; }
   if (siblingNameTaken(state.allLists || [], targetParentId, targetName, id)) {
-    showToast(t('toast.name_required'), 'error'); return;
+    showToast(t('toast.list_exists_at_level', targetName), 'error'); return;
   }
   const isSection = isSectionRow(list);
   const updates = {

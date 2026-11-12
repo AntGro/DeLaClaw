@@ -21,6 +21,7 @@ Cross-cutting app configuration — theme, language, backend picker, sharing man
   - **stats** — usage statistics: DB age, visit count, streak via `daily_visits`
   - **agents** — API token management for external agents (`agent_grants`)
 - **Hash routing:** `#settings` and `#settings/<pane>` deep-link to specific panes
+- **Deep-link hashes survive startup:** a `#type/id` hash is never clobbered on a cold load — the login gate skips its `#login` replaceState for it, the initial `switchView` skips its hash sync for it, and `navigateToItem` keeps it (switchView with skipHash) so the URL goes on pointing at the item. Without all three, a pasted link would land on the default view instead of the item (the gate and the startup view restore both rewrite the hash).
 
 ## Interaction Guards
 - **Saves:** `guard()` for import/export, category edits, prompt saves

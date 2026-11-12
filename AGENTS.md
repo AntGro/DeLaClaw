@@ -60,9 +60,9 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 
 ## 3. Security
 
-- **XSS**: No `innerHTML` with user data unless escaped. Wrap all user fields (`name`, `text`, `note`, `brand`, etc.) in `esc()` when interpolating into template literals. `renderMd()` and `truncateWithShowMore()` already esc internally, don't double-wrap. `showDeleteConfirm` uses `.textContent` (safe).
+- **XSS**: No `innerHTML` with user data unless escaped. Wrap all user fields (`name`, `text`, `note`, `brand`, etc.) in `esc()` when interpolating into template literals. `renderMd()` and `truncateWithShowMore()` already esc internally, don't double-wrap. `showConfirmAction` uses `.textContent` by default (safe); its `messageHtml`/`detailHtml` options take `innerHTML` only with content already run through `renderMd`.
 - **Safe DOM for URLs**: TODO/project links with user-provided URLs must use safe allowlist check, not raw `innerHTML`.
-- **CSP hardening (sec-004)**: Vendor JS self-hosted in `vendor/` (`three@0.170.0`). No `cdn.jsdelivr.net` for app code. CSP meta in `index.html`: `default-src 'self'; script-src 'self' 'sha256-...importmap...' accounts.google.com apis.google.com gstatic cloudflareinsights; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes. Cloudflare Web Analytics beacon allowed in both `script-src` (`static.cloudflareinsights.com`) and `connect-src` (`cloudflareinsights.com`).
+- **CSP hardening (sec-004)**: No vendored JS and no `cdn.jsdelivr.net` for app code since three.js was dropped (Nov 2026) — the hero storm is a single SVG from hero to gate (logo.js), no canvas stage. CSP meta in `index.html`: `default-src 'self'; script-src 'self' accounts.google.com apis.google.com gstatic cloudflareinsights; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes. Cloudflare Web Analytics beacon allowed in both `script-src` (`static.cloudflareinsights.com`) and `connect-src` (`cloudflareinsights.com`).
 - **Google Identity exception**: GSI (`accounts.google.com/gsi/client` + `apis.google.com/js/api.js`) must stay CDN per Google ToS, no SRI allowed. Documented exception allowed only via CSP.
 
 ## 4. Backend & Data
@@ -71,7 +71,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - **Category integrity**: each category/deck table has one protected default row (`name=''`, `is_protected=1`). `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item FKs (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
 - Schema version in `settings` key `schema_version`, migrations in `migrations/`.
 - Base schema + migrations must be runnable in local SQLite (`server/schema.sql`).
-- Vendor: `scripts/update-vendor.sh [three_ver]` updates `vendor/` + `index.html` comment + `docs-site/attributions.md`. Weekly GitHub Action `vendor-check.yml` opens PR to `dev` if new versions.
+- Vendor: none since three.js was dropped (Nov 2026) — the `vendor/` directory, `scripts/update-vendor.sh`, and the weekly `vendor-check.yml` action were all removed with it.
 
 ## 5. Git, Versioning, Commit
 
@@ -85,13 +85,13 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 ## 6. Testing
 
 - `bun tests/tests.js` (or `node`). All tests must pass before pushing. Covers: unit logic, adapter compliance, import/export, window-assignment guard, XSS esc usage, CODEMAP freshness (`.agents/CODEMAP.json` matches regenerated output).
-- PWA: `CACHE_VERSION` + `PRECACHE_URLS` in `sw.js` — `cache.addAll` fails entire install if any entry 404, so list must be exact. Include new `js/*.js` and `vendor/*` files.
+- PWA: `CACHE_VERSION` + `PRECACHE_URLS` in `sw.js` — `cache.addAll` fails entire install if any entry 404, so list must be exact. Include new `js/*.js` files.
 - CODEMAP: `scripts/generate-codemap.js` must be idempotent. CI fails if committed JSON differs from regenerated.
 
 ## 7. Docs
 
-- `docs-site/attributions.md` must list all third-party assets with correct load source (vendor/ vs CDN). Update when vendor versions change.
-- `docs-site/setup.md`, `architecture.md`, `sharing.md`, `contributing.md` must stay in sync with adapter changes.
+- `docs-site/attributions.md` must list all third-party assets with correct load source (CDN, embedded, or self-hosted). Update when a third-party asset changes.
+- `docs-site/setup.md`, `architecture.md`, `sharing.md` must stay in sync with adapter changes.
 - No personal info, workspace config, memory files in public repo.
 - **Mermaid diagrams** (`docs-site/`): read `.agents/skills/mermaid-diagrams.md` before creating or editing Mermaid diagrams. Validate every touched block with the Mermaid v10 parser (`mermaid.parse`, node + jsdom shim) before committing — a block missing its `sequenceDiagram` header fails to render with no useful error (lesson v2.9.6).
 

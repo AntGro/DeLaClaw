@@ -5,6 +5,7 @@ import { t, getLang } from './i18n.js';
 import { lucideIcon } from './icons.js';
 import { isMobileUA } from './utils.js';
 import { computeNextDue, isStructuredRule, normalizeFrequencyRule } from './habits.js';
+import { localTimeZone, wallTimeToInstant } from './calendar-pure.js';
 
 // ── Prompt generators (EN / FR / ES) ──────────────────────────────
 
@@ -29,6 +30,10 @@ function buildPrompt(lang) {
   "birthdays": [
     { "name": "Person Name", "birthday": "YYYY-MM-DD", "note": "optional" }
   ],
+  "events": [
+    { "title": "Event title", "note": "optional", "all_day": true, "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD" },
+    { "title": "Timed event", "note": "optional", "all_day": false, "date": "YYYY-MM-DD", "start_time": "HH:MM", "end_time": "HH:MM", "timezone": "IANA timezone, e.g. Europe/London" }
+  ],
   "lists": [
     { "name": "List Name", "color": "#hex", "kind": "bucket", "parent": null }
   ],
@@ -52,9 +57,11 @@ Generate 3–5 items per category. Use today (${today}) as reference for dates. 
 **Habits & chores.** Habits aren't just personal development — include household chores, especially infrequent ones where a reminder is essential (e.g. descaling the washing machine every 3 months, changing pillowcases every 2 weeks, cleaning windows every 4 months, vacuuming behind furniture monthly).
 ${freqRules}
 
+**Events.** Include a few calendar events around today — a mix of timed events (date, start/end times, timezone) and full-day events (start/end dates, e.g. a weekend trip). Give each a short note.
+
 **Flashcards.** Generate smart, educational flashcards tailored to my interests or knowledge areas. Each card: one precise question → one concise factual answer (1–2 sentences). Avoid trivially obvious questions. Vary the decks (e.g. general knowledge, vocabulary, history, science, professional topics). For non-English terms or cultural topics, keep question and answer in the relevant language.
 
-Respond ONLY with valid JSON — no markdown fences, no commentary.
+Return the JSON in a \`\`\`json fenced code block and nothing else.
 
 ${schema}`,
 
@@ -69,9 +76,11 @@ Génère 3 à 5 éléments par catégorie. Utilise la date du jour (${today}) co
 **Habitudes & tâches ménagères.** Les habitudes ne sont pas que du développement personnel — inclus des corvées ménagères, surtout les peu fréquentes où un rappel est indispensable (ex. détartrer le lave-linge tous les 3 mois, changer les taies d'oreiller toutes les 2 semaines, nettoyer les vitres tous les 4 mois, aspirer derrière les meubles tous les mois).
 ${freqRules}
 
+**Événements.** Inclus quelques événements du calendrier autour d'aujourd'hui — un mélange d'événements avec heure (date, heures de début/fin, fuseau horaire) et d'événements à la journée (dates de début/fin, ex. un week-end). Donne à chacun une courte note.
+
 **Flashcards.** Génère des flashcards éducatives et adaptées à mes centres d'intérêt. Chaque carte : une question précise → une réponse factuelle concise (1–2 phrases). Évite les questions triviales. Varie les decks (culture générale, vocabulaire, histoire, sciences, sujets professionnels). Pour les termes ou sujets culturels français, garde question et réponse en français.
 
-Réponds UNIQUEMENT avec du JSON valide — pas de blocs markdown, pas de commentaire.
+Renvoie le JSON dans un bloc de code \`\`\`json, et rien d'autre.
 
 ${schema}`,
 
@@ -86,9 +95,11 @@ Genera 3–5 elementos por categoría. Usa la fecha de hoy (${today}) como refer
 **Hábitos y tareas del hogar.** Los hábitos no son solo desarrollo personal — incluye tareas domésticas, especialmente las poco frecuentes donde un recordatorio es esencial (ej. descalcificar la lavadora cada 3 meses, cambiar fundas de almohada cada 2 semanas, limpiar ventanas cada 4 meses, aspirar detrás de los muebles mensualmente).
 ${freqRules}
 
+**Eventos.** Incluye algunos eventos del calendario alrededor de hoy — una mezcla de eventos con hora (fecha, horas de inicio/fin, zona horaria) y eventos de día completo (fechas de inicio/fin, ej. un fin de semana). Dale a cada uno una nota corta.
+
 **Flashcards.** Genera flashcards educativas adaptadas a mis intereses o áreas de conocimiento. Cada tarjeta: una pregunta precisa → una respuesta factual concisa (1–2 frases). Evita preguntas triviales. Varía los mazos (cultura general, vocabulario, historia, ciencia, temas profesionales). Para términos o temas culturales en español, mantén pregunta y respuesta en español.
 
-Responde SOLO con JSON válido — sin bloques markdown, sin comentarios.
+Devuelve el JSON en un bloque de código \`\`\`json, y nada más.
 
 ${schema}`,
   };
@@ -105,7 +116,7 @@ function parseCustomJSON(raw) {
   cleaned = cleaned.trim();
   const data = JSON.parse(cleaned);
   // Validate: must be an object with at least one recognised key
-  const validKeys = ['projects', 'tasks', 'todos', 'habits', 'flashcards', 'birthdays', 'lists', 'list_items'];
+  const validKeys = ['projects', 'tasks', 'todos', 'habits', 'flashcards', 'birthdays', 'events', 'lists', 'list_items'];
   const found = Object.keys(data).filter(k => validKeys.includes(k));
   if (found.length === 0) throw new Error('No recognised data tables found');
   return data;
@@ -194,6 +205,39 @@ function normalizeCustomData(data) {
       base(r, 'bd', i);
       if (r.note == null) r.note = '';
       if (r.avatar_url === undefined) r.avatar_url = null;
+      return r;
+    });
+  }
+
+  if (data.events) {
+    data.events = data.events.map((r, i) => {
+      base(r, 'ev', i);
+      if (r.note == null) r.note = null;
+      // Full-day events carry a date range; timed events carry a date
+      // plus start/end times in a timezone (converted to UTC instants).
+      if (r.all_day == null) r.all_day = (r.start_date || r.end_date || r.date) && !r.start_time ? 1 : 0;
+      r.all_day = r.all_day ? 1 : 0;
+      if (r.all_day) {
+        if (!r.start_date && r.date) r.start_date = r.date;
+        if (!r.end_date) r.end_date = r.start_date || today;
+        if (!r.start_date) r.start_date = r.end_date;
+        r.start_ts = null; r.end_ts = null; r.timezone = null;
+      } else {
+        if (!r.timezone) r.timezone = localTimeZone();
+        if (r.date && r.start_time) r.start_ts = wallTimeToInstant(r.date, r.start_time, r.timezone);
+        if (r.date && r.end_time) r.end_ts = wallTimeToInstant(r.date, r.end_time, r.timezone);
+        // A timed event with no usable times degrades to a full-day
+        // event on its date instead of vanishing from the calendar.
+        if (!r.start_ts || !r.end_ts || r.end_ts <= r.start_ts) {
+          r.all_day = 1;
+          r.start_date = r.date || today;
+          r.end_date = r.start_date;
+          r.start_ts = null; r.end_ts = null; r.timezone = null;
+        } else {
+          r.start_date = null; r.end_date = null;
+        }
+      }
+      delete r.date; delete r.start_time; delete r.end_time;
       return r;
     });
   }

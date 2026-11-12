@@ -6,22 +6,13 @@
 <title>DeLaClaw</title>
 <link rel="icon" type="image/png" href="icons/favicon.png">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<!-- Content-Security-Policy: self-hosted vendor + Google Identity exception (Google forbids SRI, see https://developers.google.com/identity/gsi/web/guides/content-security-policy) -->
-<!-- CSP hardened: all inline handlers removed via delegation (Phase 1 index.html 109, Phase 2 js/*.js 254 → 0). Secure hash for importmap restored, unsafe-* removed. -->
+<!-- Content-Security-Policy: Google Identity exception only (Google forbids SRI, see https://developers.google.com/identity/gsi/web/guides/content-security-policy) -->
+<!-- CSP hardened: all inline handlers removed via delegation (Phase 1 index.html 109, Phase 2 js/*.js 254 → 0). No importmap since three.js was dropped; unsafe-* removed from script-src. -->
 <!-- frame-src includes https://docs.google.com: the Drive join picker renders in a docs.google.com iframe (google.picker). -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1yvnH29VT6SvG/tGoNfuKL3PfgQC2PuybzkQ2c6rgyA=' https://accounts.google.com https://apis.google.com https://www.gstatic.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com https://cloudflareinsights.com; frame-src 'self' https://accounts.google.com https://content.google.com https://docs.google.com https://www.youtube.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
-<!-- Vendor: self-hosted (was CDN jsdelivr) — three @0.170.0 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com https://apis.google.com https://www.gstatic.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com https://cloudflareinsights.com; frame-src 'self' https://accounts.google.com https://content.google.com https://docs.google.com https://www.youtube.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <!-- Google Identity: must stay on CDN per ToS, no SRI per Google docs -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://apis.google.com/js/api.js" async defer></script>
-<script type="importmap">
-{
-  "imports": {
-    "three": "./vendor/three/build/three.module.js",
-    "three/addons/": "./vendor/three/examples/jsm/"
-  }
-}
-</script>
 <link rel="stylesheet" href="style.css">
 <script src="js/bootstrap.js"></script>
 <script src="js/delegation.js"></script>
@@ -39,7 +30,6 @@
 
   <div class="hero-storm-wrap" id="heroStormBg">
     <svg id="heroStorm" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"></svg>
-    <canvas id="heroStorm3d"></canvas>
     <button type="button" class="hero-demo-btn" id="heroDemoBtn">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="7" height="7" rx="2" fill="#3b82f6"/><rect x="10" y="1" width="7" height="7" rx="2" fill="#6366f1"/><rect x="1" y="10" width="7" height="7" rx="2" fill="#22c55e"/><rect x="10" y="10" width="7" height="7" rx="2" fill="#ec4899"/></svg>
       <span>Demo</span>
@@ -229,16 +219,8 @@ bun run server.js</pre>
 
   <!-- Gate footer (identity links only — no stats/backend) -->
   <footer class="gate-footer">
-    <div class="footer-links">
-      <a href="https://docs.delaclaw.com/#/" target="_blank" rel="noopener" class="footer-link"><span data-icon="book-open" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_docs">Docs</span></a>
-      <span class="footer-sep">·</span>
-      <a href="https://github.com/AntGro/DeLaClaw" target="_blank" rel="noopener" class="footer-link"><span data-icon="github" data-size="13" data-color="currentColor"></span> GitHub</a>
-      <span class="footer-sep">·</span>
-      <a href="https://github.com/AntGro/DeLaClaw/blob/main/LICENSE" target="_blank" rel="noopener" class="footer-link"><span data-icon="scale" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_license">License</span></a>
-      <span class="footer-sep">·</span>
-      <a href="https://docs.delaclaw.com/#/privacy" target="_blank" rel="noopener" class="footer-link"><span data-icon="shield" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_privacy">Privacy</span></a>
-    </div>
-    <div class="footer-copyright">© 2026 DeLaClaw</div>
+    <div class="footer-links"></div>
+    <div class="footer-copyright"></div>
   </footer>
 </div>
 
@@ -397,11 +379,12 @@ bun run server.js</pre>
           </div>
         </div>
         <div class="calendar-add-wrap">
-          <button class="btn" data-action="toggle-calendar-add" data-menu="calendarFilterMenu" title="Filter" aria-expanded="false" aria-haspopup="true"><span data-icon="funnel" data-size="16"></span></button>
+          <button class="btn cal-filter-btn" data-action="toggle-calendar-add" data-menu="calendarFilterMenu" title="Filter" aria-expanded="false" aria-haspopup="true"><span data-icon="funnel" data-size="16"></span></button>
           <div class="calendar-add-menu" id="calendarFilterMenu" style="display:none" role="menu">
             <button data-action="toggle-calendar-filter" data-filter="todo" class="active" role="menuitemcheckbox" aria-checked="true"><i class="cal-swatch cal-todo"></i><span id="calendarFilterTodos">TODOs</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
             <button data-action="toggle-calendar-filter" data-filter="habit" class="active" role="menuitemcheckbox" aria-checked="true"><i class="cal-swatch cal-habit"></i><span id="calendarFilterHabits">Habits</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
             <button data-action="toggle-calendar-filter" data-filter="birthday" class="active" role="menuitemcheckbox" aria-checked="true"><i class="cal-swatch cal-birthday"></i><span id="calendarFilterBirthdays">Birthdays</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
+            <button data-action="toggle-calendar-filter" data-filter="event" class="active" role="menuitemcheckbox" aria-checked="true"><i class="cal-swatch cal-event"></i><span id="calendarFilterEvents">Events</span><span class="cal-check"><span data-icon="check" data-size="14"></span></span></button>
           </div>
         </div>
       </div>
@@ -410,7 +393,12 @@ bun run server.js</pre>
           <button class="btn" id="calendarAddBtn" data-action="toggle-calendar-add" data-menu="calendarAddMenu" title="Add" aria-expanded="false" aria-haspopup="true"><span data-icon="plus" data-size="16"></span></button>
           <div class="calendar-add-menu" id="calendarAddMenu" style="display:none" role="menu">
             <button data-action="open-add-birthday" role="menuitem"><span data-icon="cake" data-size="15"></span> <span id="calendarAddBirthdayLabel">Birthday</span></button>
+            <button data-action="open-add-event" role="menuitem"><span data-icon="calendar-plus" data-size="15"></span> <span id="calendarAddEventLabel">Event</span></button>
           </div>
+        </div>
+        <div class="search-wrapper">
+          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
+          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search…" data-action="filter-calendar-search"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
         </div>
       </div>
     </div>
@@ -483,16 +471,8 @@ bun run server.js</pre>
       <div class="footer-backend" id="footerBackend"></div>
     </div>
     <div class="footer-row footer-row-identity">
-      <div class="footer-links">
-        <a href="https://docs.delaclaw.com/#/" target="_blank" rel="noopener" class="footer-link"><span data-icon="book-open" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_docs">Docs</span></a>
-        <span class="footer-sep">·</span>
-        <a href="https://github.com/AntGro/DeLaClaw" target="_blank" rel="noopener" class="footer-link"><span data-icon="github" data-size="13" data-color="currentColor"></span> GitHub</a>
-        <span class="footer-sep">·</span>
-        <a href="https://github.com/AntGro/DeLaClaw/blob/main/LICENSE" target="_blank" rel="noopener" class="footer-link"><span data-icon="scale" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_license">License</span></a>
-        <span class="footer-sep">·</span>
-        <a href="https://docs.delaclaw.com/#/privacy" target="_blank" rel="noopener" class="footer-link"><span data-icon="shield" data-size="13" data-color="currentColor"></span> <span data-i18n="utils.footer_privacy">Privacy</span></a>
-      </div>
-      <div class="footer-copyright">© 2026 DeLaClaw</div>
+      <div class="footer-links"></div>
+      <div class="footer-copyright"></div>
     </div>
   </footer>
 
@@ -617,6 +597,10 @@ bun run server.js</pre>
               <img class="backend-icon-img" src="icons/brand/googledrive.svg" alt="Google Drive" width="16" height="16">
               <span id="settingsDriveExportBtn">Save to Google Drive</span>
             </button>
+            <button type="button" class="settings-data-btn" data-action="copy-backup">
+              <span data-icon="copy" data-size="16"></span>
+              <span id="settingsCopyBackupBtn">Copy backup as text</span>
+            </button>
             <div class="drive-backup-link" id="driveBackupLink" style="display:none"></div>
           </div>
           <div class="setting-group">
@@ -625,6 +609,10 @@ bun run server.js</pre>
             <button type="button" class="settings-data-btn" data-action="import-backup">
               <span data-icon="upload" data-size="16"></span>
               <span id="settingsImportBtn">Import backup</span>
+            </button>
+            <button type="button" class="settings-data-btn" data-action="import-backup-paste">
+              <span data-icon="clipboard-list" data-size="16"></span>
+              <span id="settingsPasteBackupBtn">Paste backup text</span>
             </button>
             <div class="import-progress" id="importProgress" style="display:none">
               <div class="import-progress-text" id="importProgressText"></div>
@@ -661,6 +649,10 @@ bun run server.js</pre>
               <div class="setting-toggle-row cal-sync-sub" data-action="toggle-cal-sync-birthdays">
                 <span class="setting-toggle-text" id="settingsCalSyncBirthdaysLabel">Birthdays</span>
                 <span class="setting-toggle-switch" id="calSyncBirthdaysSwitch"></span>
+              </div>
+              <div class="setting-toggle-row cal-sync-sub" data-action="toggle-cal-sync-events">
+                <span class="setting-toggle-text" id="settingsCalSyncEventsLabel">Events</span>
+                <span class="setting-toggle-switch" id="calSyncEventsSwitch"></span>
               </div>
               <button type="button" class="settings-data-btn" data-action="resync-cal-sync">
                 <span data-icon="refresh-cw" data-size="16"></span>

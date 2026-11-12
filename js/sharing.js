@@ -71,7 +71,7 @@ function createDemoSharingStub() {
 // are the Drive adapter's public groups and the item arrays are its
 // per-group file contents, so reads match the live adapter's shapes.
 // Every mutation rejects with the shared read-only error; no polling.
-const SHARING_TYPE_KEY = { todo: 'todos', habit: 'habits', list_item: 'lists' };
+const SHARING_TYPE_KEY = { todo: 'todos', habit: 'habits', list_item: 'lists', event: 'events' };
 
 function createCachedSharing(blob) {
   const groups = Array.isArray(blob?.groups) ? blob.groups : [];
@@ -104,6 +104,7 @@ function createCachedSharing(blob) {
   stub.getAllSharedItems = (itemType) => allItems(itemType ? SHARING_TYPE_KEY[itemType] : null);
   stub.getAllSharedTodos = () => allItems('todos');
   stub.getAllSharedListItems = () => allItems('lists');
+  stub.getAllSharedEvents = () => allItems('events');
   stub.getAllSharedHabits = () => allItems('habits').filter(i => i.item_type === 'habit' && i.completions !== undefined);
   stub.getCurrentUser = () => blob?.currentUser || { display_name: 'Member', backendUserId: 'googledrive' };
   stub.getCurrentMemberId = async (groupId) => memberIds[groupId] || null;

@@ -48,13 +48,14 @@
     'switch-view': 1, 'set-project-filter': 1, 'set-todo-filter': 1, 'set-habit-filter': 1,
     'set-flashcard-filter': 1, 'sort-projects': 1, 'sort-todos': 1, 'sort-habits': 1,
     'sort-flashcards': 1, 'sort-lists': 1, 'toggle-archived': 1, 'toggle-search': 1,
-    'clear-search': 1, 'switch-settings-pane': 1, 'toggle-theme': 1, 'export-backup': 1,
+    'clear-search': 1, 'switch-settings-pane': 1, 'toggle-theme': 1, 'export-backup': 1, 'copy-backup': 1,
     'navigate-to-category': 1, 'toggle-done-todos': 1, 'navigate-to-habit-category': 1,
     'navigate-to-todo-section': 1, 'navigate-to-habit-section': 1, 'navigate-to-list-section': 1,
     'toggle-section-chips': 1,
-    'navigate-to-flash-deck': 1, 'open-habit-history': 1, 'navigate-to-project': 1,
+    'navigate-to-flash-deck': 1, 'navigate-to-flash-section': 1, 'open-habit-history': 1, 'navigate-to-project': 1,
     'toggle-expand-project': 1, 'copy-project-title': 1, 'copy-item-link': 1,
     'show-todo-general-card': 1, 'calendar-prev': 1, 'calendar-next': 1, 'calendar-today': 1,
+    'welcome-cal-nav': 1, 'welcome-cal-today': 1,
     'toggle-calendar-filter': 1, 'open-welcome-birthday': 1, 'set-calendar-view': 1,
     'open-calendar-picker': 1, 'pick-calendar-month': 1, 'pick-calendar-year': 1,
     'open-calendar-day': 1, 'calendar-day-nav': 1, 'toggle-calendar-add': 1, 'navigate-to-list': 1,
@@ -70,7 +71,8 @@
     // written or applied to the in-memory schedule.
     'start-practice': 1, 'reveal-card': 1, 'rate-card': 1, 'continue-free-practice': 1,
     'start-text-practice': 1, 'start-text-practice-for-text': 1, 'handle-line-click': 1,
-    'submit-text-review': 1, 'continue-text-same-text': 1
+    'submit-text-review': 1, 'continue-text-same-text': 1,
+    'open-chunk-panel': 1, 'show-chunk-stats': 1, 'back-to-chunk-panel': 1, 'toggle-chunk-bar': 1, 'revise-chunk': 1
   };
   function readOnlyAllows(action) {
     // 'close-and-open-revision' mutates (task status) despite its prefix.
@@ -121,7 +123,7 @@
       case 'unshare-habit': callWindow('unshareHabit', [getId(el), el]); break;
       case 'copy-habit-to-personal': callWindow('copyHabitToPersonal', [getId(el), el]); break;
       case 'open-add-habit-category': callWindow('openAddHabitCategoryModal', []); break;
-      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('closeCalendarDay', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
+      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
       case 'open-add-flash-deck': callWindow('openAddFlashDeckModal', []); break;
       case 'open-add-list': callWindow('openAddListModal', []); break;
       case 'open-import': callWindow('openImportModal', []); break;
@@ -151,7 +153,11 @@
       case 'toggle-theme': callWindow('toggleTheme', []); break;
       case 'export-backup': callWindow('exportBackup', []); break;
       case 'export-to-drive': callWindow('exportToGoogleDrive', []); break;
+      case 'copy-backup': callWindow('copyBackup', []); break;
       case 'import-backup': callWindow('importBackup', []); break;
+      case 'import-backup-paste': callWindow('openPasteBackupModal', []); break;
+      case 'close-paste-backup-modal': callWindow('closePasteBackupModal', []); break;
+      case 'confirm-paste-backup': callWindow('confirmPasteBackup', []); break;
       case 'show-todo-general-card': callWindow('showTodoGeneralCard', []); break;
       case 'navigate-to-category': callWindow('navigateToCategory', [getCat(el)]); break;
       case 'navigate-to-todo-section': callWindow('navigateToTodoSection', [getCat(el)]); break;
@@ -165,6 +171,7 @@
       case 'toggle-done-todos': callWindow('toggleDoneTodos', [el.dataset.catId || getCat(el)]); break;
       case 'open-edit-category-modal': callWindow('openEditCategoryModal', [getCat(el)]); break;
       case 'open-quick-add-priority-picker': callWindow('openQuickAddPriorityPicker', [el, e]); break;
+      case 'open-quick-add-deadline-picker': callWindow('openQuickAddDeadlinePicker', [el, e]); break;
       case 'add-todo-to-category': break; // textarea only — creation handled on Enter keydown, not click
       case 'add-todo-from-add-row': { var inp = el.closest('.todo-cat-add')?.querySelector('.todo-cat-input'); if (inp) callWindow('addTodoToCategory', [inp]); } break;
       case 'share-todo-from-add': callWindow('shareTodoFromAdd', [el]); break;
@@ -219,6 +226,12 @@
       case 'save-habit-completion': callWindow('saveHabitCompletion', [el.dataset.id||getId(el)]); break;
       case 'cancel-edit-completion': callWindow('cancelEditCompletion', [el.dataset.id||getId(el)]); break;
       case 'navigate-to-flash-deck': callWindow('navigateToFlashDeck', [el.dataset.deck||getId(el)]); break;
+      case 'navigate-to-flash-section': callWindow('navigateToFlashSection', [el.dataset.deck||getId(el)]); break;
+      case 'open-add-flash-deck-in-section': callWindow('openAddFlashDeckModal', [el.dataset.deck||getId(el)]); break;
+      case 'delete-flash-section': callWindow('deleteFlashSection', [el.dataset.deck||getId(el)]); break;
+      case 'close-delete-flash-section-modal': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeDeleteFlashSectionModal', []); break;
+      case 'delete-flash-section-move-up': callWindow('deleteFlashSectionMoveUp', []); break;
+      case 'delete-flash-section-subtree': callWindow('deleteFlashSectionSubtree', []); break;
       case 'quick-add-draft': callWindow('quickAddDraft', []); break;
       case 'update-proposed-deck': callWindow('updateProposedDeck', [getId(el), el.value||el.dataset.deck]); break;
       case 'accept-proposal': callWindow('acceptProposal', [getId(el)]); break;
@@ -255,6 +268,15 @@
       case 'start-text-practice-for-text': callWindow('startTextPracticeForText', [getId(el)]); break;
       case 'open-edit-text': callWindow('openEditTextModal', [getId(el)]); break;
       case 'delete-text': callWindow('deleteText', [getId(el)]); break;
+      case 'open-chunk-panel': callWindow('openChunkPanel', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10), el]); break;
+      case 'show-chunk-stats': callWindow('showChunkStats', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
+      case 'back-to-chunk-panel': callWindow('backToChunkPanel', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
+      case 'close-chunk-panel': callWindow('closeChunkPanel', []); break;
+      case 'toggle-chunk-bar': callWindow('toggleChunkBar', [el.dataset.textId, el]); break;
+      case 'revise-chunk': callWindow('reviseChunk', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
+      case 'open-edit-chunk': callWindow('openEditChunkModal', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
+      case 'close-edit-chunk': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditChunkModal', []); break;
+      case 'save-edit-chunk': callWindow('saveEditChunk', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
       case 'close-add-text': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddTextModal', []); break;
       case 'save-new-text': callWindow('saveNewText', []); break;
       case 'close-edit-text': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditTextModal', []); break;
@@ -283,11 +305,13 @@
       case 'delete-all-archived-tasks': callWindow('deleteAllArchivedTasks', []); break;
       case 'approve-task-and-close': { var atId = el.dataset.taskId||getId(el); var atSt = el.dataset.status; if (window.updateTaskStatus) window.updateTaskStatus(atId, atSt, el); callWindow('closeRevisionModal', []); } break;
       case 'close-and-open-revision': { var coId = el.dataset.taskId||getId(el); var coSt = el.dataset.status; if (window.updateTaskStatus) window.updateTaskStatus(coId, coSt, el); callWindow('closeRevisionModal', []); if (window.openRevisionModal) setTimeout(function(){ window.openRevisionModal(coId); }, 120); } break;
-      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('closeCalendarDay', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
+      case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
       case 'handle-avatar-click': callWindow('handleAvatarClick', [getId(el)]); break;
       case 'calendar-prev': callWindow('calendarNav', [-1]); break;
       case 'calendar-next': callWindow('calendarNav', [1]); break;
       case 'calendar-today': callWindow('calendarToday', []); break;
+      case 'welcome-cal-nav': callWindow('welcomeCalNav', [parseInt(el.dataset.delta, 10) || 0]); break;
+      case 'welcome-cal-today': callWindow('welcomeCalToday', []); break;
       case 'toggle-calendar-filter': callWindow('toggleCalendarFilter', [el.dataset.filter]); break;
       case 'open-welcome-birthday': callWindow('openCalendarDate', [el.dataset.date]); break;
       case 'set-calendar-view': callWindow('closeCalendarAddMenu', []); callWindow('setCalendarView', [el.dataset.view, el.dataset]); break;
@@ -297,9 +321,11 @@
       case 'open-calendar-day': callWindow('openCalendarDay', [el.dataset.date]); break;
       case 'close-calendar-day': callWindow('closeCalendarDay', []); break;
       case 'calendar-day-nav': callWindow('calendarDayNav', [el.dataset.dir]); break;
+      case 'calendar-day-jump': callWindow('openDayJumpPicker', []); break;
       case 'toggle-calendar-add': callWindow('toggleCalendarAddMenu', [el]); break;
       case 'edit-birthday-avatar': callWindow('handleAvatarClick', [el.dataset.id]); break;
-      case 'calendar-birthday-edit': callWindow('closeCalendarDay', []); callWindow('openEditBirthdayModal', [el.dataset.id]); break;
+      case 'calendar-birthday-edit': callWindow('openEditBirthdayModal', [el.dataset.id]); break;
+      case 'calendar-event-edit': callWindow('openEditEventModal', [el.dataset.id]); break;
       case 'calendar-toggle-todo': {
         var ctDone = el.dataset.done === 'true';
         var ctDate = el.dataset.date;
@@ -308,6 +334,11 @@
             if (window.renderCalendar) window.renderCalendar();
             if (window.renderCalendarDayPanel) window.renderCalendarDayPanel(ctDate);
           });
+        break;
+      }
+      case 'calendar-edit-row': {
+        const row = el.closest('.cal-row');
+        if (row) callWindow('editCalendarRowInline', [row, el.dataset.calType, el.dataset.calId]);
         break;
       }
       case 'calendar-habit-done': {
@@ -321,6 +352,17 @@
       }
       case 'open-edit-birthday': callWindow('openEditBirthdayModal', [getId(el)]); break;
       case 'delete-birthday': callWindow('deleteBirthday', [getId(el)]); break;
+      case 'open-add-event': callWindow('closeCalendarAddMenu', []); callWindow('openAddEventModal', [el.dataset.date]); break;
+      case 'open-edit-event': callWindow('openEditEventModal', [getId(el)]); break;
+      case 'delete-event': callWindow('deleteEvent', [getId(el)]); break;
+      case 'close-add-event': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddEventModal', []); break;
+      case 'save-new-event': callWindow('saveNewEvent', []); break;
+      case 'close-edit-event': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditEventModal', []); break;
+      case 'save-edit-event': callWindow('saveEditEvent', []); break;
+      case 'share-event': callWindow('shareEvent', [getId(el), el]); break;
+      case 'unshare-event': callWindow('unshareEvent', [getId(el), el]); break;
+      case 'copy-event-to-personal': callWindow('copyEventToPersonal', [getId(el), el]); break;
+      case 'event-set-mode': callWindow('setEventMode', [el.dataset.prefix, el.dataset.mode]); break;
       case 'pick-new-birthday-avatar': callWindow('pickNewBirthdayAvatar', []); break;
       case 'clear-new-birthday-avatar': callWindow('clearNewBirthdayAvatar', []); break;
       case 'close-add-birthday': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddBirthdayModal', []); break;
@@ -394,6 +436,7 @@
       case 'toggle-cal-sync-habits': callWindow('toggleCalSyncSub', ['habits']); break;
       case 'toggle-cal-sync-todos': callWindow('toggleCalSyncSub', ['todos']); break;
       case 'toggle-cal-sync-birthdays': callWindow('toggleCalSyncSub', ['birthdays']); break;
+      case 'toggle-cal-sync-events': callWindow('toggleCalSyncSub', ['events']); break;
       case 'resync-cal-sync': callWindow('resyncCalSync', []); break;
       default: {
         var camel = action.replace(/-([a-z])/g, function(_,c){ return c.toUpperCase(); });
@@ -420,6 +463,9 @@
       case 'handle-model-change': callWindow('handleModelChange', []); break;
       case 'update-next-sibling-category': { var nxt = el.nextElementSibling; if (nxt && nxt.dataset) nxt.dataset.category = el.value; } break;
       case 'pick-calendar-day': callWindow('pickCalendarDay', [el.value]); break;
+      case 'jump-to-calendar-day': callWindow('jumpToCalendarDay', [el.value]); break;
+      case 'event-field': callWindow('updateEventSummary', [el.dataset.prefix]); break;
+      case 'birthday-field': callWindow('updateBirthdaySummary', [el.dataset.prefix]); break;
       case 'update-proposed-deck': callWindow('updateProposedDeck', [el.dataset.id||el.dataset.todoId, el.value]); break;
       default: break;
     }
@@ -440,6 +486,7 @@
           case 'filter-habits': callWindow('filterHabits', [e]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [e]); break;
           case 'filter-lists': callWindow('filterLists', [e]); break;
+          case 'filter-calendar-search': callWindow('filterCalendarSearch', [e]); break;
           default: break;
         }
         return;
@@ -455,6 +502,7 @@
           case 'filter-habits': callWindow('filterHabits', [fakeEvt]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [fakeEvt]); break;
           case 'filter-lists': callWindow('filterLists', [fakeEvt]); break;
+          case 'filter-calendar-search': callWindow('filterCalendarSearch', [fakeEvt]); break;
           default: break;
         }
       }, 150);
@@ -463,6 +511,9 @@
     if (isReadOnly()) return; // non-filter inputs are edit flows (silent: fires per keystroke)
     switch (action) {
       case 'update-scene-preview': callWindow('updateScenePreview', [el]); break;
+      case 'event-field': callWindow('updateEventSummary', [el.dataset.prefix]); break;
+      case 'birthday-field': callWindow('updateBirthdaySummary', [el.dataset.prefix]); break;
+      case 'add-todo-to-category': if (window.updateTodoCharCounter) window.updateTodoCharCounter(el); break;
       default: break;
     }
   }
@@ -486,6 +537,8 @@
         case 'save-new-list-on-enter': e.preventDefault(); callWindow('saveNewList', []); break;
         case 'save-edit-list-on-enter': e.preventDefault(); callWindow('saveEditList', []); break;
         case 'save-new-birthday-on-enter': e.preventDefault(); callWindow('saveNewBirthday', []); break;
+        case 'save-new-event-on-enter': e.preventDefault(); callWindow('saveNewEvent', []); break;
+        case 'save-edit-event-on-enter': e.preventDefault(); callWindow('saveEditEvent', []); break;
         case 'sharing-invite-on-enter': e.preventDefault(); if (window.sharingInvite) { var gid = el.dataset.groupId||el.dataset.id; window.sharingInvite(gid, null, el); } break;
         case 'sharing-create-group-on-enter': e.preventDefault(); callWindow('sharingCreateGroupSubmit', []); break;
         case 'sharing-join-code-on-enter': if ((e.ctrlKey || e.metaKey) && window.sharingJoinCodeSubmit) { e.preventDefault(); window.sharingJoinCodeSubmit(); } break;

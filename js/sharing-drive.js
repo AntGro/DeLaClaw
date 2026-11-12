@@ -64,7 +64,8 @@ import { createMutationQueue } from './sharing-mutation-queue.js';
 //           ├── group.json                 ← metadata + member list
 //           ├── todos.json                 ← shared todos
 //           ├── habits.json                ← shared habits
-//           └── lists.json                 ← shared list items
+//           ├── lists.json                 ← shared list items
+//           └── events.json                ← shared calendar events
 //
 // Identity:
 //   User email comes from the Drive About API (no extra OAuth scope needed).
@@ -83,7 +84,7 @@ const { sharedRoot: SHARED_ROOT_NAME, groupPrefix: GROUP_PREFIX } =
   driveFolderNames(currentHostname());
 const POLL_MS          = 15_000;      // 15s — faster than personal (30s)
 const MAX_RETRIES      = 2;
-const ITEM_TYPES       = ['todos', 'habits', 'lists'];
+const ITEM_TYPES       = ['todos', 'habits', 'lists', 'events'];
 const EXTRA_COUNT      = 10;
 const EXTRA_FILES      = Array.from({ length: EXTRA_COUNT }, (_, i) => `extra_${i + 1}`);
 // Named placeholder files for future features (group messages, games).
@@ -1960,6 +1961,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
     getAllSharedListItems() {
       return this.getAllSharedItems('list_item');
+    },
+
+    getAllSharedEvents() {
+      return this.getAllSharedItems('event');
     },
 
     /**

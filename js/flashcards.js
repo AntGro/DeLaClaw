@@ -1,10 +1,11 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, showToast, showConfirmAction, balanceGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea } from './utils.js';
+import { esc, escQ, showToast, showConfirmAction, applySectionGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, onColorFor } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
-import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap, persistTextEdit, leadingRevealCount, trailingRevealCount } from './scene-parse.js';
+import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneBlockText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap, persistTextEdit, leadingRevealCount, trailingRevealCount, getTextChunks, isChunkDue, chunkReviseMode, applyChunkEdit } from './scene-parse.js';
+import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, descendantBucketIds, descendantsOf, siblingNameTaken, planNodeMove, resolveSectionPath, parseSectionPath, flattenTree, runDeckToSectionMigration } from './sections-pure.js';
 
 // ===================================================================
 // FLASHCARDS — Spaced Repetition (Algo-style intervals)
@@ -109,6 +110,8 @@ let _deckMap = new Map();     // id → row
 let _deckByName = new Map();  // name → row (backward compat)
 let _defaultDeckId = null;    // protected default row
 let _sharedDeckId = null;     // protected __shared__ row
+let _deckTree = null;         // buildSectionTree over deck rows (sections + buckets)
+const FLASH_SECTION_DEFAULT_COLOR = '#3b82f6';
 
 async function loadFlashcardDecks() {
   const { data, error } = await state.db.from('flashcard_decks').select('*').order('sort_order', { ascending: true });
@@ -118,12 +121,35 @@ async function loadFlashcardDecks() {
   _defaultDeckId = null;
   _sharedDeckId = null;
   for (const row of (data || [])) {
+    normalizeSectionFields(row);
     _deckMap.set(row.id, row);
-    _deckByName.set(row.name, row);
+    // First wins: with sibling-scoped names, two decks in different
+    // sections can share a name, and legacy name lookups (cards/texts
+    // without deck_id, draft proposals) must resolve stably to the
+    // oldest one instead of drifting to the newest duplicate.
+    if (!_deckByName.has(row.name)) _deckByName.set(row.name, row);
     if (row.is_protected && row.name === SHARED_CATEGORY) _sharedDeckId = row.id;
     else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultDeckId = row.id;
   }
+  _deckTree = buildSectionTree([..._deckMap.values()]);
   await backfillCategoryColors('flashcard_decks', _deckMap);
+}
+
+function getDeckTree() {
+  if (!_deckTree) _deckTree = buildSectionTree([..._deckMap.values()]);
+  return _deckTree;
+}
+
+// Item count for one deck bucket (cards for card decks, texts for text decks).
+function deckItemCount(deckId) {
+  return getDeckType(deckId) === 'text'
+    ? allTexts.filter(tx => deckIdForText(tx) === deckId).length
+    : allCards.filter(c => deckIdForCard(c) === deckId).length;
+}
+
+// Item count for a section node: the sum over its descendant buckets.
+function deckSectionItemCount(node) {
+  return descendantBucketIds(node).reduce((sum, id) => sum + deckItemCount(id), 0);
 }
 
 function getFlashcardDecks() { return _deckMap; }
@@ -222,14 +248,25 @@ function getDeckType(deckId) {
   return 'flashcard'; // default
 }
 
-// Deck options for the edit modals: only same-type decks, never __shared__.
-// A card in a text deck (or a text in a flashcard deck) would be invisible,
-// since deck buckets render by deck type — so cross-type moves are excluded.
+// Deck options for the edit modals: only same-type buckets, never
+// __shared__ and never sections (bucket-only pickers). A card in a
+// text deck (or a text in a flashcard deck) would be invisible, since
+// deck buckets render by deck type — so cross-type moves are excluded.
+// Labels carry the section path, so two same-name decks in different
+// sections are distinguishable (values are ids, so the choice is exact).
 function deckOptionsForEdit(type, currentDeckId) {
-  return [..._deckMap.values()]
+  const tree = getDeckTree();
+  // Tree display order (DFS), so decks inside a section sit under it
+  // in the picker instead of interleaving by global sort_order.
+  return flattenTree(tree.roots)
+    .filter(n => n.kind === 'bucket')
+    .map(n => n.row)
     .filter(d => d.id !== _sharedDeckId && getDeckType(d.id) === type)
-    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-    .map(d => `<option value="${esc(d.id)}" ${d.id === currentDeckId ? 'selected' : ''}>${esc(d.name || t('common.category_default'))}</option>`)
+    .map(d => {
+      const node = tree.byId.get(d.id);
+      const label = node ? pathLabelOf(node, tree.byId) : (d.name || t('common.category_default'));
+      return `<option value="${esc(d.id)}" ${d.id === currentDeckId ? 'selected' : ''}>${esc(label)}</option>`;
+    })
     .join('');
 }
 
@@ -238,33 +275,33 @@ function hasSharedDeckItems() {
   return allCards.some(c => deckIdForCard(c) === _sharedDeckId) || allTexts.some(tx => deckIdForText(tx) === _sharedDeckId);
 }
 
-// Deck rows for display, sorted by sort_order (__shared__ only when it has items)
-function getVisibleDeckRows() {
-  const showShared = hasSharedDeckItems();
-  return [..._deckMap.values()]
-    .filter(r => r.id !== _sharedDeckId || showShared)
-    .sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
-}
-
 function renderDeckNavButtons() {
   const container = document.getElementById('flashcardNavButtons');
   if (!container) return;
-  const rows = getVisibleDeckRows();
+  const tree = getDeckTree();
+  const showShared = hasSharedDeckItems();
+  // Top-level nav only: sections and top-level buckets, in tree order.
+  // Section buttons navigate to the section block; their count is the
+  // sum over descendant buckets. The shared deck stays in nav only
+  // while it has items, like before.
+  const roots = tree.roots.filter(n => n.kind !== 'bucket' || n.id !== _sharedDeckId || showShared);
 
   // Draft nav button first
   let html = `<button class="category-nav-btn" style="--cat-color:${DRAFT_COLOR}" data-action="navigate-to-flash-deck" data-deck="__drafts">${lucideIcon('file-edit', 14, DRAFT_COLOR)} ${t('flashcards.draft')} (${allDrafts.length})</button>`;
 
-  html += rows.map(row => {
+  html += roots.map(node => {
+    const row = node.row;
+    const color = row.color || FLASH_DEFAULT_COLOR;
+    if (node.kind === 'section') {
+      const display = row.shortname || row.name || '';
+      return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-flash-section" data-deck="${esc(row.id)}" title="${esc(row.name || '')}">${lucideIcon('folder', 12, color)} ${esc(display)} (${deckSectionItemCount(node)})</button>`;
+    }
     const deckId = row.id;
-    const color = getDeckColorById(deckId);
     const sn = getDeckShortname(deckId);
     const display = sn || getDeckDisplayName(deckId);
     const type = getDeckType(deckId);
     const icon = type === 'text' ? lucideIcon('book-open', 12, color) : lucideIcon('layers', 12, color);
-    const count = type === 'text'
-      ? allTexts.filter(tx => deckIdForText(tx) === deckId).length
-      : allCards.filter(c => deckIdForCard(c) === deckId).length;
-    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-flash-deck" data-deck="${esc(deckId)}" title="${esc(getDeckDisplayName(deckId))}">${icon} ${esc(display)} (${count})</button>`;
+    return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-flash-deck" data-deck="${esc(deckId)}" title="${esc(getDeckDisplayName(deckId))}">${icon} ${esc(display)} (${deckItemCount(deckId)})</button>`;
   }).join('');
 
   container.innerHTML = html;
@@ -275,28 +312,78 @@ window.navigateToFlashDeck = function(deck) {
   scrollToAndHighlight(el, null);
 };
 
+window.navigateToFlashSection = function(sectionId) {
+  const el = document.getElementById(`flashSection-${sectionId}`);
+  const color = _deckMap.get(sectionId)?.color || FLASH_SECTION_DEFAULT_COLOR;
+  scrollToAndHighlight(el, color);
+};
+
+// Renumber exactly the ids passed (top-level roots from the nav, or one
+// section's children from its chips row) — sort_order is per parent.
+async function reorderDeckSiblings(orderedIds) {
+  const reorderable = orderedIds.filter(id => id !== '__drafts' && id !== _sharedDeckId);
+  const deckRows = reorderable.map(id => _deckMap.get(id)).filter(Boolean);
+  const updates = [];
+  deckRows.forEach((d, i) => {
+    if (Number(d.sort_order ?? 0) !== i) updates.push({ id: d.id, sort_order: i });
+    d.sort_order = i;
+  });
+  await bulkSortOrder('flashcard_decks', updates);
+  await loadFlashcardDecks();
+  const grid = document.getElementById('flashcardGrid');
+  const snapshot = snapshotBuckets(grid);
+  renderFlashcards();
+  animateBucketsFromSnapshot(grid, snapshot, 600);
+  showToast(t('toast.reordered'), 'success');
+}
+
+/** Cross-section chip drag — mirrors listNavCrossDrop in lists.js. */
+function flashDeckCrossDrop() {
+  return {
+    rootEl: document.getElementById('flashcardsView'),
+    rowOwner: (rowEl) => rowEl.id === 'flashcardNavButtons' ? null
+      : rowEl.id.startsWith('flashSectionChips-') ? rowEl.id.slice('flashSectionChips-'.length) : undefined,
+    canDrop: (dragId, parentId) => {
+      const node = getDeckTree().byId.get(dragId);
+      if (!node) return false;
+      // Protected decks (default, shared) never move into a section.
+      if (node.row.is_protected) return false;
+      if ((node.parentId || null) === (parentId || null)) return false;
+      return !planNodeMove([..._deckMap.values()], dragId, parentId, null).error;
+    },
+    onMove: (dragId, parentId, beforeId) => moveDeckNodeToParent(dragId, parentId, beforeId),
+  };
+}
+
+async function moveDeckNodeToParent(dragId, parentId, beforeId) {
+  const plan = planNodeMove([..._deckMap.values()], dragId, parentId, beforeId);
+  if (plan.error || !plan.updates?.length) return;
+  const grid = document.getElementById('flashcardGrid');
+  const snapshot = snapshotBuckets(grid);
+  for (const u of plan.updates) {
+    await state.db.from('flashcard_decks').update({ parent_id: u.parent_id, sort_order: u.sort_order }).eq('id', u.id);
+  }
+  await refreshFlashcards();
+  animateBucketsFromSnapshot(grid, snapshot, 600);
+}
+
 function initFlashDeckNavBtnReorder() {
   const skipIds = new Set(['__drafts']);
   if (_sharedDeckId) skipIds.add(_sharedDeckId);
   initNavBtnReorder('flashcardNavButtons', {
     idAttr: 'deck',
     skipIds,
-    async onReorder(orderedIds) {
-      const reorderable = orderedIds.filter(id => id !== '__drafts' && id !== _sharedDeckId);
-      const deckRows = reorderable.map(id => _deckMap.get(id)).filter(Boolean);
-      const updates = [];
-      deckRows.forEach((d, i) => {
-        if (Number(d.sort_order ?? 0) !== i) updates.push({ id: d.id, sort_order: i });
-        d.sort_order = i;
-      });
-      await bulkSortOrder('flashcard_decks', updates);
-      await loadFlashcardDecks();
-      const grid = document.getElementById('flashcardGrid');
-      const snapshot = snapshotBuckets(grid);
-      renderFlashcards();
-      animateBucketsFromSnapshot(grid, snapshot, 600);
-      showToast(t('toast.reordered'), 'success');
-    },
+    onReorder: reorderDeckSiblings,
+    crossDrop: flashDeckCrossDrop(),
+  });
+}
+
+function initFlashSectionNavBtnReorder(sectionId) {
+  initNavBtnReorder('flashSectionChips-' + sectionId, {
+    idAttr: 'deck',
+    skipIds: new Set(),
+    onReorder: reorderDeckSiblings,
+    crossDrop: flashDeckCrossDrop(),
   });
 }
 
@@ -319,19 +406,74 @@ function renderFlashcards() {
   renderAllBuckets();
 }
 
+// Render one tree level: sections become section blocks, buckets become
+// deck buckets. Under a search query a section shows only when its own
+// name matches or one of its descendant decks renders something.
+function renderFlashLevel(nodes, q) {
+  let html = '';
+  for (const node of nodes) {
+    if (node.kind === 'section') {
+      const nameMatches = q && (node.row.name || '').toLowerCase().includes(q);
+      const childrenHtml = renderFlashLevel(node.children, q);
+      if (q && !nameMatches && !childrenHtml) continue;
+      html += renderFlashSection(node, childrenHtml);
+    } else {
+      if (node.id === _sharedDeckId && !hasSharedDeckItems()) continue;
+      html += renderDeckBucket(node.id, q);
+    }
+  }
+  return html;
+}
+
+function renderFlashSection(node, childrenHtml) {
+  const section = node.row;
+  const color = section.color || FLASH_SECTION_DEFAULT_COLOR;
+  const total = deckSectionItemCount(node);
+  // Chips row: one nav button per child (sections navigate to their
+  // block, buckets to their deck), draggable across sections via the
+  // same crossDrop as the top nav.
+  const chips = node.children.map(child => {
+    const isSec = child.kind === 'section';
+    const count = isSec ? deckSectionItemCount(child) : deckItemCount(child.id);
+    const childColor = child.row.color || (isSec ? FLASH_SECTION_DEFAULT_COLOR : FLASH_DEFAULT_COLOR);
+    const label = child.row.shortname || child.row.name || '';
+    const title = child.row.name || '';
+    const icon = isSec ? lucideIcon('folder', 12, childColor)
+      : (getDeckType(child.id) === 'text' ? lucideIcon('book-open', 12, childColor) : lucideIcon('layers', 12, childColor));
+    const action = isSec ? 'navigate-to-flash-section' : 'navigate-to-flash-deck';
+    return `<button class="category-nav-btn" style="--cat-color:${childColor}" data-action="${action}" data-deck="${esc(child.id)}" title="${esc(title)}">${icon} ${esc(label)} (${count})</button>`;
+  }).join('');
+  const inner = childrenHtml || `<p class="empty-msg">${t('common.section_empty')}</p>`;
+  return `<div class="section-block" id="flashSection-${esc(section.id)}" data-node-kind="section" data-node-id="${esc(section.id)}" style="--cat-color:${color};--cat-on-color:${onColorFor(color)}">
+    <div class="section-header" data-action="toggle-section-chips">
+      <div class="section-header-left">
+        <h3 class="section-name">${lucideIcon('folder', 16)} ${esc(section.name || '')}</h3>
+        <span class="section-stats">(${total})</span>
+      </div>
+      <div class="section-header-actions">
+        <button class="todo-cat-shortname-btn" data-action="open-add-flash-deck-in-section" data-deck="${esc(section.id)}" title="${esc(t('flashcards.new_deck'))}">${lucideIcon('folder-plus', 14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="copy-item-link" data-link-type="flashsection" data-id="${esc(section.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
+        <button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(section.id)}" title="${esc(t('flashcards.edit_deck'))}">${lucideIcon('pencil', 14)}</button>
+        <button class="todo-cat-delete-btn" data-action="delete-flash-section" data-deck="${esc(section.id)}" title="${esc(t('common.delete'))}">${lucideIcon('trash-2', 14)}</button>
+      </div>
+    </div>
+    <div class="category-nav-buttons section-chips${node.children.length > 1 ? '' : ' section-chips-collapsed'}" id="flashSectionChips-${esc(section.id)}">${chips}</div>
+    <div class="section-level">${inner}</div>
+  </div>`;
+}
+
 function renderAllBuckets() {
   const grid = document.getElementById('flashcardGrid');
   if (!grid) return;
   grid.className = 'project-grid';
 
-  const deckIds = getVisibleDeckRows().map(r => r.id);
   const q = searchQuery.toLowerCase().trim();
 
   // Draft bucket first
   let html = renderDraftsBucket(q);
 
-  // Then deck buckets
-  html += deckIds.map(deckId => renderDeckBucket(deckId, q)).join('');
+  // Then the deck tree (sections + top-level buckets)
+  html += renderFlashLevel(getDeckTree().roots, q);
 
   if (!html.trim()) {
     html = `<div class="fc-empty-state">
@@ -353,6 +495,16 @@ function renderAllBuckets() {
     const draftList = draftDeck.querySelector('.task-list');
     if (draftList) initDraftDragDrop(draftList);
   }
+  // Section chips rows are re-created with the grid, so their drag
+  // handlers are (re)bound here after every grid render, like Lists
+  // does for its section chips.
+  const deckTree = getDeckTree();
+  const walkSections = (nodes) => {
+    for (const n of nodes) {
+      if (n.kind === 'section') { initFlashSectionNavBtnReorder(n.id); walkSections(n.children); }
+    }
+  };
+  walkSections(deckTree.roots);
   // Bind expand toggles for text items
   grid.querySelectorAll('.tr-expand-toggle').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -365,7 +517,11 @@ function renderAllBuckets() {
       }
     });
   });
-  balanceGrid(grid);
+  // Per-level section layout (like Lists): top-level buckets and
+  // section blocks share one width, each section's own level is laid
+  // out capped at the span it was given. Deck buckets carry
+  // data-node-kind so the layout sees them.
+  applySectionGrid(grid);
 }
 
 function initFlashcardHoverDelay(container) {
@@ -415,13 +571,16 @@ function renderDraftsBucket(q) {
   if (pendingCount > 0) chips.push(`<span class="fc-chip fc-chip-due">${pendingCount} ${t('flashcards.generating')}</span>`);
   if (readyCount > 0) chips.push(`<span class="fc-chip fc-chip-new">${readyCount} ready</span>`);
 
-  return `<div class="project-card" id="flashDraftsDeck" style="--cat-color:${DRAFT_COLOR}">
+  return `<div class="project-card" id="flashDraftsDeck" data-node-kind="bucket" data-node-id="__drafts" style="--cat-color:${DRAFT_COLOR}">
     <div class="project-card-header">
       <div style="display:flex;align-items:flex-start;gap:6px;">
         <div class="project-info">
           <strong>${lucideIcon('file-edit', 16)} ${t('flashcards.draft')}</strong>
           <span class="tech">${drafts.length} items ${chips.join(' ')}</span>
         </div>
+      </div>
+      <div class="project-header-actions">
+        <button class="todo-cat-shortname-btn" data-action="copy-item-link" data-link-type="flashdeck" data-id="__drafts" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
       </div>
     </div>
     <div class="add-task">
@@ -442,10 +601,7 @@ function renderDraftItem(d) {
   let proposalHtml = '';
   if (hasProposal) {
     const suggestedDeck = d.proposed_deck || '';
-    const dbDeckNames = [..._deckMap.values()].map(r => r.name);
-    const deckOptions = [...new Set([...dbDeckNames, suggestedDeck])].sort().map(dk =>
-      `<option value="${esc(dk)}"${dk === suggestedDeck ? ' selected' : ''}>${esc(dk || t('common.category_default'))}</option>`
-    ).join('');
+    const deckOptions = proposalDeckOptions(suggestedDeck);
     proposalHtml = `<div class="fc-proposal">
       <div class="fc-proposal-label">${lucideIcon('sparkles', 14, '#22c55e')} Proposed card:</div>
       <div class="fc-proposal-qa"><strong>Q:</strong> ${esc(d.proposed_front)}</div>
@@ -470,6 +626,7 @@ function renderDraftItem(d) {
       <span class="todo-text" style="cursor:text;">${esc(d.content.length > 120 ? d.content.slice(0, 120) + '…' : d.content)}</span>
       ${isPending ? `<span class="fc-status-badge fc-status-pending">${t('flashcards.generating')}</span>` : ''}
       <div class="todo-actions">
+        <button data-action="copy-item-link" data-link-type="flashdraft" data-id="${esc(d.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 16)}</button>
         ${!hasProposal && !isPending ? `<button data-action="request-proposal" data-id="${esc(d.id)}" title="${t('flashcards.propose')}">${lucideIcon('sparkles', 16)}</button>` : ''}
         <button data-action="start-inline-edit-draft" data-id="${esc(d.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
         <button data-action="delete-draft" data-id="${esc(d.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
@@ -543,7 +700,7 @@ function renderFlashcardDeck(deckId, q) {
     practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')}</span>`;
   }
 
-  return `<div class="project-card" id="flashDeck-${esc(deckId)}" style="--cat-color:${color}">
+  return `<div class="project-card" id="flashDeck-${esc(deckId)}" data-node-kind="bucket" data-node-id="${esc(deckId)}" style="--cat-color:${color}">
     <div class="project-card-header">
       <div style="display:flex;align-items:flex-start;gap:6px;">
         <div class="project-info">
@@ -554,6 +711,7 @@ function renderFlashcardDeck(deckId, q) {
       <div style="display:flex;align-items:center;gap:6px;">
         ${practiceButton}
         <div class="project-header-actions">
+          <button class="todo-cat-shortname-btn" data-action="copy-item-link" data-link-type="flashdeck" data-id="${esc(deckId)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
           ${deckId !== _defaultDeckId ? `<button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deckId)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>` : ''}
           <button class="archive-project-btn" data-action="open-add-flashcard" data-deck="${esc(deckId)}" title="${t('flashcards.add_card')}">${lucideIcon('plus', 16)}</button>
           ${deckId !== _defaultDeckId ? `<button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deckId)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>` : ''}
@@ -613,7 +771,7 @@ function renderTextDeck(deckId, q) {
     practiceButton = `<span class="fc-all-done">${lucideIcon('circle-check', 14, '#22c55e')}</span>`;
   }
 
-  return `<div class="project-card" id="flashDeck-${esc(deckId)}" style="--cat-color:${color}">
+  return `<div class="project-card" id="flashDeck-${esc(deckId)}" data-node-kind="bucket" data-node-id="${esc(deckId)}" style="--cat-color:${color}">
     <div class="project-card-header">
       <div style="display:flex;align-items:flex-start;gap:6px;">
         <div class="project-info">
@@ -624,6 +782,7 @@ function renderTextDeck(deckId, q) {
       <div style="display:flex;align-items:center;gap:6px;">
         ${practiceButton}
         <div class="project-header-actions">
+          <button class="todo-cat-shortname-btn" data-action="copy-item-link" data-link-type="flashdeck" data-id="${esc(deckId)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
           ${deckId !== _defaultDeckId ? `<button class="todo-cat-shortname-btn" data-action="prompt-flash-shortname" data-deck="${esc(deckId)}" title="${t('flashcards.edit_deck')}">${lucideIcon("pencil",14)}</button>` : ''}
           <button class="archive-project-btn" data-action="open-add-text" data-deck="${esc(deckId)}" title="${t('text_revision.add_text')}">${lucideIcon('plus', 16)}</button>
           ${deckId !== _defaultDeckId ? `<button class="todo-cat-delete-btn" data-action="delete-deck" data-deck="${esc(deckId)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>` : ''}
@@ -851,11 +1010,16 @@ window.acceptProposal = async function(id) {
   _pendingProposal.add(id);
   _setProposalBtns(id, true);
   try {
-    // Normalize the proposed deck name through the deck row — the heartbeat's
+    // Normalize the proposed deck through the deck row — the heartbeat's
     // proposed_deck is TEXT and only needs to match loosely; the write path
-    // derives the canonical name + FK from the row.
+    // derives the canonical name + FK from the row. A section row can
+    // never receive a card (deck buckets render by bucket only), so a
+    // proposal resolving to a section falls back to the default deck.
     const proposedName = draft.proposed_deck || '';
-    const deckRow = _deckByName.get(proposedName) || _deckMap.get(_defaultDeckId);
+    let deckRow = null;
+    const resolvedId = resolveDraftDeckId(proposedName);
+    if (resolvedId) deckRow = _deckMap.get(resolvedId);
+    if (!deckRow || isSectionRow(deckRow)) deckRow = _deckMap.get(_defaultDeckId);
     const deckName = deckRow?.name ?? '';
     const deckId = deckRow?.id || _defaultDeckId;
     if (state.db.connected) {
@@ -922,10 +1086,7 @@ window.editProposal = function(id) {
   if (!draft) return;
   closeAllFlashModals();
   const currentDeck = draft.proposed_deck || '';
-  const dbDeckNames = [..._deckMap.values()].map(r => r.name);
-  const deckOptions = [...new Set([...dbDeckNames, currentDeck])].sort().map(dk =>
-    `<option value="${esc(dk)}"${dk === currentDeck ? ' selected' : ''}>${esc(dk || t('common.category_default'))}</option>`
-  ).join('');
+  const deckOptions = proposalDeckOptions(currentDeck);
   const html = `<div class="modal-overlay" id="editProposalModal" style="display:flex;" data-action="close-edit-proposal" data-overlay-close="true">
     <div class="modal">
       <h2>${lucideIcon('pencil', 18, '#8b5cf6')} ${t('flashcards.edit_proposal')}</h2>
@@ -1067,7 +1228,64 @@ window.deleteFlashcard = function(id) {
 };
 
 // ── New Deck ──
-window.openAddFlashDeckModal = function() {
+// Section helpers — mirrors the Lists page's chain/convert logic.
+// nextFlashSortOrder: next sort_order within one parent (0 when empty).
+function nextFlashSortOrder(parentId) {
+  // Rows are normalized at load (kind/parent_id defaults), so parent_id
+  // is either a section id or null here.
+  const siblings = [..._deckMap.values()].filter(d => (d.parent_id ?? null) === (parentId ?? null));
+  return siblings.reduce((m, d) => Math.max(m, Number(d.sort_order) || 0), -1) + 1;
+}
+
+function flashChildRow(parentId, name) {
+  return [..._deckMap.values()].find(d => (d.parent_id ?? null) === (parentId ?? null) && (d.name || '').toLowerCase() === name.toLowerCase()) || null;
+}
+
+// Convert a bucket deck into a section: its cards and texts move to the
+// default deck first, then the row flips to kind='section'. The sequence
+// runs through runDeckToSectionMigration (checked writes, flip last,
+// id-precise rollback), so a failed move can never strand items inside
+// a section row, where deck buckets never render them.
+async function convertDeckToSection(row) {
+  const targetId = _defaultDeckId;
+  const targetName = _deckMap.get(targetId)?.name ?? '';
+  await runDeckToSectionMigration(state.db, {
+    deckId: row.id, deckName: row.name ?? '', targetId, targetName,
+  });
+  row.kind = 'section';
+  await loadFlashcardDecks();
+}
+
+// Create the section chain for path segments (like ensureListSectionChain).
+// A segment colliding with an existing bucket converts that bucket.
+// guardId (the row being renamed) must never land inside itself or one
+// of its own descendants — a typed path resolving there throws.
+async function ensureFlashSectionChain(segments, startParentId = null, guardId = null) {
+  let parentId = startParentId || null;
+  for (const seg of (segments || [])) {
+    let row = flashChildRow(parentId, seg);
+    if (row && guardId && (row.id === guardId || descendantsOf(getDeckTree().byId.get(guardId) || { children: [] }).some(n => n.id === row.id))) {
+      throw new Error('section-cycle');
+    }
+    if (!row) {
+      const { data, error } = await state.db.from('flashcard_decks').insert({
+        name: seg, shortname: null, color: FLASH_SECTION_DEFAULT_COLOR,
+        sort_order: nextFlashSortOrder(parentId), kind: 'section', parent_id: parentId,
+      }).select();
+      if (error) throw error;
+      row = data?.[0] || null;
+      if (!row) throw new Error('section-create-failed');
+      await loadFlashcardDecks();
+    } else if (!isSectionRow(row)) {
+      await convertDeckToSection(row);
+      row = _deckMap.get(row.id);
+    }
+    parentId = row.id;
+  }
+  return parentId;
+}
+
+window.openAddFlashDeckModal = function(sectionId) {
   closeAllFlashModals();
   const defaultColor = nextPaletteColor(_deckMap);
   const html = `<div class="modal-overlay" id="addFlashDeckModal" style="display:flex;" data-action="close-add-flash-deck" data-overlay-close="true">
@@ -1098,6 +1316,9 @@ window.openAddFlashDeckModal = function() {
     </div>
   </div>`;
   document.body.insertAdjacentHTML('beforeend', html);
+  // Parent section when opened from a section header's add button
+  // (open-add-flash-deck-in-section); empty for a top-level deck.
+  document.getElementById('addFlashDeckModal').dataset.parentId = sectionId || '';
   document.getElementById('newDeckName').focus();
 };
 
@@ -1112,24 +1333,37 @@ window.closeAddFlashDeckModal = function() {
 };
 
 window.saveNewFlashDeck = async function() {
-  const name = document.getElementById('newDeckName').value.trim();
-  if (!name) { showToast(t('toast.name_required')); return; }
+  const rawName = document.getElementById('newDeckName').value.trim();
+  const segments = parseSectionPath(rawName);
+  if (!segments.length) { showToast(t('toast.name_required')); return; }
+  // Path syntax ('Geography > World Capitals') creates the section
+  // chain, like Lists; a section header's add button fixes the parent.
+  const modal = document.getElementById('addFlashDeckModal');
+  const startParentId = modal?.dataset.parentId || null;
+  const name = segments[segments.length - 1];
 
-  // Check for duplicate deck name
-  for (const d of _deckMap.values()) {
-    if (d.name.toLowerCase() === name.toLowerCase()) {
-      showToast(t('toast.name_required'), 'error');
-      return;
-    }
-  }
-
-  // Create the deck row in DB first
   const type = document.getElementById('newDeckType').value === 'text' ? 'text' : 'flashcard';
   if (state.db.connected) {
     const shortname = document.getElementById('newDeckShortname').value.trim() || null;
     const color = document.getElementById('newDeckColor').value;
-    const sortOrder = Math.max(0, ...Array.from(_deckMap.values()).map(d => d.sort_order || 0)) + 1;
-    await state.db.from('flashcard_decks').insert({ name, shortname, color, sort_order: sortOrder, deck_type: type });
+    let parentId;
+    try {
+      parentId = await ensureFlashSectionChain(segments.slice(0, -1), startParentId);
+    } catch (e) {
+      // A cycle is a validation error (same toast as before); anything
+      // else is a failed conversion write and must say so.
+      if (e?.message === 'section-cycle') showToast(t('toast.name_required'), 'error');
+      else showToast(t('toast.update_failed') + ': ' + (e?.message || e), 'error');
+      return;
+    }
+    // Names are unique among siblings only, like the other pages —
+    // the same name may exist in another section.
+    if (siblingNameTaken([..._deckMap.values()], parentId, name, null)) {
+      showToast(t('flashcards.deck_exists_at_level', name), 'error');
+      return;
+    }
+    const sortOrder = nextFlashSortOrder(parentId);
+    await state.db.from('flashcard_decks').insert({ name, shortname, color, sort_order: sortOrder, deck_type: type, kind: 'bucket', parent_id: parentId });
     await loadFlashcardDecks();
   }
 
@@ -1139,9 +1373,10 @@ window.saveNewFlashDeck = async function() {
 };
 
 function closeAllFlashModals() {
-  ['addFlashcardModal', 'editFlashcardModal', 'addDraftModal', 'addFlashDeckModal', 'addTextModal', 'editTextModal', 'editDeckModal', 'importFlashModal'].forEach(id => {
+  ['addFlashcardModal', 'editFlashcardModal', 'addDraftModal', 'addFlashDeckModal', 'addTextModal', 'editTextModal', 'editDeckModal', 'importFlashModal', 'editChunkModal'].forEach(id => {
     const m = document.getElementById(id); if (m) m.remove();
   });
+  if (window.closeChunkPanel) window.closeChunkPanel();
 }
 
 // ── Practice Session ──
@@ -1378,8 +1613,12 @@ function showAllCaughtUp(kind, anchorEl) {
 // ===================================================================
 
 // ── Text Item Rendering ──
+// Segments shown on the chunk bar before Show more; the rest stay in the
+// DOM (hidden by CSS) so expanding needs no re-render.
+const TR_BAR_COLLAPSED_COUNT = 16;
 function renderTextItem(tx, color) {
-  const chunks = allChunkProgress.filter(ch => ch.text_id === tx.id);
+  const chunks = allChunkProgress.filter(ch => ch.text_id === tx.id)
+    .sort((a, b) => a.chunk_index - b.chunk_index);
   const now = new Date();
   const totalChunks = chunks.length;
   const masteredChunks = chunks.filter(ch => ch.last_review && ch.stability >= 21 && ch.next_review && new Date(ch.next_review) > now).length;
@@ -1390,7 +1629,9 @@ function renderTextItem(tx, color) {
   const titleTrunc = tx.title.length > 70 ? tx.title.slice(0, 70) + '...' : tx.title;
   const authorStr = tx.author ? ` — ${esc(tx.author)}` : '';
 
-  // Chunk-level progress bar
+  // Chunk-level progress bar, full item width so segments keep a usable
+  // size on phone. Each segment is a button: tap (or long hover, via its
+  // title) opens that chunk's stats / revise / edit menu.
   let progressBar = '';
   let borderColor = color;
   if (totalChunks > 0) {
@@ -1403,9 +1644,11 @@ function renderTextItem(tx, color) {
       else if (isDue) { cls = 'tr-seg-due'; dueCount++; }
       else if (ch.stability >= 21) { cls = 'tr-seg-mastered'; mastCount++; }
       else { okCount++; }
-      return `<div class="tr-seg ${cls}"></div>`;
+      const chunkLabel = t('text_revision.chunk_title', ch.chunk_index + 1, totalChunks);
+      return `<button type="button" class="tr-seg ${cls}" data-action="open-chunk-panel" data-text-id="${esc(tx.id)}" data-chunk-index="${ch.chunk_index}" aria-label="${esc(chunkLabel)}"></button>`;
     }).join('');
-    progressBar = `<div class="tr-progress-bar">${segments}</div>`;
+    const hiddenCount = totalChunks - TR_BAR_COLLAPSED_COUNT;
+    progressBar = `<div class="tr-progress-wrap"><div class="tr-progress-bar">${segments}</div>${hiddenCount > 0 ? `<button type="button" class="tr-bar-toggle" data-action="toggle-chunk-bar" data-text-id="${esc(tx.id)}" data-hidden="${hiddenCount}"><span class="tr-bar-toggle-label">${t('text_revision.chunk_show_more', hiddenCount)}</span> ${lucideIcon('chevron-down', 14)}</button>` : ''}</div>`;
     // Border = majority chunk status color
     const counts = [
       { n: mastCount, c: 'var(--fc-mastered)' },
@@ -1423,51 +1666,535 @@ function renderTextItem(tx, color) {
       <div class="tr-text-info">
         <span class="todo-text"><strong>${esc(titleTrunc)}</strong><span class="tr-author">${authorStr}</span></span>
         <span class="tr-meta">${lineCount} lines ${lucideIcon('layers', 12)} ${masteredChunks}/${totalChunks} chunks${dueChunks > 0 ? ` <span class="tr-due-badge">${dueChunks} due</span>` : ''}${tx.focus_role ? ` <span class="tr-role-badge">${t('text_revision.role_badge_prefix')}${esc(tx.focus_role)}</span>` : ''}</span>
-        ${progressBar}
       </div>
       <div class="todo-actions">
+        <button data-action="copy-item-link" data-link-type="flashtext" data-id="${esc(tx.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 16)}</button>
         <button data-action="start-text-practice-for-text" data-id="${esc(tx.id)}" title="${t('text_revision.revise_this')}">${lucideIcon('book-open', 16)}</button>
         <button class="tr-expand-toggle" data-text-id="${tx.id}" title="Expand">${lucideIcon('chevron-down', 16)}</button>
         <button data-action="open-edit-text" data-id="${esc(tx.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
         <button data-action="delete-text" data-id="${esc(tx.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
       </div>
     </div>
+    ${progressBar}
     <div class="tr-text-body" id="trBody-${tx.id}" style="display:none;">
       <div class="tr-text-preview">${previewLines}${lineCount > 3 ? '<br><span class="tr-more">...</span>' : ''}</div>
     </div>
   </div>`;
 }
 
-// ── Chunk Splitting ──
-function splitTextIntoChunks(content, linesPerChunk) {
-  const lines = content.split('\n');
-  const chunks = [];
-  let currentChunk = [];
-  let nonEmptyCount = 0;
-  for (let i = 0; i < lines.length; i++) {
-    currentChunk.push(lines[i]);
-    if (lines[i].trim() !== '') nonEmptyCount++;
-    if (nonEmptyCount >= linesPerChunk) {
-      chunks.push(currentChunk.join('\n'));
-      currentChunk = [];
-      nonEmptyCount = 0;
+// ── Chunk Menu (stats / revise / edit for one chunk) ──
+function findChunk(textId, chunkIndex) {
+  const tx = allTexts.find(t => t.id === textId);
+  if (!tx) return null;
+  const chunk = allChunkProgress.find(ch => ch.text_id === textId && ch.chunk_index === chunkIndex);
+  if (!chunk) return null;
+  return { tx, chunk };
+}
+
+function chunkFmtDate(s) {
+  try {
+    return new Date(s).toLocaleDateString(getLang(), { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch { return s || ''; }
+}
+
+// ── Chunk panel: a small popover by the segment, not a modal ──
+// Click opens it at once; desktop hover waits 2s (same delay as the
+// item row actions). It offers three actions: Show stats renders the
+// stats inside the same panel — stats only, no text, with a recall
+// ring, a recall-decay curve and stability/difficulty bars — Revise
+// starts the revision overlay directly, and only Edit opens a modal.
+// Opening: panel follows the segment; closing: the close button,
+// tapping/clicking elsewhere, Escape, or moving away from both segment
+// and panel. Scrolling moves the panel with its segment (it only closes
+// once the segment leaves the viewport). While open, the owning text item
+// carries .chunk-panel-open, which freezes its row actions in whatever
+// state they had (see item-utils: the hover timer skips panel-open
+// items and mouseleave never hides them, and segment hover never shows
+// them) so the bar never shifts under the panel. Moving to another
+// segment while the pointer stays inside the bar opens that segment's
+// panel at once; leaving the bar breaks that chain.
+let _chunkPanelEl = null, _chunkPanelSeg = null, _chunkPanelItem = null;
+let _chunkPanelTextId = null, _chunkPanelIndex = null, _chunkPanelView = 'options';
+// Side the panel opened on ('above' | 'below'), frozen for its
+// lifetime — see chunkPanelPosition.
+let _chunkPanelSide = null;
+let _chunkPanelHideTimer = null, _chunkPanelHoverBound = false;
+let _chunkPanelHoverTimer = null, _chunkPanelHoverSeg = null;
+// True while the pointer stays inside the segments area (the bar, gaps
+// included) with a panel open: moving to another segment then opens its
+// panel at once, without paying the 2s hover delay again. Leaving the
+// bar resets it, so the next segment hover costs 2s again.
+let _chunkPanelSegChain = false;
+// Same 2s delay as the item row actions: hovering a segment must not
+// pop the panel open on a mere pass-over; a click opens it at once.
+const CHUNK_PANEL_HOVER_DELAY_MS = 2000;
+
+function _chunkPanelCancelHoverTimer() {
+  if (_chunkPanelHoverTimer) { clearTimeout(_chunkPanelHoverTimer); _chunkPanelHoverTimer = null; }
+  _chunkPanelHoverSeg = null;
+}
+
+// Recall-decay curve for the stats view: the same FSRS curve the app
+// schedules from, sampled from the last review to the next one (or past
+// today when there is no next review), with today marked on it.
+function chunkRecallCurveSvg(S, lastReview, horizon, now) {
+  const W = 256, H = 84, padX = 4, padTop = 12, padBottom = 6;
+  const start = new Date(lastReview).getTime(), end = horizon.getTime();
+  const span = Math.max(1, end - start);
+  const xFor = (ms) => padX + (W - 2 * padX) * clamp((ms - start) / span, 0, 1);
+  const yFor = (r) => padTop + (H - padTop - padBottom) * (1 - clamp(r, 0, 1));
+  const pts = [];
+  for (let i = 0; i <= 48; i++) {
+    const ms = start + span * i / 48;
+    pts.push([xFor(ms), yFor(retrievability(S, lastReview, new Date(ms).toISOString()))]);
+  }
+  const line = pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const area = `M ${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)} L ${line.split(' ').slice(1).join(' L ')} L ${pts[pts.length - 1][0].toFixed(1)},${(H - padBottom).toFixed(1)} L ${pts[0][0].toFixed(1)},${(H - padBottom).toFixed(1)} Z`;
+  const nowMs = now.getTime();
+  const nowX = xFor(nowMs), nowY = yFor(retrievability(S, lastReview, now.toISOString()));
+  const todayX = Math.max(22, Math.min(W - 22, nowX));
+  return `<svg class="tr-chunk-curve" viewBox="0 0 ${W} ${H}" role="img" aria-label="${t('text_revision.chunk_retrievability')}">
+    <path d="${area}" fill="var(--accent-dim)" stroke="none"/>
+    <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="${nowX.toFixed(1)}" y1="${padTop}" x2="${nowX.toFixed(1)}" y2="${(H - padBottom).toFixed(1)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>
+    <circle cx="${nowX.toFixed(1)}" cy="${nowY.toFixed(1)}" r="3.5" fill="var(--accent)"/>
+    <text x="${todayX.toFixed(1)}" y="10" text-anchor="middle" class="tr-chunk-curve-label">${t('common.today')}</text>
+  </svg>`;
+}
+
+function chunkPanelStatsHtml(tx, chunk, chunkIndex, chunks) {
+  const now = new Date();
+  const isNew = !chunk.last_review;
+  const isDue = isChunkDue(chunk, now);
+  const statusKey = isNew ? 'new' : isDue ? 'due' : (chunk.stability >= 21 ? 'mastered' : 'ok');
+  const statusLabel = isNew ? t('flashcards.new_card')
+    : isDue ? t('flashcards.due')
+    : (chunk.stability >= 21 ? t('flashcards.filter_mastered') : t('text_revision.chunk_status_ok'));
+  const statusColor = { new: 'var(--fc-new)', due: 'var(--fc-due)', ok: 'var(--fc-mastered)', mastered: 'var(--fc-mastered)' }[statusKey];
+  const r = (!isNew && chunk.stability)
+    ? retrievability(chunk.stability, chunk.last_review, now.toISOString()) : null;
+  const mode = chunkReviseMode(chunk, now);
+  // Recall ring: circumference for r=30 is 188.5.
+  const ring = r === null
+    ? `<div class="tr-chunk-ring"><svg viewBox="0 0 76 76" class="tr-chunk-ring-svg"><circle cx="38" cy="38" r="30" fill="none" stroke="var(--border)" stroke-width="7" stroke-dasharray="3 5"/></svg><span class="tr-chunk-ring-center">—</span></div>`
+    : `<div class="tr-chunk-ring"><svg viewBox="0 0 76 76" class="tr-chunk-ring-svg"><circle cx="38" cy="38" r="30" fill="none" stroke="var(--border)" stroke-width="7"/><circle cx="38" cy="38" r="30" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${(188.5 * r).toFixed(1)} 188.5" transform="rotate(-90 38 38)"/></svg><span class="tr-chunk-ring-center">${Math.round(r * 100)}%</span></div>`;
+  // Decay curve horizon: the next review when there is one (never
+  // before today, so today stays on the chart), otherwise far enough
+  // past the last review to show the decay, and never before today.
+  let curve = '';
+  if (!isNew) {
+    const lastMs = new Date(chunk.last_review).getTime();
+    const nextMs = chunk.next_review ? new Date(chunk.next_review).getTime() : null;
+    const horizonMs = nextMs ? Math.max(nextMs, now.getTime())
+      : Math.max(lastMs + Math.max(2 * (chunk.stability || 1), 7) * 86400000, now.getTime());
+    const horizon = new Date(horizonMs);
+    curve = `<div class="tr-chunk-curve-wrap">${chunkRecallCurveSvg(chunk.stability, chunk.last_review, horizon, now)}
+      <div class="tr-chunk-curve-axis"><span>${chunkFmtDate(chunk.last_review)}</span><span>${chunkFmtDate(horizon.toISOString())}</span></div></div>`;
+  } else {
+    curve = `<p class="tr-chunk-panel-note">${t('text_revision.chunk_no_reviews')}</p>`;
+  }
+  const stabilityBar = isNew ? '' : `<div class="tr-chunk-bar"><span style="width:${Math.min(100, Math.round(chunk.stability / 21 * 100))}%"></span></div>`;
+  const difficultyDots = isNew ? '' : `<div class="tr-chunk-dots">${Array.from({ length: 10 }, (_, i) =>
+    `<span class="${i < Math.round(Number(chunk.difficulty) || 0) ? 'filled' : ''}"></span>`).join('')}</div>`;
+  return `<div class="tr-chunk-viz">
+      <div class="tr-chunk-viz-recall">${ring}<span class="tr-chunk-viz-label">${t('text_revision.chunk_retrievability')}</span></div>
+      <div class="tr-chunk-viz-status"><span class="tr-chunk-status-badge" style="--status-color:${statusColor}">${esc(statusLabel)}</span></div>
+    </div>
+    ${curve}
+    <div class="tr-chunk-panel-stats">
+      <div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_stability')}</span><strong>${isNew ? '—' : String(chunk.stability)}</strong></div>
+      ${stabilityBar}
+      <div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_difficulty')}</span><strong>${isNew ? '—' : (Number(chunk.difficulty) || 0).toFixed(1)}</strong></div>
+      ${difficultyDots}
+      <div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_reviews')}</span><strong>${String(chunk.review_count || 0)}</strong></div>
+      <div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_last_review')}</span><strong>${isNew ? t('text_revision.chunk_never') : chunkFmtDate(chunk.last_review)}</strong></div>
+      <div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_next_review')}</span><strong>${(isNew || !chunk.next_review) ? t('text_revision.chunk_never') : chunkFmtDate(chunk.next_review)}</strong></div>
+    </div>
+    ${mode === 'practice' ? `<p class="tr-chunk-note">${t('text_revision.chunk_practice_note')}</p>` : ''}
+    ${!chunkHasRoleLines(tx, chunkIndex) ? `<p class="tr-chunk-note">${t('text_revision.chunk_no_role_lines')}</p>` : ''}`;
+}
+
+function chunkPanelOptionsHtml(tx, chunkIndex, chunks) {
+  const canRevise = chunkHasRoleLines(tx, chunkIndex);
+  return `<div class="tr-chunk-panel-actions">
+      <button type="button" class="tr-chunk-panel-btn" data-action="show-chunk-stats" data-text-id="${esc(tx.id)}" data-chunk-index="${chunkIndex}">${lucideIcon('bar-chart-3', 16)} ${t('text_revision.chunk_show_stats')}</button>
+      <button type="button" class="tr-chunk-panel-btn" data-action="open-edit-chunk" data-text-id="${esc(tx.id)}" data-chunk-index="${chunkIndex}">${lucideIcon('pencil', 16)} ${t('text_revision.chunk_edit')}</button>
+      <button type="button" class="tr-chunk-panel-btn" data-action="revise-chunk" data-text-id="${esc(tx.id)}" data-chunk-index="${chunkIndex}" ${canRevise ? '' : 'disabled'}>${lucideIcon('book-open', 16)} ${t('text_revision.chunk_revise')}</button>
+    </div>
+    ${canRevise ? '' : `<p class="tr-chunk-panel-note">${t('text_revision.chunk_no_role_lines')}</p>`}`;
+}
+
+function chunkPanelHeaderHtml(title, withBack) {
+  return `<div class="tr-chunk-panel-header">
+    ${withBack ? `<button type="button" class="tr-chunk-panel-nav" data-action="back-to-chunk-panel" data-text-id="${esc(_chunkPanelTextId)}" data-chunk-index="${_chunkPanelIndex}">${lucideIcon('chevron-left', 14)} ${t('text_revision.chunk_back')}</button>` : ''}
+    <span class="tr-chunk-panel-title">${esc(title)}</span>
+    <button type="button" class="tr-chunk-panel-close" data-action="close-chunk-panel" aria-label="${t('common.close')}">${lucideIcon('x', 14)}</button>
+  </div>`;
+}
+
+function chunkPanelRender() {
+  if (!_chunkPanelEl) return;
+  const found = findChunk(_chunkPanelTextId, _chunkPanelIndex);
+  if (!found) { window.closeChunkPanel(); return; }
+  const { tx, chunk } = found;
+  const chunks = getTextChunks(tx);
+  const title = `${tx.title} — ${t('text_revision.chunk_title', _chunkPanelIndex + 1, chunks.length)}`;
+  _chunkPanelEl.innerHTML = _chunkPanelView === 'stats'
+    ? chunkPanelHeaderHtml(title, true) + chunkPanelStatsHtml(tx, chunk, _chunkPanelIndex, chunks)
+    : chunkPanelHeaderHtml(title, false) + chunkPanelOptionsHtml(tx, _chunkPanelIndex, chunks);
+  chunkPanelPosition();
+}
+
+function chunkPanelPosition() {
+  if (!_chunkPanelEl || !_chunkPanelSeg) return;
+  const rect = _chunkPanelSeg.getBoundingClientRect();
+  const panel = _chunkPanelEl;
+  panel.style.visibility = 'hidden';
+  panel.style.display = 'block';
+  const w = panel.offsetWidth, h = panel.offsetHeight;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const gap = 6;
+  const below = vh - rect.bottom - gap;
+  // The side is decided once, from the opening (options) view, and
+  // frozen for the panel's lifetime. The stats view is much taller
+  // than the options view, so re-deciding the flip on every render
+  // would jump the panel to the other side of the segment when the
+  // user clicks Show stats near the bottom of the page — leaving the
+  // cursor hovering neither panel nor segment, and the mouseout timer
+  // then closes the stats panel before it can be read. With the side
+  // frozen, the taller view only grows within its side (clamped to
+  // the viewport, scrollable via CSS max-height), so it always still
+  // covers the spot the cursor is on.
+  if (!_chunkPanelSide) {
+    _chunkPanelSide = (below < h && rect.top - gap > below) ? 'above' : 'below';
+  }
+  const top = _chunkPanelSide === 'above'
+    ? Math.max(8, rect.top - h - gap)
+    : Math.min(rect.bottom + gap, Math.max(8, vh - h - 8));
+  const left = Math.max(8, Math.min(rect.left + rect.width / 2 - w / 2, vw - w - 8));
+  panel.style.top = `${top}px`;
+  panel.style.left = `${left}px`;
+  panel.style.visibility = 'visible';
+}
+
+function _chunkPanelDetachListeners() {
+  if (_chunkPanelEl?._outsideClick) document.removeEventListener('click', _chunkPanelEl._outsideClick, true);
+  if (_chunkPanelEl?._keyDown) document.removeEventListener('keydown', _chunkPanelEl._keyDown);
+  if (_chunkPanelEl?._scrollReposition) { window.removeEventListener('scroll', _chunkPanelEl._scrollReposition, true); window.removeEventListener('resize', _chunkPanelEl._scrollReposition); }
+}
+
+// Scrolling must not close the panel: the scroll that brings a segment
+// into view fires asynchronously, after the panel already opened, so a
+// scroll-to-close would dismiss the panel on the very tap that opened
+// it. Instead the panel follows its segment while scrolling, and only
+// closes once the segment itself leaves the viewport.
+function _chunkPanelOnScroll() {
+  if (!_chunkPanelEl || !_chunkPanelSeg) return;
+  const rect = _chunkPanelSeg.getBoundingClientRect();
+  if (rect.bottom < 0 || rect.top > window.innerHeight) { window.closeChunkPanel(); return; }
+  chunkPanelPosition();
+}
+
+window.closeChunkPanel = function() {
+  _chunkPanelCancelHoverTimer();
+  if (_chunkPanelHideTimer) { clearTimeout(_chunkPanelHideTimer); _chunkPanelHideTimer = null; }
+  if (_chunkPanelEl) _chunkPanelDetachListeners();
+  if (_chunkPanelEl) _chunkPanelEl.remove();
+  if (_chunkPanelItem) {
+    _chunkPanelItem.classList.remove('chunk-panel-open');
+    // While the panel was open the row actions were frozen (neither
+    // shown nor hidden, so the bar could not shift under the panel).
+    // Only unfreeze them if the pointer has really left the item;
+    // otherwise they keep whatever state they had.
+    if (!_chunkPanelItem.matches(':hover')) {
+      const actions = _chunkPanelItem.querySelector('.todo-actions');
+      if (actions) actions.classList.remove('visible');
     }
   }
-  if (currentChunk.length > 0) chunks.push(currentChunk.join('\n'));
-  return chunks;
-}
+  _chunkPanelEl = null; _chunkPanelSeg = null; _chunkPanelItem = null;
+  _chunkPanelTextId = null; _chunkPanelIndex = null; _chunkPanelView = 'options';
+  _chunkPanelSide = null;
+};
 
-// Unified chunk access: scene texts (focus_role set) chunk parsed content
-// lines; plain texts chunk raw lines as before. Chunk indexes stay aligned
-// with text_line_progress rows in both modes.
-function getTextChunks(tx) {
-  const perChunk = tx.blocks_per_chunk || 4;
-  if (tx.focus_role) {
-    return splitSceneIntoChunks(parseSceneContent(tx.content).lines, perChunk);
+window.openChunkPanel = function(textId, chunkIndex, segEl) {
+  _chunkPanelCancelHoverTimer();
+  const found = findChunk(textId, chunkIndex);
+  if (!found) { showToast(t('common.item_not_found'), 'error'); return; }
+  const seg = segEl && segEl.classList && segEl.classList.contains('tr-seg') && segEl.isConnected ? segEl
+    : Array.from(document.querySelectorAll('.tr-seg')).find(s => s.dataset.textId === textId && parseInt(s.dataset.chunkIndex || '0', 10) === chunkIndex);
+  if (!seg) return;
+  // Re-opening the same segment keeps the current view (options or stats);
+  // it must not reset stats back to options or close the panel, or a
+  // hover-then-click would dismiss what the user just opened.
+  if (_chunkPanelEl && _chunkPanelTextId === textId && _chunkPanelIndex === chunkIndex) {
+    _chunkPanelSeg = seg;
+    if (_chunkPanelHideTimer) { clearTimeout(_chunkPanelHideTimer); _chunkPanelHideTimer = null; }
+    chunkPanelPosition();
+    return;
   }
-  return splitTextIntoChunks(tx.content, perChunk);
+  window.closeChunkPanel();
+  const panel = document.createElement('div');
+  panel.id = 'chunkPanel';
+  panel.className = 'tr-chunk-panel';
+  panel.setAttribute('role', 'dialog');
+  document.body.appendChild(panel);
+  _chunkPanelEl = panel; _chunkPanelSeg = seg;
+  _chunkPanelItem = seg.closest('.tr-text-item');
+  _chunkPanelTextId = textId; _chunkPanelIndex = chunkIndex; _chunkPanelView = 'options';
+  _chunkPanelSegChain = true;
+  if (_chunkPanelItem) {
+    // Marker only: it tells the row-action hover timer to stay out
+    // (see item-utils.js). It must NOT hide already-visible actions —
+    // while the panel is open the actions are frozen in whatever state
+    // they had, so the bar cannot shift under the panel.
+    _chunkPanelItem.classList.add('chunk-panel-open');
+  }
+  chunkPanelRender();
+  panel._outsideClick = (e) => {
+    if (!_chunkPanelEl) return;
+    if (e.target.closest('#chunkPanel') || e.target.closest('.tr-seg')) return;
+    window.closeChunkPanel();
+  };
+  panel._keyDown = (e) => { if (e.key === 'Escape') window.closeChunkPanel(); };
+  panel._scrollReposition = _chunkPanelOnScroll;
+  document.addEventListener('click', panel._outsideClick, true);
+  document.addEventListener('keydown', panel._keyDown);
+  window.addEventListener('scroll', panel._scrollReposition, true);
+  window.addEventListener('resize', panel._scrollReposition);
+};
+
+window.showChunkStats = function(textId, chunkIndex) {
+  if (!_chunkPanelEl || _chunkPanelTextId !== textId || _chunkPanelIndex !== chunkIndex) {
+    window.openChunkPanel(textId, chunkIndex);
+    if (!_chunkPanelEl) return;
+  }
+  _chunkPanelView = 'stats';
+  chunkPanelRender();
+  const back = _chunkPanelEl.querySelector('[data-action="back-to-chunk-panel"]');
+  if (back) back.focus();
+};
+
+window.backToChunkPanel = function(textId, chunkIndex) {
+  if (!_chunkPanelEl) return;
+  _chunkPanelView = 'options';
+  chunkPanelRender();
+  const stats = _chunkPanelEl.querySelector('[data-action="show-chunk-stats"]');
+  if (stats) stats.focus();
+};
+
+// Hover / focus handling for segments (delegation covers clicks only).
+// Click opens the panel at once; mouse hover waits 2s (same delay as
+// the item row actions) so passing over a segment does not pop it open.
+// Moving to another segment restarts the timer for that segment, and
+// leaving segment and panel cancels it. Focus opens at once for
+// keyboard users (tabbing through segments must not wait 2s per stop).
+// The 150ms grace lets the pointer travel from a segment to the panel
+// without it flickering shut.
+if (!_chunkPanelHoverBound) {
+  _chunkPanelHoverBound = true;
+  const _chunkPanelInPanelOrSeg = (el) => !!el && !!el.closest && !!(el.closest('#chunkPanel') || el.closest('.tr-seg'));
+  // The segments area is the whole bar (segments plus the 2px gaps
+  // between them), so sliding from one segment to the next never
+  // counts as leaving it.
+  const _chunkPanelInSegArea = (el) => !!el && !!el.closest && !!(el.closest('.tr-progress-bar') || el.closest('.tr-seg'));
+  const _chunkPanelScheduleClose = () => {
+    if (_chunkPanelHideTimer) clearTimeout(_chunkPanelHideTimer);
+    _chunkPanelHideTimer = setTimeout(() => { if (_chunkPanelEl) window.closeChunkPanel(); }, 150);
+  };
+  document.addEventListener('mouseover', (e) => {
+    const seg = e.target.closest ? e.target.closest('.tr-seg') : null;
+    if (seg) {
+      if (_chunkPanelHideTimer) { clearTimeout(_chunkPanelHideTimer); _chunkPanelHideTimer = null; }
+      if (_chunkPanelEl && _chunkPanelTextId === seg.dataset.textId
+        && _chunkPanelIndex === parseInt(seg.dataset.chunkIndex || '0', 10)) {
+        _chunkPanelCancelHoverTimer();
+        return;
+      }
+      // Chain: the panel is already open and the pointer never left
+      // the bar since it opened, so the newly hovered segment's panel
+      // opens at once instead of costing another 2s.
+      if (_chunkPanelEl && _chunkPanelSegChain) {
+        window.openChunkPanel(seg.dataset.textId, parseInt(seg.dataset.chunkIndex || '0', 10), seg);
+        return;
+      }
+      if (_chunkPanelHoverSeg !== seg) {
+        _chunkPanelCancelHoverTimer();
+        _chunkPanelHoverSeg = seg;
+        _chunkPanelHoverTimer = setTimeout(() => {
+          _chunkPanelHoverTimer = null;
+          if (!_chunkPanelHoverSeg || !_chunkPanelHoverSeg.isConnected) { _chunkPanelHoverSeg = null; return; }
+          const s = _chunkPanelHoverSeg; _chunkPanelHoverSeg = null;
+          window.openChunkPanel(s.dataset.textId, parseInt(s.dataset.chunkIndex || '0', 10), s);
+        }, CHUNK_PANEL_HOVER_DELAY_MS);
+      }
+    } else if (e.target.closest && e.target.closest('#chunkPanel')) {
+      if (_chunkPanelHideTimer) { clearTimeout(_chunkPanelHideTimer); _chunkPanelHideTimer = null; }
+      _chunkPanelCancelHoverTimer();
+    }
+  });
+  document.addEventListener('mouseout', (e) => {
+    // Leaving the bar (to the item body, the panel, or elsewhere)
+    // breaks the chain: the next segment hover costs 2s again.
+    if (_chunkPanelInSegArea(e.target) && !_chunkPanelInSegArea(e.relatedTarget)) _chunkPanelSegChain = false;
+    if (_chunkPanelInPanelOrSeg(e.target) && !_chunkPanelInPanelOrSeg(e.relatedTarget)) {
+      _chunkPanelCancelHoverTimer();
+      if (_chunkPanelEl) _chunkPanelScheduleClose();
+    }
+  });
+  document.addEventListener('focusin', (e) => {
+    const seg = e.target.closest ? e.target.closest('.tr-seg') : null;
+    if (seg) {
+      _chunkPanelCancelHoverTimer();
+      if (_chunkPanelHideTimer) { clearTimeout(_chunkPanelHideTimer); _chunkPanelHideTimer = null; }
+      window.openChunkPanel(seg.dataset.textId, parseInt(seg.dataset.chunkIndex || '0', 10), seg);
+    } else if (e.target.closest && e.target.closest('#chunkPanel')) {
+      if (_chunkPanelHideTimer) { clearTimeout(_chunkPanelHideTimer); _chunkPanelHideTimer = null; }
+    }
+  });
+  document.addEventListener('focusout', (e) => {
+    if (!_chunkPanelEl) return;
+    // A null relatedTarget means focus went nowhere (e.g. the focused
+    // panel button was replaced when switching views) — not a genuine
+    // move out of the panel, and outside clicks close it separately.
+    if (_chunkPanelInPanelOrSeg(e.target) && e.relatedTarget && !_chunkPanelInPanelOrSeg(e.relatedTarget)) _chunkPanelScheduleClose();
+  });
 }
 
+window.toggleChunkBar = function(textId, el) {
+  const item = el ? el.closest('.tr-text-item') : null;
+  const bar = item ? item.querySelector('.tr-progress-bar') : null;
+  if (!bar || !el) return;
+  const expanded = bar.classList.toggle('tr-bar-expanded');
+  const hidden = parseInt(el.dataset.hidden || '0', 10);
+  el.innerHTML = `<span class="tr-bar-toggle-label">${expanded ? t('text_revision.chunk_show_less') : t('text_revision.chunk_show_more', hidden)}</span> ${lucideIcon(expanded ? 'chevron-up' : 'chevron-down', 14)}`;
+  el.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+};
+
+window.reviseChunk = function(textId, chunkIndex) {
+  const found = findChunk(textId, chunkIndex);
+  if (!found) return;
+  const { tx, chunk } = found;
+  if (!chunkHasRoleLines(tx, chunkIndex)) return;
+  window.closeChunkPanel();
+  trSessionActive = true;
+  trSessionDeck = deckIdForText(tx);
+  trSessionTextId = tx.id;
+  const mode = chunkReviseMode(chunk, new Date());
+  if (mode === 'practice') trFreePracticeLastChunk = chunkIndex;
+  showTextPracticeOverlay(tx, chunk, { freePractice: mode === 'practice' });
+};
+
+// Background scroll lock for the chunk edit modal, same pattern as the
+// calendar day modal: the body is fixed at the current scroll offset, so
+// the page behind the modal cannot scroll. Owned by a flag, so closing
+// never steals another modal's lock (day modal, Settings).
+function lockFlashModalScroll() {
+  // Already locked by this modal, or by the day modal (which owns the
+  // body position) — either way there is nothing more to lock.
+  if (document.body.dataset.flashModalScroll || document.body.dataset.dayModalScroll) return;
+  const scrollY = window.scrollY;
+  document.body.classList.add('no-scroll');
+  document.body.style.top = `-${scrollY}px`;
+  document.body.dataset.flashModalScrollY = scrollY;
+  document.body.dataset.flashModalScroll = '1';
+}
+
+function unlockFlashModalScroll() {
+  if (!document.body.dataset.flashModalScroll) return;
+  const scrollY = parseInt(document.body.dataset.flashModalScrollY || '0', 10);
+  delete document.body.dataset.flashModalScroll;
+  delete document.body.dataset.flashModalScrollY;
+  if (document.body.dataset.dayModalScroll) return;
+  document.body.classList.remove('no-scroll');
+  document.body.style.top = '';
+  window.scrollTo(0, scrollY);
+}
+
+window.closeEditChunkModal = function() {
+  const m = document.getElementById('editChunkModal'); if (m) m.remove();
+  unlockFlashModalScroll();
+};
+
+window.openEditChunkModal = function(textId, chunkIndex) {
+  const found = findChunk(textId, chunkIndex);
+  if (!found) return;
+  const { tx } = found;
+  const chunks = getTextChunks(tx);
+  const content = chunks[chunkIndex];
+  if (content === undefined) return;
+  window.closeChunkPanel();
+  closeAllFlashModals();
+  closeEditChunkModal();
+  let fields = '';
+  if (!tx.focus_role) {
+    const text = typeof content === 'string' ? content : String(content);
+    const rows = Math.min(12, Math.max(4, text.split('\n').length + 1));
+    fields = `<label>${t('text_revision.content_label')}</label>
+      <textarea id="editChunkContent" rows="${rows}">${esc(text)}</textarea>`;
+  } else {
+    fields = content.map((ln, i) => {
+      const label = ln.speaker || t('text_revision.stage_directions');
+      const text = sceneBlockText(ln);
+      const rows = Math.min(6, Math.max(2, text.split('\n').length + 1));
+      return `<label>${esc(label)}</label>
+      <textarea data-chunk-block="${i}" rows="${rows}">${esc(text)}</textarea>`;
+    }).join('');
+  }
+  const html = `<div class="modal-overlay" id="editChunkModal" style="display:flex;" data-action="close-edit-chunk" data-overlay-close="true">
+    <div class="modal">
+      <h2>${t('text_revision.chunk_edit_title', chunkIndex + 1, chunks.length)}</h2>
+      <p class="tr-chunk-note">${tx.focus_role ? t('text_revision.chunk_edit_hint_scene') : t('text_revision.chunk_edit_hint_plain')}</p>
+      ${fields}
+      <div class="modal-actions">
+        <button class="modal-cancel" data-action="close-edit-chunk">${t('common.cancel')}</button>
+        <button class="modal-save" data-action="save-edit-chunk" data-text-id="${esc(tx.id)}" data-chunk-index="${chunkIndex}">${t('common.save')}</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  lockFlashModalScroll();
+};
+
+window.saveEditChunk = async function(textId, chunkIndex) {
+  const found = findChunk(textId, chunkIndex);
+  if (!found) return;
+  const { tx, chunk } = found;
+  let edited;
+  if (!tx.focus_role) {
+    const el = document.getElementById('editChunkContent');
+    if (!el) return;
+    edited = el.value;
+  } else {
+    edited = Array.from(document.querySelectorAll('#editChunkModal [data-chunk-block]'))
+      .sort((a, b) => parseInt(a.dataset.chunkBlock, 10) - parseInt(b.dataset.chunkBlock, 10))
+      .map(el => el.value);
+  }
+  const result = applyChunkEdit(tx, chunkIndex, edited);
+  if (!result.ok) { showToast(t('text_revision.chunk_edit_boundary'), 'error'); return; }
+  if (!result.changed) { closeEditChunkModal(); return; }
+  const oldContent = tx.content;
+  const reset = { stability: 0, difficulty: 5, last_review: null, next_review: null, review_count: 0 };
+  if (state.db.connected) {
+    const { error: updateError } = await state.db.from('texts').update({ content: result.content }).eq('id', textId);
+    if (updateError) { showToast(t('toast.failed_to_save'), 'error'); return; }
+    const { error: resetError } = await state.db.from('text_line_progress').update(reset).eq('id', chunk.id);
+    if (resetError) {
+      // Roll the text back so the old progress never attaches to new text.
+      await state.db.from('texts').update({ content: oldContent }).eq('id', textId);
+      showToast(t('toast.failed_to_save'), 'error');
+      return;
+    }
+  }
+  tx.content = result.content;
+  Object.assign(chunk, reset);
+  closeEditChunkModal();
+  await refreshFlashcards();
+  if (!state.db.connected && state.currentView === 'flashcards') renderFlashcards();
+  showToast(t('text_revision.chunk_updated'));
+};
+
+// Chunking lives in scene-parse.js (single source of truth for both modes);
+// getTextChunks is imported from there.
 // In scene mode, chunks holding none of the role's lines carry nothing to
 // learn and are skipped by the revision pickers.
 function chunkHasRoleLines(tx, chunkIndex) {
@@ -2371,10 +3098,15 @@ window.openImportModal = async function() {
   closeAllFlashModals();
   const { LLM_SERVICES, escHtml } = await import('./demo-chooser.js');
 
-  const sortedDecks = [..._deckMap.values()].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  const deckOptions = sortedDecks.map(r =>
-    `<option value="${esc(r.id)}">${esc(r.name || t('common.category_default'))}</option>`
-  ).join('');
+  // Bucket-only, tree order, path labels — like deckOptionsForEdit.
+  // (Import targets a deck, never a section.)
+  const importTree = getDeckTree();
+  const deckOptions = flattenTree(importTree.roots)
+    .filter(n => n.kind === 'bucket' && n.id !== _sharedDeckId)
+    .map(n => {
+      const label = pathLabelOf(n, importTree.byId) || t('common.category_default');
+      return `<option value="${esc(n.id)}">${esc(label)}</option>`;
+    }).join('');
 
   const isMobile = isMobileUA();
   const serviceButtons = LLM_SERVICES.map(s => {
@@ -2777,10 +3509,13 @@ window.openImportModal = async function() {
         return;
       }
       const color = nextPaletteColor(_deckMap);
-      const sortOrder = Math.max(0, ...Array.from(_deckMap.values()).map(d => d.sort_order || 0)) + 1;
-      await state.db.from('flashcard_decks').insert({ name: deckName, color, sort_order: sortOrder });
+      const sortOrder = nextFlashSortOrder(null);
+      // Take the id from the insert itself: with sibling-scoped names
+      // the name map is first-wins, so a name lookup could return an
+      // older same-name deck instead of the row just created.
+      const { data: newDeck } = await state.db.from('flashcard_decks').insert({ name: deckName, color, sort_order: sortOrder, kind: 'bucket', parent_id: null }).select();
       await loadFlashcardDecks();
-      deckId = _deckByName.get(deckName)?.id || null;
+      deckId = newDeck?.[0]?.id || _deckByName.get(deckName)?.id || null;
     } else if (sel) {
       deckId = sel;
       deckName = _deckMap.get(deckId)?.name ?? '';
@@ -2841,20 +3576,46 @@ window.setFlashcardFilter = setFlashcardFilter;
 window.refreshFlashcards = refreshFlashcards;
 
 
+// Resolve a draft's proposed deck to a bucket id. Proposed values are
+// section paths ('Geography > World Capitals') since sections landed;
+// legacy plain names fall back to the first-wins name map.
+function resolveDraftDeckId(proposed) {
+  if (!proposed) return null;
+  const node = resolveSectionPath(getDeckTree().roots, parseSectionPath(proposed));
+  if (node) return node.id;
+  return _deckByName.get(proposed)?.id || null;
+}
+
+// Proposal deck pickers: bucket-only options whose values are section
+// paths, so two same-name decks in different sections stay distinct.
+// A legacy value not matching any current path is kept as an option so
+// the select never drops the draft's current choice.
+function proposalDeckOptions(current) {
+  const tree = getDeckTree();
+  const paths = flattenTree(tree.roots)
+    .filter(n => n.kind === 'bucket' && n.id !== _sharedDeckId)
+    .map(n => pathLabelOf(n, tree.byId));
+  const values = [...new Set([...paths, current || ''])];
+  return values.map(v =>
+    `<option value="${esc(v)}"${v === (current || '') ? ' selected' : ''}>${esc(v || t('common.category_default'))}</option>`
+  ).join('');
+}
+
 async function deleteDeck(deckId) {
   const deckRow = _deckMap.get(deckId);
   const deckName = deckRow ? (deckRow.name || t('common.category_default')) : deckId;
   const cards = allCards.filter(c => deckIdForCard(c) === deckId);
   const texts = allTexts.filter(tx => deckIdForText(tx) === deckId);
-  const drafts = deckRow ? allDrafts.filter(d => d.proposed_deck === deckRow.name) : [];
+  const drafts = deckRow ? allDrafts.filter(d => resolveDraftDeckId(d.proposed_deck) === deckId) : [];
   const total = cards.length + texts.length;
   const msg = total > 0
     ? `Delete "${deckName}" and its ${total} item(s)? This cannot be undone.`
     : `Delete empty deck "${deckName}"?`;
 
   showConfirmAction(t('common.delete'), msg, async () => {
-    // Delete drafts targeting this deck (proposed_deck is TEXT, not FK)
-    if (drafts.length && deckRow) await state.db.from('flashcard_notes').delete().eq('proposed_deck', deckRow.name);
+    // Delete drafts targeting this deck. Proposed values are paths,
+    // not just names, so drafts are deleted by id, not by name match.
+    for (const d of drafts) await state.db.from('flashcard_notes').delete().eq('id', d.id);
     // CASCADE on FK — deleting the deck removes all its flashcards + texts
     if (deckRow) {
       await state.db.from('flashcard_decks').delete().eq('id', deckRow.id);
@@ -2871,6 +3632,105 @@ async function deleteDeck(deckId) {
   });
 }
 window.deleteDeck = deleteDeck;
+
+// ── Delete Section ──
+// Mirrors deleteListSection: empty sections delete directly, non-empty
+// ones ask whether to move the children up one level or delete the
+// whole subtree (decks, their cards/texts, and targeting drafts).
+let _pendingFlashSectionDelete = null;
+
+function deleteFlashSection(sectionId) {
+  const node = getDeckTree().byId.get(sectionId);
+  const row = _deckMap.get(sectionId);
+  if (!node || !row || !isSectionRow(row)) return;
+  if (!node.children.length) {
+    showConfirmAction(t('common.delete'), t('common.section_delete_empty', row.name), async () => {
+      await state.db.from('flashcard_decks').delete().eq('id', sectionId);
+      showToast(t('toast.deleted'), 'info');
+      await refreshFlashcards();
+    });
+    return;
+  }
+  _pendingFlashSectionDelete = sectionId;
+  closeAllFlashModals();
+  const html = `<div class="modal-overlay" id="deleteFlashSectionModal" style="display:flex;" data-action="close-delete-flash-section-modal" data-overlay-close="true">
+    <div class="modal">
+      <h2>${lucideIcon('folder', 20)} ${t('common.section_delete_title')}</h2>
+      <p>${t('common.section_delete_msg')} <strong>${esc(row.name || '')}</strong></p>
+      <div class="modal-actions">
+        <button class="modal-cancel" data-action="close-delete-flash-section-modal">${t('common.cancel')}</button>
+        <button class="btn" data-action="delete-flash-section-move-up">${t('common.section_delete_move_up')}</button>
+        <button class="modal-save" data-action="delete-flash-section-subtree">${t('common.section_delete_subtree')}</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+window.deleteFlashSection = deleteFlashSection;
+
+window.closeDeleteFlashSectionModal = function() {
+  _pendingFlashSectionDelete = null;
+  const m = document.getElementById('deleteFlashSectionModal'); if (m) m.remove();
+};
+
+window.deleteFlashSectionMoveUp = async function() {
+  const sectionId = _pendingFlashSectionDelete;
+  if (!sectionId) return;
+  window.closeDeleteFlashSectionModal();
+  const node = getDeckTree().byId.get(sectionId);
+  if (!node) return;
+  const parentId = node.parentId || null;
+  const parentChildren = [...getDeckTree().byId.values()]
+    .filter(n => (n.parentId || null) === parentId)
+    .sort((a, b) => (Number(a.row.sort_order) || 0) - (Number(b.row.sort_order) || 0));
+  const moving = [...node.children];
+  const movingIds = new Set(moving.map(n => n.id));
+  const rest = parentChildren.filter(n => n.id !== sectionId);
+  const at = Math.max(0, parentChildren.findIndex(n => n.id === sectionId));
+  const finalOrder = [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+  for (let i = 0; i < finalOrder.length; i++) {
+    const n = finalOrder[i];
+    const updates = { sort_order: i };
+    if (movingIds.has(n.id)) updates.parent_id = parentId;
+    if (Number(n.row.sort_order) !== i || updates.parent_id !== undefined) {
+      await state.db.from('flashcard_decks').update(updates).eq('id', n.id);
+    }
+  }
+  await state.db.from('flashcard_decks').delete().eq('id', sectionId);
+  showToast(t('toast.deleted'), 'info');
+  await refreshFlashcards();
+};
+
+window.deleteFlashSectionSubtree = async function() {
+  const sectionId = _pendingFlashSectionDelete;
+  if (!sectionId) return;
+  window.closeDeleteFlashSectionModal();
+  const node = getDeckTree().byId.get(sectionId);
+  if (!node) return;
+  const subtree = [node, ...descendantsOf(node)];
+  const bucketIds = subtree.filter(n => n.kind === 'bucket').map(n => n.id);
+  // Explicit item deletes: deck-row deletion cascades on Local SQLite
+  // only, so subtree removal deletes items itself to stay correct on
+  // every backend.
+  for (const bid of bucketIds) {
+    for (const c of allCards.filter(x => deckIdForCard(x) === bid)) await state.db.from('flashcards').delete().eq('id', c.id);
+    for (const tx of allTexts.filter(x => deckIdForText(x) === bid)) {
+      await state.db.from('text_line_progress').delete().eq('text_id', tx.id);
+      await state.db.from('texts').delete().eq('id', tx.id);
+    }
+    for (const d of allDrafts.filter(x => resolveDraftDeckId(x.proposed_deck) === bid)) {
+      await state.db.from('flashcard_notes').delete().eq('id', d.id);
+    }
+  }
+  for (const n of subtree.filter(n => n.kind === 'section').reverse()) {
+    await state.db.from('flashcard_decks').delete().eq('id', n.id);
+  }
+  for (const bid of bucketIds) {
+    await state.db.from('flashcard_decks').delete().eq('id', bid);
+  }
+  showToast(t('toast.deleted'), 'info');
+  await refreshFlashcards();
+};
 
 // ── Edit Deck Modal ──
 function openEditDeckModal(deckId) {
@@ -2909,30 +3769,88 @@ window.closeEditDeckModal = function() {
   const m = document.getElementById('editDeckModal'); if (m) m.remove();
 };
 
+// Restore a deck row to its pre-edit values after a failed item update
+// during rename: the rename is one logical operation, so a half-synced
+// name cache must not outlive a rolled-back rename. deckRow is still
+// pre-edit here (Object.assign runs only after every write succeeds).
+// Returns the rollback's own error (null on success) so the caller can
+// report a failed rollback instead of the item error it was covering.
+async function rollbackDeckRow(deckId, deckRow) {
+  const { error } = await state.db.from('flashcard_decks').update({
+    name: deckRow.name, shortname: deckRow.shortname, color: deckRow.color,
+    parent_id: deckRow.parent_id ?? null, sort_order: deckRow.sort_order,
+  }).eq('id', deckId);
+  return error;
+}
+
 window.saveEditDeck = async function() {
   const deckId = document.getElementById('editDeckId').value;
   const deckRow = _deckMap.get(deckId);
   if (!deckRow) return;
-  const newName = document.getElementById('editDeckName').value.trim();
+  const rawName = document.getElementById('editDeckName').value.trim();
   const shortname = document.getElementById('editDeckShortname').value.trim();
   const color = document.getElementById('editDeckColor').value;
-  if (!newName && !deckRow.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
+  if (!rawName && !deckRow.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
+  // A typed path ('A > B') nests the deck under the section chain, like
+  // creation and like Lists/TODOs/Habits renames — the last segment is
+  // the deck's own name. A plain name keeps the current parent.
+  let targetName = rawName;
+  let targetParentId = deckRow.parent_id ?? null;
+  if (!deckRow.is_protected && rawName.includes('>')) {
+    const segments = parseSectionPath(rawName);
+    if (!segments.length) { showToast(t('toast.name_required'), 'error'); return; }
+    targetName = segments[segments.length - 1];
+    try {
+      targetParentId = await ensureFlashSectionChain(segments.slice(0, -1), null, deckId);
+    } catch (e) {
+      // A cycle is a validation error (same toast as before); anything
+      // else is a failed conversion write and must say so.
+      if (e?.message === 'section-cycle') showToast(t('toast.name_required'), 'error');
+      else showToast(t('toast.update_failed') + ': ' + (e?.message || e), 'error');
+      return;
+    }
+  }
+  if (deckRow.is_protected) targetParentId = null;
+  // Rename keeps sibling-scoped uniqueness (creation already enforces
+  // it); previously a rename could silently duplicate any deck name.
+  if (!deckRow.is_protected && (targetName !== deckRow.name || targetParentId !== (deckRow.parent_id ?? null))
+    && siblingNameTaken([..._deckMap.values()], targetParentId, targetName, deckId)) {
+    showToast(t('flashcards.deck_exists_at_level', targetName), 'error');
+    return;
+  }
 
-  const updates = { shortname: shortname || null, color };
-  if (!deckRow.is_protected) updates.name = newName;
-  await state.db.from('flashcard_decks').update(updates).eq('id', deckId);
+  const updates = { shortname: shortname || null, color, parent_id: targetParentId };
+  if (!deckRow.is_protected) updates.name = targetName;
+  if (targetParentId !== (deckRow.parent_id ?? null)) updates.sort_order = nextFlashSortOrder(targetParentId);
+  // Checked writes: the rename is one logical operation. A failed deck
+  // update reports failure (modal stays open, nothing mutates), and a
+  // failed item update rolls the deck row back to its pre-edit values —
+  // no success toast and no local mutation until every write succeeds.
+  const { error: deckError } = await state.db.from('flashcard_decks').update(updates).eq('id', deckId);
+  if (deckError) { showToast(t('toast.update_failed') + ': ' + deckError.message, 'error'); return; }
 
   // Update items' deck name string if name changed (grouping is by deck_id;
   // this just keeps the display cache accurate for every card in the deck)
-  if (!deckRow.is_protected && newName !== deckRow.name) {
-    await state.db.from('flashcards').update({ deck: newName }).eq('deck_id', deckId);
-    await state.db.from('texts').update({ deck: newName }).eq('deck_id', deckId);
+  if (!deckRow.is_protected && targetName !== deckRow.name) {
+    const { error: cardsError } = await state.db.from('flashcards').update({ deck: targetName }).eq('deck_id', deckId);
+    if (cardsError) {
+      const rbError = await rollbackDeckRow(deckId, deckRow);
+      showToast(t('toast.update_failed') + ': ' + (rbError?.message || cardsError.message), 'error');
+      return;
+    }
+    const { error: textsError } = await state.db.from('texts').update({ deck: targetName }).eq('deck_id', deckId);
+    if (textsError) {
+      const rbError = await rollbackDeckRow(deckId, deckRow);
+      showToast(t('toast.update_failed') + ': ' + (rbError?.message || textsError.message), 'error');
+      return;
+    }
   }
 
   Object.assign(deckRow, updates);
   if (updates.name) deckRow.name = updates.name;
+  // First wins, like loadFlashcardDecks — see its comment.
   _deckByName.clear();
-  for (const row of _deckMap.values()) _deckByName.set(row.name, row);
+  for (const row of _deckMap.values()) if (!_deckByName.has(row.name)) _deckByName.set(row.name, row);
 
   closeEditDeckModal();
   await refreshFlashcards();

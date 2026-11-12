@@ -3,6 +3,7 @@ import { t, getLang } from './i18n.js';
 import state, { DEFAULT_CATEGORY_PALETTE } from './state.js';
 import { APP_VERSION } from './version.js';
 import { layoutLevel } from './sections-pure.js';
+import { parseLocalDate } from './calendar-pure.js';
 
 // ===================================================================
 // UTILS
@@ -405,6 +406,31 @@ function setDbSizeText(text) {
   if (el) el.textContent = text;
 }
 
+// Footer identity links — single definition shared by the gate footer and
+// the app footer, so the two can never drift apart. Icons are inlined via
+// lucideIcon with an explicit 'currentColor': LUCIDE_COLORS would otherwise
+// paint book-open/github in brand colours. Labels keep their data-i18n
+// spans so a language switch re-translates them like any other static text.
+const FOOTER_LINKS = [
+  { href: 'https://docs.delaclaw.com/#/', icon: 'book-open', key: 'utils.footer_docs' },
+  { href: 'https://github.com/AntGro/DeLaClaw', icon: 'github', label: 'GitHub' },
+  { href: 'https://github.com/AntGro/DeLaClaw/blob/main/LICENSE', icon: 'scale', key: 'utils.footer_license' },
+  { href: 'https://docs.delaclaw.com/#/privacy', icon: 'shield', key: 'utils.footer_privacy' },
+];
+
+function renderFooterIdentity() {
+  const linksHtml = FOOTER_LINKS.map(l => {
+    const label = l.key ? `<span data-i18n="${l.key}">${t(l.key)}</span>` : esc(l.label);
+    return `<a href="${l.href}" target="_blank" rel="noopener" class="footer-link">${lucideIcon(l.icon, 13, 'currentColor')} ${label}</a>`;
+  }).join('<span class="footer-sep">·</span>');
+  document.querySelectorAll('.footer-links').forEach(el => { el.innerHTML = linksHtml; });
+  const year = new Date().getFullYear();
+  const gateCopy = document.querySelector('.gate-footer .footer-copyright');
+  if (gateCopy) gateCopy.textContent = `© ${year} DeLaClaw · v${APP_VERSION}`;
+  const appCopy = document.querySelector('.site-footer .footer-copyright');
+  if (appCopy) appCopy.textContent = `© ${year} DeLaClaw`;
+}
+
 function updateFooterStats(viewCountsGetter) {
   const container = document.getElementById('dbStatsContainer');
   if (!container) return;
@@ -541,6 +567,30 @@ function formatRelativeDate(d) {
   if (diffDays < -1 && diffDays >= -7) return t('common.days_ago', Math.abs(diffDays));
   const dateStr = d.toLocaleDateString(getLang(), { month: 'short', day: 'numeric' });
   return t('common.date_at', dateStr, timeStr);
+}
+
+// Day-only variant of formatRelativeDate for date-only TODO deadlines:
+// same relative buckets, but no time is ever shown (none was set).
+function formatRelativeDay(dateStr, now = new Date()) {
+  const target = parseLocalDate(dateStr);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((target - today) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return t('common.today');
+  if (diffDays === 1) return t('common.tomorrow');
+  if (diffDays === -1) return t('common.yesterday');
+  if (diffDays > 1 && diffDays <= 7) return t('common.in_days', diffDays);
+  if (diffDays < -1 && diffDays >= -7) return t('common.days_ago', Math.abs(diffDays));
+  return target.toLocaleDateString(getLang(), { month: 'short', day: 'numeric' });
+}
+
+// Snooze-until display: a snooze that lands exactly at midnight is
+// day-only (no time was set, e.g. the "This week-end" preset) — show
+// just the day. Any other time shows date + time as before.
+function formatSnoozeUntil(value) {
+  const date = new Date(value);
+  const opts = { month: 'short', day: 'numeric' };
+  if (date.getHours() !== 0 || date.getMinutes() !== 0) { opts.hour = '2-digit'; opts.minute = '2-digit'; }
+  return date.toLocaleString(getLang(), opts);
 }
 
 // ===================================================================
@@ -841,6 +891,8 @@ const DEEP_LINK_TYPE_MAP = {
   birthday: 'birthdays', flashcard: 'flashcards',
   list: 'lists', listitem: 'lists',
   todocat: 'todos', habitcat: 'habits',
+  flashsection: 'flashcards', flashdeck: 'flashcards',
+  flashtext: 'flashcards', flashdraft: 'flashcards',
 };
 
 /** Parse a deep-link hash like #todo/abc123 → { type, id } or null */
@@ -979,9 +1031,9 @@ function setConfirmActionProgress(text) {
 }
 
 export {
-  esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate,
+  esc, escQ, deepEqual, renderMd, showToast, formatRelativeDate, formatRelativeDay, formatSnoozeUntil,
   showConfirmAction, closeConfirmAction, executeConfirmAction, setConfirmActionProgress,
-  updateFooterStats, updateTaskListMaxHeight, truncateWithShowMore,
+  updateFooterStats, renderFooterIdentity, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, applySectionGrid, fetchAll,
   isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, isDesktopLike,
   backfillCategoryColors, nextPaletteColor, onColorFor,

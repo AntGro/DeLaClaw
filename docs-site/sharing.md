@@ -23,7 +23,7 @@ flowchart TB
         subgraph SHARED["DeLaClaw-Shared-{groupId}<br/>(creator's Drive)"]
             direction TB
             GJ["group.json<br/>members, creator, name"]
-            ITEMS["todos/habits/lists.json<br/>item files (plain JSON arrays)"]
+            ITEMS["todos/habits/lists/events.json<br/>item files (plain JSON arrays)"]
             EXTRA["extra_1..10.json · messages.json · games.json<br/>future placeholders"]
         end
         PA -->|"direct file read/write"| SHARED
@@ -74,19 +74,19 @@ The Google Drive sharing adapter is the only sharing path. Drive sharing has no 
 flowchart LR
     subgraph CD["Creator's Drive"]
         direction TB
-        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · groups.json"]
-        CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · extra_1..10.json<br/>messages.json · games.json"]
+        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · events.json · groups.json"]
+        CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · events.json · extra_1..10.json<br/>messages.json · games.json"]
     end
     subgraph JD["Joiner's Drive"]
         direction TB
-        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json<br/>groups.json &#9668; <b>pointers + own-group names</b><br/>{id, folderId, fileIds} · {id, name}"]
+        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json · events.json<br/>groups.json &#9668; <b>pointers + own-group names</b><br/>{id, folderId, fileIds} · {id, name}"]
     end
 ```
 
 _Folder names shown for production (`delaclaw.com`); dev and preview builds use `DeLaClawDev/`, `DeLaClawDev-Shared/`, etc. — see "Drive folder naming" in [Backends](backends.md)._
 
 - `group.json` — members (hashed IDs + pseudos), creator, name
-- `todos.json` / `habits.json` / `lists.json` — item files: plain JSON arrays of item objects
+- `todos.json` / `habits.json` / `lists.json` / `events.json` — item files: plain JSON arrays of item objects
 - `extra_1..10.json` — empty placeholders, pre-authorize future item types (avoids sending every member back through the Drive Picker)
 - `messages.json` / `games.json` — empty named placeholders, reserved for future features (group messages, games); no sync logic yet
 

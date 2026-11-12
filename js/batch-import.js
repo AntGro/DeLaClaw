@@ -14,6 +14,7 @@ import state, { SHARED_CATEGORY } from './state.js';
 import { esc, nextPaletteColor, showToast, isMobileUA } from './utils.js';
 import { lucideIcon } from './icons.js';
 import { parseImportArray } from './import-pure.js';
+import { isDateOnly } from './calendar-pure.js';
 
 // -------------------------------------------------------------------
 // Creation helpers
@@ -404,6 +405,10 @@ export async function openBatchImportModal(cfg) {
         return `<select ${attrs}>${(field.options || []).map(o =>
           `<option value="${esc(o)}"${o === val ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
       case 'datetime':
+        // A date-only value gets a date input: rendering it as datetime-local
+        // would show a phantom time (UTC midnight parsed to local, e.g. 01:00
+        // in summer), and touching the field would silently convert it to timed.
+        if (isDateOnly(val)) return `<input type="date" ${attrs} value="${esc(val)}">`;
         return `<input type="datetime-local" ${attrs} value="${isoToLocalInput(val)}">`;
       case 'datalist':
         return `<input ${attrs} list="${cfg.modalId}Data-${field.key}" value="${esc(val)}">`;

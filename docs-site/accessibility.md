@@ -1,7 +1,5 @@
 # Accessibility Audit
 
-Last updated: 2026-08-21
-
 ## Summary
 
 DeLaClaw has basic accessibility support but several gaps that should be addressed. This document catalogs findings organized by severity and provides recommendations.
@@ -34,7 +32,7 @@ When a modal is open, Tab can move focus to elements behind the modal overlay. U
 ### 3. Icon-only buttons without accessible names
 
 Many action buttons contain only an SVG icon (via `lucideIcon()`) without a text label or `aria-label`. Examples:
-- "Add task" buttons in project cards: `<button onclick="addTask('...')">${lucideIcon('plus', 16)}</button>`
+- "Add task" buttons in project cards: `<button data-action="add-task" data-id="...">${lucideIcon('plus', 16)}</button>`
 - "Add todo" buttons in category cards
 - "Add habit" quick-add buttons
 - Various edit/delete action buttons in hover menus
@@ -64,7 +62,7 @@ The `--muted` color is `#6c6f7e` on dark (`#08090d` background) and `#71717a` on
 
 ### 6. Drag-and-drop not keyboard accessible
 
-Drag-and-drop reordering uses mouse-only HTML drag events. There is no keyboard alternative for reordering items.
+Drag-and-drop reordering uses long-press + pointer events (not native HTML drag). There is still no keyboard alternative for reordering items.
 
 **Recommendation**: Add keyboard reordering (e.g. Alt+Up/Down when focused on an item). This is a larger feature and can be tracked separately.
 

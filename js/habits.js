@@ -190,14 +190,17 @@ async function saveEditHabitCategory() {
     try {
       targetParentId = await ensureHabitSectionChain(segments.slice(0, -1), null, catId);
     } catch (e) {
-      showToast(t('toast.name_required'), 'error');
+      // A cycle is a validation error (same toast as before); anything
+      // else is a failed conversion write and must say so.
+      if (e?.message === 'section-cycle') showToast(t('toast.name_required'), 'error');
+      else showToast(t('toast.update_failed') + ': ' + (e?.message || e), 'error');
       return;
     }
   }
   if (!targetName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
   if (cat.is_protected) targetParentId = null;
   if (!cat.is_protected && siblingNameTaken([..._habitCatMap.values()], targetParentId, targetName, catId)) {
-    showToast(t('toast.name_required'), 'error');
+    showToast(t('toast.category_exists_at_level', targetName), 'error');
     return;
   }
 
@@ -207,7 +210,11 @@ async function saveEditHabitCategory() {
   const updates = { shortname: shortname || null, color, parent_id: targetParentId };
   if (!cat.is_protected) updates.name = targetName;
   if (targetParentId !== (cat.parent_id || null)) updates.sort_order = nextHabitSortOrder(targetParentId);
-  await state.db.from('habit_categories').update(updates).eq('id', catId);
+  // Checked write (like saveEditList): a failed rename must report
+  // failure — modal stays open, no reload, no calendar resync, no
+  // success toast — instead of silently keeping the old row.
+  const { error } = await state.db.from('habit_categories').update(updates).eq('id', catId);
+  if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
   await loadHabitCategories();
 
   // Calendar: bucket labels appear in event summaries; sections never
@@ -229,7 +236,7 @@ async function saveEditHabitCategory() {
 // source of truth, re-exported below); local helpers follow.
 
 import { STRUCTURED_PREFIXES, DOW_KEYS, DOW_JS, isStructuredRule, normalizeFrequencyRule, computeNextDue, localDateStr } from './frequency-rule.js';
-import { parseLocalDate, isHabitSnoozed, toDateStr, planAutoRoll } from './calendar-pure.js';
+import { parseLocalDate, isHabitSnoozed, toDateStr, planAutoRoll, nextSaturdayStr } from './calendar-pure.js';
 // (re-exported in the export list at the bottom of this file)
 
 function formatFrequency(rule) {
@@ -1341,6 +1348,11 @@ function renderHabitCategoryCard(catId) {
     ? `<button class="todo-cat-shortname-btn" data-action="open-edit-habit-category-modal" data-category="${esc(catId)}" title="${t('common.edit')}">${lucideIcon("pencil",14)}</button>`
     : '';
 
+  // Copy-link for the bucket itself: the habitcat deep link already
+  // resolves buckets via #habitsView [data-node-id] (the section header
+  // has the same button for sections); shown unconditionally.
+  const copyLinkBtn = `<button class="todo-cat-shortname-btn" data-action="copy-item-link" data-link-type="habitcat" data-id="${esc(catId)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>`;
+
   const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
       <textarea placeholder="${t('habits.quick_add_placeholder')}" maxlength="1000" class="todo-cat-input habit-add-input" data-category="${esc(catId)}" data-action="add-habit-from-input" rows="1" style="resize:none;overflow:hidden;"></textarea>
       <button data-action="add-habit-from-input">${lucideIcon('plus', 16)}</button>
@@ -1357,6 +1369,7 @@ function renderHabitCategoryCard(catId) {
       </div>
       <div class="todo-cat-header-actions">
         ${shareAllBtn}
+        ${copyLinkBtn}
         ${editBtn}
         ${deleteBtn}
       </div>
@@ -1451,7 +1464,7 @@ function editHabitModalHTML() {
 }
 
 function habitSnoozeModalHTML() {
-  return `<div class="modal snooze-modal"><h2>${lucideIcon("moon",20)} ${t('habits.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('habits.snooze_hint')}</p><div class="snooze-options"><button data-action="habit-snooze-for" data-amount="1" data-unit="d">${t('habits.snooze_tomorrow')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="w">${t('habits.snooze_1w')}</button><button data-action="habit-snooze-for" data-amount="2" data-unit="w">${t('habits.snooze_2w')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="M">${t('habits.snooze_1m')}</button></div><label style="margin-top:12px;">${t('habits.snooze_custom')}</label><input type="date" id="habitSnoozeCustomDate" class="snooze-date-input"><input type="hidden" id="habitSnoozeId"><div class="modal-actions"><button class="modal-cancel" data-action="close-habit-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-habit-snooze">${t('habits.snooze')}</button></div></div>`;
+  return `<div class="modal snooze-modal"><h2>${lucideIcon("moon",20)} ${t('habits.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('habits.snooze_hint')}</p><div class="snooze-options"><button data-action="habit-snooze-for" data-amount="1" data-unit="d">${t('habits.snooze_tomorrow')}</button><button data-action="habit-snooze-for" data-unit="weekend">${t('habits.snooze_weekend')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="w">${t('habits.snooze_1w')}</button><button data-action="habit-snooze-for" data-amount="2" data-unit="w">${t('habits.snooze_2w')}</button><button data-action="habit-snooze-for" data-amount="1" data-unit="M">${t('habits.snooze_1m')}</button></div><label style="margin-top:12px;">${t('habits.snooze_custom')}</label><input type="date" id="habitSnoozeCustomDate" class="snooze-date-input"><input type="hidden" id="habitSnoozeId"><div class="modal-actions"><button class="modal-cancel" data-action="close-habit-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-habit-snooze">${t('habits.snooze')}</button></div></div>`;
 }
 
 function habitHistoryModalHTML() {
@@ -1459,7 +1472,7 @@ function habitHistoryModalHTML() {
 }
 
 function addHabitCategoryModalHTML() {
-  return `<div class="modal"><h2>` + lucideIcon("folder-plus",20) + ` ${t('habits.add_category')}</h2><label>${t('habits.category_name')}</label><input type="text" id="newHabitCategoryName" placeholder="${t('habits.category_placeholder')}" maxlength="40" data-action="save-new-habit-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newHabitCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-habit-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newHabitCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit-category">${t("common.create")}</button></div></div>`;
+  return `<div class="modal"><h2>` + lucideIcon("folder-plus",20) + ` ${t('habits.add_category')}</h2><label>${t('habits.category_name')}</label><input type="text" id="newHabitCategoryName" placeholder="${t('habits.category_placeholder')}" maxlength="80" data-action="save-new-habit-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newHabitCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-habit-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newHabitCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-habit-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-habit-category">${t("common.create")}</button></div></div>`;
 }
 
 function editHabitCategoryModalHTML() {
@@ -1726,12 +1739,12 @@ async function saveNewHabit() {
   await refreshHabits();
 }
 
-function editHabitInline(habitId, itemEl) {
+function editHabitInline(habitId, itemEl, opts = {}) {
   const habit = state.allHabits.find(c => c.id === habitId);
   if (!habit) return;
-  const nameEl = itemEl
+  const nameEl = opts.nameEl || (itemEl
     ? itemEl.querySelector('.habit-name')
-    : document.querySelector(`.habit-item[data-habit-id="${habitId}"] .habit-name`);
+    : document.querySelector(`.habit-item[data-habit-id="${habitId}"] .habit-name`));
   if (!nameEl) return;
 
   // Hide actions while editing
@@ -1793,7 +1806,7 @@ function editHabitInline(habitId, itemEl) {
   inlineEditText(nameEl, habit.name, {
     maxLength: 1000,
     extraEl: extras,
-    containerEl: nameEl.closest('.habit-item'),
+    containerEl: opts.containerEl || nameEl.closest('.habit-item'),
     collectExtra: () => ({
       frequency_rule: getFrequencyFromPicker(freqContainer),
       category_id: catSelect.value || _defaultHabitCatId,
@@ -1894,7 +1907,7 @@ function editHabitInline(habitId, itemEl) {
         showToast(t('habits.habit_updated'), 'success');
       }
     },
-    refreshFn: refreshHabits,
+    refreshFn: opts.refreshFn || refreshHabits,
   });
 }
 
@@ -2554,7 +2567,7 @@ async function saveNewHabitCategory() {
   try {
     const parentId = await ensureHabitSectionChain(segments.slice(0, -1), startParentId);
     if (siblingNameTaken([..._habitCatMap.values()], parentId, name, null)) {
-      showToast(t('habits.category_exists'), 'error'); return;
+      showToast(t('toast.category_exists_at_level', name), 'error'); return;
     }
     const { error } = await state.db.from('habit_categories').insert({
       name, shortname, color, sort_order: nextHabitSortOrder(parentId),
@@ -2905,7 +2918,7 @@ document.addEventListener('input', e => {
   }
 });
 
-export { refreshHabits, renderHabits, initHabitModals, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, habitFinishedFor, initHabitHoverDelay, isStructuredRule, normalizeFrequencyRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName, getHabitCatPath, getHabitCatOrderKey, computeNextDue, isMyCreatedSharedHabit };
+export { refreshHabits, renderHabits, initHabitModals, editHabitInline, formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, updateHabitNextDue, habitFinishedFor, initHabitHoverDelay, isStructuredRule, normalizeFrequencyRule, STRUCTURED_PREFIXES, syncSharedHabits, loadHabitCategories, getHabitCategories, getHabitCategoryColor, getHabitCatColor, catIdForHabit, getHabitCatDisplayName, getHabitCatPath, getHabitCatOrderKey, computeNextDue, isMyCreatedSharedHabit };
 
 window.setHabitFilter = setHabitFilter;
 window.openAddHabitModal = openAddHabitModal;
@@ -3326,6 +3339,9 @@ async function applyHabitSnooze(habitId, snoozedUntil) {
 function habitSnoozeFor(amount, unit) {
   const habitId = document.getElementById('habitSnoozeId')?.value;
   if (!habitId) return;
+  // The coming Saturday (a date, so the habit wakes ON it like every
+  // other habit snooze).
+  if (unit === 'weekend') { applyHabitSnooze(habitId, nextSaturdayStr(habitTodayStr())); return; }
   const target = new Date();
   if (unit === 'd') target.setDate(target.getDate() + amount);
   else if (unit === 'w') target.setDate(target.getDate() + amount * 7);

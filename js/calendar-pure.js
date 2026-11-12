@@ -1,5 +1,6 @@
 // ===================================================================
-// calendar-pure.js — Dependency-free date logic for the Calendar page.
+// calendar-pure.js — Dependency-free date logic for the Calendar page
+// and TODO deadlines.
 //
 // No imports: safe to load in Node (tests) and in any browser module.
 // All dates are local 'YYYY-MM-DD' strings; weeks start on Monday.
@@ -83,6 +84,195 @@ export function overdueDays(dueStr, todayStr) {
   if (!dueStr || !todayStr) return 0;
   const diff = Math.round((parseLocalDate(dueStr) - parseLocalDate(todayStr)) / 86400000);
   return diff < 0 ? -diff : 0;
+}
+
+// ===================================================================
+// TODO DEADLINES — date-only vs timed
+// ===================================================================
+// A TODO deadline is either a date-only 'YYYY-MM-DD' string (no time
+// set) or a full UTC ISO timestamp. Date-only deadlines are due at
+// the END of their local day: not overdue during that day, and sorted
+// after that day's timed deadlines. Timed deadlines keep instant
+// semantics. Shared by the TODO list and Welcome render/sort paths
+// so both surfaces agree.
+
+/** True when the value is a date-only 'YYYY-MM-DD' string (no time). */
+export function isDateOnly(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+/** Effective end instant of a deadline: day end for date-only, itself for timed. */
+export function dueEffectiveEnd(due) {
+  if (isDateOnly(due)) {
+    const d = parseLocalDate(due);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  }
+  return new Date(due);
+}
+
+/** Overdue check for a deadline (falsy due → false). */
+export function isDueOverdue(due, now = new Date()) {
+  return !!due && dueEffectiveEnd(due) < now;
+}
+
+/** Compare two set deadlines (nulls handled by callers). */
+export function compareDueDates(a, b) {
+  return dueEffectiveEnd(a) - dueEffectiveEnd(b);
+}
+
+/**
+ * True when the value is a real calendar date, not just YYYY-MM-DD-shaped.
+ * '2026-02-31' matches the shape but is not a date; the Date constructor
+ * would silently normalize it to Mar 3, so the round-trip check rejects it.
+ */
+export function isValidDateOnly(value) {
+  if (!isDateOnly(value)) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+}
+
+/**
+ * Drop a date-only value that is not a real calendar date (→ null).
+ * Anything else passes through unchanged. Applied at read boundaries
+ * (TODO refresh, calendar-sync scan) so corrupt values from shared
+ * payloads or direct Drive writes never render as a different day.
+ * Batch import rejects such values outright (import-pure.js).
+ */
+export function dropInvalidDateOnly(value) {
+  return (isDateOnly(value) && !isValidDateOnly(value)) ? null : value;
+}
+
+/**
+ * Due-soon check: not overdue, and the effective end is within 24h.
+ * Compared in milliseconds, not rounded hours: rounding made deadlines
+ * 23.5–24h out (e.g. a date-only deadline due today, before 00:30)
+ * miss the due-soon bell.
+ */
+export function isDueSoon(due, now = new Date()) {
+  if (!due || isDueOverdue(due, now)) return false;
+  return dueEffectiveEnd(due) - now < 24 * 60 * 60 * 1000;
+}
+
+// ===================================================================
+// USER EVENTS — instant model (v2.31.0)
+// ===================================================================
+// Timed events store absolute instants (start_ts / end_ts, UTC ISO)
+// plus the IANA timezone they were entered in. Display converts to
+// the VIEWER's timezone: an event's days are the days its instant
+// interval overlaps in the viewer's timezone, so it can sit on a
+// different date for a viewer in another zone — standard calendar
+// semantics. Full-day events store an inclusive date range
+// (start_date..end_date) and never convert.
+
+const _tzFormatters = new Map();
+function _tzFormatter(timeZone) {
+  let fmt = _tzFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    });
+    _tzFormatters.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
+/** Wall-clock parts of an instant (ms since epoch) in a timezone. */
+function _zonedParts(ms, timeZone) {
+  const parts = _tzFormatter(timeZone).formatToParts(new Date(ms));
+  const out = {};
+  for (const p of parts) {
+    if (p.type !== 'literal') out[p.type] = Number(p.value);
+  }
+  return out; // { year, month, day, hour, minute, second }
+}
+
+/** The local timezone of the current runtime (IANA name). */
+export function localTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+/** 'YYYY-MM-DD' of an instant (ISO string) as seen in timeZone. */
+export function instantToDateStr(isoTs, timeZone) {
+  const ms = Date.parse(isoTs);
+  if (!Number.isFinite(ms)) return '';
+  const p = _zonedParts(ms, timeZone);
+  return toDateStr(p.year, p.month - 1, p.day);
+}
+
+/** 'HH:MM' of an instant (ISO string) as seen in timeZone. */
+export function instantToTimeStr(isoTs, timeZone) {
+  const ms = Date.parse(isoTs);
+  if (!Number.isFinite(ms)) return '';
+  const p = _zonedParts(ms, timeZone);
+  return `${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
+}
+
+/** UTC offset (ms) of timeZone at an instant: wall reading minus UTC. */
+function _tzOffsetMs(ms, timeZone) {
+  const p = _zonedParts(ms, timeZone);
+  const wallAsUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  return wallAsUTC - Math.floor(ms / 1000) * 1000;
+}
+
+/**
+ * The instant (UTC ISO string) corresponding to a wall-clock date +
+ * 'HH:MM' time in timeZone. Two-pass offset correction so the result
+ * is right on both sides of a DST transition; a wall time inside the
+ * spring-forward gap resolves to the nearest valid instant.
+ */
+export function wallTimeToInstant(dateStr, timeStr, timeZone) {
+  const [y, m, d] = String(dateStr || '').split('-').map(Number);
+  const [hh, mm] = String(timeStr || '00:00').split(':').map(Number);
+  if (!y || !m || !d) return '';
+  const wallAsUTC = Date.UTC(y, m - 1, d, hh || 0, mm || 0);
+  let instant = wallAsUTC - _tzOffsetMs(wallAsUTC, timeZone);
+  instant = wallAsUTC - _tzOffsetMs(instant, timeZone);
+  return new Date(instant).toISOString();
+}
+
+/**
+ * The full day span an event occupies for a viewer in viewerTz:
+ * { startDate, endDate } ('YYYY-MM-DD', inclusive) or null when the
+ * event carries no usable dates. Timed events: the days overlapped
+ * by [start_ts, end_ts) in viewerTz — an end exactly at local
+ * midnight does not claim the new day. Full-day: the stored range.
+ */
+export function eventSpan(ev, viewerTz) {
+  if (!ev) return null;
+  if (ev.all_day) {
+    if (!ev.start_date) return null;
+    return { startDate: ev.start_date, endDate: ev.end_date || ev.start_date };
+  }
+  if (!ev.start_ts || !ev.end_ts) return null;
+  const startDate = instantToDateStr(ev.start_ts, viewerTz);
+  const endMs = Date.parse(ev.end_ts);
+  if (!startDate || !Number.isFinite(endMs)) return null;
+  const endDate = instantToDateStr(new Date(endMs - 1).toISOString(), viewerTz);
+  return { startDate, endDate: endDate || startDate };
+}
+
+/**
+ * Placement of an event inside [rangeStart, rangeEnd] for a viewer in
+ * viewerTz: one entry per occupied day within the range —
+ * { date, startsHere, endsHere } — startsHere/endsHere mark the
+ * event's own first/last day (false on days where it merely
+ * continues through the range edge). Empty array when outside.
+ */
+export function eventDatesInRange(ev, rangeStart, rangeEnd, viewerTz) {
+  const span = eventSpan(ev, viewerTz);
+  if (!span) return [];
+  const start = span.startDate < rangeStart ? rangeStart : span.startDate;
+  const end = span.endDate > rangeEnd ? rangeEnd : span.endDate;
+  if (start > end) return [];
+  const out = [];
+  for (let d = start; ; d = addDays(d, 1)) {
+    out.push({ date: d, startsHere: d === span.startDate, endsHere: d === span.endDate });
+    if (d === end) break;
+  }
+  return out;
 }
 
 /**
@@ -210,12 +400,54 @@ export function birthdaysInRange(birthdayStr, start, end) {
 }
 
 /**
+ * The next occurrence of a birthday on or after todayStr:
+ * { date, turningAge }, or null for an invalid date of birth. Uses the
+ * same construction as birthdayInMonth — a Feb 29 birthday rolls to
+ * Mar 1 on non-leap years, matching how the calendar places it.
+ */
+export function nextBirthdayOccurrence(dobStr, todayStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dobStr || '');
+  if (!m || !todayStr) return null;
+  const birthY = +m[1], mo = +m[2] - 1, da = +m[3];
+  const thisYear = +todayStr.slice(0, 4);
+  for (const y of [thisYear, thisYear + 1]) {
+    const occ = new Date(y, mo, da);
+    const ds = toDateStr(occ.getFullYear(), occ.getMonth(), occ.getDate());
+    if (ds >= todayStr) return { date: ds, turningAge: y - birthY };
+  }
+  return null;
+}
+
+/**
  * Toggle one key of a { todo, habit, birthday } visibility map.
  * Returns the same object reference when the type is unknown.
  */
 export function toggleShow(show, type) {
   if (!show || !(type in show)) return show;
   return { ...show, [type]: !show[type] };
+}
+
+/**
+ * Filter-status disc background: one radial sector per filterable
+ * calendar type, in list order clockwise from the top (a conic
+ * gradient starts at the top and runs clockwise, so the separators
+ * fall at multiples of 2π/K). A shown type gets its colour pale (15%
+ * over the surface); a filtered-out type gets the neutral button
+ * background (var(--surface2)), so it reads as switched off. The
+ * sector width comes from the list length — never hard-code a count:
+ * adding a type is one entry in the caller's list (plus its funnel
+ * toggle, its calShow default and its collectRangeEvents branch).
+ */
+export function buildFilterDiscBackground(types, show) {
+  if (!types.length) return 'none';
+  const step = 100 / types.length;
+  const sectors = types.map((t, i) => {
+    const color = show && show[t.key] === false
+      ? 'var(--surface2)'
+      : `color-mix(in srgb, ${t.color} 15%, var(--surface))`;
+    return `${color} ${i * step}% ${(i + 1) * step}%`;
+  });
+  return `conic-gradient(${sectors.join(', ')})`;
 }
 
 /** Add n days to a 'YYYY-MM-DD' string (n may be negative). */
@@ -226,8 +458,35 @@ export function addDays(dateStr, n) {
 }
 
 /**
+ * 'YYYY-MM-DD' of the coming Saturday strictly after the given local
+ * date: this week's Saturday (Mon–Fri), next Saturday when the date is
+ * already a Saturday (snoozing to today would wake at once) or a Sunday
+ * (this week's Saturday has passed). Used by the "This week-end"
+ * snooze presets on TODOs and habits.
+ */
+export function nextSaturdayStr(dateStr) {
+  const d = parseLocalDate(dateStr);
+  const add = ((6 - d.getDay() + 7) % 7) || 7;
+  return addDays(dateStr, add);
+}
+
+/**
  * The 7 date strings ('YYYY-MM-DD') of the Monday-first week containing dateStr.
  */
+/**
+ * 'GMT+2' / 'GMT-4' style offset label for a zone on a date (DST-aware:
+ * the offset is read on the given date, default today). '' when the zone
+ * is unknown to Intl.
+ */
+export function gmtOffsetLabel(timeZone, dateStr) {
+  try {
+    const d = dateStr ? parseLocalDate(dateStr) : new Date();
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'shortOffset' }).formatToParts(d);
+    const part = parts.find(p => p.type === 'timeZoneName');
+    return part ? part.value : '';
+  } catch { return ''; }
+}
+
 export function getWeekDates(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d);

@@ -18,19 +18,19 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 
 | Module | Description |
 |---|---|
-| **Today** | Daily briefing: focus TODOs, due habits, flashcard reviews, upcoming birthdays, stats |
+| **Today** | Daily briefing: focus TODOs, due habits, memory reviews, upcoming birthdays, stats |
 | **Projects** | Kanban-style project boards with task statuses, links, and drag-and-drop |
 | **TODOs** | Categorized tasks with 5 priority levels, due dates, snooze, drag-and-drop reordering |
 | **Habits** | Recurring habits with flexible scheduling (structured rules + free text), completion tracking, streaks |
-| **Flashcards** | Spaced repetition (FSRS algorithm) with deck organization and text memorization mode |
-| **Calendar** | Month, week, day and year views bringing together TODOs, habits and birthdays, with per-type filters |
+| **Memory** | Spaced repetition (FSRS algorithm) with deck organization and text memorization mode |
+| **Calendar** | Month, week, day and year views bringing together TODOs, habits, birthdays and your own events, with per-type filters |
 | **Lists** | General-purpose checklists with archival support |
 | **Group** | [COMING] Sharing-group management: members, invites, shared-item counts |
 
 ### Capabilities
 
 - **Google Drive storage**: data saved as per-table JSON files in a `DeLaClaw/` folder in your Drive
-- **Google Calendar sync**: optionally mirror habits, TODOs, and birthdays to a dedicated Google Calendar
+- **Google Calendar sync**: optionally mirror habits, TODOs, birthdays, and events to a dedicated Google Calendar
 - **PWA**: installable on mobile and desktop via service worker with network-first caching
 - **Dark and light themes** with automatic OS preference detection
 - **Internationalization**: English, French, Spanish
@@ -85,6 +85,7 @@ js/
   calendar.js           Calendar views (month/week/day/year)
   calendar-pure.js      Pure calendar date/expansion logic
   calendar-sync.js      Google Calendar sync
+  events.js             Calendar events (timed + timezone, or full-day) and their CRUD modals
   welcome.js            Today dashboard
   projects.js           Project boards and task management
   todos.js              TODO management
@@ -119,7 +120,6 @@ js/
   backend-logos.js      Backend brand icons (SVG)
   hero.js               Landing page animations
   logo.js               Logo animation engine
-  storm3d.js            Three.js hero effect
   bootstrap.js          Extracted inline init script (CSP-safe)
   sw-register.js        Service worker registration (CSP-safe)
   version.js            Auto-generated version constant
@@ -142,10 +142,6 @@ bun tests/tests.js
 
 Tests covering unit logic, adapter compliance, import/export, and structural checks (XSS escaping, generated-index freshness). All tests must pass before pushing to `dev`.
 
-## Contributing
-
-See [Contributing](docs-site/contributing.md).
-
 ## License
 
 [PolyForm Noncommercial 1.0.0](LICENSE) — see [NOTICE](NOTICE) for attribution requirements.
@@ -156,6 +152,5 @@ DeLaClaw is source-available, not open source. You can use, modify, and distribu
 
 - [Lucide](https://lucide.dev) icons (ISC License)
 - [DM Sans](https://fonts.google.com/specimen/DM+Sans) font (Open Font License)
-- [Three.js](https://threejs.org) for hero animations (MIT License)
 
 See [Attributions](docs-site/attributions.md) for full details.

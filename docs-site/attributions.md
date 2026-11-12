@@ -1,17 +1,8 @@
 # Third-Party Attributions
 
-DeLaClaw uses the following third-party software and assets. No npm dependencies are installed at runtime. Most external libraries are self-hosted in `vendor/` for CSP hardening and offline PWA support; only Google Identity must remain on CDN per Google ToS (no SRI allowed).
-
-Vendor versions are checked weekly by the `vendor-check` GitHub Action, which opens a PR to `dev` when new releases are available. Manual updates: `scripts/update-vendor.sh [three_ver]`.
+DeLaClaw uses the following third-party software and assets. No npm dependencies are installed at runtime. No external libraries are vendored; only Google Identity and the Google API client must remain on CDN per Google ToS (no SRI allowed).
 
 ## Libraries
-
-### Three.js
-- **Package**: `three` v0.170.0
-- **License**: MIT
-- **Source**: https://github.com/mrdoob/three.js
-- **Loaded from**: `vendor/three/build/three.module.js` + `vendor/three/examples/jsm/utils/BufferGeometryUtils.js` (self-hosted ESM copy, originally `cdn.jsdelivr.net/npm/three@0.170.0`)
-- **Purpose**: 3D extruded heptagram on the landing/hero page
 
 ### Google Identity Services
 - **Library**: GIS (`accounts.google.com/gsi/client`)
@@ -24,8 +15,8 @@ Vendor versions are checked weekly by the `vendor-check` GitHub Action, which op
 - **Library**: `apis.google.com/js/api.js`
 - **License**: Google APIs Terms of Service
 - **Source**: https://developers.google.com/api-client-library/javascript
-- **Loaded from**: `apis.google.com` (CDN, loaded on demand for Drive backend)
-- **Purpose**: Google Drive API file operations (read/write/list user app data)
+- **Loaded from**: `apis.google.com` (CDN — the script loads on every page; the Picker module itself loads on demand when joining a group)
+- **Purpose**: Google Picker used when joining a sharing group
 
 ## Fonts
 

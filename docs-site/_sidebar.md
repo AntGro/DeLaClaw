@@ -12,6 +12,7 @@
   - [Performance](performance.md)
   - [Accessibility](accessibility.md)
   - [Offline Support](backends.md?id=6-offline-behavior)
+  - [Character Limits](char-limits.md)
 - **Decisions**
   - [ADR 0001 — No build step](adrs/0001-no-build-github-pages-byob.md)
   - [ADR 0002 — Pluggable backends](adrs/0002-byob-pluggable-backends.md)
@@ -23,9 +24,6 @@
   - [ADR 0008 — Category schema](adrs/0008-category-schema-fk-cascade-protected.md)
   - [ADR 0009 — Cloudflare Pages hosting](adrs/0009-cloudflare-pages-hosting.md)
   - [ADR 0010 — Nested sections](adrs/0010-nested-sections.md)
-- **Contributing**
-  - [How to Contribute](contributing.md)
-  - [Issue Templates](contributing.md?id=submitting-issues)
 - **Legal**
   - [Privacy](privacy.md)
   - [Attributions](attributions.md)

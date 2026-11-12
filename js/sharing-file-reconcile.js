@@ -7,7 +7,7 @@
 // no error codes, no Drive/Dropbox specifics — those stay in the adapter.
 //
 // Problem: deletion is only absence. A file backend syncs whole item
-// files (todos.json, habits.json, lists.json); a plain union-by-id merge
+// files (todos.json, habits.json, lists.json, events.json); a plain union-by-id merge
 // cannot tell "deleted by a member" apart from "not yet seen", so a
 // deletion uploaded by one member is resurrected by another member's
 // stale in-memory copy on the next merge.

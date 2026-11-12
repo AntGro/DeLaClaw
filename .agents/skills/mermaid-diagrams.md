@@ -22,6 +22,28 @@ Use ` ```mermaid ` fenced code blocks in any `docs-site/*.md` file.
 
 Flowcharts and sequence diagrams cover most DeLaClaw doc needs.
 
+### Diagram header (`%%{init}`)
+
+Some diagrams open with an `%%{init}` directive (theme `base`, light colours) before the diagram declaration. Copy the variant matching the diagram type from a neighbouring block in the same file — without it, a block renders in Mermaid's default colours.
+
+Flowcharts:
+
+```
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'primaryColor': '#ffffff', 'primaryBorderColor': '#cbd5e1', 'primaryTextColor': '#0f172a', 'lineColor': '#334155'}}}%%
+flowchart TD
+```
+
+Flowcharts with subgraphs add the cluster colours (`'clusterBkg': '#f1f5f9', 'clusterBorder': '#cbd5e1'`).
+
+Sequence diagrams:
+
+```
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
+sequenceDiagram
+```
+
+Usage is per-file, not universal: `sharing.md` uses the header on every block, `sync-architecture.md` on some, `architecture.md` and `backends.md` don't use it. Match the file you're editing.
+
 ### Flowchart essentials
 
 ```

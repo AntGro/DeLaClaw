@@ -15,7 +15,7 @@ DeLaClaw does not operate a central server. Depending on which backend mode you 
 DeLaClaw requests one or more Google scopes depending on your usage:
 
 - **`drive.file`** (default) — limits access strictly to files and folders that DeLaClaw itself creates. Used for personal data storage, backups, and the sharing feature (group folders are created and accessed under this scope; joining a group grants access to that group's files only).
-- **`calendar.app.created`** (optional) — limits access to calendars that DeLaClaw itself creates. Requested only when you enable Calendar sync in Settings. DeLaClaw creates a dedicated calendar — `DeLaClaw` on delaclaw.com, `DeLaClawDev` on dev/preview builds — and writes events for your habits, TODOs, and birthdays. It does not read or modify any other calendar.
+- **`calendar.app.created`** (optional) — limits access to calendars that DeLaClaw itself creates. Requested together with `drive.file` when you connect Google Drive; it is optional at consent, and you can decline it and enable Calendar sync later from Settings. DeLaClaw creates a dedicated calendar — `DeLaClaw` on delaclaw.com, `DeLaClawDev` on dev/preview builds — and writes events for your habits, TODOs, birthdays, and your own calendar events. It does not read or modify any other calendar.
 
 You can revoke any of these scopes at any time from your Google Account permissions page. Calendar sync can be disabled independently in Settings: this deletes all events from the DeLaClaw calendar (the empty calendar itself is kept so it can be reused if you re-enable sync).
 
@@ -46,7 +46,7 @@ DeLaClaw also keeps a `daily_visits` record in your own database — a single ro
 
 DeLaClaw uses browser-standard storage mechanisms for local preferences:
 
-- **localStorage**: theme preference, language, active tab, stay-connected credentials, sharing preferences, and tab visibility/order settings.
+- **localStorage**: theme preference, language, active tab, stay-connected backend choice (URL and mode only — no credentials are stored), sharing preferences, and tab visibility/order settings.
 - **IndexedDB**: offline cache of your database tables, scoped by backend mode and account. It serves read-only data when the network is unavailable and lets the app start while offline; it is refreshed on every successful sync and otherwise stays in your browser until you clear your browser's site data.
 - **Service Worker cache**: static app assets (HTML, CSS, JS, icons) for offline loading. Versioned and replaced on each update.
 
@@ -60,6 +60,7 @@ When using DeLaClaw, your browser makes requests to:
 - **Google Drive API** (`www.googleapis.com`) (if using Google Drive mode): reading and writing your data files and shared folders. Subject to [Google's privacy policy](https://policies.google.com/privacy).
 - **Google Calendar API** (`www.googleapis.com/calendar/`) (if Calendar sync is enabled): creating and updating events in the dedicated DeLaClaw calendar. Subject to [Google's privacy policy](https://policies.google.com/privacy).
 - **Google APIs** (`apis.google.com`) (if using Google Drive mode): the Google API client library, loaded to power the Google Picker used when joining a sharing group. Subject to [Google's privacy policy](https://policies.google.com/privacy).
+- **Google OAuth** (`oauth2.googleapis.com`) (if using Google Drive mode): revoking the access token when you disconnect. Subject to [Google's privacy policy](https://policies.google.com/privacy).
 - **Google Static** (`www.gstatic.com`): Google Identity Services scripts used during Google Drive authentication, and the DM Sans font files. Subject to [Google's privacy policy](https://policies.google.com/privacy).
 - **Google Fonts** (`fonts.googleapis.com`): to load the DM Sans typeface. Subject to [Google's privacy policy](https://policies.google.com/privacy).
 - **Cloudflare Web Analytics** (`static.cloudflareinsights.com`): aggregate page-view metrics on the hosted version (no cookies, no personal data). Subject to [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).

@@ -45,6 +45,7 @@ function removeDragArtifacts() {
   document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
   document.body.style.userSelect = '';
   document.body.style.webkitUserSelect = '';
+  document.body.classList.remove('item-drag-active');
   setDragging(false);
 }
 
@@ -134,6 +135,13 @@ export function initItemHoverDelay(container, {
         item.addEventListener('mouseenter', () => {
           hoverTimer = setTimeout(() => {
             if (item.querySelector(editingSelector)) return;
+            // A chunk panel open on this item owns the hover: revealing
+            // the row actions would shift the bar under the panel.
+            if (item.classList.contains('chunk-panel-open')) return;
+            // Hovering a segment must open the panel, never the row
+            // actions — even if the item timer fires first (both delays
+            // are 2s, so the order is a race).
+            if (item.querySelector('.tr-seg:hover')) return;
             actions.classList.add('visible');
           }, 2000);
         });
@@ -141,11 +149,16 @@ export function initItemHoverDelay(container, {
         item.addEventListener('mouseleave', () => {
           if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
           if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
-          actions.classList.remove('visible');
+          // While a chunk panel is open the actions are frozen: hiding
+          // them here would shift the bar under the panel. The panel
+          // close unfreezes them (hiding them if the pointer has left
+          // the item by then).
+          if (!item.classList.contains('chunk-panel-open')) actions.classList.remove('visible');
         });
 
         item.addEventListener('click', (e) => {
           if (e.target.closest(actionsSelector)) return;
+          if (e.target.closest('.tr-seg')) return;
           if (item.querySelector(editingSelector)) return;
           if (clickTimer) clearTimeout(clickTimer);
           clickTimer = setTimeout(() => {
@@ -298,6 +311,7 @@ export function initItemDragDrop(container, {
 
       dragState = null;
       setDragging(false);
+      document.body.classList.remove('item-drag-active');
       cleanup(true);
 
       if (changed) {
@@ -343,6 +357,7 @@ export function initItemDragDrop(container, {
         activated = true;
         e.preventDefault();
         setDragging(true);
+        document.body.classList.add('item-drag-active');
         document.body.style.userSelect = 'none';
         document.body.style.webkitUserSelect = 'none';
 
@@ -599,9 +614,13 @@ export async function bulkSortOrder(tableName, updates) {
 const SCROLLABLE_LIST_SELECTOR = '.task-list, .todo-cat-list, .list-item-list, .birthday-bucket-list, .welcome-items, .cal-day-list';
 
 function scrollContainerKey(el) {
-  if (el.id) return 'id:' + el.id;
-  const cat = el.dataset?.category;
-  if (cat) return 'cat:' + cat;
+  // Key by the container's own identity (same attributes as bucketKey):
+  // keying by the nearest ancestor id made every list in a grid share
+  // the grid id, so one tick snapped all lists to a single scroll
+  // position. The ancestor id stays only as a fallback for containers
+  // with no identity of their own.
+  const own = bucketKey(el);
+  if (own) return own;
   const card = el.closest('[id]');
   if (card?.id) return 'id:' + card.id;
   return null;
@@ -694,10 +713,20 @@ export function scrollToAndHighlight(element, color, durationMs = 1500) {
 let _activeInlineEdit = null;
 let _inlineEditRefreshTimer = null;
 let _datePickerJustClosed = false;
+// Monotonic edit generation: incremented on every inlineEditText()
+// start. A finishing edit refreshes only if its generation is still
+// the latest — a newer edit may have started (and even finished)
+// while this one faded out, and a stale refresh must not pre-empt
+// or duplicate the newer edit's own refresh.
+let _inlineEditGeneration = 0;
 
 export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refreshFn, extraEl, onStart, onFinish, collectExtra, multiline, containerEl }) {
   if (state.readOnlyMode) return; // read-only: no inline editing
   if (spanEl.dataset.editing) return;
+
+  // Capture this edit's generation (see finishEdit): a refresh is
+  // stale once any newer edit has started.
+  const myGeneration = ++_inlineEditGeneration;
 
   // Cancel any other active inline edit first (discard + restore span)
   if (_activeInlineEdit) {
@@ -785,11 +814,18 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     spanEl.textContent = save && trimmed ? trimmed : originalText;
     root.replaceWith(spanEl);
 
+    // Refresh only if this is still the newest edit: a newer edit may
+    // have started — and even finished — while this one faded out, and
+    // the upfront clearTimeout cannot cover a timer that is only
+    // created below, after the fade-out. The newer edit's own finish
+    // refreshes instead. (_activeInlineEdit is not enough here: it is
+    // cleared as soon as the newer edit starts finishing.)
+    if (myGeneration !== _inlineEditGeneration) return;
     if (deferRefresh) {
       // Defer refresh — will be cancelled if another edit starts soon
       _inlineEditRefreshTimer = setTimeout(() => {
         _inlineEditRefreshTimer = null;
-        refreshFn();
+        if (myGeneration === _inlineEditGeneration) refreshFn();
       }, 350);
     } else {
       await refreshFn();
@@ -826,12 +862,13 @@ export function inlineEditText(spanEl, originalText, { maxLength, saveFn, refres
     containerEl.addEventListener('mousedown', _containerMousedownHandler, true);
   }
 
-  // Native date-picker guard: on iOS, tapping "Done" blurs the date input
-  // and moves focus to <body>, which would otherwise trigger cancel. On
-  // desktop Chrome the picker has no confirm button, so clicking outside to
-  // dismiss it can also land outside the edit wrapper. Setting a short flag
-  // on date-input blur lets the focusout handler skip cancellation.
-  root.querySelectorAll('input[type="date"], input[type="datetime-local"]').forEach(di => {
+  // Native date/time-picker guard: on iOS, tapping "Done" blurs the date
+  // input and moves focus to <body>, which would otherwise trigger
+  // cancel. On desktop Chrome the picker has no confirm button, so
+  // clicking outside to dismiss it can also land outside the edit
+  // wrapper. Setting a short flag on date/time-input blur lets the
+  // focusout handler skip cancellation.
+  root.querySelectorAll('input[type="date"], input[type="datetime-local"], input[type="time"]').forEach(di => {
     di.addEventListener('blur', () => {
       _datePickerJustClosed = true;
       setTimeout(() => { _datePickerJustClosed = false; }, 300);

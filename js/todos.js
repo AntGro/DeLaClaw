@@ -1,6 +1,7 @@
 import { lucideIcon } from './icons.js';
 import state, { TODO_MAX_LEN, GENERAL_CATEGORY_COLOR, SHARED_CATEGORY } from './state.js';
-import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, formatRelativeDate, formatRelativeDay, formatSnoozeUntil, truncateWithShowMore, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
+import { isDateOnly, isDueOverdue, isDueSoon, compareDueDates, dropInvalidDateOnly, nextSaturdayStr, parseLocalDate, toDateStr } from './calendar-pure.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration, orderKeyOf, compareOrderKeys } from './sections-pure.js';
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
@@ -206,14 +207,17 @@ async function saveEditCategory() {
     try {
       targetParentId = await ensureTodoSectionChain(segments.slice(0, -1), null, catId);
     } catch (e) {
-      showToast(t('toast.name_required'), 'error');
+      // A cycle is a validation error (same toast as before); anything
+      // else is a failed conversion write and must say so.
+      if (e?.message === 'section-cycle') showToast(t('toast.name_required'), 'error');
+      else showToast(t('toast.update_failed') + ': ' + (e?.message || e), 'error');
       return;
     }
   }
   if (!targetName && !cat.is_protected) { showToast(t('toast.name_required'), 'error'); return; }
   if (cat.is_protected) targetParentId = null;
   if (!cat.is_protected && siblingNameTaken([..._todoCatMap.values()], targetParentId, targetName, catId)) {
-    showToast(t('toast.name_required'), 'error');
+    showToast(t('toast.category_exists_at_level', targetName), 'error');
     return;
   }
 
@@ -225,7 +229,11 @@ async function saveEditCategory() {
   const updates = { shortname: shortname || null, color, parent_id: targetParentId };
   if (!cat.is_protected) updates.name = targetName;
   if (targetParentId !== (cat.parent_id || null)) updates.sort_order = nextTodoSortOrder(targetParentId);
-  await state.db.from('todo_categories').update(updates).eq('id', catId);
+  // Checked write (like saveEditList): a failed rename must report
+  // failure — modal stays open, no reload, no calendar resync, no
+  // success toast — instead of silently keeping the old row.
+  const { error } = await state.db.from('todo_categories').update(updates).eq('id', catId);
+  if (error) { showToast(t('toast.update_failed') + ': ' + error.message, 'error'); return; }
   await loadTodoCategories();
 
   // Calendar: bucket labels appear in event summaries, so a bucket
@@ -298,6 +306,12 @@ async function refreshTodos() {
     allTodos = allTodos.filter(t => !t.shared_id || t._shared);
   }
 
+  // Drop date-only deadlines that are not real calendar dates (e.g.
+  // '2026-02-31' from a shared payload or a direct Drive write): they
+  // would otherwise normalize silently to a different day on render.
+  // In-memory only; the stored value is untouched until re-saved.
+  for (const td of allTodos) td.due_date = dropInvalidDateOnly(td.due_date);
+
   _lastRefreshTodos = Date.now();
 
   if (state.currentView === 'todos') {
@@ -342,7 +356,7 @@ function getFilteredTodosForCategory(catId) {
       if (!a.due_date && !b.due_date) return 0;
       if (!a.due_date) return 1;
       if (!b.due_date) return -1;
-      return new Date(a.due_date) - new Date(b.due_date);
+      return compareDueDates(a.due_date, b.due_date);
     });
   } else if (sortBy === 'priority') {
     const prio = { urgent: 0, high: 1, medium: 2, low: 3, normal: 4 };
@@ -560,6 +574,12 @@ function renderCategoryCard(catId) {
     ? `<button class="todo-cat-delete-btn" data-action="delete-category" data-category="${esc(catId)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>`
     : '';
 
+  // Copy-link for the bucket itself: the todocat deep link already
+  // resolves buckets via #todosView [data-node-id] (the section header
+  // has the same button for sections); shown unconditionally, every
+  // bucket is linkable, including General and protected ones.
+  const copyLinkBtn = `<button class="todo-cat-shortname-btn" data-action="copy-item-link" data-link-type="todocat" data-id="${esc(catId)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>`;
+
   const activeEmptyMsg = displayActive.length === 0
     ? `<p class="empty-msg">${todoFilter === 'pending' ? t('todos.all_caught_up') : t('todos.no_items')}</p>`
     : '';
@@ -601,8 +621,9 @@ function renderCategoryCard(catId) {
   const headerIcon = isSharedDeck ? `${lucideIcon('users', 16)} ` : '';
 
   const addRow = isSharedDeck ? '' : `<div class="todo-cat-add">
-      <textarea placeholder="${t('todos.add_todo_placeholder')}" maxlength="2000" class="todo-cat-input" data-category="${esc(catId)}" data-priority="normal" data-action="add-todo-to-category" rows="1" style="resize:none;overflow:hidden;"></textarea>
+      <textarea placeholder="${t('todos.add_todo_placeholder')}" maxlength="${TODO_MAX_LEN}" class="todo-cat-input" data-category="${esc(catId)}" data-priority="normal" data-action="add-todo-to-category" rows="1" style="resize:none;overflow:hidden;"></textarea>
       <button class="todo-add-priority-btn" data-action="open-quick-add-priority-picker" title="${esc(t('todos.set_priority'))}">${lucideIcon('circle-off', 16, 'var(--muted)')}</button>
+      <button class="todo-add-deadline-btn" data-action="open-quick-add-deadline-picker" title="${esc(t('todos.set_deadline'))}">${lucideIcon('calendar', 16, 'var(--muted)')}</button>
       <button data-action="add-todo-from-add-row">${lucideIcon('plus', 16)}</button>
       ${state.sharing ? `<button class="sharing-share-btn" data-action="share-todo-from-add" title="${esc(t('sharing.share'))}">${lucideIcon('share', 16)}</button>` : ''}
     </div>
@@ -618,7 +639,7 @@ function renderCategoryCard(catId) {
         </div>
       </div>
       <div class="todo-cat-header-actions">
-        ${shareAllBtn}${shortnameBtn}${deleteBtn}
+        ${shareAllBtn}${copyLinkBtn}${shortnameBtn}${deleteBtn}
       </div>
     </div>
     ${addRow}
@@ -631,7 +652,7 @@ function renderCategoryCard(catId) {
 
 function renderTodoItem(td) {
   const now = new Date();
-  const isOverdue = td.due_date && !td.done && new Date(td.due_date) < now;
+  const isOverdue = td.due_date && !td.done && isDueOverdue(td.due_date, now);
   const isSnoozed = td.snooze_until && new Date(td.snooze_until) > now;
   const isFlagged = td.priority && td.priority !== 'normal';
 
@@ -645,21 +666,19 @@ function renderTodoItem(td) {
 
   let dueDateStr = '';
   if (td.due_date) {
-    const d = new Date(td.due_date);
-    const diffMs = d - now;
-    const diffH = Math.round(diffMs / (1000 * 60 * 60));
+    const dueLabel = isDateOnly(td.due_date) ? formatRelativeDay(td.due_date, now) : formatRelativeDate(new Date(td.due_date));
     if (isOverdue) {
-      dueDateStr = `<span class="todo-due overdue">${lucideIcon('alert-triangle', 14)} ${t('todos.overdue')} (${formatRelativeDate(d)})</span>`;
-    } else if (diffH < 24) {
-      dueDateStr = `<span class="todo-due due-soon">${lucideIcon("bell",16)} ${t('todos.due')} ${formatRelativeDate(d)}</span>`;
+      dueDateStr = `<span class="todo-due overdue">${lucideIcon('alert-triangle', 14)} ${t('todos.overdue')} (${dueLabel})</span>`;
+    } else if (isDueSoon(td.due_date, now)) {
+      dueDateStr = `<span class="todo-due due-soon">${lucideIcon("bell",16)} ${t('todos.due')} ${dueLabel}</span>`;
     } else {
-      dueDateStr = `<span class="todo-due">${lucideIcon("calendar",16)} ${formatRelativeDate(d)}</span>`;
+      dueDateStr = `<span class="todo-due">${lucideIcon("calendar",16)} ${dueLabel}</span>`;
     }
   }
 
   let snoozeInfo = '';
   if (isSnoozed) {
-    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon",16)} ${t('todos.snoozed_until')} ${new Date(td.snooze_until).toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
+    snoozeInfo = `<span class="todo-snoozed">${lucideIcon("moon",16)} ${t('todos.snoozed_until')} ${formatSnoozeUntil(td.snooze_until)}</span>`;
   }
 
   const priorityClass = isFlagged ? `todo-priority-${td.priority}` : '';
@@ -783,6 +802,7 @@ function openQuickAddPriorityPicker(btn, event) {
   const existing = document.getElementById('priorityPickerPopover');
   if (existing) { closePriorityPicker(); return; }
   closePriorityPicker();
+  closeDeadlinePicker();
   _lastQuickAddPrioBtn = btn;
   const rect = btn.getBoundingClientRect();
   const container = btn.closest('.todo-cat-add, .welcome-quick-add');
@@ -834,6 +854,112 @@ function setQuickAddPriority(optionEl, level) {
 }
 
 let _lastQuickAddPrioBtn = null;
+
+// ── Quick-add deadline picker ──────────────────────────────────────
+// Mirrors the priority picker: a popover anchored to the calendar
+// button in the quick-add row. The chosen date lives on the input's
+// dataset.deadline until the TODO is added (then it is reset, like
+// the priority). Only one quick-add popover is open at a time.
+let _lastQuickAddDeadlineBtn = null;
+let _deadlinePickerDocClick = null;
+let _deadlinePickerKeydown = null;
+
+function closeDeadlinePicker() {
+  const el = document.getElementById('deadlinePickerPopover');
+  if (el) el.remove();
+  if (_deadlinePickerDocClick) { document.removeEventListener('click', _deadlinePickerDocClick); _deadlinePickerDocClick = null; }
+  if (_deadlinePickerKeydown) { document.removeEventListener('keydown', _deadlinePickerKeydown); _deadlinePickerKeydown = null; }
+  window.removeEventListener('scroll', closeDeadlinePicker, { capture: true });
+}
+
+function updateQuickAddDeadlineBtn(btn, dateStr) {
+  btn.innerHTML = lucideIcon('calendar', 16, dateStr ? 'var(--accent)' : 'var(--muted)');
+  btn.title = dateStr ? `${t('todos.deadline')}: ${dateStr}` : t('todos.set_deadline');
+  btn.classList.toggle('has-deadline', !!dateStr);
+}
+
+function setQuickAddDeadline(dateStr) {
+  if (!_lastQuickAddDeadlineBtn) return;
+  const container = _lastQuickAddDeadlineBtn.closest('.todo-cat-add, .welcome-quick-add');
+  const inputEl = container?.querySelector('.todo-cat-input');
+  if (inputEl) {
+    if (dateStr) inputEl.dataset.deadline = dateStr;
+    else delete inputEl.dataset.deadline;
+  }
+  updateQuickAddDeadlineBtn(_lastQuickAddDeadlineBtn, dateStr);
+}
+
+function openQuickAddDeadlinePicker(btn, event) {
+  event.stopPropagation();
+  const existing = document.getElementById('deadlinePickerPopover');
+  if (existing) { closeDeadlinePicker(); return; }
+  closeDeadlinePicker();
+  closePriorityPicker();
+  _lastQuickAddDeadlineBtn = btn;
+  const rect = btn.getBoundingClientRect();
+  const container = btn.closest('.todo-cat-add, .welcome-quick-add');
+  const inputEl = container?.querySelector('.todo-cat-input');
+  const current = inputEl?.dataset.deadline || '';
+
+  const picker = document.createElement('div');
+  picker.className = 'deadline-picker';
+  picker.id = 'deadlinePickerPopover';
+  picker.innerHTML = `<input type="date" id="quickAddDeadlineInput" value="${esc(current)}" aria-label="${esc(t('todos.deadline'))}">`
+    + (current ? `<button type="button" class="deadline-picker-clear">${esc(t('todos.clear_deadline'))}</button>` : '');
+  document.body.appendChild(picker);
+
+  const dateInput = picker.querySelector('#quickAddDeadlineInput');
+  // Chrome fires `change` on a date input on the very first keystroke
+  // that yields a complete value — typing "2" in the year of
+  // 2026-11-11 commits "0002-11-11" at once — so closing on every
+  // `change` kills the popover before the year can be fully typed.
+  // Only a change that did not just follow an editing keystroke came
+  // from the native calendar popup: that one closes the popover; a
+  // typed change just commits the value and leaves the popover open.
+  let lastEditKeydownAt = 0;
+  dateInput.addEventListener('keydown', (e) => {
+    if (/^[0-9]$/.test(e.key) || e.key === 'Backspace' || e.key === 'Delete') lastEditKeydownAt = Date.now();
+  });
+  dateInput.addEventListener('change', () => {
+    const typed = Date.now() - lastEditKeydownAt < 200;
+    setQuickAddDeadline(dateInput.value);
+    if (!typed) closeDeadlinePicker();
+  });
+  const clearBtn = picker.querySelector('.deadline-picker-clear');
+  if (clearBtn) clearBtn.addEventListener('click', () => { setQuickAddDeadline(''); closeDeadlinePicker(); });
+
+  // Position the popover below the button, clamped inside the viewport.
+  // Measure again on the next frame: on iOS the native date control
+  // only gets its final width after first layout, so the popover can
+  // widen past the synchronous measurement and run off the right edge
+  // (measured on a real iPhone: the clamp ran on ~179px, the popover
+  // rendered ~200px+ wide).
+  const positionPicker = () => {
+    if (!document.getElementById('deadlinePickerPopover')) return;
+    const ph = picker.offsetHeight;
+    let top = rect.bottom + 4;
+    let left = rect.left;
+    if (top + ph > window.innerHeight - 8) top = rect.top - ph - 4;
+    if (left + picker.offsetWidth > window.innerWidth - 8) left = window.innerWidth - picker.offsetWidth - 8;
+    picker.style.top = top + 'px';
+    picker.style.left = left + 'px';
+  };
+  positionPicker();
+  requestAnimationFrame(positionPicker);
+
+  // Outside clicks close — but clicks inside the picker (on the date
+  // input) must not, or the native date popup could never be used.
+  _deadlinePickerDocClick = (e) => {
+    const p = document.getElementById('deadlinePickerPopover');
+    if (p && !p.contains(e.target) && !_lastQuickAddDeadlineBtn?.contains(e.target)) closeDeadlinePicker();
+  };
+  _deadlinePickerKeydown = (e) => { if (e.key === 'Escape') closeDeadlinePicker(); };
+  setTimeout(() => {
+    document.addEventListener('click', _deadlinePickerDocClick);
+    document.addEventListener('keydown', _deadlinePickerKeydown);
+    window.addEventListener('scroll', closeDeadlinePicker, { once: true, capture: true });
+  }, 0);
+}
 
 async function setTodoPriority(id, level) {
   closePriorityPicker();
@@ -896,18 +1022,24 @@ async function addTodoToCategory(inputEl) {
   const catId = inputEl.dataset.category || _defaultCatId;
   const cat = _todoCatMap.get(catId);
   const priority = inputEl.dataset.priority || 'normal';
+  const deadline = inputEl.dataset.deadline || '';
 
   const pendingTodos = allTodos.filter(t => !t.done && catIdForTodo(t) === catId);
   const minOrder = pendingTodos.length > 0 ? Math.min(...pendingTodos.map(t => t.sort_order || 0)) - 1 : 0;
 
-  const { error } = await state.db.from('todos').insert({ text, priority, category: cat?.name ?? '', category_id: catId, sort_order: minOrder });
+  const newTodo = { text, priority, category: cat?.name ?? '', category_id: catId, sort_order: minOrder };
+  if (deadline) newTodo.due_date = deadline;
+  const { error } = await state.db.from('todos').insert(newTodo);
   if (error) { showToast(t('toast.failed_to_add') + ': ' + error.message, 'error'); return; }
   inputEl.value = '';
   if (inputEl.tagName === 'TEXTAREA') { inputEl.style.height = ''; }
-  // Reset priority to medium after adding
+  // Reset priority + deadline after adding
   inputEl.dataset.priority = 'normal';
+  delete inputEl.dataset.deadline;
   const prioBtn = inputEl.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.todo-add-priority-btn');
   if (prioBtn) updateQuickAddPriorityBtn(prioBtn, 'normal');
+  const dlBtn = inputEl.closest('.todo-cat-add, .welcome-quick-add')?.querySelector('.todo-add-deadline-btn');
+  if (dlBtn) updateQuickAddDeadlineBtn(dlBtn, '');
   showToast(t('toast.added'), 'success');
   await refreshTodos();
 }
@@ -1041,12 +1173,12 @@ async function deleteAllDoneTodos(catId) {
   );
 }
 
-async function editTodoInline(id, itemEl) {
+async function editTodoInline(id, itemEl, opts = {}) {
   const todo = allTodos.find(t => t.id === id);
   if (!todo) return;
   if (!itemEl) itemEl = document.querySelector(`.todo-item[data-todo-id="${id}"]`);
   if (!itemEl) return;
-  const textEl = itemEl.querySelector('.todo-text');
+  const textEl = opts.textEl || itemEl.querySelector('.todo-text');
   if (!textEl || textEl.dataset.editing) return;
 
   // Clear any stale pending priority from a previous cancelled edit
@@ -1057,28 +1189,52 @@ async function editTodoInline(id, itemEl) {
   const actionsEl = itemEl.querySelector('.todo-actions');
   if (actionsEl) actionsEl.classList.remove('visible');
 
-  // Build deadline date input as extra element
+  // Build deadline inputs as extra element: a date input plus an
+  // optional time input. Date set + time empty = date-only deadline
+  // (stored as 'YYYY-MM-DD', due at the end of that day).
   const deadlineRow = document.createElement('div');
   deadlineRow.className = 'todo-edit-deadline-row';
   const deadlineLabel = document.createElement('label');
   deadlineLabel.innerHTML = lucideIcon('calendar') + ' ' + t('todos.deadline') + ':';
   deadlineLabel.className = 'todo-edit-deadline-label';
-  const deadlineInput = document.createElement('input');
-  deadlineInput.type = 'datetime-local';
-  deadlineInput.className = 'todo-edit-deadline-input';
+  const deadlineDateInput = document.createElement('input');
+  deadlineDateInput.type = 'date';
+  deadlineDateInput.className = 'todo-edit-deadline-input';
+  const deadlineTimeInput = document.createElement('input');
+  deadlineTimeInput.type = 'time';
+  deadlineTimeInput.className = 'todo-edit-deadline-input todo-edit-deadline-time';
   if (todo.due_date) {
-    const d = new Date(todo.due_date);
-    deadlineInput.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    if (isDateOnly(todo.due_date)) {
+      deadlineDateInput.value = todo.due_date;
+    } else {
+      const d = new Date(todo.due_date);
+      const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      deadlineDateInput.value = local.slice(0, 10);
+      deadlineTimeInput.value = local.slice(11, 16);
+    }
   }
   const clearBtn = document.createElement('button');
   clearBtn.type = 'button';
   clearBtn.className = 'todo-edit-deadline-clear';
   clearBtn.textContent = '✕';
   clearBtn.title = t('common.close');
-  clearBtn.addEventListener('click', (e) => { e.stopPropagation(); deadlineInput.value = ''; });
+  clearBtn.addEventListener('click', (e) => { e.stopPropagation(); deadlineDateInput.value = ''; deadlineTimeInput.value = ''; });
+  // The label sits beside a wrapping fields block, so it stays
+  // vertically centred across both lines when the time drops below
+  // the date. The date never stretches (minimum required width, so
+  // its calendar icon stays next to the date). The time + clear stay
+  // grouped: they always wrap together and right-align on the second
+  // line via margin-left:auto on the group.
+  const deadlineFields = document.createElement('div');
+  deadlineFields.className = 'todo-edit-deadline-fields';
+  const deadlineTimeGroup = document.createElement('div');
+  deadlineTimeGroup.className = 'todo-edit-deadline-time-group';
+  deadlineTimeGroup.appendChild(deadlineTimeInput);
+  deadlineTimeGroup.appendChild(clearBtn);
+  deadlineFields.appendChild(deadlineDateInput);
+  deadlineFields.appendChild(deadlineTimeGroup);
   deadlineRow.appendChild(deadlineLabel);
-  deadlineRow.appendChild(deadlineInput);
-  deadlineRow.appendChild(clearBtn);
+  deadlineRow.appendChild(deadlineFields);
 
   // Category row
   const catRow = document.createElement('div');
@@ -1117,11 +1273,12 @@ async function editTodoInline(id, itemEl) {
   extras.appendChild(catRow);
 
   inlineEditText(textEl, todo.text, {
-    maxLength: 2000,
+    maxLength: TODO_MAX_LEN,
     extraEl: extras,
-    containerEl: itemEl,
+    containerEl: opts.containerEl || itemEl,
     collectExtra: () => {
-      const newDeadline = deadlineInput.value ? new Date(deadlineInput.value).toISOString() : null;
+      const newDeadline = !deadlineDateInput.value ? null
+        : (deadlineTimeInput.value ? new Date(`${deadlineDateInput.value}T${deadlineTimeInput.value}`).toISOString() : deadlineDateInput.value);
       const selectedCatId = catSelect.value;
       const selectedCat = _todoCatMap.get(selectedCatId);
       const flagBtn = itemEl.querySelector('.todo-flag-btn');
@@ -1186,7 +1343,7 @@ async function editTodoInline(id, itemEl) {
         }
       }
     },
-    refreshFn: refreshTodos,
+    refreshFn: opts.refreshFn || refreshTodos,
   });
 }
 
@@ -1194,11 +1351,11 @@ async function editTodoInline(id, itemEl) {
 // CATEGORY MANAGEMENT
 // ===================================================================
 function snoozeModalHTML() {
-  return `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button data-action="snooze-for" data-amount="1" data-unit="h">${t('todos.snooze_1h')}</button><button data-action="snooze-for" data-amount="3" data-unit="h">${t('todos.snooze_3h')}</button><button data-action="snooze-for" data-amount="1" data-unit="d">${t('todos.snooze_1d')}</button><button data-action="snooze-for" data-amount="3" data-unit="d">${t('todos.snooze_3d')}</button><button data-action="snooze-for" data-amount="7" data-unit="d">${t('todos.snooze_1w')}</button><button data-action="snooze-for" data-amount="1" data-unit="M">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">${t('todos.snooze_custom')}</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" data-action="close-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-snooze">${t('todos.snooze')}</button></div></div>`;
+  return `<div class="modal snooze-modal"><h2>${lucideIcon("clock",20)} ${t('todos.snooze')}</h2><p style="font-size:0.82rem;color:var(--muted);margin-bottom:12px;">${t('todos.snooze_hint')}</p><div class="snooze-options"><button data-action="snooze-for" data-amount="1" data-unit="h">${t('todos.snooze_1h')}</button><button data-action="snooze-for" data-amount="3" data-unit="h">${t('todos.snooze_3h')}</button><button data-action="snooze-for" data-amount="1" data-unit="d">${t('todos.snooze_1d')}</button><button data-action="snooze-for" data-amount="3" data-unit="d">${t('todos.snooze_3d')}</button><button data-action="snooze-for" data-unit="weekend">${t('todos.snooze_weekend')}</button><button data-action="snooze-for" data-amount="7" data-unit="d">${t('todos.snooze_1w')}</button><button data-action="snooze-for" data-amount="1" data-unit="M">${t('todos.snooze_1m')}</button></div><label style="margin-top:12px;">${t('todos.snooze_custom')}</label><input type="datetime-local" id="snoozeCustomDate" style="width:100%;margin-top:4px;"><input type="hidden" id="snoozeTaskId"><div class="modal-actions"><button class="modal-cancel" data-action="close-snooze-modal">${t('common.cancel')}</button><button class="modal-save" data-action="submit-snooze">${t('todos.snooze')}</button></div></div>`;
 }
 
 function addCategoryModalHTML() {
-  return `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="40" data-action="save-new-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-category">${t('common.add')}</button></div></div>`;
+  return `<div class="modal"><h2>${lucideIcon("folder-plus",20)} ${t('todos.add_category')}</h2><label>${t('todos.category_name')}</label><input type="text" id="newCategoryName" placeholder="${t('todos.category_placeholder')}" maxlength="80" data-action="save-new-category-on-enter"><div class="modal-row"><div class="modal-field"><label>${t('common.shortname')}</label><input type="text" id="newCategoryShortname" placeholder="${t('common.shortname_placeholder')}" maxlength="20" data-action="save-new-category-on-enter"></div><div class="modal-field"><label>${t('common.color')}</label><input type="color" id="newCategoryColor"></div></div><div class="modal-actions"><button class="modal-cancel" data-action="close-add-category-modal">${t('common.cancel')}</button><button class="modal-save" data-action="save-new-category">${t('common.add')}</button></div></div>`;
 }
 
 function editCategoryModalHTML() {
@@ -1310,7 +1467,7 @@ async function saveNewCategory() {
     const parentId = await ensureTodoSectionChain(segments.slice(0, -1), startParentId);
     const name = segments[segments.length - 1];
     if (siblingNameTaken([..._todoCatMap.values()], parentId, name, null)) {
-      showToast(t('toast.name_required'), 'error');
+      showToast(t('toast.category_exists_at_level', name), 'error');
       return;
     }
     const { error } = await state.db.from('todo_categories').insert({
@@ -1491,6 +1648,11 @@ function openSnoozeModal(todoId) {
   modal.innerHTML = snoozeModalHTML();
   document.getElementById('snoozeTaskId').value = todoId;
   document.getElementById('snoozeCustomDate').value = '';
+  // Hourly snoozes only make sense for a deadline with a specific hour:
+  // a date-only (or absent) deadline hides the 1h/3h options.
+  const todo = allTodos.find(t => t.id === todoId);
+  const hasTimedDeadline = !!(todo?.due_date && !isDateOnly(todo.due_date));
+  modal.querySelectorAll('[data-action="snooze-for"][data-unit="h"]').forEach(b => { b.style.display = hasTimedDeadline ? '' : 'none'; });
   modal.classList.add('visible');
 }
 
@@ -1503,6 +1665,11 @@ async function snoozeFor(amount, unit) {
   let target;
   if (unit === 'h') {
     target = new Date(now.getTime() + amount * 60 * 60 * 1000);
+  } else if (unit === 'weekend') {
+    // The coming Saturday, day only: no time is set, so the item wakes
+    // at the start of Saturday. (parseLocalDate already lands on local
+    // midnight.)
+    target = parseLocalDate(nextSaturdayStr(toDateStr(now.getFullYear(), now.getMonth(), now.getDate())));
   } else if (unit === 'd') {
     target = new Date(now.getTime() + amount * 24 * 60 * 60 * 1000);
     if (amount === 1) { target.setHours(9, 0, 0, 0); }
@@ -1530,7 +1697,7 @@ async function doSnooze(snoozeUntil) {
   snoozeBtns.forEach(b => { b.disabled = true; b.classList.add('is-pending'); });
 
   try {
-    const snoozedMsg = `${t('todos.snoozed_until')} ${snoozeUntil.toLocaleString(getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+    const snoozedMsg = `${t('todos.snoozed_until')} ${formatSnoozeUntil(snoozeUntil)}`;
     if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
       // ─── Shared: write snooze to Drive payload (optimistic — refresh on staging) ───
       const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
@@ -2244,7 +2411,7 @@ document.addEventListener('input', e => {
   }
 });
 
-export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey };
+export { refreshTodos, renderTodos, getCategoryColor, setCategoryColor, loadTodoCategories, getTodoCategories, initTodoModals, getTodoCounts, getTodos, syncSharedTodos, SHARED_CATEGORY, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey, editTodoInline };
 
 window.setTodoFilter = setTodoFilter;
 window.addTodoToCategory = addTodoToCategory;
@@ -2260,6 +2427,9 @@ window.deleteAllDoneTodos = deleteAllDoneTodos;
 window.openPriorityPicker = openPriorityPicker;
 window.openQuickAddPriorityPicker = openQuickAddPriorityPicker;
 window.setQuickAddPriority = setQuickAddPriority;
+window.openQuickAddDeadlinePicker = openQuickAddDeadlinePicker;
+window.setQuickAddDeadline = setQuickAddDeadline;
+window.closeDeadlinePicker = closeDeadlinePicker;
 window.updateQuickAddPriorityBtn = updateQuickAddPriorityBtn;
 window.setTodoPriority = setTodoPriority;
 window.closePriorityPicker = closePriorityPicker;

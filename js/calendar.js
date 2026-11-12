@@ -7,14 +7,15 @@
 
 import state, { CALENDAR_PREFS_KEY } from './state.js';
 import { esc, renderMd } from './utils.js';
+import { initItemHoverDelay } from './item-utils.js';
 import { lucideIcon } from './icons.js';
 import { sharedBadge } from './sharing-ui.js';
 import { t, getLang } from './i18n.js';
-import { getTodos, catIdForTodo, getCategoryColor, getTodoCatPath, getTodoCatOrderKey } from './todos.js';
-import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatPath, getHabitCatOrderKey, isAutoHabit } from './habits.js';
+import { getTodos, catIdForTodo, getCategoryColor, getTodoCatPath, getTodoCatOrderKey, editTodoInline } from './todos.js';
+import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatPath, getHabitCatOrderKey, isAutoHabit, editHabitInline } from './habits.js';
 import { compareOrderKeys } from './sections-pure.js';
 import { captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
-import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, addDays, getWeekDates, isHabitSnoozed, parseLocalDate, overdueDays } from './calendar-pure.js';
+import { toDateStr, getMonthGrid, expandHabitOccurrences, birthdaysInRange, toggleShow, buildFilterDiscBackground, addDays, getWeekDates, isHabitSnoozed, parseLocalDate, overdueDays, eventDatesInRange, eventSpan, instantToTimeStr, localTimeZone } from './calendar-pure.js';
 
 let calYear;
 let calMonth; // 0-based
@@ -34,7 +35,23 @@ let calShow = { // type filters
   todo: _calPrefs.show?.todo !== false,
   habit: _calPrefs.show?.habit !== false,
   birthday: _calPrefs.show?.birthday !== false,
+  event: _calPrefs.show?.event !== false,
 };
+// Filterable calendar types, in disc order (clockwise from the top).
+// The filter disc, the funnel menu and the funnel filter all read this
+// order. Adding a type: one entry here, its funnel toggle in index.html,
+// its calShow default above and its collectRangeEvents branch below —
+// the disc re-computes its sectors from this list, no count anywhere
+// is hard-coded.
+const CAL_FILTER_TYPES = [
+  { key: 'todo', color: 'var(--accent)' },
+  { key: 'habit', color: 'var(--green)' },
+  { key: 'birthday', color: 'var(--pink)' },
+  { key: 'event', color: 'var(--event-color)' },
+];
+// Search query — session-only, deliberately never persisted (unlike the
+// view/filters above): a reload starts unfiltered, like other tabs.
+let calSearch = '';
 
 function saveCalPrefs() {
   try { localStorage.setItem(CALENDAR_PREFS_KEY, JSON.stringify({ view: calView, show: calShow })); } catch {}
@@ -54,9 +71,12 @@ function syncCalendarToolbar() {
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-checked', String(active));
   });
+  // Filter disc: the funnel button's background shows one sector per
+  // type — saturated when shown, pale when filtered out.
+  document.querySelector('.cal-filter-btn')?.style.setProperty('--cal-disc', buildFilterDiscBackground(CAL_FILTER_TYPES, calShow));
 }
 
-const TYPE_ORDER = { todo: 0, habit: 1, birthday: 2 };
+const TYPE_ORDER = { birthday: 0, event: 1, todo: 2, habit: 3 };
 const MAX_CHIPS = 3;
 
 function setAnchor(dateStr) {
@@ -93,10 +113,22 @@ function monthEndStr() {
 // -------------------------------------------------------------------
 
 function collectMonthEvents() {
-  return collectRangeEvents(monthStartStr(), monthEndStr());
+  return collectRangeEvents(monthStartStr(), monthEndStr(), calShow, calSearch);
 }
 
-function collectRangeEvents(start, end) {
+/**
+ * Aggregate every item visible on the calendar between start and end
+ * (inclusive date strings). `show` overrides the Calendar tab's funnel
+ * filter. Defaults to the tab's filter, which the Welcome strip also
+ * uses, so a strip cell never shows an item its day panel would hide.
+ * Callers that must ignore the filter pass all-true explicitly.
+ * `search` is a lowercased query: when non-empty, only items whose
+ * title/name contains it are kept. Title/name only — notes are not
+ * matched (they are not collected here) and neither are category
+ * names. The Welcome strip never passes a query, so a search on the
+ * Calendar tab never leaks into Welcome.
+ */
+function collectRangeEvents(start, end, show = calShow, search = '') {
   const map = new Map(); // dateStr → [{ type, id, title, sub, avatar }]
   const push = (date, ev) => {
     if (!map.has(date)) map.set(date, []);
@@ -108,7 +140,7 @@ function collectRangeEvents(start, end) {
   // (it still needs doing today). Overdue instances are flagged for
   // the dashed-red highlight.
   for (const td of getTodos()) {
-    if (!calShow.todo) break;
+    if (!show.todo) break;
     if (td.done) continue;
     const d = (td.due_date || '').slice(0, 10);
     if (!d) continue;
@@ -126,7 +158,7 @@ function collectRangeEvents(start, end) {
   // Habits: every occurrence of structured rules within the month;
   // free-text rules pin a single occurrence on next_due.
   for (const h of state.allHabits || []) {
-    if (!calShow.habit) break;
+    if (!show.habit) break;
     if (h.is_draft) continue;
     if (h.is_finished) continue;
     const rule = normalizeFrequencyRule(h.frequency_rule || '');
@@ -174,7 +206,7 @@ function collectRangeEvents(start, end) {
 
   // Birthdays: yearly occurrence in every month the range spans
   for (const b of state.allBirthdays || []) {
-    if (!calShow.birthday) break;
+    if (!show.birthday) break;
     for (const occ of birthdaysInRange(b.birthday, start, end)) {
       push(occ.date, {
         type: 'birthday', id: b.id, title: b.name || '',
@@ -183,7 +215,44 @@ function collectRangeEvents(start, end) {
     }
   }
 
+  // Events: timed events are absolute instants — the days they occupy
+  // are computed in the VIEWER's timezone (calendar-pure), so the same
+  // event can sit on different dates for different viewers. Full-day
+  // events occupy their stored date range as-is.
+  if (show.event) {
+    const viewerTz = localTimeZone();
+    for (const ev of state.allEvents || []) {
+      const placements = eventDatesInRange(ev, start, end, viewerTz);
+      if (!placements.length) continue;
+      const evBase = {
+        type: 'event', id: ev.id, title: ev.title || '', sub: '',
+        catColor: 'var(--event-color)',
+        allDay: !!ev.all_day,
+        start_ts: ev.start_ts || null, end_ts: ev.end_ts || null,
+        start_date: ev.start_date || null, end_date: ev.end_date || null,
+        timezone: ev.timezone || null,
+        startTimeLabel: ev.all_day ? '' : instantToTimeStr(ev.start_ts, viewerTz),
+        shared_id: ev.shared_id || null, shared_group_id: ev.shared_group_id || null,
+      };
+      // The full span (not just the in-range part) drives the day
+      // modal's time-range label.
+      const span = eventSpan(ev, viewerTz);
+      evBase.spanStart = span ? span.startDate : placements[0].date;
+      evBase.spanEnd = span ? span.endDate : placements[placements.length - 1].date;
+      for (const p of placements) {
+        push(p.date, { ...evBase, startsHere: p.startsHere, endsHere: p.endsHere });
+      }
+    }
+  }
+
   for (const evs of map.values()) evs.sort((a, b) => TYPE_ORDER[a.type] - TYPE_ORDER[b.type]);
+  if (search) {
+    for (const [date, evs] of map) {
+      const kept = evs.filter(ev => (ev.title || '').toLowerCase().includes(search));
+      if (kept.length) map.set(date, kept);
+      else map.delete(date);
+    }
+  }
   return map;
 }
 
@@ -202,9 +271,11 @@ function chipHTML(ev, hidden) {
     ? `<img src="${esc(ev.avatar)}" alt="" class="cal-chip-avatar">`
     : `<i></i>`;
   // TODOs/habits render markdown like their own pages do; birthdays stay plain text
-  const title = ev.type === 'birthday' ? esc(ev.title) : renderMd(ev.title);
-  // Shape encodes the type; background encodes the item's category color
-  // (birthdays have no category → type color fallback).
+  // Timed events prefix their start time (viewer timezone) on their first day.
+  const title = ev.type === 'birthday' ? esc(ev.title)
+    : renderMd(ev.type === 'event' && !ev.allDay && ev.startsHere && ev.startTimeLabel ? `${ev.startTimeLabel} ${ev.title}` : ev.title);
+  // Background encodes the item's category color (birthdays have no
+  // category → type color fallback); all chips share a 2px corner.
   const catColor = ev.catColor || (ev.type === 'birthday' ? 'var(--pink)' : 'var(--accent)');
   return `<span class="cal-chip cal-${ev.type}${ev.overdue ? ' cal-chip-overdue' : ''}" style="--cat-color:${catColor}"${hidden ? ' data-hidden=""' : ''}>${icon}<span>${title}</span></span>`;
 }
@@ -284,6 +355,58 @@ function fullDateStr(dateStr) {
   return new Intl.DateTimeFormat(getLang(), {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   }).format(parseDateStr(dateStr));
+}
+
+/**
+ * Day-panel header parts: the main line (weekday, month, day) and a sub
+ * line with the year and where the day sits relative to today.
+ */
+function dayTitleParts(dateStr) {
+  const d = parseDateStr(dateStr);
+  // Capitalize the weekday and month in every locale: Intl returns them
+  // lowercase in French/Spanish ("lundi 2 novembre"). formatToParts keeps
+  // each locale's word order and particles ("2 de noviembre de") intact.
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+  const main = new Intl.DateTimeFormat(getLang(), {
+    weekday: 'long', day: 'numeric', month: 'long',
+  }).formatToParts(d)
+    .map((p) => (p.type === 'weekday' || p.type === 'month' ? cap(p.value) : p.value))
+    .join('');
+  const now = new Date();
+  const today = toDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((parseLocalDate(dateStr) - parseLocalDate(today)) / 86400000);
+  const rel = diff === 0 ? t('calendar.today')
+    : diff === 1 ? t('calendar.tomorrow')
+    : diff === -1 ? t('calendar.yesterday')
+    : diff > 1 ? t('common.in_days', diff)
+    : t('common.days_ago', Math.abs(diff));
+  return { main, sub: `${d.getFullYear()} · ${rel}` };
+}
+
+/** Jump the day panel (and the grid behind it) to an arbitrary date. */
+function jumpToCalendarDay(dateStr) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return;
+  setAnchor(dateStr);
+  renderCalendar();
+  renderCalendarDayPanel(dateStr);
+}
+
+/** Swap the panel title for a date input and open its native picker. */
+function openDayJumpPicker() {
+  const input = document.getElementById('calDayJumpInput');
+  const title = document.getElementById('calDayTitle');
+  if (!input || !title) return;
+  input.value = calPanelDate || '';
+  title.style.display = 'none';
+  input.style.display = '';
+  input.focus();
+  try { input.showPicker(); } catch { /* picker opens on click/focus instead */ }
+  input.addEventListener('blur', () => {
+    // Dismissed without choosing: restore the title.
+    if (input.value === calPanelDate && document.getElementById('calDayJumpInput') === input) {
+      renderCalendarDayPanel(calPanelDate);
+    }
+  }, { once: true });
 }
 
 function labelSeg(picker, text) {
@@ -399,7 +522,7 @@ function renderMonthView(grid) {
 
 function renderWeekView(grid) {
   const dates = getWeekDates(calDate);
-  const events = collectRangeEvents(dates[0], dates[6]);
+  const events = collectRangeEvents(dates[0], dates[6], calShow, calSearch);
   const names = weekdayNames();
   let html = `<div class="cal-weekdays">${names.map(w => `<span>${esc(w)}</span>`).join('')}</div>`;
   html += '<div class="cal-week cal-week-page">';
@@ -413,7 +536,7 @@ function monthShortName(m) {
 }
 
 function renderYearView(grid) {
-  const events = collectRangeEvents(`${calYear}-01-01`, `${calYear}-12-31`);
+  const events = collectRangeEvents(`${calYear}-01-01`, `${calYear}-12-31`, calShow, calSearch);
   let html = '<div class="cal-year">';
   for (let m = 0; m < 12; m++) {
     html += `<div class="cal-mini">
@@ -438,6 +561,7 @@ function renderYearView(grid) {
 
 function renderDayView(grid) {
   grid.innerHTML = `<div class="cal-dayview">${dayGroupsHTML(calDate)}</div>`;
+  initCalDayRowBehaviors(grid);
 }
 
 // -------------------------------------------------------------------
@@ -488,6 +612,16 @@ function toggleCalendarFilter(type) {
   calShow = next;
   saveCalPrefs();
   syncCalendarToolbar();
+  renderCalendar();
+}
+
+// Calendar search: the query is session-only (never persisted) and the
+// input lives in the static toolbar, so re-rendering the grid never
+// steals its focus. The generic toggle-search/clear-search actions own
+// the wrapper: collapsing an empty input dispatches an input event,
+// which lands here with an empty value and clears the filter.
+function filterCalendarSearch(e) {
+  calSearch = (e.target?.value || '').trim().toLowerCase();
   renderCalendar();
 }
 
@@ -563,6 +697,30 @@ function calSharedBadge(ev) {
 // the due date and by how much it is overdue — not just the red border.
 // (Buckets: formatHabitDue's overdue line; TODOs use the same
 // date + days-ago composition with their own i18n keys.)
+function calShortDate(dateStr) {
+  return parseLocalDate(dateStr).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' });
+}
+
+// Time-range sub-line for an event row in the day modal, in the
+// viewer's timezone. Full-day: "All day" (plus the range when it
+// spans days). Timed: "09:00 – 10:00", or "Oct 24 23:00 → Oct 25
+// 01:00" when the converted span crosses midnight; the event's own
+// timezone is appended when it differs from the viewer's.
+function calEventSub(ev) {
+  const viewerTz = localTimeZone();
+  if (ev.allDay) {
+    if (!ev.end_date || ev.end_date === ev.start_date) return t('events.all_day');
+    return `${calShortDate(ev.start_date)} – ${calShortDate(ev.end_date)} · ${t('events.all_day')}`;
+  }
+  const startT = instantToTimeStr(ev.start_ts, viewerTz);
+  const endT = instantToTimeStr(ev.end_ts, viewerTz);
+  let label = (ev.spanStart && ev.spanEnd && ev.spanStart !== ev.spanEnd)
+    ? `${calShortDate(ev.spanStart)} ${startT} → ${calShortDate(ev.spanEnd)} ${endT}`
+    : `${startT} – ${endT}`;
+  if (ev.timezone && ev.timezone !== viewerTz) label += ` · ${ev.timezone.replace(/_/g, ' ')}`;
+  return label;
+}
+
 function calOverdueSub(ev) {
   if (!ev.overdue) return '';
   const dueStr = ev.type === 'todo' ? ev.dueDate : ev.next_due;
@@ -577,6 +735,13 @@ function calOverdueSub(ev) {
 }
 
 function dayPanelRow(ev, dateStr) {
+  if (ev.type === 'event') {
+    return `<button class="cal-row" data-action="calendar-event-edit" data-id="${esc(ev.id)}">
+      <span class="cal-row-avatar cal-row-icon">${lucideIcon(ev.allDay ? 'calendar-days' : 'clock', 15)}</span>
+      <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong><span class="cal-row-sub">${esc(calEventSub(ev))}</span></span>
+      ${lucideIcon('pencil', 15)}
+    </button>`;
+  }
   if (ev.type === 'birthday') {
     const thumb = ev.avatar
       ? `<img src="${esc(ev.avatar)}" alt="" class="cal-row-avatar">`
@@ -588,8 +753,9 @@ function dayPanelRow(ev, dateStr) {
     </button>`;
   }
   if (ev.type === 'todo') {
-    return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
+    return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}" data-cal-type="todo" data-cal-id="${esc(ev.id)}">
       <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong>${calOverdueSub(ev)}</span>
+      ${calRowActions('todo', ev.id)}
       <button class="todo-done-btn" data-todo-id="${esc(ev.id)}" data-action="calendar-toggle-todo"
         data-done="true" data-date="${dateStr}" title="${t('common.done')}">
         ${lucideIcon('circle-check', 18)}
@@ -602,8 +768,9 @@ function dayPanelRow(ev, dateStr) {
   // habit's current due date, stamped today).
   // Automatic habits validate themselves — no Done button, just the badge.
   if (ev.is_auto) {
-    return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
+    return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}" data-cal-type="habit" data-cal-id="${esc(ev.id)}">
       <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong>${calOverdueSub(ev)}</span>
+      ${calRowActions('habit', ev.id)}
       <span class="habit-auto-badge">${lucideIcon('zap', 12)} ${t('habits.auto_badge')}</span>
     </div>`;
   }
@@ -615,13 +782,106 @@ function dayPanelRow(ev, dateStr) {
   const doneAttrs = canComplete
     ? `title="${t('common.done')}"`
     : `disabled title="${esc(t('calendar.only_next_due'))}"`;
-  return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}">
+  return `<div class="cal-row${ev.overdue ? ' cal-row-overdue' : ''}" data-cal-type="habit" data-cal-id="${esc(ev.id)}">
     <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong>${calOverdueSub(ev)}</span>
+    ${calRowActions('habit', ev.id)}
     <button class="habit-done-btn" data-habit-id="${esc(ev.id)}" data-action="calendar-habit-done"
       data-date="${dateStr}" ${doneAttrs}>
       ${lucideIcon('circle-check', 18)}
     </button>
   </div>`;
+}
+
+// Actions menu for TODO/habit day rows (same reveal pattern as the other
+// containers). Events/birthdays keep their single-click edit + permanent
+// pencil icon, so they get no menu — their dblclick is already an edit.
+function calRowActions(type, id) {
+  return `<div class="cal-row-actions">
+    <button data-action="calendar-edit-row" data-cal-type="${type}" data-cal-id="${esc(id)}" title="${t('common.edit')}">${lucideIcon('pencil', 15)}</button>
+    <button data-action="copy-item-link" data-link-type="${type}" data-id="${esc(id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 15)}</button>
+  </div>`;
+}
+
+// Same refresh pair the Done handlers use: grid + open day panel.
+function refreshCalendarSurfaces() {
+  renderCalendar();
+  if (calPanelDate) renderCalendarDayPanel(calPanelDate);
+}
+
+// Calendar rows open the SAME inline editors as the TODOs/Habits tabs
+// (text + deadline + category for TODOs; name + frequency + category +
+// end date for habits), anchored on the row title, refreshing the
+// calendar surfaces instead of the native views on finish.
+function editCalendarTodoInline(row, id) {
+  const titleEl = row.querySelector('.cal-row-main strong');
+  if (!titleEl) return;
+  const actionsEl = row.querySelector('.cal-row-actions');
+  if (actionsEl) actionsEl.classList.remove('visible');
+  editTodoInline(id, row, { textEl: titleEl, containerEl: row, refreshFn: refreshCalendarSurfaces });
+}
+
+function editCalendarHabitInline(row, id) {
+  const titleEl = row.querySelector('.cal-row-main strong');
+  if (!titleEl) return;
+  const actionsEl = row.querySelector('.cal-row-actions');
+  if (actionsEl) actionsEl.classList.remove('visible');
+  editHabitInline(id, row, { nameEl: titleEl, containerEl: row, refreshFn: refreshCalendarSurfaces });
+}
+
+function editCalendarRowInline(row, type, id) {
+  if (type === 'todo') editCalendarTodoInline(row, id);
+  else if (type === 'habit') editCalendarHabitInline(row, id);
+}
+
+// Shared hover/click reveal + dblclick edit, wired after every day render
+// (the panel rebuilds via innerHTML, so listeners must be re-attached).
+// Event/birthday rows carry no menu and no cal type, so dblclick ignores
+// them — their single click already opens the edit modal.
+function initCalDayRowBehaviors(container) {
+  if (!container) return;
+  initItemHoverDelay(container, {
+    itemSelector: '.cal-row',
+    actionsSelector: '.cal-row-actions',
+    rowSelector: '.cal-row-main',
+    textSelector: '.cal-row-main',
+    editingSelector: '.task-edit-input, .todo-edit-wrapper',
+    onDblClick: (row) => {
+      if (row.dataset.calType && row.dataset.calId) {
+        editCalendarRowInline(row, row.dataset.calType, row.dataset.calId);
+      }
+    },
+  });
+}
+
+// Background scroll lock while the day modal is open (same pattern as
+// Settings: the body is fixed at the current scroll offset, so the page
+// behind the modal cannot scroll on Welcome or Calendar). Owned by the
+// day modal via a flag, so closing it never steals another modal's lock.
+function lockDayModalScroll() {
+  if (document.body.dataset.dayModalScroll) return;
+  const scrollY = window.scrollY;
+  document.body.classList.add('no-scroll');
+  document.body.style.top = `-${scrollY}px`;
+  document.body.dataset.dayModalScrollY = scrollY;
+  document.body.dataset.dayModalScroll = '1';
+}
+
+function unlockDayModalScroll() {
+  if (!document.body.dataset.dayModalScroll) return;
+  document.body.classList.remove('no-scroll');
+  const scrollY = parseInt(document.body.dataset.dayModalScrollY || '0', 10);
+  document.body.style.top = '';
+  delete document.body.dataset.dayModalScrollY;
+  delete document.body.dataset.dayModalScroll;
+  window.scrollTo(0, scrollY);
+}
+
+// Stacking: when an item modal opens above the day modal, the day modal
+// stays open underneath, blurred and below the item overlay, instead of
+// closing. Exiting the item modal restores it to the front.
+function setCalendarDayBehind(on) {
+  const overlay = document.getElementById('calendarDayOverlay');
+  if (overlay) overlay.classList.toggle('cal-day-behind', !!on);
 }
 
 function openCalendarDay(dateStr) {
@@ -638,12 +898,14 @@ function openCalendarDay(dateStr) {
   });
   document.getElementById('app').appendChild(overlay);
   renderCalendarDayPanel(dateStr);
+  lockDayModalScroll();
 }
 
 function closeCalendarDay() {
   calPanelDate = null;
   const overlay = document.getElementById('calendarDayOverlay');
   if (overlay) overlay.remove();
+  unlockDayModalScroll();
 }
 
 // Prev/next day from inside the day modal: re-render the panel for the
@@ -655,16 +917,23 @@ function calendarDayNav(dir) {
 }
 
 function dayGroupsHTML(dateStr) {
-  const events = collectRangeEvents(dateStr, dateStr).get(dateStr) || [];
+  const events = collectRangeEvents(dateStr, dateStr, calShow, calSearch).get(dateStr) || [];
   const groups = [
+    { type: 'event', label: t('calendar.events'), color: 'var(--event-color)', icon: 'calendar-days' },
     { type: 'habit', label: t('calendar.habits'), color: 'var(--green)', icon: 'repeat' },
     { type: 'todo', label: t('calendar.todos'), color: 'var(--accent)', icon: 'list-checks' },
     { type: 'birthday', label: t('calendar.birthdays'), color: 'var(--pink)', icon: 'cake' },
   ];
   let body = '';
   for (const g of groups) {
-    const evs = events.filter(e => e.type === g.type);
+    let evs = events.filter(e => e.type === g.type);
     if (!evs.length) continue;
+    if (g.type === 'event') {
+      // Full-day first, then by start instant (viewer-day order).
+      evs = [...evs].sort((a, b) =>
+        (a.allDay ? 0 : 1) - (b.allDay ? 0 : 1) ||
+        String(a.start_ts || a.start_date || '').localeCompare(String(b.start_ts || b.start_date || '')));
+    }
     let items = '';
     if (g.type === 'birthday') {
       items = evs.map(e => dayPanelRow(e, dateStr)).join('');
@@ -704,18 +973,23 @@ function renderCalendarDayPanel(dateStr) {
   // shared capture/restore; navigating to another day starts at top.
   const scrollMap = calPanelDate === dateStr ? captureInnerScrollPositions(modal) : null;
   calPanelDate = dateStr;
-  const title = fullDateStr(dateStr);
+  const title = dayTitleParts(dateStr);
 
   modal.innerHTML = `
     <div class="cal-day-header">
       <button class="btn" data-action="calendar-day-nav" data-dir="-1" title="${t('calendar.prev_day')}">${lucideIcon('chevron-left', 16)}</button>
-      <h2>${esc(title)}</h2>
+      <button class="cal-day-title" id="calDayTitle" data-action="calendar-day-jump" title="${t('calendar.jump_to_date')}">
+        <span class="cal-day-title-main">${esc(title.main)}</span>
+        <span class="cal-day-title-sub">${esc(title.sub)}</span>
+      </button>
+      <input type="date" class="cal-day-jump-input" id="calDayJumpInput" data-action="jump-to-calendar-day" style="display:none" aria-label="${t('calendar.jump_to_date')}">
       <button class="btn" data-action="calendar-day-nav" data-dir="1" title="${t('calendar.next_day')}">${lucideIcon('chevron-right', 16)}</button>
       <div class="calendar-add-wrap">
         <button class="btn" data-action="toggle-calendar-add" data-menu="calendarDayAddMenu"
           title="${t('common.add')}" aria-expanded="false" aria-haspopup="true">${lucideIcon('plus', 16)}</button>
         <div class="calendar-add-menu" id="calendarDayAddMenu" style="display:none" role="menu">
           <button data-action="open-add-birthday" data-date="${dateStr}" role="menuitem">${lucideIcon('cake', 15)} <span>${t('birthdays.add_birthday')}</span></button>
+          <button data-action="open-add-event" data-date="${dateStr}" role="menuitem">${lucideIcon('calendar-plus', 15)} <span>${t('events.add_event')}</span></button>
         </div>
       </div>
     </div>
@@ -724,9 +998,10 @@ function renderCalendarDayPanel(dateStr) {
       <button class="modal-cancel" data-action="close-calendar-day">${t('common.close')}</button>
     </div>`;
   if (scrollMap) restoreInnerScrollPositions(modal, scrollMap);
+  initCalDayRowBehaviors(modal);
 }
 
-export { renderCalendar };
+export { renderCalendar, collectRangeEvents, dayCellHTML };
 
 // Keep the grid fresh when todo/habit data changes elsewhere
 // (same pattern as the Welcome view); birthdays refresh via refreshBirthdays().
@@ -737,10 +1012,21 @@ document.addEventListener('habits-changed', () => {
   if (state.currentView === 'calendar') renderCalendar();
 });
 
+// Keep an open day panel in sync on views where the refresh functions
+// don't re-render the grid (Welcome): on the Calendar tab,
+// renderCalendar() inside refreshEvents()/refreshBirthdays() already
+// re-renders the panel, so this skips that view to avoid double work.
+for (const evt of ['events-changed', 'birthdays-changed']) {
+  document.addEventListener(evt, () => {
+    if (calPanelDate && state.currentView !== 'calendar') renderCalendarDayPanel(calPanelDate);
+  });
+}
+
 window.renderCalendar = renderCalendar;
 window.calendarNav = calendarNav;
 window.calendarToday = calendarToday;
 window.toggleCalendarFilter = toggleCalendarFilter;
+window.filterCalendarSearch = filterCalendarSearch;
 window.openCalendarDate = openCalendarDate;
 window.setCalendarView = setCalendarView;
 window.openCalendarPicker = openCalendarPicker;
@@ -750,6 +1036,10 @@ window.pickCalendarDay = pickCalendarDay;
 window.toggleCalendarAddMenu = toggleCalendarAddMenu;
 window.closeCalendarAddMenu = closeCalendarAddMenu;
 window.openCalendarDay = openCalendarDay;
+window.jumpToCalendarDay = jumpToCalendarDay;
+window.openDayJumpPicker = openDayJumpPicker;
 window.closeCalendarDay = closeCalendarDay;
+window.setCalendarDayBehind = setCalendarDayBehind;
 window.calendarDayNav = calendarDayNav;
 window.renderCalendarDayPanel = renderCalendarDayPanel;
+window.editCalendarRowInline = editCalendarRowInline;

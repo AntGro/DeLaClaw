@@ -622,4 +622,60 @@ export const LOCAL_MIGRATIONS = {
       upd.run(result.next_due, result.is_finished, h.id);
     }
   },
+  // 2.28.0: user calendar events (Calendar page + add menu). Timed
+  // events store absolute instants + their IANA timezone; full-day
+  // events store an inclusive date range. Same DDL as schema.sql.
+  '2.28.0': `
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      title TEXT NOT NULL,
+      note TEXT,
+      all_day INTEGER DEFAULT 0,
+      start_ts TEXT,
+      end_ts TEXT,
+      start_date TEXT,
+      end_date TEXT,
+      timezone TEXT,
+      shared_id TEXT,
+      shared_group_id TEXT,
+      owner_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `,
+
+  // 2.29.0: repair dangling deck/category FKs (same repair as the
+  // Drive 2.29.0 migration; see its comment for the history). A FK
+  // that points at no row — or is NULL — is remapped by the legacy
+  // string: '' → the protected default row (ORDER BY is_protected
+  // DESC prefers it when duplicate '' rows exist), a name → the row
+  // with that name. FKs that already resolve, and names that match
+  // no row, are left untouched.
+  '2.29.0': `
+    UPDATE flashcards SET deck_id = (
+      SELECT id FROM flashcard_decks WHERE name = flashcards.deck ORDER BY is_protected DESC LIMIT 1
+    ) WHERE (deck_id IS NULL OR deck_id NOT IN (SELECT id FROM flashcard_decks))
+      AND EXISTS (SELECT 1 FROM flashcard_decks WHERE name = flashcards.deck);
+    UPDATE texts SET deck_id = (
+      SELECT id FROM flashcard_decks WHERE name = texts.deck ORDER BY is_protected DESC LIMIT 1
+    ) WHERE (deck_id IS NULL OR deck_id NOT IN (SELECT id FROM flashcard_decks))
+      AND EXISTS (SELECT 1 FROM flashcard_decks WHERE name = texts.deck);
+    UPDATE todos SET category_id = (
+      SELECT id FROM todo_categories WHERE name = todos.category ORDER BY is_protected DESC LIMIT 1
+    ) WHERE (category_id IS NULL OR category_id NOT IN (SELECT id FROM todo_categories))
+      AND EXISTS (SELECT 1 FROM todo_categories WHERE name = todos.category);
+    UPDATE habits SET category_id = (
+      SELECT id FROM habit_categories WHERE name = habits.category ORDER BY is_protected DESC LIMIT 1
+    ) WHERE (category_id IS NULL OR category_id NOT IN (SELECT id FROM habit_categories))
+      AND EXISTS (SELECT 1 FROM habit_categories WHERE name = habits.category);
+  `,
+
+  // 2.32.34: flashcard decks gain sections, like the other category
+  // tables since 2.23.0 — kind ('bucket' default, or 'section') and
+  // parent_id (NULL = top level, plain column, not a foreign key).
+  // Existing decks all become top-level buckets, so nothing moves.
+  '2.32.34': `
+    ALTER TABLE flashcard_decks ADD COLUMN kind TEXT DEFAULT 'bucket';
+    ALTER TABLE flashcard_decks ADD COLUMN parent_id TEXT;
+  `,
 };

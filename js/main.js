@@ -11,7 +11,7 @@ import { wrapWithOfflineCache, loadCacheSnapshot, driveCacheScope, showReadOnlyB
 import { DRIVE_SCOPE_FILE, clearStoredDriveEmail, getStoredDriveEmail } from './adapters/drive.js';
 import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, reconcileLedger as reconcileCalendarLedger, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
-import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
+import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, renderFooterIdentity, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
 
@@ -19,6 +19,7 @@ const SETTINGS_PANES = ['general', 'calendar', 'data', 'stats', 'agents', 'accou
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
 import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
 import { refreshBirthdays, initBirthdayModals } from './birthdays.js';
+import { refreshEvents, initEventModals, syncSharedEvents } from './events.js';
 import { renderCalendar } from './calendar.js';
 import { refreshFlashcards, renderFlashcards, initFlashcardModals, getFlashcardCounts } from './flashcards.js';
 import { refreshLists, renderLists, initListModals, syncSharedListItems } from './lists.js';
@@ -130,7 +131,8 @@ function setDemoCategoriesFromData(data) {
     names.forEach((name, idx) => {
       // Nested sections: a category given as a path ('Reading > Fiction')
       // becomes a section chain plus a leaf bucket, so demo data can show
-      // the feature. Decks never take this path.
+      // the feature. Decks take this path too since flashcard sections
+      // landed (the Geography sample section).
       const segments = allowPaths ? name.split('>').map(s => s.trim()).filter(Boolean) : [name];
       if (segments.length <= 1) {
         const row = mkRow(name, 'bucket', null);
@@ -159,7 +161,7 @@ function setDemoCategoriesFromData(data) {
 
   const todoLookup = buildCatRows(data.todos, 'category', 'todo_categories', true);
   const habitLookup = buildCatRows(data.habits, 'category', 'habit_categories', true);
-  const deckLookup = buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks');
+  const deckLookup = buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks', true);
 
   // Enrich items with category_id / deck_id (fall back to default row).
   // A path category ('Reading > Fiction') resolves to its leaf bucket;
@@ -225,6 +227,7 @@ function hydrateIcons() {
     span.outerHTML = lucideIcon(name, size, color);
   });
 }
+renderFooterIdentity();
 hydrateIcons();
 
 // ===================================================================
@@ -431,9 +434,11 @@ function initGate() {
   // Check if returning from signup overlay with a pre-selected backend
   const signupMode = localStorage.getItem('claw_signup_mode');
   localStorage.removeItem('claw_signup_mode');
-  // Set login hash (user is on the login page) — preserve #setup if present
-  // Skip hero when returning from signup — go straight to the login form
-  if (window.location.hash !== '#setup' && !signupMode) {
+  // Set login hash (user is on the login page) — preserve #setup if present,
+  // and preserve a deep-link hash (#type/id): it must survive the gate so
+  // handleStartupDeepLink can still navigate to the linked item after
+  // login/demo entry (a cold-pasted link otherwise dies here).
+  if (window.location.hash !== '#setup' && !signupMode && !parseDeepLink(window.location.hash)) {
     history.replaceState(null, '', '#login');
     showHero();
   }
@@ -711,8 +716,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Wrap all save/add/submit actions with guard() to prevent double-fire
   const guardedNames = [
     'saveNewBirthday', 'saveEditBirthday', 'removeAvatar',
+    'saveNewEvent', 'saveEditEvent',
     'saveNewDraft', 'saveEditedProposal', 'saveNewFlashcard', 'saveEditFlashcard',
-    'saveNewText', 'saveEditText', 'submitFeedback', 'submitTextReview',
+    'saveNewText', 'saveEditText', 'saveEditChunk', 'submitFeedback', 'submitTextReview',
     'saveEditDeck',
     'saveNewHabit', 'saveEditHabit', 'saveHabitCompletion', 'addHabitFromInput',
     'saveNewHabitCategory', 'saveEditHabitCategory',
@@ -720,7 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
     'saveNewList', 'saveEditList',
     'addTask', 'saveNewProject', 'saveEditProject', 'submitRevision',
     'saveNewCategory', 'saveEditCategory', 'snoozeFor', 'submitSnooze', 'habitSnoozeFor', 'submitHabitSnooze', 'addTodoToCategory',
-    'executeConfirmAction',
+    'executeConfirmAction', 'confirmPasteBackup',
     'quickAddDraft', 'quickAddListItem',
     'saveGlobalPrompt', 'saveProjectPrompt',
   ];
@@ -1266,7 +1272,10 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     const firstVisible = getVisibleTabs()[0];
     savedView = firstVisible ? firstVisible.key : 'welcome';
   }
-  switchView(savedView, isSettingsHash);
+  switchView(savedView, isSettingsHash || !!parseDeepLink(location.hash));
+  // A deep-link hash must survive this switchView: its hash sync would
+  // otherwise replace #type/id with #<view> before handleStartupDeepLink
+  // (after data load) reads it, so a cold-pasted link would never navigate.
 
   // Listen for back/forward navigation
   window.addEventListener('hashchange', () => {
@@ -1385,6 +1394,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       habits: () => refreshHabits(),
       habit_completions: () => refreshHabits(),
       birthdays: () => refreshBirthdays(),
+      events: () => refreshEvents(),
       flashcards: () => refreshFlashcards(),
       flashcard_notes: () => refreshFlashcards(),
       lists: () => refreshLists(),
@@ -1477,6 +1487,11 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   initBirthdayModals();
   await refreshBirthdays();
 
+  // Initialize Events
+  initEventModals();
+  if (state.sharing) await syncSharedEvents();
+  await refreshEvents();
+
   // Initialize Flashcards
   initFlashcardModals();
   await refreshFlashcards();
@@ -1512,6 +1527,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
       if (await syncSharedTodos()) await refreshTodos();
       if (await syncSharedHabits()) await refreshHabits();
       if (await syncSharedListItems()) await refreshLists();
+      if (await syncSharedEvents()) await refreshEvents();
     } catch (e) {
       console.warn('sharing refresh:', e);
     }
@@ -1520,6 +1536,15 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     if (footerGc && state.sharing) {
       const gc = state.sharing.getAllGroups().length;
       footerGc.innerHTML = `${lucideIcon('users', 14)} ${gc} group${gc !== 1 ? 's' : ''}`;
+    }
+  });
+
+  // A birthday added from the Welcome page must appear in its Upcoming
+  // Birthdays bucket right away when it falls in the next 7 days —
+  // refreshBirthdays only re-renders the Calendar tab itself.
+  document.addEventListener('birthdays-changed', () => {
+    if (state.currentView === 'welcome') {
+      refreshWelcome().then(() => renderWelcome());
     }
   });
 
@@ -1582,6 +1607,7 @@ function initDemoBanner() {
     await refreshTodos();
     await refreshHabits();
     await refreshBirthdays();
+    await refreshEvents();
     await refreshFlashcards();
     await refreshLists();
     refreshWelcome();
@@ -1806,6 +1832,7 @@ async function onLangSwitchDemo(lang) {
   await refreshTodos();
   await refreshHabits();
   await refreshBirthdays();
+  await refreshEvents();
   await refreshFlashcards();
   refreshWelcome();
   // Re-render banner text
@@ -1942,6 +1969,7 @@ function updateStaticLabels() {
     'habitsView': 'common.search',
     'flashcardsView': 'flashcards.search_placeholder',
     'listsView': 'lists.search_placeholder',
+    'calendarView': 'common.search',
   };
   for (const [viewId, key] of Object.entries(searchMap)) {
     const view = document.getElementById(viewId);
@@ -2065,6 +2093,8 @@ function updateStaticLabels() {
   if (settingsCalSyncTodosLabel) settingsCalSyncTodosLabel.textContent = t('cal_sync.todos');
   const settingsCalSyncBirthdaysLabel = document.getElementById('settingsCalSyncBirthdaysLabel');
   if (settingsCalSyncBirthdaysLabel) settingsCalSyncBirthdaysLabel.textContent = t('cal_sync.birthdays');
+  const settingsCalSyncEventsLabel = document.getElementById('settingsCalSyncEventsLabel');
+  if (settingsCalSyncEventsLabel) settingsCalSyncEventsLabel.textContent = t('cal_sync.events');
   const settingsCalSyncResyncLabel = document.getElementById('settingsCalSyncResyncLabel');
   if (settingsCalSyncResyncLabel) settingsCalSyncResyncLabel.textContent = t('cal_sync.resync');
   const settingsTabsLabel = document.getElementById('settingsTabsLabel');
@@ -2108,12 +2138,16 @@ function updateStaticLabels() {
   if (settingsExportBtn) settingsExportBtn.textContent = t('menu.settings_export_btn');
   const settingsDriveExportBtn = document.getElementById('settingsDriveExportBtn');
   if (settingsDriveExportBtn) settingsDriveExportBtn.textContent = t('menu.settings_drive_export_btn');
+  const settingsCopyBackupBtn = document.getElementById('settingsCopyBackupBtn');
+  if (settingsCopyBackupBtn) settingsCopyBackupBtn.textContent = t('menu.settings_copy_backup_btn');
   const settingsRestoreLabel = document.getElementById('settingsRestoreLabel');
   if (settingsRestoreLabel) settingsRestoreLabel.textContent = t('menu.settings_restore');
   const settingsRestoreHint = document.getElementById('settingsRestoreHint');
   if (settingsRestoreHint) settingsRestoreHint.textContent = t('menu.settings_restore_hint');
   const settingsImportBtn = document.getElementById('settingsImportBtn');
   if (settingsImportBtn) settingsImportBtn.textContent = t('menu.settings_import_btn');
+  const settingsPasteBackupBtn = document.getElementById('settingsPasteBackupBtn');
+  if (settingsPasteBackupBtn) settingsPasteBackupBtn.textContent = t('menu.settings_paste_backup_btn');
   // Flashcard toolbar buttons
   const flashPracticeBtn = document.getElementById('flashcardPracticeAllBtn');
   if (flashPracticeBtn) {
@@ -2128,6 +2162,10 @@ function updateStaticLabels() {
   }
   const calAddBirthday = document.getElementById('calendarAddBirthdayLabel');
   if (calAddBirthday) calAddBirthday.textContent = t('birthdays.add_birthday');
+  const calAddEvent = document.getElementById('calendarAddEventLabel');
+  if (calAddEvent) calAddEvent.textContent = t('events.add_event');
+  const calFE = document.getElementById('calendarFilterEvents');
+  if (calFE) calFE.textContent = t('calendar.events');
   const calFT = document.getElementById('calendarFilterTodos');
   if (calFT) calFT.textContent = t('calendar.todos');
   const calFH = document.getElementById('calendarFilterHabits');
@@ -2893,7 +2931,7 @@ const BACKUP_TABLES = [
   'projects', 'habits', 'texts', 'lists',
   // child / independent tables
   'todos', 'tasks', 'habit_completions', 'flashcards', 'flashcard_notes',
-  'text_line_progress', 'birthdays', 'list_items',
+  'text_line_progress', 'birthdays', 'events', 'list_items',
   'settings', 'prompts', 'daily_visits',
   // sharing: owned groups (creator side) — FK order: groups → members → items
   'sharing_groups', 'sharing_members', 'sharing_items',
@@ -2901,13 +2939,36 @@ const BACKUP_TABLES = [
   'groups',
 ];
 
+async function fetchTableWithRetry(table) {
+  try {
+    return await fetchAll(() => state.db.from(table).select('*'));
+  } catch (e) {
+    // One retry for a transient failure (e.g. a dropped Local request);
+    // a second failure propagates to the caller, which records the table.
+    console.warn(`Retrying ${table} after export error:`, e.message);
+    await new Promise(r => setTimeout(r, 500));
+    return fetchAll(() => state.db.from(table).select('*'));
+  }
+}
+
 async function generateBackupJSON() {
   const backup = { _meta: { version: 1, exported_at: new Date().toISOString(), tables: [] } };
+  const failed = [];
   for (const table of BACKUP_TABLES) {
     try {
-      backup[table] = await fetchAll(() => state.db.from(table).select('*'));
+      backup[table] = await fetchTableWithRetry(table);
       backup._meta.tables.push(table);
-    } catch (e) { console.warn(`Skipping ${table}:`, e.message); }
+    } catch (e) {
+      console.warn(`Skipping ${table}:`, e.message);
+      failed.push(table);
+    }
+  }
+  if (failed.length) {
+    // Strict: never report a partial backup as a success. Both callers
+    // abort on this throw, so no file is downloaded or pushed to Drive.
+    const err = new Error(t('menu.settings_backup_incomplete', failed.join(', ')));
+    err.failedTables = failed;
+    throw err;
   }
   return backup;
 }
@@ -2927,7 +2988,35 @@ async function exportBackup() {
     showToast(t('menu.settings_backup_done'));
   } catch (e) {
     console.error('Export failed:', e);
-    showToast(t('menu.settings_backup_error'));
+    // An incomplete backup names the missing tables; anything else is generic.
+    showToast(e.failedTables?.length ? e.message : t('menu.settings_backup_error'));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Clipboard copies are gated to small backups: a multi-MB JSON string is
+// unwieldy to paste anywhere, and a huge clipboard write can stall the tab.
+const BACKUP_COPY_MAX_BYTES = 10 * 1024 * 1024;
+
+async function copyBackup() {
+  const btn = document.querySelector('.settings-data-btn[data-action="copy-backup"]');
+  if (btn) btn.disabled = true;
+  try {
+    // Same strict generation path as the download: an incomplete backup
+    // throws here, so nothing is copied.
+    const backup = await generateBackupJSON();
+    const json = JSON.stringify(backup, null, 2);
+    if (new Blob([json]).size >= BACKUP_COPY_MAX_BYTES) {
+      showToast(t('menu.settings_backup_too_large'));
+      return;
+    }
+    await navigator.clipboard.writeText(json);
+    showToast(t('menu.settings_backup_copied'));
+  } catch (e) {
+    console.error('Copy backup failed:', e);
+    // An incomplete backup names the missing tables; anything else is generic.
+    showToast(e.failedTables?.length ? e.message : t('menu.settings_backup_error'));
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -3083,6 +3172,15 @@ async function exportToGoogleDrive() {
 
 window.exportToGoogleDrive = exportToGoogleDrive;
 
+// Shared destructive-restore confirm (file and pasted-text imports alike).
+function restoreConfirmOpts() {
+  return {
+    btnText: t('menu.settings_restore') || 'Restore',
+    iconSvg: '<svg class="confirm-action-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+    btnIconSvg: '<svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+  };
+}
+
 function importBackup() {
   const input = document.getElementById('backupFileInput');
   if (!input) return;
@@ -3095,19 +3193,21 @@ function importBackup() {
       t('menu.settings_restore_confirm'),
       () => performImport(file),
       null,
-      {
-        btnText: t('menu.settings_restore') || 'Restore',
-        iconSvg: '<svg class="confirm-action-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
-        btnIconSvg: '<svg class="lucide-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
-      }
+      restoreConfirmOpts()
     );
   }, { once: true });
   input.click();
 }
 
 async function performImport(file) {
-  const btn = document.querySelector('.settings-data-btn[data-action="import-backup"]');
-  if (btn) btn.disabled = true;
+  return performImportFromText(await file.text());
+}
+
+// The parser is shared by the file import and the pasted-text import:
+// both feed the same JSON text in, and the same restore runs.
+async function performImportFromText(text) {
+  const btns = document.querySelectorAll('.settings-data-btn[data-action="import-backup"], .settings-data-btn[data-action="import-backup-paste"]');
+  btns.forEach(b => b.disabled = true);
 
   const progressEl = document.getElementById('importProgress');
   const progressText = document.getElementById('importProgressText');
@@ -3120,8 +3220,13 @@ async function performImport(file) {
   const hideProgress = () => { if (progressEl) progressEl.style.display = 'none'; };
 
   try {
-    const text = await file.text();
-    const backup = JSON.parse(text);
+    let backup;
+    try {
+      backup = JSON.parse(text);
+    } catch {
+      showToast(t('menu.settings_restore_invalid'));
+      return;
+    }
     if (!backup._meta || backup._meta.version !== 1) {
       showToast(t('menu.settings_restore_invalid'));
       return;
@@ -3130,7 +3235,7 @@ async function performImport(file) {
     // The backup's own calendar keys are meaningless in this account, so we
     // always re-inject the pre-import values after reseed.
     const CAL_KEYS = ['gcal_sync_enabled', 'gcal_calendar_id',
-      'gcal_sync_habits', 'gcal_sync_todos', 'gcal_sync_birthdays'];
+      'gcal_sync_habits', 'gcal_sync_todos', 'gcal_sync_birthdays', 'gcal_sync_events'];
     const savedCalSettings = {};
     if (state.driveMode) {
       for (const k of CAL_KEYS) {
@@ -3143,7 +3248,7 @@ async function performImport(file) {
     //    gcal_sync records and settings from the in-memory store. ──
     const syncWasEnabled = savedCalSettings.gcal_sync_enabled === 'true';
     if (syncWasEnabled && savedCalSettings.gcal_calendar_id) {
-      for (const itemType of ['todo', 'habit', 'birthday']) {
+      for (const itemType of ['todo', 'habit', 'birthday', 'event']) {
         try { await deleteTypeEvents(itemType); } catch (_) { /* best effort */ }
       }
     }
@@ -3264,6 +3369,7 @@ async function performImport(file) {
       await refreshTodos();
       await refreshHabits();
       await refreshBirthdays();
+      await refreshEvents();
       await refreshFlashcards();
       await refreshLists();
       refreshWelcome();
@@ -3282,12 +3388,56 @@ async function performImport(file) {
     showToast(t('menu.settings_restore_error'));
   } finally {
     hideProgress();
-    if (btn) btn.disabled = false;
+    btns.forEach(b => b.disabled = false);
   }
 }
 
 window.exportBackup = exportBackup;
+window.copyBackup = copyBackup;
+// ── Import from pasted text ──────────────────────────────────────────
+
+function openPasteBackupModal() {
+  document.getElementById('pasteBackupOverlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'pasteBackupOverlay';
+  overlay.className = 'modal-overlay visible';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closePasteBackupModal(); });
+  overlay.innerHTML = `<div class="modal modal-wide">
+    <h2>${esc(t('menu.settings_paste_backup_title'))}</h2>
+    <textarea id="pasteBackupText" rows="10" placeholder="${esc(t('menu.settings_paste_backup_placeholder'))}"></textarea>
+    <div class="modal-actions">
+      <button type="button" class="modal-cancel" data-action="close-paste-backup-modal">${esc(t('common.cancel'))}</button>
+      <button type="button" class="modal-save" data-action="confirm-paste-backup">${esc(t('menu.settings_import_btn'))}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('pasteBackupText')?.focus();
+}
+
+function closePasteBackupModal() {
+  document.getElementById('pasteBackupOverlay')?.remove();
+}
+
+function confirmPasteBackup() {
+  const text = (document.getElementById('pasteBackupText')?.value || '').trim();
+  if (!text) {
+    showToast(t('menu.settings_paste_backup_empty'));
+    return;
+  }
+  closePasteBackupModal();
+  showConfirmAction(
+    t('menu.settings_restore'),
+    t('menu.settings_restore_confirm'),
+    () => performImportFromText(text),
+    null,
+    restoreConfirmOpts()
+  );
+}
+
 window.importBackup = importBackup;
+window.openPasteBackupModal = openPasteBackupModal;
+window.closePasteBackupModal = closePasteBackupModal;
+window.confirmPasteBackup = confirmPasteBackup;
 
 
 // ===================================================================
@@ -3296,6 +3446,10 @@ window.importBackup = importBackup;
 // currentView is in state
 
 function switchView(view, skipHash) {
+  // Re-clicking the current tab scrolls to the top (after the re-render
+  // below, since Habits/Memory restore the page scroll position while
+  // rendering — scrolling first would be undone).
+  const sameTab = view === state.currentView;
   // Animate header logo on page transition
   const headerLogo = document.querySelector('.header-logo');
   if (headerLogo && view !== state.currentView) {
@@ -3388,6 +3542,10 @@ function switchView(view, skipHash) {
   if (activeTab) activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
 
   updateViewFooterStats();
+
+  if (sameTab && window.scrollY > 0) {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 }
 
 // ===================================================================
@@ -3423,6 +3581,9 @@ function updateViewFooterStats() {
     },
     birthdays: () => [
       `${icon('cake')} Birthdays: ${state.allBirthdays.length}`,
+    ],
+    events: () => [
+      `${icon('calendar-days')} Events: ${(state.allEvents || []).length}`,
     ],
     flashcards: () => {
       const c = getFlashcardCounts();
@@ -3539,7 +3700,9 @@ function navigateToItem(type, id) {
   if (!view) { showToast(t('common.item_not_found'), 'error'); return; }
 
   if (state.currentView !== view) {
-    switchView(view);
+    // Keep the deep-link hash: the URL must go on pointing at the item
+    // (a refresh re-lands on it) instead of being replaced by #<view>.
+    switchView(view, true);
   }
   let attempts = 0;
   const maxAttempts = 3;
@@ -3568,6 +3731,10 @@ function findItemElement(type, id) {
     birthday: `.birthday-card[data-id="${eid}"]`,
     vest: `[data-vest-id="${eid}"]`,
     flashcard: `[data-card-id="${eid}"]`,
+    flashsection: `#flashcardsView [data-node-id="${eid}"]`,
+    flashdeck: `#flashcardsView [data-node-id="${eid}"]`,
+    flashtext: `[data-text-id="${eid}"]`,
+    flashdraft: `[data-draft-id="${eid}"]`,
     list: `[data-list-id="${eid}"]`,
     listitem: `[data-item-id="${eid}"]`,
     todocat: `#todosView [data-node-id="${eid}"]`,
@@ -3665,9 +3832,11 @@ async function updateCalSyncUI() {
   const hRow = document.querySelector('[data-action="toggle-cal-sync-habits"]');
   const tRow = document.querySelector('[data-action="toggle-cal-sync-todos"]');
   const bRow = document.querySelector('[data-action="toggle-cal-sync-birthdays"]');
+  const eRow = document.querySelector('[data-action="toggle-cal-sync-events"]');
   if (hRow) hRow.classList.toggle('checked', prefs.habits);
   if (tRow) tRow.classList.toggle('checked', prefs.todos);
   if (bRow) bRow.classList.toggle('checked', prefs.birthdays);
+  if (eRow) eRow.classList.toggle('checked', prefs.events);
   // Show calendar nav button only for Drive and Demo backends
   const calNavBtn = document.getElementById('settingsNavCalendarBtn');
   if (calNavBtn) calNavBtn.style.display = (state.demoMode || state.driveMode) ? '' : 'none';
@@ -3755,6 +3924,7 @@ async function resyncCalSync() {
     '[data-action="toggle-cal-sync-habits"]',
     '[data-action="toggle-cal-sync-todos"]',
     '[data-action="toggle-cal-sync-birthdays"]',
+    '[data-action="toggle-cal-sync-events"]',
   ].map(s => document.querySelector(s)).filter(Boolean);
   toggleRows.forEach(r => r.classList.add('is-pending'));
   const progressEl = document.getElementById('calSyncProgress');
@@ -3813,8 +3983,8 @@ async function toggleCalSyncSub(subKey) {
       { onConflict: 'key' }
     );
     await updateCalSyncUI();
-    // subKey is 'habits', 'todos', or 'birthdays' → item type is singular
-    const itemType = subKey.replace(/s$/, ''); // 'habit', 'todo', 'birthday'
+    // subKey is 'habits', 'todos', 'birthdays' or 'events' → item type is singular
+    const itemType = subKey.replace(/s$/, ''); // 'habit', 'todo', 'birthday', 'event'
     const label = t(`cal_sync.${subKey}`);
     const msgKey = newVal ? 'syncing_type' : 'removing_type';
     const doneKey = newVal ? 'sync_complete' : 'remove_complete';

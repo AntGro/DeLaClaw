@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS flashcard_decks (
   color TEXT,
   sort_order INTEGER DEFAULT 0,
   is_protected INTEGER DEFAULT 0,
+  kind TEXT DEFAULT 'bucket',
+  parent_id TEXT,
   deck_type TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
@@ -179,6 +181,28 @@ CREATE TABLE IF NOT EXISTS birthdays (
   category TEXT DEFAULT '',
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- User calendar events (Calendar page). Timed events store absolute
+-- instants (start_ts/end_ts, UTC ISO) plus the IANA timezone they were
+-- entered in; display converts to the viewer's timezone. Full-day
+-- events store an inclusive date range (start_date..end_date) and are
+-- timezone-free, like birthdays.
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  title TEXT NOT NULL,
+  note TEXT,
+  all_day INTEGER DEFAULT 0,
+  start_ts TEXT,
+  end_ts TEXT,
+  start_date TEXT,
+  end_date TEXT,
+  timezone TEXT,
+  shared_id TEXT,
+  shared_group_id TEXT,
+  owner_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS settings (

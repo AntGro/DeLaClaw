@@ -588,6 +588,31 @@ async function _convertGroupItemsToPersonal(groupId) {
         `convert list item ${row.id}`);
     }
   }
+
+  // ── Events ──
+  {
+    const rows = await dbThrow(
+      state.db.from('events').select('id, title, shared_id').eq('shared_group_id', groupId),
+      'load shared events');
+    for (const row of (rows || [])) {
+      const sh = row.shared_id ? sharedLookup.get(row.shared_id) : null;
+      const enriched = {};
+      if (sh) {
+        const p = sh.payload || {};
+        enriched.title = p.title || row.title || '';
+        enriched.note = p.note ?? null;
+        enriched.all_day = p.all_day ? 1 : 0;
+        enriched.start_ts = p.start_ts || null;
+        enriched.end_ts = p.end_ts || null;
+        enriched.start_date = p.start_date || null;
+        enriched.end_date = p.end_date || null;
+        enriched.timezone = p.timezone || null;
+      }
+      await dbThrow(
+        state.db.from('events').update({ ...nullShared, ...enriched }).eq('id', row.id),
+        `convert event ${row.id}`);
+    }
+  }
 }
 
 /**
@@ -598,12 +623,13 @@ async function _convertGroupItemsToPersonal(groupId) {
  * Dynamic imports avoid a static cycle (todos/habits/lists import sharing-ui).
  */
 async function _refreshViewsAfterItemsChanged() {
-  const [{ refreshTodos }, { refreshHabits }, { refreshLists }] = await Promise.all([
-    import('./todos.js'), import('./habits.js'), import('./lists.js'),
+  const [{ refreshTodos }, { refreshHabits }, { refreshLists }, { refreshEvents }] = await Promise.all([
+    import('./todos.js'), import('./habits.js'), import('./lists.js'), import('./events.js'),
   ]);
   await refreshTodos();
   await refreshHabits();
   await refreshLists();
+  await refreshEvents();
 }
 
 /**
@@ -613,6 +639,7 @@ async function _deleteGroupItems(groupId) {
   await state.db.from('todos').delete().eq('shared_group_id', groupId);
   await state.db.from('habits').delete().eq('shared_group_id', groupId);
   await state.db.from('list_items').delete().eq('shared_group_id', groupId);
+  await state.db.from('events').delete().eq('shared_group_id', groupId);
 }
 
 async function sharingDeleteGroup(groupId) {

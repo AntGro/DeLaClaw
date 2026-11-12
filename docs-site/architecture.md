@@ -32,7 +32,7 @@ A thin abstraction exposing:
 
 - `db.from(table)` — returns a chainable query builder (select/insert/update/delete)
 - `db.channel(name)` — real-time subscriptions (returns a no-op channel on all active backends)
-- `db.rpc(fn, params)` — remote procedure calls (returns a no-op on all active backends)
+- `db.rpc(fn, params)` — remote procedure calls (REST posts to `/rest/v1/rpc/<fn>`; Demo and Drive return a no-op)
 
 Every call to `db.from()` wraps the result in a `tracked()` Proxy. This Proxy intercepts `.then()` to drive the activity indicator: the header logo spins while a query is in flight, and flashes red on error.
 
@@ -55,7 +55,7 @@ All adapters return `{ data, error }` objects. Successful queries return `{ data
 
 Combines the demo adapter's in-memory query engine with Google Drive persistence. On connect, it authenticates via Google Identity Services (`drive.file` scope, plus optional `calendar.app.created` for [Calendar sync](sync-architecture.md)), finds or creates a `DeLaClaw/` folder (`DeLaClawDev/` on dev and preview builds), and loads per-table JSON files (e.g. `todos.json`, `habits.json`) into memory. All runtime queries hit the in-memory store (instant). On any mutation, a 2-second debounced write-back uploads the changed table to Drive as its own JSON file. The adapter exposes `forceSave()` for explicit flushes (called on `beforeunload` and `visibilitychange` → hidden), and `reseed()` for backup imports. A 30-second polling loop checks Drive for external changes; an immediate poll also fires on window focus (covers both tab switch-back and window switch-back).
 
-After a successful Drive flush, the optional Calendar sync module writes dirty items (habits, TODOs, birthdays) to a dedicated "DeLaClaw" Google Calendar ("DeLaClawDev" on dev and preview builds). See [Sync Architecture](sync-architecture.md) for the full flow.
+After a successful Drive flush, the optional Calendar sync module writes dirty items (habits, TODOs, birthdays, events) to a dedicated "DeLaClaw" Google Calendar ("DeLaClawDev" on dev and preview builds). See [Sync Architecture](sync-architecture.md) for the full flow.
 
 ## State management
 
@@ -108,6 +108,7 @@ The canonical table list lives in `server/schema.sql` (SQLite base schema).
 | `texts` | Full texts for memorization (chunked) | -- |
 | `text_line_progress` | Per-chunk SRS progress for texts | `text_id` -> `texts.id` |
 | `birthdays` | Birthday records with optional avatars | -- |
+| `events` | User calendar events: timed instants + entry timezone, or full-day date ranges | -- |
 | `lists` | Checklist containers | -- |
 | `list_items` | Items within lists | `list_id` -> `lists.id` |
 | `settings` | Key-value store (schema version, preferences) | -- |
@@ -136,7 +137,7 @@ Sections are purely local: they are never shared to a group (sharing stays per b
 ### CHECK constraints
 
 CHECK constraints are enforced at the database level:
-- `tasks.status`: `todo`, `in-progress`, `review`, `approved`, `revision`
+- `tasks.status`: `draft`, `todo`, `in-progress`, `review`, `approved`, `revision`, `idea`, `idea-shipped`, `idea-plan-requested`
 - `todos.priority`: `urgent`, `high`, `medium`, `low`, `normal`
 - `flashcard_notes.proposal_status`: `pending`, `ready`, `accepted`, `rejected`
 
@@ -159,7 +160,7 @@ On install, the SW calls `skipWaiting()`. On activate, it purges old caches and 
 The `VERSION` file at the repo root is the single source of truth:
 
 ```
-latest=1.016
+latest=2.32.89
 ```
 
 The pre-commit hook (`.githooks/pre-commit`):
@@ -180,7 +181,7 @@ style.css                  All styles (dark + light themes, responsive)
 sw.js                      Service worker
 manifest.json              PWA manifest
 VERSION                    Version source of truth
-CNAME                      GitHub Pages custom domain
+CNAME                      Leftover GitHub Pages artifact (Cloudflare Pages ignores it)
 
 js/
   main.js                  Bootstrap, view switching, settings, login, footer
@@ -201,6 +202,7 @@ js/
   sharing-file-reconcile.js  Sharing file reconciliation engine
   sharing-mutation-queue.js  Queued sharing mutations
   sharing-ui.js            Sharing UI: Group tab, share popovers, completion modal
+  groups.js                Sharing-group management tab (behind the coming-soon gate)
   agents-ui.js             Settings > Agents pane
   delegation.js            Cross-module action delegation for shared items
   welcome.js               Today dashboard
@@ -212,7 +214,8 @@ js/
   flashcards.js            Flashcard SRS + text memorization
   scene-parse.js           Scene script parsing for text memorization (pure)
   birthdays.js             Birthday data + CRUD modals (no page; surfaces on Calendar)
-  calendar.js              Calendar page (todos, habits, birthdays month grid)
+  events.js                Event data + CRUD modals (no page; lives on Calendar)
+  calendar.js              Calendar page (todos, habits, birthdays, events month grid)
   calendar-pure.js         Pure calendar date/expansion logic
   lists.js                 Checklists
   sections-pure.js         Nested-section tree logic for TODOs, Habits and Lists (pure)
@@ -228,8 +231,7 @@ js/
   item-utils.js            Drag-and-drop, inline editing, hover actions
   backend-logos.js         Backend picker logo SVGs
   hero.js                  Landing page animations
-  logo.js                  Logo animation engine
-  storm3d.js               Three.js hero particle effect
+  logo.js                  Logo animation engine (hero storm SVG + gate logo)
   demo-chooser.js          Demo dataset selector UI
   demo-data.js             Sample data for demo mode
   bootstrap.js             ES module loader (extracted from inline script)

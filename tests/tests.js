@@ -82,7 +82,9 @@ test('Balanced backticks in JS files (excluding markdown processors)', () => {
   const skipFiles = new Set(['utils.js']);
   for (const [name, content] of Object.entries(jsFiles)) {
     if (skipFiles.has(name)) continue;
-    const count = (content.match(/`/g) || []).length;
+    // Escaped backticks (\`) are literal characters inside template literals
+    // (e.g. the ```json fence in the demo generation prompt), not delimiters
+    const count = (content.replace(/\\`/g, '').match(/`/g) || []).length;
     if (count % 2 !== 0) {
       throw new Error(`${name} has ${count} backticks (odd — likely unclosed template literal)`);
     }
@@ -392,6 +394,20 @@ test('Footer DB size RPC caches missing optional capability', () => {
     'updateFooterStats should have a single guarded db_size_mb call site');
 });
 
+test('Footer identity links are rendered once from a shared definition', () => {
+  const utils = jsFiles['utils.js'];
+  assert(utils.includes('function renderFooterIdentity'), 'utils.js must define renderFooterIdentity');
+  assert(utils.includes("querySelectorAll('.footer-links')"), 'footer links must fill every .footer-links container');
+  assert(utils.includes('getFullYear()'), 'footer copyright year must be dynamic');
+  assert(utils.includes('`© ${year} DeLaClaw · v${APP_VERSION}`'), 'gate footer must show the app version');
+  const main = jsFiles['main.js'];
+  assert(main.includes('renderFooterIdentity'), 'main.js must import and call renderFooterIdentity');
+  assert(!indexHtml.includes('github.com/AntGro/DeLaClaw/blob/main/LICENSE'),
+    'footer links must not be hardcoded in index.html');
+  assert(!indexHtml.includes('docs.delaclaw.com/#/privacy'),
+    'footer links must not be hardcoded in index.html');
+});
+
 test('Shared TODO sync reads local pointers from DB, not startup cache', () => {
   const todos = jsFiles['todos.js'];
   assert(todos.includes("state.db.from('todos').select('id,shared_id,shared_group_id')"),
@@ -490,6 +506,267 @@ test('style.css contains expected base selectors', () => {
   for (const sel of required) {
     assert(styleCss.includes(sel), `Missing expected selector: ${sel}`);
   }
+});
+
+// #welcomeView is a flex item of #app.active (column flex) and its auto
+// margins override align-items:stretch, so without width:100% the container
+// shrink-wraps to the week's chip titles and changes width on week nav.
+test('style.css pins .welcome-container to full width (no flex shrink-wrap)', () => {
+  const rule = styleCss.match(/\.welcome-container\{([^}]*)\}/);
+  assert(rule, 'Missing .welcome-container rule');
+  assert(rule[1].includes('width:100%'), '.welcome-container must keep width:100%');
+});
+
+// Phone Welcome rows are full-width, so they show titles, not the
+// dots-only month-grid rule (which would render every busy day alike).
+test('style.css shows Welcome strip titles on phones (not dots-only)', () => {
+  assert(styleCss.includes('.welcome-calendar-strip .cal-chips{display:flex;}'),
+    'Missing Welcome phone chips override');
+  assert(styleCss.includes('.welcome-calendar-strip .cal-dots{display:none;}'),
+    'Missing Welcome phone dots override');
+  assert(styleCss.includes('.welcome-calendar-strip .cal-day-dow{display:block;}'),
+    'Missing Welcome phone weekday override');
+});
+
+// The strip scrolls inside its capped section like .welcome-items does,
+// instead of clipping its bottom rows on phones. Rows must stay
+// content-sized: a definite-height grid would otherwise compress them
+// (day cells have overflow:hidden, so their automatic minimum is 0).
+test('style.css lets the Welcome strip scroll inside its section', () => {
+  assert(styleCss.includes('.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;grid-auto-rows:max-content;}'),
+    'Missing Welcome strip scroll rule');
+});
+
+// The strip must agree with the day panel: both use the Calendar tab's
+// funnel filter, so a strip cell never shows a TODO/habit its day panel
+// would hide (reported: Dec 13 showed habits on the strip, "Nothing
+// scheduled" on click, with TODOs/habits filtered out on the tab).
+// The strip still passes no search query — a Calendar search never
+// leaks into Welcome.
+test('Welcome strip uses the Calendar tab funnel filter', () => {
+  const welcome = jsFiles['welcome.js'];
+  assert(welcome.includes('collectRangeEvents(dates[0], dates[6])'),
+    'renderWelcomeCalendar must call collectRangeEvents with no show override, so it defaults to the Calendar tab funnel filter');
+  assert(!welcome.includes('collectRangeEvents(dates[0], dates[6], {'),
+    'renderWelcomeCalendar must not pass an explicit show override: an all-true override would show items the day panel hides');
+});
+
+// Filter-status disc: one radial sector per filterable type, in list
+// order clockwise from the top, pale when shown and neutral (the plain
+// button background) when filtered out. The sector width comes from
+// the list length — adding a type must not need a code change here.
+test('filter disc background is data-driven, not hard-coded', async () => {
+  const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+  assert(typeof mod.buildFilterDiscBackground === 'function', 'calendar-pure must export buildFilterDiscBackground');
+  const four = [
+    { key: 'todo', color: 'var(--accent)' },
+    { key: 'habit', color: 'var(--green)' },
+    { key: 'birthday', color: 'var(--pink)' },
+    { key: 'event', color: 'var(--event-color)' },
+  ];
+  const allOn = { todo: true, habit: true, birthday: true, event: true };
+  assert(mod.buildFilterDiscBackground(four, allOn) ===
+    'conic-gradient(color-mix(in srgb, var(--accent) 15%, var(--surface)) 0% 25%, color-mix(in srgb, var(--green) 15%, var(--surface)) 25% 50%, color-mix(in srgb, var(--pink) 15%, var(--surface)) 50% 75%, color-mix(in srgb, var(--event-color) 15%, var(--surface)) 75% 100%)',
+    'four shown types must give four 25% sectors clockwise from the top, in list order, all pale');
+  const oneOff = mod.buildFilterDiscBackground(four, { ...allOn, habit: false });
+  assert(oneOff.includes('var(--surface2) 25% 50%'),
+    'a filtered-out type must get its sector in the neutral button background');
+  assert(!oneOff.includes('var(--green) 25% 50%'),
+    'a filtered-out sector must not keep its pale colour');
+  assert(oneOff.includes('color-mix(in srgb, var(--accent) 15%, var(--surface)) 0% 25%') && oneOff.includes('color-mix(in srgb, var(--pink) 15%, var(--surface)) 50% 75%'),
+    'the other sectors must stay pale when one type is filtered out');
+  const five = [...four, { key: 'custom', color: 'var(--orange)' }];
+  const fiveOn = mod.buildFilterDiscBackground(five, { ...allOn, custom: true });
+  assert(fiveOn.includes('color-mix(in srgb, var(--accent) 15%, var(--surface)) 0% 20%') && fiveOn.includes('color-mix(in srgb, var(--orange) 15%, var(--surface)) 80% 100%'),
+    'five types must give five 20% sectors: the count must come from the list, never a hard-coded 25%');
+  assert(mod.buildFilterDiscBackground([], allOn) === 'none', 'an empty type list must not produce a gradient');
+  assert(mod.buildFilterDiscBackground(four, {}).includes('color-mix(in srgb, var(--accent) 15%, var(--surface)) 0% 25%'),
+    'a type missing from show must read as shown (the calShow default is !== false)');
+});
+
+// Wiring: the funnel button carries the disc, and the toolbar sync
+// repaints it from the type list on every filter change.
+test('funnel button carries the filter disc', () => {
+  const cal = jsFiles['calendar.js'];
+  assert(cal.includes("const CAL_FILTER_TYPES = ["),
+    'calendar.js must define CAL_FILTER_TYPES as the single ordered list of filterable types');
+  for (const key of ['todo', 'habit', 'birthday', 'event']) {
+    assert(cal.includes(`key: '${key}'`), `CAL_FILTER_TYPES must include ${key}`);
+  }
+  assert(cal.includes("buildFilterDiscBackground(CAL_FILTER_TYPES, calShow)"),
+    'syncCalendarToolbar must repaint the disc from CAL_FILTER_TYPES and calShow');
+  assert(cal.includes("style.setProperty('--cal-disc'"),
+    'the disc must be applied as the --cal-disc custom property on the funnel button');
+  assert(indexHtml.includes('class="btn cal-filter-btn"') && indexHtml.includes('data-menu="calendarFilterMenu"'),
+    'the funnel button must carry the cal-filter-btn class');
+  assert(styleCss.includes('.btn.cal-filter-btn{background:var(--cal-disc, var(--surface2));}'),
+    'the disc button must use --cal-disc as its background');
+  assert(!styleCss.includes('.btn.cal-filter-btn{width:34px') && !styleCss.includes('.btn.cal-filter-btn{border-radius:50%'),
+    'the disc button must keep its plain .btn shape and size: no forced circle');
+  assert(!/\.btn\.cal-filter-btn svg\{/.test(styleCss),
+    'the disc icon must carry no halo: it reads on its own over pale and neutral sectors');
+  assert(!/\.btn\.cal-filter-btn[^}]*color:#fff/.test(styleCss),
+    'the disc icon must not be forced white: it would vanish when every type is filtered out');
+});
+
+// TODO inline edit (Welcome + TODOs page): the deadline row is a
+// no-wrap flex row whose children cannot shrink — the date input floors
+// at its ~138px intrinsic width (min-width:auto), the time input is a
+// fixed 104px, so below ~1050px viewport the row's ~365px min-content
+// overflowed the Welcome column (measured: wrapper scrollWidth 365 vs
+// clientWidth 265 at 800px, time input 45px past the card edge, the
+// clear button pushed out of view entirely). The row is label +
+// a wrapping fields block: the label stays vertically centred across
+// both lines when the time drops below the date, the date never
+// stretches (minimum required width, so its calendar icon stays next
+// to the date), and the time + clear stay grouped — they always wrap
+// together and sit directly under the date, so the two boxes share
+// the same left edge.
+// The category select has the same floor problem from its longest
+// option label (measured 50px overflow), so shared .inline-edit-input
+// needs min-width:0. Structural only — the behavioural proof is the
+// browser measurement (scrollWidth == clientWidth at 800/782/390px,
+// label centre == fields centre, date at intrinsic width).
+test('style.css keeps the TODO inline-edit rows inside the card', () => {
+  const row = styleCss.match(/\.todo-edit-deadline-row\{([^}]*)\}/);
+  assert(row, 'Missing .todo-edit-deadline-row rule');
+  assert(row[1].includes('align-items:center'), '.todo-edit-deadline-row must centre the label across the fields block');
+  assert(!row[1].includes('flex-wrap:wrap'), '.todo-edit-deadline-row must not wrap itself: the fields block wraps, the label stays beside it');
+  const fields = styleCss.match(/\.todo-edit-deadline-fields\{([^}]*)\}/);
+  assert(fields, 'Missing .todo-edit-deadline-fields rule');
+  assert(fields[1].includes('flex-wrap:wrap'), '.todo-edit-deadline-fields must wrap so time + clear drop below instead of overflowing');
+  assert(fields[1].includes('flex:0 1 auto'), '.todo-edit-deadline-fields must shrink-wrap to its content, or the time group could not sit next to the date on one line');
+  assert(fields[1].includes('min-width:0'), '.todo-edit-deadline-fields must have min-width:0 so it can shrink below its single-line content');
+  const group = styleCss.match(/\.todo-edit-deadline-time-group\{([^}]*)\}/);
+  assert(group, 'Missing .todo-edit-deadline-time-group rule');
+  assert(group[1].includes('margin-left:auto') === false, '.todo-edit-deadline-time-group must not right-align: the wrapped time + clear must sit directly under the date so the two boxes share the same left edge');
+  const date = styleCss.match(/\.todo-edit-deadline-input\{([^}]*)\}/);
+  assert(date, 'Missing .todo-edit-deadline-input rule');
+  assert(date[1].includes('flex:0 1 auto'), '.todo-edit-deadline-input must not grow: it stays at its minimum required width so the calendar icon sits next to the date');
+  assert(date[1].includes('min-width:120px'), '.todo-edit-deadline-input must keep a 120px floor so it never crushes below a readable date');
+  const time = styleCss.match(/\.todo-edit-deadline-input\.todo-edit-deadline-time\{([^}]*)\}/);
+  assert(time, 'Missing .todo-edit-deadline-time rule');
+  assert(time[1].includes('flex:0 1 auto'), '.todo-edit-deadline-time must be allowed to shrink at the narrowest widths instead of overflowing');
+  const input = styleCss.match(/^\.inline-edit-input\{([^}]*)\}/m);
+  assert(input, 'Missing .inline-edit-input rule');
+  assert(input[1].includes('min-width:0'), '.inline-edit-input must have min-width:0 so selects shrink below their longest option instead of overflowing');
+});
+
+// Dropdown chevrons must sit clear of the right border: the native
+// arrow is painted flush against the edge on iOS Safari, so every
+// select outside a modal reuses the modal select's custom chevron
+// (appearance:none, 12px icon at right 12px, 32px right padding)
+// instead of the native arrow.
+test('select chevrons sit clear of the right border', () => {
+  for (const cls of ['select.inline-edit-input', '.welcome-quick-cat-select']) {
+    const rule = styleCss.match(new RegExp(cls.replace('.', '\\.') + '\\{([^}]*)\\}'));
+    assert(rule, `Missing ${cls} rule`);
+    assert(rule[1].includes('appearance:none'), `${cls} must hide the native arrow, or it sits flush against the right border on iOS Safari`);
+    assert(rule[1].includes('background-position:right 12px center'), `${cls} must place its chevron 12px from the right border, like .modal select`);
+    assert(rule[1].includes('padding-right:32px'), `${cls} must keep 32px right padding so the text never runs under the chevron`);
+  }
+});
+
+// Quick-add rows must fit narrow buckets: the input's default size
+// (~192px min-content) used to force the row past the card edge
+// (measured 61px overflow at 800px, + button 40px past the edge),
+// so the input gets a 120px floor and shrinks above it, the select
+// gets min-width:0, the buttons never shrink, and the row wraps
+// instead of ever being cut.
+test('welcome quick-add rows fit narrow buckets', () => {
+  const row = styleCss.match(/\.welcome-quick-add\{([^}]*)\}/);
+  assert(row, 'Missing .welcome-quick-add rule');
+  assert(row[1].includes('flex-wrap:wrap'), '.welcome-quick-add must wrap so the buttons drop to a second line instead of being cut past the card edge');
+  const input = styleCss.match(/\.welcome-quick-add input\{([^}]*)\}/);
+  assert(input, 'Missing .welcome-quick-add input rule');
+  assert(input[1].includes('min-width:120px'), '.welcome-quick-add input must keep a 120px floor so it stays usable, shrinking above it instead of holding its ~192px default size');
+  const select = styleCss.match(/\.welcome-quick-cat-select\{([^}]*)\}/);
+  assert(select, 'Missing .welcome-quick-cat-select rule');
+  assert(select[1].includes('min-width:0'), '.welcome-quick-cat-select must have min-width:0 so it can shrink below its longest option instead of forcing the row wider');
+  const button = styleCss.match(/\.welcome-quick-add button\{([^}]*)\}/);
+  assert(button, 'Missing .welcome-quick-add button rule');
+  assert(button[1].includes('flex-shrink:0'), '.welcome-quick-add buttons must never shrink: the + button is the first thing cut when the row overflows');
+});
+
+// Below ~854px a two-column card is too narrow for the quick-add to
+// fit on one line, so the grid must go single-column there instead of
+// wrapping the quick-add row.
+test('welcome grid goes single-column before the quick-add would wrap', () => {
+  const mq = styleCss.match(/@media\(max-width:(\d+)px\)\{\s*\.welcome-grid\{grid-template-columns:1fr;\}/);
+  assert(mq, 'Missing a single-column media query for .welcome-grid');
+  assert(Number(mq[1]) >= 854, `.welcome-grid must go single-column at 854px or above (measured: the quick-add starts wrapping at 852px and fits exactly at 854px); got ${mq[1]}px`);
+});
+
+// The quick-add row must also fit on one line in single-column mode
+// at phone widths: flex line collection uses the hypothetical sizes
+// (select cap + input floor), so at 393px the + button wrapped even
+// after the grid went single-column — 120 + 120 + 98 buttons + 24
+// gaps = 362px against a 347px row. The ≤600px overrides must bring
+// that total inside a 360px viewport's row (360 - 24 container - 20
+// section padding = 316px).
+test('welcome quick-add fits on one line at phone widths', () => {
+  const selectCaps = [...styleCss.matchAll(/\.welcome-quick-cat-select\{[^}]*max-width:(\d+)px/g)].map(m => Number(m[1]));
+  const inputFloors = [...styleCss.matchAll(/\.welcome-quick-add input\{[^}]*min-width:(\d+)px/g)].map(m => Number(m[1]));
+  assert(selectCaps.length > 0, 'Missing .welcome-quick-cat-select max-width');
+  assert(inputFloors.length > 0, 'Missing .welcome-quick-add input min-width');
+  const total = Math.min(...selectCaps) + Math.min(...inputFloors) + 98 + 24;
+  assert(total <= 316, `Welcome quick-add hypothetical total must fit a 360px row (316px): select cap ${Math.min(...selectCaps)} + input floor ${Math.min(...inputFloors)} + 98 buttons + 24 gaps = ${total}px`);
+});
+
+// Collapsed row actions must not lay out: max-width:0 alone still lays
+// their buttons out past the viewport edge on every row (measured 244
+// elements past 390px), which iOS Safari pans to. display:none keeps
+// them out of layout until .visible restores the grid.
+test('collapsed row actions stay display:grid so the reveal slides smoothly', () => {
+  for (const cls of ['task-actions', 'habit-actions', 'todo-actions', 'birthday-actions', 'list-item-actions']) {
+    assert(styleCss.includes(`.${cls}{display:grid;`),
+      `${cls} must stay display:grid when collapsed, or the max-width/opacity transition never runs`);
+    assert(!styleCss.includes(`.${cls}{display:none;`),
+      `${cls} must not be display:none when collapsed: display is not animatable, so the slide-in becomes instant`);
+    assert(!styleCss.includes(`.${cls}.visible{display:grid;`),
+      `${cls}.visible must not flip display: it only widens the already-rendered grid`);
+  }
+});
+
+// Day modal: the page behind it must not scroll (Welcome and Calendar
+// share the modal), and opening an item modal from it must stack above
+// it — blurred behind — instead of closing it, so exiting the item
+// modal returns to the day modal with the updated item.
+test('day modal locks background scroll and stacks item modals above it', () => {
+  const cal = jsFiles['calendar.js'];
+  assert(cal.includes('function lockDayModalScroll()') && cal.includes('function unlockDayModalScroll()'),
+    'Missing day modal scroll-lock helpers');
+  assert(cal.includes('lockDayModalScroll();') && cal.includes('unlockDayModalScroll();'),
+    'Day modal open/close must lock/unlock background scroll');
+  assert(cal.includes('dataset.dayModalScroll'),
+    'Scroll lock must be owned by the day modal (flag), not shared');
+  assert(cal.includes('function setCalendarDayBehind(on)'),
+    'Missing setCalendarDayBehind helper');
+  assert(styleCss.includes('#calendarDayOverlay.cal-day-behind{z-index:150;}'),
+    'Behind day modal must sit below the item overlay (z-index 200)');
+  assert(styleCss.includes('#calendarDayOverlay.cal-day-behind .modal{filter:blur(4px);}'),
+    'Behind day modal must be blurred');
+  const del = jsFiles['delegation.js'];
+  for (const action of ['open-add-birthday', 'calendar-birthday-edit', 'calendar-event-edit', 'open-add-event']) {
+    const lines = del.split('\n').filter(l => l.includes(`case '${action}'`));
+    assert(lines.length > 0, `Missing delegation case ${action}`);
+    assert(lines.every(l => !l.includes('closeCalendarDay')),
+      `${action} must not close the day modal anymore`);
+  }
+  for (const f of ['events.js', 'birthdays.js']) {
+    const src = jsFiles[f];
+    assert(src.includes('setCalendarDayBehind(true)') && src.includes('setCalendarDayBehind(false)'),
+      `${f} item modals must set/clear the behind state`);
+    assert(!src.includes('closeCalendarDay'),
+      `${f} must not close the day modal on any path`);
+  }
+  // An open panel on Welcome refreshes when items change there (the
+  // Calendar tab is covered by renderCalendar in the refresh functions).
+  assert(cal.includes("['events-changed', 'birthdays-changed']") &&
+    cal.includes("state.currentView !== 'calendar') renderCalendarDayPanel(calPanelDate)"),
+    'Open day panel must sync on event/birthday changes off the Calendar tab');
+  assert(jsFiles['birthdays.js'].includes("dispatchEvent(new CustomEvent('birthdays-changed'))"),
+    'refreshBirthdays must dispatch birthdays-changed like refreshEvents does');
 });
 
 // ===================================================================
@@ -693,6 +970,33 @@ test('Inline edit textareas set flex:none to prevent column-flex height bug', ()
       }
     }
   }
+});
+
+// ===================================================================
+// 22b. A cancelled inline edit must not refresh over a newer edit
+// ===================================================================
+test('Cancelled inline edit skips its refresh when a newer edit has started', () => {
+  // Double-clicking a second item while a first edit is open cancels
+  // the first edit, whose deferred refresh is only scheduled after its
+  // fade-out — so the upfront clearTimeout in inlineEditText cannot
+  // cancel it, and the stale refresh would re-render and destroy the
+  // new edit. finishEdit must therefore refresh only if its generation
+  // is still the latest: _activeInlineEdit alone is not enough, since
+  // it is cleared as soon as the newer edit starts finishing.
+  const itemUtils = jsFiles['item-utils.js'];
+  assert(itemUtils.includes('let _inlineEditGeneration = 0;'),
+    'item-utils.js must track a monotonic inline-edit generation');
+  assert(itemUtils.includes('const myGeneration = ++_inlineEditGeneration;'),
+    'item-utils.js must capture each edit\'s generation at start');
+  const restoreIdx = itemUtils.indexOf('root.replaceWith(spanEl);');
+  assert(restoreIdx !== -1, 'item-utils.js: finishEdit must restore the span with root.replaceWith(spanEl)');
+  const deferIdx = itemUtils.indexOf('if (deferRefresh) {', restoreIdx);
+  assert(deferIdx !== -1, 'item-utils.js: finishEdit must have a deferred-refresh branch');
+  const between = itemUtils.slice(restoreIdx, deferIdx);
+  assert(between.includes('if (myGeneration !== _inlineEditGeneration) return;'),
+    'item-utils.js: finishEdit must return early when a newer edit has started, so a stale refresh never re-renders over it');
+  assert(itemUtils.includes('if (myGeneration === _inlineEditGeneration) refreshFn();'),
+    'item-utils.js: the deferred refresh timer must re-check the generation when it fires');
 });
 
 // ===================================================================
@@ -1555,6 +1859,21 @@ test('migration runner deletes the pre-migration backup after the batch succeeds
     'drive.js must delete the backup file after the migration batch completes');
 });
 
+test('drive sync bar appears on connect and scales with viewport height', () => {
+  // The bar was created lazily on the first sync event, so a fresh load
+  // with no mutations showed no bar at all until the first change.
+  // createDriveAdapter must paint it (synced) before declaring ready.
+  const driveAdapter = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+  const readyIdx = driveAdapter.indexOf("emit('ready');");
+  assert(readyIdx !== -1, 'drive.js must emit ready at the end of createDriveAdapter');
+  const beforeReady = driveAdapter.slice(Math.max(0, readyIdx - 600), readyIdx);
+  assert(beforeReady.includes('updateSyncBarState();'),
+    'createDriveAdapter must call updateSyncBarState() before emit(ready), so the bar exists from connect');
+  // Thickness: 3px on short screens, up to 5px on tall ones.
+  assert(styleCss.includes('.drive-sync-bar{position:fixed;top:0;left:0;width:100%;height:clamp(3px,0.5vh,5px);'),
+    'the sync bar height must scale with viewport height (3px to 5px), not stay fixed at 3px');
+});
+
 test('migration restore overwrites table files in place (never delete-then-restore)', () => {
   // Deleting table files first would leave a window with zero table files, in
   // which the next connect would take the fresh-install branch and stamp empty
@@ -2121,6 +2440,84 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
   }
 });
 
+test('Item drags show a grabbing cursor while armed', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const css = fs.readFileSync(path.resolve(__dirname, '..', 'style.css'), 'utf8');
+  assert(css.includes('.item-dragging{cursor:grabbing;}'),
+    'the dragged item must read grabbing once the long-press arms the drag');
+  assert(css.includes('body.item-drag-active,body.item-drag-active *{cursor:grabbing;}'),
+    'the cursor must stay grabbing everywhere while an item drag runs, not just over the dragged item');
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'item-utils.js'), 'utf8');
+  assert(src.includes("document.body.classList.add('item-drag-active')")
+    && src.includes("document.body.classList.remove('item-drag-active')"),
+    'item drags must toggle the item-drag-active body class on activation and on finish');
+});
+
+test('Day modal is wide enough for three columns, and inline edits size to content', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const css = fs.readFileSync(path.resolve(__dirname, '..', 'style.css'), 'utf8');
+  assert(css.includes('.modal-wide.cal-day-modal { width: 1200px; max-width: 94vw; }'),
+    'the day modal must be 1200px wide on desktop so its three columns are not squeezed');
+  assert(css.includes('grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));'),
+    'day-modal columns must be at least 360px wide, so narrow viewports drop to a single column instead of two squeezed ones');
+  assert(css.includes('.modal.modal-wide textarea:not(.task-edit-input){min-height:200px;resize:none;}'),
+    'the wide-modal textarea floor must not apply to inline-edit fields, which size to their content');
+  assert(css.includes('.modal textarea:not(.task-edit-input){width:100%;'),
+    'the generic modal textarea floor (80px) must not apply to inline-edit fields either');
+  assert(css.includes('.cal-row:has(.todo-edit-wrapper) .habit-done-btn,'),
+    'a day row being edited inline must hide its habit Done button');
+  assert(css.includes('.cal-row:has(.todo-edit-wrapper) .todo-done-btn { display: none; }'),
+    'a day row being edited inline must hide its todo Done button');
+});
+
+test('TODO quick-add supports a deadline and a 4000-character cap', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const stateSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'state.js'), 'utf8');
+  assert(stateSrc.includes('export const TODO_MAX_LEN = 4000;'),
+    'the TODO name cap must be 4000 characters');
+  const todosSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'todos.js'), 'utf8');
+  assert(!todosSrc.includes('maxlength="2000"') && !todosSrc.includes('maxLength: 2000'),
+    'no TODO name field may still cap at 2000');
+  assert(todosSrc.includes('maxlength="${TODO_MAX_LEN}"'),
+    'the bucket quick-add must cap the name at TODO_MAX_LEN');
+  assert(todosSrc.includes('maxLength: TODO_MAX_LEN'),
+    'the TODO inline edit must cap the name at TODO_MAX_LEN');
+  assert(todosSrc.includes('todo-add-deadline-btn') && todosSrc.includes('data-action="open-quick-add-deadline-picker"'),
+    'the bucket quick-add must offer a deadline button');
+  assert(todosSrc.includes('lastEditKeydownAt') && todosSrc.includes('if (!typed) closeDeadlinePicker();'),
+    'the deadline picker must not close on a typed change: Chrome fires change on the first keystroke that yields a complete value (typing "2" in the year commits 0002), so only a change without a just-prior editing keystroke (a calendar-popup pick) may close it');
+  assert(todosSrc.includes('inputEl.dataset.deadline') && todosSrc.includes('newTodo.due_date = deadline'),
+    'adding a TODO must carry the quick-add deadline into due_date');
+  const welcomeSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'welcome.js'), 'utf8');
+  assert(welcomeSrc.includes('maxlength="${TODO_MAX_LEN}"'),
+    'the Welcome quick-add must cap the name at TODO_MAX_LEN');
+  assert(welcomeSrc.includes('todo-add-deadline-btn'),
+    'the Welcome quick-add must offer a deadline button');
+  const css = fs.readFileSync(path.resolve(__dirname, '..', 'style.css'), 'utf8');
+  assert(css.includes('.deadline-picker{position:fixed;'),
+    'the deadline picker popover must be styled');
+  assert(css.includes('max-width:calc(100vw - 16px);'),
+    'the deadline picker must be capped to the viewport: on iOS the native date control widens the popover past its measured width and it would otherwise run off the right edge');
+  assert(todosSrc.includes('requestAnimationFrame(positionPicker)'),
+    'the deadline picker must re-measure on the next frame: on iOS the native date control only gets its final width after first layout, so the synchronous clamp can undershoot');
+  // The picker input uses the inline-edit deadline input's sizing
+  // (flex-basis auto, 120px floor, no width:100%): that input renders
+  // fine on iPhone, while width:100% inside the narrow popover let
+  // iOS's native date control paint past the popover's right edge.
+  const pickerInput = css.match(/\.deadline-picker input\[type="date"\]\{[^}]*\}/);
+  assert(pickerInput, 'Missing .deadline-picker input rule');
+  assert(pickerInput[0].includes('flex:0 1 auto;min-width:120px;'),
+    'the deadline picker input must use the inline-edit sizing (flex:0 1 auto; min-width:120px)');
+  assert(!pickerInput[0].includes('width:100%'),
+    'the deadline picker input must not have width:100%: it sizes the input to the narrow popover instead of its intrinsic width');
+  const delSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'delegation.js'), 'utf8');
+  assert(delSrc.includes("case 'add-todo-to-category': if (window.updateTodoCharCounter)"),
+    'typing in the bucket quick-add must update the character counter');
+});
+
 
 test('Drag clones are globally tagged and cleaned before drag-enabled re-renders', () => {
   const itemUtils = jsFiles['item-utils.js'];
@@ -2214,6 +2611,108 @@ test('CHECK constraints match across Demo adapter and SQLite schema', () => {
     'Demo flashcard_notes.proposal_status', 'SQLite flashcard_notes.proposal_status');
 });
 
+test('BACKUP_TABLES covers every schema table except derived/credential tables', () => {
+  const sqliteSrc = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'schema.sql'), 'utf8');
+  const mainSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'main.js'), 'utf8');
+
+  // Tables in the canonical SQLite schema.
+  const schemaTables = [...sqliteSrc.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map(m => m[1]);
+
+  // BACKUP_TABLES in js/main.js (export/import order).
+  const backupMatch = mainSrc.match(/const BACKUP_TABLES = \[([\s\S]*?)\];/);
+  assert(backupMatch, 'Could not find BACKUP_TABLES in main.js');
+  const backupTables = [...backupMatch[1].matchAll(/'(\w+)'/g)].map(m => m[1]);
+
+  // Excluded by design: gcal_sync is a derived ledger rebuilt on connect
+  // (reconcileLedger); agent_grants holds token hashes that must never
+  // travel in a backup export. Sharing tables live only on Drive, so they
+  // are listed in BACKUP_TABLES although they are not in schema.sql.
+  const excluded = new Set(['gcal_sync', 'agent_grants']);
+  const sharingTables = new Set(['sharing_groups', 'sharing_members', 'sharing_items', 'groups']);
+  for (const t of schemaTables) {
+    if (excluded.has(t)) continue;
+    assert(backupTables.includes(t), `BACKUP_TABLES is missing schema table '${t}' — exports would silently drop it`);
+  }
+  for (const t of backupTables) {
+    assert(schemaTables.includes(t) || sharingTables.has(t), `BACKUP_TABLES lists unknown table '${t}'`);
+  }
+});
+
+test('generateBackupJSON retries once, then throws naming the failed tables', () => {
+  const mainSrc = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'main.js'), 'utf8');
+  // A failed table is retried once (fetchTableWithRetry) instead of skipped.
+  assert(mainSrc.includes('fetchTableWithRetry'), 'main.js must retry a failed backup table once');
+  // The export aborts with the failed table names attached — no partial file.
+  assert(/generateBackupJSON[\s\S]*?failed\.push\(table\)/.test(mainSrc), 'generateBackupJSON must collect failed tables');
+  assert(/if \(failed\.length\)[\s\S]*?throw/.test(mainSrc), 'generateBackupJSON must throw when a table failed after retry');
+  assert(mainSrc.includes('err.failedTables = failed'), 'the thrown error must carry failedTables for the toast');
+  assert(mainSrc.includes("e.failedTables?.length ? e.message"), 'exportBackup must show the incomplete message naming the tables');
+});
+
+test('settings_backup_incomplete exists in EN, FR and ES', () => {
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  for (const [lang, text] of [['EN', 'Backup incomplete'], ['FR', 'Sauvegarde incomplète'], ['ES', 'Copia de seguridad incompleta']]) {
+    assert(i18n.includes(`settings_backup_incomplete: '${text}`), `i18n ${lang} must define settings_backup_incomplete`);
+  }
+});
+
+test('copy-backup option copies the backup as text, gated to under 10 MB', () => {
+  const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  const delegationSrc = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  // Third export option in Settings > Data.
+  assert(indexHtml.includes('data-action="copy-backup"'), 'index.html must offer a copy-backup button');
+  assert(delegationSrc.includes("case 'copy-backup': callWindow('copyBackup', [])"), 'delegation must route copy-backup to copyBackup');
+  // Same strict generation path as the download, then clipboard.
+  assert(mainSrc.includes('async function copyBackup()'), 'main.js must define copyBackup');
+  assert(mainSrc.includes('BACKUP_COPY_MAX_BYTES = 10 * 1024 * 1024'), 'copy gate must be 10 MB');
+  assert(mainSrc.includes('new Blob([json]).size >= BACKUP_COPY_MAX_BYTES'), 'copyBackup must measure the JSON byte size against the gate');
+  assert(mainSrc.includes('navigator.clipboard.writeText(json)'), 'copyBackup must write the JSON to the clipboard');
+  // Labels in all three languages.
+  for (const [lang, key, text] of [
+    ['EN', 'settings_copy_backup_btn', 'Copy backup as text'],
+    ['FR', 'settings_copy_backup_btn', 'Copier la sauvegarde en texte'],
+    ['ES', 'settings_copy_backup_btn', 'Copiar la copia como texto'],
+    ['EN', 'settings_backup_copied', 'Backup copied to clipboard.'],
+    ['FR', 'settings_backup_copied', 'Sauvegarde copiée dans le presse-papiers.'],
+    ['ES', 'settings_backup_copied', 'Copia copiada al portapapeles.'],
+    ['EN', 'settings_backup_too_large', 'Backup is too large to copy'],
+    ['FR', 'settings_backup_too_large', 'Sauvegarde trop volumineuse'],
+    ['ES', 'settings_backup_too_large', 'La copia es demasiado grande'],
+  ]) {
+    assert(i18n.includes(`${key}: '${text}`), `i18n ${lang} must define ${key}`);
+  }
+});
+
+test('import-backup-paste reuses the same parser as the file import', () => {
+  const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+  const delegationSrc = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  // Second import option in Settings > Data.
+  assert(indexHtml.includes('data-action="import-backup-paste"'), 'index.html must offer an import-backup-paste button');
+  assert(delegationSrc.includes("case 'import-backup-paste': callWindow('openPasteBackupModal', [])"), 'delegation must route import-backup-paste to openPasteBackupModal');
+  // One shared restore: the file entry reads text, then both go through it.
+  assert(mainSrc.includes('async function performImportFromText(text)'), 'main.js must define performImportFromText');
+  assert(/async function performImport\(file\)[\s\S]*?performImportFromText\(await file\.text\(\)\)/.test(mainSrc), 'performImport must feed the file text into performImportFromText');
+  assert(mainSrc.includes('() => performImportFromText(text)'), 'the paste confirm must restore through performImportFromText');
+  // The paste modal is a textarea + the same destructive confirm as the file flow.
+  assert(mainSrc.includes('id="pasteBackupText"'), 'the paste modal must have a textarea');
+  assert(mainSrc.includes('restoreConfirmOpts()'), 'the paste confirm must reuse the file import confirm options');
+  // Double-submit guard on the paste confirm.
+  assert(/guardedNames = \[[\s\S]*?'confirmPasteBackup'/.test(mainSrc), 'confirmPasteBackup must be in the guard() list');
+  // Labels in all three languages.
+  for (const [lang, key, text] of [
+    ['EN', 'settings_paste_backup_btn', 'Paste backup text'],
+    ['FR', 'settings_paste_backup_btn', 'Coller une sauvegarde en texte'],
+    ['ES', 'settings_paste_backup_btn', 'Pegar texto de copia'],
+    ['EN', 'settings_paste_backup_title', 'Import from pasted text'],
+    ['FR', 'settings_paste_backup_title', 'Importer depuis un texte collé'],
+    ['ES', 'settings_paste_backup_title', 'Importar desde texto pegado'],
+  ]) {
+    assert(i18n.includes(`${key}: '${text}`), `i18n ${lang} must define ${key}`);
+  }
+});
+
 // ===================================================================
 // AUTH & SHARING: Migration files exist
 // ===================================================================
@@ -2250,12 +2749,26 @@ test('drive adapter passes login_hint to the GIS token client', () => {
   const end = drive.indexOf('// ── Drive API helpers ──', start);
   assert(start !== -1 && end !== -1, 'drive.js: getGoogleAccessToken block not found');
   const fn = drive.slice(start, end);
-  assert(fn.includes('initTokenClient({') && fn.includes('hint: getStoredDriveEmail()'),
+  assert(fn.includes('initTokenClient({') && fn.includes('login_hint: getStoredDriveEmail()'),
     'drive.js: initTokenClient must pass the stored Google account email as login_hint');
   assert(drive.includes("localStorage.getItem(_DRIVE_EMAIL_KEY)") || drive.includes("localStorage.getItem('claw_drive_email')") || drive.includes('_DRIVE_EMAIL_KEY'),
     'drive.js: the login_hint email must be persisted in localStorage (survives PWA restarts)');
   assert(drive.includes('drive/v3/about?fields=user(emailAddress)'),
     'drive.js: the Google account email must be captured from the Drive about API after auth');
+});
+
+test('drive adapter re-auth never forces the GIS account chooser', () => {
+  const drive = fs.readFileSync(path.join(__dirname, '..', 'js', 'adapters', 'drive.js'), 'utf-8');
+  const start = drive.indexOf('function getGoogleAccessToken(');
+  const end = drive.indexOf('// ── Drive API helpers ──', start);
+  assert(start !== -1 && end !== -1, 'drive.js: getGoogleAccessToken block not found');
+  const fn = drive.slice(start, end);
+  // GIS defaults prompt to 'select_account', which forces the account
+  // chooser even when login_hint is set — every request must pass ''.
+  assert(fn.includes("requestAccessToken({ prompt: '' })"),
+    'drive.js: getGoogleAccessToken must pass prompt \'\' so login_hint can skip the chooser');
+  assert(!/requestAccessToken\(\s*\)/.test(fn),
+    'drive.js: getGoogleAccessToken must not call requestAccessToken() with no args (GIS default prompt is select_account)');
 });
 
 test('disconnect clears the stored login_hint email', () => {
@@ -3727,6 +4240,164 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'repair must not stage inserted rows when the backend insert failed');
     });
 
+    test('chunk panel: revise mode is FSRS for due/new, practice for not-due (incl. same-day)', async () => {
+      const { isChunkDue, chunkReviseMode, isSameLocalDay } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const now = new Date(2026, 10, 4, 10, 0, 0);
+      const todayMorning = new Date(2026, 10, 4, 9, 0, 0).toISOString();
+      const tomorrow = new Date(2026, 10, 5, 10, 0, 0).toISOString();
+      const yesterday = new Date(2026, 10, 3, 10, 0, 0).toISOString();
+      const threeDaysAgo = new Date(2026, 10, 1, 10, 0, 0).toISOString();
+      assert(isChunkDue({}), 'never-reviewed chunk is due');
+      assert(chunkReviseMode({}) === 'fsrs', 'new chunk revises with an FSRS update');
+      assert(chunkReviseMode({ last_review: yesterday, next_review: yesterday }, now) === 'fsrs',
+        'past-due chunk revises with an FSRS update');
+      assert(chunkReviseMode({ last_review: yesterday, next_review: null }, now) === 'fsrs',
+        'missing next review counts as due, matching the pickers');
+      assert(isSameLocalDay(todayMorning, now), 'same local calendar day, not UTC date');
+      assert(!isSameLocalDay(yesterday, now), 'yesterday is not today');
+      assert(chunkReviseMode({ last_review: todayMorning, next_review: tomorrow }, now) === 'practice',
+        'a chunk already revised today revises without touching stats');
+      assert(chunkReviseMode({ last_review: threeDaysAgo, next_review: tomorrow }, now) === 'practice',
+        'any not-due chunk revises as practice only (agreed rule)');
+      assert(!isChunkDue({ last_review: threeDaysAgo, next_review: tomorrow }, now),
+        'not-due chunk is not due');
+    });
+
+    test('chunk panel: plain chunk edit rewords one chunk, refuses boundary shifts', async () => {
+      const { applyChunkEdit, getTextChunks } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const lines = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
+      const tx = { content: lines.join('\n'), blocks_per_chunk: 4, focus_role: null };
+      const oldChunks = getTextChunks(tx);
+      assert(oldChunks.length === 3, '12 lines at 4 per chunk give 3 chunks');
+      const edited = ['line 5', 'line 6 edited', 'line 7', 'line 8'].join('\n');
+      const res = applyChunkEdit(tx, 1, edited);
+      assert(res.ok && res.changed, 'rewording one chunk succeeds and reports changed');
+      const newChunks = getTextChunks({ ...tx, content: res.content });
+      assert(newChunks[0] === oldChunks[0] && newChunks[2] === oldChunks[2],
+        'chunks before and after the edited chunk stay byte-identical');
+      assert(newChunks[1].includes('line 6 edited'), 'edited chunk carries the new wording');
+      const noop = applyChunkEdit(tx, 1, oldChunks[1]);
+      assert(noop.ok && !noop.changed, 'saving an unchanged chunk reports no change (no reset)');
+      assert(!applyChunkEdit(tx, 1, ['line 5', 'line 6', 'line 7', 'line 8', 'extra'].join('\n')).ok,
+        'adding a line to a chunk is refused: it would shift later chunks');
+      assert(!applyChunkEdit(tx, 1, ['line 5', '', 'line 7', 'line 8'].join('\n')).ok,
+        'blanking a counted line is refused: it would shift later chunks');
+      assert(applyChunkEdit(tx, 1, ['line 5', '', 'line 7', 'line 8'].join('\n')).reason === 'boundary_shift',
+        'boundary-shift refusal names its reason');
+      assert(!applyChunkEdit(tx, 3, 'x').ok, 'out-of-range chunk index is refused');
+    });
+
+    test('chunk panel: scene chunk edit rewords one block, preserves the rest', async () => {
+      const { applyChunkEdit, getTextChunks, sceneBlockText, parseSceneContent } =
+        await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+      const content = '<RODRIGUE: line one>\nIgnored line outside blocks\n<CHIMÈNE: line two>\n<RODRIGUE: line three>\n<**He exits**>';
+      const tx = { content, blocks_per_chunk: 2, focus_role: 'RODRIGUE' };
+      const oldChunks = getTextChunks(tx);
+      assert(oldChunks.length === 2, '4 blocks at 2 per chunk give 2 chunks');
+      assert(sceneBlockText(oldChunks[0][0]) === 'line one', 'first block text');
+      const res = applyChunkEdit(tx, 0, ['line one edited', 'line two']);
+      assert(res.ok && res.changed, 'rewording one scene block succeeds');
+      assert(res.content.includes('Ignored line outside blocks'),
+        'text between blocks is preserved byte-for-byte');
+      const newChunks = getTextChunks({ ...tx, content: res.content });
+      assert(newChunks[1].length === oldChunks[1].length
+        && newChunks[1].every((ln, i) => ln.speaker === oldChunks[1][i].speaker
+          && JSON.stringify(ln.segments) === JSON.stringify(oldChunks[1][i].segments)),
+        'the later chunk is parsed identically after the edit');
+      assert(!applyChunkEdit(tx, 0, ['only one block']).ok,
+        'wrong block count is refused');
+      const asideTx = { content: '<RODRIGUE: I speak **aside** now>', blocks_per_chunk: 4, focus_role: 'RODRIGUE' };
+      const asideChunk = getTextChunks(asideTx)[0];
+      assert(sceneBlockText(asideChunk[0]) === 'I speak **aside** now',
+        'inline directions survive a block-text round-trip');
+      assert(applyChunkEdit(asideTx, 0, [sceneBlockText(asideChunk[0])]).changed === false,
+        're-saving a block unchanged is a no-op');
+      const dirRes = applyChunkEdit(tx, 1, ['line three', 'He exits slowly']);
+      assert(dirRes.ok && dirRes.content.includes('<**He exits slowly**>'),
+        'direction blocks keep their ** wrapper when reworded');
+    });
+
+    test('chunk panel: segments, delegation and chunk i18n are wired', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const delegationJs = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+      const itemUtilsJs = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(flashJs.includes('data-action="open-chunk-panel"'),
+        'segments must carry the chunk-panel action');
+      assert(!flashJs.includes('chunkMenuModal') && !flashJs.includes('openChunkMenu'),
+        'the chunk modal is gone: only Edit opens a modal, stats live in the panel');
+      assert(flashJs.includes('data-action="toggle-chunk-bar"'),
+        'bars over the collapsed count must offer show-more');
+      assert(flashJs.includes('window.openChunkPanel') && flashJs.includes('window.showChunkStats')
+        && flashJs.includes('window.closeChunkPanel') && flashJs.includes('window.reviseChunk')
+        && flashJs.includes('window.openEditChunkModal') && flashJs.includes('window.saveEditChunk'),
+        'chunk panel, stats view, targeted revise, chunk edit and chunk save must exist');
+      assert(flashJs.includes('lockFlashModalScroll()'),
+        'the chunk edit modal must lock background scroll');
+      assert(flashJs.includes('chunkReviseMode(chunk'),
+        'targeted revise must route through the pure revise-mode rule');
+      assert(flashJs.includes('applyChunkEdit(tx, chunkIndex, edited)'),
+        'chunk save must route through the pure splice validator');
+      for (const action of ['open-chunk-panel', 'show-chunk-stats', 'back-to-chunk-panel', 'close-chunk-panel', 'toggle-chunk-bar', 'revise-chunk', 'open-edit-chunk', 'save-edit-chunk']) {
+        assert(delegationJs.includes(`case '${action}':`),
+          `delegation must have an explicit case for ${action}, not only the default fallback`);
+      }
+      assert(itemUtilsJs.includes("item.classList.contains('chunk-panel-open')"),
+        'the row-action hover timer must skip panel-open items');
+      assert(itemUtilsJs.includes("e.target.closest('.tr-seg')"),
+        'segment clicks must not trigger the row actions');
+      assert(itemUtilsJs.includes("item.querySelector('.tr-seg:hover')"),
+        'the row-action timer must not show actions when the pointer is on a segment');
+      assert(itemUtilsJs.includes("if (!item.classList.contains('chunk-panel-open')) actions.classList.remove('visible')"),
+        'mouseleave must not hide actions frozen by an open chunk panel');
+      assert(!css.includes('.tr-text-item.chunk-panel-open .todo-actions'),
+        'an open panel must not force-hide already-visible row actions');
+      assert(flashJs.includes('_chunkPanelSegChain') && flashJs.includes("matches(':hover')"),
+        'moving within the bar must switch panels at once, and closing the panel must only hide actions once the pointer left the item');
+      assert(/\.tr-seg \{[^}]*min-width:\s*16px/.test(css) && /\.tr-seg \{[^}]*height:\s*16px/.test(css),
+        'segments must be at least 16px in both dimensions to be tappable');
+      assert(css.includes('.tr-bar-expanded'), 'expanded bars must wrap instead of overflowing');
+      assert(/\.tr-bar-toggle \{[^}]*border-radius:\s*999px/.test(css)
+        && /\.tr-bar-toggle \{[^}]*background:\s*var\(--accent-dim\)/.test(css),
+        'show-more/less must be a visible pill, not muted plain text');
+      assert(css.includes('.tr-chunk-panel') && css.includes('.tr-chunk-panel-stats'),
+        'the panel and its inline stats view must be styled');
+      assert(!flashJs.includes('chunkPreviewHtml') && !flashJs.includes('tr-chunk-preview'),
+        'the stats view shows only stats: the chunk text preview is gone');
+      assert(flashJs.includes('chunkRecallCurveSvg') && flashJs.includes('tr-chunk-ring')
+        && flashJs.includes('tr-chunk-curve') && flashJs.includes('tr-chunk-bar') && flashJs.includes('tr-chunk-dots'),
+        'the stats view must visualise recall (ring + decay curve) and stability/difficulty (bars)');
+      assert(flashJs.includes('CHUNK_PANEL_HOVER_DELAY_MS = 2000') && flashJs.includes('_chunkPanelHoverTimer'),
+        'hover must wait 2s before opening the panel; clicks still open it at once');
+      // Frozen side (2.32.36): near the bottom the short options view
+      // fits below the segment while the tall stats view does not, so
+      // re-deciding the flip on Show stats jumped the panel above the
+      // segment — the cursor was left hovering neither panel nor
+      // segment and the mouseout timer closed the stats panel. The
+      // side is now decided once, from the opening view, and kept for
+      // the panel's lifetime (the taller view grows within its side,
+      // clamped to the viewport).
+      assert(flashJs.includes("if (!_chunkPanelSide)"),
+        'chunk panel positioning must freeze the side on first position');
+      assert(flashJs.includes("_chunkPanelSide = (below < h && rect.top - gap > below) ? 'above' : 'below'"),
+        'the frozen side must use the same flip rule as the opening position');
+      assert(flashJs.includes("_chunkPanelSide === 'above'"),
+        'later renders must reuse the frozen side instead of re-flipping');
+      assert(flashJs.includes("  _chunkPanelSide = null;"),
+        'closing the panel must reset the frozen side for the next open');
+      assert(/\.modal\{[^}]*background:\s*var\(--dropdown-bg\)/.test(css),
+        'modals must use an opaque background, not the translucent surface');
+      assert(!/\.modal\{[^}]*backdrop-filter/.test(css),
+        'modals must not blur the page through themselves');
+      const i18nJs = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      for (const key of ['chunk_title', 'chunk_revise', 'chunk_edit', 'chunk_show_more', 'chunk_show_less', 'chunk_show_stats', 'chunk_back', 'chunk_no_reviews', 'chunk_edit_boundary', 'chunk_practice_note']) {
+        assert((i18nJs.match(new RegExp(`${key}:`, 'g')) || []).length >= 3,
+          `chunk i18n key ${key} must exist in EN, FR and ES`);
+      }
+    });
+
     test('scene revision: masked bubbles hide content length; leading cues auto-reveal', async () => {
       const { leadingRevealCount } =
         await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
@@ -4131,6 +4802,38 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(r.item.category === 'General' && !r.item.categoryIsNew, 'real "General" category must win');
     });
 
+    test('todo-import: date-only due_date preserved, snooze stays ISO', async () => {
+      const imp = await import(pathToFileURL(path.join(JS_DIR, 'import-pure.js')).href);
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'todo-import.js')).href);
+      // Flag behavior on the shared normalizer (tz-safe expectations)
+      assert(imp.normalizeImportDate('2026-11-02', 'due_date', { preserveDateOnly: true }) === '2026-11-02',
+        'preserveDateOnly must return the date-only string as-is');
+      assert(imp.normalizeImportDate('2026-11-02', 'due_date') === new Date(2026, 10, 2).toISOString(),
+        'default must still convert to local-midnight ISO');
+      assert(imp.normalizeImportDate('2026-11-02T18:30', 'due_date', { preserveDateOnly: true }) === new Date('2026-11-02T18:30').toISOString(),
+        'flag must only affect the date-only branch');
+      let threw = false;
+      try { imp.normalizeImportDate('2026-02-31', 'due_date', { preserveDateOnly: true }); } catch { threw = true; }
+      assert(threw, 'invalid date-only must still be rejected with the flag on');
+      // Wrapper threads the option through
+      assert(mod.normalizeTodoImportDate('2026-11-02', 'due_date', { preserveDateOnly: true }) === '2026-11-02',
+        'wrapper must pass options through');
+      // Validate: due_date preserved, snooze_until converted
+      const ctx = { categoryNames: [], groupById: new Map(), sharingReady: false };
+      const r = mod.validateTodoImportItem({ title: 'X', due_date: '2026-11-02', snooze_until: '2026-11-02' }, 0, ctx);
+      assert(r.errors.length === 0, 'both dates valid: ' + JSON.stringify(r.errors));
+      assert(r.item.due_date === '2026-11-02', 'imported date-only due_date must stay date-only');
+      assert(r.item.snooze_until === new Date(2026, 10, 2).toISOString(), 'imported date-only snooze must stay local-midnight ISO');
+      // Review UI: datetime fields with date-only values render a date input
+      // (a datetime-local input would show a phantom UTC-midnight time).
+      const shell = jsFiles['batch-import.js'];
+      const fnStart = shell.indexOf('function renderFieldInput');
+      assert(fnStart !== -1, 'batch-import must have renderFieldInput');
+      const fnBody = shell.slice(fnStart, fnStart + 1500);
+      assert(fnBody.includes('isDateOnly(val)') && fnBody.includes('type="date"'),
+        'review datetime fields must branch to a date input for date-only values');
+    });
+
     test('calendar day modal: overdue amounts + prev/next day navigation', () => {
       const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
       // Overdue rows show the bucket-style label (due date + days ago)
@@ -4162,6 +4865,170 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'prev_day/next_day must exist in all 3 locales');
     });
 
+    test('inner scroll positions are keyed per list, not per grid', () => {
+      const iu = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      const fn = iu.match(/function scrollContainerKey\(el\) \{([\s\S]*?)\n\}/);
+      assert(fn, 'Could not find scrollContainerKey in item-utils.js');
+      // A list's own id must key its scroll position: keying by the
+      // nearest ancestor id made every list in a grid share the grid id,
+      // so one tick snapped all lists to a single scroll position.
+      assert(fn[1].includes('bucketKey(el)'), 'scrollContainerKey must key by the container\'s own identity (bucketKey)');
+      assert(fn[1].indexOf('bucketKey(el)') < fn[1].indexOf("closest('[id]')"), 'the container\'s own id must win over the shared ancestor id');
+    });
+
+    test('calendar grid: chips sort Birthday > Events > TODOs > Habits', () => {
+      const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+      assert(cal.includes('const TYPE_ORDER = { birthday: 0, event: 1, todo: 2, habit: 3 };'),
+        'grid chips must sort Birthday first, then Events, TODOs, Habits last');
+    });
+
+    test('calendar: collectRangeEvents honors the show override', async () => {
+      // calendar.js touches DOM at import (listeners, esc, layout): stub it.
+      // Modules stay imported afterwards; their listeners hang off the stub.
+      const saved = { document: globalThis.document, localStorage: globalThis.localStorage, window: globalThis.window, addEventListener: globalThis.addEventListener };
+      const makeEscEl = () => {
+        const el = {}; let v = '';
+        Object.defineProperty(el, 'textContent', { set(x) { v = String(x ?? ''); }, get() { return v; } });
+        Object.defineProperty(el, 'innerHTML', { get() { return v; } });
+        return el;
+      };
+      globalThis.document = { addEventListener: () => {}, documentElement: { style: { setProperty: () => {} } }, body: { addEventListener: () => {} }, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, createElement: makeEscEl };
+      globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+      globalThis.window = globalThis;
+      globalThis.addEventListener = () => {};
+      try {
+        const cal = await import(pathToFileURL(path.join(JS_DIR, 'calendar.js')).href);
+        assert(typeof cal.collectRangeEvents === 'function' && typeof cal.dayCellHTML === 'function',
+          'calendar must export collectRangeEvents and dayCellHTML for reuse');
+        const state = (await import(pathToFileURL(path.join(JS_DIR, 'state.js')).href)).default;
+        const prev = state.allBirthdays;
+        state.allBirthdays = [{ id: 'b1', name: 'Test', birthday: '1990-10-28' }];
+        try {
+          const all = cal.collectRangeEvents('2026-10-26', '2026-11-01', { todo: true, habit: true, birthday: true, event: true });
+          assert((all.get('2026-10-28') || []).some(e => e.type === 'birthday'), 'birthday must appear with show.birthday true');
+          const none = cal.collectRangeEvents('2026-10-26', '2026-11-01', { todo: true, habit: true, birthday: false, event: true });
+          assert(!(none.get('2026-10-28') || []).some(e => e.type === 'birthday'), 'birthday must disappear with show.birthday false');
+          const cell = cal.dayCellHTML('2026-10-28', true, all, 'Wed');
+          assert(cell.includes('data-action="open-calendar-day"') && cell.includes('cal-birthday'),
+            'day cell must open the day panel and carry the birthday chip');
+        } finally {
+          state.allBirthdays = prev;
+        }
+      } finally {
+        for (const k of ['document', 'localStorage', 'window', 'addEventListener']) {
+          if (saved[k] === undefined) delete globalThis[k]; else globalThis[k] = saved[k];
+        }
+      }
+    });
+
+    test('calendar search (2.32.42): title-only match, notes never matched, Welcome excluded', async () => {
+      // Same DOM stubs as the show-override test above (calendar.js
+      // touches DOM at import).
+      const saved = { document: globalThis.document, localStorage: globalThis.localStorage, window: globalThis.window, addEventListener: globalThis.addEventListener };
+      const makeEscEl = () => {
+        const el = {}; let v = '';
+        Object.defineProperty(el, 'textContent', { set(x) { v = String(x ?? ''); }, get() { return v; } });
+        Object.defineProperty(el, 'innerHTML', { get() { return v; } });
+        return el;
+      };
+      globalThis.document = { addEventListener: () => {}, documentElement: { style: { setProperty: () => {} } }, body: { addEventListener: () => {} }, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, createElement: makeEscEl };
+      globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+      globalThis.window = globalThis;
+      globalThis.addEventListener = () => {};
+      try {
+        const cal = await import(pathToFileURL(path.join(JS_DIR, 'calendar.js')).href);
+        const state = (await import(pathToFileURL(path.join(JS_DIR, 'state.js')).href)).default;
+        const prevB = state.allBirthdays, prevE = state.allEvents;
+        state.allBirthdays = [{ id: 'b1', name: 'Alice Test', birthday: '1990-10-28' }];
+        state.allEvents = [{ id: 'e1', title: 'Dentist appointment', note: 'bring insurance card', all_day: 1, start_date: '2026-10-28', end_date: '2026-10-28', start_ts: null, end_ts: null, timezone: null }];
+        try {
+          const show = { todo: true, habit: true, birthday: true, event: true };
+          const day = (map) => map.get('2026-10-28') || [];
+          // Title match, case-insensitive.
+          const alice = cal.collectRangeEvents('2026-10-26', '2026-11-01', show, 'alice');
+          assert(day(alice).some(e => e.type === 'birthday' && e.title === 'Alice Test'), 'search must match a birthday by name, case-insensitively');
+          const dentist = cal.collectRangeEvents('2026-10-26', '2026-11-01', show, 'dentist');
+          assert(day(dentist).some(e => e.type === 'event'), 'search must match an event by title');
+          // Notes are never matched — the word lives only in the note.
+          const insurance = cal.collectRangeEvents('2026-10-26', '2026-11-01', show, 'insurance');
+          assert(!day(insurance).some(e => e.type === 'event'), 'search must not match an event note');
+          assert(!day(insurance).length, 'a note-only match must leave the day empty');
+          // No query: everything shows.
+          const all = cal.collectRangeEvents('2026-10-26', '2026-11-01', show);
+          assert(day(all).some(e => e.type === 'birthday') && day(all).some(e => e.type === 'event'), 'empty search must show everything');
+        } finally {
+          state.allBirthdays = prevB;
+          state.allEvents = prevE;
+        }
+        // Wiring: the four tab call sites pass the session query, the
+        // Welcome strip never does, and the input reuses the shared
+        // search-wrapper UX in the toolbar-right with the add button.
+        const calSrc = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+        assert(calSrc.includes("return collectRangeEvents(monthStartStr(), monthEndStr(), calShow, calSearch);"),
+          'month view must pass the search query');
+        assert(calSrc.includes("collectRangeEvents(dates[0], dates[6], calShow, calSearch)"),
+          'week view must pass the search query');
+        assert(calSrc.includes("collectRangeEvents(`${calYear}-01-01`, `${calYear}-12-31`, calShow, calSearch)"),
+          'year view must pass the search query');
+        assert(calSrc.includes("collectRangeEvents(dateStr, dateStr, calShow, calSearch)"),
+          'day view/panel must pass the search query');
+        assert(calSrc.includes("const kept = evs.filter(ev => (ev.title || '').toLowerCase().includes(search));"),
+          'the filter must consult the title only — notes and category names are never read');
+        assert(calSrc.includes("JSON.stringify({ view: calView, show: calShow })"),
+          'calendar prefs must persist only view and filters, never the search query');
+        const welcomeSrc = fs.readFileSync(path.join(JS_DIR, 'welcome.js'), 'utf-8');
+        assert(welcomeSrc.includes("collectRangeEvents(dates[0], dates[6])"),
+          'the Welcome strip must call collectRangeEvents without a search query');
+        const calView = indexHtml.slice(indexHtml.indexOf('id="calendarView"'));
+        assert(calView.includes('class="search-wrapper"') && calView.includes('data-action="toggle-search"') && calView.includes('data-action="filter-calendar-search"'),
+          'the calendar toolbar must reuse the shared search-wrapper (toggle + input)');
+        assert(calView.indexOf('class="search-wrapper"') > calView.indexOf('id="calendarAddBtn"'),
+          'the search must sit in the toolbar-right with the add button, not with the funnel filter');
+        const del = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+        assert((del.match(/case 'filter-calendar-search':/g) || []).length === 2,
+          'delegation must route filter-calendar-search both immediately (cleared) and debounced (typing)');
+        const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+        assert(main.includes("'calendarView': 'common.search'"),
+          'the calendar search placeholder/title must come from common.search via the searchMap');
+      } finally {
+        for (const k of ['document', 'localStorage', 'window', 'addEventListener']) {
+          if (saved[k] === undefined) delete globalThis[k]; else globalThis[k] = saved[k];
+        }
+      }
+    });
+
+    test('welcome: calendar strip reuses week cells and nav', () => {
+      const w = jsFiles['welcome.js'];
+      assert(w.includes("from './calendar.js'") && w.includes('collectRangeEvents') && w.includes('dayCellHTML'),
+        'welcome strip must reuse the calendar tab renderers');
+      assert(w.includes('welcome-cal-nav') && w.includes('welcome-cal-today') && w.includes('wCalWeekOffset'),
+        'welcome strip must have week navigation with its own offset');
+      assert(!w.includes('bdOnDay') && !w.includes('welcome-cal-dots'),
+        'bespoke strip filtering (dots + 2 labels) must be gone');
+      const del = jsFiles['delegation.js'];
+      assert(del.includes("case 'welcome-cal-nav':") && del.includes("case 'welcome-cal-today':"),
+        'delegation must route welcome week nav');
+      const i18n = jsFiles['i18n.js'];
+      assert((i18n.match(/prev_week:/g) || []).length === 3 && (i18n.match(/next_week:/g) || []).length === 3,
+        'prev_week/next_week must exist in all 3 locales');
+      const ev = jsFiles['events.js'];
+      assert(ev.includes("CustomEvent('events-changed')"), 'event refreshes must notify views');
+      assert(w.includes("addEventListener('events-changed'"), 'welcome must refresh on event changes');
+      assert(!w.includes('getWeekDates'), 'welcome strip must not use the Mon-Sun week');
+      assert(w.includes('addDays(start, i)'), 'welcome strip must build a rolling today+6 window');
+    });
+
+    test('calendar: day panel title capitalizes weekday and month in all locales', () => {
+      const cal = jsFiles['calendar.js'];
+      const start = cal.indexOf('function dayTitleParts');
+      const end = cal.indexOf('\nfunction ', start + 1);
+      const fn = cal.slice(start, end);
+      assert(fn.includes('formatToParts'),
+        'dayTitleParts must use formatToParts to keep locale word order');
+      assert(fn.includes("p.type === 'weekday'") && fn.includes("p.type === 'month'"),
+        'dayTitleParts must capitalize the weekday and month parts');
+    });
+
     test('calendar-pure: overdueDays boundaries (yesterday / today / tomorrow)', async () => {
       const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
       assert(typeof mod.overdueDays === 'function', 'calendar-pure must export overdueDays');
@@ -4176,6 +5043,217 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // The modal must actually delegate to the tested function.
       assert(jsFiles['calendar.js'].includes('overdueDays(dueStr, todayStr())'),
         'calOverdueSub must compute the count via calendar-pure overdueDays');
+    });
+
+    test('todos: date-only deadlines are due at end of day, timed keep instant semantics', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      for (const fn of ['isDateOnly', 'dueEffectiveEnd', 'isDueOverdue', 'compareDueDates']) {
+        assert(typeof mod[fn] === 'function', `calendar-pure must export ${fn}`);
+      }
+      assert(mod.isDateOnly('2026-10-30') === true, 'YYYY-MM-DD must count as date-only');
+      assert(mod.isDateOnly('2026-10-30T10:00:00.000Z') === false, 'ISO timestamp must not count as date-only');
+      assert(mod.isDateOnly(null) === false && mod.isDateOnly('') === false, 'missing value must not count as date-only');
+      const noon = new Date(2026, 9, 30, 12, 0, 0); // local noon, Oct 30
+      assert(mod.isDueOverdue('2026-10-30', noon) === false, 'date-only due today must not be overdue at noon');
+      assert(mod.isDueOverdue('2026-10-29', noon) === true, 'date-only due yesterday must be overdue');
+      assert(mod.isDueOverdue('2026-10-31', noon) === false, 'date-only due tomorrow must not be overdue');
+      assert(mod.isDueOverdue(null, noon) === false, 'no deadline must never be overdue');
+      const timedPast = new Date(2026, 9, 30, 10, 0, 0).toISOString();
+      const timedFuture = new Date(2026, 9, 30, 14, 0, 0).toISOString();
+      assert(mod.isDueOverdue(timedPast, noon) === true, 'timed past deadline must stay overdue');
+      assert(mod.isDueOverdue(timedFuture, noon) === false, 'timed future deadline must stay not overdue');
+      const timed9 = new Date(2026, 9, 30, 9, 0, 0).toISOString();
+      assert(mod.compareDueDates(timed9, '2026-10-30') < 0,
+        'timed morning deadline must sort before date-only same day (end of day)');
+      assert(mod.compareDueDates('2026-10-29', '2026-10-30') < 0, 'earlier date-only day must sort first');
+      assert(mod.compareDueDates('2026-10-30', '2026-10-30') === 0, 'same date-only day must tie');
+      const end = mod.dueEffectiveEnd('2026-10-30');
+      assert(end.getHours() === 23 && end.getMinutes() === 59 && end.getSeconds() === 59,
+        'date-only effective end must be 23:59:59 local');
+      assert(mod.dueEffectiveEnd(timed9).getTime() === new Date(timed9).getTime(),
+        'timed effective end must be the instant itself');
+    });
+
+    test('todos: inline edit uses date + optional time inputs; renders share date-only semantics', () => {
+      const todos = jsFiles['todos.js'];
+      const welcome = jsFiles['welcome.js'];
+      assert(todos.includes("deadlineDateInput.type = 'date'"), 'deadline edit must use a date input');
+      assert(todos.includes("deadlineTimeInput.type = 'time'"), 'deadline edit must use an optional time input');
+      assert(!todos.includes("deadlineInput.type = 'datetime-local'"),
+        'no datetime-local deadline input must remain');
+      assert(todos.includes('isDueOverdue(td.due_date, now)') && welcome.includes('isDueOverdue(td.due_date, now)'),
+        'both render paths must use the shared overdue helper');
+      assert(todos.includes('formatRelativeDay(td.due_date, now)') && welcome.includes('formatRelativeDay(td.due_date, now)'),
+        'both render paths must show date-only deadlines without a time');
+      assert(todos.includes('compareDueDates(a.due_date, b.due_date)') && welcome.includes('compareDueDates(a.due_date, b.due_date)'),
+        'both sorts must use the shared comparator');
+      assert(jsFiles['item-utils.js'].includes('input[type="time"]'),
+        'picker guard must cover the new time input');
+      assert(fs.readFileSync(STYLE_FILE, 'utf-8').includes('todo-edit-deadline-time'),
+        'time input must have its narrower width rule');
+    });
+
+    test('todos: due-soon uses milliseconds, not rounded hours (audit fix 1)', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      assert(typeof mod.isDueSoon === 'function', 'calendar-pure must export isDueSoon');
+      // The audit's case: date-only due today, 00:15 — 23.75h remain.
+      // Math.round gave 24h, so the bell was missed; ms comparison keeps it.
+      const early = new Date(2026, 9, 30, 0, 15, 0);
+      assert(mod.isDueSoon('2026-10-30', early) === true, 'date-only due today at 00:15 must be due-soon');
+      assert(mod.isDueSoon('2026-10-31', early) === false, 'date-only due tomorrow must not be due-soon');
+      const noon = new Date(2026, 9, 30, 12, 0, 0);
+      assert(mod.isDueSoon('2026-10-30', noon) === true, 'date-only due today at noon must be due-soon');
+      assert(mod.isDueSoon('2026-10-29', noon) === false, 'overdue must never be due-soon');
+      const timedSoon = new Date(2026, 9, 31, 0, 0, 0).toISOString(); // 23.75h from 00:15
+      assert(mod.isDueSoon(timedSoon, early) === true, 'timed 23.75h out must be due-soon (same rounding fix)');
+      const timedLater = new Date(2026, 9, 31, 0, 45, 0).toISOString(); // 24.5h from 00:15
+      assert(mod.isDueSoon(timedLater, early) === false, 'timed 24.5h out must not be due-soon');
+      const timedPast = new Date(2026, 9, 30, 10, 0, 0).toISOString();
+      assert(mod.isDueSoon(timedPast, noon) === false, 'timed past must not be due-soon');
+      assert(mod.isDueSoon(null, noon) === false, 'no deadline must never be due-soon');
+    });
+
+    test('todos: invalid date-only deadlines are dropped, not normalized (audit fix 2)', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      assert(typeof mod.isValidDateOnly === 'function', 'calendar-pure must export isValidDateOnly');
+      assert(typeof mod.dropInvalidDateOnly === 'function', 'calendar-pure must export dropInvalidDateOnly');
+      assert(mod.isValidDateOnly('2026-02-28') === true, 'real date must validate');
+      assert(mod.isValidDateOnly('2024-02-29') === true, 'leap-day must validate');
+      for (const bad of ['2026-02-31', '2026-02-29', '2026-13-01', '2026-00-10', '2026-01-00', '2026-1-1']) {
+        assert(mod.isValidDateOnly(bad) === false, `${bad} must not validate as a real calendar date`);
+      }
+      assert(mod.isValidDateOnly('2026-10-30T10:00:00.000Z') === false, 'timestamp must not count as date-only');
+      assert(mod.isValidDateOnly(null) === false && mod.isValidDateOnly('') === false, 'missing value must not validate');
+      assert(mod.dropInvalidDateOnly('2026-02-31') === null, 'invalid date-only must drop to null');
+      assert(mod.dropInvalidDateOnly('2026-10-30') === '2026-10-30', 'valid date-only must pass through');
+      const timed = new Date(2026, 9, 30, 10, 0, 0).toISOString();
+      assert(mod.dropInvalidDateOnly(timed) === timed, 'timed value must pass through');
+      assert(mod.dropInvalidDateOnly(null) === null, 'null must pass through as null');
+      // Wiring: both renders use the shared helper (no rounded-hour math left),
+      // and both read boundaries drop invalid date-only values.
+      const todos = jsFiles['todos.js'];
+      const welcome = jsFiles['welcome.js'];
+      assert(todos.includes('isDueSoon(td.due_date, now)') && welcome.includes('isDueSoon(td.due_date, now)'),
+        'both render paths must use isDueSoon');
+      assert(!todos.includes('Math.round((dueEffectiveEnd') && !welcome.includes('Math.round((dueEffectiveEnd'),
+        'rounded-hour due-soon math must be gone from both render paths');
+      assert(todos.includes('dropInvalidDateOnly(td.due_date)') && todos.includes('dropInvalidDateOnly'),
+        'refreshTodos must drop invalid date-only deadlines on read');
+      assert(jsFiles['calendar-sync.js'].includes('dropInvalidDateOnly(item.due_date)'),
+        'calendar-sync scan must drop invalid date-only deadlines');
+      assert(jsFiles['import-pure.js'].includes('is not a real calendar date'),
+        'batch import must reject non-real calendar dates outright');
+    });
+
+    test('calendar-pure: event instant model — wall time, conversion, placement', async () => {
+      const mod = await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      for (const fn of ['wallTimeToInstant', 'instantToDateStr', 'instantToTimeStr', 'eventSpan', 'eventDatesInRange', 'gmtOffsetLabel']) {
+        assert(typeof mod[fn] === 'function', `calendar-pure must export ${fn}`);
+      }
+      // Next birthday occurrence (drives the birthday form's summary).
+      const nbo = mod.nextBirthdayOccurrence;
+      assert(typeof nbo === 'function', 'calendar-pure must export nextBirthdayOccurrence');
+      assert(JSON.stringify(nbo('1996-10-15', '2026-10-11')) === JSON.stringify({ date: '2026-10-15', turningAge: 30 }), 'next occurrence later this year');
+      assert(JSON.stringify(nbo('1996-10-15', '2026-10-15')) === JSON.stringify({ date: '2026-10-15', turningAge: 30 }), 'a birthday today IS the next occurrence');
+      assert(JSON.stringify(nbo('1996-10-15', '2026-10-16')) === JSON.stringify({ date: '2027-10-15', turningAge: 31 }), 'the day after, it rolls to next year');
+      assert(JSON.stringify(nbo('2000-02-29', '2027-01-10')) === JSON.stringify({ date: '2027-03-01', turningAge: 27 }), 'Feb 29 rolls to Mar 1 on non-leap years (same rule as birthdayInMonth)');
+      assert(JSON.stringify(nbo('2000-02-29', '2028-01-10')) === JSON.stringify({ date: '2028-02-29', turningAge: 28 }), 'Feb 29 stays Feb 29 on leap years');
+      assert(nbo('not-a-date', '2026-10-11') === null, 'invalid date of birth -> null');
+      // GMT offset labels are DST-aware (read on the event's date).
+      assert(mod.gmtOffsetLabel('Europe/Paris', '2026-10-24') === 'GMT+2', 'Paris in October is GMT+2');
+      assert(mod.gmtOffsetLabel('Europe/Paris', '2026-01-15') === 'GMT+1', 'Paris in January is GMT+1');
+      assert(mod.gmtOffsetLabel('America/New_York', '2026-10-24') === 'GMT-4', 'New York in October is GMT-4');
+      assert(mod.gmtOffsetLabel('Asia/Tokyo', '2026-10-24') === 'GMT+9', 'Tokyo is GMT+9');
+      // Wall time -> instant, pinned to known offsets (Oct = CEST/BST,
+      // Jan = CET/GMT): Paris 09:00 in October is 07:00Z.
+      assert(mod.wallTimeToInstant('2026-10-24', '09:00', 'Europe/Paris') === '2026-10-24T07:00:00.000Z',
+        'Paris 09:00 (CEST, UTC+2) must be 07:00Z');
+      assert(mod.wallTimeToInstant('2026-10-24', '09:00', 'Europe/London') === '2026-10-24T08:00:00.000Z',
+        'London 09:00 (BST, UTC+1) must be 08:00Z');
+      assert(mod.wallTimeToInstant('2026-01-15', '09:00', 'Europe/Paris') === '2026-01-15T08:00:00.000Z',
+        'Paris 09:00 in January (CET, UTC+1) must be 08:00Z');
+      // Round trip through zones.
+      assert(mod.instantToTimeStr('2026-10-24T07:00:00.000Z', 'Europe/Paris') === '09:00',
+        '07:00Z must read 09:00 in Paris');
+      assert(mod.instantToDateStr('2026-10-24T23:30:00.000Z', 'America/New_York') === '2026-10-24',
+        '23:30Z is still Oct 24 in New York');
+      assert(mod.instantToDateStr('2026-10-24T23:30:00.000Z', 'Asia/Tokyo') === '2026-10-25',
+        '23:30Z is already Oct 25 in Tokyo');
+      // A Paris 23:00 -> 01:00 event (21:00Z -> 23:00Z): how many days,
+      // and which, depends on the viewer's timezone.
+      const night = { all_day: 0, start_ts: '2026-10-24T21:00:00.000Z', end_ts: '2026-10-24T23:00:00.000Z', timezone: 'Europe/Paris' };
+      const daysParis = mod.eventDatesInRange(night, '2026-10-01', '2026-10-31', 'Europe/Paris').map(x => x.date);
+      assert(JSON.stringify(daysParis) === JSON.stringify(['2026-10-24', '2026-10-25']),
+        'in Paris the event spans Oct 24 and Oct 25');
+      const daysLondon = mod.eventDatesInRange(night, '2026-10-01', '2026-10-31', 'Europe/London').map(x => x.date);
+      assert(JSON.stringify(daysLondon) === JSON.stringify(['2026-10-24']),
+        'in London it ends exactly at midnight, so it occupies Oct 24 only');
+      const daysTokyo = mod.eventDatesInRange(night, '2026-10-01', '2026-10-31', 'Asia/Tokyo').map(x => x.date);
+      assert(JSON.stringify(daysTokyo) === JSON.stringify(['2026-10-25']),
+        'in Tokyo it sits entirely on Oct 25');
+      // Continuation flags at the range edge.
+      const clipped = mod.eventDatesInRange(night, '2026-10-25', '2026-10-25', 'Europe/Paris');
+      assert(clipped.length === 1 && clipped[0].startsHere === false && clipped[0].endsHere === true,
+        'a range-clipped continuation day is not the event start, but is its end');
+      // Full-day span: stored range, no conversion, clipped to range.
+      const conf = { all_day: 1, start_date: '2026-10-24', end_date: '2026-10-26' };
+      const confDays = mod.eventDatesInRange(conf, '2026-10-01', '2026-10-31', 'America/New_York');
+      assert(confDays.length === 3 && confDays[0].startsHere && confDays[2].endsHere,
+        'a full-day event occupies its stored range in every timezone');
+      assert(mod.eventDatesInRange(conf, '2026-11-01', '2026-11-30', 'Europe/Paris').length === 0,
+        'an event outside the range places nothing');
+      assert(mod.eventSpan({ all_day: 0, start_ts: '', end_ts: '' }, 'Europe/Paris') === null,
+        'a timed event without instants has no span');
+    });
+
+    test('events: table, sharing and sync registration sweep', async () => {
+      const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf-8');
+      // Data layer: schema + both migrations + adapter registration
+      assert(read('server/schema.sql').includes('CREATE TABLE IF NOT EXISTS events'), 'schema.sql must create the events table');
+      assert(read('migrations/local-migrations.js').includes("'2.28.0'"), 'local migrations must carry 2.28.0 (events table)');
+      assert(read('migrations/drive-migrations.js').includes("'2.28.0'"), 'drive migrations must carry 2.28.0 (events table)');
+      assert(read('js/adapters/drive.js').includes("'birthdays', 'events', 'lists'"), 'DRIVE_TABLES must register events (events.json)');
+      assert(read('js/demo-data.js').includes('const events = ['), 'demo data must register the events table');
+      // Sharing: interface + stub key map + Drive item types + convenience getter
+      assert(read('js/sharing-interface.js').includes('getAllSharedEvents'), 'sharing interface must require getAllSharedEvents');
+      assert(read('js/sharing.js').includes("event: 'events'"), 'sharing stub SHARING_TYPE_KEY must map event -> events');
+      assert(read('js/sharing-drive.js').includes("const ITEM_TYPES       = ['todos', 'habits', 'lists', 'events'];"), 'sharing-drive ITEM_TYPES must include events (group events.json)');
+      assert(read('js/sharing-drive.js').includes('getAllSharedEvents()'), 'sharing-drive must implement getAllSharedEvents');
+      // Calendar sync: prefs, table map, payload builder, syncable branch, settings key preserved on restore
+      const sync = read('js/calendar-sync.js');
+      assert(sync.includes("getSetting('gcal_sync_events')"), 'cal sync prefs must read gcal_sync_events');
+      assert(sync.includes("events: 'event'"), 'TABLE_TO_TYPE must map events -> event');
+      assert(sync.includes('function calEventToEvent('), 'cal sync must build event payloads');
+      assert(sync.includes("case 'event': return calEventToEvent(item);"), 'itemToEvent must dispatch events');
+      assert(sync.includes("if (prefs.events) types.push({ table: 'events', type: 'event' });"), 'reconcile flows must include events');
+      // View wiring: service worker precache, delegation cases, calendar collection
+      assert(read('sw.js').includes("'js/events.js'"), 'sw precache must include js/events.js');
+      const del = read('js/delegation.js');
+      for (const a of ['open-add-event', 'calendar-event-edit', 'save-new-event', 'save-edit-event', 'share-event', 'unshare-event', 'event-set-mode', 'event-field', 'toggle-cal-sync-events']) {
+        assert(del.includes(`case '${a}'`), `delegation must handle ${a}`);
+      }
+      const cal = read('js/calendar.js');
+      assert(cal.includes('eventDatesInRange(ev, start, end, viewerTz)'), 'calendar must place events via calendar-pure');
+      assert(cal.includes('state.allEvents'), 'calendar must read state.allEvents');
+      // Event form v2: stacked schedule layers (constant modal height),
+      // multi-line note, share-at-creation, icon-only edit actions
+      const evjs = read('js/events.js');
+      assert(evjs.includes('event-schedule-layer'), 'event form must stack the timed/all-day layers (constant modal height)');
+      assert(evjs.includes('<textarea id="${p}EventNote"'), 'event note must be a multi-line textarea');
+      assert(evjs.includes('id="newEventGroup"'), 'add event form must offer a group select');
+      assert(evjs.includes('convertEventToShared'), 'share conversion must be shared by edit-share and create-share');
+      assert(evjs.includes("title=\"${t('common.delete')}\""), 'edit event delete button must be icon-only with a title');
+      assert(read('js/birthdays.js').includes('<textarea id="newBirthdayNote"'), 'birthday note must be a multi-line textarea');
+      assert(read('js/birthdays.js').includes('<textarea id="editBirthdayNote"'), 'edit birthday note must be a multi-line textarea');
+      // Birthday form: colored header, shared title/summary classes, live summary wiring
+      const bdays = read('js/birthdays.js');
+      assert(bdays.includes("modal.style.setProperty('--cat-color', 'var(--pink)')"), 'birthday modals must take the pink colored header');
+      assert(bdays.includes('class="modal-title-input"'), 'birthday name field must use the shared prominent title input');
+      assert(bdays.includes('modal-live-summary'), 'birthday form must render the shared live summary');
+      assert(bdays.includes('nextBirthdayOccurrence'), 'birthday summary must compute via calendar-pure');
+      assert(bdays.includes('birthday-date-row'), 'birthday date must sit in the aligned name-column row');
+      assert(bdays.includes('birthday-identity'), 'avatar must group with the name+date fields (centered against them)');
+      assert(del.includes("case 'birthday-field'"), 'delegation must route birthday-field to the summary updater');
     });
 
     test('calendar-pure: month grid, habit expansion, birthdays', async () => {
@@ -4500,6 +5578,108 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       db2.close();
     });
 
+    test('drive migration 2.29.0 remaps dangling deck/category FKs by legacy string', async () => {
+      const { DRIVE_MIGRATIONS } =
+        await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+      const store = {
+        flashcard_decks: [
+          { id: '_default_flashcard_decks', name: '', is_protected: 1 },
+          { id: '_shared_flashcard_decks', name: '__shared__', is_protected: 1 },
+          { id: '_cat_721bb3d4', name: 'Histoire de France' },
+          { id: '_cat_56374e4e', name: 'Vocabulaire' },
+        ],
+        flashcards: [
+          // The reported case: legacy 'Général' row gone, string '' kept.
+          { id: 'c1', deck: '', deck_id: '_cat_72921675' },
+          { id: 'c2', deck: 'Histoire de France', deck_id: '_cat_721bb3d4' },
+          { id: 'c3', deck: 'Vocabulaire', deck_id: null },
+          { id: 'c4', deck: 'No Such Deck', deck_id: '_cat_deadbeef' },
+          { id: 'c5', deck: '__shared__', deck_id: '_cat_gone' },
+        ],
+        todo_categories: [
+          { id: '_default_todo_categories', name: '', is_protected: 1 },
+        ],
+        todos: [
+          { id: 't1', category: '', category_id: '_cat_gone' },
+          { id: 't2', category: '', category_id: '_default_todo_categories' },
+        ],
+        habit_categories: [
+          { id: '_default_habit_categories', name: '', is_protected: 1 },
+        ],
+        habits: [
+          { id: 'h1', category: 'Nope', category_id: '_cat_gone' },
+        ],
+      };
+      await DRIVE_MIGRATIONS['2.29.0'](store);
+      const byId = (rows) => Object.fromEntries(rows.map(r => [r.id, r]));
+      const cards = byId(store.flashcards);
+      assert(cards.c1.deck_id === '_default_flashcard_decks',
+        `orphan '' card must remap to the default deck, got ${cards.c1.deck_id}`);
+      assert(cards.c2.deck_id === '_cat_721bb3d4', 'resolving FK must be untouched');
+      assert(cards.c3.deck_id === '_cat_56374e4e', 'null FK must resolve by name');
+      assert(cards.c4.deck_id === '_cat_deadbeef',
+        'unmatched name must be left untouched, never guessed into General');
+      assert(cards.c5.deck_id === '_shared_flashcard_decks',
+        'shared-deck string must resolve to the shared row');
+      const todos = byId(store.todos);
+      assert(todos.t1.category_id === '_default_todo_categories',
+        'orphan TODO must remap to the default category');
+      assert(todos.t2.category_id === '_default_todo_categories', 'resolving TODO FK untouched');
+      assert(byId(store.habits).h1.category_id === '_cat_gone',
+        'unmatched habit name must be left untouched');
+      // Idempotency: a second run changes nothing.
+      const snapshot = JSON.stringify(store);
+      await DRIVE_MIGRATIONS['2.29.0'](store);
+      assert(JSON.stringify(store) === snapshot, 'second run must be a no-op');
+    });
+
+    test('local migration 2.29.0 remaps dangling deck/category FKs by legacy string', async () => {
+      // Runs the real SQL against old-schema tables. Needs bun:sqlite;
+      // skipped under plain node.
+      let Database;
+      try {
+        ({ Database } = await import('bun:sqlite'));
+      } catch {
+        console.log('  (skip: bun:sqlite unavailable)');
+        return;
+      }
+      const { LOCAL_MIGRATIONS } =
+        await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'local-migrations.js')).href);
+      const db = new Database(':memory:');
+      db.exec(`CREATE TABLE flashcard_decks (id TEXT PRIMARY KEY, name TEXT, is_protected INTEGER DEFAULT 0);
+        CREATE TABLE flashcards (id TEXT PRIMARY KEY, deck TEXT NOT NULL, deck_id TEXT);
+        CREATE TABLE texts (id TEXT PRIMARY KEY, deck TEXT NOT NULL, deck_id TEXT);
+        CREATE TABLE todo_categories (id TEXT PRIMARY KEY, name TEXT, is_protected INTEGER DEFAULT 0);
+        CREATE TABLE todos (id TEXT PRIMARY KEY, category TEXT DEFAULT '', category_id TEXT);
+        CREATE TABLE habit_categories (id TEXT PRIMARY KEY, name TEXT, is_protected INTEGER DEFAULT 0);
+        CREATE TABLE habits (id TEXT PRIMARY KEY, category TEXT DEFAULT '', category_id TEXT);`);
+      db.exec(`INSERT INTO flashcard_decks VALUES
+        ('_default_flashcard_decks', '', 1),
+        ('_cat_721bb3d4', 'Histoire de France', 0);
+        INSERT INTO flashcards VALUES
+        ('c1', '', '_cat_72921675'),
+        ('c2', 'Histoire de France', '_cat_721bb3d4'),
+        ('c3', 'No Such Deck', '_cat_deadbeef'),
+        ('c4', 'Histoire de France', NULL);
+        INSERT INTO texts VALUES ('x1', '', '_cat_72921675');
+        INSERT INTO todo_categories VALUES ('_default_todo_categories', '', 1);
+        INSERT INTO todos VALUES ('t1', '', '_cat_gone');
+        INSERT INTO habit_categories VALUES ('_default_habit_categories', '', 1);
+        INSERT INTO habits VALUES ('h1', 'Nope', '_cat_gone');`);
+      db.exec(LOCAL_MIGRATIONS['2.29.0']);
+      const fk = (table, id, col) =>
+        db.prepare(`SELECT ${col} FROM ${table} WHERE id = ?`).get(id)[col];
+      assert(fk('flashcards', 'c1', 'deck_id') === '_default_flashcard_decks',
+        'orphan card must remap to the default deck');
+      assert(fk('flashcards', 'c2', 'deck_id') === '_cat_721bb3d4', 'resolving FK untouched');
+      assert(fk('flashcards', 'c3', 'deck_id') === '_cat_deadbeef', 'unmatched name untouched');
+      assert(fk('flashcards', 'c4', 'deck_id') === '_cat_721bb3d4', 'null FK resolves by name');
+      assert(fk('texts', 'x1', 'deck_id') === '_default_flashcard_decks', 'orphan text remapped');
+      assert(fk('todos', 't1', 'category_id') === '_default_todo_categories', 'orphan TODO remapped');
+      assert(fk('habits', 'h1', 'category_id') === '_cat_gone', 'unmatched habit untouched');
+      db.close();
+    });
+
     test('main: sharing-changed not re-broadcast for local item mutations', () => {
       const main = jsFiles['main.js'];
       // Local item-* mutations are rendered optimistically by their callers;
@@ -4773,10 +5953,13 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('habit end date: backup save/load carry whole habit rows (no field allowlist)', () => {
       const main = jsFiles['main.js'];
-      // Save: generateBackupJSON exports select('*') per table, habits
+      // Save: backup export fetches select('*') per table, habits
       // included — end_date / is_finished ride along with every other field.
-      assert(main.includes("'habits'") && /backup\[table\] = await fetchAll\(\(\) => state\.db\.from\(table\)\.select\('\*'\)\)/.test(main),
+      // (The fetch goes through fetchTableWithRetry, which retries once.)
+      assert(main.includes("'habits'") && /fetchAll\(\(\) => state\.db\.from\(table\)\.select\('\*'\)\)/.test(main),
         'backup save must export full habit rows via select(*)');
+      assert(/backup\[table\] = await fetchTableWithRetry\(table\)/.test(main),
+        'generateBackupJSON must fetch each table through the retrying helper');
       // Load: restore inserts rows wholesale, stripping only owner_id.
       assert(main.includes('const { owner_id, ...rest } = r;'),
         'backup restore must strip only owner_id, keeping end_date / is_finished');
@@ -4945,7 +6128,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // Surfaces: Welcome list + mini calendar, footer overdue count,
       // Calendar page window filter, Google Calendar sync gates.
       assert(welcome.includes('if (isHabitSnoozed(c, todayStr)) return false;'), 'Welcome due list must exclude snoozed habits');
-      assert(welcome.includes('if (isHabitSnoozed(h, calTodayStr)) return false;'), 'Welcome mini calendar must exclude snoozed habits');
+      // Mini calendar now reuses collectRangeEvents (same snooze exclusion
+      // as the Calendar page, asserted below) instead of its own filter.
+      assert(welcome.includes('collectRangeEvents(dates[0], dates[6]'), 'Welcome mini calendar must reuse collectRangeEvents (snooze exclusion included)');
       assert(main.includes('!isHabitSnoozed(c, todayLocal)'), 'overdue count must exclude snoozed habits');
       assert(calendar.includes('!(snoozed && d < h.snoozed_until)'), 'Calendar page must hide occurrences inside the snooze window');
       assert(sync.includes('snoozed_until: sh.snoozed_until || null,'), 'calendar sync must resolve snoozed_until for shared habits');
@@ -4955,6 +6140,88 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const demo = fs.readFileSync(path.join(__dirname, '..', 'js', 'demo-data.js'), 'utf-8');
       assert((demo.match(/snoozed_until: dateOnly\(6\)/g) || []).length === 3,
         'demo Water the plants habit must be snoozed in all three languages');
+    });
+
+    test('snooze: "This week-end" preset on TODOs and habits + hourly options hidden without a timed deadline (2.32.44)', async () => {
+      const { nextSaturdayStr } =
+        await import(pathToFileURL(path.join(JS_DIR, 'calendar-pure.js')).href);
+      // The coming Saturday, strictly after today: this week's Saturday
+      // Mon–Fri, next Saturday on Sat (today would wake at once) and Sun
+      // (this week's Saturday has passed). Week of Nov 2–8, 2026.
+      for (const [from, expected] of [
+        ['2026-11-02', '2026-11-07'], // Monday
+        ['2026-11-03', '2026-11-07'],
+        ['2026-11-04', '2026-11-07'],
+        ['2026-11-05', '2026-11-07'],
+        ['2026-11-06', '2026-11-07'], // Friday
+        ['2026-11-07', '2026-11-14'], // Saturday → next Saturday
+        ['2026-11-08', '2026-11-14'], // Sunday → next Saturday
+      ]) {
+        assert(nextSaturdayStr(from) === expected, `nextSaturdayStr(${from}) must be ${expected}`);
+      }
+      // Both modals offer the preset, after the day presets.
+      const todos = jsFiles['todos.js'];
+      const habits = jsFiles['habits.js'];
+      assert(todos.includes('<button data-action="snooze-for" data-unit="weekend">${t(\'todos.snooze_weekend\')}</button>'),
+        'TODO snooze modal must offer This week-end');
+      assert(habits.includes('<button data-action="habit-snooze-for" data-unit="weekend">${t(\'habits.snooze_weekend\')}</button>'),
+        'habit snooze modal must offer This week-end');
+      // TODO wakes at the start of Saturday — day only, no time is set;
+      // habit wakes ON the Saturday date.
+      const snoozeStart = todos.indexOf('async function snoozeFor');
+      const snoozeBlock = todos.slice(snoozeStart, todos.indexOf('async function submitSnooze', snoozeStart));
+      assert(snoozeBlock.includes("} else if (unit === 'weekend') {"),
+        'snoozeFor must handle the weekend unit');
+      assert(snoozeBlock.includes('nextSaturdayStr(toDateStr(now.getFullYear(), now.getMonth(), now.getDate()))'),
+        'snoozeFor must target the coming Saturday');
+      const weekendStart = snoozeBlock.indexOf("} else if (unit === 'weekend') {");
+      const weekendBlock = snoozeBlock.slice(weekendStart, snoozeBlock.indexOf("} else if (unit === 'd')", weekendStart));
+      assert(!weekendBlock.includes('setHours'), 'the weekend preset must not set a time — day only');
+      // A snooze landing exactly at midnight shows just the day, no time
+      // (toast + item labels on both the TODOs page and Welcome).
+      const utils = fs.readFileSync(path.join(__dirname, '..', 'js', 'utils.js'), 'utf-8');
+      assert(utils.includes('function formatSnoozeUntil(value)'), 'a midnight-aware snooze formatter must exist');
+      assert(utils.includes("if (date.getHours() !== 0 || date.getMinutes() !== 0)"), 'the formatter must add the time only when it is not midnight');
+      assert(todos.includes('formatSnoozeUntil(snoozeUntil)') && todos.includes('formatSnoozeUntil(td.snooze_until)'),
+        'TODO toast and item label must use the midnight-aware format');
+      const welcome = jsFiles['welcome.js'];
+      assert(welcome.includes('formatSnoozeUntil(td.snooze_until)'),
+        'Welcome TODO label must use the midnight-aware format');
+      assert(habits.includes("if (unit === 'weekend') { applyHabitSnooze(habitId, nextSaturdayStr(habitTodayStr())); return; }"),
+        'habitSnoozeFor must snooze to the coming Saturday date');
+      // Hourly options hide unless the TODO deadline carries a time
+      // (date-only or absent deadline → no 1h/3h).
+      assert(todos.includes("const hasTimedDeadline = !!(todo?.due_date && !isDateOnly(todo.due_date));"),
+        'openSnoozeModal must detect a timed deadline via isDateOnly');
+      assert(todos.includes("modal.querySelectorAll('[data-action=\"snooze-for\"][data-unit=\"h\"]')"),
+        'openSnoozeModal must toggle the 1h/3h buttons');
+      // The label exists in all three languages for both sections.
+      const i18n = fs.readFileSync(path.join(__dirname, '..', 'js', 'i18n.js'), 'utf-8');
+      for (const key of ["snooze_weekend: 'This week-end'", "snooze_weekend: 'Ce week-end'", "snooze_weekend: 'Este fin de semana'"]) {
+        assert((i18n.match(new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length === 2,
+          `i18n must carry ${key} for both todos and habits`);
+      }
+    });
+
+    test('welcome: focus habit last-done is editable like on the Habits tab (2.32.46)', () => {
+      const habits = jsFiles['habits.js'];
+      const welcome = jsFiles['welcome.js'];
+      // The Habits tab renders Last Done as a clickable span that opens
+      // the inline date editor; the Welcome focus item rendered a plain
+      // span, so the field looked — and was — read-only there.
+      assert(habits.includes('data-action="edit-habit-last-done"'), 'Habits tab must offer last-done editing');
+      assert(welcome.includes('<span class="habit-last-done habit-last-done-editable" data-action="edit-habit-last-done"'),
+        'Welcome focus habit must render the editable last-done span');
+      assert(welcome.includes("title=\"${t('habits.click_to_edit_last_done')}\""),
+        'Welcome last-done span must carry the edit tooltip');
+      assert(welcome.includes('!habit.is_draft ? `<span class="habit-last-done habit-last-done-editable"'),
+        'Welcome must hide the span for drafts, like the Habits tab');
+      // Delegation is document-level and the handler is window-exposed,
+      // so the Welcome surface needs no new wiring.
+      assert(jsFiles['delegation.js'].includes("case 'edit-habit-last-done':"),
+        'delegation must route edit-habit-last-done');
+      assert(habits.includes('window.editHabitLastDone = editHabitLastDone;'),
+        'editHabitLastDone must be window-exposed');
     });
 
     test('migrations add habit snoozed_until (2.19.0)', () => {
@@ -6346,9 +7613,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(dl.placements[0].cols >= 1 && dl.placements[0].cols <= 3, 'nested sections lay out within the cap');
     });
 
-    test('sections: schema + migrations carry kind/parent_id on all three tables', () => {
+    test('sections: schema + migrations carry kind/parent_id on all four tables', () => {
       const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
-      for (const table of ['todo_categories', 'habit_categories', 'lists']) {
+      for (const table of ['todo_categories', 'habit_categories', 'lists', 'flashcard_decks']) {
         const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS ${table}`);
         assert(start >= 0, `schema.sql missing ${table}`);
         const ddl = schema.slice(start, schema.indexOf(');', start));
@@ -6364,6 +7631,13 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         assert(local.includes(`ALTER TABLE ${table} ADD COLUMN kind`), `local migration must add kind to ${table}`);
         assert(local.includes(`ALTER TABLE ${table} ADD COLUMN parent_id`), `local migration must add parent_id to ${table}`);
       }
+      // Flashcard decks joined sections later (2.32.34), same shape:
+      // existing decks become top-level buckets, nothing moves.
+      assert(local.includes("'2.32.34'"), 'local migrations must include 2.32.34');
+      assert(local.includes('ALTER TABLE flashcard_decks ADD COLUMN kind'), 'local migration must add kind to flashcard_decks');
+      assert(local.includes('ALTER TABLE flashcard_decks ADD COLUMN parent_id'), 'local migration must add parent_id to flashcard_decks');
+      assert(drive.includes("'2.32.34'"), 'drive migrations must include 2.32.34');
+      assert(drive.includes('store.flashcard_decks'), 'drive 2.32.34 must backfill flashcard_decks');
       const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf-8');
       assert(sw.includes("'js/sections-pure.js'"), 'sw.js precache must include sections-pure.js');
     });
@@ -6390,6 +7664,176 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // Backup exports whole rows, so kind/parent_id travel with no change
       const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
       assert(mainSrc.includes("select('*')") || mainSrc.includes('select("*")'), 'backup must stay whole-row');
+    });
+
+    test('flashcard sections: tree render, bucket-only pickers, section delete, nav drag', () => {
+      const src = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      assert(src.includes("from './sections-pure.js'"), 'flashcards must import sections-pure');
+      for (const fn of ['buildSectionTree', 'planNodeMove', 'siblingNameTaken', 'parseSectionPath']) {
+        assert(src.includes(fn), `flashcards must use sections-pure ${fn}`);
+      }
+      assert(src.includes('function renderFlashSection'), 'flashcards must render section blocks');
+      assert(src.includes('data-node-kind="section"'), 'flashcard section blocks must carry node-kind');
+      assert(src.includes('open-add-flash-deck-in-section'), 'section headers must offer add-deck-in-section');
+      assert(src.includes('delete-flash-section'), 'section headers must offer delete section');
+      assert(src.includes('deleteFlashSectionMoveUp'), 'flashcards must offer move-up on section delete');
+      assert(src.includes('deleteFlashSectionSubtree'), 'flashcards must offer subtree delete on section delete');
+      assert(src.includes('moveDeckNodeToParent'), 'flashcards must move decks between sections');
+      assert(src.includes('flashSectionChips-'), 'flashcards must render per-section chips rows');
+      // Bucket-only pickers with path labels
+      assert(src.includes('proposalDeckOptions'), 'proposal pickers must use path-valued bucket options');
+      const editOpts = src.slice(src.indexOf('function deckOptionsForEdit'));
+      assert(editOpts.slice(0, editOpts.indexOf('function ', 10)).includes("n.kind === 'bucket'"),
+        'deckOptionsForEdit must list buckets only (sections excluded via the tree)');
+      // Sibling-scoped names: creation via path syntax, rename guarded,
+      // legacy name map resolves first-wins so duplicates stay stable.
+      assert(src.includes('ensureFlashSectionChain'), 'deck creation must build the section chain');
+      assert(src.includes("siblingNameTaken([..._deckMap.values()]"), 'deck names must be sibling-scoped');
+      assert(src.includes('if (!_deckByName.has(row.name))'), 'deck name map must be first-wins');
+      // Rename via path syntax (2.32.35): renaming deck B to 'A > B'
+      // must nest B under A, like creation and like Lists/TODOs/Habits
+      // renames — the old code stored the literal 'A > B' as the name.
+      const editDeck = src.slice(src.indexOf('window.saveEditDeck'));
+      assert(editDeck.includes("rawName.includes('>')"), 'deck rename must detect a typed path');
+      assert(editDeck.includes('ensureFlashSectionChain(segments.slice(0, -1), null, deckId)'),
+        'deck rename must build the section chain with the deck as cycle guard');
+      assert(editDeck.includes('parent_id: targetParentId'), 'deck rename must persist the new parent');
+      assert(editDeck.includes('nextFlashSortOrder(targetParentId)'), 'deck rename must re-sort at the end of the new parent');
+      assert(editDeck.includes('siblingNameTaken([..._deckMap.values()], targetParentId, targetName, deckId)'),
+        'deck rename must check sibling uniqueness in the target parent (covers same-name moves too)');
+      // The chain guard: a rename path resolving inside the row itself
+      // or one of its descendants must throw instead of creating a cycle.
+      const chain = src.slice(src.indexOf('async function ensureFlashSectionChain'));
+      assert(chain.includes('guardId = null'), 'section chain builder must take a cycle guard');
+      assert(chain.includes("throw new Error('section-cycle')"), 'section chain builder must refuse a path through the guarded row');
+      // Nav drag mirrors Lists: top nav + chips rows share crossDrop.
+      assert(src.includes('flashDeckCrossDrop'), 'flashcards must support cross-section chip drag');
+      // Delegation + read-only navigation
+      const del = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+      for (const a of ['navigate-to-flash-section', 'open-add-flash-deck-in-section', 'delete-flash-section',
+        'delete-flash-section-move-up', 'delete-flash-section-subtree']) {
+        assert(del.includes(`'${a}'`), `delegation must handle ${a}`);
+      }
+      assert(del.includes("'navigate-to-flash-section': 1"), 'section navigation must stay read-only allowed');
+      // Demo showcases one nested deck; derivation understands paths.
+      const demo = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
+      assert(demo.includes("deck: 'Geography > World Capitals'"), 'demo must nest a deck under a section sample');
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes("buildCatRows([...(data.flashcards || []), ...(data.texts || [])], 'deck', 'flashcard_decks', true)"),
+        'demo deck rows must be built with path support');
+    });
+
+    test('review findings 1+2 (2.32.39): renames are checked writes on every page', () => {
+      const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      // Flashcards: the deck update is checked before any item update,
+      // and a failed item update rolls the deck row back to its pre-edit
+      // values — the rename is one logical operation, with no success
+      // toast and the modal left open on failure.
+      const editDeck = flashSrc.slice(flashSrc.indexOf('window.saveEditDeck'));
+      assert(editDeck.includes("const { error: deckError } = await state.db.from('flashcard_decks').update(updates)"),
+        'deck rename must capture the deck update error');
+      assert(editDeck.includes('if (deckError) { showToast(t(\'toast.update_failed\')'),
+        'deck rename must report a failed deck update and return before mutating anything');
+      assert(editDeck.includes("const { error: cardsError } = await state.db.from('flashcards').update({ deck: targetName })"),
+        'deck rename must capture the card name-cache update error');
+      assert(editDeck.includes("const { error: textsError } = await state.db.from('texts').update({ deck: targetName })"),
+        'deck rename must capture the text name-cache update error');
+      assert(editDeck.includes('rollbackDeckRow(deckId, deckRow)'),
+        'a failed item update must roll the deck row back to its pre-edit values');
+      assert(flashSrc.includes('async function rollbackDeckRow(deckId, deckRow)'),
+        'the deck rollback helper must restore name/shortname/color/parent/sort_order from the pre-edit row');
+      // TODOs and Habits: the single category update is checked, like
+      // Lists already was — a failed rename reports failure instead of
+      // silently keeping the old row and toasting success.
+      for (const [name, src, table] of [
+        ['todos.js', todosSrc, 'todo_categories'],
+        ['habits.js', habitsSrc, 'habit_categories'],
+        ['lists.js', listsSrc, 'lists'],
+      ]) {
+        assert(src.includes(`const { error } = await state.db.from('${table}').update(updates)`),
+          `${name} rename must capture the category update error`);
+        assert(src.includes("if (error) { showToast(t('toast.update_failed')"),
+          `${name} rename must report a failed update and return before closing the modal`);
+      }
+      // A section-chain failure is reported for what it is: a cycle is
+      // a validation error, anything else is a failed conversion write
+      // (a rename/create must not blame the name for a DB failure).
+      const cycleCount = [flashSrc, todosSrc, habitsSrc]
+        .reduce((n, src) => n + (src.match(/e\?\.message === 'section-cycle'/g) || []).length, 0);
+      assert(cycleCount === 4,
+        'all four rename/create chain catches must distinguish a cycle from a conversion failure');
+    });
+
+    test('deck duplicate name (2.32.40): exact "already exists" toast, not "Name required"', () => {
+      const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      // Both duplicate-name rejections (create and rename) name the deck
+      // and the level — a duplicate is not a missing name.
+      assert((flashSrc.match(/deck_exists_at_level/g) || []).length === 2,
+        'create and rename must both report a duplicate deck name with the deck_exists_at_level toast');
+      const newDeck = flashSrc.slice(flashSrc.indexOf('window.saveNewFlashDeck'));
+      assert(newDeck.includes("if (siblingNameTaken([..._deckMap.values()], parentId, name, null)) {\n      showToast(t('flashcards.deck_exists_at_level', name), 'error');"),
+        'creating a deck with a sibling name must toast Deck "<name>" already exists at that level');
+      const editDeck = flashSrc.slice(flashSrc.indexOf('window.saveEditDeck'));
+      assert(editDeck.includes("&& siblingNameTaken([..._deckMap.values()], targetParentId, targetName, deckId)) {\n    showToast(t('flashcards.deck_exists_at_level', targetName), 'error');"),
+        'renaming a deck onto a sibling name must toast Deck "<name>" already exists at that level');
+      // The key exists in all three locales and carries the name slot.
+      for (const [lang, text] of [
+        ['EN', 'Deck "{0}" already exists at that level'],
+        ['FR', 'Le paquet « {0} » existe déjà à ce niveau'],
+        ['ES', 'El mazo "{0}" ya existe en este nivel'],
+      ]) {
+        assert(i18nSrc.includes(`deck_exists_at_level: '${text}'`),
+          `flashcards.deck_exists_at_level must be defined in ${lang}`);
+      }
+    });
+
+    test('category/list duplicate name (2.32.41): exact "already exists" toast on every tab', () => {
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      // All six duplicate-name rejections (create + rename on TODOs,
+      // Habits and Lists) name the item and the level — a duplicate is
+      // not a missing name. Lists say "List", the other two "Category".
+      for (const [name, src, key, count] of [
+        ['todos.js', todosSrc, 'category_exists_at_level', 2],
+        ['habits.js', habitsSrc, 'category_exists_at_level', 2],
+        ['lists.js', listsSrc, 'list_exists_at_level', 2],
+      ]) {
+        assert((src.match(new RegExp(key, 'g')) || []).length === count,
+          `${name} must report a duplicate name with the ${key} toast at both create and rename`);
+      }
+      assert(todosSrc.includes("if (!cat.is_protected && siblingNameTaken([..._todoCatMap.values()], targetParentId, targetName, catId)) {\n    showToast(t('toast.category_exists_at_level', targetName), 'error');"),
+        'renaming a TODO category onto a sibling name must toast Category "<name>" already exists at that level');
+      assert(todosSrc.includes("if (siblingNameTaken([..._todoCatMap.values()], parentId, name, null)) {\n      showToast(t('toast.category_exists_at_level', name), 'error');"),
+        'creating a TODO category with a sibling name must toast Category "<name>" already exists at that level');
+      assert(habitsSrc.includes("if (!cat.is_protected && siblingNameTaken([..._habitCatMap.values()], targetParentId, targetName, catId)) {\n    showToast(t('toast.category_exists_at_level', targetName), 'error');"),
+        'renaming a habit category onto a sibling name must toast Category "<name>" already exists at that level');
+      assert(habitsSrc.includes("if (siblingNameTaken([..._habitCatMap.values()], parentId, name, null)) {\n      showToast(t('toast.category_exists_at_level', name), 'error'); return;"),
+        'creating a habit category with a sibling name must toast Category "<name>" already exists at that level');
+      assert(listsSrc.includes("if (siblingNameTaken(state.allLists || [], parentId, name, null)) {\n      showToast(t('toast.list_exists_at_level', name), 'error'); return;"),
+        'creating a list with a sibling name must toast List "<name>" already exists at that level');
+      assert(listsSrc.includes("if (siblingNameTaken(state.allLists || [], targetParentId, targetName, id)) {\n    showToast(t('toast.list_exists_at_level', targetName), 'error'); return;"),
+        'renaming a list onto a sibling name must toast List "<name>" already exists at that level');
+      // Both keys exist in all three locales and carry the name slot;
+      // the old habits-only key (no name, no level) is gone.
+      for (const [lang, key, text] of [
+        ['EN', 'category_exists_at_level', 'Category "{0}" already exists at that level'],
+        ['FR', 'category_exists_at_level', 'La catégorie « {0} » existe déjà à ce niveau'],
+        ['ES', 'category_exists_at_level', 'La categoría "{0}" ya existe en este nivel'],
+        ['EN', 'list_exists_at_level', 'List "{0}" already exists at that level'],
+        ['FR', 'list_exists_at_level', 'La liste « {0} » existe déjà à ce niveau'],
+        ['ES', 'list_exists_at_level', 'La lista "{0}" ya existe en este nivel'],
+      ]) {
+        assert(i18nSrc.includes(`${key}: '${text}'`),
+          `toast.${key} must be defined in ${lang}`);
+      }
+      assert(!i18nSrc.includes("category_exists: '"),
+        'the old habits.category_exists key (no name, no level) must be removed now that habit creation uses the shared toast');
     });
 
     test('sections: demo data showcases nesting in all three languages', () => {
@@ -6425,6 +7869,47 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(mainSrc.includes("buildCatRows(data.habits, 'category', 'habit_categories', true)"),
         'demo habit categories must be built with path support');
       assert(mainSrc.includes("kind === 'section' ? '#3b82f6'"), 'demo derivation must create section rows in the bold default section color');
+    });
+
+    test('demo events (2.32.43): sampled data seeds events, chooser prompt teaches them', () => {
+      const demo = fs.readFileSync(path.join(JS_DIR, 'demo-data.js'), 'utf-8');
+      // Five events per language, same ids and relative dates, translated
+      // titles/notes: 3 timed + 2 full-day (one multi-day) per variant.
+      assert((demo.match(/id: 'demo-ev-/g) || []).length === 15,
+        'demo data must seed 5 events in each of the 3 languages');
+      assert((demo.match(/all_day: 0, start_ts: wallTimeToInstant/g) || []).length === 9,
+        'demo data must seed 3 timed events per language');
+      assert((demo.match(/all_day: 1, start_ts: null/g) || []).length === 6,
+        'demo data must seed 2 full-day events per language');
+      assert((demo.match(/start_date: dateOnly\(3\), end_date: dateOnly\(5\)/g) || []).length === 3,
+        'demo data must include a multi-day full-day event in each language');
+      for (const title of ['Dinner with Alex', 'Book club meeting', 'Weekend trip to the coast', 'Dentist appointment', 'Moving day',
+        'Dîner avec Alex', 'Club de lecture', 'Week-end à la côte', 'Rendez-vous dentiste', 'Jour du déménagement',
+        'Cena con Alex', 'Fin de semana en la costa', 'Cita con el dentista', 'Día de la mudanza']) {
+        assert(demo.includes(`title: '${title}'`), `demo data must include the event "${title}"`);
+      }
+      // Timed events are built in the viewer's timezone from a local
+      // time, never from a raw UTC timestamp.
+      assert(demo.includes("import { localTimeZone, wallTimeToInstant } from './calendar-pure.js';"),
+        'demo data must build timed events via wallTimeToInstant in the viewer timezone');
+      assert(demo.includes('birthdays: [], events: [],'),
+        'getEmptyData must keep the events table key (empty)');
+      // The personalised-demo prompt teaches events too: schema, a
+      // paragraph in each language, parsing and normalisation.
+      const chooser = fs.readFileSync(path.join(JS_DIR, 'demo-chooser.js'), 'utf-8');
+      assert(chooser.includes('"events": [') && chooser.includes('"all_day": true') && chooser.includes('"start_time": "HH:MM"'),
+        'demo chooser schema must describe both event shapes (full-day range and timed with timezone)');
+      for (const [lang, text] of [
+        ['EN', '**Events.** Include a few calendar events'],
+        ['FR', '**Événements.** Inclus quelques événements'],
+        ['ES', '**Eventos.** Incluye algunos eventos'],
+      ]) {
+        assert(chooser.includes(text), `demo chooser prompt must ask for events in ${lang}`);
+      }
+      assert(chooser.includes("['projects', 'tasks', 'todos', 'habits', 'flashcards', 'birthdays', 'events', 'lists', 'list_items']"),
+        'parseCustomJSON must recognise the events table');
+      assert(chooser.includes('wallTimeToInstant(r.date, r.start_time, r.timezone)') && chooser.includes('r.all_day = r.all_day ? 1 : 0'),
+        'normalizeCustomData must convert LLM event times to UTC instants and coerce all_day to 0/1');
     });
 
     test('sections: section chips navigate via explicit delegation cases, sections have copy-link', () => {
@@ -6475,6 +7960,88 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'findItemElement must resolve todocat/habitcat inside their views');
     });
 
+    // Copy-link coverage: buckets (TODOs/Habits), Memory sections,
+    // decks (card + text + Drafts), draft items and text items. Each
+    // button must carry the link type whose deep link resolves back
+    // to that exact element (verified live in the browser too).
+    test('copy-link buttons exist on buckets, Memory sections/decks/drafts/texts, with resolving deep links', () => {
+      const todosSrc = fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8');
+      const habitsSrc = fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8');
+      const fcSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      const utilsSrc = fs.readFileSync(path.join(JS_DIR, 'utils.js'), 'utf-8');
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      // Bucket headers (the section headers already had theirs): the
+      // todocat/habitcat deep link resolves buckets via [data-node-id].
+      assert(todosSrc.includes('data-action="copy-item-link" data-link-type="todocat" data-id="${esc(catId)}"'),
+        'TODO bucket header must have a copy-link button (todocat, bucket id)');
+      assert(habitsSrc.includes('data-action="copy-item-link" data-link-type="habitcat" data-id="${esc(catId)}"'),
+        'Habits bucket header must have a copy-link button (habitcat, bucket id)');
+      // Memory: section header, both deck headers, Drafts deck header,
+      // draft items, text items.
+      assert(fcSrc.includes('data-action="copy-item-link" data-link-type="flashsection" data-id="${esc(section.id)}"'),
+        'Memory section header must have a copy-link button (flashsection)');
+      assert(fcSrc.includes('data-action="copy-item-link" data-link-type="flashdeck" data-id="${esc(deckId)}"'),
+        'Memory deck bucket headers must have a copy-link button (flashdeck)');
+      assert(fcSrc.includes('data-action="copy-item-link" data-link-type="flashdeck" data-id="__drafts"'),
+        'Drafts deck header must have a copy-link button (flashdeck/__drafts)');
+      assert(fcSrc.includes('data-action="copy-item-link" data-link-type="flashdraft" data-id="${esc(d.id)}"'),
+        'draft items must have a copy-link button (flashdraft)');
+      assert(fcSrc.includes('data-action="copy-item-link" data-link-type="flashtext" data-id="${esc(tx.id)}"'),
+        'Memory text items must have a copy-link button (flashtext)');
+      // The four new types must map to the Memory view and resolve.
+      for (const type of ['flashsection', 'flashdeck', 'flashtext', 'flashdraft']) {
+        assert(utilsSrc.includes(`${type}: 'flashcards'`),
+          `DEEP_LINK_TYPE_MAP must map ${type} to the flashcards view`);
+      }
+      assert(mainSrc.includes('flashsection: `#flashcardsView [data-node-id='),
+        'findItemElement must resolve flashsection inside the Memory view');
+      assert(mainSrc.includes('flashdeck: `#flashcardsView [data-node-id='),
+        'findItemElement must resolve flashdeck inside the Memory view');
+      assert(mainSrc.includes('flashtext: `[data-text-id='),
+        'findItemElement must resolve flashtext via data-text-id');
+      assert(mainSrc.includes('flashdraft: `[data-draft-id='),
+        'findItemElement must resolve flashdraft via data-draft-id');
+    });
+
+    test('welcome overview counts coming events; birthdays header adds a birthday', () => {
+      const welcomeSrc = fs.readFileSync(path.join(JS_DIR, 'welcome.js'), 'utf-8');
+      // Overview: distinct calendar events over today..today+6 (a multi-day
+      // event places one entry per day, so the count dedupes by id).
+      assert(welcomeSrc.includes('collectRangeEvents(todayStr, addDays(todayStr, 6))'),
+        'welcome must count events over the next 7 days from collectRangeEvents');
+      assert(welcomeSrc.includes("ev.type === 'event'") && welcomeSrc.includes('eventsNext7'),
+        'welcome must count only type=event entries, deduplicated by id');
+      assert(welcomeSrc.includes("t('welcome.events_next_7_days')"),
+        'the overview must show the coming-events card with its i18n label');
+      // Upcoming Birthdays header: + button opens the normal add-birthday modal.
+      assert(welcomeSrc.includes('data-action="open-add-birthday"'),
+        'the Upcoming Birthdays header must have a button opening the add-birthday modal');
+      // Saving must refresh Welcome so the new birthday appears in the bucket
+      // when it falls in the next 7 days.
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes("addEventListener('birthdays-changed'"),
+        'main must listen for birthdays-changed to refresh Welcome');
+      // i18n label in all three languages.
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      for (const label of ['Events (next 7 days)', 'Événements (7 prochains jours)', 'Eventos (próximos 7 días)']) {
+        assert(i18nSrc.includes(label), `i18n must carry the coming-events label in all languages (missing: ${label})`);
+      }
+    });
+
+    // A pasted deep link must survive a cold load: the gate, the startup
+    // view restore and the navigation itself all rewrite the URL hash,
+    // and any one of them clobbering #type/id strands the link on the
+    // default view (live bug: every cold-loaded deep link failed).
+    test('deep-link hash survives the gate, startup view restore and navigation', () => {
+      const mainSrc = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(mainSrc.includes("!parseDeepLink(window.location.hash)"),
+        'the login gate must not replaceState #login over a deep-link hash');
+      assert(mainSrc.includes('switchView(savedView, isSettingsHash || !!parseDeepLink(location.hash))'),
+        'the initial switchView must skip its hash sync when the hash is a deep link');
+      assert(mainSrc.includes('switchView(view, true);'),
+        'navigateToItem must keep the deep-link hash instead of replacing it with #<view>');
+    });
+
     test('utils: onColorFor picks white on dark colors, near-black on pale ones', async () => {
       // utils.js registers document/window listeners at module load.
       if (globalThis.document && !globalThis.document.addEventListener) globalThis.document.addEventListener = () => {};
@@ -6505,11 +8072,27 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('sections: border + header color, adaptive titles, list button parity', () => {
       const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
-      // The section color appears as the block's border (2px) and as
-      // the solid header band at full strength; the body background
-      // stays transparent (bucket cards keep their own surface/tint).
-      assert(css.includes('.section-block{border:2px solid var(--cat-color);border-radius:12px;padding:10px;background:transparent'),
-        'section block must be a colored border on a transparent background');
+      // The section color appears as the block's border (5px, all four
+      // sides — the top border stays: without it the pale body shows
+      // through a tiny gap at the top corners, where the header alone
+      // cannot cover the strip between the padding-box and border-box
+      // corners) and as the solid header band at full strength; the
+      // body background is a very pale (6%) tint of the same color,
+      // and the block's top corners are 11px to match the header's.
+      assert(css.includes('.section-block{border:5px solid var(--cat-color);border-radius:11px;padding:10px;background:color-mix(in srgb, var(--cat-color) 6%, var(--surface))'),
+        'section block must be a 5px colored border on a 6% pale tint background');
+      assert(!css.includes('.section-block .section-block'),
+        'no nested override: a section keeps its 5px border at any depth — the thick border marks sections (containers of buckets), the thin border marks leaf buckets');
+      assert(css.includes('padding:10px 14px;border-radius:6px 6px 0 0;'),
+        'section header top corners must be 6px (11px outer minus the 5px border), matching the padding-box corner');
+      assert(css.includes('.project-card[style*="--cat-color"]{border-top:none;border-radius:11px;'),
+        'bucket cards keep the thin neutral border with 11px top corners');
+      assert(!css.includes('.project-card[style*="--cat-color"]{border:5px'),
+        'the 5px border is sections-only, not buckets');
+      assert(css.includes('.welcome-section[style*="--cat-color"]{border-top:none;border-radius:11px;'),
+        'Welcome sections keep the thin neutral border with 11px top corners');
+      assert(!css.includes('.welcome-section[style*="--cat-color"]{border:5px'),
+        'the 5px border is sections-only, not Welcome sections');
       assert(!css.includes('var(--cat-color) 12%, transparent);display:flex;flex-direction:column;gap:10px'),
         'the old 12%-over-transparent section background must be gone');
       assert(!css.includes('padding:10px;background:var(--cat-color);display:flex'),
@@ -6823,10 +8406,12 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         itemRollbackPatch: { category_id: 'CAT', category: 'Reading' },
         flipPatch: { kind: 'section' },
       };
-      // Fake query-builder db: records calls, fails the Nth call when failAt > 0.
+      // Fake query-builder db: records calls, fails the Nth call when failAt > 0
+      // (or the listed calls when failAt is an array).
       const fakeDb = (failAt) => {
         const calls = [];
-        const record = (entry) => { calls.push(entry); return Promise.resolve({ error: calls.length === failAt ? new Error('injected-' + calls.length) : null }); };
+        const failSet = new Set(Array.isArray(failAt) ? failAt : [failAt]);
+        const record = (entry) => { calls.push(entry); return Promise.resolve({ error: failSet.has(calls.length) ? new Error('injected-' + calls.length) : null }); };
         return {
           calls,
           from: (table) => ({
@@ -6858,6 +8443,18 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'rollback bulk-moves the items back to the original bucket');
       assert(db.calls[3].op === 'delete' && db.calls[3].table === 'todo_categories' && db.calls[3].val === 'STAR',
         'rollback deletes the star bucket');
+      // Flip fails AND the rollback update fails: the star bucket must
+      // NOT be deleted — deleting it while items still point at it
+      // would orphan them on Drive and cascade-delete them on Local.
+      // The adapter reports failures as { error }, never by throwing,
+      // so the result must be checked, not merely awaited.
+      db = fakeDb([2, 3]);
+      threw = null;
+      try { await m.runBucketToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 3, 'a failed rollback must stop before the star-bucket delete');
+      assert(db.calls[2].op === 'update' && db.calls[2].table === 'todos' && db.calls[2].val === 'STAR',
+        'the third call is the rollback update, and no delete follows it');
+      assert(String(threw.message).includes('rollback'), 'the thrown error must report the failed rollback, not just the flip');
       // Views are wired to the helper, with no per-item loop left.
       for (const [name, src] of [
         ['todos.js', fs.readFileSync(path.join(JS_DIR, 'todos.js'), 'utf-8')],
@@ -6870,6 +8467,96 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const listsSrc = fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8');
       assert(!listsSrc.includes('list.shortname = null;'),
         'list conversion must not null the shortname in memory (sections keep short names since v2.25.0)');
+    });
+
+    test('sections-pure: runDeckToSectionMigration — checked writes, flip last, id-precise rollback', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      const spec = { deckId: 'DECK', deckName: 'Old', targetId: 'GENERAL', targetName: '' };
+      // Fake query-builder db: records calls, fails the Nth call when failAt > 0
+      // (or the listed calls when failAt is an array).
+      // select returns the ids that the bulk moves would touch.
+      const fakeDb = (failAt) => {
+        const calls = [];
+        const failSet = new Set(Array.isArray(failAt) ? failAt : [failAt]);
+        const fail = () => (failSet.has(calls.length) ? new Error('injected-' + calls.length) : null);
+        const record = (entry) => { calls.push(entry); return Promise.resolve({ error: fail() }); };
+        return {
+          calls,
+          from: (table) => ({
+            select: (_cols) => ({
+              eq: (col, val) => {
+                calls.push({ op: 'select', table, col, val });
+                const error = fail();
+                return Promise.resolve({
+                  data: error ? null : (table === 'flashcards' ? [{ id: 'c1' }, { id: 'c2' }] : [{ id: 't1' }]),
+                  error,
+                });
+              },
+            }),
+            update: (patch) => ({ eq: (col, val) => record({ op: 'update', table, patch, col, val }) }),
+          }),
+        };
+      };
+      // Success: two id captures, two bulk moves, flip last — exactly five writes, in order.
+      let db = fakeDb(0);
+      await m.runDeckToSectionMigration(db, spec);
+      assert(db.calls.length === 5, 'success path must be exactly five calls');
+      assert(db.calls[0].op === 'select' && db.calls[0].table === 'flashcards', 'first call captures the deck\'s card ids');
+      assert(db.calls[1].op === 'select' && db.calls[1].table === 'texts', 'second call captures the deck\'s text ids');
+      assert(db.calls[2].table === 'flashcards' && db.calls[2].col === 'deck_id' && db.calls[2].val === 'DECK'
+        && db.calls[2].patch.deck_id === 'GENERAL', 'third call bulk-moves the cards to the default deck');
+      assert(db.calls[3].table === 'texts' && db.calls[3].patch.deck_id === 'GENERAL',
+        'fourth call bulk-moves the texts to the default deck');
+      assert(db.calls[4].table === 'flashcard_decks' && db.calls[4].patch.kind === 'section',
+        'the kind flip is the last write');
+      // A failed id capture throws before any move.
+      db = fakeDb(1);
+      let threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 1, 'a failed card-id capture must abort before any move');
+      // A failed card move throws, and the flip is never attempted.
+      db = fakeDb(3);
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 3, 'a failed card move must abort before the text move and the flip');
+      // A failed text move throws after rolling the cards back — by id,
+      // so the default deck's own items are untouched.
+      db = fakeDb(4);
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 6, 'a failed text move must roll the cards back before rethrowing');
+      assert(db.calls[4].op === 'update' && db.calls[4].table === 'flashcards' && db.calls[4].col === 'id'
+        && db.calls[4].val === 'c1' && db.calls[4].patch.deck_id === 'DECK' && db.calls[4].patch.deck === 'Old',
+        'rollback moves the first card back to the original deck, by id');
+      assert(db.calls[5].col === 'id' && db.calls[5].val === 'c2',
+        'rollback moves the second card back too');
+      assert(!db.calls.some(c => c.table === 'flashcard_decks'),
+        'a failed text move must never reach the kind flip');
+      // A failed flip throws after rolling both tables back, cards first.
+      db = fakeDb(5);
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 8, 'a failed flip must roll both tables back before rethrowing');
+      assert(db.calls[5].table === 'flashcards' && db.calls[5].col === 'id' && db.calls[5].val === 'c1',
+        'flip rollback moves the cards back first');
+      assert(db.calls[7].table === 'texts' && db.calls[7].col === 'id' && db.calls[7].val === 't1'
+        && db.calls[7].patch.deck_id === 'DECK', 'flip rollback moves the texts back last');
+      // A failed flip whose card rollback also fails: every rollback row
+      // is still attempted, and the thrown error reports the rollback
+      // failure alongside the flip failure.
+      db = fakeDb([5, 6]);
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 8, 'a failed rollback must not cut the remaining rollback rows short');
+      assert(String(threw.message).includes('rollback'), 'the thrown error must report the failed rollback, not just the flip');
+      // flashcards.js is wired to the helper, with no unchecked bulk
+      // move left in the conversion.
+      const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      assert(flashSrc.includes('runDeckToSectionMigration(state.db'),
+        'deck conversion must run through the checked migration helper');
+      const conv = flashSrc.slice(flashSrc.indexOf('async function convertDeckToSection'));
+      assert(!conv.slice(0, conv.indexOf('async function ', 10)).includes("await state.db.from('flashcards').update"),
+        'convertDeckToSection must not bulk-move cards itself');
     });
 
     test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {
@@ -7027,6 +8714,10 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(itemUtilsSrc.includes("document.body.classList.add('chip-drag-active')")
         && itemUtilsSrc.includes("document.body.classList.remove('chip-drag-active')"),
         'chip drags must toggle the chip-drag-active body class on activation and on finish');
+      assert(css.includes('.category-nav-btn.nav-btn-dragging{box-shadow:0 2px 12px rgba(0,0,0,0.25);cursor:grabbing;}'),
+        'the dragged chip must read grabbing once the long-press arms the drag');
+      assert(css.includes('body.chip-drag-active,body.chip-drag-active *{cursor:grabbing;}'),
+        'the cursor must stay grabbing everywhere while a chip drag runs, not just over the dragged chip');
       assert(itemUtilsSrc.includes('allBtns().length < 2 && !crossDrop'),
         'single-chip rows must still initialise when crossDrop is configured (their chip can be dragged out)');
       const itemUtils = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');

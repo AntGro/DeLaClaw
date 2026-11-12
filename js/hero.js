@@ -2,23 +2,26 @@
 // DeLaClaw Hero — scroll-driven Storm animation
 // ===================================================================
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
-import * as storm3d from './storm3d.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const easeOut = t => 1 - (1 - t) * (1 - t);
-const easeInOut = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 const easeCubicOut = t => 1 - Math.pow(1 - t, 3);
 
-let heroEl, stormSvg, stormBg, stormCanvas, ticking = false;
+let heroEl, stormSvg, stormBg, ticking = false;
 let destroyed = false;
-let storm3dBuilt = false;
+// Landing rotation: latched when shrinking starts, so the target
+// cannot jump mid-landing as scroll progress increases.
+let landRotStart = null, landRotTarget = null;
 
 // Storm phase boundaries (tuned for 300vh spacer / 2 panels)
 const STORM_OPEN_END  = 0.20;   // step 1->2 completes
-const STORM_3D_START  = 0.22;   // begin crossfade to 3D
-const STORM_3D_END    = 0.40;   // fully 3D
 const STORM_SHRINK    = 0.75;   // start shrinking
+// The storm is 7-fold symmetric: rotating by 360/7 maps the pattern
+// exactly onto itself, so landing on a multiple looks identical to 0°.
+const STORM_SYM = 360 / 7;
+// enterT when shrinkT reaches HANDOFF: easeCubicOut(e) = 0.95.
+const ENTERT_HANDOFF = 1 - Math.cbrt(0.05);
 
 // Features panel fade-out end — skip link vanishes right after
 const FEAT_FADE_END   = 0.66;
@@ -27,6 +30,16 @@ function getProgress() {
   if (!heroEl) return 0;
   const maxScroll = heroEl.offsetHeight - window.innerHeight;
   return maxScroll > 0 ? clamp(window.scrollY / maxScroll, 0, 1) : 0;
+}
+
+// Same ratio, NOT clamped: keeps growing past the hero's own range
+// until the gate comes on screen. Capped at 1.5 so a missing gate
+// logo cannot spin the storm forever. Rotation only — every other
+// phase boundary keeps using the clamped p.
+function getRawProgress() {
+  if (!heroEl) return 0;
+  const maxScroll = heroEl.offsetHeight - window.innerHeight;
+  return maxScroll > 0 ? Math.min(window.scrollY / maxScroll, 1.5) : 0;
 }
 
 function vmin58() {
@@ -39,18 +52,30 @@ function render() {
   if (destroyed || !heroEl) { ticking = false; return; }
   const p = getProgress();
 
-  // ── Pre-compute shrink progress (shared by 3D + position sections) ──
+  // ── Pre-compute shrink progress ──
   const gateLogoSvg = document.querySelector('#gateLogo > svg.storm-logo');
   const targetRect = gateLogoSvg ? gateLogoSvg.getBoundingClientRect() : null;
   const targetOnScreen = targetRect && targetRect.top < window.innerHeight;
   const HANDOFF = 0.95;  // visibility-swap threshold
   let shrinkT = 0;  // 0 = no shrink, reaches ~0.99 at max scroll
+  let enterT = 0;     // raw float progress, linear in scroll
   if (p > STORM_SHRINK && targetOnScreen) {
-    const enterT = clamp(1 - targetRect.top / window.innerHeight, 0, 1);
+    enterT = clamp(1 - targetRect.top / window.innerHeight, 0, 1);
     shrinkT = easeCubicOut(enterT);
   }
   // landT normalizes to 1.0 at HANDOFF so visual interpolations fully converge before the swap
   const landT = clamp(shrinkT / HANDOFF, 0, 1);
+
+  // Rotation keeps increasing with scroll; during landing it eases
+  // forward to the next symmetry multiple, never back to 0.
+  if (shrinkT > 0) {
+    if (landRotTarget === null) {
+      landRotStart = getRawProgress() * 60;
+      landRotTarget = Math.ceil(landRotStart / STORM_SYM - 1e-6) * STORM_SYM;
+    }
+  } else {
+    landRotStart = landRotTarget = null;
+  }
 
   // ── Storm parameters ──
   let step, sw, gamma;
@@ -75,58 +100,6 @@ function render() {
     degree: 1, invert: true, showOuterCircle: true, rotation: 0
   }, 400);
 
-  // ── 3D crossfade ──
-  if (stormCanvas && p >= STORM_3D_START) {
-    // Lazy-init Three.js and build mesh once
-    if (!storm3dBuilt) {
-      storm3d.init(stormCanvas);
-      storm3d.build(7, 2, 10, 18);
-      storm3dBuilt = true;
-    }
-
-    // Forward crossfade: SVG → canvas
-    const fadeT = clamp((p - STORM_3D_START) / (STORM_3D_END - STORM_3D_START), 0, 1);
-    let fade = easeInOut(fadeT);
-
-    // Keep 3D fully visible during shrink; only fade back to SVG once landed
-    if (landT > 0.92) {
-      const landBlend = clamp((landT - 0.92) / 0.08, 0, 1);
-      fade = lerp(fade, 0, easeOut(landBlend));
-    }
-
-    stormSvg.style.opacity = String(1 - fade);
-    stormCanvas.style.opacity = String(fade);
-
-    // Gentle tilt reveals depth; Z-spin matches the SVG's CSS rotation
-    // During crossfade (fade<1): stay perfectly flat to match the 2D SVG
-    // After crossfade: tilt and yaw vary continuously to show off the 3D
-    const moveT = clamp((p - STORM_3D_END) / 0.10, 0, 1);
-    const tiltBase = easeOut(moveT) * 0.22;                       // ramp to ~12.5°
-    // Continuous oscillation — unclamped so it keeps moving through shrink
-    const paradeP = (p - STORM_3D_END) / (STORM_SHRINK - STORM_3D_END);
-    let tiltX = tiltBase + (moveT > 0 ? Math.sin(paradeP * Math.PI * 2.5) * 0.10 : 0);
-    let spinY = moveT > 0 ? Math.sin(paradeP * Math.PI * 3.2) * 0.18 : 0;
-
-    // Damp tilt toward 0 during shrink so it arrives flat
-    if (landT > 0) {
-      const damp = 1 - landT;
-      tiltX *= damp;
-      spinY *= damp;
-    }
-
-    // Z-rotation: wind down in sync with SVG rotation during shrink
-    let cssRotDeg = Math.min(p, STORM_SHRINK) * 60;
-    if (landT > 0) {
-      cssRotDeg = lerp(STORM_SHRINK * 60, 0, easeOut(landT));
-    }
-    const spinZ = -cssRotDeg * Math.PI / 180;             // negate: CSS rotates CW, Three.js Z rotates CCW
-
-    storm3d.frame(tiltX, spinY, spinZ);
-  } else if (stormCanvas) {
-    stormCanvas.style.opacity = '0';
-    stormSvg.style.opacity = '1';
-  }
-
   // ── Size + position ──
   const gateEl = document.getElementById('gate');
   const gateTop = gateEl ? gateEl.getBoundingClientRect().top : Infinity;
@@ -134,11 +107,12 @@ function render() {
   const gateOverlaps = gateTop < stormBottom;
 
   if (shrinkT <= 0) {
-    // Full size, centered — hold rotation at STORM_SHRINK cap if past it
+    // Full size, centered — rotation keeps increasing with scroll,
+    // including past the hero's own range (dead zone before the gate
+    // comes on screen), so it never sits frozen while scrolling
     stormBg.style.setProperty('--hero-storm-size', '58vmin');
-    const baseRot = 'rotate(' + (Math.min(p, STORM_SHRINK) * 60) + 'deg)';
+    const baseRot = 'rotate(' + (getRawProgress() * 60) + 'deg)';
     stormSvg.style.transform = baseRot;
-    if (stormCanvas) stormCanvas.style.transform = '';
     stormBg.style.opacity = '1';
     stormBg.style.zIndex = gateOverlaps ? '11' : '';
     stormSvg.style.filter = '';
@@ -162,8 +136,12 @@ function render() {
       stormSvg.style.filter = 'none';
     }
 
-    // Rotation winds down to 0
-    const rot = lerp(STORM_SHRINK * 60, 0, easeOut(landT));
+    // Rotation moves forward to the latched symmetry angle at a
+    // constant rate in scroll — linear in enterT, never eased, so it
+    // keeps turning for the whole float and arrives exactly on target
+    // at the swap (visually identical to the unrotated gate logo)
+    const rot = lerp(landRotStart, landRotTarget,
+      clamp(enterT / ENTERT_HANDOFF, 0, 1));
 
     // Translate toward #stormTarget center
     const gCx = targetRect.left + targetRect.width / 2;
@@ -172,7 +150,6 @@ function render() {
     const dy = (gCy - window.innerHeight / 2) * landT;
 
     stormSvg.style.transform = 'translate(' + dx + 'px,' + dy + 'px) rotate(' + rot + 'deg)';
-    if (stormCanvas) stormCanvas.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
 
     // Storm handoff: at landing, hide hero storm and show gate storm
     const gateLogoSvg = document.querySelector('#gateLogo > svg');
@@ -387,7 +364,6 @@ export function initHero() {
   if (!heroEl || heroEl.style.display === 'none') return;
   stormSvg = document.getElementById('heroStorm');
   stormBg  = document.getElementById('heroStormBg');
-  stormCanvas = document.getElementById('heroStorm3d');
   if (!stormSvg || !stormBg) return;
   // Ensure gate logo SVG exists in the DOM (hidden while hero flies)
   injectGateLogo();
@@ -434,9 +410,8 @@ export function destroyHero() {
   destroyed = true;
   window.removeEventListener('scroll', onScroll);
   window.removeEventListener('resize', onScroll);
-  heroEl = stormSvg = stormBg = stormCanvas = null;
-  if (storm3dBuilt) { storm3d.dispose(); }
-  storm3dBuilt = false;
+  heroEl = stormSvg = stormBg = null;
+  landRotStart = landRotTarget = null;
   // Restore gate title visibility
   const nt = document.getElementById('gateTitle');
   if (nt) nt.style.visibility = '';

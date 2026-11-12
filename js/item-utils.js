@@ -614,9 +614,13 @@ export async function bulkSortOrder(tableName, updates) {
 const SCROLLABLE_LIST_SELECTOR = '.task-list, .todo-cat-list, .list-item-list, .birthday-bucket-list, .welcome-items, .cal-day-list';
 
 function scrollContainerKey(el) {
-  if (el.id) return 'id:' + el.id;
-  const cat = el.dataset?.category;
-  if (cat) return 'cat:' + cat;
+  // Key by the container's own identity (same attributes as bucketKey):
+  // keying by the nearest ancestor id made every list in a grid share
+  // the grid id, so one tick snapped all lists to a single scroll
+  // position. The ancestor id stays only as a fallback for containers
+  // with no identity of their own.
+  const own = bucketKey(el);
+  if (own) return own;
   const card = el.closest('[id]');
   if (card?.id) return 'id:' + card.id;
   return null;

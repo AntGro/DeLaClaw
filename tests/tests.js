@@ -4865,6 +4865,17 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'prev_day/next_day must exist in all 3 locales');
     });
 
+    test('inner scroll positions are keyed per list, not per grid', () => {
+      const iu = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      const fn = iu.match(/function scrollContainerKey\(el\) \{([\s\S]*?)\n\}/);
+      assert(fn, 'Could not find scrollContainerKey in item-utils.js');
+      // A list's own id must key its scroll position: keying by the
+      // nearest ancestor id made every list in a grid share the grid id,
+      // so one tick snapped all lists to a single scroll position.
+      assert(fn[1].includes('bucketKey(el)'), 'scrollContainerKey must key by the container\'s own identity (bucketKey)');
+      assert(fn[1].indexOf('bucketKey(el)') < fn[1].indexOf("closest('[id]')"), 'the container\'s own id must win over the shared ancestor id');
+    });
+
     test('calendar grid: chips sort Birthday > Events > TODOs > Habits', () => {
       const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
       assert(cal.includes('const TYPE_ORDER = { birthday: 0, event: 1, todo: 2, habit: 3 };'),

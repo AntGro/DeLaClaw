@@ -48,9 +48,9 @@ User jobs:
 - FSRS v5-style power forgetting curve: `R(S, t) = (t/S × F + 1)^(-0.5)` where F ≈ 0.2346
 - Stability ≈ target interval in days; next review = stability days from now; 90% target retention
 - Ratings: 1=Again, 2=Hard, 3=Good, 4=Easy
-- New cards: initial stability set by rating (Again=0.5, Hard=1, Good=3, Easy=7)
+- New cards: initial stability set by rating (Again≈0.007 ≈10min, Hard=1, Good=1, Easy=4)
 - Success: stability multiplied by rating-dependent factor adjusted for retrievability and difficulty
-- Lapse (Again on review): stability reduced, difficulty increased
+- Lapse (Again on review, Anki-style): card enters relearning — stability reset to ≈10min, next review after one 10-minute step, `relearning=1`; the card re-enters the practice session once the step is due (or early, when the queue empties — learn-ahead). Good on a relearning card graduates it to 1 day, Easy to 4 days, Hard/Again repeat the step. Difficulty increases. Deliberately no leech mechanism: no lapse counter, no suspension.
 - Status mapping: mastered (stability ≥ 21, not yet due), ok (reviewed, due later), due (past due date), new (never reviewed), draft (proposal stage)
 
 ### Decks

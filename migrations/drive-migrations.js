@@ -511,4 +511,13 @@ export const DRIVE_MIGRATIONS = {
       if (row.parent_id === undefined) row.parent_id = null;
     }
   },
+  '2.32.102': async (store) => {
+    // 2.32.102: Anki-style relearning flag on cards and text chunks.
+    // Nothing is in relearning yet, so every existing row starts at 0.
+    for (const table of ['flashcards', 'text_line_progress']) {
+      for (const row of (store[table] || [])) {
+        if (row.relearning == null) row.relearning = 0;
+      }
+    }
+  },
 };

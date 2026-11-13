@@ -4682,6 +4682,82 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'free practice submit must not fall through to the scheduling path');
     });
 
+    // Anki-style relearning (v2.32.102): a lapse puts the card into
+    // relearning for one 10-minute step instead of cutting a multi-year
+    // interval to 30%; Good/Easy graduate it to 1d/4d. No leech.
+    function loadFsrsUpdate() {
+      const flashJs = jsFiles['flashcards.js'];
+      const start = flashJs.indexOf('// ── SM-2');
+      const end = flashJs.indexOf('// ── State ──');
+      assert(start !== -1 && end > start, 'could not find the FSRS scheduling block in flashcards.js');
+      return new Function(`${flashJs.slice(start, end)}; return fsrsUpdate;`)();
+    }
+
+    test('relearning: lapse on a mature card resets to a 10-minute step', () => {
+      const fsrsUpdate = loadFsrsUpdate();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const mature = { stability: 5153, difficulty: 4.6, last_review: '2026-11-03T00:30:00Z', next_review: '2026-11-13T00:30:00Z', review_count: 10 };
+      const out = fsrsUpdate(mature, 1, now);
+      assert(out.relearning === 1, `lapse must set relearning=1, got ${out.relearning}`);
+      assert(out.stability <= 0.01, `lapse must reset stability to ~10min, got ${out.stability}`);
+      assert(new Date(out.next_review) - now === 10 * 60 * 1000, `lapse must be due in 10 minutes, got ${out.next_review}`);
+      assert(out.difficulty > 4.6, 'lapse must increase difficulty');
+      assert(out.review_count === 11, 'lapse must count as a review');
+    });
+
+    test('relearning: Good graduates to 1 day, Easy to 4 days', () => {
+      const fsrsUpdate = loadFsrsUpdate();
+      const now = new Date('2026-11-13T00:40:00Z');
+      const relearning = { stability: 0.01, difficulty: 5.5, relearning: 1, last_review: '2026-11-13T00:30:00Z', next_review: '2026-11-13T00:40:00Z', review_count: 11 };
+      const good = fsrsUpdate(relearning, 3, now);
+      assert(good.relearning === 0, 'Good on a relearning card must clear relearning');
+      assert(good.stability === 1, `Good must graduate to stability 1, got ${good.stability}`);
+      assert(new Date(good.next_review) - now === 86400000, `Good must be due in 1 day, got ${good.next_review}`);
+      const easy = fsrsUpdate(relearning, 4, now);
+      assert(easy.relearning === 0 && easy.stability === 4, 'Easy on a relearning card must graduate to 4 days');
+      const easyDays = (new Date(easy.next_review) - now) / 86400000;
+      assert(easyDays >= 3.8 && easyDays <= 4.2, `Easy must be due in ~4 days, got ${easyDays}`);
+    });
+
+    test('relearning: Hard/Again repeat the 10-minute step', () => {
+      const fsrsUpdate = loadFsrsUpdate();
+      const now = new Date('2026-11-13T00:40:00Z');
+      const relearning = { stability: 0.01, difficulty: 5.5, relearning: 1, last_review: '2026-11-13T00:30:00Z', next_review: '2026-11-13T00:40:00Z', review_count: 11 };
+      for (const rating of [1, 2]) {
+        const out = fsrsUpdate(relearning, rating, now);
+        assert(out.relearning === 1, `rating ${rating} on a relearning card must stay in relearning`);
+        assert(new Date(out.next_review) - now === 10 * 60 * 1000, `rating ${rating} must repeat the 10-minute step`);
+      }
+    });
+
+    test('relearning: normal success path and new-card path are unchanged', () => {
+      const fsrsUpdate = loadFsrsUpdate();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const mature = { stability: 100, difficulty: 4, last_review: '2026-10-14T00:30:00Z', next_review: '2026-11-13T00:30:00Z', review_count: 5 };
+      const good = fsrsUpdate(mature, 3, now);
+      assert(good.relearning === 0, 'Good on a normal review card must not enter relearning');
+      assert(good.stability > 200, `Good must keep growing stability, got ${good.stability}`);
+      const fresh = fsrsUpdate({ stability: 0, difficulty: 5, review_count: 0 }, 1, now);
+      assert(fresh.relearning === 0, 'Again on a new card must not enter relearning');
+      assert(new Date(fresh.next_review) - now === 86400000, 'Again on a new card stays due in 1 day');
+    });
+
+    test('relearning: session re-presents a lapsed card (learn-ahead when the queue empties)', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const rateStart = flashJs.indexOf('window.rateCard = async function');
+      const rateBody = flashJs.slice(rateStart, flashJs.indexOf('window.endPractice', rateStart));
+      assert(/rating = Number\(rating\)/.test(rateBody),
+        'rateCard must coerce the rating to a number: delegation passes el.dataset.rating as a string, and the FSRS core compares strictly (rating === 1)');
+      assert(/if \(updates\.relearning === 1\) sessionRelearning\.push/.test(rateBody),
+        'rateCard must queue a lapsed card for re-presentation');
+      const showStart = flashJs.indexOf('function showNextCard()');
+      const showBody = flashJs.slice(showStart, flashJs.indexOf('window.revealCard', showStart));
+      assert(/sessionRelearning\.sort/.test(showBody), 'showNextCard must consider due relearning cards first');
+      assert(/sessionQueue\.length === 0 && sessionRelearning\.length > 0/.test(showBody),
+        'showNextCard must bring a relearning card back early when the queue empties');
+      assert(/t\('flashcards\.relearning'\)/.test(showBody), 'a re-shown relearning card must be marked as such');
+    });
+
     test('shared chains: no success-path re-render (failure still refreshes)', () => {
       const habits = jsFiles['habits.js'];
       // The optimistic refresh already shows the published values (the

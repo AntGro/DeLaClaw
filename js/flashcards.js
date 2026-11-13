@@ -14,6 +14,16 @@ import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, de
 // ── SM-2 / Algo-style Spaced Repetition Core ──
 // Ratings: 1=Again, 2=Hard, 3=Good, 4=Easy
 // Stability ≈ target interval in days. Next review = stability days from now.
+//
+// Lapses follow Anki: Again on a review card puts it into relearning
+// (one 10-minute step), and it comes back in-session once the step is
+// due — or early, when the queue empties (learn-ahead). Good graduates
+// it to 1 day, Easy to 4 days, Hard/Again repeat the step. There is
+// deliberately no leech mechanism: no lapse counter, no suspension.
+const RELEARN_STEP_MS = 10 * 60 * 1000; // one relearning step: 10 minutes
+const RELEARN_STABILITY = 0.007;        // ≈10 minutes, in days
+const GRADUATING_INTERVAL = 1;          // days after Good on a relearning card
+const EASY_INTERVAL = 4;                // days after Easy on a relearning card
 
 const DECAY = 0.5;
 const FACTOR = Math.pow(0.9, 1 / -DECAY) - 1; // ≈ 0.2346 — power forgetting curve constant
@@ -49,11 +59,6 @@ function stabilityAfterSuccess(S, D, R, rating) {
   return S * baseMult * easyBonus * diffFactor;
 }
 
-// Lapse (Again on review): reduce interval significantly
-function stabilityAfterLapse(S, D, R) {
-  return Math.max(0.5, S * 0.3);
-}
-
 // Difficulty drifts toward 5 (mean reversion), adjusted by rating
 function updateDifficulty(D, rating) {
   const delta = -(rating - 3) * 0.5; // Easy→-0.5, Good→0, Hard→+0.5, Again→+1.0
@@ -68,20 +73,45 @@ function fuzz(interval) {
 
 function fsrsUpdate(card, rating, now) {
   const isNew = !card.last_review || card.stability === 0;
-  let S, D;
-  if (isNew) { D = initDifficulty(rating); S = initStability(rating); }
-  else {
-    const R = retrievability(card.stability, card.last_review, now.toISOString());
-    S = rating === 1 ? stabilityAfterLapse(card.stability, card.difficulty, R)
-      : stabilityAfterSuccess(card.stability, card.difficulty, R, rating);
+  let S, D, relearning = 0, nextReview;
+  if (isNew) {
+    D = initDifficulty(rating); S = initStability(rating);
+    const interval = fuzz(nextInterval(S));
+    nextReview = new Date(now.getTime() + interval * 86400000);
+  } else if (rating === 1) {
+    // Lapse (Again on a review card): into relearning, not a 30% cut
+    // of a multi-year interval. Due again after one 10-minute step.
+    S = RELEARN_STABILITY;
     D = updateDifficulty(card.difficulty, rating);
+    relearning = 1;
+    nextReview = new Date(now.getTime() + RELEARN_STEP_MS);
+  } else if (card.relearning) {
+    // In relearning: Good/Easy graduate, Hard/Again repeat the step.
+    D = updateDifficulty(card.difficulty, rating);
+    if (rating === 3) {
+      S = GRADUATING_INTERVAL;
+      nextReview = new Date(now.getTime() + GRADUATING_INTERVAL * 86400000);
+    } else if (rating === 4) {
+      S = EASY_INTERVAL;
+      nextReview = new Date(now.getTime() + fuzz(EASY_INTERVAL) * 86400000);
+    } else {
+      S = RELEARN_STABILITY;
+      relearning = 1;
+      nextReview = new Date(now.getTime() + RELEARN_STEP_MS);
+    }
+  } else {
+    const R = retrievability(card.stability, card.last_review, now.toISOString());
+    S = stabilityAfterSuccess(card.stability, card.difficulty, R, rating);
+    D = updateDifficulty(card.difficulty, rating);
+    const interval = fuzz(nextInterval(S));
+    nextReview = new Date(now.getTime() + interval * 86400000);
   }
-  const interval = fuzz(nextInterval(S));
   return {
     stability: Math.round(S * 100) / 100,
     difficulty: Math.round(D * 100) / 100,
+    relearning,
     last_review: now.toISOString(),
-    next_review: new Date(now.getTime() + interval * 86400000).toISOString(),
+    next_review: nextReview.toISOString(),
     review_count: (card.review_count || 0) + 1,
   };
 }
@@ -93,6 +123,7 @@ let allTexts = [];
 let allChunkProgress = [];
 let sessionActive = false;
 let sessionQueue = [];
+let sessionRelearning = []; // lapsed cards waiting out their 10-min step
 let sessionDone = 0;
 let sessionCorrect = 0;
 let sessionTotal = 0;
@@ -1408,6 +1439,7 @@ function startPractice(deckFilter, anchorEl) {
   selected.sort(() => Math.random() - 0.5);
 
   sessionQueue = selected;
+  sessionRelearning = [];
   sessionDone = 0;
   sessionCorrect = 0;
   sessionActive = true;
@@ -1463,16 +1495,28 @@ function hidePracticeOverlay() {
 function showNextCard() {
   const overlay = document.getElementById('practiceOverlay');
   if (!overlay) return;
+  // Relearning cards whose step is due jump the queue; when nothing
+  // else is left, the earliest one comes back early (learn-ahead —
+  // the step is 10 min, inside Anki's 20 min default).
+  const now = new Date();
+  sessionRelearning.sort((a, b) => a.dueAt - b.dueAt);
+  const due = [];
+  while (sessionRelearning.length > 0 && sessionRelearning[0].dueAt <= now) due.push(sessionRelearning.shift().card);
+  const fresh = due.filter(c => !sessionQueue.find(s => s.id === c.id));
+  if (fresh.length > 0) sessionQueue.unshift(...fresh);
+  if (sessionQueue.length === 0 && sessionRelearning.length > 0) {
+    sessionQueue.unshift(sessionRelearning.shift().card);
+  }
   if (sessionQueue.length === 0) { showSessionSummary(); return; }
 
   const card = sessionQueue[0];
-  const pct = sessionTotal > 0 ? Math.round((sessionDone / sessionTotal) * 100) : 0;
+  const pct = sessionTotal > 0 ? Math.min(100, Math.round((sessionDone / sessionTotal) * 100)) : 0;
 
   overlay.innerHTML = `
     <div class="practice-header">
       ${practiceHeaderLogo()}
       <div class="practice-progress-bar"><div class="practice-progress-fill" style="width:${pct}%;"></div></div>
-      <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${esc(getDeckDisplayName(deckIdForCard(card)))}</span></div>
+      <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${esc(getDeckDisplayName(deckIdForCard(card)))}${card.relearning ? ` · ${t('flashcards.relearning')}` : ''}</span></div>
       <button class="practice-close" data-action="end-practice">✕</button>
     </div>
     <div class="practice-card-area" data-action="reveal-card">
@@ -1507,6 +1551,10 @@ window.revealCard = function() {
 
 let _ratingInProgress = false;
 window.rateCard = async function(rating) {
+  // Delegation passes el.dataset.rating — a string. The FSRS core
+  // compares ratings strictly (rating === 1), so coerce here: without
+  // it, clicking Again was silently treated as a success.
+  rating = Number(rating);
   if (_ratingInProgress) return;
   if (sessionQueue.length === 0) return;
   _ratingInProgress = true;
@@ -1528,6 +1576,9 @@ window.rateCard = async function(rating) {
       const idx = allCards.findIndex(c => c.id === card.id);
       if (idx >= 0) Object.assign(allCards[idx], updates);
       if (state.db.connected) await state.db.from('flashcards').update(updates).eq('id', card.id);
+      // Lapsed (or still relearning) card: back in-session once its
+      // 10-minute step is due. Read-only sessions never schedule.
+      if (updates.relearning === 1) sessionRelearning.push({ card, dueAt: new Date(updates.next_review) });
     }
     showNextCard();
   } finally {

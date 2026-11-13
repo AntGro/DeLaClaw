@@ -1411,6 +1411,53 @@ function closeAllFlashModals() {
   if (window.closeChunkPanel) window.closeChunkPanel();
 }
 
+// ── Pure session helpers ──
+// Extracted from startPractice/showNextCard so the session mechanics can
+// be tested as state transitions (see tests/tests.js 'relearning: ...').
+// They take plain data and return new state; they never touch the DOM,
+// the session globals, or the DB.
+
+// Pick the next card to present, honouring relearning steps:
+// - a relearning card whose step is due jumps ahead of the queue;
+// - when the queue empties, the earliest relearning card comes back early
+//   (learn-ahead: the step is 10 min, inside Anki's 20 min default);
+// - a card is never queued twice for one scheduled step.
+// Returns { next, queue, relearning } with fresh arrays; inputs untouched.
+function pickNextCard(queue, relearning, now) {
+  const q = [...queue];
+  const rl = [...relearning].sort((a, b) => a.dueAt - b.dueAt);
+  const due = [];
+  while (rl.length > 0 && rl[0].dueAt <= now) due.push(rl.shift().card);
+  const fresh = due.filter(c => !q.find(s => s.id === c.id));
+  if (fresh.length > 0) q.unshift(...fresh);
+  if (q.length === 0 && rl.length > 0) q.unshift(rl.shift().card);
+  return { next: q[0] || null, queue: q, relearning: rl };
+}
+
+// Choose the session's cards from the due pool, in priority order:
+// relearning/short-interval cards first (stability ≤ 2 — including a
+// card whose 10-minute step elapsed after a session restart), then
+// overdue cards (stalest first), then new cards. New cards wait while
+// anything reviewed is due. Capped at sessionSize, deduped.
+function selectSessionCards(pool, sessionSize) {
+  const failed = pool.filter(c => c.last_review && c.stability > 0 && c.stability <= 2);
+  const overdue = pool.filter(c => c.last_review && c.stability > 2)
+    .sort((a, b) => new Date(a.next_review || 0) - new Date(b.next_review || 0));
+  // New cards wait until nothing is due: no new material while
+  // unmastered cards are pending.
+  const dueCount = pool.filter(c => c.last_review).length;
+  const fresh = dueCount > 0 ? [] : pool.filter(c => !c.last_review).sort(() => Math.random() - 0.5);
+  const selected = [];
+  for (const group of [failed, overdue, fresh]) {
+    for (const card of group) {
+      if (selected.length >= sessionSize) break;
+      if (!selected.find(s => s.id === card.id)) selected.push(card);
+    }
+    if (selected.length >= sessionSize) break;
+  }
+  return selected;
+}
+
 // ── Practice Session ──
 function startPractice(deckFilter, anchorEl) {
   const now = new Date();
@@ -1421,22 +1468,7 @@ function startPractice(deckFilter, anchorEl) {
   sessionDeck = deckFilter || null;
 
   const SESSION_SIZE = 10;
-  const failed = pool.filter(c => c.last_review && c.stability > 0 && c.stability <= 2);
-  const overdue = pool.filter(c => c.last_review && c.stability > 2)
-    .sort((a, b) => new Date(a.next_review || 0) - new Date(b.next_review || 0));
-  // New cards wait until nothing is due: no new material while
-  // unmastered cards are pending.
-  const dueCount = pool.filter(c => c.last_review).length;
-  const fresh = dueCount > 0 ? [] : pool.filter(c => !c.last_review).sort(() => Math.random() - 0.5);
-
-  let selected = [];
-  for (const group of [failed, overdue, fresh]) {
-    for (const card of group) {
-      if (selected.length >= SESSION_SIZE) break;
-      if (!selected.find(s => s.id === card.id)) selected.push(card);
-    }
-    if (selected.length >= SESSION_SIZE) break;
-  }
+  const selected = selectSessionCards(pool, SESSION_SIZE);
   selected.sort(() => Math.random() - 0.5);
 
   sessionQueue = selected;
@@ -1500,18 +1532,12 @@ function showNextCard() {
   // Relearning cards whose step is due jump the queue; when nothing
   // else is left, the earliest one comes back early (learn-ahead —
   // the step is 10 min, inside Anki's 20 min default).
-  const now = new Date();
-  sessionRelearning.sort((a, b) => a.dueAt - b.dueAt);
-  const due = [];
-  while (sessionRelearning.length > 0 && sessionRelearning[0].dueAt <= now) due.push(sessionRelearning.shift().card);
-  const fresh = due.filter(c => !sessionQueue.find(s => s.id === c.id));
-  if (fresh.length > 0) sessionQueue.unshift(...fresh);
-  if (sessionQueue.length === 0 && sessionRelearning.length > 0) {
-    sessionQueue.unshift(sessionRelearning.shift().card);
-  }
-  if (sessionQueue.length === 0) { showSessionSummary(); return; }
+  const picked = pickNextCard(sessionQueue, sessionRelearning, new Date());
+  sessionQueue = picked.queue;
+  sessionRelearning = picked.relearning;
+  if (!picked.next) { showSessionSummary(); return; }
 
-  const card = sessionQueue[0];
+  const card = picked.next;
   const pct = sessionTotal > 0 ? Math.min(100, Math.round((sessionDone / sessionTotal) * 100)) : 0;
 
   overlay.innerHTML = `

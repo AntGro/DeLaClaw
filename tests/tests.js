@@ -4742,7 +4742,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(new Date(fresh.next_review) - now === 86400000, 'Again on a new card stays due in 1 day');
     });
 
-    test('relearning: session re-presents a lapsed card (learn-ahead when the queue empties)', () => {
+    test('relearning: session wires the pure helpers (rateCard queues, showNextCard picks)', () => {
       const flashJs = jsFiles['flashcards.js'];
       const rateStart = flashJs.indexOf('window.rateCard = async function');
       const rateBody = flashJs.slice(rateStart, flashJs.indexOf('window.endPractice', rateStart));
@@ -4752,10 +4752,108 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'rateCard must queue a lapsed card for re-presentation');
       const showStart = flashJs.indexOf('function showNextCard()');
       const showBody = flashJs.slice(showStart, flashJs.indexOf('window.revealCard', showStart));
-      assert(/sessionRelearning\.sort/.test(showBody), 'showNextCard must consider due relearning cards first');
-      assert(/sessionQueue\.length === 0 && sessionRelearning\.length > 0/.test(showBody),
-        'showNextCard must bring a relearning card back early when the queue empties');
+      assert(/pickNextCard\(sessionQueue, sessionRelearning, new Date\(\)\)/.test(showBody),
+        'showNextCard must pick the next card through the pure helper');
       assert(/t\('flashcards\.relearning'\)/.test(showBody), 'a re-shown relearning card must be marked as such');
+    });
+
+    // Relearning queue behaviour: the mechanics are pure helpers, so the
+    // suite tests state transitions instead of source patterns.
+    function loadSessionHelpers() {
+      const flashJs = jsFiles['flashcards.js'];
+      const start = flashJs.indexOf('// ── Pure session helpers ──');
+      const end = flashJs.indexOf('// ── Practice Session ──');
+      assert(start !== -1 && end > start, 'could not find the pure session helpers block in flashcards.js');
+      return new Function(`${flashJs.slice(start, end)}; return { pickNextCard, selectSessionCards };`)();
+    }
+
+    test('relearning: due card jumps the queue; not-yet-due card waits', () => {
+      const { pickNextCard } = loadSessionHelpers();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const A = { id: 'a' }, B = { id: 'b' }, C = { id: 'c' };
+      const due = pickNextCard([A, B], [{ card: C, dueAt: new Date('2026-11-13T00:25:00Z') }], now);
+      assert(due.next === C, 'a relearning card whose step is due must be presented next');
+      assert(due.queue.map(c => c.id).join(',') === 'c,a,b', `due card must jump ahead, got ${due.queue.map(c => c.id)}`);
+      assert(due.relearning.length === 0, 'the due card must leave the relearning list');
+      const waiting = pickNextCard([A, B], [{ card: C, dueAt: new Date('2026-11-13T00:40:00Z') }], now);
+      assert(waiting.next === A, 'a relearning card whose step is not due must not jump the queue');
+      assert(waiting.queue.map(c => c.id).join(',') === 'a,b', 'the queue must be untouched while the step is pending');
+      assert(waiting.relearning.length === 1 && waiting.relearning[0].card === C, 'the pending card must stay in relearning');
+    });
+
+    test('relearning: empty queue brings the earliest card back early (learn-ahead)', () => {
+      const { pickNextCard } = loadSessionHelpers();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const C = { id: 'c' }, D = { id: 'd' };
+      const out = pickNextCard([], [
+        { card: C, dueAt: new Date('2026-11-13T00:40:00Z') },
+        { card: D, dueAt: new Date('2026-11-13T00:35:00Z') },
+      ], now);
+      assert(out.next === D, 'the earliest-due relearning card must return first');
+      assert(out.queue.map(c => c.id).join(',') === 'd', 'only the earliest card returns early');
+      assert(out.relearning.length === 1 && out.relearning[0].card === C, 'the later card must stay in relearning');
+    });
+
+    test('relearning: multiple due cards return in due order, once per step', () => {
+      const { pickNextCard } = loadSessionHelpers();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const A = { id: 'a' }, C = { id: 'c' }, D = { id: 'd' };
+      const first = pickNextCard([A], [
+        { card: C, dueAt: new Date('2026-11-13T00:10:00Z') },
+        { card: D, dueAt: new Date('2026-11-13T00:05:00Z') },
+      ], now);
+      assert(first.next === D, 'the stalest due card must be presented first');
+      assert(first.queue.map(c => c.id).join(',') === 'd,c,a', `due cards must precede the queue in due order, got ${first.queue.map(c => c.id)}`);
+      assert(first.relearning.length === 0, 'both due cards must leave the relearning list');
+      // After D is rated, C is next — not D again.
+      const second = pickNextCard(first.queue.slice(1), first.relearning, now);
+      assert(second.next === C, 'the next due card follows after the first is rated');
+      // A card already in the queue is never duplicated for one step.
+      const dup = pickNextCard([C], [{ card: C, dueAt: new Date('2026-11-13T00:05:00Z') }], now);
+      assert(dup.next === C && dup.queue.length === 1, 'a card already in the queue must appear only once');
+      assert(dup.relearning.length === 0, 'the duplicate entry must be consumed, not left pending');
+    });
+
+    test('relearning: pickNextCard does not mutate its inputs', () => {
+      const { pickNextCard } = loadSessionHelpers();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const A = { id: 'a' }, B = { id: 'b' }, C = { id: 'c' };
+      const q = [A, B];
+      const rl = [{ card: C, dueAt: new Date('2026-11-13T00:25:00Z') }];
+      pickNextCard(q, rl, now);
+      assert(q.map(c => c.id).join(',') === 'a,b', 'the queue argument must be untouched');
+      assert(rl.length === 1 && rl[0].card === C, 'the relearning argument must be untouched');
+    });
+
+    test('relearning: restart picks a due lapsed card first when slots are scarce', () => {
+      const { selectSessionCards } = loadSessionHelpers();
+      const overdue = Array.from({ length: 11 }, (_, i) => ({
+        id: 'o' + i, stability: 100,
+        last_review: '2026-10-01T00:00:00Z',
+        next_review: `2026-11-${String(1 + i).padStart(2, '0')}T00:00:00Z`,
+      }));
+      const lapsed = {
+        id: 'lapsed', stability: 0.01, relearning: 1,
+        last_review: '2026-11-13T00:20:00Z', next_review: '2026-11-13T00:30:00Z',
+      };
+      const sel = selectSessionCards([...overdue, lapsed], 10);
+      assert(sel.length === 10, `selection must be capped at 10, got ${sel.length}`);
+      assert(sel[0] === lapsed, 'a due relearning card must be picked first on restart');
+      assert(sel.filter(c => c.id === 'lapsed').length === 1, 'the lapsed card must be selected once');
+    });
+
+    test('relearning: selection waits new cards while reviewed cards are due', () => {
+      const { selectSessionCards } = loadSessionHelpers();
+      const reviewed = { id: 'r', stability: 50, last_review: '2026-11-01T00:00:00Z', next_review: '2026-11-12T00:00:00Z' };
+      const held = selectSessionCards([reviewed, { id: 'f1' }, { id: 'f2' }], 10);
+      assert(held.length === 1 && held[0] === reviewed, 'new cards must wait while reviewed cards are due');
+      const fresh = selectSessionCards([{ id: 'f1' }, { id: 'f2' }, { id: 'f3' }], 10);
+      assert(fresh.length === 3, 'an all-new pool must select the new cards');
+      assert(['f1', 'f2', 'f3'].every(id => fresh.find(c => c.id === id)), 'all new cards must be selected');
+      const older = { id: 'older', stability: 50, last_review: '2026-10-01T00:00:00Z', next_review: '2026-11-01T00:00:00Z' };
+      const newer = { id: 'newer', stability: 50, last_review: '2026-10-01T00:00:00Z', next_review: '2026-11-10T00:00:00Z' };
+      const ordered = selectSessionCards([newer, older], 10);
+      assert(ordered[0] === older && ordered[1] === newer, 'overdue cards must sort stalest first');
     });
 
     test('relearning: session counter counts presentations, summary counts unique cards', () => {

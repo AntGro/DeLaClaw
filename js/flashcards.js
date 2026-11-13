@@ -124,6 +124,7 @@ let allChunkProgress = [];
 let sessionActive = false;
 let sessionQueue = [];
 let sessionRelearning = []; // lapsed cards waiting out their 10-min step
+let sessionRatedIds = new Set(); // unique cards rated this session (summary count)
 let sessionDone = 0;
 let sessionCorrect = 0;
 let sessionTotal = 0;
@@ -1440,6 +1441,7 @@ function startPractice(deckFilter, anchorEl) {
 
   sessionQueue = selected;
   sessionRelearning = [];
+  sessionRatedIds = new Set();
   sessionDone = 0;
   sessionCorrect = 0;
   sessionActive = true;
@@ -1565,6 +1567,7 @@ window.rateCard = async function(rating) {
   try {
     const card = sessionQueue.shift();
     sessionDone++;
+    sessionRatedIds.add(card.id);
     if (rating >= 3) sessionCorrect++;
     // Read-only mode: the session still advances, but the rating is not
     // recorded — no FSRS update in memory or in the DB, so the card
@@ -1578,7 +1581,12 @@ window.rateCard = async function(rating) {
       if (state.db.connected) await state.db.from('flashcards').update(updates).eq('id', card.id);
       // Lapsed (or still relearning) card: back in-session once its
       // 10-minute step is due. Read-only sessions never schedule.
-      if (updates.relearning === 1) sessionRelearning.push({ card, dueAt: new Date(updates.next_review) });
+      // The re-presentation is a scheduled rating of its own, so the
+      // session total grows with it — otherwise the header reads 12/10.
+      if (updates.relearning === 1) {
+        sessionRelearning.push({ card, dueAt: new Date(updates.next_review) });
+        sessionTotal++;
+      }
     }
     showNextCard();
   } finally {
@@ -1612,7 +1620,7 @@ function showSessionSummary() {
       <div class="practice-summary-emoji">${accuracy >= 80 ? lucideIcon('trophy', 32) : accuracy >= 50 ? lucideIcon('flame', 32) : lucideIcon('book-open', 32)}</div>
       <h2>${t('flashcards.session_complete')}</h2>
       <div class="practice-summary-stats">
-        <div class="practice-summary-stat"><span class="practice-stat-val">${sessionDone}</span><span class="practice-stat-lbl">${t('flashcards.cards_reviewed')}</span></div>
+        <div class="practice-summary-stat"><span class="practice-stat-val">${sessionRatedIds.size}</span><span class="practice-stat-lbl">${t('flashcards.cards_reviewed')}</span></div>
         <div class="practice-summary-stat"><span class="practice-stat-val">${sessionCorrect}</span><span class="practice-stat-lbl">${t('flashcards.good_plus')}</span></div>
         <div class="practice-summary-stat"><span class="practice-stat-val">${accuracy}%</span><span class="practice-stat-lbl">${t('flashcards.accuracy')}</span></div>
       </div>

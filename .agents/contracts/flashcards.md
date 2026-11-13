@@ -50,7 +50,8 @@ User jobs:
 - Ratings: 1=Again, 2=Hard, 3=Good, 4=Easy
 - New cards: initial stability set by rating (Again≈0.007 ≈10min, Hard=1, Good=1, Easy=4)
 - Success: stability multiplied by rating-dependent factor adjusted for retrievability and difficulty
-- Lapse (Again on review, Anki-style): card enters relearning — stability reset to ≈10min, next review after one 10-minute step, `relearning=1`; the card re-enters the practice session once the step is due (or early, when the queue empties — learn-ahead). Good on a relearning card graduates it to 1 day, Easy to 4 days, Hard/Again repeat the step. Difficulty increases. Deliberately no leech mechanism: no lapse counter, no suspension.
+- Lapse (Again on review, Anki-style): card enters relearning — stability reset to ≈10min, next review after one 10-minute step, `relearning=1`; a flashcard re-enters the practice session once the step is due (or early, when the queue empties — learn-ahead). Text chunks share the scheduling (10-minute due, graduation) but have no session queue: a lapsed chunk reappears at the next revise, not in-session. Good on a relearning card/chunk graduates it to 1 day, Easy to 4 days, Hard/Again repeat the step. Difficulty increases. Deliberately no leech mechanism: no lapse counter, no suspension.
+- Session counts: the header counts ratings vs scheduled presentations (`sessionDone / sessionTotal`; the total grows when a lapsed card is queued for re-presentation), while the summary's "cards reviewed" counts unique cards rated.
 - Status mapping: mastered (stability ≥ 21, not yet due), ok (reviewed, due later), due (past due date), new (never reviewed), draft (proposal stage)
 
 ### Decks

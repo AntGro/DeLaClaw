@@ -4748,7 +4748,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const rateBody = flashJs.slice(rateStart, flashJs.indexOf('window.endPractice', rateStart));
       assert(/rating = Number\(rating\)/.test(rateBody),
         'rateCard must coerce the rating to a number: delegation passes el.dataset.rating as a string, and the FSRS core compares strictly (rating === 1)');
-      assert(/if \(updates\.relearning === 1\) sessionRelearning\.push/.test(rateBody),
+      assert(/sessionRelearning\.push\(\{ card, dueAt: new Date\(updates\.next_review\) \}\)/.test(rateBody),
         'rateCard must queue a lapsed card for re-presentation');
       const showStart = flashJs.indexOf('function showNextCard()');
       const showBody = flashJs.slice(showStart, flashJs.indexOf('window.revealCard', showStart));
@@ -4756,6 +4756,24 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(/sessionQueue\.length === 0 && sessionRelearning\.length > 0/.test(showBody),
         'showNextCard must bring a relearning card back early when the queue empties');
       assert(/t\('flashcards\.relearning'\)/.test(showBody), 'a re-shown relearning card must be marked as such');
+    });
+
+    test('relearning: session counter counts presentations, summary counts unique cards', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const rateStart = flashJs.indexOf('window.rateCard = async function');
+      const rateBody = flashJs.slice(rateStart, flashJs.indexOf('window.endPractice', rateStart));
+      assert(/sessionTotal\+\+;/.test(rateBody),
+        'queuing a lapsed card must grow the session total, or the header reads 12/10');
+      assert(/sessionRatedIds\.add\(card\.id\)/.test(rateBody),
+        'rateCard must record the rated card id for the unique count');
+      const startStart = flashJs.indexOf('function startPractice(');
+      const startBody = flashJs.slice(startStart, flashJs.indexOf('function practiceHeaderLogo', startStart));
+      assert(/sessionRatedIds = new Set\(\);/.test(startBody),
+        'startPractice must reset the rated-ids set');
+      const summaryStart = flashJs.indexOf('function showSessionSummary()');
+      const summaryBody = flashJs.slice(summaryStart, flashJs.indexOf('window.endPractice', summaryStart));
+      assert(/sessionRatedIds\.size/.test(summaryBody),
+        'the summary must count unique cards reviewed, not ratings');
     });
 
     test('shared chains: no success-path re-render (failure still refreshes)', () => {

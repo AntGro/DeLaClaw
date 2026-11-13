@@ -1434,11 +1434,13 @@ function pickNextCard(queue, relearning, now) {
   return { next: q[0] || null, queue: q, relearning: rl };
 }
 
-// Choose the session's cards from the due pool, in priority order:
-// relearning/short-interval cards first (stability ≤ 2 — including a
+// Choose the session's cards from the due pool, grouped by priority:
+// relearning/short-interval first (stability ≤ 2 — including a
 // card whose 10-minute step elapsed after a session restart), then
-// overdue cards (stalest first), then new cards. New cards wait while
-// anything reviewed is due. Capped at sessionSize, deduped.
+// overdue (stalest first), then new cards. New cards wait while
+// anything reviewed is due. The cap is applied in priority order.
+// Returns { failed, overdue, fresh }; see orderSessionQueue for how
+// the groups are presented.
 function selectSessionCards(pool, sessionSize) {
   const failed = pool.filter(c => c.last_review && c.stability > 0 && c.stability <= 2);
   const overdue = pool.filter(c => c.last_review && c.stability > 2)
@@ -1447,15 +1449,26 @@ function selectSessionCards(pool, sessionSize) {
   // unmastered cards are pending.
   const dueCount = pool.filter(c => c.last_review).length;
   const fresh = dueCount > 0 ? [] : pool.filter(c => !c.last_review).sort(() => Math.random() - 0.5);
-  const selected = [];
-  for (const group of [failed, overdue, fresh]) {
+  const groups = { failed: [], overdue: [], fresh: [] };
+  let total = 0;
+  for (const [key, group] of [['failed', failed], ['overdue', overdue], ['fresh', fresh]]) {
     for (const card of group) {
-      if (selected.length >= sessionSize) break;
-      if (!selected.find(s => s.id === card.id)) selected.push(card);
+      if (total >= sessionSize) break;
+      groups[key].push(card);
+      total++;
     }
-    if (selected.length >= sessionSize) break;
+    if (total >= sessionSize) break;
   }
-  return selected;
+  return groups;
+}
+
+// Present the selected groups in priority order, shuffled within each
+// group: a lapsed card is always presented before any overdue card,
+// and overdue cards before any new card — the order inside a group
+// stays random.
+function orderSessionQueue(groups) {
+  const shuffle = arr => [...arr].sort(() => Math.random() - 0.5);
+  return [...shuffle(groups.failed), ...shuffle(groups.overdue), ...shuffle(groups.fresh)];
 }
 
 // ── Practice Session ──
@@ -1468,16 +1481,13 @@ function startPractice(deckFilter, anchorEl) {
   sessionDeck = deckFilter || null;
 
   const SESSION_SIZE = 10;
-  const selected = selectSessionCards(pool, SESSION_SIZE);
-  selected.sort(() => Math.random() - 0.5);
-
-  sessionQueue = selected;
+  sessionQueue = orderSessionQueue(selectSessionCards(pool, SESSION_SIZE));
   sessionRelearning = [];
   sessionRatedIds = new Set();
   sessionDone = 0;
   sessionCorrect = 0;
   sessionActive = true;
-  sessionTotal = selected.length;
+  sessionTotal = sessionQueue.length;
   showPracticeOverlay();
   showNextCard();
 }

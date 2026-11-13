@@ -4755,6 +4755,14 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(/pickNextCard\(sessionQueue, sessionRelearning, new Date\(\)\)/.test(showBody),
         'showNextCard must pick the next card through the pure helper');
       assert(/t\('flashcards\.relearning'\)/.test(showBody), 'a re-shown relearning card must be marked as such');
+      const startStart = flashJs.indexOf('function startPractice(');
+      const startBody = flashJs.slice(startStart, flashJs.indexOf('function showNextCard', startStart));
+      assert(/sessionQueue = orderSessionQueue\(selectSessionCards\(pool, SESSION_SIZE\)\)/.test(startBody),
+        'startPractice must order the queue by priority group, shuffled within each group');
+      assert(/sessionTotal = sessionQueue\.length;/.test(startBody),
+        'sessionTotal must count the ordered queue (a stale reference here breaks the session entirely)');
+      assert(!/selected\.sort\(\(\) => Math\.random\(\) - 0\.5\)/.test(startBody),
+        'startPractice must no longer shuffle the whole selection flat');
     });
 
     // Relearning queue behaviour: the mechanics are pure helpers, so the
@@ -4764,7 +4772,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const start = flashJs.indexOf('// ── Pure session helpers ──');
       const end = flashJs.indexOf('// ── Practice Session ──');
       assert(start !== -1 && end > start, 'could not find the pure session helpers block in flashcards.js');
-      return new Function(`${flashJs.slice(start, end)}; return { pickNextCard, selectSessionCards };`)();
+      return new Function(`${flashJs.slice(start, end)}; return { pickNextCard, selectSessionCards, orderSessionQueue };`)();
     }
 
     test('relearning: due card jumps the queue; not-yet-due card waits', () => {
@@ -4825,8 +4833,8 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(rl.length === 1 && rl[0].card === C, 'the relearning argument must be untouched');
     });
 
-    test('relearning: restart picks a due lapsed card first when slots are scarce', () => {
-      const { selectSessionCards } = loadSessionHelpers();
+    test('relearning: restart selects a due lapsed card ahead of overdue cards when slots are scarce', () => {
+      const { selectSessionCards, orderSessionQueue } = loadSessionHelpers();
       const overdue = Array.from({ length: 11 }, (_, i) => ({
         id: 'o' + i, stability: 100,
         last_review: '2026-10-01T00:00:00Z',
@@ -4836,24 +4844,42 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         id: 'lapsed', stability: 0.01, relearning: 1,
         last_review: '2026-11-13T00:20:00Z', next_review: '2026-11-13T00:30:00Z',
       };
-      const sel = selectSessionCards([...overdue, lapsed], 10);
-      assert(sel.length === 10, `selection must be capped at 10, got ${sel.length}`);
-      assert(sel[0] === lapsed, 'a due relearning card must be picked first on restart');
-      assert(sel.filter(c => c.id === 'lapsed').length === 1, 'the lapsed card must be selected once');
+      const groups = selectSessionCards([...overdue, lapsed], 10);
+      assert(groups.failed.length === 1 && groups.failed[0] === lapsed, 'a due relearning card must be selected in the failed group');
+      const total = groups.failed.length + groups.overdue.length + groups.fresh.length;
+      assert(total === 10, `selection must be capped at 10, got ${total}`);
+      // And the priority is real at presentation, not just selection:
+      // the failed group is presented first, whatever the shuffle does.
+      const queue = orderSessionQueue(groups);
+      assert(queue[0] === lapsed, 'the lapsed card must be presented first on restart');
+      assert(queue.length === 10, 'the presented queue must hold the selection');
+    });
+
+    test('relearning: session presents groups in priority order, shuffled within each group', () => {
+      const { orderSessionQueue } = loadSessionHelpers();
+      const A = { id: 'a' }, B = { id: 'b' }, C = { id: 'c' }, D = { id: 'd' };
+      const groups = { failed: [A, B], overdue: [C], fresh: [D] };
+      const queue = orderSessionQueue(groups);
+      assert(queue.length === 4, 'the queue must hold every selected card');
+      assert(['a', 'b'].includes(queue[0].id) && ['a', 'b'].includes(queue[1].id) && queue[0] !== queue[1],
+        `failed cards must be presented first, got ${queue.map(c => c.id)}`);
+      assert(queue[2] === C && queue[3] === D, 'overdue cards follow the failed group, new cards last');
+      assert(groups.failed.map(c => c.id).join(',') === 'a,b', 'the input groups must not be mutated');
     });
 
     test('relearning: selection waits new cards while reviewed cards are due', () => {
       const { selectSessionCards } = loadSessionHelpers();
       const reviewed = { id: 'r', stability: 50, last_review: '2026-11-01T00:00:00Z', next_review: '2026-11-12T00:00:00Z' };
       const held = selectSessionCards([reviewed, { id: 'f1' }, { id: 'f2' }], 10);
-      assert(held.length === 1 && held[0] === reviewed, 'new cards must wait while reviewed cards are due');
+      assert(held.overdue.length === 1 && held.overdue[0] === reviewed, 'new cards must wait while reviewed cards are due');
+      assert(held.fresh.length === 0, 'no new card must be selected while a reviewed card is due');
       const fresh = selectSessionCards([{ id: 'f1' }, { id: 'f2' }, { id: 'f3' }], 10);
-      assert(fresh.length === 3, 'an all-new pool must select the new cards');
-      assert(['f1', 'f2', 'f3'].every(id => fresh.find(c => c.id === id)), 'all new cards must be selected');
+      assert(fresh.fresh.length === 3, 'an all-new pool must select the new cards');
+      assert(['f1', 'f2', 'f3'].every(id => fresh.fresh.find(c => c.id === id)), 'all new cards must be selected');
       const older = { id: 'older', stability: 50, last_review: '2026-10-01T00:00:00Z', next_review: '2026-11-01T00:00:00Z' };
       const newer = { id: 'newer', stability: 50, last_review: '2026-10-01T00:00:00Z', next_review: '2026-11-10T00:00:00Z' };
       const ordered = selectSessionCards([newer, older], 10);
-      assert(ordered[0] === older && ordered[1] === newer, 'overdue cards must sort stalest first');
+      assert(ordered.overdue[0] === older && ordered.overdue[1] === newer, 'overdue cards must sort stalest first for selection');
     });
 
     test('relearning: session counter counts presentations, summary counts unique cards', () => {

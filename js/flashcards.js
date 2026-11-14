@@ -1563,7 +1563,7 @@ function showNextCard() {
       <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${esc(getDeckDisplayName(deckIdForCard(card)))}${card.relearning ? ` · ${t('flashcards.relearning')}` : ''}</span></div>
       <button class="practice-close" data-action="end-practice">✕</button>
     </div>
-    <div class="practice-card-area" data-action="toggle-card">
+    <div class="practice-card-area" data-action="toggle-card" tabindex="0" role="button" aria-label="${t('flashcards.toggle_card')}">
       <div class="practice-card" id="practiceCard">
         <div class="practice-card-front">
           <div class="practice-card-label">${t('flashcards.question')}</div>
@@ -3066,6 +3066,9 @@ document.addEventListener('keydown', (e) => {
   const card = document.getElementById('practiceCard');
   if (!card) return;
   if (e.key === ' ' || e.key === 'Enter') {
+    // A focused control keeps its own keyboard behaviour: Space/Enter on
+    // a rating or close button must activate it, not flip the card.
+    if (e.target.closest?.('button, input, textarea, select, a[href]')) return;
     e.preventDefault();
     window.toggleCard();
   } else if (card.classList.contains('flipped')) {

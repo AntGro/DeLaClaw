@@ -53,6 +53,7 @@ User jobs:
 - Lapse (Again on review, Anki-style): card enters relearning — stability reset to ≈10min, next review after one 10-minute step, `relearning=1`; a flashcard re-enters the practice session once the step is due, never early (no learn-ahead since Nov 14, 2026: a card whose step has not elapsed waits for the next session). Text chunks share the scheduling (10-minute due, graduation) but have no session queue: a lapsed chunk reappears at the next revise, not in-session. Good on a relearning card/chunk graduates it to 1 day, Easy to 4 days, Hard to 12 hours, Again repeats the step. Difficulty increases. Deliberately no leech mechanism: no lapse counter, no suspension.
 - Session counts: the header counts ratings vs scheduled presentations (`sessionDone / sessionTotal`; the total grows when a lapsed card is queued for re-presentation), while the summary's "cards reviewed" counts unique cards rated.
 - Session order: presented failed-group first (relearning/short-interval, shuffled within), then overdue, then new — the priority is presentation order, not just which cards make the 10 slots.
+- Keyboard: Space/Enter toggle the card only when focus is not on a control — a focused rating or close button keeps its normal activation. The card area is itself focusable (tabindex 0, role button, localized label).
 - Status mapping: mastered (stability ≥ 21, not yet due), ok (reviewed, due later), due (past due date), new (never reviewed), draft (proposal stage)
 
 ### Decks

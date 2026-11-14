@@ -4775,6 +4775,29 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'startPractice must no longer shuffle the whole selection flat');
     });
 
+    test('practice: Space/Enter on a focused control must not flip the card', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      // The document-level keyboard handler must let a focused control keep
+      // its own activation: Space/Enter on a rating or close button must
+      // fire the button, not toggle the card.
+      const guard = "e.target.closest?.('button, input, textarea, select, a[href]')";
+      assert(flashJs.includes(guard), 'the keyboard handler must ignore Space/Enter originating from a focused control');
+      const spaceIdx = flashJs.indexOf("if (e.key === ' ' || e.key === 'Enter')");
+      const guardIdx = flashJs.indexOf(guard);
+      const toggleIdx = flashJs.indexOf('window.toggleCard();', spaceIdx);
+      assert(spaceIdx !== -1 && guardIdx > spaceIdx && toggleIdx > guardIdx,
+        'the control guard must sit inside the Space/Enter branch, before the toggle');
+      // The card area itself must be keyboard-focusable with button semantics.
+      assert(/data-action="toggle-card" tabindex="0" role="button" aria-label="\$\{t\('flashcards\.toggle_card'\)\}"/.test(flashJs),
+        'the card area must be focusable (tabindex 0, role button) with a localized label');
+      const i18nJs = jsFiles['i18n.js'];
+      assert(/toggle_card: 'Flip card'/.test(i18nJs), 'toggle_card must exist in English');
+      assert(/toggle_card: 'Retourner la carte'/.test(i18nJs), 'toggle_card must exist in French');
+      assert(/toggle_card: 'Voltear la tarjeta'/.test(i18nJs), 'toggle_card must exist in Spanish');
+      assert(/\.practice-card-area:focus-visible/.test(styleCss),
+        'the focused card area must show a visible focus outline');
+    });
+
     test('practice: tapping the card alternates front and back', () => {
       const flashJs = jsFiles['flashcards.js'];
       const fnStart = flashJs.indexOf('window.toggleCard = function');

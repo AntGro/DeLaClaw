@@ -17,9 +17,10 @@ import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, de
 //
 // Lapses follow Anki: Again on a review card puts it into relearning
 // (one 10-minute step), and it comes back in-session once the step is
-// due — or early, when the queue empties (learn-ahead). Good graduates
-// it to 1 day, Easy to 4 days, Hard/Again repeat the step. There is
-// deliberately no leech mechanism: no lapse counter, no suspension.
+// due — never early: a card whose step has not elapsed waits for the
+// next session. Good graduates it to 1 day, Easy to 4 days, Hard/Again
+// repeat the step. There is deliberately no leech mechanism: no lapse
+// counter, no suspension.
 const RELEARN_STEP_MS = 10 * 60 * 1000; // one relearning step: 10 minutes
 const RELEARN_STABILITY = 0.007;        // ≈10 minutes, in days
 const GRADUATING_INTERVAL = 1;          // days after Good on a relearning card
@@ -1419,8 +1420,9 @@ function closeAllFlashModals() {
 
 // Pick the next card to present, honouring relearning steps:
 // - a relearning card whose step is due jumps ahead of the queue;
-// - when the queue empties, the earliest relearning card comes back early
-//   (learn-ahead: the step is 10 min, inside Anki's 20 min default);
+// - a card whose step has not elapsed never comes back early: when
+//   the queue empties, the session ends and the card waits for the
+//   next session (it stays in `relearning`, due after its step);
 // - a card is never queued twice for one scheduled step.
 // Returns { next, queue, relearning } with fresh arrays; inputs untouched.
 function pickNextCard(queue, relearning, now) {
@@ -1430,7 +1432,6 @@ function pickNextCard(queue, relearning, now) {
   while (rl.length > 0 && rl[0].dueAt <= now) due.push(rl.shift().card);
   const fresh = due.filter(c => !q.find(s => s.id === c.id));
   if (fresh.length > 0) q.unshift(...fresh);
-  if (q.length === 0 && rl.length > 0) q.unshift(rl.shift().card);
   return { next: q[0] || null, queue: q, relearning: rl };
 }
 
@@ -1539,9 +1540,9 @@ function hidePracticeOverlay() {
 function showNextCard() {
   const overlay = document.getElementById('practiceOverlay');
   if (!overlay) return;
-  // Relearning cards whose step is due jump the queue; when nothing
-  // else is left, the earliest one comes back early (learn-ahead —
-  // the step is 10 min, inside Anki's 20 min default).
+  // Relearning cards whose step is due jump the queue; a card whose
+  // step has not elapsed never comes back early — when the queue
+  // empties, the session ends and the card waits for the next session.
   const picked = pickNextCard(sessionQueue, sessionRelearning, new Date());
   sessionQueue = picked.queue;
   sessionRelearning = picked.relearning;

@@ -4789,17 +4789,29 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(waiting.relearning.length === 1 && waiting.relearning[0].card === C, 'the pending card must stay in relearning');
     });
 
-    test('relearning: empty queue brings the earliest card back early (learn-ahead)', () => {
+    test('relearning: a card whose step has not elapsed never comes back early', () => {
       const { pickNextCard } = loadSessionHelpers();
       const now = new Date('2026-11-13T00:30:00Z');
       const C = { id: 'c' }, D = { id: 'd' };
+      // Queue empty, steps still pending: no next card — the session ends
+      // and both cards wait for the next session. (There was a learn-ahead
+      // here that brought the earliest card back instantly; removed Nov 14,
+      // 2026 — a card must not reappear before its 10-minute step is due.)
       const out = pickNextCard([], [
         { card: C, dueAt: new Date('2026-11-13T00:40:00Z') },
         { card: D, dueAt: new Date('2026-11-13T00:35:00Z') },
       ], now);
-      assert(out.next === D, 'the earliest-due relearning card must return first');
-      assert(out.queue.map(c => c.id).join(',') === 'd', 'only the earliest card returns early');
-      assert(out.relearning.length === 1 && out.relearning[0].card === C, 'the later card must stay in relearning');
+      assert(out.next === null, 'no card must be presented when the queue is empty and no step is due');
+      assert(out.queue.length === 0, 'the queue must stay empty');
+      assert(out.relearning.length === 2, 'both pending cards must stay in relearning for the next session');
+      // But a card whose step HAS elapsed still returns, earliest first.
+      const due = pickNextCard([], [
+        { card: C, dueAt: new Date('2026-11-13T00:40:00Z') },
+        { card: D, dueAt: new Date('2026-11-13T00:25:00Z') },
+      ], now);
+      assert(due.next === D, 'the earliest due relearning card must return once its step has elapsed');
+      assert(due.queue.map(c => c.id).join(',') === 'd', 'only the due card returns');
+      assert(due.relearning.length === 1 && due.relearning[0].card === C, 'the not-yet-due card must stay in relearning');
     });
 
     test('relearning: multiple due cards return in due order, once per step', () => {

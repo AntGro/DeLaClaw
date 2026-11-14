@@ -1288,17 +1288,31 @@ function flashChildRow(parentId, name) {
 // converted deck's explicit type when it has one, so an empty text
 // deck's star bucket still renders as a text deck.
 async function convertDeckToSection(row) {
-  const starRow = {
-    name: '*', shortname: null, color: row.color || FLASH_SECTION_DEFAULT_COLOR,
-    sort_order: 0, kind: 'bucket', parent_id: row.id,
-  };
-  if (row.deck_type) starRow.deck_type = row.deck_type;
-  const { data, error } = await state.db.from('flashcard_decks').insert(starRow).select();
-  if (error) throw error;
-  const starId = data?.[0]?.id;
-  // Abort without flipping kind if the '*' bucket is missing — see
-  // convertListBucketToSection.
-  if (!starId) throw new Error('section-convert-star-missing');
+  // Reload first: a failed attempt never reaches the reload at the end
+  // of this function, so the map may not know about a leftover '*' bucket
+  // yet — and the retry must reuse it, not insert a second one.
+  await loadFlashcardDecks();
+  row = _deckMap.get(row.id) ?? row;
+  // Reuse a leftover '*' bucket from a failed attempt instead of
+  // inserting a second one — a retry after a swallowed delete failure
+  // or a kept star (failed rollback) must not create a duplicate.
+  // Reuse is safe even when the leftover holds items: the retry's bulk
+  // moves add the deck's remaining items into the same bucket.
+  const existingStar = flashChildRow(row.id, '*');
+  let starId = existingStar?.id || null;
+  if (!starId) {
+    const starRow = {
+      name: '*', shortname: null, color: row.color || FLASH_SECTION_DEFAULT_COLOR,
+      sort_order: 0, kind: 'bucket', parent_id: row.id,
+    };
+    if (row.deck_type) starRow.deck_type = row.deck_type;
+    const { data, error } = await state.db.from('flashcard_decks').insert(starRow).select();
+    if (error) throw error;
+    starId = data?.[0]?.id;
+    // Abort without flipping kind if the '*' bucket is missing — see
+    // convertListBucketToSection.
+    if (!starId) throw new Error('section-convert-star-missing');
+  }
   await runDeckToSectionMigration(state.db, {
     deckId: row.id, deckName: row.name ?? '', starId,
   });

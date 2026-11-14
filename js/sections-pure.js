@@ -443,27 +443,34 @@ function combineMigrationErrors(originalError, rollbackError) {
 // destination: the '*' bucket is fresh, so every row in it came from
 // this conversion — including one added concurrently between the bulk
 // moves. Returns the rollback error (null on success). The adapter
-// surface reports failures as { error }, never by throwing, so the
-// result is checked, not merely awaited.
+// contract is { error }, never a throw, so the result is checked and
+// there is no try/catch — like the main moves below.
 async function rollbackStarItems(db, table, starId, deckId, deckName) {
-  try {
-    const r = await db.from(table).update({ deck_id: deckId, deck: deckName }).eq('deck_id', starId);
-    return r?.error || null;
-  } catch (e) {
-    return e;
-  }
+  const r = await db.from(table).update({ deck_id: deckId, deck: deckName }).eq('deck_id', starId);
+  return r?.error || null;
 }
 
 // Best-effort delete of the '*' bucket. A failed delete only leaves an
-// empty star bucket behind, which is harmless — so failures are
-// swallowed. Check the returned { error } too: the adapters report
-// failures that way rather than throwing, so a try/catch alone would
-// miss them.
+// empty star bucket behind, which is harmless — so failures are logged,
+// not thrown. The adapters report failures as { error } rather than
+// throwing, so check the result.
 async function deleteStarBucket(db, starId) {
-  try {
-    const r = await db.from('flashcard_decks').delete().eq('id', starId);
-    if (r?.error) return;
-  } catch (_) { /* ignored — see above */ }
+  const r = await db.from('flashcard_decks').delete().eq('id', starId);
+  if (r?.error) console.warn('deleteStarBucket failed:', r.error);
+}
+
+// Abort a deck→section conversion: move everything back from the '*'
+// bucket, then delete the bucket only if both move-backs succeeded.
+// A failed move is ambiguous — the PATCH may have committed while its
+// response was lost — so never assume nothing moved; the rollback is
+// idempotent and moves nothing when the star is empty. Always throws:
+// the original error, or a combined error when a rollback also failed.
+async function abortMigration(db, starId, deckId, deckName, originalError) {
+  const e1 = await rollbackStarItems(db, 'flashcards', starId, deckId, deckName);
+  const e2 = await rollbackStarItems(db, 'texts', starId, deckId, deckName);
+  const rollbackError = e1 || e2;
+  if (!rollbackError) await deleteStarBucket(db, starId);
+  throw rollbackError ? combineMigrationErrors(originalError, rollbackError) : originalError;
 }
 
 /**
@@ -478,37 +485,23 @@ async function deleteStarBucket(db, starId) {
  * a section row. The rollback is by destination, not by id: the '*'
  * bucket is fresh, so every row in it came from this conversion —
  * including one added concurrently between the bulk moves — and a
- * bulk move-back catches it. The '*' bucket is deleted on every
- * failure path once the move-back has succeeded (or when nothing
- * moved yet), and kept whenever a rollback fails, so items are never
- * left pointing at a deleted bucket. A failed rollback is reported
- * alongside the original error (the items stay in the visible '*'
- * bucket, so nothing is lost, but the caller is told the move-back
- * did not happen).
+ * bulk move-back catches it. Every failure routes through one abort
+ * path (see abortMigration): both tables are rolled back and the '*'
+ * bucket is deleted only if both move-backs succeed, so a failed
+ * conversion can never leave an orphan '*' behind, and a retry can
+ * never create a second one. A failed rollback is reported alongside
+ * the original error (the items stay in the visible '*' bucket, so
+ * nothing is lost, but the caller is told the move-back did not
+ * happen).
  *
  * spec: { deckId, deckName, starId }
  */
 export async function runDeckToSectionMigration(db, spec) {
   const { deckId, deckName, starId } = spec;
   const moveCards = await db.from('flashcards').update({ deck_id: starId, deck: '*' }).eq('deck_id', deckId);
-  if (moveCards.error) {
-    // Nothing moved — the '*' bucket is empty.
-    await deleteStarBucket(db, starId);
-    throw moveCards.error;
-  }
+  if (moveCards.error) await abortMigration(db, starId, deckId, deckName, moveCards.error);
   const moveTexts = await db.from('texts').update({ deck_id: starId, deck: '*' }).eq('deck_id', deckId);
-  if (moveTexts.error) {
-    const rollbackError = await rollbackStarItems(db, 'flashcards', starId, deckId, deckName);
-    if (!rollbackError) await deleteStarBucket(db, starId);
-    if (rollbackError) throw combineMigrationErrors(moveTexts.error, rollbackError);
-    throw moveTexts.error;
-  }
+  if (moveTexts.error) await abortMigration(db, starId, deckId, deckName, moveTexts.error);
   const flip = await db.from('flashcard_decks').update({ kind: 'section', updated_at: new Date().toISOString() }).eq('id', deckId);
-  if (!flip.error) return;
-  const rollbackCardsError = await rollbackStarItems(db, 'flashcards', starId, deckId, deckName);
-  const rollbackTextsError = await rollbackStarItems(db, 'texts', starId, deckId, deckName);
-  const rollbackError = rollbackCardsError || rollbackTextsError;
-  if (!rollbackError) await deleteStarBucket(db, starId);
-  if (rollbackError) throw combineMigrationErrors(flip.error, rollbackError);
-  throw flip.error;
+  if (flip.error) await abortMigration(db, starId, deckId, deckName, flip.error);
 }

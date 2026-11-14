@@ -4963,12 +4963,14 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
-    test('relearning: session counter counts presentations, summary counts unique cards', () => {
+    test('relearning: session counter stays fixed, summary counts unique cards', () => {
       const flashJs = jsFiles['flashcards.js'];
       const rateStart = flashJs.indexOf('window.rateCard = async function');
       const rateBody = flashJs.slice(rateStart, flashJs.indexOf('window.endPractice', rateStart));
-      assert(/sessionTotal\+\+;/.test(rateBody),
-        'queuing a lapsed card must grow the session total, or the header reads 12/10');
+      assert(!/sessionTotal\+\+/.test(rateBody),
+        'queuing a lapsed card must not grow the session total: its re-presentation belongs to a later session, so the header would read 3/6 for 3 cards');
+      assert(/sessionRelearning\.push\(\{ card, dueAt: new Date\(updates\.next_review\) \}\)/.test(rateBody),
+        'rateCard must still queue a lapsed card for re-presentation once its step is due');
       assert(/sessionRatedIds\.add\(card\.id\)/.test(rateBody),
         'rateCard must record the rated card id for the unique count');
       const startStart = flashJs.indexOf('function startPractice(');

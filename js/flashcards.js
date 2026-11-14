@@ -1630,13 +1630,13 @@ window.rateCard = async function(rating) {
       const idx = allCards.findIndex(c => c.id === card.id);
       if (idx >= 0) Object.assign(allCards[idx], updates);
       if (state.db.connected) await state.db.from('flashcards').update(updates).eq('id', card.id);
-      // Lapsed (or still relearning) card: back in-session once its
-      // 10-minute step is due. Read-only sessions never schedule.
-      // The re-presentation is a scheduled rating of its own, so the
-      // session total grows with it — otherwise the header reads 12/10.
+      // Lapsed (or still relearning) card: queued for re-presentation
+      // once its 10-minute step is due — in a later session, since a card
+      // whose step has not elapsed never returns early. The session total
+      // stays fixed at the starting size: counting the re-presentation
+      // here would read 3/6 for a 3-card session.
       if (updates.relearning === 1) {
         sessionRelearning.push({ card, dueAt: new Date(updates.next_review) });
-        sessionTotal++;
       }
     }
     showNextCard();

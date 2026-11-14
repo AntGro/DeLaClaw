@@ -1316,7 +1316,6 @@ async function convertDeckToSection(row) {
   await runDeckToSectionMigration(state.db, {
     deckId: row.id, deckName: row.name ?? '', starId,
   });
-  row.kind = 'section';
   await loadFlashcardDecks();
 }
 

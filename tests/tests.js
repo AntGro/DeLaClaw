@@ -4682,6 +4682,224 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'free practice submit must not fall through to the scheduling path');
     });
 
+    // Anki-style relearning (v2.32.102): a lapse puts the card into
+    // relearning for one 10-minute step instead of cutting a multi-year
+    // interval to 30%; Good/Easy graduate it to 1d/4d. No leech.
+    function loadFsrsUpdate() {
+      const flashJs = jsFiles['flashcards.js'];
+      const start = flashJs.indexOf('// ── SM-2');
+      const end = flashJs.indexOf('// ── State ──');
+      assert(start !== -1 && end > start, 'could not find the FSRS scheduling block in flashcards.js');
+      return new Function(`${flashJs.slice(start, end)}; return fsrsUpdate;`)();
+    }
+
+    test('relearning: lapse on a mature card resets to a 10-minute step', () => {
+      const fsrsUpdate = loadFsrsUpdate();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const mature = { stability: 5153, difficulty: 4.6, last_review: '2026-11-03T00:30:00Z', next_review: '2026-11-13T00:30:00Z', review_count: 10 };
+      const out = fsrsUpdate(mature, 1, now);
+      assert(out.relearning === 1, `lapse must set relearning=1, got ${out.relearning}`);
+      assert(out.stability <= 0.01, `lapse must reset stability to ~10min, got ${out.stability}`);
+      assert(new Date(out.next_review) - now === 10 * 60 * 1000, `lapse must be due in 10 minutes, got ${out.next_review}`);
+      assert(out.difficulty > 4.6, 'lapse must increase difficulty');
+      assert(out.review_count === 11, 'lapse must count as a review');
+    });
+
+    test('relearning: Good graduates to 1 day, Easy to 4 days', () => {
+      const fsrsUpdate = loadFsrsUpdate();
+      const now = new Date('2026-11-13T00:40:00Z');
+      const relearning = { stability: 0.01, difficulty: 5.5, relearning: 1, last_review: '2026-11-13T00:30:00Z', next_review: '2026-11-13T00:40:00Z', review_count: 11 };
+      const good = fsrsUpdate(relearning, 3, now);
+      assert(good.relearning === 0, 'Good on a relearning card must clear relearning');
+      assert(good.stability === 1, `Good must graduate to stability 1, got ${good.stability}`);
+      assert(new Date(good.next_review) - now === 86400000, `Good must be due in 1 day, got ${good.next_review}`);
+      const easy = fsrsUpdate(relearning, 4, now);
+      assert(easy.relearning === 0 && easy.stability === 4, 'Easy on a relearning card must graduate to 4 days');
+      const easyDays = (new Date(easy.next_review) - now) / 86400000;
+      assert(easyDays >= 3.8 && easyDays <= 4.2, `Easy must be due in ~4 days, got ${easyDays}`);
+    });
+
+    test('relearning: Hard/Again repeat the 10-minute step', () => {
+      const fsrsUpdate = loadFsrsUpdate();
+      const now = new Date('2026-11-13T00:40:00Z');
+      const relearning = { stability: 0.01, difficulty: 5.5, relearning: 1, last_review: '2026-11-13T00:30:00Z', next_review: '2026-11-13T00:40:00Z', review_count: 11 };
+      for (const rating of [1, 2]) {
+        const out = fsrsUpdate(relearning, rating, now);
+        assert(out.relearning === 1, `rating ${rating} on a relearning card must stay in relearning`);
+        assert(new Date(out.next_review) - now === 10 * 60 * 1000, `rating ${rating} must repeat the 10-minute step`);
+      }
+    });
+
+    test('relearning: normal success path and new-card path are unchanged', () => {
+      const fsrsUpdate = loadFsrsUpdate();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const mature = { stability: 100, difficulty: 4, last_review: '2026-10-14T00:30:00Z', next_review: '2026-11-13T00:30:00Z', review_count: 5 };
+      const good = fsrsUpdate(mature, 3, now);
+      assert(good.relearning === 0, 'Good on a normal review card must not enter relearning');
+      assert(good.stability > 200, `Good must keep growing stability, got ${good.stability}`);
+      const fresh = fsrsUpdate({ stability: 0, difficulty: 5, review_count: 0 }, 1, now);
+      assert(fresh.relearning === 0, 'Again on a new card must not enter relearning');
+      assert(new Date(fresh.next_review) - now === 86400000, 'Again on a new card stays due in 1 day');
+    });
+
+    test('relearning: session wires the pure helpers (rateCard queues, showNextCard picks)', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const rateStart = flashJs.indexOf('window.rateCard = async function');
+      const rateBody = flashJs.slice(rateStart, flashJs.indexOf('window.endPractice', rateStart));
+      assert(/rating = Number\(rating\)/.test(rateBody),
+        'rateCard must coerce the rating to a number: delegation passes el.dataset.rating as a string, and the FSRS core compares strictly (rating === 1)');
+      assert(/sessionRelearning\.push\(\{ card, dueAt: new Date\(updates\.next_review\) \}\)/.test(rateBody),
+        'rateCard must queue a lapsed card for re-presentation');
+      const showStart = flashJs.indexOf('function showNextCard()');
+      const showBody = flashJs.slice(showStart, flashJs.indexOf('window.revealCard', showStart));
+      assert(/pickNextCard\(sessionQueue, sessionRelearning, new Date\(\)\)/.test(showBody),
+        'showNextCard must pick the next card through the pure helper');
+      assert(/t\('flashcards\.relearning'\)/.test(showBody), 'a re-shown relearning card must be marked as such');
+      const startStart = flashJs.indexOf('function startPractice(');
+      const startBody = flashJs.slice(startStart, flashJs.indexOf('function showNextCard', startStart));
+      assert(/sessionQueue = orderSessionQueue\(selectSessionCards\(pool, SESSION_SIZE\)\)/.test(startBody),
+        'startPractice must order the queue by priority group, shuffled within each group');
+      assert(/sessionTotal = sessionQueue\.length;/.test(startBody),
+        'sessionTotal must count the ordered queue (a stale reference here breaks the session entirely)');
+      assert(!/selected\.sort\(\(\) => Math\.random\(\) - 0\.5\)/.test(startBody),
+        'startPractice must no longer shuffle the whole selection flat');
+    });
+
+    // Relearning queue behaviour: the mechanics are pure helpers, so the
+    // suite tests state transitions instead of source patterns.
+    function loadSessionHelpers() {
+      const flashJs = jsFiles['flashcards.js'];
+      const start = flashJs.indexOf('// ── Pure session helpers ──');
+      const end = flashJs.indexOf('// ── Practice Session ──');
+      assert(start !== -1 && end > start, 'could not find the pure session helpers block in flashcards.js');
+      return new Function(`${flashJs.slice(start, end)}; return { pickNextCard, selectSessionCards, orderSessionQueue };`)();
+    }
+
+    test('relearning: due card jumps the queue; not-yet-due card waits', () => {
+      const { pickNextCard } = loadSessionHelpers();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const A = { id: 'a' }, B = { id: 'b' }, C = { id: 'c' };
+      const due = pickNextCard([A, B], [{ card: C, dueAt: new Date('2026-11-13T00:25:00Z') }], now);
+      assert(due.next === C, 'a relearning card whose step is due must be presented next');
+      assert(due.queue.map(c => c.id).join(',') === 'c,a,b', `due card must jump ahead, got ${due.queue.map(c => c.id)}`);
+      assert(due.relearning.length === 0, 'the due card must leave the relearning list');
+      const waiting = pickNextCard([A, B], [{ card: C, dueAt: new Date('2026-11-13T00:40:00Z') }], now);
+      assert(waiting.next === A, 'a relearning card whose step is not due must not jump the queue');
+      assert(waiting.queue.map(c => c.id).join(',') === 'a,b', 'the queue must be untouched while the step is pending');
+      assert(waiting.relearning.length === 1 && waiting.relearning[0].card === C, 'the pending card must stay in relearning');
+    });
+
+    test('relearning: empty queue brings the earliest card back early (learn-ahead)', () => {
+      const { pickNextCard } = loadSessionHelpers();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const C = { id: 'c' }, D = { id: 'd' };
+      const out = pickNextCard([], [
+        { card: C, dueAt: new Date('2026-11-13T00:40:00Z') },
+        { card: D, dueAt: new Date('2026-11-13T00:35:00Z') },
+      ], now);
+      assert(out.next === D, 'the earliest-due relearning card must return first');
+      assert(out.queue.map(c => c.id).join(',') === 'd', 'only the earliest card returns early');
+      assert(out.relearning.length === 1 && out.relearning[0].card === C, 'the later card must stay in relearning');
+    });
+
+    test('relearning: multiple due cards return in due order, once per step', () => {
+      const { pickNextCard } = loadSessionHelpers();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const A = { id: 'a' }, C = { id: 'c' }, D = { id: 'd' };
+      const first = pickNextCard([A], [
+        { card: C, dueAt: new Date('2026-11-13T00:10:00Z') },
+        { card: D, dueAt: new Date('2026-11-13T00:05:00Z') },
+      ], now);
+      assert(first.next === D, 'the stalest due card must be presented first');
+      assert(first.queue.map(c => c.id).join(',') === 'd,c,a', `due cards must precede the queue in due order, got ${first.queue.map(c => c.id)}`);
+      assert(first.relearning.length === 0, 'both due cards must leave the relearning list');
+      // After D is rated, C is next — not D again.
+      const second = pickNextCard(first.queue.slice(1), first.relearning, now);
+      assert(second.next === C, 'the next due card follows after the first is rated');
+      // A card already in the queue is never duplicated for one step.
+      const dup = pickNextCard([C], [{ card: C, dueAt: new Date('2026-11-13T00:05:00Z') }], now);
+      assert(dup.next === C && dup.queue.length === 1, 'a card already in the queue must appear only once');
+      assert(dup.relearning.length === 0, 'the duplicate entry must be consumed, not left pending');
+    });
+
+    test('relearning: pickNextCard does not mutate its inputs', () => {
+      const { pickNextCard } = loadSessionHelpers();
+      const now = new Date('2026-11-13T00:30:00Z');
+      const A = { id: 'a' }, B = { id: 'b' }, C = { id: 'c' };
+      const q = [A, B];
+      const rl = [{ card: C, dueAt: new Date('2026-11-13T00:25:00Z') }];
+      pickNextCard(q, rl, now);
+      assert(q.map(c => c.id).join(',') === 'a,b', 'the queue argument must be untouched');
+      assert(rl.length === 1 && rl[0].card === C, 'the relearning argument must be untouched');
+    });
+
+    test('relearning: restart selects a due lapsed card ahead of overdue cards when slots are scarce', () => {
+      const { selectSessionCards, orderSessionQueue } = loadSessionHelpers();
+      const overdue = Array.from({ length: 11 }, (_, i) => ({
+        id: 'o' + i, stability: 100,
+        last_review: '2026-10-01T00:00:00Z',
+        next_review: `2026-11-${String(1 + i).padStart(2, '0')}T00:00:00Z`,
+      }));
+      const lapsed = {
+        id: 'lapsed', stability: 0.01, relearning: 1,
+        last_review: '2026-11-13T00:20:00Z', next_review: '2026-11-13T00:30:00Z',
+      };
+      const groups = selectSessionCards([...overdue, lapsed], 10);
+      assert(groups.failed.length === 1 && groups.failed[0] === lapsed, 'a due relearning card must be selected in the failed group');
+      const total = groups.failed.length + groups.overdue.length + groups.fresh.length;
+      assert(total === 10, `selection must be capped at 10, got ${total}`);
+      // And the priority is real at presentation, not just selection:
+      // the failed group is presented first, whatever the shuffle does.
+      const queue = orderSessionQueue(groups);
+      assert(queue[0] === lapsed, 'the lapsed card must be presented first on restart');
+      assert(queue.length === 10, 'the presented queue must hold the selection');
+    });
+
+    test('relearning: session presents groups in priority order, shuffled within each group', () => {
+      const { orderSessionQueue } = loadSessionHelpers();
+      const A = { id: 'a' }, B = { id: 'b' }, C = { id: 'c' }, D = { id: 'd' };
+      const groups = { failed: [A, B], overdue: [C], fresh: [D] };
+      const queue = orderSessionQueue(groups);
+      assert(queue.length === 4, 'the queue must hold every selected card');
+      assert(['a', 'b'].includes(queue[0].id) && ['a', 'b'].includes(queue[1].id) && queue[0] !== queue[1],
+        `failed cards must be presented first, got ${queue.map(c => c.id)}`);
+      assert(queue[2] === C && queue[3] === D, 'overdue cards follow the failed group, new cards last');
+      assert(groups.failed.map(c => c.id).join(',') === 'a,b', 'the input groups must not be mutated');
+    });
+
+    test('relearning: selection waits new cards while reviewed cards are due', () => {
+      const { selectSessionCards } = loadSessionHelpers();
+      const reviewed = { id: 'r', stability: 50, last_review: '2026-11-01T00:00:00Z', next_review: '2026-11-12T00:00:00Z' };
+      const held = selectSessionCards([reviewed, { id: 'f1' }, { id: 'f2' }], 10);
+      assert(held.overdue.length === 1 && held.overdue[0] === reviewed, 'new cards must wait while reviewed cards are due');
+      assert(held.fresh.length === 0, 'no new card must be selected while a reviewed card is due');
+      const fresh = selectSessionCards([{ id: 'f1' }, { id: 'f2' }, { id: 'f3' }], 10);
+      assert(fresh.fresh.length === 3, 'an all-new pool must select the new cards');
+      assert(['f1', 'f2', 'f3'].every(id => fresh.fresh.find(c => c.id === id)), 'all new cards must be selected');
+      const older = { id: 'older', stability: 50, last_review: '2026-10-01T00:00:00Z', next_review: '2026-11-01T00:00:00Z' };
+      const newer = { id: 'newer', stability: 50, last_review: '2026-10-01T00:00:00Z', next_review: '2026-11-10T00:00:00Z' };
+      const ordered = selectSessionCards([newer, older], 10);
+      assert(ordered.overdue[0] === older && ordered.overdue[1] === newer, 'overdue cards must sort stalest first for selection');
+    });
+
+    test('relearning: session counter counts presentations, summary counts unique cards', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const rateStart = flashJs.indexOf('window.rateCard = async function');
+      const rateBody = flashJs.slice(rateStart, flashJs.indexOf('window.endPractice', rateStart));
+      assert(/sessionTotal\+\+;/.test(rateBody),
+        'queuing a lapsed card must grow the session total, or the header reads 12/10');
+      assert(/sessionRatedIds\.add\(card\.id\)/.test(rateBody),
+        'rateCard must record the rated card id for the unique count');
+      const startStart = flashJs.indexOf('function startPractice(');
+      const startBody = flashJs.slice(startStart, flashJs.indexOf('function practiceHeaderLogo', startStart));
+      assert(/sessionRatedIds = new Set\(\);/.test(startBody),
+        'startPractice must reset the rated-ids set');
+      const summaryStart = flashJs.indexOf('function showSessionSummary()');
+      const summaryBody = flashJs.slice(summaryStart, flashJs.indexOf('window.endPractice', summaryStart));
+      assert(/sessionRatedIds\.size/.test(summaryBody),
+        'the summary must count unique cards reviewed, not ratings');
+    });
+
     test('shared chains: no success-path re-render (failure still refreshes)', () => {
       const habits = jsFiles['habits.js'];
       // The optimistic refresh already shows the published values (the

@@ -678,4 +678,13 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE flashcard_decks ADD COLUMN kind TEXT DEFAULT 'bucket';
     ALTER TABLE flashcard_decks ADD COLUMN parent_id TEXT;
   `,
+
+  // 2.32.102: Anki-style relearning — cards/chunks in relearning carry
+  // a flag (1) so a later Good/Easy graduates them (1d/4d) instead of
+  // growing from the ~10-minute stability. Nothing is in relearning
+  // yet, so every existing row starts at 0.
+  '2.32.102': `
+    ALTER TABLE flashcards ADD COLUMN relearning INTEGER DEFAULT 0;
+    ALTER TABLE text_line_progress ADD COLUMN relearning INTEGER DEFAULT 0;
+  `,
 };

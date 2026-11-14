@@ -14,6 +14,16 @@ import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, de
 // ── SM-2 / Algo-style Spaced Repetition Core ──
 // Ratings: 1=Again, 2=Hard, 3=Good, 4=Easy
 // Stability ≈ target interval in days. Next review = stability days from now.
+//
+// Lapses follow Anki: Again on a review card puts it into relearning
+// (one 10-minute step), and it comes back in-session once the step is
+// due — or early, when the queue empties (learn-ahead). Good graduates
+// it to 1 day, Easy to 4 days, Hard/Again repeat the step. There is
+// deliberately no leech mechanism: no lapse counter, no suspension.
+const RELEARN_STEP_MS = 10 * 60 * 1000; // one relearning step: 10 minutes
+const RELEARN_STABILITY = 0.007;        // ≈10 minutes, in days
+const GRADUATING_INTERVAL = 1;          // days after Good on a relearning card
+const EASY_INTERVAL = 4;                // days after Easy on a relearning card
 
 const DECAY = 0.5;
 const FACTOR = Math.pow(0.9, 1 / -DECAY) - 1; // ≈ 0.2346 — power forgetting curve constant
@@ -49,11 +59,6 @@ function stabilityAfterSuccess(S, D, R, rating) {
   return S * baseMult * easyBonus * diffFactor;
 }
 
-// Lapse (Again on review): reduce interval significantly
-function stabilityAfterLapse(S, D, R) {
-  return Math.max(0.5, S * 0.3);
-}
-
 // Difficulty drifts toward 5 (mean reversion), adjusted by rating
 function updateDifficulty(D, rating) {
   const delta = -(rating - 3) * 0.5; // Easy→-0.5, Good→0, Hard→+0.5, Again→+1.0
@@ -68,20 +73,45 @@ function fuzz(interval) {
 
 function fsrsUpdate(card, rating, now) {
   const isNew = !card.last_review || card.stability === 0;
-  let S, D;
-  if (isNew) { D = initDifficulty(rating); S = initStability(rating); }
-  else {
-    const R = retrievability(card.stability, card.last_review, now.toISOString());
-    S = rating === 1 ? stabilityAfterLapse(card.stability, card.difficulty, R)
-      : stabilityAfterSuccess(card.stability, card.difficulty, R, rating);
+  let S, D, relearning = 0, nextReview;
+  if (isNew) {
+    D = initDifficulty(rating); S = initStability(rating);
+    const interval = fuzz(nextInterval(S));
+    nextReview = new Date(now.getTime() + interval * 86400000);
+  } else if (rating === 1) {
+    // Lapse (Again on a review card): into relearning, not a 30% cut
+    // of a multi-year interval. Due again after one 10-minute step.
+    S = RELEARN_STABILITY;
     D = updateDifficulty(card.difficulty, rating);
+    relearning = 1;
+    nextReview = new Date(now.getTime() + RELEARN_STEP_MS);
+  } else if (card.relearning) {
+    // In relearning: Good/Easy graduate, Hard/Again repeat the step.
+    D = updateDifficulty(card.difficulty, rating);
+    if (rating === 3) {
+      S = GRADUATING_INTERVAL;
+      nextReview = new Date(now.getTime() + GRADUATING_INTERVAL * 86400000);
+    } else if (rating === 4) {
+      S = EASY_INTERVAL;
+      nextReview = new Date(now.getTime() + fuzz(EASY_INTERVAL) * 86400000);
+    } else {
+      S = RELEARN_STABILITY;
+      relearning = 1;
+      nextReview = new Date(now.getTime() + RELEARN_STEP_MS);
+    }
+  } else {
+    const R = retrievability(card.stability, card.last_review, now.toISOString());
+    S = stabilityAfterSuccess(card.stability, card.difficulty, R, rating);
+    D = updateDifficulty(card.difficulty, rating);
+    const interval = fuzz(nextInterval(S));
+    nextReview = new Date(now.getTime() + interval * 86400000);
   }
-  const interval = fuzz(nextInterval(S));
   return {
     stability: Math.round(S * 100) / 100,
     difficulty: Math.round(D * 100) / 100,
+    relearning,
     last_review: now.toISOString(),
-    next_review: new Date(now.getTime() + interval * 86400000).toISOString(),
+    next_review: nextReview.toISOString(),
     review_count: (card.review_count || 0) + 1,
   };
 }
@@ -93,6 +123,8 @@ let allTexts = [];
 let allChunkProgress = [];
 let sessionActive = false;
 let sessionQueue = [];
+let sessionRelearning = []; // lapsed cards waiting out their 10-min step
+let sessionRatedIds = new Set(); // unique cards rated this session (summary count)
 let sessionDone = 0;
 let sessionCorrect = 0;
 let sessionTotal = 0;
@@ -1379,6 +1411,66 @@ function closeAllFlashModals() {
   if (window.closeChunkPanel) window.closeChunkPanel();
 }
 
+// ── Pure session helpers ──
+// Extracted from startPractice/showNextCard so the session mechanics can
+// be tested as state transitions (see tests/tests.js 'relearning: ...').
+// They take plain data and return new state; they never touch the DOM,
+// the session globals, or the DB.
+
+// Pick the next card to present, honouring relearning steps:
+// - a relearning card whose step is due jumps ahead of the queue;
+// - when the queue empties, the earliest relearning card comes back early
+//   (learn-ahead: the step is 10 min, inside Anki's 20 min default);
+// - a card is never queued twice for one scheduled step.
+// Returns { next, queue, relearning } with fresh arrays; inputs untouched.
+function pickNextCard(queue, relearning, now) {
+  const q = [...queue];
+  const rl = [...relearning].sort((a, b) => a.dueAt - b.dueAt);
+  const due = [];
+  while (rl.length > 0 && rl[0].dueAt <= now) due.push(rl.shift().card);
+  const fresh = due.filter(c => !q.find(s => s.id === c.id));
+  if (fresh.length > 0) q.unshift(...fresh);
+  if (q.length === 0 && rl.length > 0) q.unshift(rl.shift().card);
+  return { next: q[0] || null, queue: q, relearning: rl };
+}
+
+// Choose the session's cards from the due pool, grouped by priority:
+// relearning/short-interval first (stability ≤ 2 — including a
+// card whose 10-minute step elapsed after a session restart), then
+// overdue (stalest first), then new cards. New cards wait while
+// anything reviewed is due. The cap is applied in priority order.
+// Returns { failed, overdue, fresh }; see orderSessionQueue for how
+// the groups are presented.
+function selectSessionCards(pool, sessionSize) {
+  const failed = pool.filter(c => c.last_review && c.stability > 0 && c.stability <= 2);
+  const overdue = pool.filter(c => c.last_review && c.stability > 2)
+    .sort((a, b) => new Date(a.next_review || 0) - new Date(b.next_review || 0));
+  // New cards wait until nothing is due: no new material while
+  // unmastered cards are pending.
+  const dueCount = pool.filter(c => c.last_review).length;
+  const fresh = dueCount > 0 ? [] : pool.filter(c => !c.last_review).sort(() => Math.random() - 0.5);
+  const groups = { failed: [], overdue: [], fresh: [] };
+  let total = 0;
+  for (const [key, group] of [['failed', failed], ['overdue', overdue], ['fresh', fresh]]) {
+    for (const card of group) {
+      if (total >= sessionSize) break;
+      groups[key].push(card);
+      total++;
+    }
+    if (total >= sessionSize) break;
+  }
+  return groups;
+}
+
+// Present the selected groups in priority order, shuffled within each
+// group: a lapsed card is always presented before any overdue card,
+// and overdue cards before any new card — the order inside a group
+// stays random.
+function orderSessionQueue(groups) {
+  const shuffle = arr => [...arr].sort(() => Math.random() - 0.5);
+  return [...shuffle(groups.failed), ...shuffle(groups.overdue), ...shuffle(groups.fresh)];
+}
+
 // ── Practice Session ──
 function startPractice(deckFilter, anchorEl) {
   const now = new Date();
@@ -1389,29 +1481,13 @@ function startPractice(deckFilter, anchorEl) {
   sessionDeck = deckFilter || null;
 
   const SESSION_SIZE = 10;
-  const failed = pool.filter(c => c.last_review && c.stability > 0 && c.stability <= 2);
-  const overdue = pool.filter(c => c.last_review && c.stability > 2)
-    .sort((a, b) => new Date(a.next_review || 0) - new Date(b.next_review || 0));
-  // New cards wait until nothing is due: no new material while
-  // unmastered cards are pending.
-  const dueCount = pool.filter(c => c.last_review).length;
-  const fresh = dueCount > 0 ? [] : pool.filter(c => !c.last_review).sort(() => Math.random() - 0.5);
-
-  let selected = [];
-  for (const group of [failed, overdue, fresh]) {
-    for (const card of group) {
-      if (selected.length >= SESSION_SIZE) break;
-      if (!selected.find(s => s.id === card.id)) selected.push(card);
-    }
-    if (selected.length >= SESSION_SIZE) break;
-  }
-  selected.sort(() => Math.random() - 0.5);
-
-  sessionQueue = selected;
+  sessionQueue = orderSessionQueue(selectSessionCards(pool, SESSION_SIZE));
+  sessionRelearning = [];
+  sessionRatedIds = new Set();
   sessionDone = 0;
   sessionCorrect = 0;
   sessionActive = true;
-  sessionTotal = selected.length;
+  sessionTotal = sessionQueue.length;
   showPracticeOverlay();
   showNextCard();
 }
@@ -1463,16 +1539,22 @@ function hidePracticeOverlay() {
 function showNextCard() {
   const overlay = document.getElementById('practiceOverlay');
   if (!overlay) return;
-  if (sessionQueue.length === 0) { showSessionSummary(); return; }
+  // Relearning cards whose step is due jump the queue; when nothing
+  // else is left, the earliest one comes back early (learn-ahead —
+  // the step is 10 min, inside Anki's 20 min default).
+  const picked = pickNextCard(sessionQueue, sessionRelearning, new Date());
+  sessionQueue = picked.queue;
+  sessionRelearning = picked.relearning;
+  if (!picked.next) { showSessionSummary(); return; }
 
-  const card = sessionQueue[0];
-  const pct = sessionTotal > 0 ? Math.round((sessionDone / sessionTotal) * 100) : 0;
+  const card = picked.next;
+  const pct = sessionTotal > 0 ? Math.min(100, Math.round((sessionDone / sessionTotal) * 100)) : 0;
 
   overlay.innerHTML = `
     <div class="practice-header">
       ${practiceHeaderLogo()}
       <div class="practice-progress-bar"><div class="practice-progress-fill" style="width:${pct}%;"></div></div>
-      <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${esc(getDeckDisplayName(deckIdForCard(card)))}</span></div>
+      <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${esc(getDeckDisplayName(deckIdForCard(card)))}${card.relearning ? ` · ${t('flashcards.relearning')}` : ''}</span></div>
       <button class="practice-close" data-action="end-practice">✕</button>
     </div>
     <div class="practice-card-area" data-action="reveal-card">
@@ -1507,6 +1589,10 @@ window.revealCard = function() {
 
 let _ratingInProgress = false;
 window.rateCard = async function(rating) {
+  // Delegation passes el.dataset.rating — a string. The FSRS core
+  // compares ratings strictly (rating === 1), so coerce here: without
+  // it, clicking Again was silently treated as a success.
+  rating = Number(rating);
   if (_ratingInProgress) return;
   if (sessionQueue.length === 0) return;
   _ratingInProgress = true;
@@ -1517,6 +1603,7 @@ window.rateCard = async function(rating) {
   try {
     const card = sessionQueue.shift();
     sessionDone++;
+    sessionRatedIds.add(card.id);
     if (rating >= 3) sessionCorrect++;
     // Read-only mode: the session still advances, but the rating is not
     // recorded — no FSRS update in memory or in the DB, so the card
@@ -1528,6 +1615,14 @@ window.rateCard = async function(rating) {
       const idx = allCards.findIndex(c => c.id === card.id);
       if (idx >= 0) Object.assign(allCards[idx], updates);
       if (state.db.connected) await state.db.from('flashcards').update(updates).eq('id', card.id);
+      // Lapsed (or still relearning) card: back in-session once its
+      // 10-minute step is due. Read-only sessions never schedule.
+      // The re-presentation is a scheduled rating of its own, so the
+      // session total grows with it — otherwise the header reads 12/10.
+      if (updates.relearning === 1) {
+        sessionRelearning.push({ card, dueAt: new Date(updates.next_review) });
+        sessionTotal++;
+      }
     }
     showNextCard();
   } finally {
@@ -1561,7 +1656,7 @@ function showSessionSummary() {
       <div class="practice-summary-emoji">${accuracy >= 80 ? lucideIcon('trophy', 32) : accuracy >= 50 ? lucideIcon('flame', 32) : lucideIcon('book-open', 32)}</div>
       <h2>${t('flashcards.session_complete')}</h2>
       <div class="practice-summary-stats">
-        <div class="practice-summary-stat"><span class="practice-stat-val">${sessionDone}</span><span class="practice-stat-lbl">${t('flashcards.cards_reviewed')}</span></div>
+        <div class="practice-summary-stat"><span class="practice-stat-val">${sessionRatedIds.size}</span><span class="practice-stat-lbl">${t('flashcards.cards_reviewed')}</span></div>
         <div class="practice-summary-stat"><span class="practice-stat-val">${sessionCorrect}</span><span class="practice-stat-lbl">${t('flashcards.good_plus')}</span></div>
         <div class="practice-summary-stat"><span class="practice-stat-val">${accuracy}%</span><span class="practice-stat-lbl">${t('flashcards.accuracy')}</span></div>
       </div>

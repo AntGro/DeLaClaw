@@ -4882,6 +4882,25 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(ordered.overdue[0] === older && ordered.overdue[1] === newer, 'overdue cards must sort stalest first for selection');
     });
 
+    test('demo data: sampled flashcards carry FSRS history, not only new cards', () => {
+      const demo = fs.readFileSync(path.join(__dirname, '..', 'js', 'demo-data.js'), 'utf-8');
+      const rows = demo.match(/\{ id: 'demo-fc-\d+',[^}]*\}/g) || [];
+      assert(rows.length === 36, `expected 36 demo flashcards (12 per language), got ${rows.length}`);
+      const reviewed = rows.filter(r => /last_review: d\(-\d+\)/.test(r));
+      assert(reviewed.length === 27, `expected 27 reviewed demo cards (9 per language), got ${reviewed.length}`);
+      const fresh = rows.filter(r => !/last_review:/.test(r) && /next_review: null/.test(r));
+      assert(fresh.length === 9, `expected 9 new demo cards (3 per language), got ${fresh.length}`);
+      assert(rows.some(r => /relearning: 1/.test(r)), 'the demo must include a card mid-relearning (stability 0.01, step due)');
+      assert(!rows.some(r => /status: '/.test(r)), 'demo flashcards must not carry the dead status field: FSRS fields are the source of truth');
+      // Every reviewed card's numbers must cohere: next_review ≈ last_review + stability.
+      for (const r of reviewed) {
+        const last = Number(/last_review: d\((-?\d+)\)/.exec(r)[1]);
+        const next = Number(/next_review: dateOnly\((-?\d+)\)/.exec(r)[1]);
+        const s = Number(/stability: ([\d.]+)/.exec(r)[1]);
+        assert(Math.abs((last + s) - next) <= 2, `demo card ${/id: '(demo-fc-\d+)'/.exec(r)[1]} is incoherent: last_review ${last} + stability ${s} should land near next_review ${next}`);
+      }
+    });
+
     test('relearning: session counter counts presentations, summary counts unique cards', () => {
       const flashJs = jsFiles['flashcards.js'];
       const rateStart = flashJs.indexOf('window.rateCard = async function');

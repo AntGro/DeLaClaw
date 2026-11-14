@@ -48,7 +48,7 @@ User jobs:
 - FSRS v5-style power forgetting curve: `R(S, t) = (t/S × F + 1)^(-0.5)` where F ≈ 0.2346
 - Stability ≈ target interval in days; next review = stability days from now; 90% target retention
 - Ratings: 1=Again, 2=Hard, 3=Good, 4=Easy
-- New cards: initial stability set by rating (Again≈0.007 ≈10min, Hard=1, Good=1, Easy=4)
+- New cards: initial stability set by rating (Again≈0.007, Hard=1, Good=1, Easy=4) — but the 1-day interval floor means a failed new card returns in 1 day, not 10 minutes
 - Success: stability multiplied by rating-dependent factor adjusted for retrievability and difficulty
 - Lapse (Again on review, Anki-style): card enters relearning — stability reset to ≈10min, next review after one 10-minute step, `relearning=1`; a flashcard re-enters the practice session once the step is due, never early (no learn-ahead since Nov 14, 2026: a card whose step has not elapsed waits for the next session). Text chunks share the scheduling (10-minute due, graduation) but have no session queue: a lapsed chunk reappears at the next revise, not in-session. Good on a relearning card/chunk graduates it to 1 day, Easy to 4 days, Hard to 12 hours, Again repeats the step. Difficulty increases. Deliberately no leech mechanism: no lapse counter, no suspension.
 - Session counts: the header counts ratings done vs cards in the session (`sessionDone / sessionTotal`); the total is the starting selection and never grows — a lapsed card's re-presentation belongs to a later session, so counting it here would read 3/6 for 3 cards. The summary's "cards reviewed" counts unique cards rated.

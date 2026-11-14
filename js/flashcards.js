@@ -1563,7 +1563,7 @@ function showNextCard() {
       <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${esc(getDeckDisplayName(deckIdForCard(card)))}${card.relearning ? ` · ${t('flashcards.relearning')}` : ''}</span></div>
       <button class="practice-close" data-action="end-practice">✕</button>
     </div>
-    <div class="practice-card-area" data-action="toggle-card" tabindex="0" role="button" aria-label="${t('flashcards.toggle_card')}">
+    <div class="practice-card-area" data-action="toggle-card" tabindex="0" role="button" aria-label="${t('flashcards.toggle_card')}" aria-pressed="false">
       <div class="practice-card" id="practiceCard">
         <div class="practice-card-front">
           <div class="practice-card-label">${t('flashcards.question')}</div>
@@ -1587,7 +1587,10 @@ function showNextCard() {
 
 window.toggleCard = function() {
   const card = document.getElementById('practiceCard');
-  if (!card) return;
+  // Ignore taps while a rating is in flight: flipping mid-write would
+  // hide the buttons under the rating being recorded.
+  if (!card || _ratingInProgress) return;
+  const area = card.closest('.practice-card-area');
   const hint = document.getElementById('practiceHint');
   const buttons = document.getElementById('practiceButtons');
   if (card.classList.contains('flipped')) {
@@ -1600,6 +1603,7 @@ window.toggleCard = function() {
     if (hint) hint.style.display = 'none';
     if (buttons) buttons.style.display = 'flex';
   }
+  if (area) area.setAttribute('aria-pressed', String(card.classList.contains('flipped')));
 };
 
 let _ratingInProgress = false;

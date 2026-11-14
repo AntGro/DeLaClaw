@@ -4798,6 +4798,19 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'the focused card area must show a visible focus outline');
     });
 
+    test('practice: toggleCard ignores taps mid-rating and announces its state', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const fnStart = flashJs.indexOf('window.toggleCard = function');
+      assert(fnStart !== -1, 'toggleCard must exist');
+      const fnBody = flashJs.slice(fnStart, flashJs.indexOf('let _ratingInProgress', fnStart));
+      assert(/if \(!card \|\| _ratingInProgress\) return;/.test(fnBody),
+        'toggleCard must ignore taps while a rating is in flight, or a tap mid-write flips the card and hides the buttons');
+      assert(/area\.setAttribute\('aria-pressed', String\(card\.classList\.contains\('flipped'\)\)\)/.test(fnBody),
+        'toggleCard must update aria-pressed so screen readers announce the flipped state');
+      assert(/aria-pressed="false"/.test(flashJs),
+        'the card area must start with aria-pressed="false"');
+    });
+
     test('practice: tapping the card alternates front and back', () => {
       const flashJs = jsFiles['flashcards.js'];
       const fnStart = flashJs.indexOf('window.toggleCard = function');
@@ -7818,7 +7831,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'the mutating close-and-open-revision action must be explicitly denied despite its close- prefix');
       assert(delegationSrc.includes("isReadOnly() && !readOnlyAllows(action)"),
         'click handler must consult the allowlist before dispatch');
-      for (const studyAction of ['start-practice', 'reveal-card', 'rate-card', 'continue-free-practice',
+      for (const studyAction of ['start-practice', 'toggle-card', 'rate-card', 'continue-free-practice',
         'start-text-practice', 'start-text-practice-for-text', 'handle-line-click', 'submit-text-review',
         'continue-text-same-text']) {
         assert(delegationSrc.includes(`'${studyAction}': 1`),

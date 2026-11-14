@@ -69,7 +69,7 @@
     // view-only interaction, and rateCard / submitTextReview skip their
     // FSRS persistence while readOnlyMode is on — ratings are never
     // written or applied to the in-memory schedule.
-    'start-practice': 1, 'reveal-card': 1, 'rate-card': 1, 'continue-free-practice': 1,
+    'start-practice': 1, 'toggle-card': 1, 'rate-card': 1, 'continue-free-practice': 1,
     'start-text-practice': 1, 'start-text-practice-for-text': 1, 'handle-line-click': 1,
     'submit-text-review': 1, 'continue-text-same-text': 1,
     'open-chunk-panel': 1, 'show-chunk-stats': 1, 'back-to-chunk-panel': 1, 'toggle-chunk-bar': 1, 'revise-chunk': 1

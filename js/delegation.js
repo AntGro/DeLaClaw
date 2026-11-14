@@ -263,7 +263,7 @@
       case 'close-edit-deck': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditDeckModal', []); break;
       case 'save-edit-deck': callWindow('saveEditDeck', []); break;
       case 'end-practice': callWindow('endPractice', []); break;
-      case 'reveal-card': callWindow('revealCard', []); break;
+      case 'toggle-card': callWindow('toggleCard', []); break;
       case 'rate-card': callWindow('rateCard', [el.dataset.rating]); break;
       case 'start-text-practice-for-text': callWindow('startTextPracticeForText', [getId(el)]); break;
       case 'open-edit-text': callWindow('openEditTextModal', [getId(el)]); break;

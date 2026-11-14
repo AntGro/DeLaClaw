@@ -1563,7 +1563,7 @@ function showNextCard() {
       <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${esc(getDeckDisplayName(deckIdForCard(card)))}${card.relearning ? ` · ${t('flashcards.relearning')}` : ''}</span></div>
       <button class="practice-close" data-action="end-practice">✕</button>
     </div>
-    <div class="practice-card-area" data-action="reveal-card">
+    <div class="practice-card-area" data-action="toggle-card">
       <div class="practice-card" id="practiceCard">
         <div class="practice-card-front">
           <div class="practice-card-label">${t('flashcards.question')}</div>
@@ -1585,12 +1585,21 @@ function showNextCard() {
   initMarquee();
 }
 
-window.revealCard = function() {
+window.toggleCard = function() {
   const card = document.getElementById('practiceCard');
-  if (!card || card.classList.contains('flipped')) return;
-  card.classList.add('flipped');
-  document.getElementById('practiceHint').style.display = 'none';
-  document.getElementById('practiceButtons').style.display = 'flex';
+  if (!card) return;
+  const hint = document.getElementById('practiceHint');
+  const buttons = document.getElementById('practiceButtons');
+  if (card.classList.contains('flipped')) {
+    // Back to the front: a tap too early is recoverable — think again.
+    card.classList.remove('flipped');
+    if (hint) hint.style.display = '';
+    if (buttons) buttons.style.display = 'none';
+  } else {
+    card.classList.add('flipped');
+    if (hint) hint.style.display = 'none';
+    if (buttons) buttons.style.display = 'flex';
+  }
 };
 
 let _ratingInProgress = false;
@@ -3058,7 +3067,7 @@ document.addEventListener('keydown', (e) => {
   if (!card) return;
   if (e.key === ' ' || e.key === 'Enter') {
     e.preventDefault();
-    if (!card.classList.contains('flipped')) window.revealCard();
+    window.toggleCard();
   } else if (card.classList.contains('flipped')) {
     if (e.key === '1') window.rateCard(1);
     else if (e.key === '2') window.rateCard(2);

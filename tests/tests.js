@@ -4761,7 +4761,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(/sessionRelearning\.push\(\{ card, dueAt: new Date\(updates\.next_review\) \}\)/.test(rateBody),
         'rateCard must queue a lapsed card for re-presentation');
       const showStart = flashJs.indexOf('function showNextCard()');
-      const showBody = flashJs.slice(showStart, flashJs.indexOf('window.revealCard', showStart));
+      const showBody = flashJs.slice(showStart, flashJs.indexOf('window.toggleCard', showStart));
       assert(/pickNextCard\(sessionQueue, sessionRelearning, new Date\(\)\)/.test(showBody),
         'showNextCard must pick the next card through the pure helper');
       assert(/t\('flashcards\.relearning'\)/.test(showBody), 'a re-shown relearning card must be marked as such');
@@ -4773,6 +4773,23 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'sessionTotal must count the ordered queue (a stale reference here breaks the session entirely)');
       assert(!/selected\.sort\(\(\) => Math\.random\(\) - 0\.5\)/.test(startBody),
         'startPractice must no longer shuffle the whole selection flat');
+    });
+
+    test('practice: tapping the card alternates front and back', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const fnStart = flashJs.indexOf('window.toggleCard = function');
+      assert(fnStart !== -1, 'toggleCard must exist');
+      const fnBody = flashJs.slice(fnStart, flashJs.indexOf('let _ratingInProgress', fnStart));
+      assert(/classList\.add\('flipped'\)/.test(fnBody), 'toggling forward must add the flipped class');
+      assert(/classList\.remove\('flipped'\)/.test(fnBody), 'toggling back must remove the flipped class');
+      assert(/buttons\.style\.display = 'flex'/.test(fnBody), 'showing the back must reveal the rating buttons');
+      assert(/buttons\.style\.display = 'none'/.test(fnBody), 'flipping back to the front must hide the rating buttons again');
+      assert(/hint\.style\.display = ''/.test(fnBody), 'flipping back to the front must show the hint again');
+      assert(/data-action="toggle-card"/.test(flashJs), 'the card area must fire the toggle action');
+      const delJs = jsFiles['delegation.js'];
+      assert(/case 'toggle-card': callWindow\('toggleCard', \[\]\);/.test(delJs), 'delegation must route the tap to toggleCard');
+      assert(/window\.toggleCard\(\);/.test(flashJs), 'Space/Enter must toggle the card (not only reveal it)');
+      assert(!/if \(!card\.classList\.contains\('flipped'\)\) window\.toggleCard/.test(flashJs), 'the keyboard must not guard the toggle to reveal-only');
     });
 
     // Relearning queue behaviour: the mechanics are pure helpers, so the

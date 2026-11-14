@@ -4719,15 +4719,25 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(easyDays >= 3.8 && easyDays <= 4.2, `Easy must be due in ~4 days, got ${easyDays}`);
     });
 
-    test('relearning: Hard/Again repeat the 10-minute step', () => {
+    test('relearning: Hard graduates at 12 hours', () => {
       const fsrsUpdate = loadFsrsUpdate();
       const now = new Date('2026-11-13T00:40:00Z');
       const relearning = { stability: 0.01, difficulty: 5.5, relearning: 1, last_review: '2026-11-13T00:30:00Z', next_review: '2026-11-13T00:40:00Z', review_count: 11 };
-      for (const rating of [1, 2]) {
-        const out = fsrsUpdate(relearning, rating, now);
-        assert(out.relearning === 1, `rating ${rating} on a relearning card must stay in relearning`);
-        assert(new Date(out.next_review) - now === 10 * 60 * 1000, `rating ${rating} must repeat the 10-minute step`);
-      }
+      const out = fsrsUpdate(relearning, 2, now);
+      assert(out.relearning === 0, 'Hard on a relearning card must graduate (clear relearning)');
+      assert(out.stability === 0.5, `Hard must graduate to stability 0.5 (12 hours), got ${out.stability}`);
+      assert(new Date(out.next_review) - now === 12 * 60 * 60 * 1000, `Hard must be due in 12 hours, got ${out.next_review}`);
+      assert(out.difficulty === 5.9, `Hard must raise difficulty to 5.9, got ${out.difficulty}`);
+    });
+
+    test('relearning: Again repeats the 10-minute step', () => {
+      const fsrsUpdate = loadFsrsUpdate();
+      const now = new Date('2026-11-13T00:40:00Z');
+      const relearning = { stability: 0.01, difficulty: 5.5, relearning: 1, last_review: '2026-11-13T00:30:00Z', next_review: '2026-11-13T00:40:00Z', review_count: 11 };
+      const out = fsrsUpdate(relearning, 1, now);
+      assert(out.relearning === 1, 'Again on a relearning card must stay in relearning');
+      assert(new Date(out.next_review) - now === 10 * 60 * 1000, 'Again must repeat the 10-minute step');
+      assert(out.difficulty === 6.35, `Again must raise difficulty to 6.35, got ${out.difficulty}`);
     });
 
     test('relearning: normal success path and new-card path are unchanged', () => {

@@ -18,12 +18,13 @@ import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, de
 // Lapses follow Anki: Again on a review card puts it into relearning
 // (one 10-minute step), and it comes back in-session once the step is
 // due — never early: a card whose step has not elapsed waits for the
-// next session. Good graduates it to 1 day, Easy to 4 days, Hard/Again
-// repeat the step. There is deliberately no leech mechanism: no lapse
-// counter, no suspension.
+// next session. Good graduates it to 1 day, Easy to 4 days, Hard to
+// 12 hours, Again repeats the step. There is deliberately no leech
+// mechanism: no lapse counter, no suspension.
 const RELEARN_STEP_MS = 10 * 60 * 1000; // one relearning step: 10 minutes
 const RELEARN_STABILITY = 0.007;        // ≈10 minutes, in days
 const GRADUATING_INTERVAL = 1;          // days after Good on a relearning card
+const HARD_RELEARN_INTERVAL = 0.5;      // days after Hard on a relearning card: 12 hours (Anki: the average of the step and the graduating interval)
 const EASY_INTERVAL = 4;                // days after Easy on a relearning card
 
 const DECAY = 0.5;
@@ -87,7 +88,8 @@ function fsrsUpdate(card, rating, now) {
     relearning = 1;
     nextReview = new Date(now.getTime() + RELEARN_STEP_MS);
   } else if (card.relearning) {
-    // In relearning: Good/Easy graduate, Hard/Again repeat the step.
+    // In relearning: Good/Easy graduate, Hard graduates at 12 hours,
+    // Again repeats the step.
     D = updateDifficulty(card.difficulty, rating);
     if (rating === 3) {
       S = GRADUATING_INTERVAL;
@@ -95,6 +97,9 @@ function fsrsUpdate(card, rating, now) {
     } else if (rating === 4) {
       S = EASY_INTERVAL;
       nextReview = new Date(now.getTime() + fuzz(EASY_INTERVAL) * 86400000);
+    } else if (rating === 2) {
+      S = HARD_RELEARN_INTERVAL;
+      nextReview = new Date(now.getTime() + HARD_RELEARN_INTERVAL * 86400000);
     } else {
       S = RELEARN_STABILITY;
       relearning = 1;

@@ -8785,7 +8785,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('sections-pure: runDeckToSectionMigration — checked writes, flip last, id-precise rollback', async () => {
       const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
-      const spec = { deckId: 'DECK', deckName: 'Old', targetId: 'GENERAL', targetName: '' };
+      const spec = { deckId: 'DECK', deckName: 'Old', starId: 'STAR' };
       // Fake query-builder db: records calls, fails the Nth call when failAt > 0
       // (or the listed calls when failAt is an array).
       // select returns the ids that the bulk moves would touch.
@@ -8808,6 +8808,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
               },
             }),
             update: (patch) => ({ eq: (col, val) => record({ op: 'update', table, patch, col, val }) }),
+            delete: () => ({ eq: (col, val) => record({ op: 'delete', table, col, val }) }),
           }),
         };
       };
@@ -8818,9 +8819,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(db.calls[0].op === 'select' && db.calls[0].table === 'flashcards', 'first call captures the deck\'s card ids');
       assert(db.calls[1].op === 'select' && db.calls[1].table === 'texts', 'second call captures the deck\'s text ids');
       assert(db.calls[2].table === 'flashcards' && db.calls[2].col === 'deck_id' && db.calls[2].val === 'DECK'
-        && db.calls[2].patch.deck_id === 'GENERAL', 'third call bulk-moves the cards to the default deck');
-      assert(db.calls[3].table === 'texts' && db.calls[3].patch.deck_id === 'GENERAL',
-        'fourth call bulk-moves the texts to the default deck');
+        && db.calls[2].patch.deck_id === 'STAR' && db.calls[2].patch.deck === '*', 'third call bulk-moves the cards into the * bucket');
+      assert(db.calls[3].table === 'texts' && db.calls[3].patch.deck_id === 'STAR' && db.calls[3].patch.deck === '*',
+        'fourth call bulk-moves the texts into the * bucket');
       assert(db.calls[4].table === 'flashcard_decks' && db.calls[4].patch.kind === 'section',
         'the kind flip is the last write');
       // A failed id capture throws before any move.
@@ -8834,7 +8835,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
       assert(threw && db.calls.length === 3, 'a failed card move must abort before the text move and the flip');
       // A failed text move throws after rolling the cards back — by id,
-      // so the default deck's own items are untouched.
+      // so the * bucket's other items (none yet) and the section are untouched.
       db = fakeDb(4);
       threw = null;
       try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
@@ -8846,31 +8847,40 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'rollback moves the second card back too');
       assert(!db.calls.some(c => c.table === 'flashcard_decks'),
         'a failed text move must never reach the kind flip');
-      // A failed flip throws after rolling both tables back, cards first.
+      // A failed flip throws after rolling both tables back, cards first,
+      // then deletes the * bucket once the rollback succeeded.
       db = fakeDb(5);
       threw = null;
       try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
-      assert(threw && db.calls.length === 8, 'a failed flip must roll both tables back before rethrowing');
+      assert(threw && db.calls.length === 9, 'a failed flip must roll both tables back and delete the * bucket before rethrowing');
       assert(db.calls[5].table === 'flashcards' && db.calls[5].col === 'id' && db.calls[5].val === 'c1',
         'flip rollback moves the cards back first');
       assert(db.calls[7].table === 'texts' && db.calls[7].col === 'id' && db.calls[7].val === 't1'
         && db.calls[7].patch.deck_id === 'DECK', 'flip rollback moves the texts back last');
+      assert(db.calls[8].op === 'delete' && db.calls[8].table === 'flashcard_decks' && db.calls[8].col === 'id'
+        && db.calls[8].val === 'STAR', 'flip rollback deletes the * bucket once every row moved back');
       // A failed flip whose card rollback also fails: every rollback row
-      // is still attempted, and the thrown error reports the rollback
+      // is still attempted, the * bucket is NOT deleted while items may
+      // still point at it, and the thrown error reports the rollback
       // failure alongside the flip failure.
       db = fakeDb([5, 6]);
       threw = null;
       try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
       assert(threw && db.calls.length === 8, 'a failed rollback must not cut the remaining rollback rows short');
+      assert(!db.calls.some(c => c.op === 'delete'),
+        'a failed rollback must leave the * bucket in place');
       assert(String(threw.message).includes('rollback'), 'the thrown error must report the failed rollback, not just the flip');
       // flashcards.js is wired to the helper, with no unchecked bulk
-      // move left in the conversion.
+      // move left in the conversion, and the * bucket is created first.
       const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
       assert(flashSrc.includes('runDeckToSectionMigration(state.db'),
         'deck conversion must run through the checked migration helper');
       const conv = flashSrc.slice(flashSrc.indexOf('async function convertDeckToSection'));
-      assert(!conv.slice(0, conv.indexOf('async function ', 10)).includes("await state.db.from('flashcards').update"),
+      const convBody = conv.slice(0, conv.indexOf('async function ', 10));
+      assert(!convBody.includes("await state.db.from('flashcards').update"),
         'convertDeckToSection must not bulk-move cards itself');
+      assert(convBody.includes("name: '*'") && convBody.includes('parent_id: row.id'),
+        'convertDeckToSection must create a * bucket inside the deck being converted');
     });
 
     test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {

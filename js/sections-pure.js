@@ -444,7 +444,7 @@ function combineMigrationErrors(originalError, rollbackError) {
 // rollback error (or null when every row moved back) — the caller
 // reports it alongside the original error instead of swallowing it.
 // Every row is attempted even after one fails, so a single bad row
-// cannot strand the rest in the default deck.
+// cannot strand the rest in the '*' bucket.
 async function rollbackDeckItems(db, table, ids, deckId, deckName) {
   let firstError = null;
   for (const id of ids) {
@@ -460,34 +460,34 @@ async function rollbackDeckItems(db, table, ids, deckId, deckName) {
 
 /**
  * The write sequence of a flashcard deck → section conversion: the
- * deck's cards and texts move to the default deck first, then the row
- * flips to kind='section'.
+ * deck's cards and texts move into a fresh '*' bucket inside it first
+ * (created by the caller, like runBucketToSectionMigration), then the
+ * row flips to kind='section'.
  *
  * Same ordering-and-checks safety as runBucketToSectionMigration, but
- * the shape differs: two item tables, and the destination is the
- * shared default deck rather than a fresh '*' bucket. Every result
+ * the shape differs: two item tables, so two bulk moves. Every result
  * is checked and the kind flip runs only after both moves succeed,
  * so a failed move can never strand items inside a section row. The
- * destination already holds items, so the rollback is id-precise:
- * the moved rows' ids are captured first and only those rows move
- * back — a rollback by destination would move the default deck's own
- * items too. A failed rollback is reported alongside the original
- * error (the items stay in the visible default deck, so nothing is
+ * rollback is id-precise: the moved rows' ids are captured first and
+ * only those rows move back. A failed flip deletes the '*' bucket,
+ * but only after a successful rollback — never while items may still
+ * point at it. A failed rollback is reported alongside the original
+ * error (the items stay in the visible '*' bucket, so nothing is
  * lost, but the caller is told the move-back did not happen).
  *
- * spec: { deckId, deckName, targetId, targetName }
+ * spec: { deckId, deckName, starId }
  */
 export async function runDeckToSectionMigration(db, spec) {
-  const { deckId, deckName, targetId, targetName } = spec;
+  const { deckId, deckName, starId } = spec;
   const cards = await db.from('flashcards').select('id').eq('deck_id', deckId);
   if (cards.error) throw cards.error;
   const texts = await db.from('texts').select('id').eq('deck_id', deckId);
   if (texts.error) throw texts.error;
   const cardIds = (cards.data || []).map(r => r.id);
   const textIds = (texts.data || []).map(r => r.id);
-  const moveCards = await db.from('flashcards').update({ deck_id: targetId, deck: targetName }).eq('deck_id', deckId);
+  const moveCards = await db.from('flashcards').update({ deck_id: starId, deck: '*' }).eq('deck_id', deckId);
   if (moveCards.error) throw moveCards.error;
-  const moveTexts = await db.from('texts').update({ deck_id: targetId, deck: targetName }).eq('deck_id', deckId);
+  const moveTexts = await db.from('texts').update({ deck_id: starId, deck: '*' }).eq('deck_id', deckId);
   if (moveTexts.error) {
     const rollbackError = await rollbackDeckItems(db, 'flashcards', cardIds, deckId, deckName);
     if (rollbackError) throw combineMigrationErrors(moveTexts.error, rollbackError);
@@ -498,6 +498,11 @@ export async function runDeckToSectionMigration(db, spec) {
   const rollbackCardsError = await rollbackDeckItems(db, 'flashcards', cardIds, deckId, deckName);
   const rollbackTextsError = await rollbackDeckItems(db, 'texts', textIds, deckId, deckName);
   const rollbackError = rollbackCardsError || rollbackTextsError;
+  if (!rollbackError) {
+    try {
+      await db.from('flashcard_decks').delete().eq('id', starId);
+    } catch (_) { /* best effort — an empty star bucket lingering is harmless */ }
+  }
   if (rollbackError) throw combineMigrationErrors(flip.error, rollbackError);
   throw flip.error;
 }

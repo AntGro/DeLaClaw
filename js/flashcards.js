@@ -1279,16 +1279,28 @@ function flashChildRow(parentId, name) {
   return [..._deckMap.values()].find(d => (d.parent_id ?? null) === (parentId ?? null) && (d.name || '').toLowerCase() === name.toLowerCase()) || null;
 }
 
-// Convert a bucket deck into a section: its cards and texts move to the
-// default deck first, then the row flips to kind='section'. The sequence
-// runs through runDeckToSectionMigration (checked writes, flip last,
-// id-precise rollback), so a failed move can never strand items inside
-// a section row, where deck buckets never render them.
+// Convert a bucket deck into a section: its cards and texts move into a
+// fresh '*' bucket inside it first (like Lists/TODOs/Habits), then the
+// row flips to kind='section'. The sequence runs through
+// runDeckToSectionMigration (checked writes, flip last, id-precise
+// rollback), so a failed move can never strand items inside a section
+// row, where deck buckets never render them. The '*' bucket keeps the
+// converted deck's explicit type when it has one, so an empty text
+// deck's star bucket still renders as a text deck.
 async function convertDeckToSection(row) {
-  const targetId = _defaultDeckId;
-  const targetName = _deckMap.get(targetId)?.name ?? '';
+  const starRow = {
+    name: '*', shortname: null, color: row.color || FLASH_SECTION_DEFAULT_COLOR,
+    sort_order: 0, kind: 'bucket', parent_id: row.id,
+  };
+  if (row.deck_type) starRow.deck_type = row.deck_type;
+  const { data, error } = await state.db.from('flashcard_decks').insert(starRow).select();
+  if (error) throw error;
+  const starId = data?.[0]?.id;
+  // Abort without flipping kind if the '*' bucket is missing — see
+  // convertListBucketToSection.
+  if (!starId) throw new Error('section-convert-star-missing');
   await runDeckToSectionMigration(state.db, {
-    deckId: row.id, deckName: row.name ?? '', targetId, targetName,
+    deckId: row.id, deckName: row.name ?? '', starId,
   });
   row.kind = 'section';
   await loadFlashcardDecks();

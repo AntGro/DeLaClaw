@@ -4719,15 +4719,25 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(easyDays >= 3.8 && easyDays <= 4.2, `Easy must be due in ~4 days, got ${easyDays}`);
     });
 
-    test('relearning: Hard/Again repeat the 10-minute step', () => {
+    test('relearning: Hard graduates at 12 hours', () => {
       const fsrsUpdate = loadFsrsUpdate();
       const now = new Date('2026-11-13T00:40:00Z');
       const relearning = { stability: 0.01, difficulty: 5.5, relearning: 1, last_review: '2026-11-13T00:30:00Z', next_review: '2026-11-13T00:40:00Z', review_count: 11 };
-      for (const rating of [1, 2]) {
-        const out = fsrsUpdate(relearning, rating, now);
-        assert(out.relearning === 1, `rating ${rating} on a relearning card must stay in relearning`);
-        assert(new Date(out.next_review) - now === 10 * 60 * 1000, `rating ${rating} must repeat the 10-minute step`);
-      }
+      const out = fsrsUpdate(relearning, 2, now);
+      assert(out.relearning === 0, 'Hard on a relearning card must graduate (clear relearning)');
+      assert(out.stability === 0.5, `Hard must graduate to stability 0.5 (12 hours), got ${out.stability}`);
+      assert(new Date(out.next_review) - now === 12 * 60 * 60 * 1000, `Hard must be due in 12 hours, got ${out.next_review}`);
+      assert(out.difficulty === 5.9, `Hard must raise difficulty to 5.9, got ${out.difficulty}`);
+    });
+
+    test('relearning: Again repeats the 10-minute step', () => {
+      const fsrsUpdate = loadFsrsUpdate();
+      const now = new Date('2026-11-13T00:40:00Z');
+      const relearning = { stability: 0.01, difficulty: 5.5, relearning: 1, last_review: '2026-11-13T00:30:00Z', next_review: '2026-11-13T00:40:00Z', review_count: 11 };
+      const out = fsrsUpdate(relearning, 1, now);
+      assert(out.relearning === 1, 'Again on a relearning card must stay in relearning');
+      assert(new Date(out.next_review) - now === 10 * 60 * 1000, 'Again must repeat the 10-minute step');
+      assert(out.difficulty === 6.35, `Again must raise difficulty to 6.35, got ${out.difficulty}`);
     });
 
     test('relearning: normal success path and new-card path are unchanged', () => {
@@ -4751,7 +4761,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(/sessionRelearning\.push\(\{ card, dueAt: new Date\(updates\.next_review\) \}\)/.test(rateBody),
         'rateCard must queue a lapsed card for re-presentation');
       const showStart = flashJs.indexOf('function showNextCard()');
-      const showBody = flashJs.slice(showStart, flashJs.indexOf('window.revealCard', showStart));
+      const showBody = flashJs.slice(showStart, flashJs.indexOf('window.toggleCard', showStart));
       assert(/pickNextCard\(sessionQueue, sessionRelearning, new Date\(\)\)/.test(showBody),
         'showNextCard must pick the next card through the pure helper');
       assert(/t\('flashcards\.relearning'\)/.test(showBody), 'a re-shown relearning card must be marked as such');
@@ -4763,6 +4773,59 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'sessionTotal must count the ordered queue (a stale reference here breaks the session entirely)');
       assert(!/selected\.sort\(\(\) => Math\.random\(\) - 0\.5\)/.test(startBody),
         'startPractice must no longer shuffle the whole selection flat');
+    });
+
+    test('practice: Space/Enter on a focused control must not flip the card', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      // The document-level keyboard handler must let a focused control keep
+      // its own activation: Space/Enter on a rating or close button must
+      // fire the button, not toggle the card.
+      const guard = "e.target.closest?.('button, input, textarea, select, a[href]')";
+      assert(flashJs.includes(guard), 'the keyboard handler must ignore Space/Enter originating from a focused control');
+      const spaceIdx = flashJs.indexOf("if (e.key === ' ' || e.key === 'Enter')");
+      const guardIdx = flashJs.indexOf(guard);
+      const toggleIdx = flashJs.indexOf('window.toggleCard();', spaceIdx);
+      assert(spaceIdx !== -1 && guardIdx > spaceIdx && toggleIdx > guardIdx,
+        'the control guard must sit inside the Space/Enter branch, before the toggle');
+      // The card area itself must be keyboard-focusable with button semantics.
+      assert(/data-action="toggle-card" tabindex="0" role="button" aria-label="\$\{t\('flashcards\.toggle_card'\)\}"/.test(flashJs),
+        'the card area must be focusable (tabindex 0, role button) with a localized label');
+      const i18nJs = jsFiles['i18n.js'];
+      assert(/toggle_card: 'Flip card'/.test(i18nJs), 'toggle_card must exist in English');
+      assert(/toggle_card: 'Retourner la carte'/.test(i18nJs), 'toggle_card must exist in French');
+      assert(/toggle_card: 'Voltear la tarjeta'/.test(i18nJs), 'toggle_card must exist in Spanish');
+      assert(/\.practice-card-area:focus-visible/.test(styleCss),
+        'the focused card area must show a visible focus outline');
+    });
+
+    test('practice: toggleCard ignores taps mid-rating and announces its state', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const fnStart = flashJs.indexOf('window.toggleCard = function');
+      assert(fnStart !== -1, 'toggleCard must exist');
+      const fnBody = flashJs.slice(fnStart, flashJs.indexOf('let _ratingInProgress', fnStart));
+      assert(/if \(!card \|\| _ratingInProgress\) return;/.test(fnBody),
+        'toggleCard must ignore taps while a rating is in flight, or a tap mid-write flips the card and hides the buttons');
+      assert(/area\.setAttribute\('aria-pressed', String\(card\.classList\.contains\('flipped'\)\)\)/.test(fnBody),
+        'toggleCard must update aria-pressed so screen readers announce the flipped state');
+      assert(/aria-pressed="false"/.test(flashJs),
+        'the card area must start with aria-pressed="false"');
+    });
+
+    test('practice: tapping the card alternates front and back', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      const fnStart = flashJs.indexOf('window.toggleCard = function');
+      assert(fnStart !== -1, 'toggleCard must exist');
+      const fnBody = flashJs.slice(fnStart, flashJs.indexOf('let _ratingInProgress', fnStart));
+      assert(/classList\.add\('flipped'\)/.test(fnBody), 'toggling forward must add the flipped class');
+      assert(/classList\.remove\('flipped'\)/.test(fnBody), 'toggling back must remove the flipped class');
+      assert(/buttons\.style\.display = 'flex'/.test(fnBody), 'showing the back must reveal the rating buttons');
+      assert(/buttons\.style\.display = 'none'/.test(fnBody), 'flipping back to the front must hide the rating buttons again');
+      assert(/hint\.style\.display = ''/.test(fnBody), 'flipping back to the front must show the hint again');
+      assert(/data-action="toggle-card"/.test(flashJs), 'the card area must fire the toggle action');
+      const delJs = jsFiles['delegation.js'];
+      assert(/case 'toggle-card': callWindow\('toggleCard', \[\]\);/.test(delJs), 'delegation must route the tap to toggleCard');
+      assert(/window\.toggleCard\(\);/.test(flashJs), 'Space/Enter must toggle the card (not only reveal it)');
+      assert(!/if \(!card\.classList\.contains\('flipped'\)\) window\.toggleCard/.test(flashJs), 'the keyboard must not guard the toggle to reveal-only');
     });
 
     // Relearning queue behaviour: the mechanics are pure helpers, so the
@@ -4789,17 +4852,29 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(waiting.relearning.length === 1 && waiting.relearning[0].card === C, 'the pending card must stay in relearning');
     });
 
-    test('relearning: empty queue brings the earliest card back early (learn-ahead)', () => {
+    test('relearning: a card whose step has not elapsed never comes back early', () => {
       const { pickNextCard } = loadSessionHelpers();
       const now = new Date('2026-11-13T00:30:00Z');
       const C = { id: 'c' }, D = { id: 'd' };
+      // Queue empty, steps still pending: no next card — the session ends
+      // and both cards wait for the next session. (There was a learn-ahead
+      // here that brought the earliest card back instantly; removed Nov 14,
+      // 2026 — a card must not reappear before its 10-minute step is due.)
       const out = pickNextCard([], [
         { card: C, dueAt: new Date('2026-11-13T00:40:00Z') },
         { card: D, dueAt: new Date('2026-11-13T00:35:00Z') },
       ], now);
-      assert(out.next === D, 'the earliest-due relearning card must return first');
-      assert(out.queue.map(c => c.id).join(',') === 'd', 'only the earliest card returns early');
-      assert(out.relearning.length === 1 && out.relearning[0].card === C, 'the later card must stay in relearning');
+      assert(out.next === null, 'no card must be presented when the queue is empty and no step is due');
+      assert(out.queue.length === 0, 'the queue must stay empty');
+      assert(out.relearning.length === 2, 'both pending cards must stay in relearning for the next session');
+      // But a card whose step HAS elapsed still returns, earliest first.
+      const due = pickNextCard([], [
+        { card: C, dueAt: new Date('2026-11-13T00:40:00Z') },
+        { card: D, dueAt: new Date('2026-11-13T00:25:00Z') },
+      ], now);
+      assert(due.next === D, 'the earliest due relearning card must return once its step has elapsed');
+      assert(due.queue.map(c => c.id).join(',') === 'd', 'only the due card returns');
+      assert(due.relearning.length === 1 && due.relearning[0].card === C, 'the not-yet-due card must stay in relearning');
     });
 
     test('relearning: multiple due cards return in due order, once per step', () => {
@@ -4882,12 +4957,33 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(ordered.overdue[0] === older && ordered.overdue[1] === newer, 'overdue cards must sort stalest first for selection');
     });
 
-    test('relearning: session counter counts presentations, summary counts unique cards', () => {
+    test('demo data: sampled flashcards carry FSRS history, not only new cards', () => {
+      const demo = fs.readFileSync(path.join(__dirname, '..', 'js', 'demo-data.js'), 'utf-8');
+      const rows = demo.match(/\{ id: 'demo-fc-\d+',[^}]*\}/g) || [];
+      assert(rows.length === 36, `expected 36 demo flashcards (12 per language), got ${rows.length}`);
+      const reviewed = rows.filter(r => /last_review: d\(-\d+\)/.test(r));
+      assert(reviewed.length === 27, `expected 27 reviewed demo cards (9 per language), got ${reviewed.length}`);
+      const fresh = rows.filter(r => !/last_review:/.test(r) && /next_review: null/.test(r));
+      assert(fresh.length === 9, `expected 9 new demo cards (3 per language), got ${fresh.length}`);
+      assert(rows.some(r => /relearning: 1/.test(r)), 'the demo must include a card mid-relearning (stability 0.01, step due)');
+      assert(!rows.some(r => /status: '/.test(r)), 'demo flashcards must not carry the dead status field: FSRS fields are the source of truth');
+      // Every reviewed card's numbers must cohere: next_review ≈ last_review + stability.
+      for (const r of reviewed) {
+        const last = Number(/last_review: d\((-?\d+)\)/.exec(r)[1]);
+        const next = Number(/next_review: dateOnly\((-?\d+)\)/.exec(r)[1]);
+        const s = Number(/stability: ([\d.]+)/.exec(r)[1]);
+        assert(Math.abs((last + s) - next) <= 2, `demo card ${/id: '(demo-fc-\d+)'/.exec(r)[1]} is incoherent: last_review ${last} + stability ${s} should land near next_review ${next}`);
+      }
+    });
+
+    test('relearning: session counter stays fixed, summary counts unique cards', () => {
       const flashJs = jsFiles['flashcards.js'];
       const rateStart = flashJs.indexOf('window.rateCard = async function');
       const rateBody = flashJs.slice(rateStart, flashJs.indexOf('window.endPractice', rateStart));
-      assert(/sessionTotal\+\+;/.test(rateBody),
-        'queuing a lapsed card must grow the session total, or the header reads 12/10');
+      assert(!/sessionTotal\+\+/.test(rateBody),
+        'queuing a lapsed card must not grow the session total: its re-presentation belongs to a later session, so the header would read 3/6 for 3 cards');
+      assert(/sessionRelearning\.push\(\{ card, dueAt: new Date\(updates\.next_review\) \}\)/.test(rateBody),
+        'rateCard must still queue a lapsed card for re-presentation once its step is due');
       assert(/sessionRatedIds\.add\(card\.id\)/.test(rateBody),
         'rateCard must record the rated card id for the unique count');
       const startStart = flashJs.indexOf('function startPractice(');
@@ -7735,7 +7831,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'the mutating close-and-open-revision action must be explicitly denied despite its close- prefix');
       assert(delegationSrc.includes("isReadOnly() && !readOnlyAllows(action)"),
         'click handler must consult the allowlist before dispatch');
-      for (const studyAction of ['start-practice', 'reveal-card', 'rate-card', 'continue-free-practice',
+      for (const studyAction of ['start-practice', 'toggle-card', 'rate-card', 'continue-free-practice',
         'start-text-practice', 'start-text-practice-for-text', 'handle-line-click', 'submit-text-review',
         'continue-text-same-text']) {
         assert(delegationSrc.includes(`'${studyAction}': 1`),

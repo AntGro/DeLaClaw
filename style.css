@@ -1712,6 +1712,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .practice-close:hover { color:var(--text); }
 
 .practice-card-area { perspective:1000px; cursor:pointer; width:100%; max-width:520px; }
+.practice-card-area:focus-visible { outline:2px solid var(--accent); outline-offset:4px; border-radius:12px; }
 .practice-card {
   width:100%; min-height:280px; position:relative;
   transform-style:preserve-3d; transition:transform 0.5s cubic-bezier(0.4,0,0.2,1);

@@ -141,20 +141,20 @@ function en() {
 
   const flashcards = [
     // Deck: World Capitals, nested under a Geography section sample
-    { id: 'demo-fc-001', deck: 'Geography > World Capitals', front: 'What is the capital of South Korea?', back: 'Seoul', status: 'mastered', next_review: dateOnly(30), created_at: d(-40), updated_at: d(-5) },
-    { id: 'demo-fc-002', deck: 'Geography > World Capitals', front: 'What is the capital of Australia?', back: 'Canberra (not Sydney)', status: 'ok', next_review: dateOnly(7), created_at: d(-40), updated_at: d(-3) },
-    { id: 'demo-fc-003', deck: 'Geography > World Capitals', front: 'What is the capital of Brazil?', back: 'Brasília', status: 'due', next_review: dateOnly(-1), created_at: d(-38), updated_at: d(-10) },
-    { id: 'demo-fc-004', deck: 'Geography > World Capitals', front: 'What is the capital of Canada?', back: 'Ottawa', status: 'new', next_review: null, created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-fc-001', deck: 'Geography > World Capitals', front: 'What is the capital of South Korea?', back: 'Seoul', stability: 35, difficulty: 4.2, last_review: d(-5), next_review: dateOnly(30), review_count: 12, relearning: 0, created_at: d(-40), updated_at: d(-5) },
+    { id: 'demo-fc-002', deck: 'Geography > World Capitals', front: 'What is the capital of Australia?', back: 'Canberra (not Sydney)', stability: 9, difficulty: 4.8, last_review: d(-3), next_review: dateOnly(7), review_count: 4, relearning: 0, created_at: d(-40), updated_at: d(-3) },
+    { id: 'demo-fc-003', deck: 'Geography > World Capitals', front: 'What is the capital of Brazil?', back: 'Brasília', stability: 9, difficulty: 5.1, last_review: d(-10), next_review: dateOnly(-1), review_count: 5, relearning: 0, created_at: d(-38), updated_at: d(-10) },
+    { id: 'demo-fc-004', deck: 'Geography > World Capitals', front: 'What is the capital of Canada?', back: 'Ottawa', next_review: null, created_at: d(-5), updated_at: d(-5) },
     // Deck: Vocabulary
-    { id: 'demo-fc-005', deck: 'Vocabulary', front: 'Ephemeral', back: 'Lasting for a very short time. "The ephemeral beauty of cherry blossoms."', status: 'ok', next_review: dateOnly(5), created_at: d(-30), updated_at: d(-4) },
-    { id: 'demo-fc-006', deck: 'Vocabulary', front: 'Ubiquitous', back: 'Present, appearing, or found everywhere. "Smartphones have become ubiquitous."', status: 'mastered', next_review: dateOnly(20), created_at: d(-30), updated_at: d(-8) },
-    { id: 'demo-fc-007', deck: 'Vocabulary', front: 'Sycophant', back: 'A person who acts obsequiously toward someone important to gain advantage.', status: 'due', next_review: dateOnly(-3), created_at: d(-25), updated_at: d(-12) },
-    { id: 'demo-fc-008', deck: 'Vocabulary', front: 'Serendipity', back: 'The occurrence of events by chance in a happy or beneficial way.', status: 'new', next_review: null, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-fc-005', deck: 'Vocabulary', front: 'Ephemeral', back: 'Lasting for a very short time. "The ephemeral beauty of cherry blossoms."', stability: 8, difficulty: 4.5, last_review: d(-4), next_review: dateOnly(5), review_count: 3, relearning: 0, created_at: d(-30), updated_at: d(-4) },
+    { id: 'demo-fc-006', deck: 'Vocabulary', front: 'Ubiquitous', back: 'Present, appearing, or found everywhere. "Smartphones have become ubiquitous."', stability: 28, difficulty: 3.9, last_review: d(-8), next_review: dateOnly(20), review_count: 9, relearning: 0, created_at: d(-30), updated_at: d(-8) },
+    { id: 'demo-fc-007', deck: 'Vocabulary', front: 'Sycophant', back: 'A person who acts obsequiously toward someone important to gain advantage.', stability: 0.01, difficulty: 5.5, last_review: d(-1), next_review: dateOnly(0), review_count: 6, relearning: 1, created_at: d(-25), updated_at: d(-1) },
+    { id: 'demo-fc-008', deck: 'Vocabulary', front: 'Serendipity', back: 'The occurrence of events by chance in a happy or beneficial way.', next_review: null, created_at: d(-2), updated_at: d(-2) },
     // Deck: History
-    { id: 'demo-fc-009', deck: 'History', front: 'When did the Berlin Wall fall?', back: '9 November 1989', status: 'mastered', next_review: dateOnly(25), created_at: d(-35), updated_at: d(-6) },
-    { id: 'demo-fc-010', deck: 'History', front: 'Who invented the printing press?', back: 'Johannes Gutenberg (c. 1440)', status: 'ok', next_review: dateOnly(3), created_at: d(-35), updated_at: d(-3) },
-    { id: 'demo-fc-011', deck: 'History', front: 'What year did the Titanic sink?', back: '15 April 1912', status: 'due', next_review: dateOnly(0), created_at: d(-30), updated_at: d(-9) },
-    { id: 'demo-fc-012', deck: 'History', front: 'Who was the first person to walk on the Moon?', back: 'Neil Armstrong — 20 July 1969', status: 'new', next_review: null, created_at: d(-3), updated_at: d(-3) },
+    { id: 'demo-fc-009', deck: 'History', front: 'When did the Berlin Wall fall?', back: '9 November 1989', stability: 31, difficulty: 4.4, last_review: d(-6), next_review: dateOnly(25), review_count: 11, relearning: 0, created_at: d(-35), updated_at: d(-6) },
+    { id: 'demo-fc-010', deck: 'History', front: 'Who invented the printing press?', back: 'Johannes Gutenberg (c. 1440)', stability: 5, difficulty: 5, last_review: d(-3), next_review: dateOnly(3), review_count: 4, relearning: 0, created_at: d(-35), updated_at: d(-3) },
+    { id: 'demo-fc-011', deck: 'History', front: 'What year did the Titanic sink?', back: '15 April 1912', stability: 9, difficulty: 4.7, last_review: d(-9), next_review: dateOnly(0), review_count: 7, relearning: 0, created_at: d(-30), updated_at: d(-9) },
+    { id: 'demo-fc-012', deck: 'History', front: 'Who was the first person to walk on the Moon?', back: 'Neil Armstrong — 20 July 1969', next_review: null, created_at: d(-3), updated_at: d(-3) },
   ];
 
   const flashcard_notes = [
@@ -282,18 +282,18 @@ function fr() {
   ];
 
   const flashcards = [
-    { id: 'demo-fc-001', deck: 'Capitales du monde', front: 'Quelle est la capitale de la Corée du Sud ?', back: 'Séoul', status: 'mastered', next_review: dateOnly(30), created_at: d(-40), updated_at: d(-5) },
-    { id: 'demo-fc-002', deck: 'Capitales du monde', front: 'Quelle est la capitale de l\'Australie ?', back: 'Canberra (pas Sydney)', status: 'ok', next_review: dateOnly(7), created_at: d(-40), updated_at: d(-3) },
-    { id: 'demo-fc-003', deck: 'Capitales du monde', front: 'Quelle est la capitale du Brésil ?', back: 'Brasília', status: 'due', next_review: dateOnly(-1), created_at: d(-38), updated_at: d(-10) },
-    { id: 'demo-fc-004', deck: 'Capitales du monde', front: 'Quelle est la capitale du Canada ?', back: 'Ottawa', status: 'new', next_review: null, created_at: d(-5), updated_at: d(-5) },
-    { id: 'demo-fc-005', deck: 'Vocabulaire', front: 'Éphémère', back: 'Qui ne dure qu\'un temps très court. « La beauté éphémère des cerisiers en fleurs. »', status: 'ok', next_review: dateOnly(5), created_at: d(-30), updated_at: d(-4) },
-    { id: 'demo-fc-006', deck: 'Vocabulaire', front: 'Ubiquitaire', back: 'Présent partout en même temps. « Les smartphones sont devenus ubiquitaires. »', status: 'mastered', next_review: dateOnly(20), created_at: d(-30), updated_at: d(-8) },
-    { id: 'demo-fc-007', deck: 'Vocabulaire', front: 'Flagorneur', back: 'Personne qui flatte avec excès pour obtenir des faveurs.', status: 'due', next_review: dateOnly(-3), created_at: d(-25), updated_at: d(-12) },
-    { id: 'demo-fc-008', deck: 'Vocabulaire', front: 'Sérendipité', back: 'Découverte heureuse faite par hasard.', status: 'new', next_review: null, created_at: d(-2), updated_at: d(-2) },
-    { id: 'demo-fc-009', deck: 'Histoire', front: 'Quand est tombé le mur de Berlin ?', back: '9 novembre 1989', status: 'mastered', next_review: dateOnly(25), created_at: d(-35), updated_at: d(-6) },
-    { id: 'demo-fc-010', deck: 'Histoire', front: 'Qui a inventé l\'imprimerie ?', back: 'Johannes Gutenberg (vers 1440)', status: 'ok', next_review: dateOnly(3), created_at: d(-35), updated_at: d(-3) },
-    { id: 'demo-fc-011', deck: 'Histoire', front: 'En quelle année le Titanic a-t-il coulé ?', back: '15 avril 1912', status: 'due', next_review: dateOnly(0), created_at: d(-30), updated_at: d(-9) },
-    { id: 'demo-fc-012', deck: 'Histoire', front: 'Qui a été le premier homme à marcher sur la Lune ?', back: 'Neil Armstrong — 20 juillet 1969', status: 'new', next_review: null, created_at: d(-3), updated_at: d(-3) },
+    { id: 'demo-fc-001', deck: 'Capitales du monde', front: 'Quelle est la capitale de la Corée du Sud ?', back: 'Séoul', stability: 35, difficulty: 4.2, last_review: d(-5), next_review: dateOnly(30), review_count: 12, relearning: 0, created_at: d(-40), updated_at: d(-5) },
+    { id: 'demo-fc-002', deck: 'Capitales du monde', front: 'Quelle est la capitale de l\'Australie ?', back: 'Canberra (pas Sydney)', stability: 9, difficulty: 4.8, last_review: d(-3), next_review: dateOnly(7), review_count: 4, relearning: 0, created_at: d(-40), updated_at: d(-3) },
+    { id: 'demo-fc-003', deck: 'Capitales du monde', front: 'Quelle est la capitale du Brésil ?', back: 'Brasília', stability: 9, difficulty: 5.1, last_review: d(-10), next_review: dateOnly(-1), review_count: 5, relearning: 0, created_at: d(-38), updated_at: d(-10) },
+    { id: 'demo-fc-004', deck: 'Capitales du monde', front: 'Quelle est la capitale du Canada ?', back: 'Ottawa', next_review: null, created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-fc-005', deck: 'Vocabulaire', front: 'Éphémère', back: 'Qui ne dure qu\'un temps très court. « La beauté éphémère des cerisiers en fleurs. »', stability: 8, difficulty: 4.5, last_review: d(-4), next_review: dateOnly(5), review_count: 3, relearning: 0, created_at: d(-30), updated_at: d(-4) },
+    { id: 'demo-fc-006', deck: 'Vocabulaire', front: 'Ubiquitaire', back: 'Présent partout en même temps. « Les smartphones sont devenus ubiquitaires. »', stability: 28, difficulty: 3.9, last_review: d(-8), next_review: dateOnly(20), review_count: 9, relearning: 0, created_at: d(-30), updated_at: d(-8) },
+    { id: 'demo-fc-007', deck: 'Vocabulaire', front: 'Flagorneur', back: 'Personne qui flatte avec excès pour obtenir des faveurs.', stability: 0.01, difficulty: 5.5, last_review: d(-1), next_review: dateOnly(0), review_count: 6, relearning: 1, created_at: d(-25), updated_at: d(-1) },
+    { id: 'demo-fc-008', deck: 'Vocabulaire', front: 'Sérendipité', back: 'Découverte heureuse faite par hasard.', next_review: null, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-fc-009', deck: 'Histoire', front: 'Quand est tombé le mur de Berlin ?', back: '9 novembre 1989', stability: 31, difficulty: 4.4, last_review: d(-6), next_review: dateOnly(25), review_count: 11, relearning: 0, created_at: d(-35), updated_at: d(-6) },
+    { id: 'demo-fc-010', deck: 'Histoire', front: 'Qui a inventé l\'imprimerie ?', back: 'Johannes Gutenberg (vers 1440)', stability: 5, difficulty: 5, last_review: d(-3), next_review: dateOnly(3), review_count: 4, relearning: 0, created_at: d(-35), updated_at: d(-3) },
+    { id: 'demo-fc-011', deck: 'Histoire', front: 'En quelle année le Titanic a-t-il coulé ?', back: '15 avril 1912', stability: 9, difficulty: 4.7, last_review: d(-9), next_review: dateOnly(0), review_count: 7, relearning: 0, created_at: d(-30), updated_at: d(-9) },
+    { id: 'demo-fc-012', deck: 'Histoire', front: 'Qui a été le premier homme à marcher sur la Lune ?', back: 'Neil Armstrong — 20 juillet 1969', next_review: null, created_at: d(-3), updated_at: d(-3) },
   ];
 
   const flashcard_notes = [
@@ -421,18 +421,18 @@ function es() {
   ];
 
   const flashcards = [
-    { id: 'demo-fc-001', deck: 'Capitales del mundo', front: '¿Cuál es la capital de Corea del Sur?', back: 'Seúl', status: 'mastered', next_review: dateOnly(30), created_at: d(-40), updated_at: d(-5) },
-    { id: 'demo-fc-002', deck: 'Capitales del mundo', front: '¿Cuál es la capital de Australia?', back: 'Canberra (no Sídney)', status: 'ok', next_review: dateOnly(7), created_at: d(-40), updated_at: d(-3) },
-    { id: 'demo-fc-003', deck: 'Capitales del mundo', front: '¿Cuál es la capital de Brasil?', back: 'Brasilia', status: 'due', next_review: dateOnly(-1), created_at: d(-38), updated_at: d(-10) },
-    { id: 'demo-fc-004', deck: 'Capitales del mundo', front: '¿Cuál es la capital de Canadá?', back: 'Ottawa', status: 'new', next_review: null, created_at: d(-5), updated_at: d(-5) },
-    { id: 'demo-fc-005', deck: 'Vocabulario', front: 'Efímero', back: 'Que dura muy poco tiempo. «La efímera belleza de los cerezos en flor.»', status: 'ok', next_review: dateOnly(5), created_at: d(-30), updated_at: d(-4) },
-    { id: 'demo-fc-006', deck: 'Vocabulario', front: 'Ubicuo', back: 'Que está presente en todas partes. «Los smartphones se han vuelto ubicuos.»', status: 'mastered', next_review: dateOnly(20), created_at: d(-30), updated_at: d(-8) },
-    { id: 'demo-fc-007', deck: 'Vocabulario', front: 'Sicofante', back: 'Persona que adula servilmente a alguien poderoso para obtener ventajas.', status: 'due', next_review: dateOnly(-3), created_at: d(-25), updated_at: d(-12) },
-    { id: 'demo-fc-008', deck: 'Vocabulario', front: 'Serendipia', back: 'Hallazgo afortunado e inesperado que se produce de manera accidental.', status: 'new', next_review: null, created_at: d(-2), updated_at: d(-2) },
-    { id: 'demo-fc-009', deck: 'Historia', front: '¿Cuándo cayó el Muro de Berlín?', back: '9 de noviembre de 1989', status: 'mastered', next_review: dateOnly(25), created_at: d(-35), updated_at: d(-6) },
-    { id: 'demo-fc-010', deck: 'Historia', front: '¿Quién inventó la imprenta?', back: 'Johannes Gutenberg (c. 1440)', status: 'ok', next_review: dateOnly(3), created_at: d(-35), updated_at: d(-3) },
-    { id: 'demo-fc-011', deck: 'Historia', front: '¿En qué año se hundió el Titanic?', back: '15 de abril de 1912', status: 'due', next_review: dateOnly(0), created_at: d(-30), updated_at: d(-9) },
-    { id: 'demo-fc-012', deck: 'Historia', front: '¿Quién fue la primera persona en caminar sobre la Luna?', back: 'Neil Armstrong — 20 de julio de 1969', status: 'new', next_review: null, created_at: d(-3), updated_at: d(-3) },
+    { id: 'demo-fc-001', deck: 'Capitales del mundo', front: '¿Cuál es la capital de Corea del Sur?', back: 'Seúl', stability: 35, difficulty: 4.2, last_review: d(-5), next_review: dateOnly(30), review_count: 12, relearning: 0, created_at: d(-40), updated_at: d(-5) },
+    { id: 'demo-fc-002', deck: 'Capitales del mundo', front: '¿Cuál es la capital de Australia?', back: 'Canberra (no Sídney)', stability: 9, difficulty: 4.8, last_review: d(-3), next_review: dateOnly(7), review_count: 4, relearning: 0, created_at: d(-40), updated_at: d(-3) },
+    { id: 'demo-fc-003', deck: 'Capitales del mundo', front: '¿Cuál es la capital de Brasil?', back: 'Brasilia', stability: 9, difficulty: 5.1, last_review: d(-10), next_review: dateOnly(-1), review_count: 5, relearning: 0, created_at: d(-38), updated_at: d(-10) },
+    { id: 'demo-fc-004', deck: 'Capitales del mundo', front: '¿Cuál es la capital de Canadá?', back: 'Ottawa', next_review: null, created_at: d(-5), updated_at: d(-5) },
+    { id: 'demo-fc-005', deck: 'Vocabulario', front: 'Efímero', back: 'Que dura muy poco tiempo. «La efímera belleza de los cerezos en flor.»', stability: 8, difficulty: 4.5, last_review: d(-4), next_review: dateOnly(5), review_count: 3, relearning: 0, created_at: d(-30), updated_at: d(-4) },
+    { id: 'demo-fc-006', deck: 'Vocabulario', front: 'Ubicuo', back: 'Que está presente en todas partes. «Los smartphones se han vuelto ubicuos.»', stability: 28, difficulty: 3.9, last_review: d(-8), next_review: dateOnly(20), review_count: 9, relearning: 0, created_at: d(-30), updated_at: d(-8) },
+    { id: 'demo-fc-007', deck: 'Vocabulario', front: 'Sicofante', back: 'Persona que adula servilmente a alguien poderoso para obtener ventajas.', stability: 0.01, difficulty: 5.5, last_review: d(-1), next_review: dateOnly(0), review_count: 6, relearning: 1, created_at: d(-25), updated_at: d(-1) },
+    { id: 'demo-fc-008', deck: 'Vocabulario', front: 'Serendipia', back: 'Hallazgo afortunado e inesperado que se produce de manera accidental.', next_review: null, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-fc-009', deck: 'Historia', front: '¿Cuándo cayó el Muro de Berlín?', back: '9 de noviembre de 1989', stability: 31, difficulty: 4.4, last_review: d(-6), next_review: dateOnly(25), review_count: 11, relearning: 0, created_at: d(-35), updated_at: d(-6) },
+    { id: 'demo-fc-010', deck: 'Historia', front: '¿Quién inventó la imprenta?', back: 'Johannes Gutenberg (c. 1440)', stability: 5, difficulty: 5, last_review: d(-3), next_review: dateOnly(3), review_count: 4, relearning: 0, created_at: d(-35), updated_at: d(-3) },
+    { id: 'demo-fc-011', deck: 'Historia', front: '¿En qué año se hundió el Titanic?', back: '15 de abril de 1912', stability: 9, difficulty: 4.7, last_review: d(-9), next_review: dateOnly(0), review_count: 7, relearning: 0, created_at: d(-30), updated_at: d(-9) },
+    { id: 'demo-fc-012', deck: 'Historia', front: '¿Quién fue la primera persona en caminar sobre la Luna?', back: 'Neil Armstrong — 20 de julio de 1969', next_review: null, created_at: d(-3), updated_at: d(-3) },
   ];
 
   const flashcard_notes = [

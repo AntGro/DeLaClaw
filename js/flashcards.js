@@ -17,12 +17,14 @@ import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, de
 //
 // Lapses follow Anki: Again on a review card puts it into relearning
 // (one 10-minute step), and it comes back in-session once the step is
-// due — or early, when the queue empties (learn-ahead). Good graduates
-// it to 1 day, Easy to 4 days, Hard/Again repeat the step. There is
-// deliberately no leech mechanism: no lapse counter, no suspension.
+// due — never early: a card whose step has not elapsed waits for the
+// next session. Good graduates it to 1 day, Easy to 4 days, Hard to
+// 12 hours, Again repeats the step. There is deliberately no leech
+// mechanism: no lapse counter, no suspension.
 const RELEARN_STEP_MS = 10 * 60 * 1000; // one relearning step: 10 minutes
 const RELEARN_STABILITY = 0.007;        // ≈10 minutes, in days
 const GRADUATING_INTERVAL = 1;          // days after Good on a relearning card
+const HARD_RELEARN_INTERVAL = 0.5;      // days after Hard on a relearning card: 12 hours (Anki: the average of the step and the graduating interval)
 const EASY_INTERVAL = 4;                // days after Easy on a relearning card
 
 const DECAY = 0.5;
@@ -86,7 +88,8 @@ function fsrsUpdate(card, rating, now) {
     relearning = 1;
     nextReview = new Date(now.getTime() + RELEARN_STEP_MS);
   } else if (card.relearning) {
-    // In relearning: Good/Easy graduate, Hard/Again repeat the step.
+    // In relearning: Good/Easy graduate, Hard graduates at 12 hours,
+    // Again repeats the step.
     D = updateDifficulty(card.difficulty, rating);
     if (rating === 3) {
       S = GRADUATING_INTERVAL;
@@ -94,6 +97,9 @@ function fsrsUpdate(card, rating, now) {
     } else if (rating === 4) {
       S = EASY_INTERVAL;
       nextReview = new Date(now.getTime() + fuzz(EASY_INTERVAL) * 86400000);
+    } else if (rating === 2) {
+      S = HARD_RELEARN_INTERVAL;
+      nextReview = new Date(now.getTime() + HARD_RELEARN_INTERVAL * 86400000);
     } else {
       S = RELEARN_STABILITY;
       relearning = 1;
@@ -1419,8 +1425,9 @@ function closeAllFlashModals() {
 
 // Pick the next card to present, honouring relearning steps:
 // - a relearning card whose step is due jumps ahead of the queue;
-// - when the queue empties, the earliest relearning card comes back early
-//   (learn-ahead: the step is 10 min, inside Anki's 20 min default);
+// - a card whose step has not elapsed never comes back early: when
+//   the queue empties, the session ends and the card waits for the
+//   next session (it stays in `relearning`, due after its step);
 // - a card is never queued twice for one scheduled step.
 // Returns { next, queue, relearning } with fresh arrays; inputs untouched.
 function pickNextCard(queue, relearning, now) {
@@ -1430,7 +1437,6 @@ function pickNextCard(queue, relearning, now) {
   while (rl.length > 0 && rl[0].dueAt <= now) due.push(rl.shift().card);
   const fresh = due.filter(c => !q.find(s => s.id === c.id));
   if (fresh.length > 0) q.unshift(...fresh);
-  if (q.length === 0 && rl.length > 0) q.unshift(rl.shift().card);
   return { next: q[0] || null, queue: q, relearning: rl };
 }
 
@@ -1539,9 +1545,9 @@ function hidePracticeOverlay() {
 function showNextCard() {
   const overlay = document.getElementById('practiceOverlay');
   if (!overlay) return;
-  // Relearning cards whose step is due jump the queue; when nothing
-  // else is left, the earliest one comes back early (learn-ahead —
-  // the step is 10 min, inside Anki's 20 min default).
+  // Relearning cards whose step is due jump the queue; a card whose
+  // step has not elapsed never comes back early — when the queue
+  // empties, the session ends and the card waits for the next session.
   const picked = pickNextCard(sessionQueue, sessionRelearning, new Date());
   sessionQueue = picked.queue;
   sessionRelearning = picked.relearning;
@@ -1557,7 +1563,7 @@ function showNextCard() {
       <div class="practice-meta"><span class="practice-meta-text">${sessionDone} / ${sessionTotal} · ${esc(getDeckDisplayName(deckIdForCard(card)))}${card.relearning ? ` · ${t('flashcards.relearning')}` : ''}</span></div>
       <button class="practice-close" data-action="end-practice">✕</button>
     </div>
-    <div class="practice-card-area" data-action="reveal-card">
+    <div class="practice-card-area" data-action="toggle-card" tabindex="0" role="button" aria-label="${t('flashcards.toggle_card')}" aria-pressed="false">
       <div class="practice-card" id="practiceCard">
         <div class="practice-card-front">
           <div class="practice-card-label">${t('flashcards.question')}</div>
@@ -1579,12 +1585,25 @@ function showNextCard() {
   initMarquee();
 }
 
-window.revealCard = function() {
+window.toggleCard = function() {
   const card = document.getElementById('practiceCard');
-  if (!card || card.classList.contains('flipped')) return;
-  card.classList.add('flipped');
-  document.getElementById('practiceHint').style.display = 'none';
-  document.getElementById('practiceButtons').style.display = 'flex';
+  // Ignore taps while a rating is in flight: flipping mid-write would
+  // hide the buttons under the rating being recorded.
+  if (!card || _ratingInProgress) return;
+  const area = card.closest('.practice-card-area');
+  const hint = document.getElementById('practiceHint');
+  const buttons = document.getElementById('practiceButtons');
+  if (card.classList.contains('flipped')) {
+    // Back to the front: a tap too early is recoverable — think again.
+    card.classList.remove('flipped');
+    if (hint) hint.style.display = '';
+    if (buttons) buttons.style.display = 'none';
+  } else {
+    card.classList.add('flipped');
+    if (hint) hint.style.display = 'none';
+    if (buttons) buttons.style.display = 'flex';
+  }
+  if (area) area.setAttribute('aria-pressed', String(card.classList.contains('flipped')));
 };
 
 let _ratingInProgress = false;
@@ -1615,13 +1634,13 @@ window.rateCard = async function(rating) {
       const idx = allCards.findIndex(c => c.id === card.id);
       if (idx >= 0) Object.assign(allCards[idx], updates);
       if (state.db.connected) await state.db.from('flashcards').update(updates).eq('id', card.id);
-      // Lapsed (or still relearning) card: back in-session once its
-      // 10-minute step is due. Read-only sessions never schedule.
-      // The re-presentation is a scheduled rating of its own, so the
-      // session total grows with it — otherwise the header reads 12/10.
+      // Lapsed (or still relearning) card: queued for re-presentation
+      // once its 10-minute step is due — in a later session, since a card
+      // whose step has not elapsed never returns early. The session total
+      // stays fixed at the starting size: counting the re-presentation
+      // here would read 3/6 for a 3-card session.
       if (updates.relearning === 1) {
         sessionRelearning.push({ card, dueAt: new Date(updates.next_review) });
-        sessionTotal++;
       }
     }
     showNextCard();
@@ -3051,8 +3070,11 @@ document.addEventListener('keydown', (e) => {
   const card = document.getElementById('practiceCard');
   if (!card) return;
   if (e.key === ' ' || e.key === 'Enter') {
+    // A focused control keeps its own keyboard behaviour: Space/Enter on
+    // a rating or close button must activate it, not flip the card.
+    if (e.target.closest?.('button, input, textarea, select, a[href]')) return;
     e.preventDefault();
-    if (!card.classList.contains('flipped')) window.revealCard();
+    window.toggleCard();
   } else if (card.classList.contains('flipped')) {
     if (e.key === '1') window.rateCard(1);
     else if (e.key === '2') window.rateCard(2);

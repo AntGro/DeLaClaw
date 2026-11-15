@@ -439,6 +439,18 @@ function combineMigrationErrors(originalError, rollbackError) {
   return err;
 }
 
+// Whether a dragged flashcard/text item may land in the target deck:
+// same-type buckets only, never the shared deck. The source deck does
+// not matter — the edit-modal picker allows moving out of the shared
+// deck, so drag mirrors it. targetKind/targetType come from the target
+// deck row (getDeckType resolves the type); a missing row denies the
+// drop, which is the safe direction.
+export function flashcardDragAllowed({ itemType, targetKind, targetType, isSharedTarget }) {
+  if (targetKind !== 'bucket') return false;
+  if (isSharedTarget) return false;
+  return targetType === itemType;
+}
+
 // Move every row in the '*' bucket back to the original deck, by
 // destination: the '*' bucket holds only rows from this conversion —
 // or from an earlier attempt at the same one, when it is a reused

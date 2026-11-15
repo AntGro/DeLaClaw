@@ -5,7 +5,7 @@ import { esc, escQ, showToast, showConfirmAction, applySectionGrid, fetchAll, is
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneBlockText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap, persistTextEdit, leadingRevealCount, trailingRevealCount, getTextChunks, isChunkDue, chunkReviseMode, applyChunkEdit } from './scene-parse.js';
-import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, descendantBucketIds, descendantsOf, siblingNameTaken, planNodeMove, resolveSectionPath, parseSectionPath, flattenTree, runDeckToSectionMigration } from './sections-pure.js';
+import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, descendantBucketIds, descendantsOf, siblingNameTaken, planNodeMove, resolveSectionPath, parseSectionPath, flattenTree, runDeckToSectionMigration, flashcardDragAllowed } from './sections-pure.js';
 
 // ===================================================================
 // FLASHCARDS — Spaced Repetition (Algo-style intervals)
@@ -533,6 +533,11 @@ function renderAllBuckets() {
     const draftList = draftDeck.querySelector('.task-list');
     if (draftList) initDraftDragDrop(draftList);
   }
+  // Init cross-deck item drag for every deck list (cards and texts),
+  // like Lists/Habits do for their items.
+  grid.querySelectorAll('.task-list[data-deck-id]').forEach((listEl) => {
+    initFlashcardItemDragDrop(listEl, listEl.dataset.deckId);
+  });
   // Section chips rows are re-created with the grid, so their drag
   // handlers are (re)bound here after every grid render, like Lists
   // does for its section chips.
@@ -593,6 +598,53 @@ function initDraftDragDrop(listEl) {
         tableName: 'flashcard_notes',
         reinitFn: () => initDraftDragDrop(listEl),
       });
+    },
+  });
+}
+
+// Cross-deck drag for cards and texts, like Lists/Habits cross-list
+// drag: a long-press drag into another deck of the same type moves
+// the item there (deck_id + the legacy deck name). A drop into a
+// wrong-type deck or the shared deck is refused with a toast and the
+// item snaps back, and a within-deck drag snaps back too — cards and
+// texts have no stored order, so their order comes from the sort
+// control, not manual order.
+function initFlashcardItemDragDrop(listEl, deckId) {
+  const type = getDeckType(deckId);
+  initItemDragDrop(listEl, {
+    itemSelector: type === 'text' ? '.todo-item[data-text-id]' : '.todo-item[data-card-id]',
+    idAttr: type === 'text' ? 'textId' : 'cardId',
+    actionsSelector: '.todo-actions',
+    crossContainerSelector: '[data-deck-id]',
+    getContainerId: (el) => el.dataset.deckId,
+    onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
+      const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;
+      if (!crossMove) {
+        renderAllBuckets();
+        return;
+      }
+      const targetRow = _deckMap.get(targetContainerId);
+      const allowed = flashcardDragAllowed({
+        itemType: type,
+        targetKind: targetRow?.kind,
+        targetType: getDeckType(targetContainerId),
+        isSharedTarget: targetContainerId === _sharedDeckId,
+      });
+      if (!allowed) {
+        const key = targetContainerId === _sharedDeckId
+          ? 'flashcards.drag_shared'
+          : (type === 'text' ? 'flashcards.drag_text_to_flashcard' : 'flashcards.drag_card_to_text');
+        showToast(t(key), 'error');
+        renderAllBuckets();
+        return;
+      }
+      const table = type === 'text' ? 'texts' : 'flashcards';
+      const targetDeck = _deckMap.get(targetContainerId);
+      const { error } = await state.db.from(table)
+        .update({ deck: targetDeck?.name ?? '', deck_id: targetContainerId })
+        .eq('id', draggedId);
+      if (error) showToast(t('toast.update_failed'), 'error');
+      refreshFlashcards();
     },
   });
 }
@@ -756,7 +808,7 @@ function renderFlashcardDeck(deckId, q) {
         </div>
       </div>
     </div>
-    <div class="task-list">
+    <div class="task-list" data-deck-id="${esc(deckId)}">
       ${cards.length > 0 ? cards.map(c => renderFlashcardItem(c, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-flashcard" data-deck="${esc(deckId)}">${lucideIcon('plus', 16)} ${t('flashcards.add_card')}</button></div>`}
     </div>
   </div>`;
@@ -827,7 +879,7 @@ function renderTextDeck(deckId, q) {
         </div>
       </div>
     </div>
-    <div class="task-list">
+    <div class="task-list" data-deck-id="${esc(deckId)}">
       ${texts.length > 0 ? texts.map(tx => renderTextItem(tx, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-text" data-deck="${esc(deckId)}">${lucideIcon('plus', 16)} ${t('text_revision.add_text')}</button></div>`}
     </div>
   </div>`;

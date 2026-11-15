@@ -9112,6 +9112,60 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the read-back throws');
     });
 
+    test('sections-pure: flashcardDragAllowed — same-type buckets only, never shared', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      // Same-type moves are allowed.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: 'flashcard', isSharedTarget: false }) === true,
+        'a card may land in a flashcard deck');
+      assert(m.flashcardDragAllowed({ itemType: 'text', targetKind: 'bucket', targetType: 'text', isSharedTarget: false }) === true,
+        'a text may land in a text deck');
+      // Wrong-type moves are refused — a card dropped in a text deck
+      // would be invisible, since each deck renders one kind only.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: 'text', isSharedTarget: false }) === false,
+        'a card may not land in a text deck');
+      assert(m.flashcardDragAllowed({ itemType: 'text', targetKind: 'bucket', targetType: 'flashcard', isSharedTarget: false }) === false,
+        'a text may not land in a flashcard deck');
+      // Sections never receive items directly.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'section', targetType: 'flashcard', isSharedTarget: false }) === false,
+        'a card may not land in a section row');
+      // The shared deck is never a drag target, even when the type matches.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: 'flashcard', isSharedTarget: true }) === false,
+        'a card may not land in the shared deck');
+      // A missing or typeless target denies the drop — the safe direction.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: undefined, targetType: 'flashcard', isSharedTarget: false }) === false,
+        'a missing target row denies the drop');
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: undefined, isSharedTarget: false }) === false,
+        'a target with no resolved type denies the drop');
+    });
+
+    test('flashcards: deck lists wire cross-deck item drag', () => {
+      const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      // Both deck lists (cards and texts) carry the deck id; the drafts
+      // list must not — drafts have their own reorder-only drag.
+      const deckLists = (flashSrc.match(/class="task-list" data-deck-id="\$\{esc\(deckId\)\}"/g) || []).length;
+      assert(deckLists === 2, 'the card list and the text list must both carry data-deck-id');
+      assert(flashSrc.includes("grid.querySelectorAll('.task-list[data-deck-id]')"),
+        'renderAllBuckets must init item drag on every deck list');
+      assert(flashSrc.includes("crossContainerSelector: '[data-deck-id]'"),
+        'item drag must accept drops in any deck list');
+      assert(flashSrc.includes("itemSelector: type === 'text' ? '.todo-item[data-text-id]' : '.todo-item[data-card-id]'"),
+        'item drag must select card rows and text rows by the deck type');
+      assert(flashSrc.includes('flashcardDragAllowed({'),
+        'item drag must check the drop against the drag guard');
+      assert(flashSrc.includes(".update({ deck: targetDeck?.name ?? '', deck_id: targetContainerId })"),
+        'a cross-deck drop must update deck_id and the legacy deck name');
+      assert(flashSrc.includes("'flashcards.drag_card_to_text'") && flashSrc.includes("'flashcards.drag_text_to_flashcard'")
+        && flashSrc.includes("'flashcards.drag_shared'"),
+        'refused drops must explain themselves with a translated toast');
+      // The keys are picked by variable, so the t()-scan test cannot see
+      // them — pin their presence in all three locales directly.
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      for (const key of ['drag_card_to_text', 'drag_text_to_flashcard', 'drag_shared']) {
+        const count = (i18nSrc.match(new RegExp(`${key}:`, 'g')) || []).length;
+        assert(count === 3, `${key} must be defined in all three locales, found ${count}`);
+      }
+    });
+
     test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {
       const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
       const rows = [

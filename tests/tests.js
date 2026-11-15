@@ -9420,6 +9420,33 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     }
   });
 
+  test('extension: a manifest declaring default_locale must ship its _locales subtree', () => {
+    // Chrome refuses to load an extension whose manifest declares
+    // default_locale without _locales/<locale>/messages.json
+    // (v2.32.120 shipped exactly that and failed to load).
+    // Nothing in the extension calls chrome.i18n.getMessage — the
+    // popup carries its own STRINGS table — so the src manifest must
+    // not declare default_locale at all.
+    const srcManifest = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'manifest.json'), 'utf8');
+    assert(!srcManifest.includes('default_locale'),
+      'src manifest must not declare default_locale (no code uses chrome.i18n.getMessage)');
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      const jsFiles = fs.readdirSync(dir).filter((f) => f.endsWith('.js'));
+      for (const f of jsFiles) {
+        const src = fs.readFileSync(path.join(dir, f), 'utf8');
+        assert(!src.includes('chrome.i18n.getMessage'),
+          `${f} must not call chrome.i18n.getMessage (it needs a _locales subtree)`);
+      }
+      const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+      if (m.default_locale) {
+        const messagesPath = path.join(dir, '_locales', m.default_locale, 'messages.json');
+        assert(fs.existsSync(messagesPath),
+          `manifest declares default_locale ${m.default_locale} but ${messagesPath} is missing — Chrome will refuse to load the extension`);
+        JSON.parse(fs.readFileSync(messagesPath, 'utf8'));
+      }
+    }
+  });
+
   test('extension: pinned keys derive the registered IDs, and the variants differ', () => {
     const prod = JSON.parse(fs.readFileSync(path.join(EXT_PROD, 'manifest.json'), 'utf8'));
     const dev = JSON.parse(fs.readFileSync(path.join(EXT_DEV, 'manifest.json'), 'utf8'));

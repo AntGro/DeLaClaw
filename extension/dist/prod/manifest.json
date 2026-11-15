@@ -19,7 +19,6 @@
       }
     }
   },
-  "default_locale": "en",
   "description": "Capture pages and quick-add TODOs and habits to DeLaClaw.",
   "host_permissions": [
     "https://www.googleapis.com/*",
@@ -40,5 +39,5 @@
     "storage",
     "activeTab"
   ],
-  "version": "2.32.120"
+  "version": "2.32.121"
 }

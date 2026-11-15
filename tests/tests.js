@@ -9019,7 +9019,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // response is lost. The helper must read the kind back: a committed
       // flip is success, a truly failed flip aborts, and a failed read
       // keeps the star and the items.
-      const makeDb = ({ flipApplies, readbackError }) => {
+      const makeDb = ({ flipApplies, readbackError, readbackRows, readbackThrows }) => {
         const rows = {
           flashcards: [{ id: 'c1', deck_id: 'DECK', deck: 'Old' }],
           texts: [{ id: 't1', deck_id: 'DECK', deck: 'Old' }],
@@ -9043,7 +9043,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
             }),
             select: () => ({
               eq: (col, val) => {
+                if (readbackThrows) throw new Error('readback-threw');
                 if (readbackError) return Promise.resolve({ data: null, error: new Error('readback-lost') });
+                if (readbackRows !== undefined) return Promise.resolve({ data: readbackRows, error: null });
                 const row = rows.flashcard_decks.find(r => r[col] === val);
                 return Promise.resolve({ data: row ? [{ kind: row.kind }] : [], error: null });
               },
@@ -9085,6 +9087,29 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the flip state is unknown');
       assert(rows.texts.every(t => t.deck_id === 'STAR'), 'the texts stay in the * bucket when the flip state is unknown');
       assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the flip state is unknown');
+      // Read-back returns no row: state unknown — keep the star and
+      // the items, throw, attempt no rollback.
+      ({ db, rows } = makeDb({ flipApplies: false, readbackError: false, readbackRows: [] }));
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && String(threw.message).includes('could not be verified'), 'an empty read-back must say the flip state could not be verified');
+      assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the read-back returns no row');
+      assert(rows.texts.every(t => t.deck_id === 'STAR'), 'the texts stay in the * bucket when the read-back returns no row');
+      assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the read-back returns no row');
+      // Read-back returns an unexpected kind: same — unknown state.
+      ({ db, rows } = makeDb({ flipApplies: false, readbackError: false, readbackRows: [{ kind: 'weird' }] }));
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && String(threw.message).includes('could not be verified'), 'an unexpected kind must say the flip state could not be verified');
+      assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the read-back returns an unexpected kind');
+      assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the read-back returns an unexpected kind');
+      // Read-back itself throws: treated as a failed read, not a crash.
+      ({ db, rows } = makeDb({ flipApplies: false, readbackError: false, readbackThrows: true }));
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && String(threw.message).includes('could not verify'), 'a throwing read-back must say the flip could not be verified');
+      assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the read-back throws');
+      assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the read-back throws');
     });
 
     test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {

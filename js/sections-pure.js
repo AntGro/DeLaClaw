@@ -445,8 +445,9 @@ function combineMigrationErrors(originalError, rollbackError) {
 // leftover — so every row in it belongs to this deck, including one
 // added concurrently between the bulk moves. Returns the rollback
 // error (null on success). The adapter contract is { error }, never a
-// throw, so the result is checked and there is no try/catch — like
-// the main moves below.
+// throw, so the result is checked. There is no try/catch here —
+// abortMigration wraps each step, and only there — like the main
+// moves, which rely on the same contract.
 async function rollbackStarItems(db, table, starId, deckId, deckName) {
   const r = await db.from(table).update({ deck_id: deckId, deck: deckName }).eq('deck_id', starId);
   return r?.error || null;
@@ -509,7 +510,11 @@ async function abortMigration(db, starId, deckId, deckName, originalError) {
  * ambiguous too: its PATCH may have committed while the response
  * was lost, so on a flip error the kind is read back first — a
  * committed flip is treated as success, and an unknown state keeps
- * the star and the items and throws.
+ * the star and the items and throws. Only an explicit 'bucket'
+ * aborts — anything else (a failed read, no row, an unexpected
+ * kind) is the unknown state. The read-back assumes
+ * read-after-write consistency, which holds for all three backends
+ * (each reads from the store it writes).
  *
  * spec: { deckId, deckName, starId }
  */
@@ -525,14 +530,28 @@ export async function runDeckToSectionMigration(db, spec) {
     // the response was lost, and rolling the items back into a row
     // that is now a section would make them invisible — the failure
     // the flip-last ordering was designed to prevent. Read the kind
-    // back before deciding.
-    const check = await db.from('flashcard_decks').select('kind').eq('id', deckId);
-    if (check.error) {
-      // State unknown: keep the star and the items, and say so.
-      const msg = (e) => (e && e.message) || String(e);
-      throw new Error(`section conversion failed (${msg(flip.error)}); could not verify whether the flip committed (${msg(check.error)}) — items were left in place`);
+    // back before deciding. This assumes read-after-write
+    // consistency, which holds for all three backends (each reads
+    // from the store it writes).
+    let check;
+    try {
+      check = await db.from('flashcard_decks').select('kind').eq('id', deckId);
+    } catch (e) {
+      check = { error: e };
     }
-    if (check.data?.[0]?.kind === 'section') return; // flip committed, response lost
-    throw await abortMigration(db, starId, deckId, deckName, flip.error);
+    const kind = check.error ? undefined : check.data?.[0]?.kind;
+    if (kind === 'section') return; // flip committed, response lost
+    if (kind === 'bucket') throw await abortMigration(db, starId, deckId, deckName, flip.error);
+    // State unknown (read failed, or no row, or an unexpected kind):
+    // aborting would move the items into a deck that may not exist.
+    // Keep the star and the items, and say so.
+    const msg = (e) => (e && e.message) || String(e);
+    const reason = check.error
+      ? `could not verify whether the flip committed (${msg(check.error)})`
+      : `the flip state could not be verified (kind: ${kind ?? 'missing'})`;
+    const err = new Error(`section conversion failed (${msg(flip.error)}); ${reason} — items were left in place`);
+    err.originalError = flip.error;
+    if (check.error) err.checkError = check.error;
+    throw err;
   }
 }

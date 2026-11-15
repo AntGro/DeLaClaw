@@ -9019,7 +9019,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // response is lost. The helper must read the kind back: a committed
       // flip is success, a truly failed flip aborts, and a failed read
       // keeps the star and the items.
-      const makeDb = ({ flipApplies, readbackError }) => {
+      const makeDb = ({ flipApplies, readbackError, readbackRows, readbackThrows }) => {
         const rows = {
           flashcards: [{ id: 'c1', deck_id: 'DECK', deck: 'Old' }],
           texts: [{ id: 't1', deck_id: 'DECK', deck: 'Old' }],
@@ -9043,7 +9043,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
             }),
             select: () => ({
               eq: (col, val) => {
+                if (readbackThrows) throw new Error('readback-threw');
                 if (readbackError) return Promise.resolve({ data: null, error: new Error('readback-lost') });
+                if (readbackRows !== undefined) return Promise.resolve({ data: readbackRows, error: null });
                 const row = rows.flashcard_decks.find(r => r[col] === val);
                 return Promise.resolve({ data: row ? [{ kind: row.kind }] : [], error: null });
               },
@@ -9085,6 +9087,83 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the flip state is unknown');
       assert(rows.texts.every(t => t.deck_id === 'STAR'), 'the texts stay in the * bucket when the flip state is unknown');
       assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the flip state is unknown');
+      // Read-back returns no row: state unknown — keep the star and
+      // the items, throw, attempt no rollback.
+      ({ db, rows } = makeDb({ flipApplies: false, readbackError: false, readbackRows: [] }));
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && String(threw.message).includes('could not be verified'), 'an empty read-back must say the flip state could not be verified');
+      assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the read-back returns no row');
+      assert(rows.texts.every(t => t.deck_id === 'STAR'), 'the texts stay in the * bucket when the read-back returns no row');
+      assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the read-back returns no row');
+      // Read-back returns an unexpected kind: same — unknown state.
+      ({ db, rows } = makeDb({ flipApplies: false, readbackError: false, readbackRows: [{ kind: 'weird' }] }));
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && String(threw.message).includes('could not be verified'), 'an unexpected kind must say the flip state could not be verified');
+      assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the read-back returns an unexpected kind');
+      assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the read-back returns an unexpected kind');
+      // Read-back itself throws: treated as a failed read, not a crash.
+      ({ db, rows } = makeDb({ flipApplies: false, readbackError: false, readbackThrows: true }));
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && String(threw.message).includes('could not verify'), 'a throwing read-back must say the flip could not be verified');
+      assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the read-back throws');
+      assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the read-back throws');
+    });
+
+    test('sections-pure: flashcardDragAllowed — same-type buckets only, never shared', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      // Same-type moves are allowed.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: 'flashcard', isSharedTarget: false }) === true,
+        'a card may land in a flashcard deck');
+      assert(m.flashcardDragAllowed({ itemType: 'text', targetKind: 'bucket', targetType: 'text', isSharedTarget: false }) === true,
+        'a text may land in a text deck');
+      // Wrong-type moves are refused — a card dropped in a text deck
+      // would be invisible, since each deck renders one kind only.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: 'text', isSharedTarget: false }) === false,
+        'a card may not land in a text deck');
+      assert(m.flashcardDragAllowed({ itemType: 'text', targetKind: 'bucket', targetType: 'flashcard', isSharedTarget: false }) === false,
+        'a text may not land in a flashcard deck');
+      // Sections never receive items directly.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'section', targetType: 'flashcard', isSharedTarget: false }) === false,
+        'a card may not land in a section row');
+      // The shared deck is never a drag target, even when the type matches.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: 'flashcard', isSharedTarget: true }) === false,
+        'a card may not land in the shared deck');
+      // A missing or typeless target denies the drop — the safe direction.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: undefined, targetType: 'flashcard', isSharedTarget: false }) === false,
+        'a missing target row denies the drop');
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: undefined, isSharedTarget: false }) === false,
+        'a target with no resolved type denies the drop');
+    });
+
+    test('flashcards: deck lists wire cross-deck item drag', () => {
+      const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      // Both deck lists (cards and texts) carry the deck id; the drafts
+      // list must not — drafts have their own reorder-only drag.
+      const deckLists = (flashSrc.match(/class="task-list" data-deck-id="\$\{esc\(deckId\)\}"/g) || []).length;
+      assert(deckLists === 2, 'the card list and the text list must both carry data-deck-id');
+      assert(flashSrc.includes("grid.querySelectorAll('.task-list[data-deck-id]')"),
+        'renderAllBuckets must init item drag on every deck list');
+      assert(flashSrc.includes("crossContainerSelector: '[data-deck-id]'"),
+        'item drag must accept drops in any deck list');
+      assert(flashSrc.includes("itemSelector: type === 'text' ? '.todo-item[data-text-id]' : '.todo-item[data-card-id]'"),
+        'item drag must select card rows and text rows by the deck type');
+      assert(flashSrc.includes('flashcardDragAllowed({'),
+        'item drag must check the drop against the drag guard');
+      assert(flashSrc.includes(".update({ deck: targetDeck?.name ?? '', deck_id: targetContainerId })"),
+        'a cross-deck drop must update deck_id and the legacy deck name');
+      assert(flashSrc.includes("'flashcards.drag_card_to_text'") && flashSrc.includes("'flashcards.drag_text_to_flashcard'")
+        && flashSrc.includes("'flashcards.drag_shared'"),
+        'refused drops must explain themselves with a translated toast');
+      // The keys are picked by variable, so the t()-scan test cannot see
+      // them — pin their presence in all three locales directly.
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      for (const key of ['drag_card_to_text', 'drag_text_to_flashcard', 'drag_shared']) {
+        const count = (i18nSrc.match(new RegExp(`${key}:`, 'g')) || []).length;
+        assert(count === 3, `${key} must be defined in all three locales, found ${count}`);
+      }
     });
 
     test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {

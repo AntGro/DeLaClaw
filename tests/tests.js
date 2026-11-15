@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 
 const JS_DIR = path.join(__dirname, '..', 'js');
@@ -42,6 +43,11 @@ const pendingAsyncTests = [];
 
 async function assertRejects(promise, msg) {
   try { await promise; } catch (e) { return; }
+  throw new Error(msg);
+}
+
+function assertThrows(fn, msg) {
+  try { fn(); } catch (e) { return; }
   throw new Error(msg);
 }
 
@@ -9362,6 +9368,412 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'both deck renderers (flashcards + texts) must place the Practice button outside the hover-revealed actions');
     });
   }
+
+  // ===================================================================
+  // Chrome extension (spec §8 step 4 — popup)
+  // ===================================================================
+  // The stamped outputs under extension/dist/ are the loadable
+  // artifacts; these tests assert on them, not on the src templates.
+  const EXT_DIST = path.join(__dirname, '..', 'extension', 'dist');
+  const EXT_PROD = path.join(EXT_DIST, 'prod');
+  const EXT_DEV = path.join(EXT_DIST, 'dev');
+
+  function readRepoVersion() {
+    const text = fs.readFileSync(path.join(__dirname, '..', 'VERSION'), 'utf8');
+    const m = text.match(/^latest=(.+)$/m);
+    assert(m, 'VERSION must have a latest= line');
+    return m[1].trim();
+  }
+
+  // Independent re-implementation of Chrome's extension-ID derivation
+  // (first 128 bits of the SHA-256 of the DER public key, hex nibbles
+  // 0-f mapped to letters a-p) — the test must not trust the packager's
+  // copy of the same function.
+  function deriveExtensionId(base64Key) {
+    const der = Buffer.from(base64Key, 'base64');
+    const hex = crypto.createHash('sha256').update(der).digest('hex').slice(0, 32);
+    return [...hex].map((c) => String.fromCharCode(97 + parseInt(c, 16))).join('');
+  }
+
+  test('extension: both stamped manifests parse with the right names and repo version', () => {
+    const prod = JSON.parse(fs.readFileSync(path.join(EXT_PROD, 'manifest.json'), 'utf8'));
+    const dev = JSON.parse(fs.readFileSync(path.join(EXT_DEV, 'manifest.json'), 'utf8'));
+    assert(prod.name === 'DeLaClaw', 'prod manifest name must be DeLaClaw');
+    assert(dev.name === 'DeLaClaw Dev', 'dev manifest name must be DeLaClaw Dev');
+    const version = readRepoVersion();
+    assert(prod.version === version, `prod manifest version must equal repo VERSION (${version})`);
+    assert(dev.version === version, `dev manifest version must equal repo VERSION (${version})`);
+    assert(prod.manifest_version === 3 && dev.manifest_version === 3, 'both manifests must be MV3');
+    assert(prod.background?.service_worker === 'service-worker.js' && prod.background?.type === 'module',
+      'prod background must be the module service worker');
+    assert(prod.action?.default_popup === 'popup.html', 'prod action must open popup.html');
+  });
+
+  test('extension: manifests carry no oauth2 block and the spec permissions only', () => {
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+      assert(!('oauth2' in m), 'manifest must not carry an oauth2 block (the web client is used at runtime)');
+      assert(JSON.stringify([...m.permissions].sort()) === JSON.stringify(['activeTab', 'contextMenus', 'identity', 'storage']),
+        `permissions must be exactly identity/contextMenus/storage/activeTab, got ${m.permissions}`);
+      assert(JSON.stringify([...m.host_permissions].sort()) === JSON.stringify(['https://oauth2.googleapis.com/*', 'https://www.googleapis.com/*']),
+        'host permissions must be exactly the two googleapis hosts');
+    }
+  });
+
+  test('extension: pinned keys derive the registered IDs, and the variants differ', () => {
+    const prod = JSON.parse(fs.readFileSync(path.join(EXT_PROD, 'manifest.json'), 'utf8'));
+    const dev = JSON.parse(fs.readFileSync(path.join(EXT_DEV, 'manifest.json'), 'utf8'));
+    assert(deriveExtensionId(prod.key) === 'cnpaghkipnignlonpoblbpoceheompap',
+      'prod key must derive the registered prod extension ID (else the OAuth redirect URI breaks)');
+    assert(deriveExtensionId(dev.key) === 'kpogipeoagoggadlphkmehgfgippgjfl',
+      'dev key must derive the registered dev extension ID');
+    assert(prod.key !== dev.key, 'the two variants must have different pinned keys');
+  });
+
+  test('extension: stamped variants resolve to different folders and app URLs', async () => {
+    const prod = await import(pathToFileURL(path.join(EXT_PROD, 'variant.js')).href);
+    const dev = await import(pathToFileURL(path.join(EXT_DEV, 'variant.js')).href);
+    assert(prod.VARIANT.folder === 'DeLaClaw', 'prod must resolve the DeLaClaw/ folder');
+    assert(dev.VARIANT.folder === 'DeLaClawDev', 'dev must resolve the DeLaClawDev/ folder');
+    assert(prod.VARIANT.appUrl === 'https://delaclaw.com', 'prod must open delaclaw.com');
+    assert(dev.VARIANT.appUrl === 'https://dev.delaclaw.pages.dev', 'dev must open the dev preview');
+    assert(prod.VARIANT.extensionId === 'cnpaghkipnignlonpoblbpoceheompap', 'prod variant id must match the registered id');
+    assert(dev.VARIANT.extensionId === 'kpogipeoagoggadlphkmehgfgippgjfl', 'dev variant id must match the registered id');
+    assert(prod.VARIANT.isDev === false && dev.VARIANT.isDev === true, 'isDev must differ per variant');
+  });
+
+  test('extension: shortcuts are the spec chords, per variant', () => {
+    const prod = JSON.parse(fs.readFileSync(path.join(EXT_PROD, 'manifest.json'), 'utf8'));
+    const dev = JSON.parse(fs.readFileSync(path.join(EXT_DEV, 'manifest.json'), 'utf8'));
+    const pKey = prod.commands._execute_action.suggested_key;
+    const dKey = dev.commands._execute_action.suggested_key;
+    assert(pKey.default === 'Ctrl+Shift+Y' && pKey.mac === 'Command+Shift+Y', 'prod shortcut must be Ctrl+Shift+Y');
+    assert(dKey.default === 'Ctrl+Shift+U' && dKey.mac === 'Command+Shift+U', 'dev shortcut must be Ctrl+Shift+U');
+  });
+
+  test('extension: known schema version is the latest DRIVE_MIGRATIONS key', async () => {
+    const { compareVersions } = await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'version-compare.js')).href);
+    const src = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf8');
+    const keys = [...src.matchAll(/'([0-9][0-9.]*?)':/g)].map((m) => m[1]);
+    const latest = keys.sort(compareVersions).pop();
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      const { VARIANT } = await import(pathToFileURL(path.join(dir, 'variant.js')).href);
+      assert(VARIANT.knownSchemaVersion === latest,
+        `stamped knownSchemaVersion (${VARIANT.knownSchemaVersion}) must equal the latest migration key (${latest})`);
+    }
+  });
+
+  test('extension: popup and service worker entry points exist and are wired', () => {
+    const html = fs.readFileSync(path.join(EXT_PROD, 'popup.html'), 'utf8');
+    assert(html.includes('<script type="module" src="popup.js">'), 'popup.html must load popup.js as a module');
+    assert(html.includes('href="popup.css"'), 'popup.html must load popup.css');
+    const sw = fs.readFileSync(path.join(EXT_PROD, 'service-worker.js'), 'utf8');
+    assert(sw.includes('chrome.runtime.onMessage.addListener'), 'service worker must expose the message API');
+    const popupJs = fs.readFileSync(path.join(EXT_PROD, 'popup.js'), 'utf8');
+    assert(popupJs.includes("chrome.runtime.sendMessage"), 'popup must talk to the service worker, never to Drive directly');
+    assert(!popupJs.includes('launchWebAuthFlow'), 'popup must never run launchWebAuthFlow (its document dies mid-flow)');
+    assert(!popupJs.includes('innerHTML'), 'popup must not use innerHTML (user data goes through textContent)');
+  });
+
+  test('extension: popup CSS carries the theme variables copied from style.css', () => {
+    const css = fs.readFileSync(path.join(EXT_PROD, 'popup.css'), 'utf8');
+    assert(css.includes(':root {'), 'popup.css must include the :root variables copied from style.css');
+    assert(css.includes('[data-theme="light"]'), 'popup.css must include the light-theme overrides copied from style.css');
+    assert(!css.includes('__THEME_VARS__'), 'the __THEME_VARS__ placeholder must be replaced at packaging');
+    for (const v of ['--bg', '--text', '--muted', '--accent', '--surface', '--border']) {
+      assert(css.includes(v), `popup.css must define ${v}`);
+    }
+  });
+
+  test('extension: icons exist at all sizes and the variants differ', () => {
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      for (const s of [16, 32, 48, 128]) {
+        const p = path.join(dir, 'icons', `icon-${s}.png`);
+        assert(fs.existsSync(p) && fs.statSync(p).size > 0, `missing icon ${p}`);
+      }
+    }
+    const prod128 = fs.readFileSync(path.join(EXT_PROD, 'icons', 'icon-128.png'));
+    const dev128 = fs.readFileSync(path.join(EXT_DEV, 'icons', 'icon-128.png'));
+    assert(!prod128.equals(dev128), 'prod and dev icons must differ (the two installed extensions must be distinguishable)');
+  });
+
+  test('extension data: TODO row shape matches the app insert path', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const row = data.buildTodoRow({ text: 'Buy milk', categoryId: 'c1', sortOrder: -2 });
+    assert(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(row.id),
+      'todo id must be a UUID');
+    assert(row.done === false, 'a new TODO row sets done: false explicitly');
+    assert(row.priority === 'normal', 'priority defaults to normal');
+    assert(!('due_date' in row), 'due_date is omitted when unset');
+    assert(!('snooze_until' in row), 'snooze_until is omitted on insert (the app reads a missing key as not snoozed)');
+    assert(row.created_at === row.updated_at && !Number.isNaN(Date.parse(row.created_at)),
+      'created_at/updated_at are ISO timestamps set to now');
+    const dated = data.buildTodoRow({ text: 'x', categoryId: 'c1', sortOrder: 0, dueDate: '2026-11-20' });
+    assert(dated.due_date === '2026-11-20', 'due_date is set when given');
+  });
+
+  test('extension data: sort_order uses the pending-only minimum, not all rows', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const rows = [
+      { done: true, category_id: 'c1', sort_order: -50 },
+      { done: false, category_id: 'c1', sort_order: -3 },
+      { done: false, category_id: 'c2', sort_order: -99 },
+    ];
+    assert(data.computeMinSortOrder(rows, 'c1') === -4,
+      'done rows must not drag new items down (min over pending only, minus 1)');
+    assert(data.computeMinSortOrder([], 'c1') === 0, 'an empty category starts at 0');
+    assert(data.computeMinSortOrder(rows.filter((r) => r.done), 'c1') === 0,
+      'a category with only done rows starts at 0');
+  });
+
+  test('extension data: category resolution never hardcodes an id', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const cats = [
+      { id: '_default_todo_categories', name: '', is_protected: 1 },
+      { id: '_shared_todo_cat', name: '__shared__', is_protected: 1 },
+      { id: 'admin', name: 'Admin', is_protected: 0 },
+    ];
+    assert(data.resolveDefaultCategory(cats).id === '_default_todo_categories',
+      'the General row is the protected non-shared row, resolved at runtime');
+    const offered = data.userCategories(cats);
+    assert(offered.length === 1 && offered[0].id === 'admin',
+      'the picker offers real user categories only (no __shared__, no General)');
+  });
+
+  test('extension data: capture text escapes links and truncates selections', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const text = data.buildCaptureText('A [B] title', 'https://x.example/a)b');
+    assert(text === 'A \\[B\\] title\n[A \\[B\\] title](https://x.example/a%29b)',
+      'capture text escapes [ ] in titles and ) in URLs');
+    assert(data.truncateSelection('x'.repeat(600)).length === 500, 'selections truncate to 500 characters');
+    assert(data.truncateSelection('short') === 'short', 'short selections pass through');
+  });
+
+  test('extension data: next_due recompute matches the app algorithm, incl. early guard and end date', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    // Daily, completed on time: next day.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_days:1', next_due: '2026-11-15', end_date: null, is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: '2026-11-16', is_finished: 0 }),
+      'daily completion advances next_due by one day');
+    // Weekly Mon/Wed/Fri, completed early (Sun 15 Nov, stored due Mon 16):
+    // unguarded next is Mon 16, which is <= current, so the guard skips it → Wed 18.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', next_due: '2026-11-16', end_date: null, is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: '2026-11-18', is_finished: 0 }),
+      'completing early skips the imminent occurrence (early guard)');
+    // End date: recomputed due strictly past it finishes the habit.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_days:1', next_due: '2026-11-15', end_date: '2026-11-15', is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: null, is_finished: 1 }),
+      'a due date past the end date finishes the habit');
+    // An occurrence exactly ON the end date is still due.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_days:1', next_due: '2026-11-15', end_date: '2026-11-16', is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: '2026-11-16', is_finished: 0 }),
+      'an occurrence exactly on the end date is still due');
+    // Free-text rules: next_due null, finished state kept.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every morning', next_due: '2026-11-15', end_date: null, is_finished: 1 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: null, is_finished: 1 }),
+      'free-text rules keep their previous finished state');
+  });
+
+  test('extension data: next_due recompute agrees with the app migration helper except for the early guard', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const freq = await import(pathToFileURL(path.join(JS_DIR, 'frequency-rule.js')).href);
+    // A completion that is NOT early: both must agree.
+    const habit = { frequency_rule: 'every_N_days:1', next_due: '2026-11-10', end_date: null, is_finished: 0 };
+    const done = data.recomputeNextDueForDone(habit, '2026-11-15T10:00:00.000Z');
+    const migrated = freq.recomputeNextDueForMigration(habit, '2026-11-15T10:00:00.000Z');
+    assert(done.next_due === migrated.next_due && done.is_finished === migrated.is_finished,
+      'on a non-early completion the extension recompute must agree with the app migration helper');
+    // An early completion: the migration helper resurrects the skipped
+    // occurrence (by design, one-shot repair); the Done path must not.
+    const earlyHabit = { frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', next_due: '2026-11-16', end_date: null, is_finished: 0 };
+    const earlyDone = data.recomputeNextDueForDone(earlyHabit, '2026-11-15T10:00:00.000Z');
+    const earlyMigrated = freq.recomputeNextDueForMigration(earlyHabit, '2026-11-15T10:00:00.000Z');
+    assert(earlyDone.next_due === '2026-11-18' && earlyMigrated.next_due === '2026-11-16',
+      'on an early completion the Done path skips the imminent occurrence while the migration helper does not');
+  });
+
+  test('extension data: due list applies every exclusion', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const today = data.todayLocalStr();
+    const noon = new Date(); noon.setHours(12, 0, 0, 0);
+    const yesterdayNoon = new Date(noon); yesterdayNoon.setDate(yesterdayNoon.getDate() - 1);
+    const habits = [
+      { id: 'due', name: 'Due', next_due: today, is_draft: 0, is_finished: 0 },
+      { id: 'overdue', name: 'Overdue', next_due: '2000-01-01', is_draft: 0, is_finished: 0 },
+      { id: 'future', name: 'Future', next_due: '2999-01-01', is_draft: 0, is_finished: 0 },
+      { id: 'draft', name: 'Draft', next_due: today, is_draft: 1, is_finished: 0 },
+      { id: 'finished', name: 'Finished', next_due: today, is_draft: 0, is_finished: 1 },
+      { id: 'shared', name: 'Shared', next_due: today, is_draft: 0, is_finished: 0, shared_id: 's1' },
+      { id: 'snoozed', name: 'Snoozed', next_due: today, is_draft: 0, is_finished: 0, snoozed_until: '2999-01-01' },
+      { id: 'snooze-expired', name: 'Snooze expired', next_due: today, is_draft: 0, is_finished: 0, snoozed_until: '2000-01-01' },
+      { id: 'done-today', name: 'Done today', next_due: today, is_draft: 0, is_finished: 0 },
+      { id: 'done-yesterday', name: 'Done yesterday', next_due: today, is_draft: 0, is_finished: 0 },
+    ];
+    const completions = [
+      { habit_id: 'done-today', completed_at: noon.toISOString() },
+      { habit_id: 'done-yesterday', completed_at: yesterdayNoon.toISOString() },
+    ];
+    const shown = data.filterDueHabits(habits, completions, today).map((h) => h.id).sort();
+    assert(JSON.stringify(shown) === JSON.stringify(['done-yesterday', 'due', 'overdue', 'snooze-expired']),
+      `due list must show due/overdue/snooze-expired/done-yesterday only, got ${shown}`);
+  });
+
+  test('extension data: schema-version guard refuses newer or missing versions', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    assert(data.checkSchemaVersion('2.32.102', '2.32.102') === null, 'equal versions may write');
+    assert(data.checkSchemaVersion('2.32.34', '2.32.102') === null, 'an older live version may write');
+    assert(typeof data.checkSchemaVersion('2.32.103', '2.32.102') === 'string',
+      'a newer live version must refuse with a message');
+    assert(typeof data.checkSchemaVersion(null, '2.32.102') === 'string',
+      'a missing live version must refuse (setup incomplete)');
+  });
+
+  test('extension i18n: every popup string exists in EN, FR and ES', async () => {
+    const i18n = await import(pathToFileURL(path.join(EXT_PROD, 'i18n.js')).href);
+    const keys = Object.keys(i18n.STRINGS.en).sort();
+    assert(keys.length > 0, 'the popup must have strings');
+    for (const lang of ['fr', 'es']) {
+      assert(JSON.stringify(Object.keys(i18n.STRINGS[lang]).sort()) === JSON.stringify(keys),
+        `${lang} strings must cover exactly the en keys`);
+      for (const k of keys) assert(i18n.STRINGS[lang][k], `${lang} string ${k} must not be empty`);
+    }
+    assert(i18n.pickLang('fr-FR') === 'fr' && i18n.pickLang('de') === 'en', 'language pick falls back to en');
+    assert(i18n.makeT('fr')('signIn') === 'Se connecter avec Google', 'fr sign-in string');
+  });
+
+  test('extension auth: implicit-flow URL and fragment parsing', async () => {
+    const auth = await import(pathToFileURL(path.join(EXT_PROD, 'auth.js')).href);
+    const url = auth.buildAuthUrl({ redirectUri: 'https://cnpaghkipnignlonpoblbpoceheompap.chromiumapp.org/oauth2', state: 's1', interactive: true });
+    assert(url.includes('response_type=token'), 'implicit flow must request response_type=token');
+    assert(url.includes('prompt=consent'), 'interactive flow must use prompt=consent');
+    assert(!url.includes('code_challenge') && !url.includes('response_type=code'), 'no PKCE and no code flow');
+    assert(url.includes('drive.file') && url.includes('calendar.app.created'), 'both scopes must be in the grant');
+    const silent = auth.buildAuthUrl({ redirectUri: 'https://x.chromiumapp.org/oauth2', state: 's2', interactive: false });
+    assert(silent.includes('prompt=none'), 'silent re-auth must use prompt=none');
+    const parsed = auth.parseAuthRedirect('https://cnpaghkipnignlonpoblbpoceheompap.chromiumapp.org/oauth2#access_token=abc&token_type=Bearer&expires_in=3600&state=s1', 's1');
+    assert(parsed.accessToken === 'abc' && parsed.expiresInSec === 3600, 'fragment parsing must return the token and expiry');
+    assertThrows(() => auth.parseAuthRedirect('https://x/#access_token=abc&expires_in=3600&state=s2', 's1'),
+      'a state mismatch must be rejected');
+    assertThrows(() => auth.parseAuthRedirect('https://x/#error=access_denied&state=s1', 's1'),
+      'a Google error must be rejected');
+  });
+
+  test('extension drive: folder resolution refuses zero or two folders', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const stub = async (url) => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ files: [] }),
+    });
+    await assertRejects(drive.resolveFolderId('tok', 'DeLaClaw', stub), 'no folder must refuse');
+    const two = async (url) => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ files: [{ id: 'a', name: 'DeLaClaw' }, { id: 'b', name: 'DeLaClaw' }] }),
+    });
+    await assertRejects(drive.resolveFolderId('tok', 'DeLaClaw', two), 'two folders must refuse to guess');
+    const one = async (url) => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ files: [{ id: 'folder-1', name: 'DeLaClaw' }] }),
+    });
+    assert(await drive.resolveFolderId('tok', 'DeLaClaw', one) === 'folder-1', 'one folder resolves');
+  });
+
+  test('extension drive: upload uses the app multipart shape', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    let captured = null;
+    const stub = async (url, opts) => {
+      captured = { url, opts };
+      return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'f1' }) };
+    };
+    await drive.uploadFile('tok', 'f1', 'todos.json', [{ id: 'a', text: 'hello' }], stub);
+    assert(captured.opts.method === 'PATCH', 'upload must PATCH');
+    assert(captured.url.includes('uploadType=multipart'), 'upload must use uploadType=multipart');
+    assert(captured.opts.headers['Content-Type'].includes('multipart/related; boundary=---dlc-drive-boundary'),
+      'upload must use the app multipart boundary');
+    assert(captured.opts.body.includes('"name":"todos.json"'), 'upload body must carry the metadata part');
+    assert(captured.opts.body.includes('[\n  {\n    "id": "a",\n    "text": "hello"\n  }\n]'),
+      'upload body must serialize with JSON.stringify(data, null, 2)');
+  });
+
+  // A fake Drive backend for the write-protocol tests: files.list,
+  // media download, metadata reads and multipart upload, with a hook
+  // that applies an external change on a chosen metadata read.
+  function fakeDrive(initialRows) {
+    let rows = JSON.parse(JSON.stringify(initialRows));
+    let md5 = 'v1';
+    let metaCalls = 0;
+    let uploads = [];
+    let changeCount = 0;
+    let changeOnMetaCall = null; // fn(n) — applied before answering meta call n
+    const fetchImpl = async (url, opts = {}) => {
+      if (url.includes('/files?q=')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ files: [{ id: 'todos-1', name: 'todos.json', md5Checksum: md5 }] }) };
+      }
+      if (url.includes('?alt=media')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify(rows) };
+      }
+      if (url.includes('fields=md5Checksum')) {
+        metaCalls += 1;
+        if (changeOnMetaCall) changeOnMetaCall(metaCalls);
+        return { ok: true, status: 200, text: async () => JSON.stringify({ md5Checksum: md5, modifiedTime: '2026-11-15T00:00:00.000Z' }) };
+      }
+      if ((opts.method || 'GET') === 'PATCH') {
+        const body = opts.body || '';
+        const parts = body.split(`--${'---dlc-drive-boundary'}`);
+        const dataPart = parts[2] || '';
+        const json = dataPart.slice(dataPart.indexOf('\r\n\r\n') + 4);
+        const uploaded = JSON.parse(json);
+        uploads.push(uploaded);
+        rows = uploaded;
+        md5 = `v${uploads.length + 1}`;
+        return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'todos-1' }) };
+      }
+      throw new Error(`unexpected fake-drive URL: ${url}`);
+    };
+    return {
+      fetchImpl,
+      get uploads() { return uploads; },
+      applyExternalChange(newRows) { rows = newRows; changeCount += 1; md5 = `v-ext-${changeCount}`; },
+      setChangeOnMetaCall(fn) { changeOnMetaCall = fn; },
+      get rows() { return rows; },
+    };
+  }
+
+  test('extension drive: md5 pre-check re-reads once and keeps the concurrent change', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const fake = fakeDrive([{ id: 'a', text: 'existing' }]);
+    // The file moves once, between the list read and the pre-check.
+    fake.setChangeOnMetaCall((n) => {
+      if (n === 1) fake.applyExternalChange([{ id: 'a', text: 'existing' }, { id: 'ext', text: 'from another client' }]);
+    });
+    const file = { id: 'todos-1', name: 'todos.json', md5Checksum: 'v1' };
+    let mine = null;
+    const readBack = await drive.writeTable('tok', file, (rows) => {
+      mine = { id: 'mine', text: 'mine' };
+      return [...rows, mine];
+    }, (rows) => rows.some((r) => r.id === 'mine'), fake.fetchImpl);
+    assert(fake.uploads.length === 1, 'one upload after one re-read');
+    const uploaded = fake.uploads[0];
+    assert(uploaded.some((r) => r.id === 'ext') && uploaded.some((r) => r.id === 'mine'),
+      'the upload must keep the concurrent change and the new row');
+    assert(readBack.some((r) => r.id === 'mine'), 'the confirming read-back must show the new row');
+  });
+
+  test('extension drive: file moved twice aborts and writes nothing', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const fake = fakeDrive([{ id: 'a', text: 'existing' }]);
+    // The file moves on every metadata read: the pre-check can never pass.
+    fake.setChangeOnMetaCall(() => fake.applyExternalChange([{ id: 'a', text: 'existing' }, { id: 'ext', text: 'moved' }]));
+    const file = { id: 'todos-1', name: 'todos.json', md5Checksum: 'v1' };
+    await assertRejects(drive.writeTable('tok', file, (rows) => [...rows, { id: 'mine' }],
+      (rows) => rows.some((r) => r.id === 'mine'), fake.fetchImpl),
+      'a file that moves twice must abort');
+    assert(fake.uploads.length === 0, 'an aborted write must upload nothing');
+  });
 
   // ===================================================================
   // SUMMARY

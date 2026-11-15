@@ -615,7 +615,7 @@ function initFlashcardItemDragDrop(listEl, deckId) {
     itemSelector: type === 'text' ? '.todo-item[data-text-id]' : '.todo-item[data-card-id]',
     idAttr: type === 'text' ? 'textId' : 'cardId',
     actionsSelector: '.todo-actions',
-    crossContainerSelector: '[data-deck-id]',
+    crossContainerSelector: '#flashcardGrid .task-list[data-deck-id]',
     getContainerId: (el) => el.dataset.deckId,
     onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
       const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;

@@ -9146,8 +9146,8 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(deckLists === 2, 'the card list and the text list must both carry data-deck-id');
       assert(flashSrc.includes("grid.querySelectorAll('.task-list[data-deck-id]')"),
         'renderAllBuckets must init item drag on every deck list');
-      assert(flashSrc.includes("crossContainerSelector: '[data-deck-id]'"),
-        'item drag must accept drops in any deck list');
+      assert(flashSrc.includes("crossContainerSelector: '#flashcardGrid .task-list[data-deck-id]'"),
+        'item drag must accept drops only in deck lists inside the flashcard grid');
       assert(flashSrc.includes("itemSelector: type === 'text' ? '.todo-item[data-text-id]' : '.todo-item[data-card-id]'"),
         'item drag must select card rows and text rows by the deck type');
       assert(flashSrc.includes('flashcardDragAllowed({'),

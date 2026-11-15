@@ -5,7 +5,7 @@ import { esc, escQ, showToast, showConfirmAction, applySectionGrid, fetchAll, is
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneBlockText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap, persistTextEdit, leadingRevealCount, trailingRevealCount, getTextChunks, isChunkDue, chunkReviseMode, applyChunkEdit } from './scene-parse.js';
-import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, descendantBucketIds, descendantsOf, siblingNameTaken, planNodeMove, resolveSectionPath, parseSectionPath, flattenTree, runDeckToSectionMigration } from './sections-pure.js';
+import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, descendantBucketIds, descendantsOf, siblingNameTaken, planNodeMove, resolveSectionPath, parseSectionPath, flattenTree, runDeckToSectionMigration, flashcardDragAllowed } from './sections-pure.js';
 
 // ===================================================================
 // FLASHCARDS — Spaced Repetition (Algo-style intervals)
@@ -533,6 +533,11 @@ function renderAllBuckets() {
     const draftList = draftDeck.querySelector('.task-list');
     if (draftList) initDraftDragDrop(draftList);
   }
+  // Init cross-deck item drag for every deck list (cards and texts),
+  // like Lists/Habits do for their items.
+  grid.querySelectorAll('.task-list[data-deck-id]').forEach((listEl) => {
+    initFlashcardItemDragDrop(listEl, listEl.dataset.deckId);
+  });
   // Section chips rows are re-created with the grid, so their drag
   // handlers are (re)bound here after every grid render, like Lists
   // does for its section chips.
@@ -593,6 +598,53 @@ function initDraftDragDrop(listEl) {
         tableName: 'flashcard_notes',
         reinitFn: () => initDraftDragDrop(listEl),
       });
+    },
+  });
+}
+
+// Cross-deck drag for cards and texts, like Lists/Habits cross-list
+// drag: a long-press drag into another deck of the same type moves
+// the item there (deck_id + the legacy deck name). A drop into a
+// wrong-type deck or the shared deck is refused with a toast and the
+// item snaps back, and a within-deck drag snaps back too — cards and
+// texts have no stored order, so their order comes from the sort
+// control, not manual order.
+function initFlashcardItemDragDrop(listEl, deckId) {
+  const type = getDeckType(deckId);
+  initItemDragDrop(listEl, {
+    itemSelector: type === 'text' ? '.todo-item[data-text-id]' : '.todo-item[data-card-id]',
+    idAttr: type === 'text' ? 'textId' : 'cardId',
+    actionsSelector: '.todo-actions',
+    crossContainerSelector: '#flashcardGrid .task-list[data-deck-id]',
+    getContainerId: (el) => el.dataset.deckId,
+    onReorder: async (orderedIds, { draggedId, sourceContainerId, targetContainerId } = {}) => {
+      const crossMove = sourceContainerId && targetContainerId && sourceContainerId !== targetContainerId;
+      if (!crossMove) {
+        renderAllBuckets();
+        return;
+      }
+      const targetRow = _deckMap.get(targetContainerId);
+      const allowed = flashcardDragAllowed({
+        itemType: type,
+        targetKind: targetRow?.kind,
+        targetType: getDeckType(targetContainerId),
+        isSharedTarget: targetContainerId === _sharedDeckId,
+      });
+      if (!allowed) {
+        const key = targetContainerId === _sharedDeckId
+          ? 'flashcards.drag_shared'
+          : (type === 'text' ? 'flashcards.drag_text_to_flashcard' : 'flashcards.drag_card_to_text');
+        showToast(t(key), 'error');
+        renderAllBuckets();
+        return;
+      }
+      const table = type === 'text' ? 'texts' : 'flashcards';
+      const targetDeck = _deckMap.get(targetContainerId);
+      const { error } = await state.db.from(table)
+        .update({ deck: targetDeck?.name ?? '', deck_id: targetContainerId })
+        .eq('id', draggedId);
+      if (error) showToast(t('toast.update_failed'), 'error');
+      refreshFlashcards();
     },
   });
 }
@@ -756,7 +808,7 @@ function renderFlashcardDeck(deckId, q) {
         </div>
       </div>
     </div>
-    <div class="task-list">
+    <div class="task-list" data-deck-id="${esc(deckId)}">
       ${cards.length > 0 ? cards.map(c => renderFlashcardItem(c, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-flashcard" data-deck="${esc(deckId)}">${lucideIcon('plus', 16)} ${t('flashcards.add_card')}</button></div>`}
     </div>
   </div>`;
@@ -827,7 +879,7 @@ function renderTextDeck(deckId, q) {
         </div>
       </div>
     </div>
-    <div class="task-list">
+    <div class="task-list" data-deck-id="${esc(deckId)}">
       ${texts.length > 0 ? texts.map(tx => renderTextItem(tx, color)).join('') : `<div class="page-empty-state" style="padding:24px 16px;"><p style="color:var(--muted);font-size:0.85rem;">${t('flashcards.empty_deck_hint')}</p><button class="empty-cta" data-action="open-add-text" data-deck="${esc(deckId)}">${lucideIcon('plus', 16)} ${t('text_revision.add_text')}</button></div>`}
     </div>
   </div>`;
@@ -1279,18 +1331,43 @@ function flashChildRow(parentId, name) {
   return [..._deckMap.values()].find(d => (d.parent_id ?? null) === (parentId ?? null) && (d.name || '').toLowerCase() === name.toLowerCase()) || null;
 }
 
-// Convert a bucket deck into a section: its cards and texts move to the
-// default deck first, then the row flips to kind='section'. The sequence
-// runs through runDeckToSectionMigration (checked writes, flip last,
-// id-precise rollback), so a failed move can never strand items inside
-// a section row, where deck buckets never render them.
+// Convert a bucket deck into a section: its cards and texts move into a
+// fresh '*' bucket inside it first (like Lists/TODOs/Habits), then the
+// row flips to kind='section'. The sequence runs through
+// runDeckToSectionMigration (checked writes, flip last, id-precise
+// rollback), so a failed move can never strand items inside a section
+// row, where deck buckets never render them. The '*' bucket keeps the
+// converted deck's explicit type when it has one, so an empty text
+// deck's star bucket still renders as a text deck.
 async function convertDeckToSection(row) {
-  const targetId = _defaultDeckId;
-  const targetName = _deckMap.get(targetId)?.name ?? '';
+  // Reload first: a failed attempt never reaches the reload at the end
+  // of this function, so the map may not know about a leftover '*' bucket
+  // yet — and the retry must reuse it, not insert a second one.
+  await loadFlashcardDecks();
+  row = _deckMap.get(row.id) ?? row;
+  // Reuse a leftover '*' bucket from a failed attempt instead of
+  // inserting a second one — a retry after a swallowed delete failure
+  // or a kept star (failed rollback) must not create a duplicate.
+  // Reuse is safe even when the leftover holds items: the retry's bulk
+  // moves add the deck's remaining items into the same bucket.
+  const existingStar = flashChildRow(row.id, '*');
+  let starId = existingStar?.id || null;
+  if (!starId) {
+    const starRow = {
+      name: '*', shortname: null, color: row.color || FLASH_SECTION_DEFAULT_COLOR,
+      sort_order: 0, kind: 'bucket', parent_id: row.id,
+    };
+    if (row.deck_type) starRow.deck_type = row.deck_type;
+    const { data, error } = await state.db.from('flashcard_decks').insert(starRow).select();
+    if (error) throw error;
+    starId = data?.[0]?.id;
+    // Abort without flipping kind if the '*' bucket is missing — see
+    // convertListBucketToSection.
+    if (!starId) throw new Error('section-convert-star-missing');
+  }
   await runDeckToSectionMigration(state.db, {
-    deckId: row.id, deckName: row.name ?? '', targetId, targetName,
+    deckId: row.id, deckName: row.name ?? '', starId,
   });
-  row.kind = 'section';
   await loadFlashcardDecks();
 }
 

@@ -8783,12 +8783,11 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'list conversion must not null the shortname in memory (sections keep short names since v2.25.0)');
     });
 
-    test('sections-pure: runDeckToSectionMigration — checked writes, flip last, id-precise rollback', async () => {
+    test('sections-pure: runDeckToSectionMigration — checked writes, flip last, destination rollback', async () => {
       const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
-      const spec = { deckId: 'DECK', deckName: 'Old', targetId: 'GENERAL', targetName: '' };
+      const spec = { deckId: 'DECK', deckName: 'Old', starId: 'STAR' };
       // Fake query-builder db: records calls, fails the Nth call when failAt > 0
       // (or the listed calls when failAt is an array).
-      // select returns the ids that the bulk moves would touch.
       const fakeDb = (failAt) => {
         const calls = [];
         const failSet = new Set(Array.isArray(failAt) ? failAt : [failAt]);
@@ -8797,80 +8796,374 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         return {
           calls,
           from: (table) => ({
-            select: (_cols) => ({
+            update: (patch) => ({ eq: (col, val) => record({ op: 'update', table, patch, col, val }) }),
+            delete: () => ({ eq: (col, val) => record({ op: 'delete', table, col, val }) }),
+            select: (cols) => ({
               eq: (col, val) => {
-                calls.push({ op: 'select', table, col, val });
-                const error = fail();
-                return Promise.resolve({
-                  data: error ? null : (table === 'flashcards' ? [{ id: 'c1' }, { id: 'c2' }] : [{ id: 't1' }]),
-                  error,
-                });
+                calls.push({ op: 'select', table, cols, col, val });
+                return Promise.resolve({ data: [{ kind: 'bucket' }], error: fail() });
               },
             }),
-            update: (patch) => ({ eq: (col, val) => record({ op: 'update', table, patch, col, val }) }),
           }),
         };
       };
-      // Success: two id captures, two bulk moves, flip last — exactly five writes, in order.
+      // Success: two bulk moves, flip last — exactly three writes, in order.
       let db = fakeDb(0);
       await m.runDeckToSectionMigration(db, spec);
-      assert(db.calls.length === 5, 'success path must be exactly five calls');
-      assert(db.calls[0].op === 'select' && db.calls[0].table === 'flashcards', 'first call captures the deck\'s card ids');
-      assert(db.calls[1].op === 'select' && db.calls[1].table === 'texts', 'second call captures the deck\'s text ids');
-      assert(db.calls[2].table === 'flashcards' && db.calls[2].col === 'deck_id' && db.calls[2].val === 'DECK'
-        && db.calls[2].patch.deck_id === 'GENERAL', 'third call bulk-moves the cards to the default deck');
-      assert(db.calls[3].table === 'texts' && db.calls[3].patch.deck_id === 'GENERAL',
-        'fourth call bulk-moves the texts to the default deck');
-      assert(db.calls[4].table === 'flashcard_decks' && db.calls[4].patch.kind === 'section',
+      assert(db.calls.length === 3, 'success path must be exactly three calls');
+      assert(db.calls[0].table === 'flashcards' && db.calls[0].col === 'deck_id' && db.calls[0].val === 'DECK'
+        && db.calls[0].patch.deck_id === 'STAR' && db.calls[0].patch.deck === '*', 'first call bulk-moves the cards into the * bucket');
+      assert(db.calls[1].table === 'texts' && db.calls[1].patch.deck_id === 'STAR' && db.calls[1].patch.deck === '*',
+        'second call bulk-moves the texts into the * bucket');
+      assert(db.calls[2].table === 'flashcard_decks' && db.calls[2].patch.kind === 'section',
         'the kind flip is the last write');
-      // A failed id capture throws before any move.
+      // A failed card move aborts: both tables are rolled back (the
+      // move may have committed while its response was lost, so never
+      // assume nothing moved), then the * bucket is deleted and the
+      // original error is rethrown.
       db = fakeDb(1);
       let threw = null;
       try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
-      assert(threw && db.calls.length === 1, 'a failed card-id capture must abort before any move');
-      // A failed card move throws, and the flip is never attempted.
+      assert(threw && threw.message === 'injected-1' && db.calls.length === 4,
+        'a failed card move must roll back both tables and delete the * bucket before rethrowing the original error');
+      assert(db.calls[1].table === 'flashcards' && db.calls[1].col === 'deck_id' && db.calls[1].val === 'STAR'
+        && db.calls[1].patch.deck_id === 'DECK', 'abort rolls the cards back first, by destination');
+      assert(db.calls[2].table === 'texts' && db.calls[2].col === 'deck_id' && db.calls[2].val === 'STAR',
+        'abort rolls the texts back too, even though their move never ran');
+      assert(db.calls[3].op === 'delete' && db.calls[3].table === 'flashcard_decks' && db.calls[3].col === 'id'
+        && db.calls[3].val === 'STAR', 'the * bucket is deleted once both rollbacks succeeded');
+      assert(!db.calls.some(c => c.table === 'flashcard_decks' && c.op === 'update'),
+        'a failed card move must never reach the kind flip');
+      // A failed text move aborts the same way: both tables rolled back,
+      // then the * bucket deleted.
+      db = fakeDb(2);
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && threw.message === 'injected-2' && db.calls.length === 5,
+        'a failed text move must roll back both tables and delete the * bucket before rethrowing');
+      assert(db.calls[2].table === 'flashcards' && db.calls[2].col === 'deck_id' && db.calls[2].val === 'STAR',
+        'abort rolls the cards back first, by destination');
+      assert(db.calls[3].table === 'texts' && db.calls[3].col === 'deck_id' && db.calls[3].val === 'STAR',
+        'abort rolls the texts back too');
+      assert(db.calls[4].op === 'delete' && db.calls[4].val === 'STAR',
+        'the * bucket is deleted once both rollbacks succeeded');
+      assert(!db.calls.some(c => c.table === 'flashcard_decks' && c.op === 'update'),
+        'a failed text move must never reach the kind flip');
+      // A failed text move whose card rollback also fails: the text
+      // rollback is still attempted, the * bucket is kept, and the
+      // thrown error reports the rollback failure alongside the move.
+      db = fakeDb([2, 3]);
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
+      assert(threw && db.calls.length === 4, 'a failed rollback must not delete the * bucket');
+      assert(db.calls[3].table === 'texts' && db.calls[3].col === 'deck_id' && db.calls[3].val === 'STAR',
+        'the text rollback is still attempted after a failed card rollback');
+      assert(!db.calls.some(c => c.op === 'delete'),
+        'a failed rollback must leave the * bucket in place');
+      assert(String(threw.message).includes('rollback'), 'the thrown error must report the failed rollback, not just the text move');
+      // A failed flip is read back first: the read says the flip did
+      // not commit, so the abort runs — both tables rolled back, cards
+      // first, then the * bucket deleted.
       db = fakeDb(3);
       threw = null;
       try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
-      assert(threw && db.calls.length === 3, 'a failed card move must abort before the text move and the flip');
-      // A failed text move throws after rolling the cards back — by id,
-      // so the default deck's own items are untouched.
-      db = fakeDb(4);
+      assert(threw && threw.message === 'injected-3' && db.calls.length === 7,
+        'a failed flip must read the kind back, roll both tables back and delete the * bucket before rethrowing');
+      assert(db.calls[3].op === 'select' && db.calls[3].table === 'flashcard_decks' && db.calls[3].cols === 'kind'
+        && db.calls[3].col === 'id' && db.calls[3].val === 'DECK',
+        'a failed flip reads the kind back before deciding whether to abort');
+      assert(db.calls[4].table === 'flashcards' && db.calls[4].col === 'deck_id' && db.calls[4].val === 'STAR',
+        'flip abort moves the cards back first, by destination');
+      assert(db.calls[5].table === 'texts' && db.calls[5].col === 'deck_id' && db.calls[5].val === 'STAR'
+        && db.calls[5].patch.deck_id === 'DECK', 'flip abort moves the texts back last, by destination');
+      assert(db.calls[6].op === 'delete' && db.calls[6].table === 'flashcard_decks' && db.calls[6].col === 'id'
+        && db.calls[6].val === 'STAR', 'flip abort deletes the * bucket once every row moved back');
+      // A failed flip whose read-back also fails: state unknown — no
+      // rollback is attempted, the * bucket is kept, and the thrown
+      // error says the flip could not be verified.
+      db = fakeDb([3, 4]);
       threw = null;
       try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
-      assert(threw && db.calls.length === 6, 'a failed text move must roll the cards back before rethrowing');
-      assert(db.calls[4].op === 'update' && db.calls[4].table === 'flashcards' && db.calls[4].col === 'id'
-        && db.calls[4].val === 'c1' && db.calls[4].patch.deck_id === 'DECK' && db.calls[4].patch.deck === 'Old',
-        'rollback moves the first card back to the original deck, by id');
-      assert(db.calls[5].col === 'id' && db.calls[5].val === 'c2',
-        'rollback moves the second card back too');
-      assert(!db.calls.some(c => c.table === 'flashcard_decks'),
-        'a failed text move must never reach the kind flip');
-      // A failed flip throws after rolling both tables back, cards first.
-      db = fakeDb(5);
-      threw = null;
-      try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
-      assert(threw && db.calls.length === 8, 'a failed flip must roll both tables back before rethrowing');
-      assert(db.calls[5].table === 'flashcards' && db.calls[5].col === 'id' && db.calls[5].val === 'c1',
-        'flip rollback moves the cards back first');
-      assert(db.calls[7].table === 'texts' && db.calls[7].col === 'id' && db.calls[7].val === 't1'
-        && db.calls[7].patch.deck_id === 'DECK', 'flip rollback moves the texts back last');
-      // A failed flip whose card rollback also fails: every rollback row
-      // is still attempted, and the thrown error reports the rollback
+      assert(threw && db.calls.length === 4, 'a failed read-back must not abort blindly');
+      assert(!db.calls.some(c => c.op === 'delete'), 'a failed read-back must leave the * bucket in place');
+      assert(!db.calls.some(c => c.op === 'update' && c.val === 'STAR'),
+        'a failed read-back must not roll anything back while the flip state is unknown');
+      assert(String(threw.message).includes('could not verify'), 'the thrown error must say the flip could not be verified');
+      // A failed flip whose card rollback also fails: the text rollback
+      // is still attempted, the * bucket is NOT deleted while items may
+      // still point at it, and the thrown error reports the rollback
       // failure alongside the flip failure.
-      db = fakeDb([5, 6]);
+      db = fakeDb([3, 5]);
       threw = null;
       try { await m.runDeckToSectionMigration(db, spec); } catch (e) { threw = e; }
-      assert(threw && db.calls.length === 8, 'a failed rollback must not cut the remaining rollback rows short');
+      assert(threw && db.calls.length === 6, 'a failed rollback must not cut the remaining rollback rows short');
+      assert(db.calls[5].table === 'texts' && db.calls[5].col === 'deck_id' && db.calls[5].val === 'STAR',
+        'the text rollback is still attempted after a failed card rollback');
+      assert(!db.calls.some(c => c.op === 'delete'),
+        'a failed rollback must leave the * bucket in place');
       assert(String(threw.message).includes('rollback'), 'the thrown error must report the failed rollback, not just the flip');
       // flashcards.js is wired to the helper, with no unchecked bulk
-      // move left in the conversion.
+      // move left in the conversion, and the * bucket is created first.
       const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
       assert(flashSrc.includes('runDeckToSectionMigration(state.db'),
         'deck conversion must run through the checked migration helper');
       const conv = flashSrc.slice(flashSrc.indexOf('async function convertDeckToSection'));
-      assert(!conv.slice(0, conv.indexOf('async function ', 10)).includes("await state.db.from('flashcards').update"),
+      const convBody = conv.slice(0, conv.indexOf('async function ', 10));
+      assert(!convBody.includes("await state.db.from('flashcards').update"),
         'convertDeckToSection must not bulk-move cards itself');
+      assert(convBody.includes("name: '*'") && convBody.includes('parent_id: row.id'),
+        'convertDeckToSection must create a * bucket inside the deck being converted');
+      assert(convBody.includes("flashChildRow(row.id, '*')"),
+        'convertDeckToSection must reuse a leftover * bucket instead of inserting a duplicate on retry');
+    });
+
+    test('sections-pure: runDeckToSectionMigration — destination rollback catches a row added just before the move', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      // Stateful fake: real in-memory rows, so the test can prove a row
+      // present in the bucket at move time is moved back by the
+      // destination rollback instead of being stranded in the deleted
+      // '*' bucket. (It does not simulate an insertion between the two
+      // completed bulk moves — such a row lands in the source deck, not
+      // the star, so the rollback cannot cover it.)
+      const rows = {
+        flashcards: [
+          { id: 'c1', deck_id: 'DECK', deck: 'Old' },
+          { id: 'c2', deck_id: 'DECK', deck: 'Old' },
+        ],
+        texts: [{ id: 't1', deck_id: 'DECK', deck: 'Old' }],
+        flashcard_decks: [
+          { id: 'DECK', kind: 'bucket' },
+          { id: 'STAR', kind: 'bucket' },
+        ],
+      };
+      const db = {
+        from: (table) => ({
+          update: (patch) => ({
+            eq: (col, val) => {
+              if (table === 'flashcards' && patch.deck_id === 'STAR') {
+                // A second tab adds a card to the deck just as the bulk
+                // move runs — it lands in the deck, so the move picks it up.
+                rows.flashcards.push({ id: 'c3', deck_id: 'DECK', deck: 'Old' });
+              }
+              if (table === 'texts' && patch.deck_id === 'STAR') {
+                return Promise.resolve({ error: new Error('injected-text-move') });
+              }
+              for (const r of rows[table]) if (r[col] === val) Object.assign(r, patch);
+              return Promise.resolve({ data: null, error: null });
+            },
+          }),
+          delete: () => ({
+            eq: (col, val) => {
+              rows.flashcard_decks = rows.flashcard_decks.filter(r => r[col] !== val);
+              return Promise.resolve({ data: null, error: null });
+            },
+          }),
+        }),
+      };
+      let threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw, 'a failed text move must throw');
+      assert(rows.flashcards.length === 3 && rows.flashcards.every(c => c.deck_id === 'DECK' && c.deck === 'Old'),
+        'the destination rollback must move every card back, including one added just before the move');
+      assert(rows.flashcards.some(c => c.id === 'c3' && c.deck_id === 'DECK'),
+        'the card added just before the move must end up back in the original deck, not stranded in the deleted star bucket');
+      assert(rows.texts.every(t => t.deck_id === 'DECK'), 'texts stay in the original deck');
+      assert(!rows.flashcard_decks.some(d => d.id === 'STAR'), 'the star bucket is deleted once the rollback succeeded');
+    });
+
+    test('sections-pure: runDeckToSectionMigration — a move that reports an error after committing is still rolled back', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      // Stateful fake: the card PATCH commits server-side, but its
+      // response is lost — the adapter reports an error although the
+      // rows moved. A reported error must never be read as "nothing
+      // moved" right before deleting the bucket they may point at.
+      const rows = {
+        flashcards: [{ id: 'c1', deck_id: 'DECK', deck: 'Old' }],
+        texts: [{ id: 't1', deck_id: 'DECK', deck: 'Old' }],
+        flashcard_decks: [
+          { id: 'DECK', kind: 'bucket' },
+          { id: 'STAR', kind: 'bucket' },
+        ],
+      };
+      const db = {
+        from: (table) => ({
+          update: (patch) => ({
+            eq: (col, val) => {
+              for (const r of rows[table]) if (r[col] === val) Object.assign(r, patch);
+              if (table === 'flashcards' && patch.deck_id === 'STAR') {
+                return Promise.resolve({ data: null, error: new Error('lost-response') });
+              }
+              return Promise.resolve({ data: null, error: null });
+            },
+          }),
+          delete: () => ({
+            eq: (col, val) => {
+              rows.flashcard_decks = rows.flashcard_decks.filter(r => r[col] !== val);
+              return Promise.resolve({ data: null, error: null });
+            },
+          }),
+        }),
+      };
+      let threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && threw.message === 'lost-response', 'the original error must be rethrown');
+      assert(rows.flashcards.every(c => c.deck_id === 'DECK' && c.deck === 'Old'),
+        'cards committed to the star must be moved back even though the move reported an error');
+      assert(rows.texts.every(t => t.deck_id === 'DECK'), 'texts stay in the original deck');
+      assert(!rows.flashcard_decks.some(d => d.id === 'STAR'), 'the star bucket is deleted once the rollback succeeded');
+    });
+
+    test('sections-pure: runDeckToSectionMigration — a flip that reports an error is read back before aborting', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      // Stateful fake: the flip PATCH may commit server-side while its
+      // response is lost. The helper must read the kind back: a committed
+      // flip is success, a truly failed flip aborts, and a failed read
+      // keeps the star and the items.
+      const makeDb = ({ flipApplies, readbackError, readbackRows, readbackThrows }) => {
+        const rows = {
+          flashcards: [{ id: 'c1', deck_id: 'DECK', deck: 'Old' }],
+          texts: [{ id: 't1', deck_id: 'DECK', deck: 'Old' }],
+          flashcard_decks: [
+            { id: 'DECK', kind: 'bucket' },
+            { id: 'STAR', kind: 'bucket' },
+          ],
+        };
+        const db = {
+          from: (table) => ({
+            update: (patch) => ({
+              eq: (col, val) => {
+                const isFlip = table === 'flashcard_decks' && patch.kind === 'section';
+                if (isFlip && !flipApplies) {
+                  return Promise.resolve({ data: null, error: new Error('flip-lost') });
+                }
+                for (const r of rows[table]) if (r[col] === val) Object.assign(r, patch);
+                if (isFlip) return Promise.resolve({ data: null, error: new Error('flip-lost') });
+                return Promise.resolve({ data: null, error: null });
+              },
+            }),
+            select: () => ({
+              eq: (col, val) => {
+                if (readbackThrows) throw new Error('readback-threw');
+                if (readbackError) return Promise.resolve({ data: null, error: new Error('readback-lost') });
+                if (readbackRows !== undefined) return Promise.resolve({ data: readbackRows, error: null });
+                const row = rows.flashcard_decks.find(r => r[col] === val);
+                return Promise.resolve({ data: row ? [{ kind: row.kind }] : [], error: null });
+              },
+            }),
+            delete: () => ({
+              eq: (col, val) => {
+                rows.flashcard_decks = rows.flashcard_decks.filter(r => r[col] !== val);
+                return Promise.resolve({ data: null, error: null });
+              },
+            }),
+          }),
+        };
+        return { db, rows };
+      };
+      // Flip committed, response lost: success — items stay in the star,
+      // the star is kept, the deck is a section.
+      let { db, rows } = makeDb({ flipApplies: true, readbackError: false });
+      let threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(!threw, 'a flip that committed must be treated as success even though it reported an error');
+      assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the flip committed');
+      assert(rows.texts.every(t => t.deck_id === 'STAR'), 'the texts stay in the * bucket when the flip committed');
+      assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the flip committed');
+      assert(rows.flashcard_decks.find(d => d.id === 'DECK').kind === 'section', 'the deck is a section when the flip committed');
+      // Flip truly failed: abort — items back in the deck, star deleted.
+      ({ db, rows } = makeDb({ flipApplies: false, readbackError: false }));
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && threw.message === 'flip-lost', 'a truly failed flip must rethrow the original error');
+      assert(rows.flashcards.every(c => c.deck_id === 'DECK'), 'the cards move back when the flip truly failed');
+      assert(rows.texts.every(t => t.deck_id === 'DECK'), 'the texts move back when the flip truly failed');
+      assert(!rows.flashcard_decks.some(d => d.id === 'STAR'), 'the star bucket is deleted once the rollback succeeded');
+      // Read-back failed: state unknown — keep the star and the items,
+      // throw a combined error, attempt no rollback.
+      ({ db, rows } = makeDb({ flipApplies: false, readbackError: true }));
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && String(threw.message).includes('could not verify'), 'a failed read-back must say the flip could not be verified');
+      assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the flip state is unknown');
+      assert(rows.texts.every(t => t.deck_id === 'STAR'), 'the texts stay in the * bucket when the flip state is unknown');
+      assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the flip state is unknown');
+      // Read-back returns no row: state unknown — keep the star and
+      // the items, throw, attempt no rollback.
+      ({ db, rows } = makeDb({ flipApplies: false, readbackError: false, readbackRows: [] }));
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && String(threw.message).includes('could not be verified'), 'an empty read-back must say the flip state could not be verified');
+      assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the read-back returns no row');
+      assert(rows.texts.every(t => t.deck_id === 'STAR'), 'the texts stay in the * bucket when the read-back returns no row');
+      assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the read-back returns no row');
+      // Read-back returns an unexpected kind: same — unknown state.
+      ({ db, rows } = makeDb({ flipApplies: false, readbackError: false, readbackRows: [{ kind: 'weird' }] }));
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && String(threw.message).includes('could not be verified'), 'an unexpected kind must say the flip state could not be verified');
+      assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the read-back returns an unexpected kind');
+      assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the read-back returns an unexpected kind');
+      // Read-back itself throws: treated as a failed read, not a crash.
+      ({ db, rows } = makeDb({ flipApplies: false, readbackError: false, readbackThrows: true }));
+      threw = null;
+      try { await m.runDeckToSectionMigration(db, { deckId: 'DECK', deckName: 'Old', starId: 'STAR' }); } catch (e) { threw = e; }
+      assert(threw && String(threw.message).includes('could not verify'), 'a throwing read-back must say the flip could not be verified');
+      assert(rows.flashcards.every(c => c.deck_id === 'STAR'), 'the cards stay in the * bucket when the read-back throws');
+      assert(rows.flashcard_decks.some(d => d.id === 'STAR'), 'the * bucket is kept when the read-back throws');
+    });
+
+    test('sections-pure: flashcardDragAllowed — same-type buckets only, never shared', async () => {
+      const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
+      // Same-type moves are allowed.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: 'flashcard', isSharedTarget: false }) === true,
+        'a card may land in a flashcard deck');
+      assert(m.flashcardDragAllowed({ itemType: 'text', targetKind: 'bucket', targetType: 'text', isSharedTarget: false }) === true,
+        'a text may land in a text deck');
+      // Wrong-type moves are refused — a card dropped in a text deck
+      // would be invisible, since each deck renders one kind only.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: 'text', isSharedTarget: false }) === false,
+        'a card may not land in a text deck');
+      assert(m.flashcardDragAllowed({ itemType: 'text', targetKind: 'bucket', targetType: 'flashcard', isSharedTarget: false }) === false,
+        'a text may not land in a flashcard deck');
+      // Sections never receive items directly.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'section', targetType: 'flashcard', isSharedTarget: false }) === false,
+        'a card may not land in a section row');
+      // The shared deck is never a drag target, even when the type matches.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: 'flashcard', isSharedTarget: true }) === false,
+        'a card may not land in the shared deck');
+      // A missing or typeless target denies the drop — the safe direction.
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: undefined, targetType: 'flashcard', isSharedTarget: false }) === false,
+        'a missing target row denies the drop');
+      assert(m.flashcardDragAllowed({ itemType: 'flashcard', targetKind: 'bucket', targetType: undefined, isSharedTarget: false }) === false,
+        'a target with no resolved type denies the drop');
+    });
+
+    test('flashcards: deck lists wire cross-deck item drag', () => {
+      const flashSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');
+      // Both deck lists (cards and texts) carry the deck id; the drafts
+      // list must not — drafts have their own reorder-only drag.
+      const deckLists = (flashSrc.match(/class="task-list" data-deck-id="\$\{esc\(deckId\)\}"/g) || []).length;
+      assert(deckLists === 2, 'the card list and the text list must both carry data-deck-id');
+      assert(flashSrc.includes("grid.querySelectorAll('.task-list[data-deck-id]')"),
+        'renderAllBuckets must init item drag on every deck list');
+      assert(flashSrc.includes("crossContainerSelector: '#flashcardGrid .task-list[data-deck-id]'"),
+        'item drag must accept drops only in deck lists inside the flashcard grid');
+      assert(flashSrc.includes("itemSelector: type === 'text' ? '.todo-item[data-text-id]' : '.todo-item[data-card-id]'"),
+        'item drag must select card rows and text rows by the deck type');
+      assert(flashSrc.includes('flashcardDragAllowed({'),
+        'item drag must check the drop against the drag guard');
+      assert(flashSrc.includes(".update({ deck: targetDeck?.name ?? '', deck_id: targetContainerId })"),
+        'a cross-deck drop must update deck_id and the legacy deck name');
+      assert(flashSrc.includes("'flashcards.drag_card_to_text'") && flashSrc.includes("'flashcards.drag_text_to_flashcard'")
+        && flashSrc.includes("'flashcards.drag_shared'"),
+        'refused drops must explain themselves with a translated toast');
+      // The keys are picked by variable, so the t()-scan test cannot see
+      // them — pin their presence in all three locales directly.
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      for (const key of ['drag_card_to_text', 'drag_text_to_flashcard', 'drag_shared']) {
+        const count = (i18nSrc.match(new RegExp(`${key}:`, 'g')) || []).length;
+        assert(count === 3, `${key} must be defined in all three locales, found ${count}`);
+      }
     });
 
     test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {

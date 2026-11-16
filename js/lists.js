@@ -1094,8 +1094,7 @@ async function attachToListItem(itemId, btnEl) {
         try {
           record = await state.driveAdapter.uploadAttachment(file);
         } catch (e) {
-          if (e?.code === 'attachment_too_large') showToast(t('lists.attachment_too_large'), 'error');
-          else showToast(t('lists.attachment_upload_failed'), 'error');
+          showToast(t('lists.attachment_upload_failed'), 'error');
           break;
         }
         // Shared → the file must be readable by the other members before

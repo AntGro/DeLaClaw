@@ -9276,7 +9276,11 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
       assert(driveSrc.includes('async uploadAttachment(file)'), 'the Drive adapter must expose uploadAttachment');
       assert(driveSrc.includes('async trashAttachmentFile(driveFileId)'), 'the Drive adapter must expose trashAttachmentFile');
-      assert(driveSrc.includes('ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024'), 'multipart uploads cap at 5 MB');
+      assert(driveSrc.includes('ATTACHMENT_MULTIPART_MAX_BYTES = 5 * 1024 * 1024'), 'multipart uploads cap at 5 MB');
+      assert(driveSrc.includes('if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES)'), 'files past the cap must take the resumable path');
+      assert(driveSrc.includes('uploadAttachmentFileResumable(tok, attachmentsFolderId, file, name)'), 'the resumable path must be wired into uploadAttachment');
+      assert(!driveSrc.includes('attachment_too_large'), 'the adapter must no longer refuse large files');
+      assert(!listsSrc.includes('attachment_too_large'), 'the caller must no longer toast a size refusal');
       assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
       const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
       assert(iface.includes('shareFileWithGroup:'), 'the sharing interface must declare shareFileWithGroup');
@@ -9287,10 +9291,54 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // The keys are picked by variable in places, so the t()-scan test
       // cannot see them all — pin their presence in all three locales directly.
       const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
-      for (const key of ['attach_file', 'remove_attachment', 'attach_unavailable', 'attachment_too_large', 'attachment_upload_failed', 'attachment_share_failed', 'attachment_added', 'attachment_removed']) {
+      for (const key of ['attach_file', 'remove_attachment', 'attach_unavailable', 'attachment_upload_failed', 'attachment_share_failed', 'attachment_added', 'attachment_removed']) {
         const count = (i18nSrc.match(new RegExp(`${key}:`, 'g')) || []).length;
         assert(count === 3, `${key} must be defined in all three locales, found ${count}`);
       }
+    });
+
+    test('drive: resumable upload initiates a session then PUTs the file', async () => {
+      // Slice the real function out of drive.js and run it against a fake
+      // fetch (same new Function idiom as the pure-helper tests).
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('async function uploadAttachmentFileResumable');
+      assert(start !== -1, 'could not find uploadAttachmentFileResumable in drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of uploadAttachmentFileResumable');
+      const load = new Function('fetch', `${driveSrc.slice(start, end + 3)}; return uploadAttachmentFileResumable;`);
+      const file = new File(['x'.repeat(1024)], 'big.bin', { type: 'video/mp4' });
+      const calls = [];
+      const fakeFetch = async (url, opts) => {
+        calls.push({ url, opts });
+        if (calls.length === 1) {
+          return { ok: true, status: 200, headers: { get: (h) => (h === 'Location' ? 'https://upload.session/abc123' : null) }, text: async () => '' };
+        }
+        return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ id: 'res-1', name: 'big.bin', size: '6291456', webViewLink: 'https://drive.google.com/file/d/res-1/view' }), text: async () => '' };
+      };
+      const record = await load(fakeFetch)('tok', 'folder-1', file, 'big.bin');
+      assert(calls.length === 2, `the resumable flow must make exactly two calls, got ${calls.length}`);
+      const [init, put] = calls;
+      assert(init.url.includes('uploadType=resumable'), 'the first call must initiate a resumable session');
+      assert(init.url.includes('fields=id,name,size,webViewLink'), 'the session must request the link back');
+      assert(init.opts.method === 'POST', 'the session initiation must be a POST');
+      assert(init.opts.headers['X-Upload-Content-Length'] === String(file.size), 'the session must declare the file size');
+      assert(init.opts.headers['X-Upload-Content-Type'] === 'video/mp4', 'the session must declare the file type');
+      const meta = JSON.parse(init.opts.body);
+      assert(meta.name === 'big.bin' && meta.parents[0] === 'folder-1', 'the session metadata must carry the name and folder');
+      assert(put.url === 'https://upload.session/abc123', 'the second call must PUT to the session URI');
+      assert(put.opts.method === 'PUT', 'the upload itself must be a PUT');
+      assert(put.opts.body === file, 'the PUT must carry the file as its body');
+      assert(record.drive_file_id === 'res-1' && record.size === 6291456 && record.url === 'https://drive.google.com/file/d/res-1/view',
+        'the record must come from the upload response');
+      // Failure paths: no session URI, and a refused initiation.
+      const noSession = async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => '' });
+      let err;
+      try { await load(noSession)('tok', 'folder-1', file, 'big.bin'); } catch (e) { err = e; }
+      assert(err && /no session URI/.test(err.message), 'a missing session URI must throw');
+      const badInit = async () => ({ ok: false, status: 400, headers: { get: () => null }, text: async () => 'bad request' });
+      err = null;
+      try { await load(badInit)('tok', 'folder-1', file, 'big.bin'); } catch (e) { err = e; }
+      assert(err && /400/.test(err.message), 'a refused initiation must throw with the status');
     });
 
     test('demo data: a sampled list item carries two attachments', () => {

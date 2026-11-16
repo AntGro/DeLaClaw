@@ -96,6 +96,9 @@ export const SHARING_INTERFACE = {
   completeItem:             'fn',   // (groupId, itemId, doneBy?, opts?) => Promise<SharedItem>
   uncompleteItem:           'fn',   // (groupId, itemId, opts?) => Promise<SharedItem>
 
+  // ── Attachments ─────────────────────────────────────────────
+  shareFileWithGroup:       'fn',   // (groupId, fileId, role?) => Promise<string[]> — share a Drive file (e.g. a list item attachment) with every other joined member, as reader; returns the shared member_ids
+
   // ── Items — habits (type-specific) ──────────────────────────
   addSharedHabit:           'fn',   // (groupId, habitData, opts?) => Promise<SharedItem>; opts.onStaged like addItem
   updateSharedHabit:        'fn',   // (groupId, sharedId, changes, opts?) => Promise<SharedItem>; opts.onStaged like addItem

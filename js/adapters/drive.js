@@ -352,6 +352,100 @@ async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag, 
   return { id: result.id, etag };
 }
 
+// ── List item attachments ─────────────────────────────────────────
+// Multipart upload caps at 5 MB — larger files need the resumable
+// endpoint (not implemented yet); the adapter refuses them outright
+// so the caller can toast instead of failing mid-upload.
+export const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+const ATTACHMENTS_FOLDER_NAME = 'attachments';
+
+/** Find the attachments subfolder under the app folder, creating it on first use. */
+async function findOrCreateAttachmentsFolder(token, parentFolderId) {
+  const q = encodeURIComponent(
+    `name='${ATTACHMENTS_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`
+  );
+  const search = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  );
+  if (search.ok) {
+    const { files } = await search.json();
+    if (files && files.length > 0) return files[0].id;
+  }
+  const create = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: ATTACHMENTS_FOLDER_NAME,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentFolderId],
+    }),
+  });
+  if (!create.ok) throw new Error('Failed to create Drive attachments folder');
+  return (await create.json()).id;
+}
+
+// ── Pure attachment helpers ──
+// (Extracted by tests via new Function slicing, same idiom as the
+// flashcards pure session helpers.)
+function uniqueDriveFileName(name, existingNames) {
+  const taken = new Set(existingNames || []);
+  if (!taken.has(name)) return name;
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  let n = 1;
+  let candidate = `${base} (${n})${ext}`;
+  while (taken.has(candidate)) candidate = `${base} (${++n})${ext}`;
+  return candidate;
+}
+// ── End pure attachment helpers ──
+
+/**
+ * Upload a user-picked file to the attachments folder via multipart
+ * upload (FormData carries the binary part — the JSON-string body used
+ * for table files cannot). Returns the attachment record stored on the
+ * item: { drive_file_id, name, size, url }.
+ */
+async function uploadAttachmentFile(token, folderId, file, name) {
+  const metadata = { name, parents: [folderId] };
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', file);
+  const resp = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,webViewLink',
+    { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form }
+  );
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    const err = new Error(`Drive upload failed: ${resp.status} ${errText}`);
+    err.code = resp.status;
+    throw err;
+  }
+  const result = await resp.json();
+  return {
+    drive_file_id: result.id,
+    name: result.name,
+    size: Number(result.size) || file.size,
+    url: result.webViewLink,
+  };
+}
+
+/** Trash an attachment file (recoverable from Drive trash). Best-effort: never throws. */
+async function trashDriveFile(token, fileId) {
+  try {
+    const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashed: true }),
+    });
+    return resp.ok;
+  } catch { return false; }
+}
+
 /** Delete a file from Drive */
 async function deleteFile(token, fileId) {
   await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
@@ -452,6 +546,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   emit('loading', t('menu.drive_connecting'));
 
   const folderId = await findOrCreateFolder(token);
+
+  // Attachments subfolder id, resolved lazily on first upload.
+  let attachmentsFolderId = null;
 
   // Per-table file IDs, ETags, and modified times
   const fileMeta = {}; // { tableName: { fileId, etag, modifiedTime } }
@@ -1367,6 +1464,32 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
     /** Expose token getter for sharing module. */
     getToken,
+    /**
+     * List item attachments — upload a user-picked file to
+     * <app folder>/attachments/ and return the record stored on the item.
+     * Throws 'attachment_too_large' (code) past the 5 MB multipart cap.
+     */
+    async uploadAttachment(file) {
+      if (!file || file.size > ATTACHMENT_MAX_BYTES) {
+        const err = new Error('attachment_too_large');
+        err.code = 'attachment_too_large';
+        throw err;
+      }
+      const tok = await getToken();
+      if (!tok) throw new Error('No valid token — please sign in again');
+      if (!attachmentsFolderId) attachmentsFolderId = await findOrCreateAttachmentsFolder(tok, folderId);
+      // listFolderFiles caps at 100 — past that a duplicate name is
+      // cosmetic only (records key on drive_file_id, never on name).
+      const existing = await listFolderFiles(tok, attachmentsFolderId).catch(() => []);
+      const name = uniqueDriveFileName(file.name, existing.map(f => f.name));
+      return uploadAttachmentFile(tok, attachmentsFolderId, file, name);
+    },
+    /** Trash an attachment file from Drive. Best-effort, returns false on failure. */
+    async trashAttachmentFile(driveFileId) {
+      const tok = await getToken();
+      if (!tok || !driveFileId) return false;
+      return trashDriveFile(tok, driveFileId);
+    },
     /** Read-only mode control — main.js drives it from auth state. */
     setReadOnly(v) { readOnlyMode = !!v; },
     get readOnly() { return readOnlyMode; },

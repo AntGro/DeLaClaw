@@ -9172,6 +9172,164 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
+    // ===================================================================
+    // List item attachments (v2.32.122)
+    // ===================================================================
+    function loadAttachmentHelpers() {
+      const listsJs = jsFiles['lists.js'];
+      const start = listsJs.indexOf('// ── Pure attachment helpers ──');
+      const end = listsJs.indexOf('// ── End pure attachment helpers ──');
+      assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in lists.js');
+      return new Function(`${listsJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl };`)();
+    }
+
+    test('lists: normalizeAttachments accepts string, array and missing; drops invalid entries', () => {
+      const { normalizeAttachments, serializeAttachments } = loadAttachmentHelpers();
+      const good = { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view' };
+      assert(JSON.stringify(normalizeAttachments(undefined)) === '[]', 'missing attachments must read as empty');
+      assert(JSON.stringify(normalizeAttachments(null)) === '[]', 'null attachments must read as empty');
+      assert(JSON.stringify(normalizeAttachments('[]')) === '[]', 'an empty JSON string must read as empty');
+      assert(JSON.stringify(normalizeAttachments(JSON.stringify([good]))) === JSON.stringify([good]),
+        'a JSON string (DB column shape) must parse to the same records');
+      assert(JSON.stringify(normalizeAttachments([good])) === JSON.stringify([good]),
+        'an array (sharing payload shape) must pass through');
+      const mixed = normalizeAttachments([
+        good,
+        { drive_file_id: 'f2', name: 'b.pdf', size: 10, url: 'https://drive.google.com/file/d/f2/view', extra: 'stripped' },
+        { name: 'no-id.pdf', size: 10, url: 'https://drive.google.com/file/d/x/view' },
+        { drive_file_id: 'f3', name: 'no-url.pdf', size: 10 },
+        { drive_file_id: 'f4', name: 'neg.pdf', size: -1, url: 'https://drive.google.com/file/d/f4/view' },
+        { drive_file_id: 'f5', name: 'nan.pdf', size: 'big', url: 'https://drive.google.com/file/d/f5/view' },
+        'not-an-object',
+      ]);
+      assert(mixed.length === 2, `only valid records survive, got ${mixed.length}`);
+      assert(mixed[1].extra === undefined, 'extra fields must be stripped from the record');
+      assert(JSON.stringify(normalizeAttachments('not json')) === '[]', 'an unparseable string must read as empty');
+      assert(serializeAttachments([]) === null, 'an empty list must store NULL, like pre-migration rows');
+      assert(serializeAttachments([good]) === JSON.stringify([good]), 'a non-empty list must store a JSON string');
+    });
+
+    test('lists: formatFileSize pins the unit boundaries', () => {
+      const { formatFileSize } = loadAttachmentHelpers();
+      assert(formatFileSize(0) === '0 B', '0 bytes');
+      assert(formatFileSize(512) === '512 B', '512 bytes');
+      assert(formatFileSize(1023) === '1023 B', '1023 bytes stays in B');
+      assert(formatFileSize(1024) === '1 KB', '1024 bytes is 1 KB');
+      assert(formatFileSize(1536) === '1.5 KB', '1536 bytes is 1.5 KB');
+      assert(formatFileSize(1048576) === '1 MB', '1 MiB is 1 MB');
+      assert(formatFileSize(2621440) === '2.5 MB', '2.5 MiB');
+      assert(formatFileSize(1073741824) === '1 GB', '1 GiB is 1 GB');
+    });
+
+    test('lists: attachment URLs are allowlisted to Drive', () => {
+      const { isDriveAttachmentUrl } = loadAttachmentHelpers();
+      assert(isDriveAttachmentUrl('https://drive.google.com/file/d/abc/view') === true, 'a Drive file link is allowed');
+      assert(isDriveAttachmentUrl('https://drive.google.com/drive/folders/abc') === true, 'a Drive folder link is allowed');
+      assert(isDriveAttachmentUrl('https://example.com/file.pdf') === false, 'an off-Drive link is refused');
+      assert(isDriveAttachmentUrl('javascript:alert(1)') === false, 'a javascript: URL is refused');
+      assert(isDriveAttachmentUrl(null) === false, 'a missing URL is refused');
+    });
+
+    test('drive: uniqueDriveFileName dedupes against the folder listing', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('// ── Pure attachment helpers ──');
+      const end = driveSrc.indexOf('// ── End pure attachment helpers ──');
+      assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in drive.js');
+      const { uniqueDriveFileName } = new Function(`${driveSrc.slice(start, end)}; return { uniqueDriveFileName };`)();
+      assert(uniqueDriveFileName('a.pdf', []) === 'a.pdf', 'no clash keeps the name');
+      assert(uniqueDriveFileName('a.pdf', ['a.pdf']) === 'a (1).pdf', 'one clash appends (1) before the extension');
+      assert(uniqueDriveFileName('a.pdf', ['a.pdf', 'a (1).pdf']) === 'a (2).pdf', 'two clashes append (2)');
+      assert(uniqueDriveFileName('notes', ['notes']) === 'notes (1)', 'an extensionless name dedupes at the end');
+      assert(uniqueDriveFileName('archive.tar.gz', ['archive.tar.gz']) === 'archive.tar (1).gz', 'only the last extension is split off');
+      assert(uniqueDriveFileName('.hidden', ['.hidden']) === '.hidden (1)', 'a leading dot is not an extension');
+    });
+
+    test('migrations: list_items gains the attachments column in 2.32.122', () => {
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(/CREATE TABLE IF NOT EXISTS list_items \([^;]*attachments TEXT/.test(schema),
+        'schema.sql must add attachments TEXT to list_items');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'2.32.122'") && local.includes('ALTER TABLE list_items ADD COLUMN attachments TEXT'),
+        'the local migration must add the attachments column');
+      const driveMig = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(driveMig.includes("'2.32.122'") && driveMig.includes('list_items'),
+        'the Drive migration must normalize list_items attachments');
+    });
+
+    test('lists: attachment UI is wired, Drive-gated, and shared items carry the payload', () => {
+      const listsSrc = jsFiles['lists.js'];
+      assert(listsSrc.includes('data-action="attach-to-list-item"'), 'items must offer an attach button');
+      assert(listsSrc.includes('data-action="remove-list-item-attachment"'), 'attachment chips must offer removal');
+      assert(listsSrc.includes("typeof state.driveAdapter?.uploadAttachment === 'function'"),
+        'the attach button must hide without a Drive adapter');
+      assert(listsSrc.includes('list-item-attachments'), 'attachments must render as chips under the item');
+      assert(listsSrc.includes('item.attachments = normalizeAttachments(sh.payload?.attachments)'),
+        'shared items must read attachments from the sharing payload');
+      assert(listsSrc.includes("shareFileWithGroup(item.shared_group_id, record.drive_file_id, 'reader')"),
+        'an attachment on a shared item must be shared with the group before the payload update');
+      assert(listsSrc.includes('_pendingAttachmentUploads'), 'uploads must be guarded per item');
+      assert(listsSrc.includes('window.attachToListItem = attachToListItem'), 'the attach flow must be window-exposed for delegation');
+      assert(listsSrc.includes('window.removeListItemAttachment = removeListItemAttachment'), 'the remove flow must be window-exposed for delegation');
+      const delSrc = jsFiles['delegation.js'];
+      assert(delSrc.includes("case 'attach-to-list-item':"), 'delegation must route the attach action');
+      assert(delSrc.includes("case 'remove-list-item-attachment':"), 'delegation must route the remove action');
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      assert(driveSrc.includes('async uploadAttachment(file)'), 'the Drive adapter must expose uploadAttachment');
+      assert(driveSrc.includes('async trashAttachmentFile(driveFileId)'), 'the Drive adapter must expose trashAttachmentFile');
+      assert(driveSrc.includes('ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024'), 'multipart uploads cap at 5 MB');
+      assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
+      const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(iface.includes('shareFileWithGroup:'), 'the sharing interface must declare shareFileWithGroup');
+      const sharingDrive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+      assert(sharingDrive.includes('async shareFileWithGroup(groupId, fileId, role'), 'the Drive sharing adapter must implement shareFileWithGroup');
+      const sharingJs = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingJs.includes("'shareFileWithGroup',"), 'the cached sharing adapter must reject shareFileWithGroup as read-only');
+      // The keys are picked by variable in places, so the t()-scan test
+      // cannot see them all — pin their presence in all three locales directly.
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      for (const key of ['attach_file', 'remove_attachment', 'attach_unavailable', 'attachment_too_large', 'attachment_upload_failed', 'attachment_share_failed', 'attachment_added', 'attachment_removed']) {
+        const count = (i18nSrc.match(new RegExp(`${key}:`, 'g')) || []).length;
+        assert(count === 3, `${key} must be defined in all three locales, found ${count}`);
+      }
+    });
+
+    test('demo data: a sampled list item carries two attachments', () => {
+      const demo = fs.readFileSync(path.join(__dirname, '..', 'js', 'demo-data.js'), 'utf-8');
+      const lines = demo.split('\n').filter(l => l.includes("id: 'demo-li-007'"));
+      assert(lines.length === 3, `expected the train-ticket item in all three languages, got ${lines.length}`);
+      assert(lines.every(l => /attachments: \[/.test(l)), 'each copy must carry attachments');
+      assert(lines.every(l => /drive\.google\.com\/file\/d\/demo-train-ticket\/view/.test(l)), 'the demo attachment must link to a Drive file');
+      const { normalizeAttachments } = loadAttachmentHelpers();
+      const sample = [{ drive_file_id: 'demo-attachment-001', name: 'train-ticket.pdf', size: 184320, url: 'https://drive.google.com/file/d/demo-train-ticket/view' }];
+      assert(normalizeAttachments(sample).length === 1, 'the demo attachment record must survive normalization');
+    });
+
+    test('demo: list_items attachments round-trip through the adapter as a JSON string', async () => {
+      const { pathToFileURL } = require('url');
+      const demo = await import(pathToFileURL(path.join(JS_DIR, 'adapters/demo.js')).href);
+      const { createDemoAdapter } = demo;
+      const exec = (builder) => {
+        let out, err;
+        builder.then(r => { out = r; }, e => { err = e; });
+        if (err) throw err;
+        return out;
+      };
+      const { normalizeAttachments, serializeAttachments } = loadAttachmentHelpers();
+      const db = createDemoAdapter({});
+      const record = { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view' };
+      exec(db.from('list_items').insert({ id: 'li-1', list_id: 'l1', text: 'x', attachments: serializeAttachments([record]) }));
+      const read = exec(db.from('list_items').select('*').eq('id', 'li-1'));
+      assert(normalizeAttachments(read.data[0].attachments).length === 1, 'a stored JSON string must read back as one attachment');
+      const record2 = { drive_file_id: 'f2', name: 'b.pdf', size: 10, url: 'https://drive.google.com/file/d/f2/view' };
+      exec(db.from('list_items').update({ attachments: serializeAttachments([record, record2]) }).eq('id', 'li-1'));
+      const read2 = exec(db.from('list_items').select('*').eq('id', 'li-1'));
+      assert(normalizeAttachments(read2.data[0].attachments).length === 2, 'a second attachment must persist alongside the first');
+      exec(db.from('list_items').update({ attachments: serializeAttachments([]) }).eq('id', 'li-1'));
+      const read3 = exec(db.from('list_items').select('*').eq('id', 'li-1'));
+      assert(normalizeAttachments(read3.data[0].attachments).length === 0, 'removing the last attachment must leave none');
+      assert(read3.data[0].attachments === null, 'an empty list must store NULL, not "[]"');
+    });
+
     test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {
       const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
       const rows = [

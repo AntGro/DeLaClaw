@@ -11,6 +11,7 @@ User jobs:
 - inline edit items
 - search across list names and items
 - share lists and items
+- attach files to list items (Drive only, several per item)
 
 ## Entry & Ownership
 - **Entry:** `js/lists.js`
@@ -35,6 +36,7 @@ User jobs:
 - **Pending sets:**
   - `_pendingListItemToggles = Set<itemId>` — block same-item double checkbox toggle, allow concurrent different items
   - `_pendingShare = Set<guardKey>` — block duplicate share/unshare actions
+  - `_pendingAttachmentUploads = Set<itemId>` — block a second upload to the same item while one runs, allow concurrent different items
 - **Modal saves:** `guard()` for `saveNewList`, `saveEditList`
 - **Quick add:** `quickAddListItem` guarded
 
@@ -52,6 +54,8 @@ User jobs:
 - `sort_order` monotonic per list (for list ordering) and per item (within-list ordering)
 - Duplicate list names allowed (no unique constraint)
 - Inline edit: save on Enter/confirm, cancel on blur (standard DeLaClaw inline edit UX)
+- **Attachments (v2.32.122):** a list item carries zero or more attachments as `{drive_file_id, name, size, url}`. Canonical storage is a JSON string in the `list_items.attachments` TEXT column (migration 2.32.122); in-memory `item.attachments` is always the parsed, validated array (`normalizeAttachments` — string/array/missing all accepted, invalid entries dropped). The file lives in the uploader's Drive under `<app folder>/attachments/`; only the link is stored on the item, never fetched on page load. Multipart upload caps at 5 MB (`ATTACHMENT_MAX_BYTES`, Drive API limit) — larger files are refused with a toast, resumable upload is a follow-up. The attach button is Drive-only (hidden when no Drive adapter). Duplicate filenames in the folder are deduped as `name (1).ext`. Removing an attachment (or deleting its item) trashes the Drive file best-effort — the link is gone either way.
+- **Attachments on shared items:** the payload carries the array (`payload.attachments`, real array, not a string) — the local pointer row's column is never the source of truth for shared items; the load enrichment copies `sh.payload.attachments` into `item.attachments`, and writes go through `state.sharing.updateItem` with a payload spread (same as text/note edits). Before the payload update, the uploaded file is shared with every other joined member as reader via `state.sharing.shareFileWithGroup` — a share failure aborts the attach (the file stays in the uploader's Drive folder, unlinked). Known gaps, not in v1: a member who joins later has no access to files attached before they joined (join-backfill open), and unsharing an item does not revoke the file grants (revoke on unshare open).
 - Wardrobe removal (v2.9.17): former wardrobe categories became lists named `<name>` inside a `Wardrobe` section (id `vest_wardrobe`); items in the protected default or an unknown category went to a `*` list inside the section (`vest_wardrobe_star`); item notes carry a `Brand / Make:` / `Size:` / `Color:` / `Status:` field block with only non-empty lines, then pre-existing notes after a blank line. Migrated ids are prefixed `vest_`. On the local backend the section kind/parent links are applied by 2.23.0, which adds those columns
 
 ## Adapter & Backend

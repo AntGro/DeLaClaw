@@ -367,6 +367,8 @@ sequenceDiagram
     Note over OA: date fields diffed vs fingerprint →<br/>markCalDirty → calendar event patched<br/>(done → event deleted)
 ```
 
+Attaching a file to a shared list item follows the same modify path for the link itself (the attachment record joins the payload), with one extra step before the payload update: the file lives in the uploader's own Drive, so it is shared with every other joined member as reader (`shareFileWithGroup`). Member emails are read at runtime from the group folder's permission list and never stored. A member who joins later has no access to files attached before they joined; unsharing the item does not revoke the file grants.
+
 #### Delete an item
 
 ```mermaid

@@ -10,6 +10,45 @@ import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 // LISTS — GENERIC USER-CREATED LISTS (bucket-card layout)
 // ===================================================================
 
+// ── Pure attachment helpers ──
+// Attachment record: { drive_file_id, name, size, url }.
+// Stored on the item as a JSON string in the list_items.attachments
+// column (and as a real array in the sharing payload). In-memory
+// item.attachments is always the parsed, validated array.
+// (Extracted by tests via new Function slicing, same idiom as the
+// flashcards pure session helpers.)
+function normalizeAttachments(value) {
+  let arr = value;
+  if (typeof arr === 'string') {
+    try { arr = JSON.parse(arr); } catch { return []; }
+  }
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(a => a && typeof a === 'object'
+    && typeof a.drive_file_id === 'string' && a.drive_file_id
+    && typeof a.name === 'string' && a.name
+    && typeof a.url === 'string' && a.url
+    && Number.isFinite(a.size) && a.size >= 0)
+    .map(a => ({ drive_file_id: a.drive_file_id, name: a.name, size: a.size, url: a.url }));
+}
+function serializeAttachments(list) {
+  const arr = normalizeAttachments(list);
+  return arr.length ? JSON.stringify(arr) : null;
+}
+function formatFileSize(bytes) {
+  const b = Number(bytes) || 0;
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${trimSize10(b / 1024)} KB`;
+  if (b < 1024 * 1024 * 1024) return `${trimSize10(b / (1024 * 1024))} MB`;
+  return `${trimSize10(b / (1024 * 1024 * 1024))} GB`;
+}
+function trimSize10(n) {
+  return (Math.round(n * 10) / 10).toString();
+}
+function isDriveAttachmentUrl(url) {
+  return typeof url === 'string' && url.startsWith('https://drive.google.com/');
+}
+// ── End pure attachment helpers ──
+
 let listSearchQuery = '';
 
 // Distinct colors for list cards (cycles)
@@ -167,6 +206,7 @@ async function refreshLists() {
     return;
   }
   state.allListItems = items || [];
+  for (const item of state.allListItems) item.attachments = normalizeAttachments(item.attachments);
 
   // Enrich shared list item pointers with live data from Drive
   if (state.sharing) {
@@ -180,6 +220,7 @@ async function refreshLists() {
         item.text = sh.payload?.text || sh.payload?.title || '';
         item.note = sh.payload?.note || null;
         item.checked = sh.done ? 1 : 0;
+        item.attachments = normalizeAttachments(sh.payload?.attachments);
         item._shared = sh;
       }
     }
@@ -469,10 +510,24 @@ function renderListItem(item) {
   const noteHtml = item.note
     ? `<div class="list-item-note">${truncateWithShowMore(item.note, MAX_META_DISPLAY, item.id, 'listnote')}</div>`
     : '';
+  // Attachments render as link chips under the text — only the link is
+  // stored on the item, the file itself is never fetched on page load.
+  const attachments = normalizeAttachments(item.attachments);
+  const attachmentsHtml = attachments.length
+    ? `<div class="list-item-attachments">${attachments.map(a => `
+      <span class="list-attachment-chip">
+        ${isDriveAttachmentUrl(a.url)
+          ? `<a href="${escQ(a.url)}" target="_blank" rel="noopener" title="${escQ(a.name)}">${lucideIcon('paperclip', 12)} ${esc(a.name)} <span class="list-attachment-size">${esc(formatFileSize(a.size))}</span></a>`
+          : `<span>${lucideIcon('paperclip', 12)} ${esc(a.name)} <span class="list-attachment-size">${esc(formatFileSize(a.size))}</span></span>`}
+        <button data-action="remove-list-item-attachment" data-id="${esc(item.id)}" data-attachment-id="${esc(a.drive_file_id)}" title="${t('lists.remove_attachment')}" aria-label="${t('lists.remove_attachment')}">${lucideIcon('x', 12)}</button>
+      </span>`).join('')}</div>`
+    : '';
 
   // Shared list item badge
   const isShared = item.shared_id && item.shared_group_id;
   const hasShareBtn = isShared || (!isShared && !!state.sharing);
+  // Drive-only: the upload needs the Drive adapter (absent in Demo/Local).
+  const canAttach = typeof state.driveAdapter?.uploadAttachment === 'function';
   let sharedHtml = '';
   if (isShared && state.sharing) {
     const group = state.sharing.getAllGroups().find(g => g.id === item.shared_group_id);
@@ -486,11 +541,13 @@ function renderListItem(item) {
       <div style="flex:1;min-width:0;">
         <span class="list-item-text">${truncateWithShowMore(item.text, 120, item.id, 'listtext')}</span>
         ${noteHtml}
+        ${attachmentsHtml}
       </div>
       <div class="list-item-actions${hasShareBtn ? ' cols-2' : ''}">
         ${!isShared && state.sharing ? `<button data-action="share-existing-list-item" data-id="${esc(item.id)}" title="${t('sharing.share')}">${lucideIcon('share', 14)}</button>` : ''}
         ${isShared && _myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="unshare-list-item" data-id="${esc(item.id)}" title="${t('sharing.unshare')}">${lucideIcon('share-off', 14)}</button>` : ''}
         ${isShared && !_myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="copy-list-item-to-personal" data-id="${esc(item.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon('copy', 14)}</button>` : ''}
+        ${canAttach ? `<button data-action="attach-to-list-item" data-id="${esc(item.id)}" title="${t('lists.attach_file')}" aria-label="${t('lists.attach_file')}">${lucideIcon('paperclip', 14)}</button>` : ''}
         <button data-action="copy-item-link" data-link-type="listitem" data-id="${esc(item.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 14)}</button>
         <button data-action="edit-list-item-inline" data-id="${esc(item.id)}" title="Edit">${lucideIcon('pencil', 14)}</button>
         <button data-action="delete-list-item" data-id="${esc(item.id)}" title="Delete">${lucideIcon('trash-2', 14)}</button>
@@ -972,11 +1029,133 @@ async function deleteListItem(id) {
       const el = document.querySelector(`[data-item-id="${CSS.escape(id)}"]`);
       await animateItemRemoval(el);
 
+      // Best-effort: trash the item's Drive attachments so they don't
+      // linger orphaned in the attachments folder. A failure here never
+      // blocks the deletion — the links are already gone with the row.
+      for (const a of normalizeAttachments(item.attachments)) {
+        try { await state.driveAdapter?.trashAttachmentFile?.(a.drive_file_id); } catch {}
+      }
+
       showToast(t('toast.removed'), 'info');
       await refreshLists();
     },
     null,
     { messageHtml: true }
+  );
+}
+
+// ── List item attachments ──────────────────────────────────────────
+// One upload per file, sequential: a failure stops the batch (the user
+// retries the rest) and the button stays disabled until it settles
+// (AGENTS 1.2 — one click, disable until fulfilled).
+const _pendingAttachmentUploads = new Set();
+
+/** Write an item's attachment list — payload for shared items, column for personal ones. */
+async function saveListItemAttachments(item, next) {
+  if (item.shared_id && item.shared_group_id && state.sharing) {
+    const currentPayload = item._shared?.payload || {};
+    await state.sharing.updateItem(item.shared_group_id, item.shared_id, {
+      payload: { ...currentPayload, attachments: next },
+    });
+    return;
+  }
+  const { error } = await state.db.from('list_items')
+    .update({ attachments: serializeAttachments(next) })
+    .eq('id', item.id);
+  if (error) throw error;
+}
+
+async function attachToListItem(itemId, btnEl) {
+  const item = (state.allListItems || []).find(x => x.id === itemId);
+  if (!item) return;
+  if (_pendingAttachmentUploads.has(itemId)) return;
+  if (typeof state.driveAdapter?.uploadAttachment !== 'function') {
+    showToast(t('lists.attach_unavailable'), 'error');
+    return;
+  }
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.className = 'list-attachment-picker';
+  // Attached to the DOM (hidden) so the picker works everywhere and
+  // automation can set files on it; removed once the pick resolves.
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  input.onchange = async () => {
+    const files = [...(input.files || [])];
+    if (!files.length) return;
+    _pendingAttachmentUploads.add(itemId);
+    if (btnEl) btnEl.disabled = true;
+    try {
+      const current = normalizeAttachments(item.attachments);
+      const added = [];
+      for (const file of files) {
+        let record;
+        try {
+          record = await state.driveAdapter.uploadAttachment(file);
+        } catch (e) {
+          if (e?.code === 'attachment_too_large') showToast(t('lists.attachment_too_large'), 'error');
+          else showToast(t('lists.attachment_upload_failed'), 'error');
+          break;
+        }
+        // Shared → the file must be readable by the other members before
+        // the link reaches them through the payload. A share failure aborts
+        // the attach (the uploaded file stays in the owner's Drive folder).
+        if (item.shared_id && item.shared_group_id && state.sharing) {
+          try {
+            await state.sharing.shareFileWithGroup(item.shared_group_id, record.drive_file_id, 'reader');
+          } catch (e) {
+            console.warn('Failed to share attachment with group:', e);
+            showToast(t('lists.attachment_share_failed'), 'error');
+            break;
+          }
+        }
+        added.push(record);
+      }
+      if (!added.length) return;
+      const next = [...current, ...added];
+      try {
+        await saveListItemAttachments(item, next);
+      } catch {
+        showToast(t('toast.update_failed'), 'error');
+        return;
+      }
+      item.attachments = next;
+      renderLists();
+      showToast(t('lists.attachment_added'), 'success');
+    } finally {
+      _pendingAttachmentUploads.delete(itemId);
+      if (btnEl) btnEl.disabled = false;
+      input.remove();
+    }
+  };
+  input.click();
+}
+
+async function removeListItemAttachment(itemId, driveFileId, btnEl) {
+  const item = (state.allListItems || []).find(x => x.id === itemId);
+  if (!item) return;
+  const attachments = normalizeAttachments(item.attachments);
+  const target = attachments.find(a => a.drive_file_id === driveFileId);
+  if (!target) return;
+  showConfirmAction(
+    t('common.delete'),
+    `Remove "${target.name}"?`,
+    async () => {
+      const next = attachments.filter(a => a.drive_file_id !== driveFileId);
+      try {
+        await saveListItemAttachments(item, next);
+      } catch {
+        showToast(t('toast.update_failed'), 'error');
+        return;
+      }
+      item.attachments = next;
+      renderLists();
+      // Best-effort: trash the Drive file so it doesn't linger orphaned.
+      // A failure here never blocks the removal — the link is already gone.
+      try { await state.driveAdapter?.trashAttachmentFile?.(driveFileId); } catch {}
+      showToast(t('lists.attachment_removed'), 'success');
+    }
   );
 }
 
@@ -1878,4 +2057,6 @@ window.toggleListItemCheck = toggleListItemCheck;
 window.editListItemInline = editListItemInline;
 window.editListItemInlineFull = editListItemInlineFull;
 window.deleteListItem = deleteListItem;
+window.attachToListItem = attachToListItem;
+window.removeListItemAttachment = removeListItemAttachment;
 window.filterLists = function(e) { listSearchQuery = e.target.value; renderLists(); };

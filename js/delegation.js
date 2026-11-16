@@ -383,6 +383,8 @@
       case 'toggle-list-item-check': callWindow('toggleListItemCheck', [getId(el), el]); break;
       case 'edit-list-item-inline': callWindow('editListItemInlineFull', [getId(el)]); break;
       case 'delete-list-item': callWindow('deleteListItem', [getId(el)]); break;
+      case 'attach-to-list-item': callWindow('attachToListItem', [getId(el), el]); break;
+      case 'remove-list-item-attachment': callWindow('removeListItemAttachment', [getId(el), el.dataset.attachmentId, el]); break;
       case 'close-add-list': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddListModal', []); break;
       case 'save-new-list': callWindow('saveNewList', []); break;
       case 'close-edit-list': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditListModal', []); break;

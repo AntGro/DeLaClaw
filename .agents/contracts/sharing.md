@@ -88,6 +88,7 @@ No RPC layer — both users read/write the shared folder directly via the Drive 
 - `todo` — shared via the group folder, synced into local `todos` with `shared_id` pointer
 - `habit` — shared with `item_type='habit'`; completions as child items with `item_type='habit_completion'` and `parent_item_id`
 - `list_item` — shared, synced into local `list_items` with `shared_id` pointer
+  - **Attachments (v2.32.122):** a shared list item's attachments travel in the payload (`payload.attachments`, real array). The file itself lives in the uploader's Drive, not the group folder — before the payload update, `shareFileWithGroup(groupId, fileId, 'reader')` grants every other joined member reader access (emails read at runtime from the group folder's permission list, matched via `memberIdFromEmail`, never stored). A member who joins later has no access to files attached before they joined (join-backfill open); unsharing does not revoke the grants (revoke on unshare open).
 
 ## Business Invariants
 - **Share-button visibility:** buttons render when `!!state.sharing`, not when groups exist

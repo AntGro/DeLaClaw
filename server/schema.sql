@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS list_items (
   text TEXT NOT NULL,
   checked INTEGER DEFAULT 0,
   note TEXT,
+  attachments TEXT,
   sort_order INTEGER DEFAULT 0,
   shared_id TEXT,
   shared_group_id TEXT,

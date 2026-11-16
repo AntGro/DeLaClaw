@@ -520,4 +520,14 @@ export const DRIVE_MIGRATIONS = {
       }
     }
   },
+
+  '2.32.122': async (store) => {
+    // 2.32.122: list item attachments — canonical storage is a JSON
+    // string (same as the Local TEXT column). A row holding a real array
+    // (e.g. hand-edited store) is stringified so backup/restore and the
+    // read normalizer see one shape everywhere. Missing stays missing.
+    for (const row of (store.list_items || [])) {
+      if (Array.isArray(row.attachments)) row.attachments = JSON.stringify(row.attachments);
+    }
+  },
 };

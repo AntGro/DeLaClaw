@@ -128,6 +128,7 @@ function createCachedSharing(blob) {
     'inviteUser', 'removeUser', 'unjoinGroup', 'tryDirectJoin', 'joinWithFileIds', 'reconnectGroup',
     'addItem', 'updateItem', 'deleteItem', 'completeItem', 'uncompleteItem',
     'addSharedHabit', 'updateSharedHabit', 'deleteSharedHabit', 'addSharedHabitCompletion',
+    'shareFileWithGroup',
   ]) stub[key] = rejectReadOnly;
   return stub;
 }

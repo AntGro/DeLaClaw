@@ -1617,6 +1617,49 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return { member_id };
     },
 
+    /**
+     * Share a Drive file (e.g. a list item attachment, which lives in the
+     * uploader's own Drive) with every other joined member of the group,
+     * as reader. Member emails are permission material: they are read at
+     * runtime from the group folder's permission list and matched to the
+     * roster via memberIdFromEmail — never stored, never returned.
+     * Members who already have access are skipped. Returns the member_ids
+     * the file was shared with; a group with no other joined members is
+     * a no-op returning []. Any member may call it (the file is theirs);
+     * only the creator path (invite/remove) is creator-gated.
+     */
+    async shareFileWithGroup(groupId, fileId, role = 'reader') {
+      const e = _groups.get(groupId);
+      if (!e) throw new Error(`Group ${groupId} not loaded`);
+      const tok = await token();
+      const myId = await currentMemberId(groupId).catch(() => null);
+      const others = new Set((e.group.members || [])
+        .filter(m => m.status === 'joined' && m.member_id !== myId)
+        .map(m => m.member_id));
+      if (others.size === 0) return [];
+      // Skip members who already have access to this file — re-granting
+      // is an error on some Drive responses. One list call, not one per member.
+      const already = new Set();
+      try {
+        for (const p of await driveListPermissions(tok, fileId)) {
+          if (p.type === 'user' && p.emailAddress) {
+            const id = await memberIdFromEmail(p.emailAddress).catch(() => null);
+            if (id) already.add(id);
+          }
+        }
+      } catch { /* treat as none already shared */ }
+      const folderPerms = await driveListPermissions(tok, e.folderId);
+      const shared = [];
+      for (const p of folderPerms || []) {
+        if (p.type !== 'user' || !p.emailAddress) continue;
+        const id = await memberIdFromEmail(p.emailAddress).catch(() => null);
+        if (!id || !others.has(id) || already.has(id)) continue;
+        await driveShareWithUser(tok, fileId, p.emailAddress, role);
+        shared.push(id);
+      }
+      return shared;
+    },
+
     /** Remove a member from a group. Creator-only. Reassigns the removed
      *  member's items to the creator, revokes Drive access, deletes the
      *  member row from group.json. The removed member's client detects the

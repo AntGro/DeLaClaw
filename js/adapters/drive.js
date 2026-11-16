@@ -353,10 +353,10 @@ async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag, 
 }
 
 // ── List item attachments ─────────────────────────────────────────
-// Multipart upload caps at 5 MB — larger files need the resumable
-// endpoint (not implemented yet); the adapter refuses them outright
-// so the caller can toast instead of failing mid-upload.
-export const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+// Multipart upload caps at 5 MB (Drive API limit) — larger files go
+// through the resumable endpoint instead, so there is no user-facing
+// size cap. The two upload functions below return the same record.
+export const ATTACHMENT_MULTIPART_MAX_BYTES = 5 * 1024 * 1024;
 const ATTACHMENTS_FOLDER_NAME = 'attachments';
 
 /** Find the attachments subfolder under the app folder, creating it on first use. */
@@ -426,6 +426,60 @@ async function uploadAttachmentFile(token, folderId, file, name) {
     throw err;
   }
   const result = await resp.json();
+  return {
+    drive_file_id: result.id,
+    name: result.name,
+    size: Number(result.size) || file.size,
+    url: result.webViewLink,
+  };
+}
+
+/**
+ * Upload a file above the multipart cap via the resumable endpoint:
+ * a session-initiating POST returns a session URI, then a single PUT
+ * of the whole file to that URI (no chunking — the session exists to
+ * lift the 5 MB cap, and a failed PUT is retried by the user picking
+ * the file again). Returns the same attachment record as
+ * uploadAttachmentFile.
+ */
+async function uploadAttachmentFileResumable(token, folderId, file, name) {
+  const metadata = { name, parents: [folderId] };
+  const init = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,webViewLink',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': file.type || 'application/octet-stream',
+        'X-Upload-Content-Length': String(file.size),
+      },
+      body: JSON.stringify(metadata),
+    }
+  );
+  if (!init.ok) {
+    const errText = await init.text().catch(() => '');
+    const err = new Error(`Drive resumable upload failed: ${init.status} ${errText}`);
+    err.code = init.status;
+    throw err;
+  }
+  const sessionUri = init.headers.get('Location');
+  if (!sessionUri) throw new Error('Drive resumable upload: no session URI');
+  const put = await fetch(sessionUri, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'Content-Length': String(file.size),
+    },
+    body: file,
+  });
+  if (!put.ok) {
+    const errText = await put.text().catch(() => '');
+    const err = new Error(`Drive resumable upload failed: ${put.status} ${errText}`);
+    err.code = put.status;
+    throw err;
+  }
+  const result = await put.json();
   return {
     drive_file_id: result.id,
     name: result.name,
@@ -1467,14 +1521,10 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     /**
      * List item attachments — upload a user-picked file to
      * <app folder>/attachments/ and return the record stored on the item.
-     * Throws 'attachment_too_large' (code) past the 5 MB multipart cap.
+     * Files past the 5 MB multipart cap use the resumable endpoint.
      */
     async uploadAttachment(file) {
-      if (!file || file.size > ATTACHMENT_MAX_BYTES) {
-        const err = new Error('attachment_too_large');
-        err.code = 'attachment_too_large';
-        throw err;
-      }
+      if (!file) throw new Error('No file');
       const tok = await getToken();
       if (!tok) throw new Error('No valid token — please sign in again');
       if (!attachmentsFolderId) attachmentsFolderId = await findOrCreateAttachmentsFolder(tok, folderId);
@@ -1482,6 +1532,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       // cosmetic only (records key on drive_file_id, never on name).
       const existing = await listFolderFiles(tok, attachmentsFolderId).catch(() => []);
       const name = uniqueDriveFileName(file.name, existing.map(f => f.name));
+      if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES) {
+        return uploadAttachmentFileResumable(tok, attachmentsFolderId, file, name);
+      }
       return uploadAttachmentFile(tok, attachmentsFolderId, file, name);
     },
     /** Trash an attachment file from Drive. Best-effort, returns false on failure. */

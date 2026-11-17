@@ -512,15 +512,18 @@ function renderListItem(item) {
     : '';
   // Attachments render as link chips under the text — only the link is
   // stored on the item, the file itself is never fetched on page load.
+  // Pending uploads render as chips too (ring instead of a link), so the
+  // user sees them the moment files are picked.
   const attachments = normalizeAttachments(item.attachments);
-  const attachmentsHtml = attachments.length
+  const pending = [...(_pendingAttachments.get(item.id)?.values() || [])];
+  const attachmentsHtml = (attachments.length || pending.length)
     ? `<div class="list-item-attachments">${attachments.map(a => `
       <span class="list-attachment-chip">
         ${isDriveAttachmentUrl(a.url)
           ? `<a href="${escQ(a.url)}" target="_blank" rel="noopener" title="${escQ(a.name)}">${lucideIcon('paperclip', 12)} ${esc(a.name)} <span class="list-attachment-size">${esc(formatFileSize(a.size))}</span></a>`
           : `<span>${lucideIcon('paperclip', 12)} ${esc(a.name)} <span class="list-attachment-size">${esc(formatFileSize(a.size))}</span></span>`}
         <button data-action="remove-list-item-attachment" data-id="${esc(item.id)}" data-attachment-id="${esc(a.drive_file_id)}" title="${t('lists.remove_attachment')}" aria-label="${t('lists.remove_attachment')}">${lucideIcon('x', 12)}</button>
-      </span>`).join('')}</div>`
+      </span>`).join('')}${pending.map(p => pendingAttachmentChipHtml(item, p)).join('')}</div>`
     : '';
 
   // Shared list item badge
@@ -1045,10 +1048,47 @@ async function deleteListItem(id) {
 }
 
 // ── List item attachments ──────────────────────────────────────────
-// One upload per file, sequential: a failure stops the batch (the user
-// retries the rest) and the button stays disabled until it settles
-// (AGENTS 1.2 — one click, disable until fulfilled).
-const _pendingAttachmentUploads = new Set();
+// Pending (optimistic) attachments: uploads in flight or failed,
+// keyed by item id, then by a client-side pending id. Memory-only — a
+// reload drops them (the XHR dies with the page; a file that already
+// landed in Drive stays there, unlinked). The per-item queue processes
+// one file at a time so the single save at the end cannot clobber
+// itself; files picked while it runs just join the queue. The upload
+// and its state live outside the view, so navigating away mid-upload
+// changes nothing — the chip re-renders with its current progress
+// when the item is shown again.
+const _pendingAttachments = new Map(); // itemId -> Map<pendingId, entry>
+const _attachmentQueueRunning = new Set(); // itemIds with a processor running
+let _pendingAttachmentSeq = 0;
+
+// Circular progress ring: an SVG circle whose stroke fills as bytes go
+// out. r=7 → circumference ≈ 43.98; the offset is patched in place by
+// updateAttachmentProgress (no full re-render per tick).
+const ATTACHMENT_RING_R = 7;
+const ATTACHMENT_RING_C = 2 * Math.PI * ATTACHMENT_RING_R;
+
+function attachmentProgressRing(progress) {
+  const clamped = Math.max(0, Math.min(1, progress));
+  const off = ATTACHMENT_RING_C * (1 - clamped);
+  return `<svg class="att-progress-ring" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle class="att-progress-ring-track" cx="8" cy="8" r="${ATTACHMENT_RING_R}"/><circle class="att-progress-ring-fg" cx="8" cy="8" r="${ATTACHMENT_RING_R}" stroke-dasharray="${ATTACHMENT_RING_C.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}"/></svg>`;
+}
+
+/** Patch a pending chip's ring in place; a no-op when the row is not on screen. */
+function updateAttachmentProgress(pendingId, progress) {
+  const chip = document.querySelector(`.list-attachment-chip[data-pending-id="${CSS.escape(pendingId)}"]`);
+  const fg = chip?.querySelector('.att-progress-ring-fg');
+  if (fg) fg.style.strokeDashoffset = String(ATTACHMENT_RING_C * (1 - Math.max(0, Math.min(1, progress))));
+}
+
+function pendingAttachmentChipHtml(item, p) {
+  const actions = p.status === 'error'
+    ? `<button data-action="retry-list-item-attachment" data-id="${esc(item.id)}" data-pending-id="${esc(p.id)}" title="${t('lists.retry_upload')}" aria-label="${t('lists.retry_upload')}">${lucideIcon('rotate-ccw', 12)}</button>
+       <button data-action="cancel-list-item-attachment" data-id="${esc(item.id)}" data-pending-id="${esc(p.id)}" title="${t('lists.remove_attachment')}" aria-label="${t('lists.remove_attachment')}">${lucideIcon('x', 12)}</button>`
+    : `<button data-action="cancel-list-item-attachment" data-id="${esc(item.id)}" data-pending-id="${esc(p.id)}" title="${t('lists.cancel_upload')}" aria-label="${t('lists.cancel_upload')}">${lucideIcon('x', 12)}</button>`;
+  return `<span class="list-attachment-chip pending${p.status === 'error' ? ' error' : ''}" data-pending-id="${esc(p.id)}">
+    ${attachmentProgressRing(p.progress)}<span class="list-attachment-name" title="${escQ(p.file.name)}">${esc(p.file.name)} <span class="list-attachment-size">${esc(formatFileSize(p.file.size))}</span></span>${actions}
+  </span>`;
+}
 
 /** Write an item's attachment list — payload for shared items, column for personal ones. */
 async function saveListItemAttachments(item, next) {
@@ -1068,7 +1108,6 @@ async function saveListItemAttachments(item, next) {
 async function attachToListItem(itemId, btnEl) {
   const item = (state.allListItems || []).find(x => x.id === itemId);
   if (!item) return;
-  if (_pendingAttachmentUploads.has(itemId)) return;
   if (typeof state.driveAdapter?.uploadAttachment !== 'function') {
     showToast(t('lists.attach_unavailable'), 'error');
     return;
@@ -1081,54 +1120,139 @@ async function attachToListItem(itemId, btnEl) {
   // automation can set files on it; removed once the pick resolves.
   input.style.display = 'none';
   document.body.appendChild(input);
-  input.onchange = async () => {
+  input.onchange = () => {
     const files = [...(input.files || [])];
+    input.remove();
     if (!files.length) return;
-    _pendingAttachmentUploads.add(itemId);
-    if (btnEl) btnEl.disabled = true;
-    try {
-      const current = normalizeAttachments(item.attachments);
-      const added = [];
-      for (const file of files) {
-        let record;
-        try {
-          record = await state.driveAdapter.uploadAttachment(file);
-        } catch (e) {
-          showToast(t('lists.attachment_upload_failed'), 'error');
-          break;
-        }
+    // Chips appear immediately, rings at 0% — the uploads run behind them.
+    let pending = _pendingAttachments.get(itemId);
+    if (!pending) { pending = new Map(); _pendingAttachments.set(itemId, pending); }
+    for (const file of files) {
+      const id = `pending-${++_pendingAttachmentSeq}`;
+      pending.set(id, { id, file, progress: 0, status: 'queued', controller: new AbortController(), error: null });
+    }
+    renderLists();
+    processAttachmentQueue(item);
+  };
+  input.click();
+}
+
+/**
+ * Drain one item's pending queue, one file at a time. A failure leaves
+ * that chip in an error state with a retry and the queue moves on to
+ * the next file; a cancel drops the chip silently. Each finished file
+ * is saved onto the item at once, so its chip turns real without
+ * waiting for its siblings still in the queue; the save reads the
+ * freshly-stored list, so an attachment removed while an upload ran
+ * is not resurrected.
+ */
+async function processAttachmentQueue(item) {
+  if (_attachmentQueueRunning.has(item.id)) return;
+  _attachmentQueueRunning.add(item.id);
+  try {
+    const pending = _pendingAttachments.get(item.id);
+    if (!pending) return;
+    const added = [];
+    let entry;
+    while ((entry = [...pending.values()].find(e => e.status === 'queued'))) {
+      entry.status = 'uploading';
+      const inFlightNames = [...pending.values()].filter(e => e !== entry).map(e => e.file.name);
+      try {
+        const record = await state.driveAdapter.uploadAttachment(entry.file, {
+          signal: entry.controller.signal,
+          inFlightNames,
+          onProgress: (fraction) => {
+            entry.progress = fraction;
+            updateAttachmentProgress(entry.id, fraction);
+          },
+        });
+        // Cancelled while the upload or the share below was awaiting —
+        // the file is in Drive, unlinked; drop it silently.
+        if (entry.status === 'cancelled') continue;
+        entry.progress = 1;
         // Shared → the file must be readable by the other members before
-        // the link reaches them through the payload. A share failure aborts
-        // the attach (the uploaded file stays in the owner's Drive folder).
+        // the link reaches them through the payload. A share failure
+        // aborts the attach (the uploaded file stays in the owner's
+        // Drive folder, unlinked).
         if (item.shared_id && item.shared_group_id && state.sharing) {
+          entry.status = 'sharing';
           try {
             await state.sharing.shareFileWithGroup(item.shared_group_id, record.drive_file_id, 'reader');
           } catch (e) {
             console.warn('Failed to share attachment with group:', e);
             showToast(t('lists.attachment_share_failed'), 'error');
-            break;
+            entry.status = 'error';
+            entry.error = e;
+            renderLists();
+            continue;
           }
+          if (entry.status === 'cancelled') continue;
         }
+        // Save this record now — the chip turns real without waiting for
+        // its siblings still in the queue.
+        if (!(state.allListItems || []).some(x => x.id === item.id)) {
+          pending.delete(entry.id);
+          continue; // the item was deleted meanwhile; the file stays orphaned in Drive
+        }
+        const next = [...normalizeAttachments(item.attachments), record];
+        try {
+          await saveListItemAttachments(item, next);
+        } catch {
+          showToast(t('toast.update_failed'), 'error');
+          entry.status = 'error';
+          entry.error = new Error('save failed');
+          renderLists();
+          continue;
+        }
+        pending.delete(entry.id);
         added.push(record);
+        item.attachments = next;
+        renderLists();
+      } catch (e) {
+        if (e?.code === 'aborted' || entry.status === 'cancelled') {
+          pending.delete(entry.id);
+          renderLists();
+          continue;
+        }
+        entry.status = 'error';
+        entry.error = e;
+        showToast(t('lists.attachment_upload_failed'), 'error');
+        renderLists();
       }
-      if (!added.length) return;
-      const next = [...current, ...added];
-      try {
-        await saveListItemAttachments(item, next);
-      } catch {
-        showToast(t('toast.update_failed'), 'error');
-        return;
-      }
-      item.attachments = next;
-      renderLists();
-      showToast(t('lists.attachment_added'), 'success');
-    } finally {
-      _pendingAttachmentUploads.delete(itemId);
-      if (btnEl) btnEl.disabled = false;
-      input.remove();
     }
-  };
-  input.click();
+    if (!pending.size) _pendingAttachments.delete(item.id);
+    if (added.length) showToast(t('lists.attachment_added'), 'success');
+  } finally {
+    _attachmentQueueRunning.delete(item.id);
+  }
+}
+
+/** Cancel (or dismiss) a pending attachment: aborts the in-flight XHR when it is uploading. */
+function cancelListItemAttachment(itemId, pendingId, btnEl) {
+  const pending = _pendingAttachments.get(itemId);
+  const entry = pending?.get(pendingId);
+  if (!entry) return;
+  if (entry.status === 'uploading' || entry.status === 'sharing') {
+    entry.status = 'cancelled';
+    entry.controller.abort(); // the queue's catch drops the chip
+  } else {
+    pending.delete(pendingId);
+    if (!pending.size) _pendingAttachments.delete(itemId);
+    renderLists();
+  }
+}
+
+/** Re-queue a failed upload (fresh AbortController, progress back to 0). */
+function retryListItemAttachment(itemId, pendingId, btnEl) {
+  const entry = _pendingAttachments.get(itemId)?.get(pendingId);
+  if (!entry || entry.status !== 'error') return;
+  entry.status = 'queued';
+  entry.progress = 0;
+  entry.error = null;
+  entry.controller = new AbortController();
+  renderLists();
+  const item = (state.allListItems || []).find(x => x.id === itemId);
+  if (item) processAttachmentQueue(item);
 }
 
 async function removeListItemAttachment(itemId, driveFileId, btnEl) {
@@ -2058,4 +2182,6 @@ window.editListItemInlineFull = editListItemInlineFull;
 window.deleteListItem = deleteListItem;
 window.attachToListItem = attachToListItem;
 window.removeListItemAttachment = removeListItemAttachment;
+window.cancelListItemAttachment = cancelListItemAttachment;
+window.retryListItemAttachment = retryListItemAttachment;
 window.filterLists = function(e) { listSearchQuery = e.target.value; renderLists(); };

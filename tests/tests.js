@@ -9267,20 +9267,41 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'shared items must read attachments from the sharing payload');
       assert(listsSrc.includes("shareFileWithGroup(item.shared_group_id, record.drive_file_id, 'reader')"),
         'an attachment on a shared item must be shared with the group before the payload update');
-      assert(listsSrc.includes('_pendingAttachmentUploads'), 'uploads must be guarded per item');
       assert(listsSrc.includes('window.attachToListItem = attachToListItem'), 'the attach flow must be window-exposed for delegation');
       assert(listsSrc.includes('window.removeListItemAttachment = removeListItemAttachment'), 'the remove flow must be window-exposed for delegation');
       const delSrc = jsFiles['delegation.js'];
       assert(delSrc.includes("case 'attach-to-list-item':"), 'delegation must route the attach action');
       assert(delSrc.includes("case 'remove-list-item-attachment':"), 'delegation must route the remove action');
       const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
-      assert(driveSrc.includes('async uploadAttachment(file)'), 'the Drive adapter must expose uploadAttachment');
+      assert(driveSrc.includes('async uploadAttachment(file, {'), 'the Drive adapter must expose uploadAttachment');
       assert(driveSrc.includes('async trashAttachmentFile(driveFileId)'), 'the Drive adapter must expose trashAttachmentFile');
       assert(driveSrc.includes('ATTACHMENT_MULTIPART_MAX_BYTES = 5 * 1024 * 1024'), 'multipart uploads cap at 5 MB');
       assert(driveSrc.includes('if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES)'), 'files past the cap must take the resumable path');
-      assert(driveSrc.includes('uploadAttachmentFileResumable(tok, attachmentsFolderId, file, name)'), 'the resumable path must be wired into uploadAttachment');
+      assert(driveSrc.includes('uploadAttachmentFileResumable(tok, attachmentsFolderId, file, name'), 'the resumable path must be wired into uploadAttachment');
+      assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
+      // Progress: the transfer runs over XHR (fetch cannot report upload
+      // progress), in 1 MB chunks for the resumable path.
+      assert(driveSrc.includes('new XMLHttpRequest()'), 'the upload transport must be XHR for progress events');
+      assert(driveSrc.includes('ATTACHMENT_CHUNK_BYTES = 1024 * 1024'), 'resumable uploads must chunk at 1 MB');
+      assert(driveSrc.includes('Content-Range'), 'resumable chunks must carry a Content-Range');
+      assert(driveSrc.includes("err.code = 'aborted'"), 'an aborted upload must reject with code aborted');
       assert(!driveSrc.includes('attachment_too_large'), 'the adapter must no longer refuse large files');
       assert(!listsSrc.includes('attachment_too_large'), 'the caller must no longer toast a size refusal');
+      assert(!listsSrc.includes('_pendingAttachmentUploads'), 'the per-item upload block must be replaced by the pending queue');
+      assert(listsSrc.includes('_pendingAttachments'), 'pending uploads must live in a per-item map');
+      assert(listsSrc.includes('processAttachmentQueue'), 'picked files must drain through a per-item queue');
+      assert(listsSrc.includes('attachmentProgressRing'), 'pending chips must render a progress ring');
+      assert(listsSrc.includes('updateAttachmentProgress'), 'progress must patch the ring in place');
+      assert(listsSrc.includes('data-pending-id'), 'pending chips must be addressable by pending id');
+      assert(delSrc.includes("case 'cancel-list-item-attachment':"), 'delegation must route the cancel action');
+      assert(delSrc.includes("case 'retry-list-item-attachment':"), 'delegation must route the retry action');
+      assert(listsSrc.includes('window.cancelListItemAttachment = cancelListItemAttachment'), 'cancel must be window-exposed for delegation');
+      assert(listsSrc.includes('window.retryListItemAttachment = retryListItemAttachment'), 'retry must be window-exposed for delegation');
+      assert(listsSrc.includes('new AbortController()'), 'each pending upload must own an AbortController');
+      const styleSrc = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(styleSrc.includes('.att-progress-ring'), 'the ring must be styled');
+      assert(styleSrc.includes('.list-attachment-chip.pending'), 'pending chips must be styled');
+      assert(styleSrc.includes('.list-attachment-chip.error'), 'failed chips must be styled');
       assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
       const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
       assert(iface.includes('shareFileWithGroup:'), 'the sharing interface must declare shareFileWithGroup');
@@ -9291,54 +9312,177 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // The keys are picked by variable in places, so the t()-scan test
       // cannot see them all — pin their presence in all three locales directly.
       const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
-      for (const key of ['attach_file', 'remove_attachment', 'attach_unavailable', 'attachment_upload_failed', 'attachment_share_failed', 'attachment_added', 'attachment_removed']) {
+      for (const key of ['attach_file', 'remove_attachment', 'attach_unavailable', 'attachment_upload_failed', 'attachment_share_failed', 'attachment_added', 'attachment_removed', 'cancel_upload', 'retry_upload']) {
         const count = (i18nSrc.match(new RegExp(`${key}:`, 'g')) || []).length;
         assert(count === 3, `${key} must be defined in all three locales, found ${count}`);
       }
     });
 
-    test('drive: resumable upload initiates a session then PUTs the file', async () => {
-      // Slice the real function out of drive.js and run it against a fake
-      // fetch (same new Function idiom as the pure-helper tests).
+    // Slice the real upload functions out of drive.js and run them
+    // against a fake fetch + a fake XHR (same new Function idiom as the
+    // pure-helper tests). The fake answers from a script queue, one
+    // entry per XHR send, in order.
+    function loadUploadFns() {
       const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
-      const start = driveSrc.indexOf('async function uploadAttachmentFileResumable');
-      assert(start !== -1, 'could not find uploadAttachmentFileResumable in drive.js');
-      const end = driveSrc.indexOf('\n}\n', start);
+      const start = driveSrc.indexOf('function xhrRequest');
+      assert(start !== -1, 'could not find xhrRequest in drive.js');
+      const resStart = driveSrc.indexOf('async function uploadAttachmentFileResumable');
+      assert(resStart !== -1, 'could not find uploadAttachmentFileResumable in drive.js');
+      const end = driveSrc.indexOf('\n}\n', resStart);
       assert(end !== -1, 'could not find the end of uploadAttachmentFileResumable');
-      const load = new Function('fetch', `${driveSrc.slice(start, end + 3)}; return uploadAttachmentFileResumable;`);
-      const file = new File(['x'.repeat(1024)], 'big.bin', { type: 'video/mp4' });
-      const calls = [];
-      const fakeFetch = async (url, opts) => {
-        calls.push({ url, opts });
-        if (calls.length === 1) {
-          return { ok: true, status: 200, headers: { get: (h) => (h === 'Location' ? 'https://upload.session/abc123' : null) }, text: async () => '' };
+      return new Function('fetch', 'XMLHttpRequest', `${driveSrc.slice(start, end + 3)}; return { uploadAttachmentFile, uploadAttachmentFileResumable };`);
+    }
+    function makeFakeXHR(script) {
+      const instances = [];
+      class FakeXHR {
+        constructor() {
+          this.headers = {};
+          this.upload = {};
+          instances.push(this);
         }
-        return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ id: 'res-1', name: 'big.bin', size: '6291456', webViewLink: 'https://drive.google.com/file/d/res-1/view' }), text: async () => '' };
-      };
-      const record = await load(fakeFetch)('tok', 'folder-1', file, 'big.bin');
-      assert(calls.length === 2, `the resumable flow must make exactly two calls, got ${calls.length}`);
-      const [init, put] = calls;
-      assert(init.url.includes('uploadType=resumable'), 'the first call must initiate a resumable session');
-      assert(init.url.includes('fields=id,name,size,webViewLink'), 'the session must request the link back');
-      assert(init.opts.method === 'POST', 'the session initiation must be a POST');
-      assert(init.opts.headers['X-Upload-Content-Length'] === String(file.size), 'the session must declare the file size');
-      assert(init.opts.headers['X-Upload-Content-Type'] === 'video/mp4', 'the session must declare the file type');
-      const meta = JSON.parse(init.opts.body);
+        open(method, url) { this.method = method; this.url = url; }
+        setRequestHeader(k, v) { this.headers[k.toLowerCase()] = v; }
+        getResponseHeader(h) { return (this._respHeaders || {})[h.toLowerCase()] || null; }
+        abort() { this._aborted = true; if (this.onabort) this.onabort(); }
+        send(body) {
+          this.body = body;
+          const step = script.shift();
+          setTimeout(() => {
+            if (this._aborted) return;
+            if (!step) throw new Error('FakeXHR: no scripted response left');
+            if (step.progress) for (const p of step.progress) this.upload.onprogress?.({ lengthComputable: true, loaded: p.loaded, total: p.total });
+            if (step.error) { if (this.onerror) this.onerror(); return; }
+            this.status = step.status;
+            this.responseText = step.responseText || '';
+            this._respHeaders = {};
+            for (const [k, v] of Object.entries(step.headers || {})) this._respHeaders[k.toLowerCase()] = v;
+            if (this.onload) this.onload();
+          }, 0);
+        }
+      }
+      return { FakeXHR, instances };
+    }
+    const resumableSessionFetch = (url, opts) => {
+      if (!url.includes('uploadType=resumable')) throw new Error('unexpected fetch: ' + url);
+      return Promise.resolve({ ok: true, status: 200, headers: { get: (h) => (h === 'Location' ? 'https://upload.session/abc123' : null) }, text: async () => '' });
+    };
+    const resumableResource = { id: 'res-1', name: 'big.bin', size: '2621440', webViewLink: 'https://drive.google.com/file/d/res-1/view' };
+
+    test('drive: multipart upload goes over XHR with progress', async () => {
+      const file = new File(['hello'], 'a.txt', { type: 'text/plain' });
+      const script = [{ status: 200, responseText: JSON.stringify({ id: 'm-1', name: 'a.txt', size: '5', webViewLink: 'https://drive.google.com/file/d/m-1/view' }), progress: [{ loaded: 3, total: 10 }, { loaded: 10, total: 10 }] }];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const load = loadUploadFns();
+      const fractions = [];
+      const record = await load(async () => { throw new Error('multipart must not fetch'); }, FakeXHR).uploadAttachmentFile('tok', 'folder-1', file, 'a.txt', { onProgress: (f) => fractions.push(f) });
+      assert(instances.length === 1, `multipart must make exactly one XHR call, got ${instances.length}`);
+      const xhr = instances[0];
+      assert(xhr.method === 'POST' && xhr.url.includes('uploadType=multipart'), 'the call must POST to the multipart endpoint');
+      assert(xhr.headers.authorization === 'Bearer tok', 'the call must carry the token');
+      assert(xhr.body instanceof FormData, 'the body must be FormData');
+      assert(fractions.length === 2 && fractions[1] === 1, `progress must be reported, ending at 1, got ${JSON.stringify(fractions)}`);
+      assert(record.drive_file_id === 'm-1' && record.url.endsWith('/m-1/view'), 'the record must come from the upload response');
+    });
+
+    test('drive: resumable upload sends 1 MB chunks with Content-Range and reports progress', async () => {
+      const file = new File(['x'.repeat(2621440)], 'big.bin', { type: 'video/mp4' });
+      const script = [
+        { status: 308, headers: { range: 'bytes=0-1048575' }, progress: [{ loaded: 524288, total: 1048576 }, { loaded: 1048576, total: 1048576 }] },
+        { status: 308, headers: { range: 'bytes=0-2097151' } },
+        { status: 200, responseText: JSON.stringify(resumableResource) },
+      ];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const fetchCalls = [];
+      const fakeFetch = (url, opts) => { fetchCalls.push({ url, opts }); return resumableSessionFetch(url, opts); };
+      const fractions = [];
+      const record = await loadUploadFns()(fakeFetch, FakeXHR)
+        .uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', { onProgress: (f) => fractions.push(f) });
+      assert(fetchCalls.length === 1, 'the session must be initiated once');
+      assert(fetchCalls[0].url.includes('uploadType=resumable'), 'the initiation must use the resumable endpoint');
+      assert(fetchCalls[0].opts.headers['X-Upload-Content-Length'] === '2621440', 'the session must declare the file size');
+      const meta = JSON.parse(fetchCalls[0].opts.body);
       assert(meta.name === 'big.bin' && meta.parents[0] === 'folder-1', 'the session metadata must carry the name and folder');
-      assert(put.url === 'https://upload.session/abc123', 'the second call must PUT to the session URI');
-      assert(put.opts.method === 'PUT', 'the upload itself must be a PUT');
-      assert(put.opts.body === file, 'the PUT must carry the file as its body');
-      assert(record.drive_file_id === 'res-1' && record.size === 6291456 && record.url === 'https://drive.google.com/file/d/res-1/view',
-        'the record must come from the upload response');
-      // Failure paths: no session URI, and a refused initiation.
+      assert(instances.length === 3, `a 2.5 MB file must take 3 chunk PUTs, got ${instances.length}`);
+      assert(instances.every(x => x.method === 'PUT' && x.url === 'https://upload.session/abc123'), 'chunks must PUT to the session URI');
+      assert(instances[0].headers['content-range'] === 'bytes 0-1048575/2621440', 'chunk 1 must declare its byte range');
+      assert(instances[1].headers['content-range'] === 'bytes 1048576-2097151/2621440', 'chunk 2 must declare its byte range');
+      assert(instances[2].headers['content-range'] === 'bytes 2097152-2621439/2621440', 'chunk 3 must declare its byte range');
+      assert(instances[0].body.size === 1048576 && instances[1].body.size === 1048576 && instances[2].body.size === 524288,
+        'chunk bodies must be the file slices');
+      assert(!('authorization' in instances[0].headers), 'chunk PUTs must not carry the token (the session URI authenticates)');
+      assert(fractions.length >= 3 && fractions[fractions.length - 1] === 1, `progress must rise and end at 1, got ${JSON.stringify(fractions)}`);
+      assert(fractions.every((f, i) => i === 0 || f >= fractions[i - 1]), 'progress must never go backwards');
+      assert(record.drive_file_id === 'res-1' && record.size === 2621440 && record.url === 'https://drive.google.com/file/d/res-1/view',
+        'the record must come from the final chunk response');
+    });
+
+    test('drive: a failed chunk retries, then resumes from the session status', async () => {
+      const file = new File(['x'.repeat(2621440)], 'big.bin', { type: 'video/mp4' });
+      // Chunk 2's PUTs fail three times with their responses lost — but
+      // the server did receive the bytes, so the status query reports
+      // them and the upload resumes at chunk 3 instead of restarting.
+      const script = [
+        { status: 308, headers: { range: 'bytes=0-1048575' } },
+        { error: true }, { error: true }, { error: true }, // chunk 2: responses lost
+        { status: 308, headers: { range: 'bytes=0-2097151' } }, // status query: chunk 2 confirmed
+        { status: 200, responseText: JSON.stringify(resumableResource) },
+      ];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const record = await loadUploadFns()(resumableSessionFetch, FakeXHR)
+        .uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {});
+      assert(instances.length === 6, `expected 6 XHR calls, got ${instances.length}`);
+      const ranges = instances.map(x => x.headers['content-range']);
+      assert(ranges.filter(r => r === 'bytes 1048576-2097151/2621440').length === 3,
+        `chunk 2 must be attempted 3 times, got ${JSON.stringify(ranges)}`);
+      assert(ranges.includes('bytes */2621440'), 'the resume must ask the session how far it got');
+      assert(ranges.includes('bytes 2097152-2621439/2621440'), 'the upload must resume at chunk 3');
+      assert(record.drive_file_id === 'res-1', 'the upload must complete after the resume');
+    });
+
+    test('drive: aborting mid-upload rejects with code aborted and starts no new chunk', async () => {
+      const file = new File(['x'.repeat(2621440)], 'big.bin', { type: 'video/mp4' });
+      const script = [
+        { status: 308, headers: { range: 'bytes=0-1048575' }, progress: [{ loaded: 786432, total: 1048576 }] },
+        { status: 308, headers: { range: 'bytes=0-2097151' } },
+        { status: 200, responseText: JSON.stringify(resumableResource) },
+      ];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const ctl = new AbortController();
+      let err;
+      try {
+        await loadUploadFns()(resumableSessionFetch, FakeXHR)
+          .uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {
+            signal: ctl.signal,
+            onProgress: (f) => { if (f > 0.2) ctl.abort(); },
+          });
+      } catch (e) { err = e; }
+      assert(err && err.code === 'aborted', `an abort must reject with code aborted, got ${err && err.code}`);
+      assert(instances.length === 1, `no further chunk must start after the abort, got ${instances.length} XHR calls`);
+    });
+
+    test('drive: resumable upload refuses a missing session URI and a refused initiation', async () => {
+      const file = new File(['x'.repeat(1024)], 'big.bin', { type: 'video/mp4' });
+      const load = loadUploadFns();
+      const { FakeXHR } = makeFakeXHR([]);
       const noSession = async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => '' });
       let err;
-      try { await load(noSession)('tok', 'folder-1', file, 'big.bin'); } catch (e) { err = e; }
+      try { await load(noSession, FakeXHR).uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {}); } catch (e) { err = e; }
       assert(err && /no session URI/.test(err.message), 'a missing session URI must throw');
       const badInit = async () => ({ ok: false, status: 400, headers: { get: () => null }, text: async () => 'bad request' });
       err = null;
-      try { await load(badInit)('tok', 'folder-1', file, 'big.bin'); } catch (e) { err = e; }
+      try { await load(badInit, FakeXHR).uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {}); } catch (e) { err = e; }
       assert(err && /400/.test(err.message), 'a refused initiation must throw with the status');
+    });
+
+    test('drive: a zero-byte file completes with one empty PUT', async () => {
+      const file = new File([], 'empty.txt', { type: 'text/plain' });
+      const script = [{ status: 200, responseText: JSON.stringify({ id: 'e-1', name: 'empty.txt', size: '0', webViewLink: 'https://drive.google.com/file/d/e-1/view' }) }];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const record = await loadUploadFns()(resumableSessionFetch, FakeXHR)
+        .uploadAttachmentFileResumable('tok', 'folder-1', file, 'empty.txt', {});
+      assert(instances.length === 1, 'a zero-byte file must take exactly one PUT');
+      assert(instances[0].headers['content-range'] === 'bytes */0', 'the empty PUT must use the status-query range');
+      assert(record.drive_file_id === 'e-1' && record.size === 0, 'the record must come back with size 0');
     });
 
     test('demo data: a sampled list item carries two attachments', () => {

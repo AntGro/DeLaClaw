@@ -404,28 +404,141 @@ function uniqueDriveFileName(name, existingNames) {
 }
 // ── End pure attachment helpers ──
 
+// ── Attachment upload transport ────────────────────────────────
+// fetch() cannot report upload progress, so the file transfer goes
+// over XMLHttpRequest (upload.onprogress); only the resumable session
+// initiation stays on fetch (its body is a few bytes of JSON).
+// An AbortSignal cancels the in-flight XHR; the promise then rejects
+// with code 'aborted'. onProgress reports a 0..1 fraction of the file
+// (for multipart, of the whole FormData body — metadata included).
+
+/** Promise wrapper around one XHR call. Resolves with status, body and a header reader. */
+function xhrRequest({ method, url, headers = {}, body = null, onUploadProgress = null, signal = null }) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+    const done = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
+      fn(arg);
+    };
+    const abortHandler = () => xhr.abort();
+    xhr.open(method, url);
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    if (signal) {
+      if (signal.aborted) {
+        const err = new Error('Upload aborted');
+        err.code = 'aborted';
+        done(reject, err);
+        return;
+      }
+      signal.addEventListener('abort', abortHandler, { once: true });
+    }
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onUploadProgress) onUploadProgress(e.loaded, e.total);
+    };
+    xhr.onload = () => done(resolve, {
+      status: xhr.status,
+      responseText: xhr.responseText,
+      getResponseHeader: (h) => xhr.getResponseHeader(h),
+    });
+    xhr.onerror = () => {
+      const err = new Error('Drive upload failed: network error');
+      err.code = 'network';
+      done(reject, err);
+    };
+    xhr.onabort = () => {
+      const err = new Error('Upload aborted');
+      err.code = 'aborted';
+      done(reject, err);
+    };
+    xhr.send(body);
+  });
+}
+
+/** Parse a Drive `Range: bytes=0-<last>` header to its last byte, or null. */
+function parseRangeHeader(value) {
+  const m = /^bytes=0-(\d+)$/.exec((value || '').trim());
+  return m ? Number(m[1]) : null;
+}
+
 /**
  * Upload a user-picked file to the attachments folder via multipart
  * upload (FormData carries the binary part — the JSON-string body used
  * for table files cannot). Returns the attachment record stored on the
  * item: { drive_file_id, name, size, url }.
  */
-async function uploadAttachmentFile(token, folderId, file, name) {
+async function uploadAttachmentFile(token, folderId, file, name, { onProgress = null, signal = null } = {}) {
   const metadata = { name, parents: [folderId] };
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
   form.append('file', file);
-  const resp = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,webViewLink',
-    { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form }
-  );
-  if (!resp.ok) {
-    const errText = await resp.text().catch(() => '');
-    const err = new Error(`Drive upload failed: ${resp.status} ${errText}`);
-    err.code = resp.status;
+  const { status, responseText } = await xhrRequest({
+    method: 'POST',
+    url: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,webViewLink',
+    headers: { 'Authorization': `Bearer ${token}` },
+    body: form,
+    signal,
+    onUploadProgress: (loaded, total) => { if (onProgress && total > 0) onProgress(loaded / total); },
+  });
+  if (status < 200 || status >= 300) {
+    const err = new Error(`Drive upload failed: ${status} ${responseText}`);
+    err.code = status;
     throw err;
   }
-  const result = await resp.json();
+  const result = JSON.parse(responseText);
+  return {
+    drive_file_id: result.id,
+    name: result.name,
+    size: Number(result.size) || file.size,
+    url: result.webViewLink,
+  };
+}
+
+// 1 MB chunks — a multiple of Drive's 256 KB chunk quantum.
+const ATTACHMENT_CHUNK_BYTES = 1024 * 1024;
+
+/** One resumable chunk PUT (or an empty status-query PUT when the body is empty). */
+async function putResumableChunk(sessionUri, body, contentRange, contentType, { onProgress = null, signal = null } = {}) {
+  return xhrRequest({
+    method: 'PUT',
+    url: sessionUri,
+    headers: {
+      'Content-Type': contentType,
+      'Content-Range': contentRange,
+    },
+    body,
+    signal,
+    onUploadProgress: (loaded) => { if (onProgress) onProgress(loaded); },
+  });
+}
+
+function resumableContentRange(start, end, total) {
+  return end > start ? `bytes ${start}-${end - 1}/${total}` : `bytes */${total}`;
+}
+
+/**
+ * Ask a resumable session how far it got. Returns { offset } (bytes
+ * confirmed, may be 0), { resource } when the file is already complete,
+ * or null when the session cannot answer.
+ */
+async function queryResumableOffset(sessionUri, total, signal) {
+  let res;
+  try {
+    res = await putResumableChunk(sessionUri, new Blob([]), resumableContentRange(0, 0, total), 'application/octet-stream', { signal });
+  } catch { return null; }
+  if (res.status === 200 || res.status === 201) {
+    try { return { resource: JSON.parse(res.responseText) }; } catch { return null; }
+  }
+  if (res.status === 308) {
+    const last = parseRangeHeader(res.getResponseHeader('Range'));
+    return { offset: last == null ? 0 : last + 1 };
+  }
+  return null;
+}
+
+function attachmentRecordFromUpload(result, file) {
   return {
     drive_file_id: result.id,
     name: result.name,
@@ -436,13 +549,14 @@ async function uploadAttachmentFile(token, folderId, file, name) {
 
 /**
  * Upload a file above the multipart cap via the resumable endpoint:
- * a session-initiating POST returns a session URI, then a single PUT
- * of the whole file to that URI (no chunking — the session exists to
- * lift the 5 MB cap, and a failed PUT is retried by the user picking
- * the file again). Returns the same attachment record as
+ * a session-initiating POST returns a session URI, then the file goes
+ * up in 1 MB chunks (Content-Range per chunk; 308 advances, 200/201
+ * completes). A failed chunk is retried twice, then the session is
+ * asked how far it got and the upload resumes from there instead of
+ * restarting the file. Returns the same attachment record as
  * uploadAttachmentFile.
  */
-async function uploadAttachmentFileResumable(token, folderId, file, name) {
+async function uploadAttachmentFileResumable(token, folderId, file, name, { onProgress = null, signal = null } = {}) {
   const metadata = { name, parents: [folderId] };
   const init = await fetch(
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,webViewLink',
@@ -465,27 +579,65 @@ async function uploadAttachmentFileResumable(token, folderId, file, name) {
   }
   const sessionUri = init.headers.get('Location');
   if (!sessionUri) throw new Error('Drive resumable upload: no session URI');
-  const put = await fetch(sessionUri, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': file.type || 'application/octet-stream',
-      'Content-Length': String(file.size),
-    },
-    body: file,
-  });
-  if (!put.ok) {
-    const errText = await put.text().catch(() => '');
-    const err = new Error(`Drive resumable upload failed: ${put.status} ${errText}`);
-    err.code = put.status;
+  const total = file.size;
+  let confirmed = 0; // bytes Drive has acknowledged
+  const report = (sentInChunk) => {
+    if (onProgress && total > 0) onProgress(Math.min(1, (confirmed + sentInChunk) / total));
+  };
+  if (total === 0) {
+    // A zero-byte file has no chunks — the empty PUT completes it.
+    const res = await putResumableChunk(sessionUri, new Blob([]), resumableContentRange(0, 0, 0), file.type || 'application/octet-stream', { signal });
+    if (res.status === 200 || res.status === 201) {
+      if (onProgress) onProgress(1);
+      return attachmentRecordFromUpload(JSON.parse(res.responseText), file);
+    }
+    const err = new Error(`Drive resumable upload failed: ${res.status} ${res.responseText}`);
+    err.code = res.status;
     throw err;
   }
-  const result = await put.json();
-  return {
-    drive_file_id: result.id,
-    name: result.name,
-    size: Number(result.size) || file.size,
-    url: result.webViewLink,
-  };
+  while (confirmed < total) {
+    const start = confirmed;
+    const end = Math.min(total, start + ATTACHMENT_CHUNK_BYTES);
+    let attempts = 0;
+    let advanced = false;
+    while (!advanced) {
+      attempts++;
+      try {
+        const res = await putResumableChunk(sessionUri, file.slice(start, end), resumableContentRange(start, end, total), file.type || 'application/octet-stream', {
+          onProgress: (loaded) => report(loaded),
+          signal,
+        });
+        if (res.status === 200 || res.status === 201) {
+          if (onProgress) onProgress(1);
+          return attachmentRecordFromUpload(JSON.parse(res.responseText), file);
+        }
+        if (res.status === 308) {
+          const last = parseRangeHeader(res.getResponseHeader('Range'));
+          if (last == null) throw new Error('Drive resumable upload: 308 without a Range header');
+          confirmed = last + 1;
+          advanced = true;
+        } else {
+          const err = new Error(`Drive resumable upload failed: ${res.status} ${res.responseText}`);
+          err.code = res.status;
+          throw err;
+        }
+      } catch (e) {
+        if (e?.code === 'aborted') throw e;
+        if (attempts < 3) continue; // retry the same chunk
+        // Retries exhausted — ask the session how far it got and resume there.
+        const q = await queryResumableOffset(sessionUri, total, signal);
+        if (q?.resource) {
+          if (onProgress) onProgress(1);
+          return attachmentRecordFromUpload(q.resource, file);
+        }
+        if (q && q.offset > confirmed) { confirmed = q.offset; advanced = true; }
+        else throw e;
+      }
+    }
+  }
+  // The loop only exits via a 200/201 return; reaching here means the
+  // server never confirmed completion.
+  throw new Error('Drive resumable upload: session ended without a file');
 }
 
 /** Trash an attachment file (recoverable from Drive trash). Best-effort: never throws. */
@@ -1522,8 +1674,10 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
      * List item attachments — upload a user-picked file to
      * <app folder>/attachments/ and return the record stored on the item.
      * Files past the 5 MB multipart cap use the resumable endpoint.
+     * opts: { onProgress (0..1 fraction), signal (AbortSignal),
+     * inFlightNames (names being uploaded right now, for dedupe) }.
      */
-    async uploadAttachment(file) {
+    async uploadAttachment(file, { onProgress = null, signal = null, inFlightNames = [] } = {}) {
       if (!file) throw new Error('No file');
       const tok = await getToken();
       if (!tok) throw new Error('No valid token — please sign in again');
@@ -1531,11 +1685,12 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       // listFolderFiles caps at 100 — past that a duplicate name is
       // cosmetic only (records key on drive_file_id, never on name).
       const existing = await listFolderFiles(tok, attachmentsFolderId).catch(() => []);
-      const name = uniqueDriveFileName(file.name, existing.map(f => f.name));
+      const name = uniqueDriveFileName(file.name, [...existing.map(f => f.name), ...inFlightNames]);
+      const opts = { onProgress, signal };
       if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES) {
-        return uploadAttachmentFileResumable(tok, attachmentsFolderId, file, name);
+        return uploadAttachmentFileResumable(tok, attachmentsFolderId, file, name, opts);
       }
-      return uploadAttachmentFile(tok, attachmentsFolderId, file, name);
+      return uploadAttachmentFile(tok, attachmentsFolderId, file, name, opts);
     },
     /** Trash an attachment file from Drive. Best-effort, returns false on failure. */
     async trashAttachmentFile(driveFileId) {

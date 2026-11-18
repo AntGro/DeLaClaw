@@ -1038,6 +1038,9 @@ async function deleteListItem(id) {
       for (const a of normalizeAttachments(item.attachments)) {
         try { await state.driveAdapter?.trashAttachmentFile?.(a.drive_file_id); } catch {}
       }
+      // …and the item's own attachments folder, which also holds orphans
+      // from cancelled uploads. Same folder key as the upload path.
+      try { await state.driveAdapter?.trashItemAttachmentsFolder?.(item.shared_id || item.id); } catch {}
 
       showToast(t('toast.removed'), 'info');
       await refreshLists();
@@ -1156,11 +1159,16 @@ async function processAttachmentQueue(item) {
     let entry;
     while ((entry = [...pending.values()].find(e => e.status === 'queued'))) {
       entry.status = 'uploading';
-      const inFlightNames = [...pending.values()].filter(e => e !== entry).map(e => e.file.name);
       try {
         const record = await state.driveAdapter.uploadAttachment(entry.file, {
           signal: entry.controller.signal,
-          inFlightNames,
+          // Folder key: the shared_id for a shared item (the stable
+          // identity across members — the local id is replaced by a fresh
+          // pointer row when an item is shared), the local id otherwise.
+          itemId: item.shared_id || item.id,
+          // The item's own attachment names cover legacy files uploaded
+          // before per-item folders (they live in the flat folder).
+          existingItemNames: normalizeAttachments(item.attachments).map(a => a.name),
           onProgress: (fraction) => {
             entry.progress = fraction;
             updateAttachmentProgress(entry.id, fraction);

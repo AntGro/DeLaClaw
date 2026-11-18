@@ -360,7 +360,8 @@ export const ATTACHMENT_MULTIPART_MAX_BYTES = 5 * 1024 * 1024;
 const ATTACHMENTS_FOLDER_NAME = 'attachments';
 
 /** Find the attachments subfolder under the app folder, creating it on first use. */
-async function findOrCreateAttachmentsFolder(token, parentFolderId) {
+/** Find the attachments subfolder without creating it, or null. */
+async function findAttachmentsFolder(token, parentFolderId) {
   const q = encodeURIComponent(
     `name='${ATTACHMENTS_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`
   );
@@ -368,10 +369,14 @@ async function findOrCreateAttachmentsFolder(token, parentFolderId) {
     `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`,
     { headers: { 'Authorization': `Bearer ${token}` } }
   );
-  if (search.ok) {
-    const { files } = await search.json();
-    if (files && files.length > 0) return files[0].id;
-  }
+  if (!search.ok) return null;
+  const { files } = await search.json();
+  return files && files.length > 0 ? files[0].id : null;
+}
+
+async function findOrCreateAttachmentsFolder(token, parentFolderId) {
+  const existing = await findAttachmentsFolder(token, parentFolderId);
+  if (existing) return existing;
   const create = await fetch('https://www.googleapis.com/drive/v3/files', {
     method: 'POST',
     headers: {
@@ -401,6 +406,20 @@ function uniqueDriveFileName(name, existingNames) {
   let candidate = `${base} (${n})${ext}`;
   while (taken.has(candidate)) candidate = `${base} (${++n})${ext}`;
   return candidate;
+}
+
+/**
+ * Claim a filename for an upload: dedupe against the names already
+ * taken (folder listing + the item's own attachment names) and the
+ * names claimed by uploads still in flight, then hold the chosen name
+ * in `claimed` until the caller releases it. The claim is what makes
+ * the naming correct — deduping against the other files' *raw* names
+ * renamed the first file of a same-name batch for no reason.
+ */
+function claimAttachmentName(fileName, takenNames, claimed) {
+  const name = uniqueDriveFileName(fileName, [...(takenNames || []), ...claimed]);
+  claimed.add(name);
+  return name;
 }
 // ── End pure attachment helpers ──
 
@@ -461,6 +480,47 @@ function xhrRequest({ method, url, headers = {}, body = null, onUploadProgress =
 function parseRangeHeader(value) {
   const m = /^bytes=0-(\d+)$/.exec((value || '').trim());
   return m ? Number(m[1]) : null;
+}
+
+/**
+ * Find the Drive folder for one item's attachments, or null. The folder
+ * is named by folder key — the shared_id for a shared item (the stable
+ * identity across members), the local id otherwise. A personal row
+ * keeps its id forever; a shared item's local id is replaced by a fresh
+ * pointer row when it is shared, so the local id would orphan the
+ * folder at share time.
+ */
+async function findItemAttachmentsFolder(token, folderKey, parentFolderId) {
+  const q = encodeURIComponent(
+    `name='${folderKey}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`
+  );
+  const search = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  );
+  if (!search.ok) return null;
+  const { files } = await search.json();
+  return files && files.length > 0 ? files[0].id : null;
+}
+
+/** Find one item's attachments folder, creating it when missing. */
+async function findOrCreateItemAttachmentsFolder(token, folderKey, parentFolderId) {
+  const existing = await findItemAttachmentsFolder(token, folderKey, parentFolderId);
+  if (existing) return existing;
+  const create = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: folderKey,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentFolderId],
+    }),
+  });
+  if (!create.ok) throw new Error('Failed to create Drive item attachments folder');
+  return (await create.json()).id;
 }
 
 /**
@@ -755,6 +815,12 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
   // Attachments subfolder id, resolved lazily on first upload.
   let attachmentsFolderId = null;
+  // Per-item attachments subfolders, by folder key (shared_id for shared
+  // items, local id otherwise) — resolved lazily, then cached.
+  const itemAttachmentsFolderIds = new Map();
+  // Names claimed by uploads still in flight, by Drive folder id — so
+  // two uploads racing the same folder can't take the same name.
+  const claimedAttachmentNames = new Map();
 
   // Per-table file IDs, ETags, and modified times
   const fileMeta = {}; // { tableName: { fileId, etag, modifiedTime } }
@@ -1671,26 +1737,76 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
     /** Expose token getter for sharing module. */
     getToken,
     /**
-     * List item attachments — upload a user-picked file to
-     * <app folder>/attachments/ and return the record stored on the item.
+     * List item attachments — upload a user-picked file to the item's own
+     * subfolder <app folder>/attachments/<folderKey>/ and return the
+     * record stored on the item. folderKey is the shared_id for a shared
+     * item, the local id otherwise (see findItemAttachmentsFolder).
      * Files past the 5 MB multipart cap use the resumable endpoint.
-     * opts: { onProgress (0..1 fraction), signal (AbortSignal),
-     * inFlightNames (names being uploaded right now, for dedupe) }.
+     * The dedupe scope is one item: a name used on another item never
+     * forces a (1) suffix here, and an item's folder holds a handful of
+     * files, so the 100-file listing cap never blinds the dedupe.
+     * existingItemNames covers files uploaded before per-item folders
+     * (they live in the flat folder, not the item's) and any name the
+     * folder listing missed. opts: { onProgress (0..1 fraction),
+     * signal (AbortSignal), itemId (folder key), existingItemNames }.
      */
-    async uploadAttachment(file, { onProgress = null, signal = null, inFlightNames = [] } = {}) {
+    async uploadAttachment(file, { onProgress = null, signal = null, itemId = null, existingItemNames = [] } = {}) {
       if (!file) throw new Error('No file');
       const tok = await getToken();
       if (!tok) throw new Error('No valid token — please sign in again');
       if (!attachmentsFolderId) attachmentsFolderId = await findOrCreateAttachmentsFolder(tok, folderId);
+      // Per-item folder (cached); without an item key the upload lands in
+      // the flat folder, as before.
+      let targetFolderId = attachmentsFolderId;
+      if (itemId) {
+        targetFolderId = itemAttachmentsFolderIds.get(itemId);
+        if (!targetFolderId) {
+          targetFolderId = await findOrCreateItemAttachmentsFolder(tok, itemId, attachmentsFolderId);
+          itemAttachmentsFolderIds.set(itemId, targetFolderId);
+        }
+      }
       // listFolderFiles caps at 100 — past that a duplicate name is
       // cosmetic only (records key on drive_file_id, never on name).
-      const existing = await listFolderFiles(tok, attachmentsFolderId).catch(() => []);
-      const name = uniqueDriveFileName(file.name, [...existing.map(f => f.name), ...inFlightNames]);
-      const opts = { onProgress, signal };
-      if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES) {
-        return uploadAttachmentFileResumable(tok, attachmentsFolderId, file, name, opts);
+      const existing = await listFolderFiles(tok, targetFolderId).catch(() => []);
+      let claimed = claimedAttachmentNames.get(targetFolderId);
+      if (!claimed) { claimed = new Set(); claimedAttachmentNames.set(targetFolderId, claimed); }
+      const name = claimAttachmentName(file.name, [...existing.map(f => f.name), ...existingItemNames], claimed);
+      try {
+        const opts = { onProgress, signal };
+        if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES) {
+          return uploadAttachmentFileResumable(tok, targetFolderId, file, name, opts);
+        }
+        return uploadAttachmentFile(tok, targetFolderId, file, name, opts);
+      } finally {
+        // Released either way: on success the file is in the folder, so
+        // the next listing sees it; on failure nothing is there to hold.
+        claimed.delete(name);
       }
-      return uploadAttachmentFile(tok, attachmentsFolderId, file, name, opts);
+    },
+
+    /**
+     * Trash one item's attachments folder (one call — trashing a folder
+     * trashes everything inside it, including orphans from cancelled
+     * uploads). Best-effort: false when there is no folder or the trash
+     * fails; never throws. The recorded files themselves are trashed
+     * individually by the caller, so legacy flat-folder files are covered
+     * too — this call only cleans the folder and its orphans.
+     */
+    async trashItemAttachmentsFolder(itemId) {
+      try {
+        if (!itemId) return false;
+        const tok = await getToken();
+        if (!tok) return false;
+        // Find-only: never create the parent folder just to look for a child.
+        if (!attachmentsFolderId) attachmentsFolderId = await findAttachmentsFolder(tok, folderId);
+        if (!attachmentsFolderId) return false;
+        let itemFolderId = itemAttachmentsFolderIds.get(itemId);
+        if (!itemFolderId) itemFolderId = await findItemAttachmentsFolder(tok, itemId, attachmentsFolderId);
+        if (!itemFolderId) return false;
+        itemAttachmentsFolderIds.delete(itemId);
+        claimedAttachmentNames.delete(itemFolderId);
+        return await trashDriveFile(tok, itemFolderId);
+      } catch { return false; }
     },
     /** Trash an attachment file from Drive. Best-effort, returns false on failure. */
     async trashAttachmentFile(driveFileId) {

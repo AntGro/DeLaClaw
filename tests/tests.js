@@ -9244,6 +9244,54 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(uniqueDriveFileName('.hidden', ['.hidden']) === '.hidden (1)', 'a leading dot is not an extension');
     });
 
+    test('drive: claimAttachmentName claims names sequentially (v2.32.125)', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('// ── Pure attachment helpers ──');
+      const end = driveSrc.indexOf('// ── End pure attachment helpers ──');
+      assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in drive.js');
+      const { claimAttachmentName } = new Function(`${driveSrc.slice(start, end)}; return { claimAttachmentName };`)();
+      // The v2.32.124 flaw: picking receipt.pdf twice in one go yielded
+      // (1) and (2) with no plain name. Claiming fixes it.
+      const claimed = new Set();
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt.pdf', 'the first claim keeps the plain name');
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt (1).pdf', 'the second claim of the same name takes (1)');
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt (2).pdf', 'the third claim takes (2)');
+      assert(claimAttachmentName('receipt.pdf', ['receipt.pdf', 'receipt (1).pdf', 'receipt (2).pdf'], new Set()) === 'receipt (3).pdf',
+        'names already in the folder still count');
+      claimed.delete('receipt.pdf');
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt.pdf', 'releasing a claim frees the name again');
+    });
+
+    test('drive: findOrCreateItemAttachmentsFolder finds, then creates (v2.32.125)', async () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('async function findItemAttachmentsFolder');
+      const end = driveSrc.indexOf('async function findOrCreateItemAttachmentsFolder');
+      const fnEnd = driveSrc.indexOf('\n}\n', end) + 3;
+      assert(start !== -1 && end > start && fnEnd > end, 'could not slice the item folder helpers from drive.js');
+      const calls = [];
+      const fetchStub = async (url, init) => {
+        calls.push({ url, init });
+        if (init?.method === 'POST') {
+          return { ok: true, json: async () => ({ id: 'folder-created' }) };
+        }
+        // First search finds the folder, second search finds nothing.
+        return { ok: true, json: async () => ({ files: calls.filter(c => !c.init?.method).length === 1 ? [{ id: 'folder-found' }] : [] }) };
+      };
+      const { findOrCreateItemAttachmentsFolder } = new Function('fetch', `${driveSrc.slice(start, fnEnd)}; return { findOrCreateItemAttachmentsFolder };`)(fetchStub);
+      const found = await findOrCreateItemAttachmentsFolder('tok', 'shared-abc', 'attachments-folder');
+      assert(found === 'folder-found', 'an existing item folder must be returned without creating');
+      assert(calls.filter(c => c.init?.method === 'POST').length === 0, 'no create call when the folder exists');
+      const created = await findOrCreateItemAttachmentsFolder('tok', 'item-xyz', 'attachments-folder');
+      assert(created === 'folder-created', 'a missing item folder must be created');
+      const createCall = calls.find(c => c.init?.method === 'POST');
+      const body = JSON.parse(createCall.init.body);
+      assert(body.name === 'item-xyz' && body.parents[0] === 'attachments-folder' && body.mimeType === 'application/vnd.google-apps.folder',
+        'the created folder must be named by folder key under the attachments folder');
+      const searchUrl = decodeURIComponent(calls[0].url);
+      assert(searchUrl.includes("name='shared-abc'") && searchUrl.includes('trashed=false'),
+        'the search must query the folder key under the parent, excluding trashed folders');
+    });
+
     test('migrations: list_items gains the attachments column in 2.32.122', () => {
       const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
       assert(/CREATE TABLE IF NOT EXISTS list_items \([^;]*attachments TEXT/.test(schema),
@@ -9277,8 +9325,19 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(driveSrc.includes('async trashAttachmentFile(driveFileId)'), 'the Drive adapter must expose trashAttachmentFile');
       assert(driveSrc.includes('ATTACHMENT_MULTIPART_MAX_BYTES = 5 * 1024 * 1024'), 'multipart uploads cap at 5 MB');
       assert(driveSrc.includes('if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES)'), 'files past the cap must take the resumable path');
-      assert(driveSrc.includes('uploadAttachmentFileResumable(tok, attachmentsFolderId, file, name'), 'the resumable path must be wired into uploadAttachment');
+      assert(driveSrc.includes('uploadAttachmentFileResumable(tok, targetFolderId, file, name'), 'the resumable path must be wired into uploadAttachment');
       assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
+      // Per-item folders (v2.32.125): each item gets its own subfolder,
+      // and names are claimed sequentially instead of deduping against
+      // the other files' raw names.
+      assert(driveSrc.includes('async trashItemAttachmentsFolder(itemId)'), 'the Drive adapter must expose trashItemAttachmentsFolder');
+      assert(driveSrc.includes('async function findOrCreateItemAttachmentsFolder(token, folderKey, parentFolderId)'), 'per-item folders must be found or created');
+      assert(driveSrc.includes('async function findAttachmentsFolder(token, parentFolderId)'), 'the parent folder must be findable without creating it');
+      assert(driveSrc.includes('function claimAttachmentName(fileName, takenNames, claimed)'), 'names must be claimed, not deduped against raw names');
+      assert(!driveSrc.includes('inFlightNames'), 'the raw-name in-flight dedupe must be gone from the adapter');
+      assert(!listsSrc.includes('inFlightNames'), 'the raw-name in-flight dedupe must be gone from the caller');
+      assert(listsSrc.includes('item.shared_id || item.id'), 'the folder key must be the shared_id for shared items, the local id otherwise');
+      assert(listsSrc.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id)'), 'deleting an item must trash its attachments folder');
       // Progress: the transfer runs over XHR (fetch cannot report upload
       // progress), in 1 MB chunks for the resumable path.
       assert(driveSrc.includes('new XMLHttpRequest()'), 'the upload transport must be XHR for progress events');

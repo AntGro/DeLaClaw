@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-11-21T02:51:32.995Z from 50 modules (v2.32.130). Total LOC 40538. Do not hand-edit.
+> Generated 2026-11-21T02:56:46.684Z from 50 modules (v2.32.131). Total LOC 40594. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,8 +27,8 @@
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
 | main | 4130 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:12,guard+pendingSet,window:8 |
+| sharing-drive | 2641 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
 | i18n | 2622 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,calendar.js | pendingSet |
-| sharing-drive | 2586 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
 | drive | 2016 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | item-utils | 1395 | - | db,i18n,icons,state | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |
 | calendar-sync | 1269 | birthdays,events,gcal_sync,habits,settings,todos | calendar-pure,drive-folders,habits,i18n | main.js | - |
@@ -54,7 +54,7 @@
 | sharing | 185 | - | offline-cache,sharing-drive,sharing-envelope,sharing-interface | - | - |
 | rest | 162 | x |  | main.js | - |
 | habit-import | 143 | - | frequency-rule,import-pure | - | - |
-| sharing-interface | 140 | - |  | sharing.js | - |
+| sharing-interface | 141 | - |  | sharing.js | - |
 | import-pure | 135 | - |  | batch-import.js,habit-import.js,todo-import.js | - |
 | db | 131 | projects | db | agents-ui.js,db.js,item-utils.js,main.js | pendingSet |
 | todo-import | 94 | - | import-pure | - | - |

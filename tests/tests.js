@@ -9442,6 +9442,50 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
+    test('sharing: ownAttachmentFileIds collects only my files, deduped', () => {
+      const driveSrc = jsFiles['sharing-drive.js'];
+      const start = driveSrc.indexOf('function ownAttachmentFileIds');
+      assert(start !== -1, 'could not find ownAttachmentFileIds in sharing-drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of ownAttachmentFileIds');
+      const { ownAttachmentFileIds } = new Function(`${driveSrc.slice(start, end + 3)}; return { ownAttachmentFileIds };`)();
+      const items = [
+        { id: 'a', payload: { attachments: [
+          { drive_file_id: 'f1', name: 'a.pdf', uploaded_by: 'me' },
+          { drive_file_id: 'f2', name: 'b.pdf', uploaded_by: 'other' },
+        ] } },
+        { id: 'b', payload: { attachments: [
+          { drive_file_id: 'f1', name: 'a.pdf', uploaded_by: 'me' },
+          { drive_file_id: 'f3', name: 'c.pdf', uploaded_by: 'me' },
+        ] } },
+        { id: 'c', payload: { text: 'no attachments' } },
+        { id: 'd', payload: { attachments: 'not-an-array' } },
+        { id: 'e' },
+      ];
+      assert(JSON.stringify(ownAttachmentFileIds(items, 'me').sort()) === JSON.stringify(['f1', 'f3']),
+        'the sweep must collect my files only, once each, ignoring other members and malformed payloads');
+      assert(ownAttachmentFileIds(items, null).length === 0, 'no member id means no files to sweep');
+      assert(ownAttachmentFileIds(null, 'me').length === 0, 'no items means no files to sweep');
+    });
+
+    test('sharing: the attachment grant sweep is wired at the interface, the adapter, the cache and both triggers', () => {
+      const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(iface.includes('sweepAttachmentGrants:'), 'the sharing interface must declare sweepAttachmentGrants');
+      const driveSrc = jsFiles['sharing-drive.js'];
+      assert(driveSrc.includes('async sweepAttachmentGrants(groupId)'), 'the Drive adapter must implement sweepAttachmentGrants');
+      assert(driveSrc.includes("ownAttachmentFileIds(e.typeData['lists'] || [], myId)"), 'the sweep must scan my list-item payloads');
+      assert(driveSrc.includes("this.shareFileWithGroup(groupId, fileId, 'reader')"), 'the sweep must grant each file reader');
+      // Load-time trigger: post-load repairs in loadAll.
+      const loadStart = driveSrc.indexOf('async loadAll()');
+      const loadEnd = driveSrc.indexOf('getAllGroups()', loadStart);
+      const loadFn = driveSrc.slice(loadStart, loadEnd);
+      assert(loadFn.includes('this.sweepAttachmentGrants(gid)'), 'loadAll must sweep each loaded group for members who joined while away');
+      // Poll trigger: fresh joins.
+      assert(driveSrc.includes('if (freshJoins.length) this.sweepAttachmentGrants(groupId)'), 'the poll must sweep when it spots a fresh join');
+      const sharingJs = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingJs.includes("'sweepAttachmentGrants',"), 'the cached sharing adapter must reject sweepAttachmentGrants as read-only');
+    });
+
     // Slice the real upload functions out of drive.js and run them
     // against a fake fetch + a fake XHR (same new Function idiom as the
     // pure-helper tests). The fake answers from a script queue, one

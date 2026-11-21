@@ -312,6 +312,22 @@ async function driveRemovePermission(token, fileId, permissionId) {
     { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
 }
 
+// Join-backfill (v2.32.131): the distinct Drive file ids of MY attachments
+// in a group's list-item payloads — the files the grant sweep must share.
+// Pure: items is the group's lists typeData, myId is my member id for the group.
+function ownAttachmentFileIds(items, myId) {
+  const ids = new Set();
+  if (!myId || !Array.isArray(items)) return [];
+  for (const item of items) {
+    const atts = item?.payload?.attachments;
+    if (!Array.isArray(atts)) continue;
+    for (const a of atts) {
+      if (a && a.drive_file_id && a.uploaded_by === myId) ids.add(a.drive_file_id);
+    }
+  }
+  return [...ids];
+}
+
 // ── Merge ───────────────────────────────────────────────────────
 // Item merging lives in sharing-file-reconcile.js (backend-agnostic):
 // unionItems for remote-vs-remote snapshots, reconcileItems for
@@ -1383,6 +1399,16 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         }
       }
 
+      // Join-backfill (v2.32.131): grant my own attachment files to members
+      // who joined while I was away. Best-effort, never fails the load.
+      for (const gid of _groups.keys()) {
+        try {
+          await this.sweepAttachmentGrants(gid);
+        } catch (err) {
+          console.warn(`sharing: attachment grant sweep failed for ${gid} (retried on next load):`, err);
+        }
+      }
+
       _loaded = true;
       return this.getAllGroups();
     },
@@ -1671,6 +1697,31 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         shared.push(id);
       }
       return shared;
+    },
+
+    /**
+     * Join-backfill (v2.32.131): grant every currently-joined member reader
+     * access to my own attachment files in this group. Called on group load
+     * (covers members who joined while I was away) and when the poll spots
+     * a fresh join. Idempotent — shareFileWithGroup skips members who already
+     * have access — so re-running is a no-op for them. Best-effort: a file
+     * whose grants fail is logged and left for the next load or join; the
+     * member can still use Drive's request-access link.
+     */
+    async sweepAttachmentGrants(groupId) {
+      const e = _groups.get(groupId);
+      if (!e) return [];
+      const myId = await currentMemberId(groupId).catch(() => null);
+      if (!myId) return [];
+      const granted = [];
+      for (const fileId of ownAttachmentFileIds(e.typeData['lists'] || [], myId)) {
+        try {
+          granted.push(...await this.shareFileWithGroup(groupId, fileId, 'reader'));
+        } catch (err) {
+          console.warn(`sharing: attachment grant sweep failed for ${fileId}:`, err);
+        }
+      }
+      return [...new Set(granted)];
     },
 
     /** Remove a member from a group. Creator-only. Reassigns the removed
@@ -2241,6 +2292,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
                     changed = true;
                     emit('group-changed', { groupId, group: e.group });
                     for (const m of freshJoins) emit('member-joined', { groupId, group: e.group, member: m });
+                    // Join-backfill: the fresh joiners can now open my files
+                    // attached before they joined. Fire-and-forget — the poll
+                    // must not wait on Drive grants.
+                    if (freshJoins.length) this.sweepAttachmentGrants(groupId).catch(err => console.warn(`sharing: attachment grant sweep failed for ${groupId}:`, err));
                   }
                 }
               } catch (err) {

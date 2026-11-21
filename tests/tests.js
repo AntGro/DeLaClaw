@@ -9180,7 +9180,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const start = listsJs.indexOf('// ── Pure attachment helpers ──');
       const end = listsJs.indexOf('// ── End pure attachment helpers ──');
       assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in lists.js');
-      return new Function(`${listsJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, sharedListItemPayload };`)();
+      return new Function(`${listsJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, sharedListItemPayload, ownAttachmentFiles };`)();
     }
 
     test('lists: normalizeAttachments accepts string, array and missing; drops invalid entries', () => {
@@ -9218,6 +9218,38 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'a non-string uploaded_by must be dropped');
       assert(normalizeAttachments([{ ...good, uploaded_by: '' }]).length === 0,
         'an empty uploaded_by must be dropped');
+    });
+
+    test('lists: ownAttachmentFiles keeps only my files, nothing when the id is unknown', () => {
+      const { ownAttachmentFiles } = loadAttachmentHelpers();
+      const atts = [
+        { drive_file_id: 'f1', name: 'mine.pdf', size: 1, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'me' },
+        { drive_file_id: 'f2', name: 'theirs.pdf', size: 1, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'other' },
+        { drive_file_id: 'f3', name: 'mine2.pdf', size: 1, url: 'https://drive.google.com/file/d/f3/view', uploaded_by: 'me' },
+      ];
+      assert(JSON.stringify(ownAttachmentFiles(atts, 'me').map(a => a.drive_file_id)) === JSON.stringify(['f1', 'f3']),
+        'only files I uploaded may be trashed on delete');
+      assert(ownAttachmentFiles(atts, null).length === 0, 'an unresolvable id must trash nothing, never guess');
+      assert(ownAttachmentFiles(atts, undefined).length === 0, 'an undefined id must trash nothing');
+      assert(ownAttachmentFiles(null, 'me').length === 0, 'no attachments means nothing to trash');
+    });
+
+    test('lists: deleting an item or a chip trashes only my own files', () => {
+      const listsSrc = jsFiles['lists.js'];
+      const delStart = listsSrc.indexOf('async function deleteListItem');
+      const delEnd = listsSrc.indexOf('// ── List item attachments', delStart);
+      const delFn = listsSrc.slice(delStart, delEnd);
+      assert(delFn.includes('ownAttachmentFiles(item.attachments, await myAttachmentUploaderId(item))'),
+        'item deletion must trash only my own attachments');
+      assert(!delFn.includes("normalizeAttachments(item.attachments)) {\n        try { await state.driveAdapter?.trashAttachmentFile"),
+        'item deletion must not trash the unfiltered attachment list');
+      assert(delFn.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id)'),
+        'item deletion must still trash my own attachments folder');
+      const remStart = listsSrc.indexOf('async function removeListItemAttachment');
+      const remEnd = listsSrc.indexOf('// ===================================================================\n// CRUD — LISTS', remStart);
+      const remFn = listsSrc.slice(remStart, remEnd);
+      assert(remFn.includes('target.uploaded_by === myId'),
+        'removing a chip must trash the file only when it is mine');
     });
 
     test('lists: sharedListItemPayload carries attachments only when the item has any', () => {

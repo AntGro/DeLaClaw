@@ -67,7 +67,26 @@ function sharedListItemPayload(item, listObj) {
   if (attachments.length) payload.attachments = attachments;
   return payload;
 }
+// The files the current user may trash on delete: only their own.
+// uploaded_by is compulsory on every record since v2.32.127, so a record
+// never matches without an uploader — and when the id cannot be resolved
+// at all, nothing is trashed.
+function ownAttachmentFiles(attachments, myId) {
+  if (!myId) return [];
+  return normalizeAttachments(attachments).filter(a => a.uploaded_by === myId);
+}
 // ── End pure attachment helpers ──
+
+// The member id my own attachments carry: the group row's id for a shared
+// item, the group-independent email-hash id for a personal one — the same
+// two sources the upload queue uses. Null when it cannot be resolved,
+// in which case no file is trashed at all.
+async function myAttachmentUploaderId(item) {
+  try {
+    if (item.shared_group_id) return await state.sharing?.getCurrentMemberId?.(item.shared_group_id) ?? null;
+    return await state.sharing?.getCurrentUserMemberId?.() ?? null;
+  } catch { return null; }
+}
 
 let listSearchQuery = '';
 
@@ -1052,14 +1071,19 @@ async function deleteListItem(id) {
       const el = document.querySelector(`[data-item-id="${CSS.escape(id)}"]`);
       await animateItemRemoval(el);
 
-      // Best-effort: trash the item's Drive attachments so they don't
-      // linger orphaned in the attachments folder. A failure here never
-      // blocks the deletion — the links are already gone with the row.
-      for (const a of normalizeAttachments(item.attachments)) {
+      // Best-effort: trash MY Drive attachments so they don't linger
+      // orphaned in the attachments folder. Never another member's files:
+      // only the file's owner can trash a Drive file, and the decision is
+      // to leave other members' files alone entirely — no attempt is made.
+      // A failure here never blocks the deletion — the links are already
+      // gone with the row.
+      for (const a of ownAttachmentFiles(item.attachments, await myAttachmentUploaderId(item))) {
         try { await state.driveAdapter?.trashAttachmentFile?.(a.drive_file_id); } catch {}
       }
-      // …and the item's own attachments folder, which also holds orphans
-      // from cancelled uploads. Same folder key as the upload path.
+      // …and my own attachments folder for this item, which also holds
+      // orphans from cancelled uploads. Same folder key as the upload path.
+      // The lookup runs in my Drive, so it can only ever find my folder —
+      // another member's folder for the same item lives in their Drive.
       try { await state.driveAdapter?.trashItemAttachmentsFolder?.(item.shared_id || item.id); } catch {}
 
       showToast(t('toast.removed'), 'info');
@@ -1327,9 +1351,14 @@ async function removeListItemAttachment(itemId, driveFileId, btnEl) {
       }
       item.attachments = next;
       renderLists();
-      // Best-effort: trash the Drive file so it doesn't linger orphaned.
-      // A failure here never blocks the removal — the link is already gone.
-      try { await state.driveAdapter?.trashAttachmentFile?.(driveFileId); } catch {}
+      // Best-effort: trash the Drive file so it doesn't linger orphaned —
+      // but only when it is mine. Removing another member's chip removes
+      // the record from the payload (any member may edit a shared item);
+      // their file stays untouched in their Drive.
+      const myId = await myAttachmentUploaderId(item);
+      if (myId && target.uploaded_by === myId) {
+        try { await state.driveAdapter?.trashAttachmentFile?.(driveFileId); } catch {}
+      }
       showToast(t('lists.attachment_removed'), 'success');
     }
   );

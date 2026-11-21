@@ -438,6 +438,7 @@ const T = {
       attach_unavailable: 'Attachments need Google Drive — connect it first',
       attachment_upload_failed: "Couldn't upload the attachment",
       attachment_share_failed: "Uploaded, but couldn't share it with the group — the attachment was not added",
+      attachment_no_uploader: "Couldn't identify you — the file wasn't uploaded",
       attachment_added: 'Attachment added', attachment_removed: 'Attachment removed',
     },
     // ── Calendar ──
@@ -1292,6 +1293,7 @@ const T = {
       attach_unavailable: 'Les pièces jointes nécessitent Google Drive — connectez-le d’abord',
       attachment_upload_failed: 'Impossible de téléverser la pièce jointe',
       attachment_share_failed: 'Téléversé, mais impossible de le partager avec le groupe — la pièce jointe n’a pas été ajoutée',
+      attachment_no_uploader: 'Impossible de vous identifier — le fichier n’a pas été envoyé',
       attachment_added: 'Pièce jointe ajoutée', attachment_removed: 'Pièce jointe supprimée',
     },
     calendar: {
@@ -2140,6 +2142,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       attach_unavailable: 'Los adjuntos necesitan Google Drive — conéctalo primero',
       attachment_upload_failed: 'No se pudo subir el adjunto',
       attachment_share_failed: 'Subido, pero no se pudo compartir con el grupo — el adjunto no se añadió',
+      attachment_no_uploader: 'No se pudo identificarte — el archivo no se subió',
       attachment_added: 'Adjunto añadido', attachment_removed: 'Adjunto eliminado',
     },
     calendar: {

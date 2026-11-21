@@ -43,6 +43,7 @@ export const SHARING_INTERFACE = {
   // ── Identity ────────────────────────────────────────────────
   getCurrentUser:           'fn',   // () => SharingUser | Promise<SharingUser>
   getCurrentMemberId:       'fn',   // (groupId) => Promise<string|null>
+  getCurrentUserMemberId:   'fn',   // () => Promise<string|null> — the current user's member id, group-independent (hash of their email); the uploader id stamped on attachment records
 
   // ── Groups — lifecycle ──────────────────────────────────────
   createGroup:              'fn',   // (name: string, onProgress?: (ev: {step, done, total}) => void) => Promise<Group>

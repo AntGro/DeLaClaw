@@ -9185,7 +9185,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('lists: normalizeAttachments accepts string, array and missing; drops invalid entries', () => {
       const { normalizeAttachments, serializeAttachments } = loadAttachmentHelpers();
-      const good = { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view' };
+      const good = { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'member-abc123' };
       assert(JSON.stringify(normalizeAttachments(undefined)) === '[]', 'missing attachments must read as empty');
       assert(JSON.stringify(normalizeAttachments(null)) === '[]', 'null attachments must read as empty');
       assert(JSON.stringify(normalizeAttachments('[]')) === '[]', 'an empty JSON string must read as empty');
@@ -9195,11 +9195,11 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'an array (sharing payload shape) must pass through');
       const mixed = normalizeAttachments([
         good,
-        { drive_file_id: 'f2', name: 'b.pdf', size: 10, url: 'https://drive.google.com/file/d/f2/view', extra: 'stripped' },
-        { name: 'no-id.pdf', size: 10, url: 'https://drive.google.com/file/d/x/view' },
-        { drive_file_id: 'f3', name: 'no-url.pdf', size: 10 },
-        { drive_file_id: 'f4', name: 'neg.pdf', size: -1, url: 'https://drive.google.com/file/d/f4/view' },
-        { drive_file_id: 'f5', name: 'nan.pdf', size: 'big', url: 'https://drive.google.com/file/d/f5/view' },
+        { drive_file_id: 'f2', name: 'b.pdf', size: 10, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'member-abc123', extra: 'stripped' },
+        { name: 'no-id.pdf', size: 10, url: 'https://drive.google.com/file/d/x/view', uploaded_by: 'member-abc123' },
+        { drive_file_id: 'f3', name: 'no-url.pdf', size: 10, uploaded_by: 'member-abc123' },
+        { drive_file_id: 'f4', name: 'neg.pdf', size: -1, url: 'https://drive.google.com/file/d/f4/view', uploaded_by: 'member-abc123' },
+        { drive_file_id: 'f5', name: 'nan.pdf', size: 'big', url: 'https://drive.google.com/file/d/f5/view', uploaded_by: 'member-abc123' },
         'not-an-object',
       ]);
       assert(mixed.length === 2, `only valid records survive, got ${mixed.length}`);
@@ -9207,20 +9207,17 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(JSON.stringify(normalizeAttachments('not json')) === '[]', 'an unparseable string must read as empty');
       assert(serializeAttachments([]) === null, 'an empty list must store NULL, like pre-migration rows');
       assert(serializeAttachments([good]) === JSON.stringify([good]), 'a non-empty list must store a JSON string');
-      // uploaded_by (v2.32.126): kept only when a non-empty string —
-      // the group member id of the uploader. Records without it (all
-      // pre-2.32.126 uploads, and every personal item) stay without it.
-      const withUploader = { ...good, uploaded_by: 'member-abc123' };
-      const normalized = normalizeAttachments([withUploader]);
-      assert(normalized[0].uploaded_by === 'member-abc123', 'a valid uploaded_by must survive normalization');
-      assert(JSON.stringify(normalizeAttachments([good])) === JSON.stringify([good]),
-        'a record without uploaded_by must not gain one');
-      assert(normalizeAttachments([{ ...good, uploaded_by: 42 }])[0].uploaded_by === undefined,
+      // uploaded_by is compulsory (v2.32.127): a record without a
+      // non-empty string uploader is invalid and is dropped, not kept
+      // unattributed — no attachment has ever been uploaded outside
+      // dev, so there are no legacy records to keep reading.
+      const { drive_file_id, name, size, url } = good;
+      assert(normalizeAttachments([{ drive_file_id, name, size, url }]).length === 0,
+        'a record without uploaded_by must be dropped');
+      assert(normalizeAttachments([{ ...good, uploaded_by: 42 }]).length === 0,
         'a non-string uploaded_by must be dropped');
-      assert(normalizeAttachments([{ ...good, uploaded_by: '' }])[0].uploaded_by === undefined,
+      assert(normalizeAttachments([{ ...good, uploaded_by: '' }]).length === 0,
         'an empty uploaded_by must be dropped');
-      assert(serializeAttachments([withUploader]) === JSON.stringify([withUploader]),
-        'uploaded_by must survive the DB round-trip');
     });
 
     test('lists: formatFileSize pins the unit boundaries', () => {
@@ -9341,15 +9338,25 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(driveSrc.includes('if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES)'), 'files past the cap must take the resumable path');
       assert(driveSrc.includes('uploadAttachmentFileResumable(tok, targetFolderId, file, name'), 'the resumable path must be wired into uploadAttachment');
       assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
-      // uploaded_by (v2.32.126): the queue stamps the uploader's group
-      // member id onto shared-item uploads; the adapter threads it into
-      // the record on both paths.
+      // uploaded_by (v2.32.126, compulsory v2.32.127): the queue stamps
+      // the uploader's group member id onto every upload; the adapter
+      // threads it into the record on both paths. The normalizer drops
+      // any record without it.
       assert(listsSrc.includes('getCurrentMemberId(item.shared_group_id)'), 'the queue must read the uploader’s member id for shared items');
+      assert(listsSrc.includes('getCurrentUserMemberId()'), 'the queue must read the group-independent uploader id for personal items');
       assert(listsSrc.includes('uploadedBy,'), 'the queue must pass uploadedBy to the adapter');
+      assert(listsSrc.includes("t('lists.attachment_no_uploader')"), 'a missing uploader id must refuse the upload with a toast, not orphan a file');
       assert(driveSrc.includes('uploadedBy = null'), 'the adapter must accept uploadedBy in the upload opts');
       assert(driveSrc.includes('const opts = { onProgress, signal, uploadedBy }'), 'the adapter must thread uploadedBy into the upload call');
       assert(driveSrc.includes('attachmentRecordFromUpload(JSON.parse(res.responseText), file, uploadedBy)'), 'the resumable path must stamp uploaded_by on the record');
       assert(driveSrc.includes('rec.uploaded_by = uploadedBy'), 'the multipart path must stamp uploaded_by on the record');
+      const ifaceSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(ifaceSrc.includes('getCurrentUserMemberId'), 'the sharing interface must expose the group-independent uploader id');
+      const sharingDriveSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+      assert(sharingDriveSrc.includes('async getCurrentUserMemberId()'), 'the Drive sharing adapter must implement the group-independent uploader id');
+      assert(sharingDriveSrc.includes('memberIdFromEmail(user.email)'), 'the uploader id must derive from the account email hash');
+      const sharingSrc = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingSrc.includes("getCurrentUserMemberId') stub[key] = async () => 'demo'"), 'the demo stub must return a member id for the uploader');
       // Per-item folders (v2.32.125): each item gets its own subfolder,
       // and names are claimed sequentially instead of deduping against
       // the other files' raw names.
@@ -9591,7 +9598,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(lines.every(l => /attachments: \[/.test(l)), 'each copy must carry attachments');
       assert(lines.every(l => /drive\.google\.com\/file\/d\/demo-train-ticket\/view/.test(l)), 'the demo attachment must link to a Drive file');
       const { normalizeAttachments } = loadAttachmentHelpers();
-      const sample = [{ drive_file_id: 'demo-attachment-001', name: 'train-ticket.pdf', size: 184320, url: 'https://drive.google.com/file/d/demo-train-ticket/view' }];
+      const sample = [{ drive_file_id: 'demo-attachment-001', name: 'train-ticket.pdf', size: 184320, url: 'https://drive.google.com/file/d/demo-train-ticket/view', uploaded_by: 'demo' }];
       assert(normalizeAttachments(sample).length === 1, 'the demo attachment record must survive normalization');
     });
 
@@ -9607,11 +9614,11 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       };
       const { normalizeAttachments, serializeAttachments } = loadAttachmentHelpers();
       const db = createDemoAdapter({});
-      const record = { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view' };
+      const record = { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'member-abc123' };
       exec(db.from('list_items').insert({ id: 'li-1', list_id: 'l1', text: 'x', attachments: serializeAttachments([record]) }));
       const read = exec(db.from('list_items').select('*').eq('id', 'li-1'));
       assert(normalizeAttachments(read.data[0].attachments).length === 1, 'a stored JSON string must read back as one attachment');
-      const record2 = { drive_file_id: 'f2', name: 'b.pdf', size: 10, url: 'https://drive.google.com/file/d/f2/view' };
+      const record2 = { drive_file_id: 'f2', name: 'b.pdf', size: 10, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'member-abc123' };
       exec(db.from('list_items').update({ attachments: serializeAttachments([record, record2]) }).eq('id', 'li-1'));
       const read2 = exec(db.from('list_items').select('*').eq('id', 'li-1'));
       assert(normalizeAttachments(read2.data[0].attachments).length === 2, 'a second attachment must persist alongside the first');

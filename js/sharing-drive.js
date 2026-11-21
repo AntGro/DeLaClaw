@@ -1145,6 +1145,19 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return { display_name: user.name || fallbackDisplayName(user.email), backendUserId: 'googledrive' };
     },
 
+    // The uploader id for attachment records: the member id is purely a
+    // hash of the email, so it is the same in every group — and it is the
+    // only identity available for a personal item, which belongs to no
+    // group. Null when the account email cannot be read. (Kept separate
+    // from getCurrentMemberId, which must return the group row's id —
+    // the group is the authority for completion authorship.)
+    async getCurrentUserMemberId() {
+      try {
+        const user = await ensureUser();
+        return user?.email ? await memberIdFromEmail(user.email) : null;
+      } catch { return null; }
+    },
+
     async getCurrentMemberId(groupId) {
       return currentMemberId(groupId);
     },

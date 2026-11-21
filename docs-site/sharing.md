@@ -389,11 +389,11 @@ sequenceDiagram
 
 List items can carry file attachments (Drive backend only — the attach button is hidden in Demo and Local mode). Each attachment is a record — file id, name, size, Drive link, and the uploader's member id — stored on the item; the file itself is never downloaded on page load, only the link.
 
-Uploads go to the uploader's Drive, in a per-item folder `DeLaClaw/attachments/<item id>/` (a shared item's folder uses its shared id). Files up to 5 MB upload in one request; larger files use the chunked resumable upload (1 MB chunks, retried, resumed after failures). The chip appears immediately with a progress ring, uploads run in the background while the user navigates elsewhere, and a failed upload leaves an error chip with retry; pending state is memory-only, so a reload drops the chip and kills the upload. Deleting an item trashes only the deleter's own recorded files and their own per-item folder (orphans from cancelled uploads included) — another member's files are never trashed: the code only attempts files whose `uploaded_by` matches the deleter, and the folder lookup runs in the deleter's own Drive, so it can only ever find their folder. Removing a single chip trashes the file only when it is yours; removing someone else's chip removes the record from the item and leaves their file alone.
+Uploads go to the uploader's Drive, in a per-item folder `DeLaClaw/attachments/<item id>/` (a shared item's folder uses its shared id). Files up to 5 MB upload in one request; larger files use the chunked resumable upload (1 MB chunks, retried, resumed after failures). The chip appears immediately with a progress ring, uploads run in the background while the user navigates elsewhere, and a failed upload leaves an error chip with retry; pending state is memory-only, so a reload drops the chip and kills the upload. Deleting an item trashes only the deleter's own recorded files and their own per-item folder (orphans from cancelled uploads included) — another member's files are never trashed: the code only attempts files whose `uploaded_by` matches the deleter, and the folder lookup runs in the deleter's own Drive, so it can only ever find their folder. If the deleter's member id cannot be resolved, nothing is trashed at all. Removing a single chip trashes the file only when it is yours; removing someone else's chip removes the record from the item and leaves their file alone.
 
 Same-name files are renamed silently: the first keeps the plain name, later ones take `(1)`, `(2)`, and so on, with the suffix splitting only the last extension. Deleting a chip frees the name.
 
-Attaching a file to a shared list item follows the same modify path for the link itself (the attachment record joins the payload), with one extra step before the payload update: the file lives in the uploader's own Drive, so it is shared with every other joined member as reader (`shareFileWithGroup`). Member emails are read at runtime from the group folder's permission list and never stored. Sharing an existing item with attachments carries its records into the payload the same way, granting each file reader to the group first — a grant failure aborts the share and the item stays personal; the bulk share does the same per item, skipping the ones whose grants fail. Access level is reader by default: readers cannot re-share or delete, and the owner may also disable download/print/copy per file. A member who joins later still sees the attachment (name, size, link — the join downloads the current item files) and gets file access through the grant sweep: every member's client grants its own files reader to the new member, on group load and when the poll spots the fresh join. When the sweep grants your files, you see a toast naming the new member. Until the sweep runs, clicking the link lands on Drive's request-access page. Unsharing the item does not revoke the file grants.
+Attaching a file to a shared list item follows the same modify path for the link itself (the attachment record joins the payload), with one extra step before the payload update: the file lives in the uploader's own Drive, so it is shared with every other joined member as reader (`shareFileWithGroup`). Member emails are read at runtime from the group folder's permission list and never stored. Sharing an existing item with attachments carries its records into the payload the same way, granting each file reader to the group first — a grant failure aborts the share and the item stays personal; the bulk share does the same per item, skipping the ones whose grants fail. Access level is reader by default: readers cannot re-share or delete, and the owner may also disable download/print/copy per file. A member who joins later still sees the attachment (name, size, link — the join downloads the current item files) and gets file access through the grant sweep: every member's client grants its own files reader to the new member, on group load and when the poll spots the fresh join. A failed grant is silent and retried on the next load or fresh join. When the sweep grants your files, you see a toast naming the new member. Until the sweep runs, clicking the link lands on Drive's request-access page. Unsharing the item does not revoke the file grants.
 
 #### Delete an item
 
@@ -419,17 +419,17 @@ sequenceDiagram
         MA->>MA: error toast — shared delete<br/>never attempted
     end
     end
-    rect rgb(253, 237, 236)
-    opt item has attachments (list item)
-        MA->>MD: trash recorded files + the item's folder<br/>owner's files only — other members' files untouched
-    end
-    end
     MA->>SF: deleteItem — splice from in-memory items<br/>+ markDeleted(id) intent (onStaged fires) →<br/>upload in background, direct write<br/>(not via the mutation queue, ETag-guarded)
     rect rgb(253, 237, 236)
     opt staging throws or upload fails
         SF-->>MA: throw
         MA->>MA: item re-inserted at original index,<br/>intents restored<br/>(no-op if staging itself threw)
         MA->>MD: restore pointer row,<br/>view refreshed, error toast
+    end
+    end
+    rect rgb(253, 237, 236)
+    opt item has attachments (list item)
+        MA->>MD: trash my recorded files + my folder<br/>only files whose uploaded_by is mine —<br/>other members' files never attempted
     end
     end
     MA->>MA: toast "Deleted", refresh →<br/>item disappears
@@ -760,7 +760,7 @@ If a member deletes their Google account outside DeLaClaw, their Drive permissio
 
 ### Design decisions (decided 2026-09-07)
 
-The flows above surfaced 14 design questions, all decided on 2026-09-07 and recorded in the **DeLaClaw design decisions** space ("Drive sharing" tab). Assumption: sharing is not yet exposed — no groups exist in the wild, so there are no backward-compatibility constraints (greenfield). Three more were decided with the attachments work in November 2026 (items 15–17).
+The flows above surfaced 14 design questions, all decided on 2026-09-07 and recorded in the **DeLaClaw design decisions** space ("Drive sharing" tab). Assumption: sharing is not yet exposed — no groups exist in the wild, so there are no backward-compatibility constraints (greenfield). Four more were decided with the attachments work in November 2026 (items 15–18).
 
 1. **Join notification** — the creator's poll shows a toast when a pending invitee flips to joined.
 2. **Deletion sync intents** — each group entry keeps per-item-file in-memory `createdIds`/`deletedIds` intent sets; reconciliation retains pending creates, drops remotely-deleted items, and suppresses remotely-stale copies of pending deletes. Each upload acknowledges only the intents its payload represented, so an ID created mid-upload stays pending. The logic is backend-agnostic (`sharing-file-reconcile.js`), shared by all file-based adapters.

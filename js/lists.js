@@ -11,7 +11,13 @@ import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 // ===================================================================
 
 // ── Pure attachment helpers ──
-// Attachment record: { drive_file_id, name, size, url }.
+// Attachment record: { drive_file_id, name, size, url, uploaded_by? }.
+// uploaded_by is the group member id (a hash, never an email) of the
+// member who uploaded the file — set on shared items only, so later
+// group flows (revocation, delete-cleans-own-files) can tell whose
+// Drive a file lives in. Personal items omit it: there is exactly one
+// owner. Records uploaded before v2.32.126 have no uploaded_by and
+// are not backfilled — the uploader is not recoverable from the record.
 // Stored on the item as a JSON string in the list_items.attachments
 // column (and as a real array in the sharing payload). In-memory
 // item.attachments is always the parsed, validated array.
@@ -28,7 +34,11 @@ function normalizeAttachments(value) {
     && typeof a.name === 'string' && a.name
     && typeof a.url === 'string' && a.url
     && Number.isFinite(a.size) && a.size >= 0)
-    .map(a => ({ drive_file_id: a.drive_file_id, name: a.name, size: a.size, url: a.url }));
+    .map(a => {
+      const rec = { drive_file_id: a.drive_file_id, name: a.name, size: a.size, url: a.url };
+      if (typeof a.uploaded_by === 'string' && a.uploaded_by) rec.uploaded_by = a.uploaded_by;
+      return rec;
+    });
 }
 function serializeAttachments(list) {
   const arr = normalizeAttachments(list);
@@ -1156,6 +1166,14 @@ async function processAttachmentQueue(item) {
     const pending = _pendingAttachments.get(item.id);
     if (!pending) return;
     const added = [];
+    // Who is uploading: the group member id on a shared item (a hash,
+    // never an email — recorded on the attachment so later group flows
+    // can tell whose Drive a file lives in). Personal items have no
+    // member id, so the record simply omits uploaded_by.
+    let uploadedBy = null;
+    if (item.shared_id && item.shared_group_id && typeof state.sharing?.getCurrentMemberId === 'function') {
+      uploadedBy = await state.sharing.getCurrentMemberId(item.shared_group_id).catch(() => null);
+    }
     let entry;
     while ((entry = [...pending.values()].find(e => e.status === 'queued'))) {
       entry.status = 'uploading';
@@ -1169,6 +1187,7 @@ async function processAttachmentQueue(item) {
           // The item's own attachment names cover legacy files uploaded
           // before per-item folders (they live in the flat folder).
           existingItemNames: normalizeAttachments(item.attachments).map(a => a.name),
+          uploadedBy,
           onProgress: (fraction) => {
             entry.progress = fraction;
             updateAttachmentProgress(entry.id, fraction);

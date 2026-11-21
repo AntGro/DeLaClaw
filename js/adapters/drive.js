@@ -529,7 +529,7 @@ async function findOrCreateItemAttachmentsFolder(token, folderKey, parentFolderI
  * for table files cannot). Returns the attachment record stored on the
  * item: { drive_file_id, name, size, url }.
  */
-async function uploadAttachmentFile(token, folderId, file, name, { onProgress = null, signal = null } = {}) {
+async function uploadAttachmentFile(token, folderId, file, name, { onProgress = null, signal = null, uploadedBy = null } = {}) {
   const metadata = { name, parents: [folderId] };
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
@@ -548,12 +548,14 @@ async function uploadAttachmentFile(token, folderId, file, name, { onProgress = 
     throw err;
   }
   const result = JSON.parse(responseText);
-  return {
+  const rec = {
     drive_file_id: result.id,
     name: result.name,
     size: Number(result.size) || file.size,
     url: result.webViewLink,
   };
+  if (typeof uploadedBy === 'string' && uploadedBy) rec.uploaded_by = uploadedBy;
+  return rec;
 }
 
 // 1 MB chunks — a multiple of Drive's 256 KB chunk quantum.
@@ -598,13 +600,15 @@ async function queryResumableOffset(sessionUri, total, signal) {
   return null;
 }
 
-function attachmentRecordFromUpload(result, file) {
-  return {
+function attachmentRecordFromUpload(result, file, uploadedBy) {
+  const rec = {
     drive_file_id: result.id,
     name: result.name,
     size: Number(result.size) || file.size,
     url: result.webViewLink,
   };
+  if (typeof uploadedBy === 'string' && uploadedBy) rec.uploaded_by = uploadedBy;
+  return rec;
 }
 
 /**
@@ -616,7 +620,7 @@ function attachmentRecordFromUpload(result, file) {
  * restarting the file. Returns the same attachment record as
  * uploadAttachmentFile.
  */
-async function uploadAttachmentFileResumable(token, folderId, file, name, { onProgress = null, signal = null } = {}) {
+async function uploadAttachmentFileResumable(token, folderId, file, name, { onProgress = null, signal = null, uploadedBy = null } = {}) {
   const metadata = { name, parents: [folderId] };
   const init = await fetch(
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,webViewLink',
@@ -649,7 +653,7 @@ async function uploadAttachmentFileResumable(token, folderId, file, name, { onPr
     const res = await putResumableChunk(sessionUri, new Blob([]), resumableContentRange(0, 0, 0), file.type || 'application/octet-stream', { signal });
     if (res.status === 200 || res.status === 201) {
       if (onProgress) onProgress(1);
-      return attachmentRecordFromUpload(JSON.parse(res.responseText), file);
+      return attachmentRecordFromUpload(JSON.parse(res.responseText), file, uploadedBy);
     }
     const err = new Error(`Drive resumable upload failed: ${res.status} ${res.responseText}`);
     err.code = res.status;
@@ -669,7 +673,7 @@ async function uploadAttachmentFileResumable(token, folderId, file, name, { onPr
         });
         if (res.status === 200 || res.status === 201) {
           if (onProgress) onProgress(1);
-          return attachmentRecordFromUpload(JSON.parse(res.responseText), file);
+          return attachmentRecordFromUpload(JSON.parse(res.responseText), file, uploadedBy);
         }
         if (res.status === 308) {
           const last = parseRangeHeader(res.getResponseHeader('Range'));
@@ -1750,7 +1754,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
      * folder listing missed. opts: { onProgress (0..1 fraction),
      * signal (AbortSignal), itemId (folder key), existingItemNames }.
      */
-    async uploadAttachment(file, { onProgress = null, signal = null, itemId = null, existingItemNames = [] } = {}) {
+    async uploadAttachment(file, { onProgress = null, signal = null, itemId = null, existingItemNames = [], uploadedBy = null } = {}) {
       if (!file) throw new Error('No file');
       const tok = await getToken();
       if (!tok) throw new Error('No valid token — please sign in again');
@@ -1772,7 +1776,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       if (!claimed) { claimed = new Set(); claimedAttachmentNames.set(targetFolderId, claimed); }
       const name = claimAttachmentName(file.name, [...existing.map(f => f.name), ...existingItemNames], claimed);
       try {
-        const opts = { onProgress, signal };
+        const opts = { onProgress, signal, uploadedBy };
         if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES) {
           return uploadAttachmentFileResumable(tok, targetFolderId, file, name, opts);
         }

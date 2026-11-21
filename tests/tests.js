@@ -9207,6 +9207,20 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(JSON.stringify(normalizeAttachments('not json')) === '[]', 'an unparseable string must read as empty');
       assert(serializeAttachments([]) === null, 'an empty list must store NULL, like pre-migration rows');
       assert(serializeAttachments([good]) === JSON.stringify([good]), 'a non-empty list must store a JSON string');
+      // uploaded_by (v2.32.126): kept only when a non-empty string —
+      // the group member id of the uploader. Records without it (all
+      // pre-2.32.126 uploads, and every personal item) stay without it.
+      const withUploader = { ...good, uploaded_by: 'member-abc123' };
+      const normalized = normalizeAttachments([withUploader]);
+      assert(normalized[0].uploaded_by === 'member-abc123', 'a valid uploaded_by must survive normalization');
+      assert(JSON.stringify(normalizeAttachments([good])) === JSON.stringify([good]),
+        'a record without uploaded_by must not gain one');
+      assert(normalizeAttachments([{ ...good, uploaded_by: 42 }])[0].uploaded_by === undefined,
+        'a non-string uploaded_by must be dropped');
+      assert(normalizeAttachments([{ ...good, uploaded_by: '' }])[0].uploaded_by === undefined,
+        'an empty uploaded_by must be dropped');
+      assert(serializeAttachments([withUploader]) === JSON.stringify([withUploader]),
+        'uploaded_by must survive the DB round-trip');
     });
 
     test('lists: formatFileSize pins the unit boundaries', () => {
@@ -9327,6 +9341,15 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(driveSrc.includes('if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES)'), 'files past the cap must take the resumable path');
       assert(driveSrc.includes('uploadAttachmentFileResumable(tok, targetFolderId, file, name'), 'the resumable path must be wired into uploadAttachment');
       assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
+      // uploaded_by (v2.32.126): the queue stamps the uploader's group
+      // member id onto shared-item uploads; the adapter threads it into
+      // the record on both paths.
+      assert(listsSrc.includes('getCurrentMemberId(item.shared_group_id)'), 'the queue must read the uploader’s member id for shared items');
+      assert(listsSrc.includes('uploadedBy,'), 'the queue must pass uploadedBy to the adapter');
+      assert(driveSrc.includes('uploadedBy = null'), 'the adapter must accept uploadedBy in the upload opts');
+      assert(driveSrc.includes('const opts = { onProgress, signal, uploadedBy }'), 'the adapter must thread uploadedBy into the upload call');
+      assert(driveSrc.includes('attachmentRecordFromUpload(JSON.parse(res.responseText), file, uploadedBy)'), 'the resumable path must stamp uploaded_by on the record');
+      assert(driveSrc.includes('rec.uploaded_by = uploadedBy'), 'the multipart path must stamp uploaded_by on the record');
       // Per-item folders (v2.32.125): each item gets its own subfolder,
       // and names are claimed sequentially instead of deduping against
       // the other files' raw names.
@@ -9542,6 +9565,23 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(instances.length === 1, 'a zero-byte file must take exactly one PUT');
       assert(instances[0].headers['content-range'] === 'bytes */0', 'the empty PUT must use the status-query range');
       assert(record.drive_file_id === 'e-1' && record.size === 0, 'the record must come back with size 0');
+    });
+
+    test('drive: attachmentRecordFromUpload stamps uploaded_by only when given', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('function attachmentRecordFromUpload');
+      assert(start !== -1, 'could not find attachmentRecordFromUpload in drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of attachmentRecordFromUpload');
+      const { attachmentRecordFromUpload } = new Function(`${driveSrc.slice(start, end + 3)}; return { attachmentRecordFromUpload };`)();
+      const result = { id: 'f1', name: 'a.pdf', size: '120', webViewLink: 'https://drive.google.com/file/d/f1/view' };
+      const file = { size: 120 };
+      const withUploader = attachmentRecordFromUpload(result, file, 'member-abc123');
+      assert(withUploader.uploaded_by === 'member-abc123', 'the uploader id must be stamped on the record');
+      assert(withUploader.drive_file_id === 'f1' && withUploader.size === 120, 'the rest of the record must be unchanged');
+      assert(attachmentRecordFromUpload(result, file, null).uploaded_by === undefined, 'no uploader must mean no key');
+      assert(attachmentRecordFromUpload(result, file).uploaded_by === undefined, 'an omitted uploader must mean no key');
+      assert(attachmentRecordFromUpload(result, file, '').uploaded_by === undefined, 'an empty uploader must mean no key');
     });
 
     test('demo data: a sampled list item carries two attachments', () => {

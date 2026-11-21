@@ -58,6 +58,15 @@ function trimSize10(n) {
 function isDriveAttachmentUrl(url) {
   return typeof url === 'string' && url.startsWith('https://drive.google.com/');
 }
+// The payload for a list item going to a group: text, list name and
+// note, plus the attachment records when the item has any — the links
+// travel with the item so members see them the moment it appears.
+function sharedListItemPayload(item, listObj) {
+  const payload = { text: item.text, list_name: listObj?.name || '', note: item.note || '' };
+  const attachments = normalizeAttachments(item.attachments);
+  if (attachments.length) payload.attachments = attachments;
+  return payload;
+}
 // ── End pure attachment helpers ──
 
 let listSearchQuery = '';
@@ -1933,6 +1942,23 @@ async function shareListItemFromAdd(btn, listId) {
 }
 window.shareListItemFromAdd = shareListItemFromAdd;
 
+// Grant every other joined member reader access to the item's attached
+// files, before the payload carrying their links goes out. Returns false
+// on the first failure — the caller must not publish the payload then.
+// (The upload path shares the same way, after the upload and before the
+// payload save.)
+async function shareAttachmentsWithGroup(groupId, attachments) {
+  for (const a of attachments) {
+    try {
+      await state.sharing.shareFileWithGroup(groupId, a.drive_file_id, 'reader');
+    } catch (e) {
+      console.warn('Failed to share attachment with group:', e);
+      return false;
+    }
+  }
+  return true;
+}
+
 async function shareExistingListItem(id, el) {
   if (!state.sharing) return;
   if (_pendingShare.has(id)) return;
@@ -1947,7 +1973,16 @@ async function shareExistingListItem(id, el) {
     if (btn) { btn.disabled = true; btn.classList.add('is-pending'); btn.setAttribute('aria-busy', 'true'); }
     try {
       const sharedId = crypto.randomUUID();
-      const payload = { text: item.text, list_name: listObj?.name || '', note: item.note || '' };
+      const attachments = normalizeAttachments(item.attachments);
+      const payload = sharedListItemPayload(item, listObj);
+      // Share each attached file with the group BEFORE the payload goes
+      // out — members must be able to open the links the moment the item
+      // appears for them. A failure aborts the share outright: the item
+      // stays personal and nothing is staged.
+      if (attachments.length && !(await shareAttachmentsWithGroup(groupId, attachments))) {
+        showToast(t('lists.share_attachments_failed'), 'error');
+        return;
+      }
       // 1. Stage the shared item in memory first: this marks the created
       // intent and the dirty type, so the poll skips it and the
       // orphan-pointer cleanup can't see a pointer whose item isn't staged.
@@ -2033,7 +2068,15 @@ async function bulkShareList(listId, el) {
           const staged = [];
           for (const item of listItems) {
             const sharedId = crypto.randomUUID();
-            const payload = { text: item.text, list_name: listObj?.name || '', note: item.note || '' };
+            const attachments = normalizeAttachments(item.attachments);
+            const payload = sharedListItemPayload(item, listObj);
+            // Files first, payload second — same as the single-item share.
+            // A file-share failure skips this item (it stays personal);
+            // the final toast reports the partial share.
+            if (attachments.length && !(await shareAttachmentsWithGroup(groupId, attachments))) {
+              console.error('[DeLaClaw] bulk share list item file-share failed:', sharedId);
+              continue;
+            }
             let onStaged;
             let wasStaged = false;
             const stagedP = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });

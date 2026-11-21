@@ -9180,7 +9180,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const start = listsJs.indexOf('// ── Pure attachment helpers ──');
       const end = listsJs.indexOf('// ── End pure attachment helpers ──');
       assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in lists.js');
-      return new Function(`${listsJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl };`)();
+      return new Function(`${listsJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, sharedListItemPayload };`)();
     }
 
     test('lists: normalizeAttachments accepts string, array and missing; drops invalid entries', () => {
@@ -9218,6 +9218,23 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'a non-string uploaded_by must be dropped');
       assert(normalizeAttachments([{ ...good, uploaded_by: '' }]).length === 0,
         'an empty uploaded_by must be dropped');
+    });
+
+    test('lists: sharedListItemPayload carries attachments only when the item has any', () => {
+      const { sharedListItemPayload } = loadAttachmentHelpers();
+      const item = { text: 'Train ticket', note: 'refundable', attachments: [
+        { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'member-abc123' },
+      ] };
+      const payload = sharedListItemPayload(item, { name: 'Travel' });
+      assert(payload.text === 'Train ticket' && payload.list_name === 'Travel' && payload.note === 'refundable',
+        'the payload must keep text, list name and note');
+      assert(Array.isArray(payload.attachments) && payload.attachments.length === 1
+        && payload.attachments[0].drive_file_id === 'f1' && payload.attachments[0].uploaded_by === 'member-abc123',
+        'the payload must carry the attachment records with their uploader');
+      const bare = sharedListItemPayload({ text: 'x', note: '', attachments: [] }, { name: 'L' });
+      assert(!('attachments' in bare), 'an item without attachments must not gain an empty attachments key');
+      const missing = sharedListItemPayload({ text: 'x', note: '' }, null);
+      assert(missing.list_name === '' && !('attachments' in missing), 'a missing list and missing attachments must both read as empty');
     });
 
     test('lists: formatFileSize pins the unit boundaries', () => {
@@ -9357,6 +9374,24 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(sharingDriveSrc.includes('memberIdFromEmail(user.email)'), 'the uploader id must derive from the account email hash');
       const sharingSrc = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
       assert(sharingSrc.includes("getCurrentUserMemberId') stub[key] = async () => 'demo'"), 'the demo stub must return a member id for the uploader');
+      // Sharing an existing item carries its attachments (v2.32.129):
+      // the files are shared reader first, the records ride the payload.
+      const shareStart = listsSrc.indexOf('async function shareExistingListItem');
+      const shareEnd = listsSrc.indexOf('window.shareExistingListItem');
+      const shareFn = listsSrc.slice(shareStart, shareEnd);
+      assert(shareFn.includes('sharedListItemPayload(item, listObj)'), 'the single-item share must build its payload through the shared helper');
+      assert(shareFn.includes('shareAttachmentsWithGroup(groupId, attachments)'), 'the single-item share must grant the files before publishing');
+      assert(shareFn.indexOf('shareAttachmentsWithGroup(groupId, attachments)') < shareFn.indexOf('state.sharing.addItem'),
+        'the file grants must come before the shared item is staged');
+      assert(shareFn.includes("t('lists.share_attachments_failed')"), 'a file-share failure must abort the single-item share with a toast');
+      const bulkStart = listsSrc.indexOf('async function bulkShareList');
+      const bulkEnd = listsSrc.indexOf('window.bulkShareList');
+      const bulkFn = bulkStart !== -1 ? listsSrc.slice(bulkStart, bulkEnd === -1 ? undefined : bulkEnd) : '';
+      assert(bulkFn.includes('sharedListItemPayload(item, listObj)'), 'the bulk share must build its payload through the shared helper');
+      assert(bulkFn.includes('shareAttachmentsWithGroup(groupId, attachments)'), 'the bulk share must grant the files before publishing');
+      assert(bulkFn.indexOf('shareAttachmentsWithGroup(groupId, attachments)') < bulkFn.indexOf('state.sharing.addItem'),
+        'the bulk share must grant the files before the shared item is staged');
+      assert(bulkFn.includes('continue;'), 'a file-share failure must skip that item in the bulk share');
       // Per-item folders (v2.32.125): each item gets its own subfolder,
       // and names are claimed sequentially instead of deduping against
       // the other files' raw names.
@@ -9401,7 +9436,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // The keys are picked by variable in places, so the t()-scan test
       // cannot see them all — pin their presence in all three locales directly.
       const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
-      for (const key of ['attach_file', 'remove_attachment', 'attach_unavailable', 'attachment_upload_failed', 'attachment_share_failed', 'attachment_added', 'attachment_removed', 'cancel_upload', 'retry_upload']) {
+      for (const key of ['attach_file', 'remove_attachment', 'attach_unavailable', 'attachment_upload_failed', 'attachment_share_failed', 'attachment_added', 'attachment_removed', 'cancel_upload', 'retry_upload', 'attachment_no_uploader', 'share_attachments_failed']) {
         const count = (i18nSrc.match(new RegExp(`${key}:`, 'g')) || []).length;
         assert(count === 3, `${key} must be defined in all three locales, found ${count}`);
       }

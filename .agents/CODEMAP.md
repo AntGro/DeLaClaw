@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-11-21T02:22:19.330Z from 50 modules (v2.32.128). Total LOC 40492. Do not hand-edit.
+> Generated 2026-11-21T02:31:08.771Z from 50 modules (v2.32.129). Total LOC 40538. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -17,7 +17,7 @@
 | birthdays | 608 | birthdays | allBirthdays,currentView,db,js | calendar-pure,i18n,icons,state,utils | main.js | modal,btn,toast | - | 9 | 31 |
 | flashcards | 4053 | flashcard_decks,flashcard_notes,flashcards,text_line_progress,texts | currentView,db,js,readOnlyMode | i18n,icons,item-utils,logo,scene-parse,sections-pure,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,card-header,empty-state,toast | pendingSet | 128 | 183 |
 | habits | 3611 | habit_categories,habit_completions,habits | _historyHabitId,allHabitCompletions,allHabits,currentView,db,js,markCalDirty,sharing | calendar-pure,frequency-rule,i18n,icons,item-utils,pending-next-due,sections-pure,sharing-ui,state,utils | calendar-sync.js,calendar.js,demo-chooser.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 61 | 136 |
-| lists | 2232 | list_items,lists | allListItems,allLists,currentView,db,driveAdapter,js,sharing | i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | pendingSet | 57 | 59 |
+| lists | 2275 | list_items,lists | allListItems,allLists,currentView,db,driveAdapter,js,sharing | i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | pendingSet | 57 | 60 |
 | projects | 1205 | projects,prompts,settings,tasks | PROJECTS,allTasks,archivedProjectIds,db,js,showArchived | i18n,icons,item-utils,state,utils | main.js | page-empty-state,modal,btn,project-card,card-header,empty-state,toast | pendingSet | 37 | 62 |
 | todos | 2685 | todo_categories,todos | currentView,db,js,markCalDirty,sharing,syncCalendarTable | calendar-pure,i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | calendar-sync.js,calendar.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 56 | 106 |
 | welcome | 845 | - | PROJECTS,allBirthdays,allHabitCompletions,allHabits,archivedProjectIds,currentView,db,js | calendar,calendar-pure,flashcards,habits,i18n,icons,item-utils,sections-pure,sharing-ui,state,todos,utils | main.js | modal,app-header,btn | pendingSet | 85 | 53 |
@@ -27,7 +27,7 @@
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
 | main | 4130 | daily_visits,projects,settings | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:12,guard+pendingSet,window:8 |
-| i18n | 2619 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,calendar.js | pendingSet |
+| i18n | 2622 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,calendar.js | pendingSet |
 | sharing-drive | 2586 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
 | drive | 2016 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | item-utils | 1395 | - | db,i18n,icons,state | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |

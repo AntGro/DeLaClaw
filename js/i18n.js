@@ -439,6 +439,7 @@ const T = {
       attachment_upload_failed: "Couldn't upload the attachment",
       attachment_share_failed: "Uploaded, but couldn't share it with the group — the attachment was not added",
       attachment_no_uploader: "Couldn't identify you — the file wasn't uploaded",
+      share_attachments_failed: "Couldn't share the attachments with the group — the item was not shared",
       attachment_added: 'Attachment added', attachment_removed: 'Attachment removed',
     },
     // ── Calendar ──
@@ -1294,6 +1295,7 @@ const T = {
       attachment_upload_failed: 'Impossible de téléverser la pièce jointe',
       attachment_share_failed: 'Téléversé, mais impossible de le partager avec le groupe — la pièce jointe n’a pas été ajoutée',
       attachment_no_uploader: 'Impossible de vous identifier — le fichier n’a pas été envoyé',
+      share_attachments_failed: 'Impossible de partager les pièces jointes avec le groupe — l’élément n’a pas été partagé',
       attachment_added: 'Pièce jointe ajoutée', attachment_removed: 'Pièce jointe supprimée',
     },
     calendar: {
@@ -2143,6 +2145,7 @@ scope_missing: 'Permission du calendrier non accord\u00e9e. Veuillez reconnecter
       attachment_upload_failed: 'No se pudo subir el adjunto',
       attachment_share_failed: 'Subido, pero no se pudo compartir con el grupo — el adjunto no se añadió',
       attachment_no_uploader: 'No se pudo identificarte — el archivo no se subió',
+      share_attachments_failed: 'No se pudieron compartir los adjuntos con el grupo — el elemento no se compartió',
       attachment_added: 'Adjunto añadido', attachment_removed: 'Adjunto eliminado',
     },
     calendar: {

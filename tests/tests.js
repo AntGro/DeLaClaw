@@ -9309,6 +9309,26 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'deleting a section must trash my own attachments on every item in the subtree');
     });
 
+    test('sharing: keep-copies and the copy buttons carry the original attachments', () => {
+      const uiSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+      const convStart = uiSrc.indexOf('// ── List items ──', uiSrc.indexOf('async function _convertGroupItemsToPersonal'));
+      const convEnd = uiSrc.indexOf('// ── Events ──', convStart);
+      const conv = uiSrc.slice(convStart, convEnd);
+      assert(conv.includes('enriched.attachments = JSON.stringify(sh.payload.attachments)'),
+        'keep-copies must carry the original attachment records into the personal item');
+      const listsSrc = jsFiles['lists.js'];
+      const copyStart = listsSrc.indexOf('async function copyListItemToPersonal');
+      const copyEnd = listsSrc.indexOf('window.copyListItemToPersonal = copyListItemToPersonal;', copyStart);
+      const copyFn = listsSrc.slice(copyStart, copyEnd);
+      assert(copyFn.includes('attachments: serializeAttachments(item.attachments)'),
+        'copy-to-personal must carry the original attachment records into the copy');
+      const unStart = listsSrc.indexOf('async function unshareListItem');
+      const unEnd = listsSrc.indexOf('window.unshareListItem = unshareListItem;', unStart);
+      const unFn = listsSrc.slice(unStart, unEnd);
+      assert(unFn.includes('attachments: serializeAttachments(item.attachments)'),
+        'the unshare personal copy must carry the original attachment records');
+    });
+
     test('lists: sharedListItemPayload carries attachments only when the item has any', () => {
       const { sharedListItemPayload } = loadAttachmentHelpers();
       const item = { text: 'Train ticket', note: 'refundable', attachments: [

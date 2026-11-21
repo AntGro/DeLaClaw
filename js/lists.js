@@ -2202,13 +2202,15 @@ async function unshareListItem(id, el) {
       if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
       try {
         const pointerRow = { ...item };
-        // 1. Create personal list item (same list)
+        // 1. Create personal list item (same list) — keeping the original
+        // attachments, still pointing at the shared files (v2.32.136).
         const { data: newItem, error: insErr } = await state.db.from('list_items').insert({
           list_id: item.list_id,
           text: item.text || '',
           note: item.note || '',
           checked: item.checked ? 1 : 0,
           sort_order: item.sort_order || 0,
+          attachments: serializeAttachments(item.attachments),
         }).select().single();
         if (insErr) { showToast(insErr.message, 'error'); return; }
         // 2. Delete the local pointer
@@ -2283,6 +2285,9 @@ async function copyListItemToPersonal(id, el) {
       note: item.note || '',
       checked: item.checked ? 1 : 0,
       sort_order: maxItemOrder + 1,
+      // Keep the original attachments, still pointing at the shared files
+      // (v2.32.136) — same rule as the leave-flow keep-copies.
+      attachments: serializeAttachments(item.attachments),
     });
     if (insErr) { showToast(insErr.message, 'error'); return; }
     showToast(t('sharing.copied_to_personal'), 'success');

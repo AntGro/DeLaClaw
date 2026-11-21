@@ -9239,17 +9239,74 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const delStart = listsSrc.indexOf('async function deleteListItem');
       const delEnd = listsSrc.indexOf('// ── List item attachments', delStart);
       const delFn = listsSrc.slice(delStart, delEnd);
-      assert(delFn.includes('ownAttachmentFiles(item.attachments, await myAttachmentUploaderId(item))'),
+      assert(delFn.includes('await trashOwnItemAttachments(item)'),
         'item deletion must trash only my own attachments');
       assert(!delFn.includes("normalizeAttachments(item.attachments)) {\n        try { await state.driveAdapter?.trashAttachmentFile"),
         'item deletion must not trash the unfiltered attachment list');
-      assert(delFn.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id)'),
-        'item deletion must still trash my own attachments folder');
+      const helperStart = listsSrc.indexOf('async function trashOwnItemAttachments');
+      const helperEnd = listsSrc.indexOf('\n}\n', helperStart);
+      const helperFn = listsSrc.slice(helperStart, helperEnd);
+      assert(helperFn.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id)'),
+        'the shared trash helper must still trash my own attachments folder');
       const remStart = listsSrc.indexOf('async function removeListItemAttachment');
       const remEnd = listsSrc.indexOf('// ===================================================================\n// CRUD — LISTS', remStart);
       const remFn = listsSrc.slice(remStart, remEnd);
       assert(remFn.includes('target.uploaded_by === myId'),
         'removing a chip must trash the file only when it is mine');
+    });
+
+    test('sharing: revocablePermissionIds matches only listed emails', () => {
+      const driveSrc = jsFiles['sharing-drive.js'];
+      const start = driveSrc.indexOf('function revocablePermissionIds');
+      assert(start !== -1, 'could not find revocablePermissionIds in sharing-drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of revocablePermissionIds');
+      const { revocablePermissionIds } = new Function(`${driveSrc.slice(start, end + 3)}; return { revocablePermissionIds };`)();
+      const perms = [
+        { id: 'p1', emailAddress: 'c@example.com', role: 'reader' },
+        { id: 'p2', emailAddress: 'd@example.com', role: 'reader' },
+        { id: 'p3', emailAddress: 'outsider@example.com', role: 'reader' },
+        { id: 'p4', role: 'reader' },
+      ];
+      assert(JSON.stringify(revocablePermissionIds(perms, new Set(['c@example.com', 'd@example.com']))) === JSON.stringify(['p1', 'p2']),
+        'only the group members\u2019 permissions are revoked — an outsider\u2019s grant stays');
+      assert(revocablePermissionIds(perms, new Set()).length === 0, 'no members means nothing to revoke');
+      assert(revocablePermissionIds(null, new Set(['c@example.com'])).length === 0, 'no permissions means nothing to revoke');
+    });
+
+    test('sharing: revoke on unshare is wired at the interface, the adapter, the cache and the unshare flow', () => {
+      const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(iface.includes('revokeFileWithGroup:'), 'the sharing interface must declare revokeFileWithGroup');
+      const driveSrc = jsFiles['sharing-drive.js'];
+      assert(driveSrc.includes('async revokeFileWithGroup(groupId, fileId)'), 'the Drive adapter must implement revokeFileWithGroup');
+      assert(driveSrc.includes('revocablePermissionIds(filePerms, new Set(idByEmail.keys()))'), 'the revoke must match permissions by group-member email');
+      const sharingJs = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingJs.includes("'revokeFileWithGroup',"), 'the cached sharing adapter must reject revokeFileWithGroup as read-only');
+      const listsSrc = jsFiles['lists.js'];
+      const unStart = listsSrc.indexOf('async function unshareListItem');
+      const unEnd = listsSrc.indexOf('window.unshareListItem = unshareListItem;', unStart);
+      const unFn = listsSrc.slice(unStart, unEnd);
+      assert(unFn.includes('revokeFileWithGroup?.(item.shared_group_id, a.drive_file_id)'), 'unsharing must revoke the group\u2019s access to my files');
+      assert(unFn.includes('ownAttachmentFiles(item.attachments, await myAttachmentUploaderId(item))'), 'unsharing must revoke only my own files, never another member\u2019s');
+    });
+
+    test('lists: deleting a list or a section trashes each item the way item delete does', () => {
+      const listsSrc = jsFiles['lists.js'];
+      const delStart = listsSrc.indexOf('async function deleteListItem');
+      const delEnd = listsSrc.indexOf('// ── List item attachments', delStart);
+      const delFn = listsSrc.slice(delStart, delEnd);
+      assert(delFn.includes('await trashOwnItemAttachments(item)'), 'item deletion must use the shared trash helper');
+      assert(!delFn.includes('trashAttachmentFile?.('), 'item deletion must not keep its own inline trash loop');
+      const listStart = listsSrc.indexOf('async function deleteList(');
+      const listEnd = listsSrc.indexOf('\n}\n', listStart);
+      const listFn = listsSrc.slice(listStart, listEnd);
+      assert(listFn.includes('for (const item of items)') && listFn.includes('await trashOwnItemAttachments(item)'),
+        'deleting a list must trash my own attachments on every item in it');
+      const secStart = listsSrc.indexOf('async function deleteListSectionSubtree');
+      const secEnd = listsSrc.indexOf('\n}\n', secStart);
+      const secFn = listsSrc.slice(secStart, secEnd);
+      assert(secFn.includes('for (const item of itemRows)') && secFn.includes('await trashOwnItemAttachments(item)'),
+        'deleting a section must trash my own attachments on every item in the subtree');
     });
 
     test('lists: sharedListItemPayload carries attachments only when the item has any', () => {

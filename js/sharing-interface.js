@@ -99,6 +99,7 @@ export const SHARING_INTERFACE = {
 
   // ── Attachments ─────────────────────────────────────────────
   shareFileWithGroup:       'fn',   // (groupId, fileId, role?) => Promise<string[]> — share a Drive file (e.g. a list item attachment) with every other joined member, as reader; returns the shared member_ids
+  revokeFileWithGroup:      'fn',   // (groupId, fileId) => Promise<string[]> — revoke on unshare: remove every other joined member's access to one of my Drive files; returns the revoked member_ids
   sweepAttachmentGrants:    'fn',   // (groupId) => Promise<string[]> — join-backfill: grant every currently-joined member reader access to my own attachment files in the group; returns the member_ids granted
 
   // ── Items — habits (type-specific) ──────────────────────────

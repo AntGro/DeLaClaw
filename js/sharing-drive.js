@@ -312,6 +312,19 @@ async function driveRemovePermission(token, fileId, permissionId) {
     { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
 }
 
+// Pure: the permission ids to remove from a file so that the given emails
+// lose access. Only permissions carrying a listed email match — anyone
+// else's access (e.g. someone the owner shared with outside the group)
+// is left alone.
+function revocablePermissionIds(filePerms, emails) {
+  if (!Array.isArray(filePerms) || !emails || emails.size === 0) return [];
+  const ids = [];
+  for (const p of filePerms) {
+    if (p && p.id && p.emailAddress && emails.has(p.emailAddress)) ids.push(p.id);
+  }
+  return ids;
+}
+
 // Join-backfill (v2.32.131): the distinct Drive file ids of MY attachments
 // in a group's list-item payloads — the files the grant sweep must share.
 // Pure: items is the group's lists typeData, myId is my member id for the group.
@@ -1697,6 +1710,47 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
         shared.push(id);
       }
       return shared;
+    },
+
+    /**
+     * Revoke on unshare (v2.32.135): remove every other joined member's
+     * reader access to one of MY files. Only the file owner can revoke,
+     * so this only ever touches files I uploaded; another member's files
+     * are never attempted. Best-effort per permission — a failed revoke
+     * leaves that grant in place (the pre-existing behaviour) and is
+     * logged, never thrown.
+     */
+    async revokeFileWithGroup(groupId, fileId) {
+      const e = _groups.get(groupId);
+      if (!e || !fileId) return [];
+      const tok = await token();
+      if (!tok) return [];
+      const myId = await currentMemberId(groupId).catch(() => null);
+      if (!myId) return [];
+      const others = new Set((e.group.members || []).filter(m => m.status === 'joined' && m.id !== myId).map(m => m.id));
+      if (others.size === 0) return [];
+      // The group members' emails, from the group folder's permission list.
+      const folderPerms = await driveListPermissions(tok, e.folderId);
+      const idByEmail = new Map();
+      for (const p of folderPerms || []) {
+        if (p.type !== 'user' || !p.emailAddress) continue;
+        const id = await memberIdFromEmail(p.emailAddress).catch(() => null);
+        if (id && others.has(id)) idByEmail.set(p.emailAddress, id);
+      }
+      if (idByEmail.size === 0) return [];
+      const filePerms = await driveListPermissions(tok, fileId);
+      const emailByPerm = new Map((filePerms || []).filter(p => p && p.id).map(p => [p.id, p.emailAddress]));
+      const revoked = [];
+      for (const permId of revocablePermissionIds(filePerms, new Set(idByEmail.keys()))) {
+        try {
+          await driveRemovePermission(tok, fileId, permId);
+          const member_id = idByEmail.get(emailByPerm.get(permId));
+          if (member_id) revoked.push(member_id);
+        } catch (err) {
+          console.warn(`sharing: revoke failed for ${fileId} permission ${permId}:`, err);
+        }
+      }
+      return [...new Set(revoked)];
     },
 
     /**

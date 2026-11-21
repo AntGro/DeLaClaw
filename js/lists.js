@@ -88,6 +88,21 @@ async function myAttachmentUploaderId(item) {
   } catch { return null; }
 }
 
+// Trash the Drive attachments I own on an item — my files only, never
+// another member's — plus my own per-item folder. Best-effort, never
+// blocks the deletion. Shared by item delete, list delete and section
+// delete: deleting a list is deleting each of its items.
+async function trashOwnItemAttachments(item) {
+  for (const a of ownAttachmentFiles(item.attachments, await myAttachmentUploaderId(item))) {
+    try { await state.driveAdapter?.trashAttachmentFile?.(a.drive_file_id); } catch {}
+  }
+  // …and my own attachments folder for this item, which also holds
+  // orphans from cancelled uploads. Same folder key as the upload path.
+  // The lookup runs in my Drive, so it can only ever find my folder —
+  // another member's folder for the same item lives in their Drive.
+  try { await state.driveAdapter?.trashItemAttachmentsFolder?.(item.shared_id || item.id); } catch {}
+}
+
 let listSearchQuery = '';
 
 // Distinct colors for list cards (cycles)
@@ -1077,14 +1092,7 @@ async function deleteListItem(id) {
       // to leave other members' files alone entirely — no attempt is made.
       // A failure here never blocks the deletion — the links are already
       // gone with the row.
-      for (const a of ownAttachmentFiles(item.attachments, await myAttachmentUploaderId(item))) {
-        try { await state.driveAdapter?.trashAttachmentFile?.(a.drive_file_id); } catch {}
-      }
-      // …and my own attachments folder for this item, which also holds
-      // orphans from cancelled uploads. Same folder key as the upload path.
-      // The lookup runs in my Drive, so it can only ever find my folder —
-      // another member's folder for the same item lives in their Drive.
-      try { await state.driveAdapter?.trashItemAttachmentsFolder?.(item.shared_id || item.id); } catch {}
+      await trashOwnItemAttachments(item);
 
       showToast(t('toast.removed'), 'info');
       await refreshLists();
@@ -1595,6 +1603,11 @@ async function deleteList(listId) {
       if (itemCount > 0) await state.db.from('list_items').delete().eq('list_id', listId);
       const { error } = await state.db.from('lists').delete().eq('id', listId);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+      // Deleting a list is deleting each of its items: trash my own
+      // attachments on every item, like deleteListItem does. Best-effort.
+      for (const item of items) {
+        try { await trashOwnItemAttachments(item); } catch {}
+      }
       showToast(t('toast.removed'), 'info');
       await refreshLists();
       // Delete shared items from Drive in the background (sequential, etag
@@ -1715,6 +1728,11 @@ async function deleteListSectionSubtree() {
   for (const bid of bucketIds) await state.db.from('list_items').delete().eq('list_id', bid);
   for (const bid of bucketIds) await state.db.from('lists').delete().eq('id', bid);
   for (const sid of sectionIds) await state.db.from('lists').delete().eq('id', sid);
+  // Same as deleting each list: trash my own attachments on every item
+  // in the subtree. Best-effort.
+  for (const item of itemRows) {
+    try { await trashOwnItemAttachments(item); } catch {}
+  }
   showToast(t('toast.deleted'), 'info');
   await refreshLists();
   if (state.sharing) {
@@ -2203,7 +2221,17 @@ async function unshareListItem(id, el) {
         const staged = new Promise(resolve => { onStaged = resolve; });
         const upload = state.sharing.deleteItem(item.shared_group_id, item.shared_id, { onStaged });
         upload.then(
-          () => showToast(t('sharing.unshared'), 'success'),
+          async () => {
+            // Revoke on unshare (v2.32.135): the group loses access to MY
+            // files on this item. Another member's files keep their grants
+            // — only their owner can revoke them. Best-effort, silent.
+            for (const a of ownAttachmentFiles(item.attachments, await myAttachmentUploaderId(item))) {
+              try { await state.sharing?.revokeFileWithGroup?.(item.shared_group_id, a.drive_file_id); } catch (err) {
+                console.warn(`sharing: revoke on unshare failed for ${a.drive_file_id}:`, err);
+              }
+            }
+            showToast(t('sharing.unshared'), 'success');
+          },
           async (e) => {
             console.warn('Failed to delete shared list item from Drive:', e);
             if (newItem?.id) await state.db.from('list_items').delete().eq('id', newItem.id);

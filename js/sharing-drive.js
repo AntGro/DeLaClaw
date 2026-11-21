@@ -1721,7 +1721,19 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           console.warn(`sharing: attachment grant sweep failed for ${fileId}:`, err);
         }
       }
-      return [...new Set(granted)];
+      const memberIds = [...new Set(granted)];
+      if (memberIds.length) {
+        // The file owner should know the new member can now open their
+        // files — surface it as a toast, not just a console line. Names
+        // come from the group row; an unresolvable name falls back to the
+        // listener showing the count instead.
+        const members = memberIds.map(id => {
+          const m = (e.group.members || []).find(m => m.id === id);
+          return { id, name: m?.display_name || '' };
+        });
+        emit('attachment-grants-swept', { groupId, group: e.group, members });
+      }
+      return memberIds;
     },
 
     /** Remove a member from a group. Creator-only. Reassigns the removed

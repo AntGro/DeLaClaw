@@ -9474,6 +9474,22 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
+    test('sharing: the sweep toasts the file owner when it grants a new member', () => {
+      const driveSrc = jsFiles['sharing-drive.js'];
+      const sweepStart = driveSrc.indexOf('async sweepAttachmentGrants(groupId)');
+      const sweepEnd = driveSrc.indexOf('\n    },', sweepStart);
+      const sweepFn = driveSrc.slice(sweepStart, sweepEnd);
+      assert(sweepFn.includes("emit('attachment-grants-swept'"), 'the sweep must emit when it grants files');
+      assert(sweepFn.includes('if (memberIds.length)'), 'the sweep must stay silent when nothing was granted');
+      assert(sweepFn.includes('display_name'), 'the toast must name the new member from the group row');
+      const mainJs = jsFiles['main.js'];
+      assert(mainJs.includes("event === 'attachment-grants-swept'"), 'main must listen for the sweep event');
+      assert(mainJs.includes('sharing.attachments_shared_with_new_member'), 'the sweep toast must use the new i18n key');
+      const i18n = jsFiles['i18n.js'];
+      assert((i18n.match(/attachments_shared_with_new_member/g) || []).length === 3,
+        'the sweep toast key must exist in all three locales');
+    });
+
     test('sharing: ownAttachmentFileIds collects only my files, deduped', () => {
       const driveSrc = jsFiles['sharing-drive.js'];
       const start = driveSrc.indexOf('function ownAttachmentFileIds');

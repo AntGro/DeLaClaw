@@ -1453,6 +1453,10 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
           const name = detail.member.display_name || '';
           showToast(t('sharing.member_joined', name, detail.group?.name || ''), 'success');
         }
+        if (event === 'attachment-grants-swept' && detail?.members?.length) {
+          const names = detail.members.map(m => m.name).filter(Boolean).join(', ');
+          showToast(t('sharing.attachments_shared_with_new_member', names || String(detail.members.length), detail.group?.name || ''), 'success');
+        }
       });
 
     } catch (e) { console.warn('sharing init:', e); state.sharingInitFailed = true; }

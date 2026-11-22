@@ -687,4 +687,12 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE flashcards ADD COLUMN relearning INTEGER DEFAULT 0;
     ALTER TABLE text_line_progress ADD COLUMN relearning INTEGER DEFAULT 0;
   `,
+
+  // 2.32.122: list item attachments — a JSON array of
+  // {drive_file_id, name, size, url} stored as TEXT (same shape as the
+  // sharing payload's attachments array, which holds a real array).
+  // Nothing is attached yet, so existing rows start NULL (= no attachments).
+  '2.32.122': `
+    ALTER TABLE list_items ADD COLUMN attachments TEXT;
+  `,
 };

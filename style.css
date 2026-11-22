@@ -1984,6 +1984,20 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .list-item-row{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px;}
 .list-item-text{font-size:0.88rem;font-weight:500;}
 .list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;white-space:pre-line;}
+.list-item-attachments{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
+.list-attachment-chip{display:inline-flex;align-items:center;gap:2px;font-size:0.75rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:2px 4px;max-width:100%;}
+.list-attachment-chip a{display:inline-flex;align-items:center;gap:3px;color:var(--accent);text-decoration:none;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.list-attachment-chip a:hover{text-decoration:underline;}
+.list-attachment-chip .list-attachment-size{color:var(--muted);flex-shrink:0;}
+.list-attachment-chip button{background:none;border:none;cursor:pointer;padding:2px;border-radius:4px;color:var(--muted);flex-shrink:0;}
+.list-attachment-chip button:hover{background:var(--surface);color:var(--text);}
+.list-attachment-chip.pending{border-style:dashed;}
+.list-attachment-chip.error{border-color:var(--red);}
+.list-attachment-chip .list-attachment-name{display:inline-flex;align-items:center;gap:3px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.att-progress-ring{flex-shrink:0;}
+.att-progress-ring-track{fill:none;stroke:var(--border);stroke-width:2;}
+.att-progress-ring-fg{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;transform:rotate(-90deg);transform-origin:8px 8px;}
+.list-attachment-chip.error .att-progress-ring-fg{stroke:var(--red);}
 .list-check-btn{background:none;border:none;cursor:pointer;padding:2px;flex-shrink:0;}
 .list-item-actions{display:grid;grid-template-columns:auto auto auto;gap:2px;justify-items:center;max-width:0;overflow:hidden;opacity:0;transition:max-width 0.25s ease-out,opacity 0.2s ease-out;pointer-events:none;}
 .list-item-actions.cols-2{grid-template-columns:auto auto;}

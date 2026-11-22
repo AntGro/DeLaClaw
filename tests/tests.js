@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 
 const JS_DIR = path.join(__dirname, '..', 'js');
@@ -42,6 +43,11 @@ const pendingAsyncTests = [];
 
 async function assertRejects(promise, msg) {
   try { await promise; } catch (e) { return; }
+  throw new Error(msg);
+}
+
+function assertThrows(fn, msg) {
+  try { fn(); } catch (e) { return; }
   throw new Error(msg);
 }
 
@@ -9166,6 +9172,884 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
+    // ===================================================================
+    // List item attachments (v2.32.122)
+    // ===================================================================
+    function loadAttachmentHelpers() {
+      const listsJs = jsFiles['lists.js'];
+      const start = listsJs.indexOf('// ── Pure attachment helpers ──');
+      const end = listsJs.indexOf('// ── End pure attachment helpers ──');
+      assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in lists.js');
+      return new Function(`${listsJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, sharedListItemPayload, ownAttachmentFiles, referencedFileIdsFromItems, memberDisplayName, listItemMatchesSearch };`)();
+    }
+
+    test('lists: normalizeAttachments accepts string, array and missing; drops invalid entries', () => {
+      const { normalizeAttachments, serializeAttachments } = loadAttachmentHelpers();
+      const good = { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'member-abc123' };
+      assert(JSON.stringify(normalizeAttachments(undefined)) === '[]', 'missing attachments must read as empty');
+      assert(JSON.stringify(normalizeAttachments(null)) === '[]', 'null attachments must read as empty');
+      assert(JSON.stringify(normalizeAttachments('[]')) === '[]', 'an empty JSON string must read as empty');
+      assert(JSON.stringify(normalizeAttachments(JSON.stringify([good]))) === JSON.stringify([good]),
+        'a JSON string (DB column shape) must parse to the same records');
+      assert(JSON.stringify(normalizeAttachments([good])) === JSON.stringify([good]),
+        'an array (sharing payload shape) must pass through');
+      const mixed = normalizeAttachments([
+        good,
+        { drive_file_id: 'f2', name: 'b.pdf', size: 10, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'member-abc123', extra: 'stripped' },
+        { name: 'no-id.pdf', size: 10, url: 'https://drive.google.com/file/d/x/view', uploaded_by: 'member-abc123' },
+        { drive_file_id: 'f3', name: 'no-url.pdf', size: 10, uploaded_by: 'member-abc123' },
+        { drive_file_id: 'f4', name: 'neg.pdf', size: -1, url: 'https://drive.google.com/file/d/f4/view', uploaded_by: 'member-abc123' },
+        { drive_file_id: 'f5', name: 'nan.pdf', size: 'big', url: 'https://drive.google.com/file/d/f5/view', uploaded_by: 'member-abc123' },
+        'not-an-object',
+      ]);
+      assert(mixed.length === 2, `only valid records survive, got ${mixed.length}`);
+      assert(mixed[1].extra === undefined, 'extra fields must be stripped from the record');
+      assert(JSON.stringify(normalizeAttachments('not json')) === '[]', 'an unparseable string must read as empty');
+      assert(serializeAttachments([]) === null, 'an empty list must store NULL, like pre-migration rows');
+      assert(serializeAttachments([good]) === JSON.stringify([good]), 'a non-empty list must store a JSON string');
+      // uploaded_by is compulsory (v2.32.127): a record without a
+      // non-empty string uploader is invalid and is dropped, not kept
+      // unattributed — no attachment has ever been uploaded outside
+      // dev, so there are no legacy records to keep reading.
+      const { drive_file_id, name, size, url } = good;
+      assert(normalizeAttachments([{ drive_file_id, name, size, url }]).length === 0,
+        'a record without uploaded_by must be dropped');
+      assert(normalizeAttachments([{ ...good, uploaded_by: 42 }]).length === 0,
+        'a non-string uploaded_by must be dropped');
+      assert(normalizeAttachments([{ ...good, uploaded_by: '' }]).length === 0,
+        'an empty uploaded_by must be dropped');
+    });
+
+    test('lists: listItemMatchesSearch matches text, note and attachment names', () => {
+      const { listItemMatchesSearch } = loadAttachmentHelpers();
+      const item = {
+        text: 'Train ticket',
+        note: 'Booked for Friday',
+        attachments: [{ drive_file_id: 'f1', name: 'receipt.jpg', size: 1, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'me' }],
+      };
+      assert(listItemMatchesSearch(item, 'train') === true, 'text matches');
+      assert(listItemMatchesSearch(item, 'FRIDAY') === true, 'note matches, case-insensitive');
+      assert(listItemMatchesSearch(item, 'receipt') === true, 'an attachment file name matches');
+      assert(listItemMatchesSearch(item, 'RECEIPT.JPG') === true, 'the full file name matches, case-insensitive');
+      assert(listItemMatchesSearch(item, 'hotel') === false, 'no match anywhere means no match');
+      assert(listItemMatchesSearch(item, '') === true, 'an empty query matches everything');
+      assert(listItemMatchesSearch({ text: null, note: null, attachments: null }, 'x') === false, 'missing fields must not throw');
+      assert(listItemMatchesSearch({ text: 'a', attachments: [{ drive_file_id: 'f2', size: 1, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'me' }] }, 'a') === true, 'a nameless attachment must not throw');
+    });
+
+    test('lists: the Lists search filter uses listItemMatchesSearch', () => {
+      const listsSrc = jsFiles['lists.js'];
+      assert(listsSrc.includes('if (listSearchQuery && !listItemMatchesSearch(item, listSearchQuery)) return;'),
+        'the item filter must match text, note and attachment names');
+    });
+
+    test('lists: memberDisplayName resolves a member id, null when unknown', () => {
+      const { memberDisplayName } = loadAttachmentHelpers();
+      const members = [
+        { member_id: 'm1', display_name: 'Romain', invited_label: 'romain' },
+        { member_id: 'm2', display_name: '', invited_label: 'yassin' },
+        { member_id: 'm3' },
+      ];
+      assert(memberDisplayName(members, 'm1') === 'Romain', 'the display name wins');
+      assert(memberDisplayName(members, 'm2') === 'yassin', 'the invited label is the fallback');
+      assert(memberDisplayName(members, 'm3') === null, 'a member with no name at all resolves to nothing');
+      assert(memberDisplayName(members, 'gone') === null, 'an unknown id resolves to nothing, never a raw hash');
+      assert(memberDisplayName(null, 'm1') === null, 'no members means no name');
+    });
+
+    test('lists: attachment chips show the uploader in the tooltip on shared items', () => {
+      const listsSrc = jsFiles['lists.js'];
+      const chipStart = listsSrc.indexOf('const attachmentsHtml');
+      const chipEnd = listsSrc.indexOf('\n  }\n', chipStart);
+      const chipFn = listsSrc.slice(chipStart, chipEnd);
+      assert(chipFn.includes('attachmentUploaderName(item, a.uploaded_by)'),
+        'each chip must resolve its uploader from the record');
+      assert(chipFn.includes("t('lists.attachment_uploaded_by', uploader)"),
+        'the tooltip must name the uploader');
+      const helperStart = listsSrc.indexOf('function attachmentUploaderName');
+      const helperEnd = listsSrc.indexOf('\n}\n', helperStart);
+      const helperFn = listsSrc.slice(helperStart, helperEnd);
+      assert(helperFn.includes('state.sharing?.getGroup?.(item.shared_group_id)'),
+        'the uploader must resolve from the group row');
+      assert(helperFn.includes('if (!item?.shared_group_id || !uploadedBy) return null;'),
+        'personal items and unattributed records must show no uploader');
+      const i18n = jsFiles['i18n.js'];
+      assert(i18n.includes("attachment_uploaded_by: 'Uploaded by {0}'"), 'the tooltip needs its EN text');
+      assert(i18n.includes("attachment_uploaded_by: 'Ajoutée par {0}'"), 'the tooltip needs its FR text');
+      assert(i18n.includes("attachment_uploaded_by: 'Subido por {0}'"), 'the tooltip needs its ES text');
+    });
+
+    test('lists: referencedFileIdsFromItems collects references except the excluded items', () => {
+      const { referencedFileIdsFromItems } = loadAttachmentHelpers();
+      const a = { drive_file_id: 'f1', name: 'a.pdf', size: 1, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'me' };
+      const b = { drive_file_id: 'f2', name: 'b.pdf', size: 1, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'me' };
+      const items = [
+        { id: 'li-a', attachments: [a] },
+        { id: 'li-b', shared_id: 'sh-b', attachments: JSON.stringify([a, b]) },
+        { id: 'li-c', attachments: null },
+      ];
+      const all = referencedFileIdsFromItems(items, new Set());
+      assert(all.has('f1') && all.has('f2') && all.size === 2, 'every record on every item counts');
+      const withoutB = referencedFileIdsFromItems(items, new Set(['li-b']));
+      assert(withoutB.has('f1') && !withoutB.has('f2'), 'excluding by local id drops that item\u2019s references');
+      const withoutBShared = referencedFileIdsFromItems(items, new Set(['sh-b']));
+      assert(withoutBShared.has('f1') && !withoutBShared.has('f2'), 'excluding by shared id drops that item\u2019s references');
+      const withoutA = referencedFileIdsFromItems(items, new Set(['li-a', 'li-b']));
+      assert(withoutA.size === 0, 'excluding every referrer leaves nothing referenced');
+    });
+
+    test('sharing: folderTrashPlan spares referenced files and keeps the folder when one remains', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('function folderTrashPlan');
+      assert(start !== -1, 'could not find folderTrashPlan in adapters/drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of folderTrashPlan');
+      const { folderTrashPlan } = new Function(`${driveSrc.slice(start, end + 3)}; return { folderTrashPlan };`)();
+      const contents = [{ id: 'f1', name: 'a.pdf' }, { id: 'f2', name: 'b.pdf' }, { id: 'f3', name: 'c.pdf' }];
+      const plan = folderTrashPlan(contents, new Set(['f2']));
+      assert(JSON.stringify(plan.trashFileIds) === JSON.stringify(['f1', 'f3']), 'only unreferenced files are trashed');
+      assert(plan.trashFolder === false, 'the folder must stay when a referenced file remains inside it');
+      const clean = folderTrashPlan(contents, new Set());
+      assert(clean.trashFolder === true && clean.trashFileIds.length === 3, 'an unreferenced folder goes entirely');
+      const empty = folderTrashPlan([], new Set(['f2']));
+      assert(empty.trashFolder === true && empty.trashFileIds.length === 0, 'an empty folder goes');
+    });
+
+    test('lists: deleting or unchipping never trashes a file another item still references', () => {
+      const listsSrc = jsFiles['lists.js'];
+      const helperStart = listsSrc.indexOf('async function trashOwnItemAttachments');
+      const helperEnd = listsSrc.indexOf('\n}\n', helperStart);
+      const helperFn = listsSrc.slice(helperStart, helperEnd);
+      assert(helperFn.includes('if (referenced.has(a.drive_file_id)) continue;'),
+        'the trash helper must skip every file another item still references');
+      assert(helperFn.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id, referenced)'),
+        'the trash helper must hand the reference set to the folder trash');
+      const rmStart = listsSrc.indexOf('async function removeListItemAttachment');
+      const rmEnd = listsSrc.indexOf('\n}\n', rmStart);
+      const rmFn = listsSrc.slice(rmStart, rmEnd);
+      assert(rmFn.includes('referencedAttachmentFileIds(new Set([item.id, item.shared_id].filter(Boolean)))'),
+        'removing a chip must check whether another item still references the file');
+      assert(rmFn.includes('if (!referenced.has(driveFileId))'),
+        'removing a chip must skip the trash when the file is still referenced');
+      const listStart = listsSrc.indexOf('async function deleteList(');
+      const listEnd = listsSrc.indexOf('\n}\n', listStart);
+      const listFn = listsSrc.slice(listStart, listEnd);
+      assert(listFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+        'deleting a list must exclude the whole batch from the reference check');
+      const secStart = listsSrc.indexOf('async function deleteListSectionSubtree');
+      const secEnd = listsSrc.indexOf('\n}\n', secStart);
+      const secFn = listsSrc.slice(secStart, secEnd);
+      assert(secFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+        'deleting a section must exclude the whole subtree from the reference check');
+    });
+
+    test('lists: ownAttachmentFiles keeps only my files, nothing when the id is unknown', () => {
+      const { ownAttachmentFiles } = loadAttachmentHelpers();
+      const atts = [
+        { drive_file_id: 'f1', name: 'mine.pdf', size: 1, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'me' },
+        { drive_file_id: 'f2', name: 'theirs.pdf', size: 1, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'other' },
+        { drive_file_id: 'f3', name: 'mine2.pdf', size: 1, url: 'https://drive.google.com/file/d/f3/view', uploaded_by: 'me' },
+      ];
+      assert(JSON.stringify(ownAttachmentFiles(atts, 'me').map(a => a.drive_file_id)) === JSON.stringify(['f1', 'f3']),
+        'only files I uploaded may be trashed on delete');
+      assert(ownAttachmentFiles(atts, null).length === 0, 'an unresolvable id must trash nothing, never guess');
+      assert(ownAttachmentFiles(atts, undefined).length === 0, 'an undefined id must trash nothing');
+      assert(ownAttachmentFiles(null, 'me').length === 0, 'no attachments means nothing to trash');
+    });
+
+    test('lists: deleting an item or a chip trashes only my own files', () => {
+      const listsSrc = jsFiles['lists.js'];
+      const delStart = listsSrc.indexOf('async function deleteListItem');
+      const delEnd = listsSrc.indexOf('// ── List item attachments', delStart);
+      const delFn = listsSrc.slice(delStart, delEnd);
+      assert(delFn.includes('await trashOwnItemAttachments(item)'),
+        'item deletion must trash only my own attachments');
+      assert(!delFn.includes("normalizeAttachments(item.attachments)) {\n        try { await state.driveAdapter?.trashAttachmentFile"),
+        'item deletion must not trash the unfiltered attachment list');
+      const helperStart = listsSrc.indexOf('async function trashOwnItemAttachments');
+      const helperEnd = listsSrc.indexOf('\n}\n', helperStart);
+      const helperFn = listsSrc.slice(helperStart, helperEnd);
+      assert(helperFn.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id, referenced)'),
+        'the shared trash helper must still trash my own attachments folder');
+      const remStart = listsSrc.indexOf('async function removeListItemAttachment');
+      const remEnd = listsSrc.indexOf('// ===================================================================\n// CRUD — LISTS', remStart);
+      const remFn = listsSrc.slice(remStart, remEnd);
+      assert(remFn.includes('target.uploaded_by === myId'),
+        'removing a chip must trash the file only when it is mine');
+    });
+
+    test('sharing: revocablePermissionIds matches only listed emails', () => {
+      const driveSrc = jsFiles['sharing-drive.js'];
+      const start = driveSrc.indexOf('function revocablePermissionIds');
+      assert(start !== -1, 'could not find revocablePermissionIds in sharing-drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of revocablePermissionIds');
+      const { revocablePermissionIds } = new Function(`${driveSrc.slice(start, end + 3)}; return { revocablePermissionIds };`)();
+      const perms = [
+        { id: 'p1', emailAddress: 'c@example.com', role: 'reader' },
+        { id: 'p2', emailAddress: 'd@example.com', role: 'reader' },
+        { id: 'p3', emailAddress: 'outsider@example.com', role: 'reader' },
+        { id: 'p4', role: 'reader' },
+      ];
+      assert(JSON.stringify(revocablePermissionIds(perms, new Set(['c@example.com', 'd@example.com']))) === JSON.stringify(['p1', 'p2']),
+        'only the group members\u2019 permissions are revoked — an outsider\u2019s grant stays');
+      assert(revocablePermissionIds(perms, new Set()).length === 0, 'no members means nothing to revoke');
+      assert(revocablePermissionIds(null, new Set(['c@example.com'])).length === 0, 'no permissions means nothing to revoke');
+    });
+
+    test('sharing: otherJoinedMemberIds and memberDisplayNameFromRoster read member_id, never id', () => {
+      const driveSrc = jsFiles['sharing-drive.js'];
+      const load = (name) => {
+        const start = driveSrc.indexOf(`function ${name}`);
+        assert(start !== -1, `could not find ${name} in sharing-drive.js`);
+        const end = driveSrc.indexOf('\n}\n', start);
+        assert(end !== -1, `could not find the end of ${name}`);
+        return new Function(`${driveSrc.slice(start, end + 3)}; return { ${name} };`)()[name];
+      };
+      const otherJoinedMemberIds = load('otherJoinedMemberIds');
+      const memberDisplayNameFromRoster = load('memberDisplayNameFromRoster');
+      const roster = [
+        { member_id: 'me', status: 'joined', display_name: 'Antoine' },
+        { member_id: 'bob', status: 'joined', display_name: 'Bob' },
+        { member_id: 'carol', status: 'joined', invited_label: 'carol@example.com' },
+        { member_id: 'dave', status: 'pending', display_name: 'Dave' },
+        { member_id: 'erin', status: 'left', display_name: 'Erin' },
+        { status: 'joined', display_name: 'No id at all' },
+      ];
+      // The 006c30f review bug: reading .id yields undefined for every
+      // member, so the revoke matched nobody and the sweep toast named nobody.
+      assert(JSON.stringify(otherJoinedMemberIds(roster, 'me')) === JSON.stringify(['bob', 'carol']),
+        'only the other joined members count, by member_id — pending, left, self and id-less rows excluded');
+      assert(otherJoinedMemberIds(null, 'me').length === 0, 'no roster means no members');
+      assert(otherJoinedMemberIds(roster, null).length === 3, 'no self id means every joined member counts');
+      assert(memberDisplayNameFromRoster(roster, 'bob') === 'Bob', 'display_name resolves');
+      assert(memberDisplayNameFromRoster(roster, 'carol') === 'carol@example.com', 'invited_label is the fallback');
+      assert(memberDisplayNameFromRoster(roster, 'nobody') === '', 'an unknown id resolves to nothing, never a raw id');
+      // Regression guard: no member-roster lookup in the adapter may read .id.
+      assert(!driveSrc.includes(".filter(m => m.status === 'joined' && m.id"), 'the revoke must not filter the roster by .id');
+      assert(!driveSrc.includes('.find(m => m.id === id)'), 'the sweep must not look a member up by .id');
+      assert(driveSrc.includes('let others = new Set(otherJoinedMemberIds(e.group.members, myId));'),
+        'the revoke must build its member set from the member_id helper');
+      assert(driveSrc.includes('name: memberDisplayNameFromRoster(e.group.members, id)'),
+        'the sweep toast must resolve names through the member_id helper');
+    });
+
+    test('lists: a failed share rolls back the grants already issued, and only those', async () => {
+      const listsSrc = jsFiles['lists.js'];
+      const start = listsSrc.indexOf('async function shareAttachmentsWithGroup');
+      assert(start !== -1, 'could not find shareAttachmentsWithGroup in lists.js');
+      const rbStart = listsSrc.indexOf('async function rollbackAttachmentGrants', start);
+      assert(rbStart !== -1, 'could not find rollbackAttachmentGrants in lists.js');
+      const end = listsSrc.indexOf('\n}\n', rbStart);
+      assert(end !== -1, 'could not find the end of rollbackAttachmentGrants');
+      const makeFns = (sharing) => new Function('state',
+        `${listsSrc.slice(start, end + 3)}; return { shareAttachmentsWithGroup, rollbackAttachmentGrants };`)({ sharing });
+      const revoked = [];
+      const sharing = {
+        shareFileWithGroup: async (groupId, fileId) => {
+          if (fileId === 'fail') throw new Error('grant failed');
+          return [`m-${fileId}`];
+        },
+        revokeFileWithGroup: async (groupId, fileId, memberIds) => { revoked.push({ fileId, memberIds }); return memberIds; },
+      };
+      const { shareAttachmentsWithGroup, rollbackAttachmentGrants } = makeFns(sharing);
+      // All grants succeed: nothing revoked, granted lists only the newly granted.
+      const okResult = await shareAttachmentsWithGroup('g1', [{ drive_file_id: 'f1' }, { drive_file_id: 'f2' }]);
+      assert(okResult.ok === true, 'a clean share reports ok');
+      assert(JSON.stringify(okResult.granted) === JSON.stringify([{ fileId: 'f1', memberIds: ['m-f1'] }, { fileId: 'f2', memberIds: ['m-f2'] }]),
+        'granted records each file with exactly the members newly granted');
+      assert(revoked.length === 0, 'a clean share revokes nothing');
+      // The second grant fails: the first file's grants are revoked, the
+      // failed and never-attempted files are not.
+      const badResult = await shareAttachmentsWithGroup('g1', [{ drive_file_id: 'f1' }, { drive_file_id: 'fail' }, { drive_file_id: 'f2' }]);
+      assert(badResult.ok === false, 'a failed share reports not-ok');
+      assert(JSON.stringify(revoked) === JSON.stringify([{ fileId: 'f1', memberIds: ['m-f1'] }]),
+        'only the already-granted file is rolled back, with exactly its newly granted members');
+      // Rollback is best-effort: one failing revoke must not stop the others.
+      revoked.length = 0;
+      const flaky = {
+        revokeFileWithGroup: async (groupId, fileId) => {
+          if (fileId === 'f1') throw new Error('revoke failed');
+          revoked.push({ fileId });
+        },
+      };
+      await makeFns(flaky).rollbackAttachmentGrants('g1', [{ fileId: 'f1', memberIds: ['m-f1'] }, { fileId: 'f2', memberIds: ['m-f2'] }]);
+      assert(JSON.stringify(revoked) === JSON.stringify([{ fileId: 'f2' }]), 'a failed revoke is logged and the rest still roll back');
+      // The callers must roll back on every later failure, not just on a grant failure.
+      assert(listsSrc.includes('await rollBackGrantsOnce();'),
+        'share-existing must roll back exactly once on staging and upload failures');
+      assert(listsSrc.includes('await rollbackAttachmentGrants(groupId, shareResult.granted);'),
+        'bulk share must roll back on staging failures');
+      assert(listsSrc.includes('await rollbackAttachmentGrants(groupId, s.granted);'),
+        'bulk share must roll back a staged item whose upload later fails');
+      assert(listsSrc.includes("await rollbackAttachmentGrants(item.shared_group_id, [{ fileId: record.drive_file_id, memberIds: grantedIds }]);"),
+        'the upload path must roll back when the attach does not land');
+      // The targeted revoke must only touch the members passed in.
+      const driveSrc = jsFiles['sharing-drive.js'];
+      assert(driveSrc.includes('async revokeFileWithGroup(groupId, fileId, member_ids)'),
+        'revoke must accept an optional member_ids filter for rollback');
+      assert(driveSrc.includes('others = new Set([...others].filter(id => wanted.has(id)));'),
+        'the targeted revoke must intersect the joined members with the passed ids');
+    });
+
+    test('sharing: revoke on unshare is wired at the interface, the adapter, the cache and the unshare flow', () => {
+      const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(iface.includes('revokeFileWithGroup:'), 'the sharing interface must declare revokeFileWithGroup');
+      const driveSrc = jsFiles['sharing-drive.js'];
+      assert(driveSrc.includes('async revokeFileWithGroup(groupId, fileId, member_ids)'), 'the Drive adapter must implement revokeFileWithGroup');
+      assert(driveSrc.includes('revocablePermissionIds(filePerms, new Set(idByEmail.keys()))'), 'the revoke must match permissions by group-member email');
+      const sharingJs = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingJs.includes("'revokeFileWithGroup',"), 'the cached sharing adapter must reject revokeFileWithGroup as read-only');
+      const listsSrc = jsFiles['lists.js'];
+      const unStart = listsSrc.indexOf('async function unshareListItem');
+      const unEnd = listsSrc.indexOf('window.unshareListItem = unshareListItem;', unStart);
+      const unFn = listsSrc.slice(unStart, unEnd);
+      assert(unFn.includes('revokeFileWithGroup?.(item.shared_group_id, a.drive_file_id)'), 'unsharing must revoke the group\u2019s access to my files');
+      assert(unFn.includes('ownAttachmentFiles(item.attachments, await myAttachmentUploaderId(item))'), 'unsharing must revoke only my own files, never another member\u2019s');
+    });
+
+    test('lists: deleting a list or a section trashes each item the way item delete does', () => {
+      const listsSrc = jsFiles['lists.js'];
+      const delStart = listsSrc.indexOf('async function deleteListItem');
+      const delEnd = listsSrc.indexOf('// ── List item attachments', delStart);
+      const delFn = listsSrc.slice(delStart, delEnd);
+      assert(delFn.includes('await trashOwnItemAttachments(item)'), 'item deletion must use the shared trash helper');
+      assert(!delFn.includes('trashAttachmentFile?.('), 'item deletion must not keep its own inline trash loop');
+      const listStart = listsSrc.indexOf('async function deleteList(');
+      const listEnd = listsSrc.indexOf('\n}\n', listStart);
+      const listFn = listsSrc.slice(listStart, listEnd);
+      assert(listFn.includes('for (const item of items)') && listFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+        'deleting a list must trash my own attachments on every item in it');
+      const secStart = listsSrc.indexOf('async function deleteListSectionSubtree');
+      const secEnd = listsSrc.indexOf('\n}\n', secStart);
+      const secFn = listsSrc.slice(secStart, secEnd);
+      assert(secFn.includes('for (const item of itemRows)') && secFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+        'deleting a section must trash my own attachments on every item in the subtree');
+    });
+
+    test('sharing: keep-copies and the copy buttons carry the original attachments', () => {
+      const uiSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+      const convStart = uiSrc.indexOf('// ── List items ──', uiSrc.indexOf('async function _convertGroupItemsToPersonal'));
+      const convEnd = uiSrc.indexOf('// ── Events ──', convStart);
+      const conv = uiSrc.slice(convStart, convEnd);
+      assert(conv.includes('enriched.attachments = JSON.stringify(sh.payload.attachments)'),
+        'keep-copies must carry the original attachment records into the personal item');
+      const listsSrc = jsFiles['lists.js'];
+      const copyStart = listsSrc.indexOf('async function copyListItemToPersonal');
+      const copyEnd = listsSrc.indexOf('window.copyListItemToPersonal = copyListItemToPersonal;', copyStart);
+      const copyFn = listsSrc.slice(copyStart, copyEnd);
+      assert(copyFn.includes('attachments: serializeAttachments(item.attachments)'),
+        'copy-to-personal must carry the original attachment records into the copy');
+      const unStart = listsSrc.indexOf('async function unshareListItem');
+      const unEnd = listsSrc.indexOf('window.unshareListItem = unshareListItem;', unStart);
+      const unFn = listsSrc.slice(unStart, unEnd);
+      assert(unFn.includes('attachments: serializeAttachments(item.attachments)'),
+        'the unshare personal copy must carry the original attachment records');
+    });
+
+    test('lists: sharedListItemPayload carries attachments only when the item has any', () => {
+      const { sharedListItemPayload } = loadAttachmentHelpers();
+      const item = { text: 'Train ticket', note: 'refundable', attachments: [
+        { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'member-abc123' },
+      ] };
+      const payload = sharedListItemPayload(item, { name: 'Travel' });
+      assert(payload.text === 'Train ticket' && payload.list_name === 'Travel' && payload.note === 'refundable',
+        'the payload must keep text, list name and note');
+      assert(Array.isArray(payload.attachments) && payload.attachments.length === 1
+        && payload.attachments[0].drive_file_id === 'f1' && payload.attachments[0].uploaded_by === 'member-abc123',
+        'the payload must carry the attachment records with their uploader');
+      const bare = sharedListItemPayload({ text: 'x', note: '', attachments: [] }, { name: 'L' });
+      assert(!('attachments' in bare), 'an item without attachments must not gain an empty attachments key');
+      const missing = sharedListItemPayload({ text: 'x', note: '' }, null);
+      assert(missing.list_name === '' && !('attachments' in missing), 'a missing list and missing attachments must both read as empty');
+    });
+
+    test('lists: formatFileSize pins the unit boundaries', () => {
+      const { formatFileSize } = loadAttachmentHelpers();
+      assert(formatFileSize(0) === '0 B', '0 bytes');
+      assert(formatFileSize(512) === '512 B', '512 bytes');
+      assert(formatFileSize(1023) === '1023 B', '1023 bytes stays in B');
+      assert(formatFileSize(1024) === '1 KB', '1024 bytes is 1 KB');
+      assert(formatFileSize(1536) === '1.5 KB', '1536 bytes is 1.5 KB');
+      assert(formatFileSize(1048576) === '1 MB', '1 MiB is 1 MB');
+      assert(formatFileSize(2621440) === '2.5 MB', '2.5 MiB');
+      assert(formatFileSize(1073741824) === '1 GB', '1 GiB is 1 GB');
+    });
+
+    test('lists: attachment URLs are allowlisted to Drive', () => {
+      const { isDriveAttachmentUrl } = loadAttachmentHelpers();
+      assert(isDriveAttachmentUrl('https://drive.google.com/file/d/abc/view') === true, 'a Drive file link is allowed');
+      assert(isDriveAttachmentUrl('https://drive.google.com/drive/folders/abc') === true, 'a Drive folder link is allowed');
+      assert(isDriveAttachmentUrl('https://example.com/file.pdf') === false, 'an off-Drive link is refused');
+      assert(isDriveAttachmentUrl('javascript:alert(1)') === false, 'a javascript: URL is refused');
+      assert(isDriveAttachmentUrl(null) === false, 'a missing URL is refused');
+    });
+
+    test('drive: uniqueDriveFileName dedupes against the folder listing', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('// ── Pure attachment helpers ──');
+      const end = driveSrc.indexOf('// ── End pure attachment helpers ──');
+      assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in drive.js');
+      const { uniqueDriveFileName } = new Function(`${driveSrc.slice(start, end)}; return { uniqueDriveFileName };`)();
+      assert(uniqueDriveFileName('a.pdf', []) === 'a.pdf', 'no clash keeps the name');
+      assert(uniqueDriveFileName('a.pdf', ['a.pdf']) === 'a (1).pdf', 'one clash appends (1) before the extension');
+      assert(uniqueDriveFileName('a.pdf', ['a.pdf', 'a (1).pdf']) === 'a (2).pdf', 'two clashes append (2)');
+      assert(uniqueDriveFileName('notes', ['notes']) === 'notes (1)', 'an extensionless name dedupes at the end');
+      assert(uniqueDriveFileName('archive.tar.gz', ['archive.tar.gz']) === 'archive.tar (1).gz', 'only the last extension is split off');
+      assert(uniqueDriveFileName('.hidden', ['.hidden']) === '.hidden (1)', 'a leading dot is not an extension');
+    });
+
+    test('drive: claimAttachmentName claims names sequentially (v2.32.125)', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('// ── Pure attachment helpers ──');
+      const end = driveSrc.indexOf('// ── End pure attachment helpers ──');
+      assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in drive.js');
+      const { claimAttachmentName } = new Function(`${driveSrc.slice(start, end)}; return { claimAttachmentName };`)();
+      // The v2.32.124 flaw: picking receipt.pdf twice in one go yielded
+      // (1) and (2) with no plain name. Claiming fixes it.
+      const claimed = new Set();
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt.pdf', 'the first claim keeps the plain name');
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt (1).pdf', 'the second claim of the same name takes (1)');
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt (2).pdf', 'the third claim takes (2)');
+      assert(claimAttachmentName('receipt.pdf', ['receipt.pdf', 'receipt (1).pdf', 'receipt (2).pdf'], new Set()) === 'receipt (3).pdf',
+        'names already in the folder still count');
+      claimed.delete('receipt.pdf');
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt.pdf', 'releasing a claim frees the name again');
+    });
+
+    test('drive: findOrCreateItemAttachmentsFolder finds, then creates (v2.32.125)', async () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('async function findItemAttachmentsFolder');
+      const end = driveSrc.indexOf('async function findOrCreateItemAttachmentsFolder');
+      const fnEnd = driveSrc.indexOf('\n}\n', end) + 3;
+      assert(start !== -1 && end > start && fnEnd > end, 'could not slice the item folder helpers from drive.js');
+      const calls = [];
+      const fetchStub = async (url, init) => {
+        calls.push({ url, init });
+        if (init?.method === 'POST') {
+          return { ok: true, json: async () => ({ id: 'folder-created' }) };
+        }
+        // First search finds the folder, second search finds nothing.
+        return { ok: true, json: async () => ({ files: calls.filter(c => !c.init?.method).length === 1 ? [{ id: 'folder-found' }] : [] }) };
+      };
+      const { findOrCreateItemAttachmentsFolder } = new Function('fetch', `${driveSrc.slice(start, fnEnd)}; return { findOrCreateItemAttachmentsFolder };`)(fetchStub);
+      const found = await findOrCreateItemAttachmentsFolder('tok', 'shared-abc', 'attachments-folder');
+      assert(found === 'folder-found', 'an existing item folder must be returned without creating');
+      assert(calls.filter(c => c.init?.method === 'POST').length === 0, 'no create call when the folder exists');
+      const created = await findOrCreateItemAttachmentsFolder('tok', 'item-xyz', 'attachments-folder');
+      assert(created === 'folder-created', 'a missing item folder must be created');
+      const createCall = calls.find(c => c.init?.method === 'POST');
+      const body = JSON.parse(createCall.init.body);
+      assert(body.name === 'item-xyz' && body.parents[0] === 'attachments-folder' && body.mimeType === 'application/vnd.google-apps.folder',
+        'the created folder must be named by folder key under the attachments folder');
+      const searchUrl = decodeURIComponent(calls[0].url);
+      assert(searchUrl.includes("name='shared-abc'") && searchUrl.includes('trashed=false'),
+        'the search must query the folder key under the parent, excluding trashed folders');
+    });
+
+    test('migrations: list_items gains the attachments column in 2.32.122', () => {
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(/CREATE TABLE IF NOT EXISTS list_items \([^;]*attachments TEXT/.test(schema),
+        'schema.sql must add attachments TEXT to list_items');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'2.32.122'") && local.includes('ALTER TABLE list_items ADD COLUMN attachments TEXT'),
+        'the local migration must add the attachments column');
+      const driveMig = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(driveMig.includes("'2.32.122'") && driveMig.includes('list_items'),
+        'the Drive migration must normalize list_items attachments');
+    });
+
+    test('lists: attachment UI is wired, Drive-gated, and shared items carry the payload', () => {
+      const listsSrc = jsFiles['lists.js'];
+      assert(listsSrc.includes('data-action="attach-to-list-item"'), 'items must offer an attach button');
+      assert(listsSrc.includes('data-action="remove-list-item-attachment"'), 'attachment chips must offer removal');
+      assert(listsSrc.includes("typeof state.driveAdapter?.uploadAttachment === 'function'"),
+        'the attach button must hide without a Drive adapter');
+      assert(listsSrc.includes('list-item-attachments'), 'attachments must render as chips under the item');
+      assert(listsSrc.includes('item.attachments = normalizeAttachments(sh.payload?.attachments)'),
+        'shared items must read attachments from the sharing payload');
+      assert(listsSrc.includes("shareFileWithGroup(item.shared_group_id, record.drive_file_id, 'reader')"),
+        'an attachment on a shared item must be shared with the group before the payload update');
+      assert(listsSrc.includes('window.attachToListItem = attachToListItem'), 'the attach flow must be window-exposed for delegation');
+      assert(listsSrc.includes('window.removeListItemAttachment = removeListItemAttachment'), 'the remove flow must be window-exposed for delegation');
+      const delSrc = jsFiles['delegation.js'];
+      assert(delSrc.includes("case 'attach-to-list-item':"), 'delegation must route the attach action');
+      assert(delSrc.includes("case 'remove-list-item-attachment':"), 'delegation must route the remove action');
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      assert(driveSrc.includes('async uploadAttachment(file, {'), 'the Drive adapter must expose uploadAttachment');
+      assert(driveSrc.includes('async trashAttachmentFile(driveFileId)'), 'the Drive adapter must expose trashAttachmentFile');
+      assert(driveSrc.includes('ATTACHMENT_MULTIPART_MAX_BYTES = 5 * 1024 * 1024'), 'multipart uploads cap at 5 MB');
+      assert(driveSrc.includes('if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES)'), 'files past the cap must take the resumable path');
+      assert(driveSrc.includes('uploadAttachmentFileResumable(tok, targetFolderId, file, name'), 'the resumable path must be wired into uploadAttachment');
+      assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
+      // uploaded_by (v2.32.126, compulsory v2.32.127): the queue stamps
+      // the uploader's group member id onto every upload; the adapter
+      // threads it into the record on both paths. The normalizer drops
+      // any record without it.
+      assert(listsSrc.includes('getCurrentMemberId(item.shared_group_id)'), 'the queue must read the uploader’s member id for shared items');
+      assert(listsSrc.includes('getCurrentUserMemberId()'), 'the queue must read the group-independent uploader id for personal items');
+      assert(listsSrc.includes('uploadedBy,'), 'the queue must pass uploadedBy to the adapter');
+      assert(listsSrc.includes("t('lists.attachment_no_uploader')"), 'a missing uploader id must refuse the upload with a toast, not orphan a file');
+      assert(driveSrc.includes('uploadedBy = null'), 'the adapter must accept uploadedBy in the upload opts');
+      assert(driveSrc.includes('const opts = { onProgress, signal, uploadedBy }'), 'the adapter must thread uploadedBy into the upload call');
+      assert(driveSrc.includes('attachmentRecordFromUpload(JSON.parse(res.responseText), file, uploadedBy)'), 'the resumable path must stamp uploaded_by on the record');
+      assert(driveSrc.includes('rec.uploaded_by = uploadedBy'), 'the multipart path must stamp uploaded_by on the record');
+      const ifaceSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(ifaceSrc.includes('getCurrentUserMemberId'), 'the sharing interface must expose the group-independent uploader id');
+      const sharingDriveSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+      assert(sharingDriveSrc.includes('async getCurrentUserMemberId()'), 'the Drive sharing adapter must implement the group-independent uploader id');
+      assert(sharingDriveSrc.includes('memberIdFromEmail(user.email)'), 'the uploader id must derive from the account email hash');
+      const sharingSrc = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingSrc.includes("getCurrentUserMemberId') stub[key] = async () => 'demo'"), 'the demo stub must return a member id for the uploader');
+      // Sharing an existing item carries its attachments (v2.32.129):
+      // the files are shared reader first, the records ride the payload.
+      const shareStart = listsSrc.indexOf('async function shareExistingListItem');
+      const shareEnd = listsSrc.indexOf('window.shareExistingListItem');
+      const shareFn = listsSrc.slice(shareStart, shareEnd);
+      assert(shareFn.includes('sharedListItemPayload(item, listObj)'), 'the single-item share must build its payload through the shared helper');
+      assert(shareFn.includes('shareAttachmentsWithGroup(groupId, attachments)'), 'the single-item share must grant the files before publishing');
+      assert(shareFn.indexOf('shareAttachmentsWithGroup(groupId, attachments)') < shareFn.indexOf('state.sharing.addItem'),
+        'the file grants must come before the shared item is staged');
+      assert(shareFn.includes("t('lists.share_attachments_failed')"), 'a file-share failure must abort the single-item share with a toast');
+      const bulkStart = listsSrc.indexOf('async function bulkShareList');
+      const bulkEnd = listsSrc.indexOf('window.bulkShareList');
+      const bulkFn = bulkStart !== -1 ? listsSrc.slice(bulkStart, bulkEnd === -1 ? undefined : bulkEnd) : '';
+      assert(bulkFn.includes('sharedListItemPayload(item, listObj)'), 'the bulk share must build its payload through the shared helper');
+      assert(bulkFn.includes('shareAttachmentsWithGroup(groupId, attachments)'), 'the bulk share must grant the files before publishing');
+      assert(bulkFn.indexOf('shareAttachmentsWithGroup(groupId, attachments)') < bulkFn.indexOf('state.sharing.addItem'),
+        'the bulk share must grant the files before the shared item is staged');
+      assert(bulkFn.includes('continue;'), 'a file-share failure must skip that item in the bulk share');
+      // Per-item folders (v2.32.125): each item gets its own subfolder,
+      // and names are claimed sequentially instead of deduping against
+      // the other files' raw names.
+      assert(driveSrc.includes('async trashItemAttachmentsFolder(itemId, referencedIds = new Set())'), 'the Drive adapter must expose trashItemAttachmentsFolder');
+      assert(driveSrc.includes('async function findOrCreateItemAttachmentsFolder(token, folderKey, parentFolderId)'), 'per-item folders must be found or created');
+      assert(driveSrc.includes('async function findAttachmentsFolder(token, parentFolderId)'), 'the parent folder must be findable without creating it');
+      assert(driveSrc.includes('function claimAttachmentName(fileName, takenNames, claimed)'), 'names must be claimed, not deduped against raw names');
+      assert(!driveSrc.includes('inFlightNames'), 'the raw-name in-flight dedupe must be gone from the adapter');
+      assert(!listsSrc.includes('inFlightNames'), 'the raw-name in-flight dedupe must be gone from the caller');
+      assert(listsSrc.includes('item.shared_id || item.id'), 'the folder key must be the shared_id for shared items, the local id otherwise');
+      assert(listsSrc.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id, referenced)'), 'deleting an item must trash its attachments folder');
+      // Progress: the transfer runs over XHR (fetch cannot report upload
+      // progress), in 1 MB chunks for the resumable path.
+      assert(driveSrc.includes('new XMLHttpRequest()'), 'the upload transport must be XHR for progress events');
+      assert(driveSrc.includes('ATTACHMENT_CHUNK_BYTES = 1024 * 1024'), 'resumable uploads must chunk at 1 MB');
+      assert(driveSrc.includes('Content-Range'), 'resumable chunks must carry a Content-Range');
+      assert(driveSrc.includes("err.code = 'aborted'"), 'an aborted upload must reject with code aborted');
+      assert(!driveSrc.includes('attachment_too_large'), 'the adapter must no longer refuse large files');
+      assert(!listsSrc.includes('attachment_too_large'), 'the caller must no longer toast a size refusal');
+      assert(!listsSrc.includes('_pendingAttachmentUploads'), 'the per-item upload block must be replaced by the pending queue');
+      assert(listsSrc.includes('_pendingAttachments'), 'pending uploads must live in a per-item map');
+      assert(listsSrc.includes('processAttachmentQueue'), 'picked files must drain through a per-item queue');
+      assert(listsSrc.includes('attachmentProgressRing'), 'pending chips must render a progress ring');
+      assert(listsSrc.includes('updateAttachmentProgress'), 'progress must patch the ring in place');
+      assert(listsSrc.includes('data-pending-id'), 'pending chips must be addressable by pending id');
+      assert(delSrc.includes("case 'cancel-list-item-attachment':"), 'delegation must route the cancel action');
+      assert(delSrc.includes("case 'retry-list-item-attachment':"), 'delegation must route the retry action');
+      assert(listsSrc.includes('window.cancelListItemAttachment = cancelListItemAttachment'), 'cancel must be window-exposed for delegation');
+      assert(listsSrc.includes('window.retryListItemAttachment = retryListItemAttachment'), 'retry must be window-exposed for delegation');
+      assert(listsSrc.includes('new AbortController()'), 'each pending upload must own an AbortController');
+      const styleSrc = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(styleSrc.includes('.att-progress-ring'), 'the ring must be styled');
+      assert(styleSrc.includes('.list-attachment-chip.pending'), 'pending chips must be styled');
+      assert(styleSrc.includes('.list-attachment-chip.error'), 'failed chips must be styled');
+      assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
+      const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(iface.includes('shareFileWithGroup:'), 'the sharing interface must declare shareFileWithGroup');
+      const sharingDrive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+      assert(sharingDrive.includes('async shareFileWithGroup(groupId, fileId, role'), 'the Drive sharing adapter must implement shareFileWithGroup');
+      const sharingJs = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingJs.includes("'shareFileWithGroup',"), 'the cached sharing adapter must reject shareFileWithGroup as read-only');
+      // The keys are picked by variable in places, so the t()-scan test
+      // cannot see them all — pin their presence in all three locales directly.
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      for (const key of ['attach_file', 'remove_attachment', 'attach_unavailable', 'attachment_upload_failed', 'attachment_share_failed', 'attachment_added', 'attachment_removed', 'cancel_upload', 'retry_upload', 'attachment_no_uploader', 'share_attachments_failed']) {
+        const count = (i18nSrc.match(new RegExp(`${key}:`, 'g')) || []).length;
+        assert(count === 3, `${key} must be defined in all three locales, found ${count}`);
+      }
+    });
+
+    test('sharing: the sweep toasts the file owner when it grants a new member', () => {
+      const driveSrc = jsFiles['sharing-drive.js'];
+      const sweepStart = driveSrc.indexOf('async sweepAttachmentGrants(groupId)');
+      const sweepEnd = driveSrc.indexOf('\n    },', sweepStart);
+      const sweepFn = driveSrc.slice(sweepStart, sweepEnd);
+      assert(sweepFn.includes("emit('attachment-grants-swept'"), 'the sweep must emit when it grants files');
+      assert(sweepFn.includes('if (memberIds.length)'), 'the sweep must stay silent when nothing was granted');
+      assert(sweepFn.includes('memberDisplayNameFromRoster(e.group.members, id)'), 'the toast must resolve the new member name from the group row by member_id');
+      const mainJs = jsFiles['main.js'];
+      assert(mainJs.includes("event === 'attachment-grants-swept'"), 'main must listen for the sweep event');
+      assert(mainJs.includes('sharing.attachments_shared_with_new_member'), 'the sweep toast must use the new i18n key');
+      const i18n = jsFiles['i18n.js'];
+      assert((i18n.match(/attachments_shared_with_new_member/g) || []).length === 3,
+        'the sweep toast key must exist in all three locales');
+    });
+
+    test('sharing: ownAttachmentFileIds collects only my files, deduped', () => {
+      const driveSrc = jsFiles['sharing-drive.js'];
+      const start = driveSrc.indexOf('function ownAttachmentFileIds');
+      assert(start !== -1, 'could not find ownAttachmentFileIds in sharing-drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of ownAttachmentFileIds');
+      const { ownAttachmentFileIds } = new Function(`${driveSrc.slice(start, end + 3)}; return { ownAttachmentFileIds };`)();
+      const items = [
+        { id: 'a', payload: { attachments: [
+          { drive_file_id: 'f1', name: 'a.pdf', uploaded_by: 'me' },
+          { drive_file_id: 'f2', name: 'b.pdf', uploaded_by: 'other' },
+        ] } },
+        { id: 'b', payload: { attachments: [
+          { drive_file_id: 'f1', name: 'a.pdf', uploaded_by: 'me' },
+          { drive_file_id: 'f3', name: 'c.pdf', uploaded_by: 'me' },
+        ] } },
+        { id: 'c', payload: { text: 'no attachments' } },
+        { id: 'd', payload: { attachments: 'not-an-array' } },
+        { id: 'e' },
+      ];
+      assert(JSON.stringify(ownAttachmentFileIds(items, 'me').sort()) === JSON.stringify(['f1', 'f3']),
+        'the sweep must collect my files only, once each, ignoring other members and malformed payloads');
+      assert(ownAttachmentFileIds(items, null).length === 0, 'no member id means no files to sweep');
+      assert(ownAttachmentFileIds(null, 'me').length === 0, 'no items means no files to sweep');
+    });
+
+    test('sharing: the attachment grant sweep is wired at the interface, the adapter, the cache and both triggers', () => {
+      const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(iface.includes('sweepAttachmentGrants:'), 'the sharing interface must declare sweepAttachmentGrants');
+      const driveSrc = jsFiles['sharing-drive.js'];
+      assert(driveSrc.includes('async sweepAttachmentGrants(groupId)'), 'the Drive adapter must implement sweepAttachmentGrants');
+      assert(driveSrc.includes("ownAttachmentFileIds(e.typeData['lists'] || [], myId)"), 'the sweep must scan my list-item payloads');
+      assert(driveSrc.includes("this.shareFileWithGroup(groupId, fileId, 'reader')"), 'the sweep must grant each file reader');
+      // Load-time trigger: post-load repairs in loadAll.
+      const loadStart = driveSrc.indexOf('async loadAll()');
+      const loadEnd = driveSrc.indexOf('getAllGroups()', loadStart);
+      const loadFn = driveSrc.slice(loadStart, loadEnd);
+      assert(loadFn.includes('this.sweepAttachmentGrants(gid)'), 'loadAll must sweep each loaded group for members who joined while away');
+      // Poll trigger: fresh joins.
+      assert(driveSrc.includes('if (freshJoins.length) this.sweepAttachmentGrants(groupId)'), 'the poll must sweep when it spots a fresh join');
+      const sharingJs = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingJs.includes("'sweepAttachmentGrants',"), 'the cached sharing adapter must reject sweepAttachmentGrants as read-only');
+    });
+
+    // Slice the real upload functions out of drive.js and run them
+    // against a fake fetch + a fake XHR (same new Function idiom as the
+    // pure-helper tests). The fake answers from a script queue, one
+    // entry per XHR send, in order.
+    function loadUploadFns() {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('function xhrRequest');
+      assert(start !== -1, 'could not find xhrRequest in drive.js');
+      const resStart = driveSrc.indexOf('async function uploadAttachmentFileResumable');
+      assert(resStart !== -1, 'could not find uploadAttachmentFileResumable in drive.js');
+      const end = driveSrc.indexOf('\n}\n', resStart);
+      assert(end !== -1, 'could not find the end of uploadAttachmentFileResumable');
+      return new Function('fetch', 'XMLHttpRequest', `${driveSrc.slice(start, end + 3)}; return { uploadAttachmentFile, uploadAttachmentFileResumable };`);
+    }
+    function makeFakeXHR(script) {
+      const instances = [];
+      class FakeXHR {
+        constructor() {
+          this.headers = {};
+          this.upload = {};
+          instances.push(this);
+        }
+        open(method, url) { this.method = method; this.url = url; }
+        setRequestHeader(k, v) { this.headers[k.toLowerCase()] = v; }
+        getResponseHeader(h) { return (this._respHeaders || {})[h.toLowerCase()] || null; }
+        abort() { this._aborted = true; if (this.onabort) this.onabort(); }
+        send(body) {
+          this.body = body;
+          const step = script.shift();
+          setTimeout(() => {
+            if (this._aborted) return;
+            if (!step) throw new Error('FakeXHR: no scripted response left');
+            if (step.progress) for (const p of step.progress) this.upload.onprogress?.({ lengthComputable: true, loaded: p.loaded, total: p.total });
+            if (step.error) { if (this.onerror) this.onerror(); return; }
+            this.status = step.status;
+            this.responseText = step.responseText || '';
+            this._respHeaders = {};
+            for (const [k, v] of Object.entries(step.headers || {})) this._respHeaders[k.toLowerCase()] = v;
+            if (this.onload) this.onload();
+          }, 0);
+        }
+      }
+      return { FakeXHR, instances };
+    }
+    const resumableSessionFetch = (url, opts) => {
+      if (!url.includes('uploadType=resumable')) throw new Error('unexpected fetch: ' + url);
+      return Promise.resolve({ ok: true, status: 200, headers: { get: (h) => (h === 'Location' ? 'https://upload.session/abc123' : null) }, text: async () => '' });
+    };
+    const resumableResource = { id: 'res-1', name: 'big.bin', size: '2621440', webViewLink: 'https://drive.google.com/file/d/res-1/view' };
+
+    test('drive: multipart upload goes over XHR with progress', async () => {
+      const file = new File(['hello'], 'a.txt', { type: 'text/plain' });
+      const script = [{ status: 200, responseText: JSON.stringify({ id: 'm-1', name: 'a.txt', size: '5', webViewLink: 'https://drive.google.com/file/d/m-1/view' }), progress: [{ loaded: 3, total: 10 }, { loaded: 10, total: 10 }] }];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const load = loadUploadFns();
+      const fractions = [];
+      const record = await load(async () => { throw new Error('multipart must not fetch'); }, FakeXHR).uploadAttachmentFile('tok', 'folder-1', file, 'a.txt', { onProgress: (f) => fractions.push(f) });
+      assert(instances.length === 1, `multipart must make exactly one XHR call, got ${instances.length}`);
+      const xhr = instances[0];
+      assert(xhr.method === 'POST' && xhr.url.includes('uploadType=multipart'), 'the call must POST to the multipart endpoint');
+      assert(xhr.headers.authorization === 'Bearer tok', 'the call must carry the token');
+      assert(xhr.body instanceof FormData, 'the body must be FormData');
+      assert(fractions.length === 2 && fractions[1] === 1, `progress must be reported, ending at 1, got ${JSON.stringify(fractions)}`);
+      assert(record.drive_file_id === 'm-1' && record.url.endsWith('/m-1/view'), 'the record must come from the upload response');
+    });
+
+    test('drive: resumable upload sends 1 MB chunks with Content-Range and reports progress', async () => {
+      const file = new File(['x'.repeat(2621440)], 'big.bin', { type: 'video/mp4' });
+      const script = [
+        { status: 308, headers: { range: 'bytes=0-1048575' }, progress: [{ loaded: 524288, total: 1048576 }, { loaded: 1048576, total: 1048576 }] },
+        { status: 308, headers: { range: 'bytes=0-2097151' } },
+        { status: 200, responseText: JSON.stringify(resumableResource) },
+      ];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const fetchCalls = [];
+      const fakeFetch = (url, opts) => { fetchCalls.push({ url, opts }); return resumableSessionFetch(url, opts); };
+      const fractions = [];
+      const record = await loadUploadFns()(fakeFetch, FakeXHR)
+        .uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', { onProgress: (f) => fractions.push(f) });
+      assert(fetchCalls.length === 1, 'the session must be initiated once');
+      assert(fetchCalls[0].url.includes('uploadType=resumable'), 'the initiation must use the resumable endpoint');
+      assert(fetchCalls[0].opts.headers['X-Upload-Content-Length'] === '2621440', 'the session must declare the file size');
+      const meta = JSON.parse(fetchCalls[0].opts.body);
+      assert(meta.name === 'big.bin' && meta.parents[0] === 'folder-1', 'the session metadata must carry the name and folder');
+      assert(instances.length === 3, `a 2.5 MB file must take 3 chunk PUTs, got ${instances.length}`);
+      assert(instances.every(x => x.method === 'PUT' && x.url === 'https://upload.session/abc123'), 'chunks must PUT to the session URI');
+      assert(instances[0].headers['content-range'] === 'bytes 0-1048575/2621440', 'chunk 1 must declare its byte range');
+      assert(instances[1].headers['content-range'] === 'bytes 1048576-2097151/2621440', 'chunk 2 must declare its byte range');
+      assert(instances[2].headers['content-range'] === 'bytes 2097152-2621439/2621440', 'chunk 3 must declare its byte range');
+      assert(instances[0].body.size === 1048576 && instances[1].body.size === 1048576 && instances[2].body.size === 524288,
+        'chunk bodies must be the file slices');
+      assert(!('authorization' in instances[0].headers), 'chunk PUTs must not carry the token (the session URI authenticates)');
+      assert(fractions.length >= 3 && fractions[fractions.length - 1] === 1, `progress must rise and end at 1, got ${JSON.stringify(fractions)}`);
+      assert(fractions.every((f, i) => i === 0 || f >= fractions[i - 1]), 'progress must never go backwards');
+      assert(record.drive_file_id === 'res-1' && record.size === 2621440 && record.url === 'https://drive.google.com/file/d/res-1/view',
+        'the record must come from the final chunk response');
+    });
+
+    test('drive: a failed chunk retries, then resumes from the session status', async () => {
+      const file = new File(['x'.repeat(2621440)], 'big.bin', { type: 'video/mp4' });
+      // Chunk 2's PUTs fail three times with their responses lost — but
+      // the server did receive the bytes, so the status query reports
+      // them and the upload resumes at chunk 3 instead of restarting.
+      const script = [
+        { status: 308, headers: { range: 'bytes=0-1048575' } },
+        { error: true }, { error: true }, { error: true }, // chunk 2: responses lost
+        { status: 308, headers: { range: 'bytes=0-2097151' } }, // status query: chunk 2 confirmed
+        { status: 200, responseText: JSON.stringify(resumableResource) },
+      ];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const record = await loadUploadFns()(resumableSessionFetch, FakeXHR)
+        .uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {});
+      assert(instances.length === 6, `expected 6 XHR calls, got ${instances.length}`);
+      const ranges = instances.map(x => x.headers['content-range']);
+      assert(ranges.filter(r => r === 'bytes 1048576-2097151/2621440').length === 3,
+        `chunk 2 must be attempted 3 times, got ${JSON.stringify(ranges)}`);
+      assert(ranges.includes('bytes */2621440'), 'the resume must ask the session how far it got');
+      assert(ranges.includes('bytes 2097152-2621439/2621440'), 'the upload must resume at chunk 3');
+      assert(record.drive_file_id === 'res-1', 'the upload must complete after the resume');
+    });
+
+    test('drive: aborting mid-upload rejects with code aborted and starts no new chunk', async () => {
+      const file = new File(['x'.repeat(2621440)], 'big.bin', { type: 'video/mp4' });
+      const script = [
+        { status: 308, headers: { range: 'bytes=0-1048575' }, progress: [{ loaded: 786432, total: 1048576 }] },
+        { status: 308, headers: { range: 'bytes=0-2097151' } },
+        { status: 200, responseText: JSON.stringify(resumableResource) },
+      ];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const ctl = new AbortController();
+      let err;
+      try {
+        await loadUploadFns()(resumableSessionFetch, FakeXHR)
+          .uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {
+            signal: ctl.signal,
+            onProgress: (f) => { if (f > 0.2) ctl.abort(); },
+          });
+      } catch (e) { err = e; }
+      assert(err && err.code === 'aborted', `an abort must reject with code aborted, got ${err && err.code}`);
+      assert(instances.length === 1, `no further chunk must start after the abort, got ${instances.length} XHR calls`);
+    });
+
+    test('drive: resumable upload refuses a missing session URI and a refused initiation', async () => {
+      const file = new File(['x'.repeat(1024)], 'big.bin', { type: 'video/mp4' });
+      const load = loadUploadFns();
+      const { FakeXHR } = makeFakeXHR([]);
+      const noSession = async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => '' });
+      let err;
+      try { await load(noSession, FakeXHR).uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {}); } catch (e) { err = e; }
+      assert(err && /no session URI/.test(err.message), 'a missing session URI must throw');
+      const badInit = async () => ({ ok: false, status: 400, headers: { get: () => null }, text: async () => 'bad request' });
+      err = null;
+      try { await load(badInit, FakeXHR).uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {}); } catch (e) { err = e; }
+      assert(err && /400/.test(err.message), 'a refused initiation must throw with the status');
+    });
+
+    test('drive: a zero-byte file completes with one empty PUT', async () => {
+      const file = new File([], 'empty.txt', { type: 'text/plain' });
+      const script = [{ status: 200, responseText: JSON.stringify({ id: 'e-1', name: 'empty.txt', size: '0', webViewLink: 'https://drive.google.com/file/d/e-1/view' }) }];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const record = await loadUploadFns()(resumableSessionFetch, FakeXHR)
+        .uploadAttachmentFileResumable('tok', 'folder-1', file, 'empty.txt', {});
+      assert(instances.length === 1, 'a zero-byte file must take exactly one PUT');
+      assert(instances[0].headers['content-range'] === 'bytes */0', 'the empty PUT must use the status-query range');
+      assert(record.drive_file_id === 'e-1' && record.size === 0, 'the record must come back with size 0');
+    });
+
+    test('drive: attachmentRecordFromUpload stamps uploaded_by only when given', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('function attachmentRecordFromUpload');
+      assert(start !== -1, 'could not find attachmentRecordFromUpload in drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of attachmentRecordFromUpload');
+      const { attachmentRecordFromUpload } = new Function(`${driveSrc.slice(start, end + 3)}; return { attachmentRecordFromUpload };`)();
+      const result = { id: 'f1', name: 'a.pdf', size: '120', webViewLink: 'https://drive.google.com/file/d/f1/view' };
+      const file = { size: 120 };
+      const withUploader = attachmentRecordFromUpload(result, file, 'member-abc123');
+      assert(withUploader.uploaded_by === 'member-abc123', 'the uploader id must be stamped on the record');
+      assert(withUploader.drive_file_id === 'f1' && withUploader.size === 120, 'the rest of the record must be unchanged');
+      assert(attachmentRecordFromUpload(result, file, null).uploaded_by === undefined, 'no uploader must mean no key');
+      assert(attachmentRecordFromUpload(result, file).uploaded_by === undefined, 'an omitted uploader must mean no key');
+      assert(attachmentRecordFromUpload(result, file, '').uploaded_by === undefined, 'an empty uploader must mean no key');
+    });
+
+    test('demo data: a sampled list item carries two attachments', () => {
+      const demo = fs.readFileSync(path.join(__dirname, '..', 'js', 'demo-data.js'), 'utf-8');
+      const lines = demo.split('\n').filter(l => l.includes("id: 'demo-li-007'"));
+      assert(lines.length === 3, `expected the train-ticket item in all three languages, got ${lines.length}`);
+      assert(lines.every(l => /attachments: \[/.test(l)), 'each copy must carry attachments');
+      assert(lines.every(l => /drive\.google\.com\/file\/d\/demo-train-ticket\/view/.test(l)), 'the demo attachment must link to a Drive file');
+      const { normalizeAttachments } = loadAttachmentHelpers();
+      const sample = [{ drive_file_id: 'demo-attachment-001', name: 'train-ticket.pdf', size: 184320, url: 'https://drive.google.com/file/d/demo-train-ticket/view', uploaded_by: 'demo' }];
+      assert(normalizeAttachments(sample).length === 1, 'the demo attachment record must survive normalization');
+    });
+
+    test('demo: list_items attachments round-trip through the adapter as a JSON string', async () => {
+      const { pathToFileURL } = require('url');
+      const demo = await import(pathToFileURL(path.join(JS_DIR, 'adapters/demo.js')).href);
+      const { createDemoAdapter } = demo;
+      const exec = (builder) => {
+        let out, err;
+        builder.then(r => { out = r; }, e => { err = e; });
+        if (err) throw err;
+        return out;
+      };
+      const { normalizeAttachments, serializeAttachments } = loadAttachmentHelpers();
+      const db = createDemoAdapter({});
+      const record = { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'member-abc123' };
+      exec(db.from('list_items').insert({ id: 'li-1', list_id: 'l1', text: 'x', attachments: serializeAttachments([record]) }));
+      const read = exec(db.from('list_items').select('*').eq('id', 'li-1'));
+      assert(normalizeAttachments(read.data[0].attachments).length === 1, 'a stored JSON string must read back as one attachment');
+      const record2 = { drive_file_id: 'f2', name: 'b.pdf', size: 10, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'member-abc123' };
+      exec(db.from('list_items').update({ attachments: serializeAttachments([record, record2]) }).eq('id', 'li-1'));
+      const read2 = exec(db.from('list_items').select('*').eq('id', 'li-1'));
+      assert(normalizeAttachments(read2.data[0].attachments).length === 2, 'a second attachment must persist alongside the first');
+      exec(db.from('list_items').update({ attachments: serializeAttachments([]) }).eq('id', 'li-1'));
+      const read3 = exec(db.from('list_items').select('*').eq('id', 'li-1'));
+      assert(normalizeAttachments(read3.data[0].attachments).length === 0, 'removing the last attachment must leave none');
+      assert(read3.data[0].attachments === null, 'an empty list must store NULL, not "[]"');
+    });
+
     test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {
       const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
       const rows = [
@@ -9362,6 +10246,538 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'both deck renderers (flashcards + texts) must place the Practice button outside the hover-revealed actions');
     });
   }
+
+  // ===================================================================
+  // Chrome extension (spec §8 step 4 — popup)
+  // ===================================================================
+  // The stamped outputs under extension/dist/ are the loadable
+  // artifacts; these tests assert on them, not on the src templates.
+  const EXT_DIST = path.join(__dirname, '..', 'extension', 'dist');
+  const EXT_PROD = path.join(EXT_DIST, 'prod');
+  const EXT_DEV = path.join(EXT_DIST, 'dev');
+
+  function readRepoVersion() {
+    const text = fs.readFileSync(path.join(__dirname, '..', 'VERSION'), 'utf8');
+    const m = text.match(/^latest=(.+)$/m);
+    assert(m, 'VERSION must have a latest= line');
+    return m[1].trim();
+  }
+
+  // Independent re-implementation of Chrome's extension-ID derivation
+  // (first 128 bits of the SHA-256 of the DER public key, hex nibbles
+  // 0-f mapped to letters a-p) — the test must not trust the packager's
+  // copy of the same function.
+  function deriveExtensionId(base64Key) {
+    const der = Buffer.from(base64Key, 'base64');
+    const hex = crypto.createHash('sha256').update(der).digest('hex').slice(0, 32);
+    return [...hex].map((c) => String.fromCharCode(97 + parseInt(c, 16))).join('');
+  }
+
+  test('extension: both stamped manifests parse with the right names and repo version', () => {
+    const prod = JSON.parse(fs.readFileSync(path.join(EXT_PROD, 'manifest.json'), 'utf8'));
+    const dev = JSON.parse(fs.readFileSync(path.join(EXT_DEV, 'manifest.json'), 'utf8'));
+    assert(prod.name === 'DeLaClaw', 'prod manifest name must be DeLaClaw');
+    assert(dev.name === 'DeLaClaw Dev', 'dev manifest name must be DeLaClaw Dev');
+    const version = readRepoVersion();
+    assert(prod.version === version, `prod manifest version must equal repo VERSION (${version})`);
+    assert(dev.version === version, `dev manifest version must equal repo VERSION (${version})`);
+    assert(prod.manifest_version === 3 && dev.manifest_version === 3, 'both manifests must be MV3');
+    assert(prod.background?.service_worker === 'service-worker.js' && prod.background?.type === 'module',
+      'prod background must be the module service worker');
+    assert(prod.action?.default_popup === 'popup.html', 'prod action must open popup.html');
+  });
+
+  test('extension: manifests carry no oauth2 block and the spec permissions only', () => {
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+      assert(!('oauth2' in m), 'manifest must not carry an oauth2 block (the web client is used at runtime)');
+      assert(JSON.stringify([...m.permissions].sort()) === JSON.stringify(['activeTab', 'contextMenus', 'identity', 'storage']),
+        `permissions must be exactly identity/contextMenus/storage/activeTab, got ${m.permissions}`);
+      assert(JSON.stringify([...m.host_permissions].sort()) === JSON.stringify(['https://oauth2.googleapis.com/*', 'https://www.googleapis.com/*']),
+        'host permissions must be exactly the two googleapis hosts');
+    }
+  });
+
+  test('extension: a manifest declaring default_locale must ship its _locales subtree', () => {
+    // Chrome refuses to load an extension whose manifest declares
+    // default_locale without _locales/<locale>/messages.json
+    // (v2.32.120 shipped exactly that and failed to load).
+    // Nothing in the extension calls chrome.i18n.getMessage — the
+    // popup carries its own STRINGS table — so the src manifest must
+    // not declare default_locale at all.
+    const srcManifest = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'manifest.json'), 'utf8');
+    assert(!srcManifest.includes('default_locale'),
+      'src manifest must not declare default_locale (no code uses chrome.i18n.getMessage)');
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      const jsFiles = fs.readdirSync(dir).filter((f) => f.endsWith('.js'));
+      for (const f of jsFiles) {
+        const src = fs.readFileSync(path.join(dir, f), 'utf8');
+        assert(!src.includes('chrome.i18n.getMessage'),
+          `${f} must not call chrome.i18n.getMessage (it needs a _locales subtree)`);
+      }
+      const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+      if (m.default_locale) {
+        const messagesPath = path.join(dir, '_locales', m.default_locale, 'messages.json');
+        assert(fs.existsSync(messagesPath),
+          `manifest declares default_locale ${m.default_locale} but ${messagesPath} is missing — Chrome will refuse to load the extension`);
+        JSON.parse(fs.readFileSync(messagesPath, 'utf8'));
+      }
+    }
+  });
+
+  test('extension: pinned keys derive the registered IDs, and the variants differ', () => {
+    const prod = JSON.parse(fs.readFileSync(path.join(EXT_PROD, 'manifest.json'), 'utf8'));
+    const dev = JSON.parse(fs.readFileSync(path.join(EXT_DEV, 'manifest.json'), 'utf8'));
+    assert(deriveExtensionId(prod.key) === 'cnpaghkipnignlonpoblbpoceheompap',
+      'prod key must derive the registered prod extension ID (else the OAuth redirect URI breaks)');
+    assert(deriveExtensionId(dev.key) === 'kpogipeoagoggadlphkmehgfgippgjfl',
+      'dev key must derive the registered dev extension ID');
+    assert(prod.key !== dev.key, 'the two variants must have different pinned keys');
+  });
+
+  test('extension: stamped variants resolve to different folders and app URLs', async () => {
+    const prod = await import(pathToFileURL(path.join(EXT_PROD, 'variant.js')).href);
+    const dev = await import(pathToFileURL(path.join(EXT_DEV, 'variant.js')).href);
+    assert(prod.VARIANT.folder === 'DeLaClaw', 'prod must resolve the DeLaClaw/ folder');
+    assert(dev.VARIANT.folder === 'DeLaClawDev', 'dev must resolve the DeLaClawDev/ folder');
+    assert(prod.VARIANT.appUrl === 'https://delaclaw.com', 'prod must open delaclaw.com');
+    assert(dev.VARIANT.appUrl === 'https://dev.delaclaw.pages.dev', 'dev must open the dev preview');
+    assert(prod.VARIANT.extensionId === 'cnpaghkipnignlonpoblbpoceheompap', 'prod variant id must match the registered id');
+    assert(dev.VARIANT.extensionId === 'kpogipeoagoggadlphkmehgfgippgjfl', 'dev variant id must match the registered id');
+    assert(prod.VARIANT.isDev === false && dev.VARIANT.isDev === true, 'isDev must differ per variant');
+  });
+
+  test('extension: shortcuts are the spec chords, per variant', () => {
+    const prod = JSON.parse(fs.readFileSync(path.join(EXT_PROD, 'manifest.json'), 'utf8'));
+    const dev = JSON.parse(fs.readFileSync(path.join(EXT_DEV, 'manifest.json'), 'utf8'));
+    const pKey = prod.commands._execute_action.suggested_key;
+    const dKey = dev.commands._execute_action.suggested_key;
+    assert(pKey.default === 'Ctrl+Shift+Y' && pKey.mac === 'Command+Shift+Y', 'prod shortcut must be Ctrl+Shift+Y');
+    assert(dKey.default === 'Ctrl+Shift+U' && dKey.mac === 'Command+Shift+U', 'dev shortcut must be Ctrl+Shift+U');
+  });
+
+  test('extension: known schema version is the latest DRIVE_MIGRATIONS key', async () => {
+    const { compareVersions } = await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'version-compare.js')).href);
+    const src = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf8');
+    const keys = [...src.matchAll(/'([0-9][0-9.]*?)':/g)].map((m) => m[1]);
+    const latest = keys.sort(compareVersions).pop();
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      const { VARIANT } = await import(pathToFileURL(path.join(dir, 'variant.js')).href);
+      assert(VARIANT.knownSchemaVersion === latest,
+        `stamped knownSchemaVersion (${VARIANT.knownSchemaVersion}) must equal the latest migration key (${latest})`);
+    }
+  });
+
+  test('extension: popup and service worker entry points exist and are wired', () => {
+    const html = fs.readFileSync(path.join(EXT_PROD, 'popup.html'), 'utf8');
+    assert(html.includes('<script type="module" src="popup.js">'), 'popup.html must load popup.js as a module');
+    assert(html.includes('href="popup.css"'), 'popup.html must load popup.css');
+    const sw = fs.readFileSync(path.join(EXT_PROD, 'service-worker.js'), 'utf8');
+    assert(sw.includes('chrome.runtime.onMessage.addListener'), 'service worker must expose the message API');
+    const popupJs = fs.readFileSync(path.join(EXT_PROD, 'popup.js'), 'utf8');
+    assert(popupJs.includes("chrome.runtime.sendMessage"), 'popup must talk to the service worker, never to Drive directly');
+    assert(!popupJs.includes('launchWebAuthFlow'), 'popup must never run launchWebAuthFlow (its document dies mid-flow)');
+    assert(!popupJs.includes('innerHTML'), 'popup must not use innerHTML (user data goes through textContent)');
+  });
+
+  test('extension: popup CSS carries the theme variables copied from style.css', () => {
+    const css = fs.readFileSync(path.join(EXT_PROD, 'popup.css'), 'utf8');
+    assert(css.includes(':root {'), 'popup.css must include the :root variables copied from style.css');
+    assert(css.includes('[data-theme="light"]'), 'popup.css must include the light-theme overrides copied from style.css');
+    assert(!css.includes('__THEME_VARS__'), 'the __THEME_VARS__ placeholder must be replaced at packaging');
+    for (const v of ['--bg', '--text', '--muted', '--accent', '--surface', '--border']) {
+      assert(css.includes(v), `popup.css must define ${v}`);
+    }
+  });
+
+  test('extension: icons exist at all sizes and the variants differ', () => {
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      for (const s of [16, 32, 48, 128]) {
+        const p = path.join(dir, 'icons', `icon-${s}.png`);
+        assert(fs.existsSync(p) && fs.statSync(p).size > 0, `missing icon ${p}`);
+      }
+    }
+    const prod128 = fs.readFileSync(path.join(EXT_PROD, 'icons', 'icon-128.png'));
+    const dev128 = fs.readFileSync(path.join(EXT_DEV, 'icons', 'icon-128.png'));
+    assert(!prod128.equals(dev128), 'prod and dev icons must differ (the two installed extensions must be distinguishable)');
+  });
+
+  test('extension data: TODO row shape matches the app insert path', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const row = data.buildTodoRow({ text: 'Buy milk', categoryId: 'c1', sortOrder: -2 });
+    assert(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(row.id),
+      'todo id must be a UUID');
+    assert(row.done === false, 'a new TODO row sets done: false explicitly');
+    assert(row.priority === 'normal', 'priority defaults to normal');
+    assert(!('due_date' in row), 'due_date is omitted when unset');
+    assert(!('snooze_until' in row), 'snooze_until is omitted on insert (the app reads a missing key as not snoozed)');
+    assert(row.created_at === row.updated_at && !Number.isNaN(Date.parse(row.created_at)),
+      'created_at/updated_at are ISO timestamps set to now');
+    const dated = data.buildTodoRow({ text: 'x', categoryId: 'c1', sortOrder: 0, dueDate: '2026-11-20' });
+    assert(dated.due_date === '2026-11-20', 'due_date is set when given');
+  });
+
+  test('extension data: sort_order uses the pending-only minimum, not all rows', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const rows = [
+      { done: true, category_id: 'c1', sort_order: -50 },
+      { done: false, category_id: 'c1', sort_order: -3 },
+      { done: false, category_id: 'c2', sort_order: -99 },
+    ];
+    assert(data.computeMinSortOrder(rows, 'c1') === -4,
+      'done rows must not drag new items down (min over pending only, minus 1)');
+    assert(data.computeMinSortOrder([], 'c1') === 0, 'an empty category starts at 0');
+    assert(data.computeMinSortOrder(rows.filter((r) => r.done), 'c1') === 0,
+      'a category with only done rows starts at 0');
+  });
+
+  test('extension data: category resolution never hardcodes an id', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const cats = [
+      { id: '_default_todo_categories', name: '', is_protected: 1 },
+      { id: '_shared_todo_cat', name: '__shared__', is_protected: 1 },
+      { id: 'admin', name: 'Admin', is_protected: 0 },
+    ];
+    assert(data.resolveDefaultCategory(cats).id === '_default_todo_categories',
+      'the General row is the protected non-shared row, resolved at runtime');
+    const offered = data.userCategories(cats);
+    assert(offered.length === 1 && offered[0].id === 'admin',
+      'the picker offers real user categories only (no __shared__, no General)');
+  });
+
+  test('extension data: capture text escapes links and truncates selections', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const text = data.buildCaptureText('A [B] title', 'https://x.example/a)b');
+    assert(text === 'A \\[B\\] title\n[A \\[B\\] title](https://x.example/a%29b)',
+      'capture text escapes [ ] in titles and ) in URLs');
+    assert(data.truncateSelection('x'.repeat(600)).length === 500, 'selections truncate to 500 characters');
+    assert(data.truncateSelection('short') === 'short', 'short selections pass through');
+  });
+
+  test('extension data: next_due recompute matches the app algorithm, incl. early guard and end date', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    // Daily, completed on time: next day.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_days:1', next_due: '2026-11-15', end_date: null, is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: '2026-11-16', is_finished: 0 }),
+      'daily completion advances next_due by one day');
+    // Weekly Mon/Wed/Fri, completed early (Sun 15 Nov, stored due Mon 16):
+    // unguarded next is Mon 16, which is <= current, so the guard skips it → Wed 18.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', next_due: '2026-11-16', end_date: null, is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: '2026-11-18', is_finished: 0 }),
+      'completing early skips the imminent occurrence (early guard)');
+    // End date: recomputed due strictly past it finishes the habit.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_days:1', next_due: '2026-11-15', end_date: '2026-11-15', is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: null, is_finished: 1 }),
+      'a due date past the end date finishes the habit');
+    // An occurrence exactly ON the end date is still due.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_days:1', next_due: '2026-11-15', end_date: '2026-11-16', is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: '2026-11-16', is_finished: 0 }),
+      'an occurrence exactly on the end date is still due');
+    // Free-text rules: next_due null, finished state kept.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every morning', next_due: '2026-11-15', end_date: null, is_finished: 1 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: null, is_finished: 1 }),
+      'free-text rules keep their previous finished state');
+  });
+
+  test('extension data: next_due recompute agrees with the app migration helper except for the early guard', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const freq = await import(pathToFileURL(path.join(JS_DIR, 'frequency-rule.js')).href);
+    // A completion that is NOT early: both must agree.
+    const habit = { frequency_rule: 'every_N_days:1', next_due: '2026-11-10', end_date: null, is_finished: 0 };
+    const done = data.recomputeNextDueForDone(habit, '2026-11-15T10:00:00.000Z');
+    const migrated = freq.recomputeNextDueForMigration(habit, '2026-11-15T10:00:00.000Z');
+    assert(done.next_due === migrated.next_due && done.is_finished === migrated.is_finished,
+      'on a non-early completion the extension recompute must agree with the app migration helper');
+    // An early completion: the migration helper resurrects the skipped
+    // occurrence (by design, one-shot repair); the Done path must not.
+    const earlyHabit = { frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', next_due: '2026-11-16', end_date: null, is_finished: 0 };
+    const earlyDone = data.recomputeNextDueForDone(earlyHabit, '2026-11-15T10:00:00.000Z');
+    const earlyMigrated = freq.recomputeNextDueForMigration(earlyHabit, '2026-11-15T10:00:00.000Z');
+    assert(earlyDone.next_due === '2026-11-18' && earlyMigrated.next_due === '2026-11-16',
+      'on an early completion the Done path skips the imminent occurrence while the migration helper does not');
+  });
+
+  test('extension data: due list applies every exclusion', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const today = data.todayLocalStr();
+    const noon = new Date(); noon.setHours(12, 0, 0, 0);
+    const yesterdayNoon = new Date(noon); yesterdayNoon.setDate(yesterdayNoon.getDate() - 1);
+    const habits = [
+      { id: 'due', name: 'Due', next_due: today, is_draft: 0, is_finished: 0 },
+      { id: 'overdue', name: 'Overdue', next_due: '2000-01-01', is_draft: 0, is_finished: 0 },
+      { id: 'future', name: 'Future', next_due: '2999-01-01', is_draft: 0, is_finished: 0 },
+      { id: 'draft', name: 'Draft', next_due: today, is_draft: 1, is_finished: 0 },
+      { id: 'finished', name: 'Finished', next_due: today, is_draft: 0, is_finished: 1 },
+      { id: 'shared', name: 'Shared', next_due: today, is_draft: 0, is_finished: 0, shared_id: 's1' },
+      { id: 'snoozed', name: 'Snoozed', next_due: today, is_draft: 0, is_finished: 0, snoozed_until: '2999-01-01' },
+      { id: 'snooze-expired', name: 'Snooze expired', next_due: today, is_draft: 0, is_finished: 0, snoozed_until: '2000-01-01' },
+      { id: 'done-today', name: 'Done today', next_due: today, is_draft: 0, is_finished: 0 },
+      { id: 'done-yesterday', name: 'Done yesterday', next_due: today, is_draft: 0, is_finished: 0 },
+    ];
+    const completions = [
+      { habit_id: 'done-today', completed_at: noon.toISOString() },
+      { habit_id: 'done-yesterday', completed_at: yesterdayNoon.toISOString() },
+    ];
+    const shown = data.filterDueHabits(habits, completions, today).map((h) => h.id).sort();
+    assert(JSON.stringify(shown) === JSON.stringify(['done-yesterday', 'due', 'overdue', 'snooze-expired']),
+      `due list must show due/overdue/snooze-expired/done-yesterday only, got ${shown}`);
+  });
+
+  test('extension data: schema-version guard refuses newer or missing versions', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    assert(data.checkSchemaVersion('2.32.102', '2.32.102') === null, 'equal versions may write');
+    assert(data.checkSchemaVersion('2.32.34', '2.32.102') === null, 'an older live version may write');
+    assert(typeof data.checkSchemaVersion('2.32.103', '2.32.102') === 'string',
+      'a newer live version must refuse with a message');
+    assert(typeof data.checkSchemaVersion(null, '2.32.102') === 'string',
+      'a missing live version must refuse (setup incomplete)');
+  });
+
+  test('extension i18n: every popup string exists in EN, FR and ES', async () => {
+    const i18n = await import(pathToFileURL(path.join(EXT_PROD, 'i18n.js')).href);
+    const keys = Object.keys(i18n.STRINGS.en).sort();
+    assert(keys.length > 0, 'the popup must have strings');
+    for (const lang of ['fr', 'es']) {
+      assert(JSON.stringify(Object.keys(i18n.STRINGS[lang]).sort()) === JSON.stringify(keys),
+        `${lang} strings must cover exactly the en keys`);
+      for (const k of keys) assert(i18n.STRINGS[lang][k], `${lang} string ${k} must not be empty`);
+    }
+    assert(i18n.pickLang('fr-FR') === 'fr' && i18n.pickLang('de') === 'en', 'language pick falls back to en');
+    assert(i18n.makeT('fr')('signIn') === 'Se connecter avec Google', 'fr sign-in string');
+  });
+
+  test('extension auth: implicit-flow URL and fragment parsing', async () => {
+    const auth = await import(pathToFileURL(path.join(EXT_PROD, 'auth.js')).href);
+    const url = auth.buildAuthUrl({ redirectUri: 'https://cnpaghkipnignlonpoblbpoceheompap.chromiumapp.org/oauth2', state: 's1', interactive: true });
+    assert(url.includes('response_type=token'), 'implicit flow must request response_type=token');
+    assert(url.includes('prompt=consent'), 'interactive flow must use prompt=consent');
+    assert(!url.includes('code_challenge') && !url.includes('response_type=code'), 'no PKCE and no code flow');
+    assert(url.includes('drive.file') && url.includes('calendar.app.created'), 'both scopes must be in the grant');
+    const silent = auth.buildAuthUrl({ redirectUri: 'https://x.chromiumapp.org/oauth2', state: 's2', interactive: false });
+    assert(silent.includes('prompt=none'), 'silent re-auth must use prompt=none');
+    const parsed = auth.parseAuthRedirect('https://cnpaghkipnignlonpoblbpoceheompap.chromiumapp.org/oauth2#access_token=abc&token_type=Bearer&expires_in=3600&state=s1', 's1');
+    assert(parsed.accessToken === 'abc' && parsed.expiresInSec === 3600, 'fragment parsing must return the token and expiry');
+    assertThrows(() => auth.parseAuthRedirect('https://x/#access_token=abc&expires_in=3600&state=s2', 's1'),
+      'a state mismatch must be rejected');
+    assertThrows(() => auth.parseAuthRedirect('https://x/#error=access_denied&state=s1', 's1'),
+      'a Google error must be rejected');
+  });
+
+  test('extension drive: folder resolution refuses zero or two folders', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const stub = async (url) => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ files: [] }),
+    });
+    await assertRejects(drive.resolveFolderId('tok', 'DeLaClaw', stub), 'no folder must refuse');
+    const two = async (url) => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ files: [{ id: 'a', name: 'DeLaClaw' }, { id: 'b', name: 'DeLaClaw' }] }),
+    });
+    await assertRejects(drive.resolveFolderId('tok', 'DeLaClaw', two), 'two folders must refuse to guess');
+    const one = async (url) => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ files: [{ id: 'folder-1', name: 'DeLaClaw' }] }),
+    });
+    assert(await drive.resolveFolderId('tok', 'DeLaClaw', one) === 'folder-1', 'one folder resolves');
+  });
+
+  test('extension drive: upload uses the app multipart shape', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    let captured = null;
+    const stub = async (url, opts) => {
+      captured = { url, opts };
+      return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'f1' }) };
+    };
+    await drive.uploadFile('tok', 'f1', 'todos.json', [{ id: 'a', text: 'hello' }], stub);
+    assert(captured.opts.method === 'PATCH', 'upload must PATCH');
+    assert(captured.url.includes('uploadType=multipart'), 'upload must use uploadType=multipart');
+    assert(captured.opts.headers['Content-Type'].includes('multipart/related; boundary=---dlc-drive-boundary'),
+      'upload must use the app multipart boundary');
+    assert(captured.opts.body.includes('"name":"todos.json"'), 'upload body must carry the metadata part');
+    assert(captured.opts.body.includes('[\n  {\n    "id": "a",\n    "text": "hello"\n  }\n]'),
+      'upload body must serialize with JSON.stringify(data, null, 2)');
+  });
+
+  // A fake Drive backend for the write-protocol tests: files.list,
+  // media download, metadata reads and multipart upload, with a hook
+  // that applies an external change on a chosen metadata read.
+  function fakeDrive(initialRows) {
+    let rows = JSON.parse(JSON.stringify(initialRows));
+    let md5 = 'v1';
+    let metaCalls = 0;
+    let uploads = [];
+    let changeCount = 0;
+    let changeOnMetaCall = null; // fn(n) — applied before answering meta call n
+    let mediaCalls = 0;
+    let changeOnMediaCall = null; // fn(n) — applied before answering media download n
+    const fetchImpl = async (url, opts = {}) => {
+      if (url.includes('/files?q=')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ files: [{ id: 'todos-1', name: 'todos.json', md5Checksum: md5 }] }) };
+      }
+      if (url.includes('?alt=media')) {
+        mediaCalls += 1;
+        if (changeOnMediaCall) changeOnMediaCall(mediaCalls);
+        return { ok: true, status: 200, text: async () => JSON.stringify(rows) };
+      }
+      if (url.includes('fields=md5Checksum')) {
+        metaCalls += 1;
+        if (changeOnMetaCall) changeOnMetaCall(metaCalls);
+        return { ok: true, status: 200, text: async () => JSON.stringify({ md5Checksum: md5, modifiedTime: '2026-11-15T00:00:00.000Z' }) };
+      }
+      if ((opts.method || 'GET') === 'PATCH') {
+        const body = opts.body || '';
+        const parts = body.split(`--${'---dlc-drive-boundary'}`);
+        const dataPart = parts[2] || '';
+        const json = dataPart.slice(dataPart.indexOf('\r\n\r\n') + 4);
+        const uploaded = JSON.parse(json);
+        uploads.push(uploaded);
+        rows = uploaded;
+        md5 = `v${uploads.length + 1}`;
+        return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'todos-1' }) };
+      }
+      throw new Error(`unexpected fake-drive URL: ${url}`);
+    };
+    return {
+      fetchImpl,
+      get uploads() { return uploads; },
+      applyExternalChange(newRows) { rows = newRows; changeCount += 1; md5 = `v-ext-${changeCount}`; },
+      setChangeOnMetaCall(fn) { changeOnMetaCall = fn; },
+      setChangeOnMediaCall(fn) { changeOnMediaCall = fn; },
+      get rows() { return rows; },
+    };
+  }
+
+  test('extension data: appendRowOnce never duplicates a row id, and builders accept a fixed id', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const rows = [{ id: 'a', text: 'existing' }];
+    const appended = data.appendRowOnce(rows, { id: 'b', text: 'new' });
+    assert(appended.length === 2 && appended[1].id === 'b', 'a new id is appended');
+    assert(data.appendRowOnce(appended, { id: 'b', text: 'new again' }) === appended,
+      'an existing id returns the same rows untouched — a retried write is a no-op');
+    assert(JSON.stringify(data.appendRowOnce(null, { id: 'x' })) === JSON.stringify([{ id: 'x' }]),
+      'a missing rows array starts fresh');
+    assert(data.buildTodoRow({ text: 't', categoryId: 'c', sortOrder: 0, id: 'fixed' }).id === 'fixed',
+      'buildTodoRow accepts a fixed id');
+    assert(data.buildCompletionRow('h1', '2026-11-21T00:00:00.000Z', 'fixed').id === 'fixed',
+      'buildCompletionRow accepts a fixed id');
+    assert(data.buildTodoRow({ text: 't', categoryId: 'c', sortOrder: 0 }).id,
+      'without a fixed id a row still gets one');
+  });
+
+  test('extension service worker: quick-add and habit-done fix their row id before the auth retry', () => {
+    const swSrc = fs.readFileSync(path.join(EXT_PROD, 'service-worker.js'), 'utf-8');
+    for (const [fnName, idName] of [['handleQuickAdd', 'insertedId'], ['handleMarkHabitDone', 'completionId']]) {
+      const start = swSrc.indexOf(`async function ${fnName}`);
+      assert(start !== -1, `could not find ${fnName} in service-worker.js`);
+      const end = swSrc.indexOf('\n}\n', start);
+      assert(end !== -1, `could not find the end of ${fnName}`);
+      const fn = swSrc.slice(start, end);
+      // The id must be fixed before withAuthRetry wraps the operation —
+      // otherwise a 401 after a successful write re-runs the insert with
+      // a fresh id and duplicates the row (006c30f review).
+      assert(fn.indexOf(`const ${idName} = crypto.randomUUID();`) !== -1, `${fnName} must fix its row id up front`);
+      assert(fn.indexOf(`const ${idName} = crypto.randomUUID();`) < fn.indexOf('return withAuthRetry('),
+        `${fnName} must fix its row id before the auth retry, not inside it`);
+      assert(fn.includes('appendRowOnce(rows, row)'), `${fnName} must append through the idempotent helper`);
+      assert(!fn.includes('return [...rows, row];'), `${fnName} must not blindly append`);
+    }
+  });
+
+  test('extension drive: md5 pre-check re-reads once and keeps the concurrent change', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const fake = fakeDrive([{ id: 'a', text: 'existing' }]);
+    // The file moves once, between the list read and the pre-check.
+    fake.setChangeOnMetaCall((n) => {
+      if (n === 1) fake.applyExternalChange([{ id: 'a', text: 'existing' }, { id: 'ext', text: 'from another client' }]);
+    });
+    const file = { id: 'todos-1', name: 'todos.json', md5Checksum: 'v1' };
+    let mine = null;
+    const readBack = await drive.writeTable('tok', file, (rows) => {
+      mine = { id: 'mine', text: 'mine' };
+      return [...rows, mine];
+    }, (rows) => rows.some((r) => r.id === 'mine'), fake.fetchImpl);
+    assert(fake.uploads.length === 1, 'one upload after one re-read');
+    const uploaded = fake.uploads[0];
+    assert(uploaded.some((r) => r.id === 'ext') && uploaded.some((r) => r.id === 'mine'),
+      'the upload must keep the concurrent change and the new row');
+    assert(readBack.some((r) => r.id === 'mine'), 'the confirming read-back must show the new row');
+  });
+
+  test('extension drive: the folder cache is keyed by account and drops on sign-out', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    let resolves = 0;
+    const fetchImpl = async (url) => {
+      if (url.includes('/files?q=')) {
+        resolves += 1;
+        return { ok: true, status: 200, text: async () => JSON.stringify({ files: [{ id: `folder-${resolves}`, name: 'DeLaClaw' }] }) };
+      }
+      throw new Error(`unexpected fake-drive URL: ${url}`);
+    };
+    const cache = drive.createFolderCache();
+    assert(await cache.folderId('tok', 'DeLaClaw', 'a@example.com', fetchImpl) === 'folder-1', 'first resolve');
+    assert(await cache.folderId('tok', 'DeLaClaw', 'a@example.com', fetchImpl) === 'folder-1', 'the same account reuses the cache');
+    assert(resolves === 1, 'the same account must not re-resolve');
+    assert(await cache.folderId('tok', 'DeLaClaw', 'b@example.com', fetchImpl) === 'folder-2', 'a different account re-resolves');
+    assert(resolves === 2, 'an account change must re-resolve, never reuse the previous account\'s folder');
+    cache.reset();
+    assert(await cache.folderId('tok', 'DeLaClaw', 'b@example.com', fetchImpl) === 'folder-3', 'reset forces a fresh resolve');
+    assert(resolves === 3, 'reset must re-resolve even for the same account');
+  });
+
+  test('extension service worker: folder resolution follows the account and sign-out drops the cache', () => {
+    const swSrc = fs.readFileSync(path.join(EXT_PROD, 'service-worker.js'), 'utf-8');
+    assert(swSrc.includes('createFolderCache'), 'the worker must use the account-keyed folder cache');
+    assert(swSrc.includes('folderCache.folderId(token, VARIANT.folder,'), 'folder resolution must pass the account email');
+    assert(!swSrc.includes('let cachedFolderId'), 'no bare folder-id cache may survive');
+    assert(swSrc.includes('folderCache.reset()'), 'sign-out must drop the cached folder id');
+  });
+
+  test('extension drive: concurrent writes to the same file are serialized and both survive', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const fake = fakeDrive([{ id: 'a', text: 'existing' }]);
+    const file = { id: 'todos-1', name: 'todos.json', md5Checksum: 'v1' };
+    await Promise.all([
+      drive.writeTable('tok', file, (rows) => [...rows, { id: 'mine1', text: 'first' }], (rows) => rows.some((r) => r.id === 'mine1'), fake.fetchImpl),
+      drive.writeTable('tok', file, (rows) => [...rows, { id: 'mine2', text: 'second' }], (rows) => rows.some((r) => r.id === 'mine2'), fake.fetchImpl),
+    ]);
+    assert(fake.uploads.length === 2, 'two serialized writes mean two uploads');
+    assert(fake.rows.some((r) => r.id === 'mine1') && fake.rows.some((r) => r.id === 'mine2'),
+      'the second write must see the first write\'s row — no silent clobber');
+  });
+
+  test('extension drive: a read-back missing rows the write produced aborts loudly', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const fake = fakeDrive([{ id: 'a', text: 'existing' }]);
+    // A concurrent writer overwrites the file between our upload and our
+    // read-back, dropping a pre-existing row but keeping our new one —
+    // the caller's verify alone would pass, so the baseline check must catch it.
+    fake.setChangeOnMediaCall((n) => {
+      if (n === 2) fake.applyExternalChange([{ id: 'mine', text: 'mine' }]);
+    });
+    const file = { id: 'todos-1', name: 'todos.json', md5Checksum: 'v1' };
+    await assertRejects(drive.writeTable('tok', file, (rows) => [...rows, { id: 'mine', text: 'mine' }],
+      (rows) => rows.some((r) => r.id === 'mine'), fake.fetchImpl),
+      'a read-back missing a row the write produced must fail loudly');
+    assert(fake.uploads.length === 1, 'the upload already happened — the failure is reported, not silently swallowed');
+  });
+
+  test('extension drive: file moved twice aborts and writes nothing', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const fake = fakeDrive([{ id: 'a', text: 'existing' }]);
+    // The file moves on every metadata read: the pre-check can never pass.
+    fake.setChangeOnMetaCall(() => fake.applyExternalChange([{ id: 'a', text: 'existing' }, { id: 'ext', text: 'moved' }]));
+    const file = { id: 'todos-1', name: 'todos.json', md5Checksum: 'v1' };
+    await assertRejects(drive.writeTable('tok', file, (rows) => [...rows, { id: 'mine' }],
+      (rows) => rows.some((r) => r.id === 'mine'), fake.fetchImpl),
+      'a file that moves twice must abort');
+    assert(fake.uploads.length === 0, 'an aborted write must upload nothing');
+  });
 
   // ===================================================================
   // SUMMARY

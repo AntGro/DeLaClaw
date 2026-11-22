@@ -43,6 +43,7 @@ export const SHARING_INTERFACE = {
   // ── Identity ────────────────────────────────────────────────
   getCurrentUser:           'fn',   // () => SharingUser | Promise<SharingUser>
   getCurrentMemberId:       'fn',   // (groupId) => Promise<string|null>
+  getCurrentUserMemberId:   'fn',   // () => Promise<string|null> — the current user's member id, group-independent (hash of their email); the uploader id stamped on attachment records
 
   // ── Groups — lifecycle ──────────────────────────────────────
   createGroup:              'fn',   // (name: string, onProgress?: (ev: {step, done, total}) => void) => Promise<Group>
@@ -95,6 +96,11 @@ export const SHARING_INTERFACE = {
   deleteItem:               'fn',   // (groupId, itemId, opts?) => Promise<void>; opts.onStaged like addItem; a failed upload restores the item and its intents
   completeItem:             'fn',   // (groupId, itemId, doneBy?, opts?) => Promise<SharedItem>
   uncompleteItem:           'fn',   // (groupId, itemId, opts?) => Promise<SharedItem>
+
+  // ── Attachments ─────────────────────────────────────────────
+  shareFileWithGroup:       'fn',   // (groupId, fileId, role?) => Promise<string[]> — share a Drive file (e.g. a list item attachment) with every other joined member, as reader; returns the shared member_ids
+  revokeFileWithGroup:      'fn',   // (groupId, fileId, member_ids?) => Promise<string[]> — revoke on unshare: remove every other joined member's access to one of my Drive files; with member_ids, only those members' access is removed (rollback of a partial share); returns the revoked member_ids
+  sweepAttachmentGrants:    'fn',   // (groupId) => Promise<string[]> — join-backfill: grant every currently-joined member reader access to my own attachment files in the group; returns the member_ids granted
 
   // ── Items — habits (type-specific) ──────────────────────────
   addSharedHabit:           'fn',   // (groupId, habitData, opts?) => Promise<SharedItem>; opts.onStaged like addItem

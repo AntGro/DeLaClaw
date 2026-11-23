@@ -1006,6 +1006,119 @@ test('Cancelled inline edit skips its refresh when a newer edit has started', ()
 });
 
 // ===================================================================
+// 22c. Touch row actions: two primary + kebab menu (splitRowActions)
+// ===================================================================
+function loadRowActionHelpers() {
+  const itemUtils = jsFiles['item-utils.js'];
+  const start = itemUtils.indexOf('// ── Pure touch row-action helpers ──');
+  const end = itemUtils.indexOf('// ── End pure touch row-action helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure touch row-action helpers block in item-utils.js');
+  return new Function(`${itemUtils.slice(start, end)}; return { TOUCH_PRIMARY_ACTIONS, splitRowActions };`)();
+}
+
+test('Touch row actions: splitRowActions keeps the first two preferred actions per surface', () => {
+  const { TOUCH_PRIMARY_ACTIONS: P, splitRowActions } = loadRowActionHelpers();
+
+  // TODOs: full row (7 buttons) and done row (4 buttons)
+  let r = splitRowActions(['toggle-todo', 'open-snooze-modal', 'share-existing-todo', 'copy-item-link', 'edit-todo-inline', 'delete-todo'], P.todo);
+  assert(JSON.stringify(r.primary) === '[0,4]' && JSON.stringify(r.overflow) === '[1,2,3,5]',
+    'todos: Done + Edit stay visible, snooze/share/link/delete go behind the kebab');
+  r = splitRowActions(['toggle-todo', 'copy-item-link', 'edit-todo-inline', 'delete-todo'], P.todo);
+  assert(JSON.stringify(r.primary) === '[0,2]',
+    'todos (done): Undo + Edit stay visible');
+
+  // Welcome TODO rows use the welcome-* variants of the same actions
+  r = splitRowActions(['welcome-toggle-todo', 'welcome-snooze', 'edit-todo-inline', 'copy-item-link', 'welcome-delete-todo'], P.todo);
+  assert(JSON.stringify(r.primary) === '[0,2]',
+    'welcome todos: Done + Edit stay visible via the welcome-* variants');
+
+  // Habits: full row (8 buttons) and draft row (no Done)
+  r = splitRowActions(['mark-habit-done', 'open-habit-snooze-modal', 'open-habit-history', 'share-existing-habit', 'copy-item-link', 'open-edit-habit-modal', 'delete-habit'], P.habit);
+  assert(JSON.stringify(r.primary) === '[0,5]',
+    'habits: Done + Edit stay visible, snooze/history/share/link/delete go behind the kebab');
+  r = splitRowActions(['open-habit-history', 'copy-item-link', 'open-edit-habit-modal', 'delete-habit'], P.habit);
+  assert(JSON.stringify(r.primary) === '[2]',
+    'habits (draft, no Done): Edit alone stays visible');
+
+  // Welcome habit rows use welcome-mark-habit-done + edit-habit-inline
+  r = splitRowActions(['welcome-mark-habit-done', 'open-habit-snooze-modal', 'welcome-open-habit-history', 'edit-habit-inline', 'copy-item-link', 'welcome-delete-habit'], P.habit);
+  assert(JSON.stringify(r.primary) === '[0,3]',
+    'welcome habits: Done + Edit stay visible via the welcome-* variants');
+
+  // Lists: with attach (Drive) and without (demo)
+  r = splitRowActions(['share-existing-list-item', 'attach-to-list-item', 'copy-item-link', 'edit-list-item-inline', 'delete-list-item'], P.list);
+  assert(JSON.stringify(r.primary) === '[1,3]',
+    'lists: Attach + Edit stay visible');
+  r = splitRowActions(['copy-item-link', 'edit-list-item-inline', 'delete-list-item'], P.list);
+  assert(JSON.stringify(r.primary) === '[1]',
+    'lists (no attach): Edit alone stays visible');
+
+  // Projects: review task and draft task (promote is the status button)
+  r = splitRowActions(['update-task-status', 'open-revision-modal', 'copy-item-link', 'prompt-edit-task', 'delete-task'], P.task);
+  assert(JSON.stringify(r.primary) === '[0,3]',
+    'projects (review): Approve + Edit stay visible');
+  r = splitRowActions(['update-task-status', 'copy-item-link', 'prompt-edit-task', 'delete-task'], P.task);
+  assert(JSON.stringify(r.primary) === '[0,2]',
+    'projects (draft): Promote + Edit stay visible');
+
+  // Memory cards: Edit + Delete, copy link behind the kebab
+  r = splitRowActions(['copy-item-link', 'open-edit-flashcard', 'delete-flashcard'], P.card);
+  assert(JSON.stringify(r.primary) === '[1,2]' && JSON.stringify(r.overflow) === '[0]',
+    'memory cards: Edit + Delete stay visible, copy link goes behind the kebab');
+
+  // Memory texts: Revise + Expand, the rest behind the kebab
+  r = splitRowActions(['copy-item-link', 'start-text-practice-for-text', 'tr-expand-toggle', 'open-edit-text', 'delete-text'], P.text);
+  assert(JSON.stringify(r.primary) === '[1,2]',
+    'memory texts: Revise + Expand stay visible');
+
+  // Memory drafts: Propose + Edit; once a proposal exists, Edit + Delete
+  r = splitRowActions(['copy-item-link', 'request-proposal', 'start-inline-edit-draft', 'delete-draft'], P.draft);
+  assert(JSON.stringify(r.primary) === '[1,2]',
+    'memory drafts: Propose + Edit stay visible');
+  r = splitRowActions(['copy-item-link', 'start-inline-edit-draft', 'delete-draft'], P.draft);
+  assert(JSON.stringify(r.primary) === '[1,2]',
+    'memory drafts (proposal exists): Edit + Delete stay visible');
+
+  // Boundaries: unknown keys never become primary; empty input splits empty
+  r = splitRowActions(['copy-item-link', 'delete-todo'], P.todo);
+  assert(JSON.stringify(r.primary) === '[]' && JSON.stringify(r.overflow) === '[0,1]',
+    'no preferred action present: nothing stays visible, everything goes behind the kebab');
+  r = splitRowActions([], P.todo);
+  assert(JSON.stringify(r.primary) === '[]' && JSON.stringify(r.overflow) === '[]',
+    'empty row splits empty');
+});
+
+test('Touch row actions: compaction runs in the touch branch and the kebab menu reuses the row buttons', () => {
+  const itemUtils = jsFiles['item-utils.js'];
+  assert(itemUtils.includes('compactRowActionsForTouch(item, actions)'),
+    'item-utils.js: initItemHoverDelay must compact row actions on touch');
+  assert(itemUtils.includes("kebab.className = 'row-action-kebab'"),
+    'item-utils.js: the compaction must append a kebab button');
+  assert(itemUtils.includes('cloneNode(true)') && itemUtils.includes("clone.classList.add('header-menu-item')"),
+    'item-utils.js: menu rows must be clones of the row buttons styled as header-menu items');
+  assert(itemUtils.includes('function openRowActionsMenu') && itemUtils.includes('function closeRowActionsMenu'),
+    'item-utils.js: the kebab menu must have open/close functions');
+
+  // Boot sets the html.touch class that the CSS keys off
+  const main = jsFiles['main.js'];
+  assert(main.includes("document.documentElement.classList.toggle('touch', isTouchDevice())"),
+    'main.js: boot must set the html.touch class from isTouchDevice()');
+
+  // CSS: bigger targets, overflow hidden behind the kebab, menu styles
+  assert(styleCss.includes('html.touch .todo-actions button') && styleCss.includes('min-width:40px'),
+    'style.css: touch action buttons must be bigger (40px targets)');
+  assert(styleCss.includes('button.row-action-overflow') && styleCss.includes('display:none'),
+    'style.css: overflow buttons must hide on touch');
+  assert(styleCss.includes('.row-actions-menu') && styleCss.includes('.row-actions-menu.open'),
+    'style.css: the kebab menu must be styled');
+
+  // i18n: kebab label in all three locales
+  const i18n = jsFiles['i18n.js'];
+  assert((i18n.match(/more_actions:/g) || []).length === 3,
+    'i18n.js: common.more_actions must exist in EN/FR/ES');
+});
+
+// ===================================================================
 // 23. Welcome habit dblclick calls canonical window.editHabitInline (not a local duplicate)
 // ===================================================================
 test('Welcome habit dblclick calls canonical window.editHabitInline', () => {

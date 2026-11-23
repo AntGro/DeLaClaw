@@ -31,6 +31,7 @@ User jobs:
 - **Sort order:** no sort selector — lists ordered manually via drag only. Items within a list: unchecked first by `sort_order`, checked at bottom
 - **Search:** `filterLists` / `listSearchQuery` — filters across list names and item names
 - **`__shared__` list:** auto-created on first shared item sync, hidden when empty, purple color (`#a78bfa`)
+- **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows Attach + Edit at 40px targets plus a kebab menu holding share/copy-link/delete (see todos.md for the shared mechanism in `item-utils.js`). The attach button only renders in Drive mode, so demo shows Edit alone. Desktop unchanged.
 
 ## Interaction Guards
 - **Pending sets:**

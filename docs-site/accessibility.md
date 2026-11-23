@@ -94,9 +94,9 @@ When the UI language is changed (FR, ES), the `<html lang="...">` attribute is n
 
 ### 11. Touch targets on mobile
 
-Some action buttons (edit, delete, priority icons) are small on mobile. WCAG recommends a minimum touch target of 44x44px.
+On touch-first devices, item row actions now show two primary actions at 40px targets plus a kebab menu holding the rest (v2.32.146), so they no longer wrap across rows. WCAG recommends a minimum touch target of 44x44px — the 40px row targets are still short of that, and other small interactive elements (edit, delete, priority icons outside row actions) are unchanged.
 
-**Recommendation**: Review and increase padding on small interactive elements for mobile viewports.
+**Recommendation**: Review and increase padding on the remaining small interactive elements for mobile viewports, and consider 44px row targets.
 
 ## Fixes applied in this commit
 

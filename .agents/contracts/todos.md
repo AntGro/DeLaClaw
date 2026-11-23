@@ -32,6 +32,7 @@ User jobs:
 - **Cross-category drag:** `initItemDragDrop` with `crossContainerSelector` — TODOs draggable between categories, updates `category_id` FK and re-numbers `sort_order`
 - **Inline edit:** note field via `inlineEditText`, preserves whitespace
 - **Done section:** `toggleDoneTodos` shows/hides completed items per category; `deleteAllDoneTodos` bulk-deletes done items in a category
+- **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows Done + Edit at 40px targets plus a kebab menu holding snooze/share/copy-link/delete. The menu rows are clones of the row's own buttons, so they fire the same `data-action` via delegation; the menu closes on outside tap, Escape, or scroll. Mechanism lives in `item-utils.js` (`TOUCH_PRIMARY_ACTIONS` / `splitRowActions` / `compactRowActionsForTouch`, run inside `initItemHoverDelay`'s touch branch). Welcome focus rows use the `welcome-*` variants (Done + Edit). Desktop unchanged.
 
 ## Interaction Guards
 - **Pending set:** `_pendingTodoToggles = Set<todoId>` for done/undone toggle

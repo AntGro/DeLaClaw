@@ -28,6 +28,7 @@ User jobs:
 - **Draft reorder:** drafts reorderable via `initItemDragDrop`, `sort_order` persisted
 - **Draft workflow:** `proposal_status=pending|ready`, feedback loop via `===FEEDBACK===` marker parsed by background worker
 - **`__shared__` deck:** hidden when empty, shown only when it has items
+- **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows two primary actions at 40px targets plus a kebab menu holding the rest (see todos.md for the shared mechanism in `item-utils.js`). Cards: Edit + Delete (copy link in the menu). Texts: Revise + Expand (copy link/edit/delete in the menu). Drafts: Propose + Edit, or Edit + Delete once a proposal exists. The proposal bar (Accept/Edit/Feedback/Reject) is not a row action and is untouched. Desktop unchanged.
 
 ## Interaction Guards
 - **Pending sets:** CODEMAP reports `pendingSet` — used for draft and card actions to block same-ID double-clicks while allowing concurrent different IDs

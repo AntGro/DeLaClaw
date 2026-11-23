@@ -2995,3 +2995,43 @@ button.cal-row { cursor: pointer; }
 }
 
 .cal-chip[data-hidden] { display: none; }
+
+/* ===== TOUCH ROW ACTIONS — two primary + kebab menu ===== */
+/* On touch-first devices (html.touch, set at boot from isTouchDevice())
+   each item row shows its two primary actions plus a kebab button opening
+   the rest in a menu, instead of all actions wrapping across rows. The
+   kebab is appended by item-utils.js; desktop is untouched. */
+.row-action-kebab{display:none;}
+html.touch .todo-actions button,
+html.touch .habit-actions button,
+html.touch .list-item-actions button,
+html.touch .task-actions button{padding:8px 10px;min-width:40px;min-height:40px;}
+html.touch .todo-actions button svg,
+html.touch .habit-actions button svg,
+html.touch .list-item-actions button svg,
+html.touch .task-actions button svg{width:20px;height:20px;}
+html.touch .todo-actions,
+html.touch .habit-actions,
+html.touch .list-item-actions,
+html.touch .task-actions{grid-template-columns:auto auto auto;}
+html.touch .todo-actions:has(:nth-child(4)):not(:has(:nth-child(5))),
+html.touch .habit-actions:has(:nth-child(4)):not(:has(:nth-child(5))),
+html.touch .task-actions:has(:nth-child(4)):not(:has(:nth-child(5))){grid-template-columns:auto auto auto;}
+html.touch .list-item-actions.cols-2{grid-template-columns:auto auto auto;}
+html.touch .todo-actions.visible,
+html.touch .habit-actions.visible,
+html.touch .list-item-actions.visible,
+html.touch .task-actions.visible{max-width:140px;}
+html.touch .todo-actions > button.row-action-overflow,
+html.touch .habit-actions > button.row-action-overflow,
+html.touch .list-item-actions > button.row-action-overflow,
+html.touch .task-actions > button.row-action-overflow{display:none;}
+html.touch .todo-actions > button.row-action-kebab,
+html.touch .habit-actions > button.row-action-kebab,
+html.touch .list-item-actions > button.row-action-kebab,
+html.touch .task-actions > button.row-action-kebab{display:inline-flex;align-items:center;justify-content:center;}
+.row-actions-menu{position:fixed;display:none;z-index:300;background:var(--dropdown-bg);border:1px solid var(--border);border-radius:10px;overflow:hidden;min-width:180px;box-shadow:0 4px 20px rgba(0,0,0,0.25);padding:4px 0;}
+.row-actions-menu.open{display:block;}
+.row-actions-menu button{display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border:none;background:none;color:var(--text);font-size:0.82rem;cursor:pointer;font-family:inherit;text-align:left;white-space:nowrap;}
+.row-actions-menu button:hover{background:var(--surface);}
+.row-actions-menu button svg{width:16px;height:16px;flex-shrink:0;}

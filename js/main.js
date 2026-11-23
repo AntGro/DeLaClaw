@@ -11,7 +11,7 @@ import { wrapWithOfflineCache, loadCacheSnapshot, driveCacheScope, showReadOnlyB
 import { DRIVE_SCOPE_FILE, clearStoredDriveEmail, getStoredDriveEmail } from './adapters/drive.js';
 import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, reconcileLedger as reconcileCalendarLedger, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
-import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, renderFooterIdentity, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
+import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, renderFooterIdentity, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
 
@@ -713,6 +713,8 @@ function requestStoragePersistence() {
 
 document.addEventListener('DOMContentLoaded', () => {
   requestStoragePersistence();
+  // Touch-first layout: row actions collapse to two primary + kebab menu.
+  document.documentElement.classList.toggle('touch', isTouchDevice());
   // Wrap all save/add/submit actions with guard() to prevent double-fire
   const guardedNames = [
     'saveNewBirthday', 'saveEditBirthday', 'removeAvatar',

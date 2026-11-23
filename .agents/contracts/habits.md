@@ -32,6 +32,7 @@ User jobs:
 - **Category nav:** reorderable via long-press drag (`initNavBtnReorder`), `sort_order` persisted
 - **Cross-category drag:** `initItemDragDrop` with `crossOnly: true` — habits can be dragged between categories but not reordered within a category
 - **Search:** text filter by name across all categories
+- **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows Done + Edit at 40px targets plus a kebab menu holding snooze/history/share/copy-link/delete (see todos.md for the shared mechanism in `item-utils.js`). Welcome focus rows use the `welcome-*` variants (`welcome-mark-habit-done` + `edit-habit-inline`). Desktop unchanged.
 
 ## Interaction Guards
 - **Pending set:** `window._pendingHabitDones = Set<habitId>`

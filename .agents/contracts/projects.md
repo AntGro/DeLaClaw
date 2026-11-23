@@ -31,6 +31,7 @@ User jobs:
 - **Expand/collapse:** `toggleExpandProject` expands a project card for focused view; `expandTask` shows a single task's full metadata in a modal
 - **Search:** `filterProjects` / `projectSearchQuery` — filters across project names, task titles, `hatch_response` content
 - **Archive toggle:** archived projects hidden by default, `toggleShowArchived` shows/hides; archived tasks within a project toggled via `toggleArchivedTasks`
+- **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows the status button (Approve/Promote/Reopen) + Edit at 40px targets plus a kebab menu holding copy-link/delete/revision (see todos.md for the shared mechanism in `item-utils.js`). Desktop unchanged.
 
 ## Interaction Guards
 - **Pending set:** `_pendingTaskStatus = Set<taskId>` for approve/promote

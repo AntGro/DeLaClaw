@@ -7,6 +7,7 @@ DeLaClaw has basic accessibility support but several gaps that should be address
 ## What works
 
 - **Keyboard shortcuts**: Alt+Left/Right to navigate between tabs
+- **Swipe navigation**: on touch devices, swipe left/right to move to the next/previous tab (same tab order as Alt+Left/Right, wraps around)
 - **Escape key**: closes all modals consistently
 - **Form labels**: login form has proper `<label for="...">` associations
 - **Search clear buttons**: have `aria-label="Clear search"`

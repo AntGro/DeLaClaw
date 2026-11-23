@@ -11,7 +11,7 @@ import { wrapWithOfflineCache, loadCacheSnapshot, driveCacheScope, showReadOnlyB
 import { DRIVE_SCOPE_FILE, clearStoredDriveEmail, getStoredDriveEmail } from './adapters/drive.js';
 import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, reconcileLedger as reconcileCalendarLedger, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
-import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, renderFooterIdentity, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP } from './utils.js';
+import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, renderFooterIdentity, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP, swipeDirection } from './utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
 
@@ -3697,6 +3697,62 @@ document.addEventListener('keydown', e => {
 });
 
 window.switchView = switchView;
+
+// ===================================================================
+// SWIPE NAVIGATION — swipe left/right to switch tabs (touch only)
+// ===================================================================
+// Mirrors the Alt+Arrow keyboard shortcut above: same tab list
+// (getVisibleTabs, respecting the user's tab order/visibility), same
+// wrap-around, same modal guard, plus the touch-specific guards (no
+// swipe from an editable field, the header, an open popover, or while
+// a drag is running). Quick swipes never arm the long-press drag
+// (150ms hold), but the drag guard stays for safety. The trailing
+// click of the swipe gesture is swallowed (capture, once, with a
+// 350ms fallback) so it cannot toggle or activate whatever sits under
+// the finger in the newly shown tab.
+let _swipeStart = null;
+if (isTouchDevice()) {
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { _swipeStart = null; return; }
+    const t = e.touches[0];
+    _swipeStart = { x: t.clientX, y: t.clientY, time: Date.now(), target: e.target };
+  }, { passive: true });
+  document.addEventListener('touchend', (e) => {
+    if (!_swipeStart || e.changedTouches.length !== 1) { _swipeStart = null; return; }
+    const t = e.changedTouches[0];
+    const dir = swipeDirection(t.clientX - _swipeStart.x, t.clientY - _swipeStart.y, Date.now() - _swipeStart.time);
+    const startTarget = _swipeStart.target;
+    _swipeStart = null;
+    if (!dir) return;
+    // Guards: editable field, header (tabs), open modal/popover, drag.
+    if (startTarget.closest && startTarget.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if (startTarget.closest && startTarget.closest('.app-header')) return;
+    if (document.querySelector('.modal-overlay.visible, .modal.visible')) return;
+    if (document.getElementById('chunkPanel')) return;
+    const practice = document.getElementById('practiceOverlay');
+    if (practice && getComputedStyle(practice).display !== 'none') return;
+    if (document.querySelector('.header-menu.open, .row-actions-menu.open')) return;
+    if (document.body.classList.contains('item-drag-active')) return;
+    const tabs = getVisibleTabs();
+    if (tabs.length < 2) return;
+    const idx = tabs.findIndex(t => t.key === state.currentView);
+    const cur = idx === -1 ? 0 : idx;
+    const next = dir === 'next'
+      ? (cur + 1) % tabs.length
+      : (cur - 1 + tabs.length) % tabs.length;
+    // Swallow the trailing click of this gesture: after the view
+    // switches, the click would otherwise land on whatever sits under
+    // the finger in the new tab.
+    const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); cleanupSwallow(); };
+    const timer = setTimeout(cleanupSwallow, 350);
+    function cleanupSwallow() {
+      document.removeEventListener('click', swallow, true);
+      clearTimeout(timer);
+    }
+    document.addEventListener('click', swallow, true);
+    switchView(tabs[next].key);
+  }, { passive: true });
+}
 
 // ===================================================================
 // DEEP-LINK NAVIGATION

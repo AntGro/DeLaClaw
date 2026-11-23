@@ -1119,6 +1119,62 @@ test('Touch row actions: compaction runs in the touch branch and the kebab menu 
 });
 
 // ===================================================================
+// 22d. Swipe navigation: left/right swipes switch tabs (touch only)
+// ===================================================================
+function loadSwipeHelpers() {
+  const utils = jsFiles['utils.js'];
+  const start = utils.indexOf('// ── Pure swipe helpers ──');
+  const end = utils.indexOf('// ── End pure swipe helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure swipe helpers block in utils.js');
+  return new Function(`${utils.slice(start, end)}; return { SWIPE_MIN_DX, SWIPE_MAX_DT_MS, SWIPE_MIN_RATIO, swipeDirection };`)();
+}
+
+test('Swipe navigation: swipeDirection recognises quick mostly-horizontal swipes only', () => {
+  const { swipeDirection } = loadSwipeHelpers();
+  assert(swipeDirection(-80, 0, 150) === 'next', 'a left swipe moves to the next tab');
+  assert(swipeDirection(80, 0, 150) === 'prev', 'a right swipe moves to the previous tab');
+  assert(swipeDirection(-61, 0, 150) === 'next', '61px sideways clears the 60px threshold');
+  assert(swipeDirection(-60, 0, 150) === null, 'exactly 60px does not count as a swipe');
+  assert(swipeDirection(-5, 0, 150) === null, 'a tap is not a swipe');
+  assert(swipeDirection(-100, 0, 500) === null, 'a 500ms gesture is too slow');
+  assert(swipeDirection(-100, 0, 499) === 'next', '499ms still counts');
+  assert(swipeDirection(-80, 40, 150) === 'next', 'a mostly-horizontal diagonal still counts');
+  assert(swipeDirection(-80, 60, 150) === null, 'a diagonal past the 1.5x ratio does not count');
+  assert(swipeDirection(0, -120, 150) === null, 'a vertical swipe never switches tabs');
+});
+
+test('Swipe navigation: main.js wires touch listeners mirroring Alt+Arrow', () => {
+  const main = jsFiles['main.js'];
+  assert(main.includes("document.addEventListener('touchstart'"),
+    'main.js: swipe nav must listen for touchstart');
+  assert(main.includes("document.addEventListener('touchend'"),
+    'main.js: swipe nav must listen for touchend');
+  assert(main.includes('swipeDirection('),
+    'main.js: swipe nav must classify the gesture with swipeDirection');
+  assert(main.includes('getVisibleTabs()'),
+    'main.js: swipe nav must use the same tab list as Alt+Arrow (order + visibility)');
+  assert(main.includes("if (isTouchDevice())"),
+    'main.js: swipe nav must be gated on touch devices');
+  // Guards: modal, chunk panel, practice overlay, header, drag
+  assert(main.includes("'.modal-overlay.visible, .modal.visible'"),
+    'main.js: swipe nav must not fire while a modal is open');
+  assert(main.includes("getElementById('chunkPanel')"),
+    'main.js: swipe nav must not fire while the chunk panel is open');
+  assert(main.includes("getElementById('practiceOverlay')"),
+    'main.js: swipe nav must not fire while the practice overlay is open');
+  assert(main.includes("'.app-header'"),
+    'main.js: swipe nav must ignore swipes starting in the header');
+  assert(main.includes("'item-drag-active'"),
+    'main.js: swipe nav must not fire while a drag is running');
+  // The trailing click of the gesture must not land in the new tab
+  assert(main.includes('stopPropagation') && main.includes('setTimeout(cleanupSwallow, 350)'),
+    'main.js: swipe nav must swallow the trailing click of the gesture');
+  const utils = jsFiles['utils.js'];
+  assert(utils.includes('swipeDirection,'),
+    'utils.js: swipeDirection must be exported');
+});
+
+// ===================================================================
 // 23. Welcome habit dblclick calls canonical window.editHabitInline (not a local duplicate)
 // ===================================================================
 test('Welcome habit dblclick calls canonical window.editHabitInline', () => {

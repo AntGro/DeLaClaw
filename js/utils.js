@@ -855,6 +855,22 @@ function isDesktopLike() {
     && window.matchMedia('(hover: hover)').matches;
 }
 
+// ── Pure swipe helpers ──
+// Swipe navigation: a quick, mostly-horizontal, single-finger swipe moves
+// to the next (left swipe) or previous (right swipe) tab. Thresholds:
+// more than 60px sideways, more sideways than vertical (1.5x), under
+// 500ms. Anything else (short, vertical, slow) is a scroll or a tap.
+const SWIPE_MIN_DX = 60;
+const SWIPE_MAX_DT_MS = 500;
+const SWIPE_MIN_RATIO = 1.5;
+function swipeDirection(dx, dy, dtMs) {
+  if (dtMs >= SWIPE_MAX_DT_MS) return null;
+  if (Math.abs(dx) <= SWIPE_MIN_DX) return null;
+  if (Math.abs(dx) <= Math.abs(dy) * SWIPE_MIN_RATIO) return null;
+  return dx < 0 ? 'next' : 'prev';
+}
+// ── End pure swipe helpers ──
+
 /**
  * Auto-assign palette colors to category/deck rows that have no color.
  * Called after loading each category table. Persists to DB so it's one-time.
@@ -1035,7 +1051,7 @@ export {
   showConfirmAction, closeConfirmAction, executeConfirmAction, setConfirmActionProgress,
   updateFooterStats, renderFooterIdentity, updateTaskListMaxHeight, truncateWithShowMore,
   isEditing, balanceGrid, applySectionGrid, fetchAll,
-  isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, isDesktopLike,
+  isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, isDesktopLike, swipeDirection,
   backfillCategoryColors, nextPaletteColor, onColorFor,
   parseDeepLink, copyItemLink, highlightItem, DEEP_LINK_TYPE_MAP,
   autoResizeTextarea,

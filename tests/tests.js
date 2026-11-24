@@ -1549,9 +1549,35 @@ test('All chunks: button, session, stop button and summary are wired', () => {
   const overlayFn = fc.slice(fc.indexOf('function showTextPracticeOverlay'), fc.indexOf('let overlay = document.getElementById', fc.indexOf('function showTextPracticeOverlay')));
   assert(overlayFn.includes('trSubmitting = false;'),
     'flashcards.js: a new overlay open must reset the flag, or Continue after a summary could never submit again');
+  assert(overlayFn.includes('trPersistedChunkPos = new Set();') && overlayFn.includes('trSessionResults = [];'),
+    'flashcards.js: a new overlay open must also clear the saved-chunk record and the accumulated results, or a fresh session would skip chunks');
   const endFn = fc.slice(fc.indexOf('window.endTextPractice = function()'), fc.indexOf('renderFlashcards();', fc.indexOf('window.endTextPractice = function()')));
   assert(endFn.includes('trSubmitting = false;'),
     'flashcards.js: closing a session must reset the flag too');
+  assert(endFn.includes('trPersistedChunkPos = new Set();') && endFn.includes('trSessionResults = [];'),
+    'flashcards.js: closing a session must clear the saved-chunk record and the accumulated results too');
+  // A failed save must be transactional: compute, persist, then mutate.
+  const applyFn = fc.slice(fc.indexOf('async function applyChunkReview'), fc.indexOf('function setPracticeSubmitDisabled'));
+  assert((applyFn.match(/const \{ error \} = await state\.db\.from\('text_line_progress'\)\.update\(/g) || []).length === 2,
+    'flashcards.js: both persistence paths in applyChunkReview must inspect the returned error');
+  assert((applyFn.match(/if \(error\) throw error;/g) || []).length === 2,
+    'flashcards.js: a failed database update must surface as an exception instead of a silent success');
+  assert(applyFn.indexOf('chunk.recent_scores = nextScores') > applyFn.indexOf("update({ recent_scores: JSON.stringify(nextScores) })"),
+    'flashcards.js: the practice path must persist the score before mutating the in-memory chunk, or a retry scores twice');
+  assert(applyFn.indexOf('Object.assign(chunk, updates)') > applyFn.indexOf('.update(updates)'),
+    'flashcards.js: the scheduled path must persist the FSRS update before mutating the in-memory chunk, or a retry re-applies FSRS');
+  // A retry resumes after the chunks already saved, and the summary covers them.
+  assert(fc.includes('if (trPersistedChunkPos.has(pos)) continue;') && fc.includes('trPersistedChunkPos.add(pos)'),
+    'flashcards.js: a multi-chunk retry must skip the chunks an earlier attempt already saved');
+  assert(fc.includes('trSessionResults.push('),
+    'flashcards.js: results must accumulate across submit attempts so the summary covers every saved chunk');
+  const singleSubmitFn = fc.slice(fc.indexOf('window.submitTextReview'), fc.indexOf('window.submitAllChunksReview'));
+  const multiSubmitFn = fc.slice(fc.indexOf('window.submitAllChunksReview'), fc.indexOf('window.stopAllChunksReview'));
+  assert(singleSubmitFn.includes("showToast(t('toast.update_failed'), 'error')")
+    && multiSubmitFn.includes("showToast(t('toast.update_failed'), 'error')"),
+    'flashcards.js: a failed save must tell the user, or the retry the guard release allows is invisible');
+  assert(!singleSubmitFn.includes('throw e;') && !multiSubmitFn.includes('throw e;'),
+    'flashcards.js: a failed save must be handled (toast + guard release), not rethrown as an unhandled rejection');
   const submitCss = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
   assert(submitCss.includes('.practice-done-btn:disabled'),
     'style.css: a disabled submit button must look inert while saving');
@@ -1559,8 +1585,8 @@ test('All chunks: button, session, stop button and summary are wired', () => {
     'flashcards.js: the all-chunks submit must score each chunk through the shared per-chunk helper');
   assert(fc.includes('applyChunkReview(chunk, knownCount, totalLines, !trFreePractice)'),
     'flashcards.js: the single-chunk submit must use the same shared helper (no drift between the two paths)');
-  assert(fc.includes('showMultiChunkPracticeSummary(results, trSessionChunks.length, textTotal)'),
-    'flashcards.js: the all-chunks submit must show the aggregate summary');
+  assert(fc.includes('showMultiChunkPracticeSummary(trSessionResults, trSessionChunks.length, textTotal)'),
+    'flashcards.js: the all-chunks submit must show the aggregate summary from the results accumulated across attempts');
   assert(fc.includes("t('text_revision.chunks_completed')") && fc.includes('tr-multi-chunk-detail')
     && fc.includes("data-action=\"toggle-chunk-summary-stats\""),
     'flashcards.js: the summary must show the aggregate plus one row per completed chunk that expands its stats in place');

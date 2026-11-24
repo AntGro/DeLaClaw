@@ -144,6 +144,8 @@ let trAllChunks = false;         // this session covers every chunk of the text
 let trAllChunksFrom = 0;       // first chunk index covered by this all-chunks session (0 = from the start)
 let trSessionChunks = [];        // [{ chunk, mode }] in order, for an all-chunks session
 let trSubmitting = false;        // a revision submit is in flight: further Submit/Stop taps are ignored until it lands or fails
+let trPersistedChunkPos = new Set(); // all-chunks positions already saved in this session (a failed save retries after these, never re-scores them)
+let trSessionResults = [];           // all-chunks result rows accumulated across submit attempts, for the summary
 
 // ── Deck table state ──
 // Decks live in the flashcard_decks DB table. Loaded into maps for fast lookup.
@@ -3042,6 +3044,8 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
   trAllChunksFrom = trAllChunks ? (opts.fromChunkIndex || 0) : 0;
   trSessionChunks = trAllChunks ? (opts.chunks || []) : [];
   trSubmitting = false; // a new session starts unsubmitted, even via Continue
+  trPersistedChunkPos = new Set();
+  trSessionResults = [];
   trFreePractice = trAllChunks ? false : !!opts.freePractice;
   let overlay = document.getElementById('practiceOverlay');
   if (!overlay) {
@@ -3281,27 +3285,38 @@ function rollbackTextPracticeFrom(fromIdx) {
 // read-only mode nothing is written, in-memory only — the summary still
 // shows the score and the rating it would have earned. Returns the ratio,
 // the rating (null for free practice) and the new score list.
+// A chunk review is transactional at the application level: the next state
+// is computed first, persisted, and only then written into the in-memory
+// chunk. A failed save therefore leaves the chunk untouched, so a retry
+// recomputes from the true state instead of scoring twice — and a failed
+// database update surfaces as an exception instead of a silent success.
 async function applyChunkReview(chunk, knownCount, totalLines, scheduled) {
   const ratio = totalLines > 0 ? knownCount / totalLines : 0;
   const nextScores = appendRecentScore(chunk.recent_scores, ratio);
-  chunk.recent_scores = nextScores;
   const rating = ratio >= 1 ? 3 : ratio >= 0.5 ? 2 : 1; // Good / Hard / Again
   if (!scheduled) {
     // Extra practice only: report the score, leave scheduling untouched.
     if (!state.readOnlyMode && state.db.connected) {
-      await state.db.from('text_line_progress').update({ recent_scores: JSON.stringify(nextScores) }).eq('id', chunk.id);
+      const { error } = await state.db.from('text_line_progress').update({ recent_scores: JSON.stringify(nextScores) }).eq('id', chunk.id);
+      if (error) throw error;
     }
+    chunk.recent_scores = nextScores;
     return { ratio, rating: null, nextScores };
   }
   if (!state.readOnlyMode) {
     const now = new Date();
     const updates = fsrsUpdate(chunk, rating, now);
     updates.recent_scores = JSON.stringify(nextScores);
+    if (state.db.connected) {
+      const { error } = await state.db.from('text_line_progress').update(updates).eq('id', chunk.id);
+      if (error) throw error;
+    }
     Object.assign(chunk, updates);
     chunk.recent_scores = nextScores; // in-memory shape stays an array
-    if (state.db.connected) {
-      await state.db.from('text_line_progress').update(updates).eq('id', chunk.id);
-    }
+  } else {
+    // Read-only: the score history updates in memory only, like the rest
+    // of the session-local review; scheduling stays untouched.
+    chunk.recent_scores = nextScores;
   }
   return { ratio, rating, nextScores };
 }
@@ -3339,11 +3354,14 @@ window.submitTextReview = async function(chunkId, totalLines) {
     showTextPracticeSummary(knownCount, totalLines, res.rating, res.nextScores);
   } catch (e) {
     // The save failed without completing: release the guard so the user
-    // can retry. On success the session ends at the summary, so the flag
-    // never needs clearing here — the next overlay open resets it.
+    // can retry — the chunk is untouched, so the retry recomputes from the
+    // true state. On success the session ends at the summary, so the flag
+    // never needs clearing here — the next overlay open resets it. The
+    // failure is shown, not rethrown: the retry is the recovery, and an
+    // unhandled rejection would tell the user nothing.
     trSubmitting = false;
     setPracticeSubmitDisabled(false);
-    throw e;
+    showToast(t('toast.update_failed'), 'error');
   }
 };
 
@@ -3356,21 +3374,26 @@ window.submitAllChunksReview = async function(uptoPos = trSessionChunks.length -
   setPracticeSubmitDisabled(true);
   try {
     const states = practiceLineStates();
-    const results = [];
     for (let pos = 0; pos <= uptoPos && pos < trSessionChunks.length; pos++) {
+      // A retry resumes after the chunks an earlier attempt already saved:
+      // re-scoring them would append a second score and re-apply FSRS.
+      if (trPersistedChunkPos.has(pos)) continue;
       const entry = trSessionChunks[pos];
       const { known, total } = chunkLineStats(states, pos);
       const res = await applyChunkReview(entry.chunk, known, total, entry.mode === 'fsrs');
-      results.push({ chunkIndex: entry.chunk.chunk_index, known, total, pct: Math.round(res.ratio * 100), rating: res.rating, chunk: entry.chunk, scores: res.nextScores });
+      trPersistedChunkPos.add(pos);
+      trSessionResults.push({ chunkIndex: entry.chunk.chunk_index, known, total, pct: Math.round(res.ratio * 100), rating: res.rating, chunk: entry.chunk, scores: res.nextScores });
     }
     const tx = allTexts.find(t => t.id === trSessionTextId);
     const textTotal = tx ? getTextChunks(tx).length : trSessionChunks.length;
-    showMultiChunkPracticeSummary(results, trSessionChunks.length, textTotal);
+    showMultiChunkPracticeSummary(trSessionResults, trSessionChunks.length, textTotal);
   } catch (e) {
-    // See submitTextReview: a failed save releases the guard for a retry.
+    // The save failed part-way: the chunks already saved stay saved and
+    // the rest stay untouched, so the retry resumes instead of restarting.
+    // Tell the user — the guard release alone is no signal to retry.
     trSubmitting = false;
     setPracticeSubmitDisabled(false);
-    throw e;
+    showToast(t('toast.update_failed'), 'error');
   }
 };
 
@@ -3578,6 +3601,8 @@ window.endTextPractice = function() {
   trAllChunksFrom = 0;
   trSessionChunks = [];
   trSubmitting = false;
+  trPersistedChunkPos = new Set();
+  trSessionResults = [];
   const overlay = document.getElementById('practiceOverlay');
   if (overlay) overlay.style.display = 'none';
   document.body.style.overflow = '';

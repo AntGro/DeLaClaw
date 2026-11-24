@@ -1098,6 +1098,18 @@ test('Touch row actions: compaction runs in the touch branch and the kebab menu 
     'item-utils.js: menu rows must be clones of the row buttons styled as header-menu items');
   assert(itemUtils.includes('function openRowActionsMenu') && itemUtils.includes('function closeRowActionsMenu'),
     'item-utils.js: the kebab menu must have open/close functions');
+  assert(itemUtils.includes("kebab.setAttribute('aria-haspopup', 'menu')") && itemUtils.includes("kebab.setAttribute('aria-expanded'") && itemUtils.includes("kebab.setAttribute('aria-controls', 'rowActionsMenu')"),
+    'item-utils.js: the kebab must expose its menu state (haspopup/expanded/controls), as the groups add-menu does');
+  assert(itemUtils.includes("_rowActionsMenu.id = 'rowActionsMenu'"),
+    'item-utils.js: the shared menu must carry the id the kebabs point at');
+  assert(itemUtils.includes("clone.setAttribute('role', 'menuitem')"),
+    'item-utils.js: menu rows must carry role=menuitem, matching the menu container');
+  assert(itemUtils.includes("menu.querySelector('[role=\"menuitem\"]')?.focus()"),
+    'item-utils.js: opening the menu must move focus to its first item');
+  assert(itemUtils.includes("closeRowActionsMenu(true)") && itemUtils.includes("if (restoreFocus) _rowActionsMenu._forKebab.focus()"),
+    'item-utils.js: Escape, Tab and choosing an item must close the menu and return focus to the kebab');
+  assert(itemUtils.includes("e.key === 'ArrowDown'") && itemUtils.includes("e.key === 'ArrowUp'") && itemUtils.includes('items[next].focus()'),
+    'item-utils.js: arrow keys must move focus between menu items (roving tabindex)');
 
   // Boot sets the html.touch class that the CSS keys off
   const main = jsFiles['main.js'];

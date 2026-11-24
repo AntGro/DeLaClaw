@@ -163,6 +163,9 @@ function compactRowActionsForTouch(item, actions) {
   kebab.className = 'row-action-kebab';
   kebab.title = t('common.more_actions');
   kebab.setAttribute('aria-label', t('common.more_actions'));
+  kebab.setAttribute('aria-haspopup', 'menu');
+  kebab.setAttribute('aria-expanded', 'false');
+  kebab.setAttribute('aria-controls', 'rowActionsMenu');
   kebab.innerHTML = lucideIcon('more-vertical', 16);
   kebab.addEventListener('click', () => openRowActionsMenu(kebab, actions));
   actions.appendChild(kebab);
@@ -180,17 +183,27 @@ let _rowActionsMenuCleanup = null;
 function getRowActionsMenu() {
   if (!_rowActionsMenu) {
     _rowActionsMenu = document.createElement('div');
+    _rowActionsMenu.id = 'rowActionsMenu';
     _rowActionsMenu.className = 'row-actions-menu';
     _rowActionsMenu.setAttribute('role', 'menu');
     // A menu choice fires its original action via delegation, then closes.
-    _rowActionsMenu.addEventListener('click', () => closeRowActionsMenu());
+    _rowActionsMenu.addEventListener('click', () => closeRowActionsMenu(true));
     document.body.appendChild(_rowActionsMenu);
   }
   return _rowActionsMenu;
 }
 
-function closeRowActionsMenu() {
-  if (_rowActionsMenu) _rowActionsMenu.classList.remove('open');
+// restoreFocus: true when the menu was dismissed by keyboard (Escape/Tab)
+// or by choosing an item — focus goes back to the kebab that opened it.
+// Outside clicks and scrolls leave focus where the user put it.
+function closeRowActionsMenu(restoreFocus = false) {
+  if (_rowActionsMenu) {
+    _rowActionsMenu.classList.remove('open');
+    if (_rowActionsMenu._forKebab) {
+      _rowActionsMenu._forKebab.setAttribute('aria-expanded', 'false');
+      if (restoreFocus) _rowActionsMenu._forKebab.focus();
+    }
+  }
   if (_rowActionsMenuCleanup) {
     _rowActionsMenuCleanup();
     _rowActionsMenuCleanup = null;
@@ -208,17 +221,22 @@ function openRowActionsMenu(kebab, actions) {
   }
   closeRowActionsMenu();
   menu._forActions = actions;
+  menu._forKebab = kebab;
   menu.innerHTML = '';
-  for (const btn of overflowBtns) {
+  for (const [i, btn] of overflowBtns.entries()) {
     const clone = btn.cloneNode(true);
     clone.classList.remove('row-action-overflow', 'todo-done-btn', 'habit-done-btn', 'habit-history-btn');
     clone.classList.add('header-menu-item');
+    clone.setAttribute('role', 'menuitem');
+    // Roving tabindex: only the first item is tabbable; arrows move focus.
+    clone.tabIndex = i === 0 ? 0 : -1;
     const label = document.createElement('span');
     label.textContent = btn.title || btn.getAttribute('aria-label') || '';
     clone.appendChild(label);
     menu.appendChild(clone);
   }
   menu.classList.add('open');
+  kebab.setAttribute('aria-expanded', 'true');
   const rect = kebab.getBoundingClientRect();
   const mw = menu.offsetWidth;
   const mh = menu.offsetHeight;
@@ -234,7 +252,25 @@ function openRowActionsMenu(kebab, actions) {
     if (kebab.contains(e.target)) return;
     if (!menu.contains(e.target)) closeRowActionsMenu();
   };
-  const onKey = (e) => { if (e.key === 'Escape') closeRowActionsMenu(); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { closeRowActionsMenu(true); return; }
+    // Tab closes the menu and hands focus back to the kebab first, so the
+    // browser's default Tab step continues from the kebab (the menu sits
+    // at the end of <body>, tabbing from inside it would jump away).
+    if (e.key === 'Tab') { closeRowActionsMenu(true); return; }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
+    const items = [...menu.querySelectorAll('[role="menuitem"]')];
+    if (!items.length) return;
+    const idx = items.indexOf(document.activeElement);
+    let next = idx;
+    if (e.key === 'ArrowDown') next = idx < 0 ? 0 : (idx + 1) % items.length;
+    else if (e.key === 'ArrowUp') next = idx < 0 ? items.length - 1 : (idx - 1 + items.length) % items.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = items.length - 1;
+    e.preventDefault();
+    items.forEach((it, i) => { it.tabIndex = i === next ? 0 : -1; });
+    items[next].focus();
+  };
   const onScroll = () => closeRowActionsMenu();
   document.addEventListener('click', onDocClick);
   document.addEventListener('keydown', onKey);
@@ -244,6 +280,9 @@ function openRowActionsMenu(kebab, actions) {
     document.removeEventListener('keydown', onKey);
     window.removeEventListener('scroll', onScroll, true);
   };
+  // Opening the menu moves focus to its first item, for keyboard and
+  // pointer users alike (a button takes focus without opening a keyboard).
+  menu.querySelector('[role="menuitem"]')?.focus();
 }
 
 

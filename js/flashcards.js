@@ -143,6 +143,7 @@ let trFreePracticeLastChunk = null; // chunk_index just practiced (excluded from
 let trAllChunks = false;         // this session covers every chunk of the text
 let trAllChunksFrom = 0;       // first chunk index covered by this all-chunks session (0 = from the start)
 let trSessionChunks = [];        // [{ chunk, mode }] in order, for an all-chunks session
+let trSubmitting = false;        // a revision submit is in flight: further Submit/Stop taps are ignored until it lands or fails
 
 // ── Deck table state ──
 // Decks live in the flashcard_decks DB table. Loaded into maps for fast lookup.
@@ -2546,7 +2547,7 @@ window.saveEditChunk = async function(textId, chunkIndex) {
   if (!result.ok) { showToast(t('text_revision.chunk_edit_boundary'), 'error'); return; }
   if (!result.changed) { closeEditChunkModal(); return; }
   const oldContent = tx.content;
-  const reset = { stability: 0, difficulty: 5, last_review: null, next_review: null, review_count: 0 };
+  const reset = { stability: 0, difficulty: 5, last_review: null, next_review: null, review_count: 0, recent_scores: null };
   if (state.db.connected) {
     const { error: updateError } = await state.db.from('texts').update({ content: result.content }).eq('id', textId);
     if (updateError) { showToast(t('toast.failed_to_save'), 'error'); return; }
@@ -3040,6 +3041,7 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
   trAllChunks = !!opts.allChunks;
   trAllChunksFrom = trAllChunks ? (opts.fromChunkIndex || 0) : 0;
   trSessionChunks = trAllChunks ? (opts.chunks || []) : [];
+  trSubmitting = false; // a new session starts unsubmitted, even via Continue
   trFreePractice = trAllChunks ? false : !!opts.freePractice;
   let overlay = document.getElementById('practiceOverlay');
   if (!overlay) {
@@ -3304,7 +3306,14 @@ async function applyChunkReview(chunk, knownCount, totalLines, scheduled) {
   return { ratio, rating, nextScores };
 }
 
+// While a revision submit is saving, its buttons stay visible but inert,
+// so a second tap cannot launch a second submission of the same session.
+function setPracticeSubmitDisabled(disabled) {
+  document.querySelectorAll('#trSubmitSection [data-action="submit-text-review"], #trSubmitSection [data-action="submit-all-chunks-review"], #trStopSection [data-action="stop-all-chunks-review"]').forEach(b => { b.disabled = disabled; });
+}
+
 window.submitTextReview = async function(chunkId, totalLines) {
+  if (trSubmitting) return;
   const lineEls = document.querySelectorAll('#trLinesContainer .tr-line');
   let knownCount = 0;
   lineEls.forEach(el => { if (el.classList.contains('tr-line-known')) knownCount++; });
@@ -3319,29 +3328,50 @@ window.submitTextReview = async function(chunkId, totalLines) {
     else endTextPractice();
     return;
   }
-  const res = await applyChunkReview(chunk, knownCount, totalLines, !trFreePractice);
-  if (trFreePractice) {
-    showFreePracticeSummary(knownCount, totalLines, res.nextScores);
-    return;
+  trSubmitting = true;
+  setPracticeSubmitDisabled(true);
+  try {
+    const res = await applyChunkReview(chunk, knownCount, totalLines, !trFreePractice);
+    if (trFreePractice) {
+      showFreePracticeSummary(knownCount, totalLines, res.nextScores);
+      return;
+    }
+    showTextPracticeSummary(knownCount, totalLines, res.rating, res.nextScores);
+  } catch (e) {
+    // The save failed without completing: release the guard so the user
+    // can retry. On success the session ends at the summary, so the flag
+    // never needs clearing here — the next overlay open resets it.
+    trSubmitting = false;
+    setPracticeSubmitDisabled(false);
+    throw e;
   }
-  showTextPracticeSummary(knownCount, totalLines, res.rating, res.nextScores);
 };
 
 // All-chunks submit: score each completed chunk exactly as its own
 // session would (FSRS when scheduled, score only otherwise), then show
 // the aggregate summary. A half-revealed chunk scores nothing.
 window.submitAllChunksReview = async function(uptoPos = trSessionChunks.length - 1) {
-  const states = practiceLineStates();
-  const results = [];
-  for (let pos = 0; pos <= uptoPos && pos < trSessionChunks.length; pos++) {
-    const entry = trSessionChunks[pos];
-    const { known, total } = chunkLineStats(states, pos);
-    const res = await applyChunkReview(entry.chunk, known, total, entry.mode === 'fsrs');
-    results.push({ chunkIndex: entry.chunk.chunk_index, known, total, pct: Math.round(res.ratio * 100), rating: res.rating, chunk: entry.chunk, scores: res.nextScores });
+  if (trSubmitting) return;
+  trSubmitting = true;
+  setPracticeSubmitDisabled(true);
+  try {
+    const states = practiceLineStates();
+    const results = [];
+    for (let pos = 0; pos <= uptoPos && pos < trSessionChunks.length; pos++) {
+      const entry = trSessionChunks[pos];
+      const { known, total } = chunkLineStats(states, pos);
+      const res = await applyChunkReview(entry.chunk, known, total, entry.mode === 'fsrs');
+      results.push({ chunkIndex: entry.chunk.chunk_index, known, total, pct: Math.round(res.ratio * 100), rating: res.rating, chunk: entry.chunk, scores: res.nextScores });
+    }
+    const tx = allTexts.find(t => t.id === trSessionTextId);
+    const textTotal = tx ? getTextChunks(tx).length : trSessionChunks.length;
+    showMultiChunkPracticeSummary(results, trSessionChunks.length, textTotal);
+  } catch (e) {
+    // See submitTextReview: a failed save releases the guard for a retry.
+    trSubmitting = false;
+    setPracticeSubmitDisabled(false);
+    throw e;
   }
-  const tx = allTexts.find(t => t.id === trSessionTextId);
-  const textTotal = tx ? getTextChunks(tx).length : trSessionChunks.length;
-  showMultiChunkPracticeSummary(results, trSessionChunks.length, textTotal);
 };
 
 window.stopAllChunksReview = function() {
@@ -3547,6 +3577,7 @@ window.endTextPractice = function() {
   trAllChunks = false;
   trAllChunksFrom = 0;
   trSessionChunks = [];
+  trSubmitting = false;
   const overlay = document.getElementById('practiceOverlay');
   if (overlay) overlay.style.display = 'none';
   document.body.style.overflow = '';

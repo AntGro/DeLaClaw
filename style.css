@@ -1780,6 +1780,7 @@ html.touch .tr-progress-bar.tr-bar-expanded .tr-seg { flex:0 0 28px; height:28px
 .practice-stat-lbl { font-size:0.875rem; color:var(--text); margin-top:4px; }
 .practice-done-btn { background:var(--accent); color:#fff; padding:10px 32px; border-radius:10px; font-size:1rem; border:none; cursor:pointer; }
 .practice-done-btn:hover { filter:brightness(0.9); }
+.practice-done-btn:disabled { opacity:0.5; pointer-events:none; cursor:wait; }
 .practice-summary-actions { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
 .practice-continue-btn { background:var(--accent); color:#fff; padding:10px 32px; border-radius:10px; font-size:1rem; border:none; cursor:pointer; }
 .practice-continue-btn:hover { filter:brightness(0.9); }

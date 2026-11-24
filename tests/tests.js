@@ -1310,6 +1310,22 @@ test('Chunk scores: migration 2.32.149 adds recent_scores on both backends', asy
     'drive migration must leave rows without scores untouched');
 });
 
+test('Chunk scores: editing a chunk clears its score history with the rest of the revision state', () => {
+  const fc = jsFiles['flashcards.js'];
+  const saveAt = fc.indexOf('window.saveEditChunk');
+  assert(saveAt !== -1, 'could not find saveEditChunk in flashcards.js');
+  const resetAt = fc.indexOf('const reset = {', saveAt);
+  assert(resetAt !== -1, 'could not find the chunk-edit reset object');
+  const reset = fc.slice(resetAt, fc.indexOf('};', resetAt));
+  assert(reset.includes('recent_scores: null'),
+    'flashcards.js: the chunk-edit reset must clear recent_scores, or old scores would stay attached to the new wording');
+  assert(reset.includes('review_count: 0') && reset.includes('stability: 0'),
+    'flashcards.js: the reset must still clear the FSRS state alongside the scores');
+  assert(fc.includes("await state.db.from('text_line_progress').update(reset).eq('id', chunk.id);")
+    && fc.includes('Object.assign(chunk, reset);'),
+    'flashcards.js: the reset (scores included) must reach both the database row and the in-memory chunk');
+});
+
 // ===================================================================
 // 22g. Chunk segments: bigger touch targets (28px, 10 collapsed)
 // ===================================================================
@@ -1521,6 +1537,24 @@ test('All chunks: button, session, stop button and summary are wired', () => {
     'flashcards.js: lines must carry their chunk position and the stop button must update on reveal and rollback');
   assert(fc.includes('window.submitAllChunksReview') && fc.includes('window.stopAllChunksReview'),
     'flashcards.js: the full submit and the early stop must both exist');
+  assert(fc.includes('let trSubmitting = false;'),
+    'flashcards.js: the revision submit must have a session-level in-flight flag');
+  assert(fc.includes('window.submitAllChunksReview = async function(uptoPos')
+    && fc.includes('if (trSubmitting) return;'),
+    'flashcards.js: a second submit while one is saving must be ignored');
+  assert(fc.includes('trSubmitting = true;') && fc.includes('setPracticeSubmitDisabled(true);'),
+    'flashcards.js: submitting must set the flag and disable the Submit/Stop buttons before the first save');
+  assert(fc.includes('trSubmitting = false;') && fc.includes('setPracticeSubmitDisabled(false);'),
+    'flashcards.js: a failed save must release the flag and re-enable the buttons so the user can retry');
+  const overlayFn = fc.slice(fc.indexOf('function showTextPracticeOverlay'), fc.indexOf('let overlay = document.getElementById', fc.indexOf('function showTextPracticeOverlay')));
+  assert(overlayFn.includes('trSubmitting = false;'),
+    'flashcards.js: a new overlay open must reset the flag, or Continue after a summary could never submit again');
+  const endFn = fc.slice(fc.indexOf('window.endTextPractice = function()'), fc.indexOf('renderFlashcards();', fc.indexOf('window.endTextPractice = function()')));
+  assert(endFn.includes('trSubmitting = false;'),
+    'flashcards.js: closing a session must reset the flag too');
+  const submitCss = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(submitCss.includes('.practice-done-btn:disabled'),
+    'style.css: a disabled submit button must look inert while saving');
   assert(fc.includes('applyChunkReview(entry.chunk, known, total, entry.mode === \'fsrs\')'),
     'flashcards.js: the all-chunks submit must score each chunk through the shared per-chunk helper');
   assert(fc.includes('applyChunkReview(chunk, knownCount, totalLines, !trFreePractice)'),

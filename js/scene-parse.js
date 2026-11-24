@@ -242,6 +242,27 @@ export function getTextChunks(tx) {
   return splitTextIntoChunks(tx.content || '', perChunk);
 }
 
+// First words of a chunk, for the chunk panel header: the first
+// non-empty lines joined with spaces, cut at maxLen with an ellipsis,
+// so a chunk can be told apart from "Chunk K of N" alone. Plain-text
+// chunks arrive as one joined string; scene chunks as line objects
+// (speaker-prefixed where there is one, directions as plain text).
+export function chunkPreviewText(chunk, maxLen = 60) {
+  let joined = '';
+  if (typeof chunk === 'string') {
+    joined = chunk.split('\n').map(s => s.trim()).filter(Boolean).join(' ');
+  } else if (Array.isArray(chunk)) {
+    joined = chunk.map(line => {
+      if (typeof line === 'string') return line.trim();
+      if (!line) return '';
+      const text = Array.isArray(line.segments) ? sceneLineText(line) : (line.text || '');
+      return line.speaker ? `${line.speaker}: ${text}` : text;
+    }).map(s => (s || '').trim()).filter(Boolean).join(' ');
+  }
+  if (joined.length <= maxLen) return joined;
+  return joined.slice(0, maxLen - 1).trimEnd() + '…';
+}
+
 // Same calendar day in the viewer's local timezone (not the UTC date of
 // the stored ISO timestamp): a review at 00:30 London time is still
 // "today" even though its UTC date may already be tomorrow, and vice
@@ -266,7 +287,8 @@ export function isChunkDue(chunk, now = new Date()) {
 
 // Revise mode for a targeted chunk: due/new chunks get the normal FSRS
 // update on submit; anything not due (including a chunk already revised
-// today) revises in practice mode — no FSRS write, no DB write.
+// today) revises in practice mode — no FSRS write, but the score still
+// joins the chunk's recent-scores history.
 export function chunkReviseMode(chunk, now = new Date()) {
   return isChunkDue(chunk, now) ? 'fsrs' : 'practice';
 }

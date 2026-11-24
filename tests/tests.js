@@ -1066,10 +1066,10 @@ test('Touch row actions: splitRowActions keeps the first two preferred actions p
   assert(JSON.stringify(r.primary) === '[1,2]' && JSON.stringify(r.overflow) === '[0]',
     'memory cards: Edit + Delete stay visible, copy link goes behind the kebab');
 
-  // Memory texts: Revise + Expand, the rest behind the kebab
-  r = splitRowActions(['copy-item-link', 'start-text-practice-for-text', 'tr-expand-toggle', 'open-edit-text', 'delete-text'], P.text);
-  assert(JSON.stringify(r.primary) === '[1,2]',
-    'memory texts: Revise + Expand stay visible');
+  // Memory texts: Revise + Revise all, the rest behind the kebab
+  r = splitRowActions(['copy-item-link', 'start-text-practice-for-text', 'start-text-practice-all-chunks', 'tr-expand-toggle', 'open-edit-text', 'delete-text'], P.text);
+  assert(JSON.stringify(r.primary) === '[1,2]' && JSON.stringify(r.overflow) === '[0,3,4,5]',
+    'memory texts: Revise + Revise all stay visible');
 
   // Memory drafts: Propose + Edit; once a proposal exists, Edit + Delete
   r = splitRowActions(['copy-item-link', 'request-proposal', 'start-inline-edit-draft', 'delete-draft'], P.draft);
@@ -1172,6 +1172,396 @@ test('Swipe navigation: main.js wires touch listeners mirroring Alt+Arrow', () =
   const utils = jsFiles['utils.js'];
   assert(utils.includes('swipeDirection,'),
     'utils.js: swipeDirection must be exported');
+});
+
+// ===================================================================
+// 22e. Draft deck movable among the top-level roots (never in a section)
+// ===================================================================
+function loadDraftPositionHelpers() {
+  const fc = jsFiles['flashcards.js'];
+  const start = fc.indexOf('// ── Pure draft-position helpers ──');
+  const end = fc.indexOf('// ── End pure draft-position helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure draft-position helpers block in flashcards.js');
+  return new Function(`${fc.slice(start, end)}; return { clampDraftNavIndex, draftIndexInOrder };`)();
+}
+
+test('Draft deck: position helpers clamp and locate the draft chip', () => {
+  const { clampDraftNavIndex, draftIndexInOrder } = loadDraftPositionHelpers();
+  assert(clampDraftNavIndex(0, 5) === 0, '0 stays first (the historical spot)');
+  assert(clampDraftNavIndex(2, 5) === 2, 'a middle position is kept');
+  assert(clampDraftNavIndex(5, 5) === 5, 'last position is allowed');
+  assert(clampDraftNavIndex(9, 5) === 5, 'beyond the end clamps to last');
+  assert(clampDraftNavIndex(-2, 5) === 0, 'a negative index clamps to first');
+  assert(clampDraftNavIndex(NaN, 5) === 0, 'a non-numeric stored value falls back to first');
+  assert(clampDraftNavIndex(undefined, 5) === 0, 'a missing stored value falls back to first');
+  assert(draftIndexInOrder(['a', '__drafts', 'b']) === 1, 'the draft index is read from the nav order');
+  assert(draftIndexInOrder(['a', 'b']) === -1, 'a section-children reorder has no draft chip');
+});
+
+test('Draft deck: movable in the top nav, frozen out of sections, shared stays frozen', () => {
+  const fc = jsFiles['flashcards.js'];
+  const navInitStart = fc.indexOf('function initFlashDeckNavBtnReorder()');
+  const navInitEnd = fc.indexOf('\n}\n', navInitStart);
+  assert(navInitStart !== -1 && navInitEnd > navInitStart, 'could not find initFlashDeckNavBtnReorder');
+  const navInit = fc.slice(navInitStart, navInitEnd);
+  assert(!navInit.includes("'__drafts'"),
+    'flashcards.js: the top-nav reorder must no longer skip the Draft chip');
+  assert(navInit.includes('_sharedDeckId'),
+    'flashcards.js: the top-nav reorder must still skip the shared deck');
+  assert(fc.includes('draftIndexInOrder(orderedIds)'),
+    'flashcards.js: reorderDeckSiblings must read the draft position from the new order');
+  assert(fc.includes("flash_draft_nav_index"),
+    'flashcards.js: the draft position must persist in settings');
+  assert(fc.includes('rootBtns.splice(clampDraftNavIndex(_draftNavIndex, rootBtns.length), 0, draftBtn)'),
+    'flashcards.js: the nav must render the Draft chip at its stored position');
+  assert(fc.includes('roots.slice(0, draftAt)') && fc.includes('roots.slice(draftAt)'),
+    'flashcards.js: the grid must place the Draft bucket at the same stored position');
+  const crossStart = fc.indexOf('function flashDeckCrossDrop()');
+  const crossEnd = fc.indexOf('\n}\n', crossStart);
+  assert(crossStart !== -1 && crossEnd > crossStart, 'could not find flashDeckCrossDrop');
+  assert(fc.slice(crossStart, crossEnd).includes('if (!node) return false;'),
+    'flashcards.js: cross-drop must refuse a drag id that is not a tree node (Draft is none, so it can never enter a section)');
+});
+
+// ===================================================================
+// 22f. Chunk revision scores: last-20 history, in-segment fill
+// ===================================================================
+function loadChunkScoreHelpers() {
+  const fc = jsFiles['flashcards.js'];
+  const start = fc.indexOf('// ── Pure chunk-score helpers ──');
+  const end = fc.indexOf('// ── End pure chunk-score helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure chunk-score helpers block in flashcards.js');
+  return new Function(`${fc.slice(start, end)}; return { CHUNK_SCORE_HISTORY, parseRecentScores, appendRecentScore, latestChunkScore, scorePct, scoreCurvePoints, scoreCurveSvg };`)();
+}
+
+test('Chunk scores: parse/append/latest keep the last 20 ratios, oldest first', () => {
+  const { CHUNK_SCORE_HISTORY, parseRecentScores, appendRecentScore, latestChunkScore, scorePct } = loadChunkScoreHelpers();
+  assert(CHUNK_SCORE_HISTORY === 20, 'history is capped at 20 scores');
+  assert(JSON.stringify(parseRecentScores([0.5, 1])) === JSON.stringify([0.5, 1]), 'an array passes through');
+  assert(JSON.stringify(parseRecentScores('[0.5,1]')) === JSON.stringify([0.5, 1]), 'a JSON string parses');
+  assert(JSON.stringify(parseRecentScores(null)) === JSON.stringify([]), 'a missing value is no scores');
+  assert(JSON.stringify(parseRecentScores('garbage')) === JSON.stringify([]), 'an unparsable value is no scores');
+  assert(JSON.stringify(parseRecentScores([0.5, 2, -1, 'x', null])) === JSON.stringify([0.5]), 'out-of-range and non-numeric entries are dropped');
+  const many = Array.from({ length: 25 }, (_, i) => i / 25);
+  assert(parseRecentScores(many).length === 20 && parseRecentScores(many)[0] === 5 / 25,
+    'more than 20 scores keeps only the last 20');
+  assert(JSON.stringify(appendRecentScore([0.5], 1)) === JSON.stringify([0.5, 1]), 'a score appends');
+  assert(appendRecentScore(Array.from({ length: 20 }, () => 0.5), 1).length === 20,
+    'appending past 20 drops the oldest');
+  assert(JSON.stringify(appendRecentScore([0.5], 2)) === JSON.stringify([0.5]), 'an out-of-range ratio is rejected');
+  assert(latestChunkScore([0.5, 0.8]) === 0.8, 'latest is the last score');
+  assert(latestChunkScore([]) === null && latestChunkScore(null) === null, 'no scores means no latest');
+  assert(scorePct(0.6) === 60 && scorePct(1) === 100 && scorePct(null) === null, 'percent rounds, null stays null');
+});
+
+test('Chunk scores: submit records the score for scheduled and free practice; the bar fills from it', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes('updates.recent_scores = JSON.stringify(nextScores)'),
+    'flashcards.js: a scheduled review must fold the score history into the FSRS update');
+  assert(fc.includes("update({ recent_scores: JSON.stringify(nextScores) })"),
+    'flashcards.js: free practice must persist the score history without touching scheduling');
+  assert(fc.includes('class="tr-seg-fill"') && fc.includes('style="width:${scorePct(latest)}%"'),
+    'flashcards.js: each segment must carry a left-anchored fill whose width is the latest score');
+  assert(fc.includes("latest === 0 ? ' tr-seg-zero' : ''"),
+    'flashcards.js: a latest score of 0 must mark the segment, since a 0-width fill is invisible');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(css.includes('.tr-seg-zero') && css.includes('border-left:3px solid var(--red)'),
+    'style.css: the zero-score marker must be a red bottom border');
+  assert(fc.includes('chunk_recent_scores') && fc.includes('tr-chunk-score-bars'),
+    'flashcards.js: the chunk panel must show the recent-scores history');
+  const i18n = jsFiles['i18n.js'];
+  assert((i18n.match(/chunk_last_score:/g) || []).length === 3,
+    'i18n.js: chunk_last_score must exist in EN/FR/ES');
+  assert((i18n.match(/chunk_recent_scores:/g) || []).length === 3,
+    'i18n.js: chunk_recent_scores must exist in EN/FR/ES');
+});
+
+test('Chunk scores: migration 2.32.149 adds recent_scores on both backends', async () => {  const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+  assert(local.includes("'2.32.149':") && local.includes('ALTER TABLE text_line_progress ADD COLUMN recent_scores TEXT'),
+    'local-migrations.js: 2.32.149 must add the recent_scores column');
+  const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+  assert(drive.includes("'2.32.149':") && drive.includes('row.recent_scores'),
+    'drive-migrations.js: 2.32.149 must normalise recent_scores');
+  const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+  assert(schema.includes('recent_scores TEXT'),
+    'server/schema.sql: fresh databases must have the recent_scores column');
+  const { DRIVE_MIGRATIONS } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+  const store = { text_line_progress: [
+    { id: 'c1', recent_scores: [0.5, 1] },
+    { id: 'c2', title: 'no scores' },
+  ]};
+  await DRIVE_MIGRATIONS['2.32.149'](store);
+  assert(store.text_line_progress[0].recent_scores === '[0.5,1]',
+    'drive migration must stringify an array-shaped history');
+  assert(!('recent_scores' in store.text_line_progress[1]),
+    'drive migration must leave rows without scores untouched');
+});
+
+// ===================================================================
+// 22g. Chunk segments: bigger touch targets (28px, 10 collapsed)
+// ===================================================================
+test('Chunk segments are 28px targets on touch, 16px on desktop', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes('TR_BAR_COLLAPSED_COUNT_TOUCH = 10'),
+    'flashcards.js: the touch collapsed count must be 10 (10 x 28px + 3px gaps fits the 332px bar on a 390px phone)');
+  assert(fc.includes('isTouchDevice() ? TR_BAR_COLLAPSED_COUNT_TOUCH : TR_BAR_COLLAPSED_COUNT'),
+    'flashcards.js: the collapsed count must switch on the touch device check');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(css.includes('html.touch .tr-seg { flex:1 1 28px; min-width:28px; height:28px; }'),
+    'style.css: touch segments must be 28px targets');
+  assert(css.includes('.tr-progress-bar { display:flex; gap:3px;'),
+    'style.css: the gap between segments must be 3px');
+  assert(css.includes('html.touch .tr-progress-bar:not(.tr-bar-expanded) .tr-seg:nth-child(n+11) { display:none; }'),
+    'style.css: the touch collapsed bar must hide from the 11th segment');
+  assert(css.includes('html.touch .tr-progress-bar.tr-bar-expanded .tr-seg { flex:0 0 28px; height:28px; }'),
+    'style.css: the touch expanded bar must stay a uniform 28px grid');
+  // A tap must not close the panel it just opened: on touch the mouseout
+  // after a tap is a synthetic artefact (the mouse jumps back to where
+  // it was before the touch), so the hover-close must not run there.
+  assert(fc.includes("document.addEventListener('mouseout'") && fc.includes('if (isTouchDevice()) return;'),
+    'flashcards.js: the chunk-panel mouseout close must be skipped on touch devices');
+});
+
+// ===================================================================
+// 22h. Chunk panel preview: first words of the chunk
+// ===================================================================
+test('Chunk panel preview: first words of plain and scene chunks', async () => {
+  const { chunkPreviewText } =
+    await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+  assert(chunkPreviewText('I met a traveller from an antique land,\nWho said — "Two vast and trunkless legs of stone"\nStand in the desert.')
+    === 'I met a traveller from an antique land, Who said — "Two vas…',
+    'a plain chunk joins its first lines and cuts at 60 chars with an ellipsis');
+  assert(chunkPreviewText('Short line.') === 'Short line.',
+    'a short chunk is returned as-is');
+  assert(chunkPreviewText('\n\n  \nFirst real line.\nSecond.') === 'First real line. Second.',
+    'blank lines are skipped');
+  assert(chunkPreviewText([
+    { speaker: null, segments: [{ text: 'A bare stage.' }] },
+    { speaker: 'ELENA', segments: [{ text: 'Is anyone there?' }] },
+    { speaker: 'MARCUS', segments: [{ text: 'You are early.' }] },
+  ]) === 'A bare stage. ELENA: Is anyone there? MARCUS: You are early.',
+    'a scene chunk prefixes the speaker where there is one');
+  assert(chunkPreviewText('') === '' && chunkPreviewText([]) === '' && chunkPreviewText(null) === '',
+    'an empty chunk has no preview');
+  assert(chunkPreviewText('x'.repeat(100)).length === 60,
+    'the preview never exceeds the max length');
+});
+
+test('Chunk panel preview: the panel header shows it in both views', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes('const preview = chunkPreviewText(chunks[_chunkPanelIndex]);'),
+    'flashcards.js: the panel render must compute the chunk preview');
+  assert(fc.includes('tr-chunk-panel-preview') && fc.includes('chunkPanelHeaderHtml(title, true, preview)'),
+    'flashcards.js: the panel header must show the preview in both views');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(css.includes('.tr-chunk-panel-preview'),
+    'style.css: the preview line must be styled');
+});
+
+// ===================================================================
+// 22i. Text practice rollback: a third click hides the line and every
+// line after it, so the passage can be revised again in place
+// ===================================================================
+function loadTextPracticeLineHelpers() {
+  const fc = jsFiles['flashcards.js'];
+  const start = fc.indexOf('// ── Pure text-practice line helpers ──');
+  const end = fc.indexOf('// ── End pure text-practice line helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure text-practice line helpers block in flashcards.js');
+  return new Function(`${fc.slice(start, end)}; return { revealedLineClickAction, maskedLineBullets };`)();
+}
+
+test('Text practice rollback: the click cycle on a revealed line', () => {
+  const { revealedLineClickAction, maskedLineBullets } = loadTextPracticeLineHelpers();
+  assert(revealedLineClickAction('mine', true) === 'mark-failed',
+    'a known own line marks as failed on the next click');
+  assert(revealedLineClickAction('mine', false) === 'rollback',
+    'a failed own line rolls back on the next click');
+  assert(revealedLineClickAction('cue', false) === 'rollback' && revealedLineClickAction('dir', false) === 'rollback',
+    'a shown cue or direction line rolls back at once (it is never evaluated)');
+  assert(maskedLineBullets('abcdef') === '• ',
+    'a 6-character line hides behind one bullet');
+  assert(maskedLineBullets('abcdefg') === '• • ',
+    'a 7-character line hides behind two bullets');
+  assert(maskedLineBullets('ab\ncdefghij') === '• <br>• • ',
+    'each part of a multi-part line gets its own bullets');
+  assert(maskedLineBullets('') === '• ',
+    'an empty line still shows one bullet');
+});
+
+test('Text practice rollback: the handler masks from the clicked line on', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes("const action = revealedLineClickAction(kind, el.classList.contains('tr-line-known'));"),
+    'flashcards.js: handleLineClick must dispatch on the revealed-line action');
+  assert(fc.includes('rollbackTextPracticeFrom(idx);'),
+    'flashcards.js: the rollback action must call the rollback helper');
+  assert(fc.includes("if (parseInt(lineEl.dataset.lineIdx, 10) < fromIdx) return;"),
+    'flashcards.js: the rollback must leave earlier lines untouched');
+  assert(fc.includes("lineEl.innerHTML = lineObj ? maskedLineBullets(lineObj.plain) : '';"),
+    'flashcards.js: rolled-back lines must get their bullets placeholder back');
+  assert(fc.includes("if (submit) submit.style.display = 'none';"),
+    'flashcards.js: the rollback must hide the submit button again');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  assert(i18n.includes('tap a failed line again to redo from there')
+    && i18n.includes('touchez une ligne échouée pour reprendre à partir d’elle')
+    && i18n.includes('toca una línea fallida para repetir desde ahí'),
+    'i18n.js: the hint must name the rollback in all three locales');
+});
+
+// ===================================================================
+// 22j. End-of-revision summary: curve of the last scores
+// ===================================================================
+test('Score curve: points map 0-100% bottom-to-top, oldest first', () => {
+  const { scoreCurvePoints, scoreCurveSvg } = loadChunkScoreHelpers();
+  assert(JSON.stringify(scoreCurvePoints([])) === '[]' && JSON.stringify(scoreCurvePoints([0.8])) === '[]',
+    'fewer than two scores draws no curve');
+  const pts = scoreCurvePoints([0, 0.5, 1]);
+  assert(pts.length === 3, 'one point per session');
+  assert(pts[0].x < pts[1].x && pts[1].x < pts[2].x, 'sessions run oldest first, left to right');
+  assert(pts[0].y > pts[1].y && pts[1].y > pts[2].y, 'a higher score sits higher');
+  assert(pts[0].pct === 0 && pts[1].pct === 50 && pts[2].pct === 100, 'each point carries its percentage');
+  assert(scoreCurveSvg([0.8]) === '', 'one score draws no curve');
+  const svg = scoreCurveSvg([0.5, 1]);
+  assert(svg.includes('<svg class="tr-score-curve"') && svg.includes('<polyline class="tr-score-curve-line"'),
+    'two scores draw a line');
+  assert((svg.match(/<circle/g) || []).length === 2, 'one dot per session');
+  assert(svg.includes('tr-score-curve-dot-last') && svg.includes('<title>100%</title>'),
+    'the latest session is marked and labelled');
+  assert(svg.includes('>100%</text>') && svg.includes('>50%</text>') && svg.includes('>0%</text>'),
+    'the curve carries its 0/50/100% scale');
+  assert((svg.match(/tr-score-curve-grid/g) || []).length === 3,
+    'each scale step gets a gridline');
+});
+
+test('Score curve: both summaries show it once there is history', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes('showFreePracticeSummary(knownCount, totalLines, res.nextScores)')
+    && fc.includes('showTextPracticeSummary(knownCount, totalLines, res.rating, res.nextScores)'),
+    'flashcards.js: the submit must pass the score history to both summaries');
+  assert(fc.includes('const curve = scoreCurveSvg(scores);'),
+    'flashcards.js: the summaries must build the curve from the history');
+  assert(fc.includes('tr-score-curve-wrap') && fc.includes("t('text_revision.chunk_recent_scores')"),
+    'flashcards.js: the curve must carry its Recent scores label');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(css.includes('.tr-score-curve-line') && css.includes('.tr-score-curve-dot-last'),
+    'style.css: the curve line and the latest dot must be styled');
+  assert(css.includes('.tr-score-curve-grid') && css.includes('.tr-score-curve-tick'),
+    'style.css: the scale gridlines and tick labels must be styled');
+  // The summary's small grey labels sat at ~4.1:1 on the background
+  // (below AA), then a 70% text mix (6.1:1 / 7.9:1) — now full text
+  // colour at a larger size, which clears AAA in both themes. The
+  // flashcard session summary shares the stat label.
+  assert(css.includes('.practice-stat-lbl { font-size:0.875rem; color:var(--text);'),
+    'style.css: the stat label must be full text colour at 0.875rem');
+  assert(css.includes('.tr-free-note { text-align:center; font-size:0.9rem; color:var(--text);'),
+    'style.css: the free-practice note must be full text colour at 0.9rem');
+  assert(css.includes('.tr-score-curve-label { font-size:0.9rem; color:var(--text);'),
+    'style.css: the curve label must be full text colour at 0.9rem');
+  assert(css.includes('.tr-score-curve-tick { font-size:10px; fill:var(--text); }'),
+    'style.css: the scale ticks must be full text colour at 10px');
+  assert(!css.includes('.practice-stat-lbl { font-size:0.75rem; color:var(--muted);'),
+    'style.css: the stat label must no longer use the low-contrast muted grey');
+});
+
+// ===================================================================
+// 22k. Revise all chunks in one session
+// ===================================================================
+function loadAllChunksHelpers() {
+  const fc = jsFiles['flashcards.js'];
+  const start = fc.indexOf('// ── Pure all-chunks session helpers ──');
+  const end = fc.indexOf('// ── End pure all-chunks session helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure all-chunks session helpers block in flashcards.js');
+  return new Function(`${fc.slice(start, end)}; return { lastCompletedChunkPos, chunkLineStats };`)();
+}
+
+test('All chunks: the last completed chunk is the one before the first masked line', () => {
+  const { lastCompletedChunkPos, chunkLineStats } = loadAllChunksHelpers();
+  const states = (spec) => spec.map(([pos, state]) => ({ pos, kind: 'mine', state }));
+  assert(lastCompletedChunkPos([]) === -1, 'no lines, nothing complete');
+  assert(lastCompletedChunkPos(states([[0, 'masked']])) === -1, 'nothing revealed yet');
+  assert(lastCompletedChunkPos(states([[0, 'known'], [0, 'failed'], [1, 'masked']])) === 0,
+    'chunk 0 complete, chunk 1 started');
+  assert(lastCompletedChunkPos(states([[0, 'known'], [1, 'known'], [1, 'failed']])) === 1,
+    'no masked lines left: every chunk complete');
+  assert(lastCompletedChunkPos(states([[0, 'known'], [1, 'masked'], [2, 'masked']])) === 0,
+    'a later masked chunk does not un-complete the earlier one');
+  const mixed = [
+    { pos: 0, kind: 'mine', state: 'known' }, { pos: 0, kind: 'cue', state: 'shown' },
+    { pos: 0, kind: 'mine', state: 'failed' }, { pos: 1, kind: 'mine', state: 'masked' },
+  ];
+  assert(chunkLineStats(mixed, 0).known === 1 && chunkLineStats(mixed, 0).total === 2,
+    'per-chunk stats count own lines only, cues excluded');
+  assert(chunkLineStats(mixed, 1).known === 0 && chunkLineStats(mixed, 1).total === 1,
+    'a masked own line counts in the total but not as known');
+});
+
+test('All chunks: button, session, stop button and summary are wired', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes('data-action="start-text-practice-all-chunks"') && fc.includes("t('text_revision.revise_all_chunks')"),
+    'flashcards.js: the text row must carry a Revise all chunks button');
+  assert(fc.includes('window.startTextPracticeAllChunks = startTextPracticeAllChunks'),
+    'flashcards.js: the all-chunks session must be window-exposed for delegation');
+  assert(fc.includes("chunks.map(ch => ({ chunk: ch, mode: chunkReviseMode(ch, now) }))"),
+    'flashcards.js: each chunk must keep the mode it would have had on its own (FSRS when due/new, practice otherwise)');
+  assert(fc.includes('tr-chunk-separator') && fc.includes("t('text_revision.chunk_title'"),
+    'flashcards.js: the overlay must separate chunks with a labelled dashed separator');
+  assert(fc.includes('data-chunk-pos=') && fc.includes('updateStopButton()'),
+    'flashcards.js: lines must carry their chunk position and the stop button must update on reveal and rollback');
+  assert(fc.includes('window.submitAllChunksReview') && fc.includes('window.stopAllChunksReview'),
+    'flashcards.js: the full submit and the early stop must both exist');
+  assert(fc.includes('applyChunkReview(entry.chunk, known, total, entry.mode === \'fsrs\')'),
+    'flashcards.js: the all-chunks submit must score each chunk through the shared per-chunk helper');
+  assert(fc.includes('applyChunkReview(chunk, knownCount, totalLines, !trFreePractice)'),
+    'flashcards.js: the single-chunk submit must use the same shared helper (no drift between the two paths)');
+  assert(fc.includes('showMultiChunkPracticeSummary(results, trSessionChunks.length, textTotal)'),
+    'flashcards.js: the all-chunks submit must show the aggregate summary');
+  assert(fc.includes("t('text_revision.chunks_completed')") && fc.includes('tr-multi-chunk-detail')
+    && fc.includes("data-action=\"toggle-chunk-summary-stats\""),
+    'flashcards.js: the summary must show the aggregate plus one row per completed chunk that expands its stats in place');
+  assert(fc.includes('const curve = scoreCurveSvg(r.scores);')
+    && fc.includes("t('text_revision.chunk_next_review')") && fc.includes('tr-chunk-score-bars'),
+    'flashcards.js: each expanded row must show its own score curve, score bars, status and next review');
+  assert(!fc.includes('openChunkStatsFromSummary'),
+    'flashcards.js: the panel redirect must be gone — the stats live in the summary');
+  assert(fc.includes("function startTextPracticeAllChunks(textId, fromChunkIndex = 0)")
+    && fc.includes('ch.chunk_index >= fromChunkIndex') && fc.includes('fromChunkIndex,'),
+    'flashcards.js: revise-all must accept a starting chunk and cover only that chunk onward');
+  assert(fc.includes("t('text_revision.from_chunk', trAllChunksFrom + 1, allChunks.length)"),
+    'flashcards.js: a from-chunk session must badge itself with its starting chunk');
+  assert(fc.includes('window.reviseFromChunk') && fc.includes('data-action="revise-from-chunk"')
+    && fc.includes("t('text_revision.chunk_revise_from')"),
+    'flashcards.js: the chunk panel must offer revising from this chunk onward, closing the panel first');
+  assert(fc.includes('practiceSummaryContinueButtons()'),
+    'flashcards.js: the continue buttons must be shared between the single and multi-chunk summaries');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(css.includes('.tr-chunk-separator') && css.includes('border-top:2px dashed'),
+    'style.css: the chunk separator must be a dashed line');
+  assert(css.includes('.tr-stop-section') && css.includes('.tr-multi-chunk-row'),
+    'style.css: the stop button section and the summary rows must be styled');
+  const del = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+  assert(del.includes("case 'start-text-practice-all-chunks': callWindow('startTextPracticeAllChunks', [getId(el)]);"),
+    'delegation.js: the new button must dispatch with the text id');
+  assert(del.includes("case 'submit-all-chunks-review': callWindow('submitAllChunksReview', []);")
+    && del.includes("case 'stop-all-chunks-review': callWindow('stopAllChunksReview', []);")
+    && del.includes("case 'toggle-chunk-summary-stats': callWindow('toggleChunkSummaryStats', [el]);"),
+    'delegation.js: the all-chunks submit, stop and summary-row actions must dispatch');
+  assert(del.includes("'start-text-practice-all-chunks': 1") && del.includes("'submit-all-chunks-review': 1")
+    && del.includes("'stop-all-chunks-review': 1") && del.includes("'toggle-chunk-summary-stats': 1"),
+    'delegation.js: the new actions must be allowed in read-only mode, like the single-chunk session');
+  assert(css.includes('.tr-multi-chunk-detail') && css.includes('.tr-multi-chunk-chevron'),
+    'style.css: the expandable row and its detail must be styled');
+  assert(del.includes("case 'revise-from-chunk': callWindow('reviseFromChunk', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]);"),
+    'delegation.js: the panel revise-from action must dispatch with text id and chunk index');
+  assert(del.includes("'revise-from-chunk': 1"),
+    'delegation.js: the revise-from action must be allowed in read-only mode');
+  assert(!del.includes('open-chunk-stats-from-summary'),
+    'delegation.js: the panel redirect action must be gone');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  assert(i18n.includes('Revise all chunks') && i18n.includes('Réviser tous les blocs') && i18n.includes('Repasar todos los bloques')
+    && i18n.includes('Stop here — save progress') && i18n.includes('Chunks completed')
+    && i18n.includes('Revise from this chunk') && i18n.includes('Réviser à partir de ce bloc') && i18n.includes('Repasar desde este bloque')
+    && i18n.includes('From chunk {0} of {1}') && i18n.includes('À partir du bloc {0} sur {1}') && i18n.includes('Desde el bloque {0} de {1}'),
+    'i18n.js: the new labels must exist in all three locales');
 });
 
 // ===================================================================
@@ -4271,8 +4661,10 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'revision lines must carry their kind (mine/cue/dir)');
       assert(/const myLineCount = chunkLines\.filter\(l => l\.kind === 'mine'\)\.length/.test(flashJs),
         'submit must count only the role\'s own lines');
-      assert(flashJs.includes("if (kind !== 'mine') return;"),
-        'cue/direction lines must not toggle known/failed');
+      const { revealedLineClickAction } = loadTextPracticeLineHelpers();
+      assert(revealedLineClickAction('cue', false) === 'rollback'
+        && revealedLineClickAction('dir', false) === 'rollback',
+        'cue/direction lines must not toggle known/failed (a click rolls them back instead)');
     });
 
     test('scene pickers skip chunks with none of the role\'s lines', () => {
@@ -4848,13 +5240,15 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     test('free practice: submit skips scheduling updates', () => {
       const flashJs = jsFiles['flashcards.js'];
       const submitStart = flashJs.indexOf('window.submitTextReview = async function');
-      const submitBody = flashJs.slice(submitStart, flashJs.indexOf('window.showTextPracticeSummary', submitStart));
-      const freeIdx = submitBody.indexOf('if (trFreePractice)');
-      const fsrsIdx = submitBody.indexOf('fsrsUpdate');
-      assert(freeIdx !== -1 && fsrsIdx !== -1 && freeIdx < fsrsIdx,
-        'submitTextReview must branch to the free-practice summary before any FSRS update');
-      assert(/showFreePracticeSummary\(knownCount, totalLines\);\s*return;/.test(submitBody),
-        'free practice submit must not fall through to the scheduling path');
+      const submitBody = flashJs.slice(submitStart, flashJs.indexOf('window.submitAllChunksReview', submitStart));
+      assert(submitBody.includes('applyChunkReview(chunk, knownCount, totalLines, !trFreePractice)'),
+        'submitTextReview must pass the free-practice flag into the shared per-chunk scoring');
+      assert(/if \(trFreePractice\) \{\s*showFreePracticeSummary\(knownCount, totalLines, res\.nextScores\);\s*return;/.test(submitBody),
+        'free practice submit must show the free-practice summary and return before the scheduled one');
+      const applyStart = flashJs.indexOf('async function applyChunkReview');
+      const applyBody = flashJs.slice(applyStart, flashJs.indexOf('window.submitTextReview', applyStart));
+      assert(applyBody.indexOf('if (!scheduled)') !== -1 && applyBody.indexOf('if (!scheduled)') < applyBody.indexOf('fsrsUpdate'),
+        'applyChunkReview must return early for free practice before any FSRS update');
     });
 
     // Anki-style relearning (v2.32.102): a lapse puts the card into

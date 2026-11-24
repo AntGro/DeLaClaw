@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS text_line_progress (
   next_review TEXT,
   review_count INTEGER NOT NULL DEFAULT 0,
   relearning INTEGER NOT NULL DEFAULT 0,
+  recent_scores TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );

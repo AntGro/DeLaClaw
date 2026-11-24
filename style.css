@@ -1556,11 +1556,23 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .tr-meta { font-size:0.75rem; color:var(--muted); display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
 .tr-due-badge { background:color-mix(in srgb, var(--fc-due) 15%, transparent); color:var(--fc-due); padding:1px 6px; border-radius:4px; font-weight:600; font-size:0.68rem; }
 .tr-progress-wrap { width:100%; margin-top:4px; }
-.tr-progress-bar { display:flex; gap:2px; border-radius:2px; overflow:hidden; }
+.tr-progress-bar { display:flex; gap:3px; border-radius:2px; overflow:hidden; }
 .tr-progress-bar:not(.tr-bar-expanded) .tr-seg:nth-child(n+17) { display:none; }
 .tr-progress-bar.tr-bar-expanded { flex-wrap:wrap; }
 .tr-progress-bar.tr-bar-expanded .tr-seg { flex:0 0 16px; }
-.tr-seg { flex:1 1 16px; min-width:16px; height:16px; border:0; padding:0; border-radius:2px; cursor:pointer; }
+.tr-seg { flex:1 1 16px; min-width:16px; height:16px; border:0; padding:0; border-radius:2px; cursor:pointer; position:relative; overflow:hidden; }
+/* In-segment fill: bottom-anchored, height = latest revision score.
+   A text-tint overlay so it reads on every scheduling colour, in both
+   themes — the hue still says when the chunk is due, the fill says how
+   well the last revision went. */
+.tr-seg-fill { position:absolute; left:0; top:0; bottom:0; background:color-mix(in srgb, var(--text) 32%, transparent); pointer-events:none; }
+/* Touch: chunk segments are 28px targets — 16px squares are too small
+   to hit precisely. 12 x 28px + gaps fits one row on a 390px phone, so
+   the collapsed bar shows 12 there (see TR_BAR_COLLAPSED_COUNT_TOUCH);
+   the expanded bar is a uniform 28px grid. */
+html.touch .tr-seg { flex:1 1 28px; min-width:28px; height:28px; }
+html.touch .tr-progress-bar:not(.tr-bar-expanded) .tr-seg:nth-child(n+11) { display:none; }
+html.touch .tr-progress-bar.tr-bar-expanded .tr-seg { flex:0 0 28px; height:28px; }
 .tr-seg:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .tr-bar-toggle { display:inline-flex; align-items:center; gap:6px; margin-top:6px; padding:6px 12px; background:var(--accent-dim); border:1px solid var(--accent); border-radius:999px; color:var(--text); font-size:0.78rem; font-weight:600; cursor:pointer; }
 .tr-bar-toggle:hover { filter:brightness(1.15); }
@@ -1576,6 +1588,9 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .tr-chunk-panel-btn:hover { background:var(--surface2); }
 .tr-chunk-panel-btn:disabled { opacity:0.5; cursor:default; }
 .tr-chunk-panel-note { font-size:0.78rem; color:var(--muted); margin-top:8px; line-height:1.5; }
+/* First words of the chunk, under the panel title — "Chunk K of N"
+   alone cannot tell chunks apart. Clamped to two lines. */
+.tr-chunk-panel-preview { font-size:0.8rem; color:var(--muted); font-style:italic; line-height:1.5; margin:2px 0 10px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .tr-chunk-panel-stats { display:flex; flex-direction:column; gap:6px; margin:10px 0 4px; font-size:0.82rem; }
 .tr-chunk-stat-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .tr-chunk-viz { display:flex; align-items:center; gap:14px; margin:2px 0 10px; }
@@ -1602,6 +1617,14 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .tr-seg-due { background:color-mix(in srgb, var(--fc-due) 50%, transparent); }
 .tr-seg-ok { background:var(--fc-ok); }
 .tr-seg-mastered { background:var(--fc-mastered); }
+/* A latest score of 0 has no visible fill, so the segment gets a red
+   bottom border instead — a chunk revised and failed must never look
+   like a chunk never revised. */
+.tr-seg-zero { border-left:3px solid var(--red); }
+/* Recent-scores mini bars in the chunk panel stats: one bar per score
+   in the last-20 history, oldest first, height = score. */
+.tr-chunk-score-bars { display:flex; align-items:flex-end; gap:2px; height:24px; margin:-2px 0 2px; }
+.tr-chunk-score-bars span { flex:1; min-width:3px; background:var(--accent); border-radius:1px; opacity:.75; }
 .tr-text-body { padding:8px 12px 4px 16px; }
 .tr-text-preview { font-size:0.8rem; color:var(--muted); line-height:1.6; font-style:italic; }
 .tr-more { opacity:0.5; }
@@ -1663,7 +1686,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .tr-sprev-warn { color:#f59e0b; }
 .tr-sprev-more { color:var(--muted); font-size:0.75rem; padding-top:4px; }
 .tr-practice-badge { display:inline-block; font-size:0.68rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--accent); background:rgba(100,108,255,0.12); border:1px solid rgba(100,108,255,0.35); border-radius:20px; padding:1px 8px; margin-left:8px; vertical-align:1px; }
-.tr-free-note { text-align:center; font-size:0.8rem; color:var(--muted); font-style:italic; margin:4px 0 8px; }
+.tr-free-note { text-align:center; font-size:0.9rem; color:var(--text); font-style:italic; margin:4px 0 8px; }
 
 /* ═══════ Practice Overlay ═══════ */
 .practice-overlay {
@@ -1754,7 +1777,7 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .practice-summary-stats { display:flex; gap:32px; justify-content:center; margin-bottom:28px; }
 .practice-summary-stat { display:flex; flex-direction:column; align-items:center; }
 .practice-stat-val { font-size:2rem; font-weight:700; color:var(--accent); }
-.practice-stat-lbl { font-size:0.75rem; color:var(--muted); margin-top:4px; }
+.practice-stat-lbl { font-size:0.875rem; color:var(--text); margin-top:4px; }
 .practice-done-btn { background:var(--accent); color:#fff; padding:10px 32px; border-radius:10px; font-size:1rem; border:none; cursor:pointer; }
 .practice-done-btn:hover { filter:brightness(0.9); }
 .practice-summary-actions { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
@@ -1763,6 +1786,35 @@ h2 .lucide-icon{vertical-align:middle;margin-right:6px;position:relative;top:-1p
 .practice-continue-alt { background:transparent; color:var(--text); border:1px solid var(--border); }
 .practice-continue-alt:hover { filter:none; background:var(--bg-offset); }
 .practice-summary-actions .practice-done-btn { background:transparent; color:var(--text-secondary); border:1px solid var(--border); }
+/* Curve of the last scores on the end-of-revision summary: one point
+   per session, oldest first, so the trend reads at a glance. */
+.tr-score-curve-wrap { margin:0 auto 24px; max-width:320px; }
+.tr-score-curve-label { font-size:0.9rem; color:var(--text); margin-bottom:6px; }
+.tr-score-curve { width:100%; height:64px; display:block; }
+.tr-score-curve-line { fill:none; stroke:var(--accent); stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+.tr-score-curve-dot { fill:var(--surface); stroke:var(--accent); stroke-width:2; }
+.tr-score-curve-dot-last { fill:var(--accent); }
+.tr-score-curve-grid { stroke:var(--border); stroke-width:1; }
+.tr-score-curve-tick { font-size:10px; fill:var(--text); }
+/* All-chunks revision: a dashed separator marks the end of one chunk and
+   the start of the next, and the blue stop button sits under the last
+   fully revealed chunk's separator. */
+.tr-chunk-separator { display:flex; align-items:center; gap:10px; margin:18px 0 12px; color:var(--text); font-size:0.85rem; }
+.tr-chunk-separator::before, .tr-chunk-separator::after { content:''; flex:1; border-top:2px dashed var(--border); }
+.tr-chunk-separator span { white-space:nowrap; }
+.tr-stop-section { margin:14px 0; text-align:center; }
+/* Multi-chunk summary: one card per completed chunk, tap the row to
+   expand its stats in place. */
+.tr-multi-chunk-rows { display:flex; flex-direction:column; gap:8px; max-width:420px; margin:0 auto 24px; }
+.tr-multi-chunk-item { border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+.tr-multi-chunk-row { display:flex; justify-content:space-between; align-items:center; gap:16px; width:100%; background:transparent; border:none; border-radius:0; padding:10px 14px; color:var(--text); font-size:0.95rem; cursor:pointer; text-align:left; }
+.tr-multi-chunk-row:hover { background:var(--surface2); }
+.tr-multi-chunk-right { display:flex; align-items:center; gap:8px; }
+.tr-multi-chunk-score { white-space:nowrap; }
+.tr-multi-chunk-chevron { display:flex; color:var(--muted); transition:transform .15s; }
+.tr-multi-chunk-row.open .tr-multi-chunk-chevron { transform:rotate(180deg); }
+.tr-multi-chunk-detail { padding:4px 14px 12px; border-top:1px solid var(--border); }
+.tr-multi-chunk-detail .tr-score-curve-wrap { margin:10px 0 4px; }
 .practice-summary-actions .practice-done-btn:hover { filter:none; background:var(--bg-offset); }
 
 @media (max-width:600px) {

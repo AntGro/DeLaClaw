@@ -70,8 +70,9 @@
     // FSRS persistence while readOnlyMode is on — ratings are never
     // written or applied to the in-memory schedule.
     'start-practice': 1, 'toggle-card': 1, 'rate-card': 1, 'continue-free-practice': 1,
-    'start-text-practice': 1, 'start-text-practice-for-text': 1, 'handle-line-click': 1,
-    'submit-text-review': 1, 'continue-text-same-text': 1,
+    'start-text-practice': 1, 'start-text-practice-for-text': 1, 'start-text-practice-all-chunks': 1, 'handle-line-click': 1,
+    'submit-text-review': 1, 'submit-all-chunks-review': 1, 'stop-all-chunks-review': 1, 'continue-text-same-text': 1,
+    'toggle-chunk-summary-stats': 1, 'revise-from-chunk': 1,
     'open-chunk-panel': 1, 'show-chunk-stats': 1, 'back-to-chunk-panel': 1, 'toggle-chunk-bar': 1, 'revise-chunk': 1
   };
   function readOnlyAllows(action) {
@@ -266,6 +267,7 @@
       case 'toggle-card': callWindow('toggleCard', []); break;
       case 'rate-card': callWindow('rateCard', [el.dataset.rating]); break;
       case 'start-text-practice-for-text': callWindow('startTextPracticeForText', [getId(el)]); break;
+      case 'start-text-practice-all-chunks': callWindow('startTextPracticeAllChunks', [getId(el)]); break;
       case 'open-edit-text': callWindow('openEditTextModal', [getId(el)]); break;
       case 'delete-text': callWindow('deleteText', [getId(el)]); break;
       case 'open-chunk-panel': callWindow('openChunkPanel', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10), el]); break;
@@ -284,6 +286,10 @@
       case 'end-text-practice': callWindow('endTextPractice', []); break;
       case 'handle-line-click': if (window.handleLineClick) window.handleLineClick(el); else { var idx = el.dataset.lineIdx || el.dataset.line || el.dataset.index; callWindow('handleLineClick', [parseInt(idx||'0',10)]); } break;
       case 'submit-text-review': callWindow('submitTextReview', [getId(el), parseInt(el.dataset.lines || '0', 10)]); break;
+      case 'submit-all-chunks-review': callWindow('submitAllChunksReview', []); break;
+      case 'stop-all-chunks-review': callWindow('stopAllChunksReview', []); break;
+      case 'toggle-chunk-summary-stats': callWindow('toggleChunkSummaryStats', [el]); break;
+      case 'revise-from-chunk': callWindow('reviseFromChunk', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
       case 'continue-text-same-text': callWindow('continueTextSameText', []); break;
       case 'continue-free-practice': callWindow('continueFreePractice', []); break;
       case 'archive-project': callWindow('archiveProject', [getId(el)]); break;

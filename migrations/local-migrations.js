@@ -695,4 +695,10 @@ export const LOCAL_MIGRATIONS = {
   '2.32.122': `
     ALTER TABLE list_items ADD COLUMN attachments TEXT;
   `,
+
+  // 2.32.149: chunk revision scores — a JSON array of the last 20
+  // ratios (0..1, oldest first). Existing rows start NULL (= no scores).
+  '2.32.149': `
+    ALTER TABLE text_line_progress ADD COLUMN recent_scores TEXT;
+  `,
 };

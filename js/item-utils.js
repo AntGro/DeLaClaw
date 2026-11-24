@@ -103,7 +103,7 @@ const TOUCH_PRIMARY_ACTIONS = {
   list: ['attach-to-list-item', 'edit-list-item-inline'],
   task: ['update-task-status', 'prompt-edit-task'],
   card: ['open-edit-flashcard', 'delete-flashcard'],
-  text: ['start-text-practice-for-text', 'tr-expand-toggle'],
+  text: ['start-text-practice-for-text', 'start-text-practice-all-chunks'],
   draft: ['request-proposal', 'start-inline-edit-draft', 'delete-draft'],
 };
 function splitRowActions(keys, primarySelectors) {

@@ -646,6 +646,111 @@ Entonces empecemos.
       created_at: d(-15), updated_at: d(-2),
     });
   });
+  // A longer rehearsal scene: 3 characters, 20 single-line messages plus
+  // 2 standalone didascalies in a single chunk (blocks_per_chunk 22),
+  // same cast as The Audition.
+  const rehearsals = {
+    en: {
+      title: 'The Rehearsal', author: 'Demo', deck: 'Theatre', focus_role: 'ELENA',
+      content: `<**A bare stage. A single spotlight. ELENA waits centre stage.**>
+<DIRECTOR: Places, everyone. From the top of the scene.>
+<ELENA: **takes a breath** I am ready when you are.>
+<MARCUS: Wait — do we start with the letter, or the argument?>
+<DIRECTOR: The letter. The argument comes after the knock.>
+<ELENA: Dearest Thomas, I write this knowing you may never read it.>
+<MARCUS: **quietly** She never sent it, did she?>
+<DIRECTOR: No. That is the whole tragedy. Keep going.>
+<ELENA: I have kept your letters under the floorboards for ten years.>
+<MARCUS: Ten years? **He laughs.** You counted every one.>
+<ELENA: I counted the days, not the letters.>
+<DIRECTOR: Good. Hold that beat — then the knock.>
+<**A knock sounds at the door. The room holds its breath.**>
+<MARCUS: **knocks three times** Elena? Are you there?>
+<ELENA: **freezes** Who is it?>
+<MARCUS: It is me. I came back.>
+<DIRECTOR: Slower. He has walked a hundred miles to say that.>
+<ELENA: You came back? After all this time?>
+<MARCUS: I never left. Not really.>
+<ELENA: **her voice breaks** Then why did you go?>
+<DIRECTOR: And — hold. That is the scene. Beautiful.>
+<MARCUS: **grinning** Same time tomorrow?>`,
+    },
+    fr: {
+      title: 'La Répétition', author: 'Demo', deck: 'Théâtre', focus_role: 'LÉA',
+      content: `<**Une scène nue. Un seul projecteur. LÉA attend au centre.**>
+<METTEUSE EN SCÈNE: En place, tout le monde. On reprend depuis le début de la scène.>
+<LÉA: **prend une inspiration** Je suis prête quand vous voulez.>
+<PAUL: Attendez — on commence par la lettre, ou par la dispute ?>
+<METTEUSE EN SCÈNE: La lettre. La dispute vient après qu'on frappe.>
+<LÉA: Mon cher Thomas, je t'écris en sachant que tu ne liras peut-être jamais ceci.>
+<PAUL: **doucement** Elle ne l'a jamais envoyée, n'est-ce pas ?>
+<METTEUSE EN SCÈNE: Non. C'est toute la tragédie. Continuez.>
+<LÉA: J'ai gardé tes lettres sous les lattes du plancher pendant dix ans.>
+<PAUL: Dix ans ? **Il rit.** Tu les as toutes comptées.>
+<LÉA: J'ai compté les jours, pas les lettres.>
+<METTEUSE EN SCÈNE: Bien. Gardez ce silence — puis on frappe.>
+<**On frappe à la porte. La pièce retient son souffle.**>
+<PAUL: **frappe trois coups** Léa ? Tu es là ?>
+<LÉA: **elle se fige** Qui est-ce ?>
+<PAUL: C'est moi. Je suis revenu.>
+<METTEUSE EN SCÈNE: Plus lentement. Il a marché cent lieues pour dire cela.>
+<LÉA: Tu es revenu ? Après tout ce temps ?>
+<PAUL: Je ne suis jamais parti. Pas vraiment.>
+<LÉA: **la voix brisée** Alors pourquoi es-tu parti ?>
+<METTEUSE EN SCÈNE: Et — on tient. C'est la scène. Magnifique.>
+<PAUL: **souriant** Même heure demain ?>`,
+    },
+    es: {
+      title: 'El ensayo', author: 'Demo', deck: 'Teatro', focus_role: 'SOFÍA',
+      content: `<**Un escenario vacío. Un solo foco. SOFÍA espera en el centro.**>
+<DIRECTORA: En sus marcas, todos. Desde el principio de la escena.>
+<SOFÍA: **respira hondo** Estoy lista cuando quieran.>
+<DIEGO: Espera — ¿empezamos por la carta o por la discusión?>
+<DIRECTORA: Por la carta. La discusión viene después de los golpes.>
+<SOFÍA: Querido Tomás, te escribo sabiendo que quizá nunca lo leas.>
+<DIEGO: **en voz baja** Nunca la envió, ¿verdad?>
+<DIRECTORA: No. Esa es toda la tragedia. Sigan.>
+<SOFÍA: Guardé tus cartas bajo las tablas del suelo durante diez años.>
+<DIEGO: ¿Diez años? **Se ríe.** Las contaste todas.>
+<SOFÍA: Conté los días, no las cartas.>
+<DIRECTORA: Bien. Guarden ese silencio — y luego los golpes.>
+<**Llaman a la puerta. La sala contiene la respiración.**>
+<DIEGO: **llama tres veces** ¿Sofía? ¿Estás ahí?>
+<SOFÍA: **se queda inmóvil** ¿Quién es?>
+<DIEGO: Soy yo. He vuelto.>
+<DIRECTORA: Más despacio. Ha caminado cien leguas para decir eso.>
+<SOFÍA: ¿Has vuelto? ¿Después de tanto tiempo?>
+<DIEGO: Nunca me fui. No del todo.>
+<SOFÍA: **con la voz rota** Entonces, ¿por qué te fuiste?>
+<DIRECTORA: Y — quietos. Esa es la escena. Precioso.>
+<DIEGO: **sonriendo** ¿Misma hora mañana ?>`,
+    },
+  };
+  const rehearsal = rehearsals[lang] || rehearsals.en;
+  data.texts.push({
+    id: 'demo-text-003', deck: rehearsal.deck, title: rehearsal.title, author: rehearsal.author,
+    content: rehearsal.content, blocks_per_chunk: 22, context_blocks: 1,
+    focus_role: rehearsal.focus_role,
+    created_at: d(-15), updated_at: d(-2),
+  });
+  // One chunk of 22 lines (20 messages + 2 didascalies) — chunk progress
+  // via the real scene parser.
+  // Pretend it was already revised 20 times, scores trending up with
+  // dips, so the demo shows the score history, the segment fill and the
+  // summary curve (see the README text-revision GIF).
+  const rehearsalChunks = splitSceneIntoChunks(parseSceneContent(rehearsal.content).lines, 22);
+  rehearsalChunks.forEach((_, idx) => {
+    data.text_line_progress.push({
+      id: `demo-tlp-rehearsal-${idx}`, text_id: 'demo-text-003', chunk_index: idx,
+      stability: 12,
+      difficulty: 5,
+      last_review: d(-2),
+      next_review: dateOnly(0),
+      review_count: 20,
+      recent_scores: [0.43, 0.50, 0.47, 0.55, 0.52, 0.60, 0.58, 0.66, 0.62, 0.70, 0.68, 0.74, 0.71, 0.78, 0.75, 0.82, 0.79, 0.85, 0.83, 0.88],
+      created_at: d(-15), updated_at: d(-2),
+    });
+  });
   data.prompts = [];
 
   return data;

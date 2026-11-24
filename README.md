@@ -7,7 +7,7 @@ A personal life OS that runs in the browser. Your data lives in your Google Driv
 [![Live Demo](https://img.shields.io/badge/demo-delaclaw.com-454dc6)](https://delaclaw.com)
 
 <p align="center">
-  <img src="screenshots/welcome.png" alt="DeLaClaw Today dashboard" width="720">
+  <img src="screenshots/welcome.gif" alt="DeLaClaw Today dashboard" width="720">
 </p>
 
 ## What it does
@@ -41,11 +41,11 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 ## Screenshots
 
 <p align="center">
-  <img src="screenshots/calendar.png" alt="Calendar month view" width="720">
+  <img src="screenshots/tabs.gif" alt="Switching between tabs" width="720">
 </p>
 
 <p align="center">
-  <img src="screenshots/todos.png" alt="TODOs" width="720">
+  <img src="screenshots/text-revision.gif" alt="Text revision mode" width="720">
 </p>
 
 ## Quick start

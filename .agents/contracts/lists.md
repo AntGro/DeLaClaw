@@ -24,15 +24,15 @@ User jobs:
 
 ## UI / UX
 - **Reused components:** `.page-empty-state`, `.modal`, `.bucket-card`, `.project-card`, `.card-header`, `.category-nav-btn`, empty-state, toast
-- **List colors:** customizable via color picker in add/edit modal; default `#14b8a6` (teal). Stable fallback for legacy lists: hash-based color from id
+- **List colors:** customizable, default teal. Stable fallback for legacy lists: hash-based color from id
 - **Checkboxes:** per `list_item`, inline edit with note field via `inlineEditText` / `editListItemInlineFull`
 - **List nav:** reorderable via long-press drag (`initNavBtnReorder`), `sort_order` persisted
 - **Cross-list drag:** `initItemDragDrop` with `crossContainerSelector` — items can be dragged between lists, updates FK and re-numbers `sort_order` in source/target; shared items keep sharing data
 - **Sort order:** no sort selector — lists ordered manually via drag only. Items within a list: unchecked first by `sort_order`, checked at bottom
 - **Scroll anchoring (v2.32.176):** `#listsGrid{overflow-anchor:none}` in style.css — `renderLists()` replaces the whole grid and restores `window.scrollY` itself; Chrome's scroll anchoring would re-adjust the scroll after the restore, because the anchor row was destroyed by the re-render (ticking an item jumped the window). The same innerHTML+scrollTo pattern exists on every view (todos, habits, calendar, flashcards, projects, welcome, main) — only the lists grid is opted out for now.
 - **Search:** `filterLists` / `listSearchQuery` — filters across list names and item names
-- **`__shared__` list:** auto-created on first shared item sync, hidden when empty, purple color (`#a78bfa`)
-- **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows Attach + Edit at 40px targets plus a kebab menu holding share/copy-link/delete (see todos.md for the shared mechanism in `item-utils.js`). The attach button only renders in Drive mode, so demo shows Edit alone. Desktop unchanged.
+- **`__shared__` list:** auto-created on first shared item sync, hidden when empty, purple color
+- **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows Attach + Edit plus a kebab menu holding share/copy-link/delete (see todos.md for the shared mechanism in `item-utils.js`). The attach button only renders in Drive mode, so demo shows Edit alone. Desktop unchanged.
 
 ## Interaction Guards
 - **Pending sets:**

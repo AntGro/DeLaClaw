@@ -11,7 +11,7 @@ DeLaClaw is a no-build, self-hosted personal dashboard. It runs entirely in the 
 - **TODOs** — Categorised to-do lists with snooze, priority, deadlines, and sharing
 - **Habits** — Recurring habit tracker with calendar view, streak stats, and sharing
 - **Memory** — Spaced-repetition flashcards and text revision decks
-- **Lists** — Shareable lists for anything that doesn't fit elsewhere
+- **Lists** — Shareable lists for anything that doesn't fit elsewhere, with file attachments (Google Drive)
 - **Calendar** — Month, week, day and year views of TODOs, habits, birthdays and your own events (including birthday reminders with avatar photos)
 - **Sharing** — Share TODOs, habits, and lists with groups via shared Drive folders
 - **Google Calendar sync** — Optionally mirror habits, TODOs, birthdays, and events to a dedicated Google Calendar

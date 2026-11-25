@@ -6,6 +6,7 @@
 - **Reference**
   - [Architecture](architecture.md)
   - [Sharing](sharing.md)
+  - [Lists](lists.md)
   - [Backends](backends.md)
   - [Sync Architecture](sync-architecture.md)
   - [Browser Support](browser-support.md)

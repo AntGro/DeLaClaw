@@ -97,7 +97,7 @@ When the UI language is changed (FR, ES), the `<html lang="...">` attribute is n
 
 On touch-first devices, item row actions now show two primary actions at 40px targets plus a kebab menu holding the rest (v2.32.146), so they no longer wrap across rows. WCAG recommends a minimum touch target of 44x44px — the 40px row targets are still short of that, and other small interactive elements (edit, delete, priority icons outside row actions) are unchanged.
 
-The kebab menu is keyboard-operable (v2.32.169): the kebab exposes `aria-haspopup="menu"`, `aria-expanded` and `aria-controls`, menu rows carry `role="menuitem"` with roving tabindex, opening moves focus to the first item, Up/Down (wrapping) and Home/End move between items, and Escape, Tab or choosing an item closes the menu and returns focus to the kebab.
+The kebab menu is keyboard-operable (v2.32.169): the kebab exposes `aria-haspopup="menu"`, `aria-expanded` and `aria-controls`, menu rows carry `role="menuitem"` with roving tabindex, opening moves focus to the first item, Up/Down (wrapping) and Home/End move between items, and Escape, Tab or choosing an item closes the menu and returns focus to the kebab. One exception: after a menu choice that deletes the row, focus falls to `<body>` — the row takes its kebab with it when it is removed, and the confirm dialog does no focus handling.
 
 **Recommendation**: Review and increase padding on the remaining small interactive elements for mobile viewports, and consider 44px row targets.
 

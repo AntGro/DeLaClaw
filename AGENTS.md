@@ -1,6 +1,6 @@
 # AGENTS.md — DeLaClaw Operating Manual
 
-For any coding agent (Human, Claude, Cursor, Codex) working in this repo. This is the single source of truth for how DeLaClaw is built. The global `~/AGENTS.md` is also read by agents — keep both in sync (this file is the repo canonical).
+For any coding agent (Human, Claude, Cursor, Codex) working in this repo. This is the canonical copy of the operating manual for how DeLaClaw is built. A mirror lives at `~/AGENTS.md` for agents that read the global file — edit here, mirror there.
 
 ## 0. Purpose
 

@@ -28,8 +28,8 @@ User jobs:
   - `.page-empty-state` for demo / no tokens
   - `.settings-data-btn` + `.sharing-group-card` for token rows
   - `.setting-group-label`, `.setting-hint` for explainer
-  - `.agent-name-pill` — quick-select pills with `brandFileIcon` brand icons for known agents (Claude Code, Codex CLI, OpenClaw, Hermes, NanoClaw, Grok Bot, Cursor, Aider); click prefills display name input via `agentsPrefillName`
-- **Copy UX:** textarea readonly `min-height:260px` monospace, select-on-render, two buttons: Copy setup + Copy token only
+- **Known-agent quick-select:** clicking a known agent (Claude Code, Codex CLI, OpenClaw, Hermes, NanoClaw, Grok Bot, Cursor, Aider) prefills the display name input via `agentsPrefillName`
+- **Copy UX:** readonly textarea, selected on render, two buttons: Copy setup + Copy token only
 - **Demo guard:** if `localStorage.claw_cc_active_mode==='demo'` → show empty state, no token creation
 
 ## Interaction Guards

@@ -38,7 +38,7 @@ function buildPrompt(lang) {
     { "name": "List Name", "color": "#hex", "kind": "bucket", "parent": null }
   ],
   "list_items": [
-    { "list_name": "List Name", "text": "Item text" }
+    { "list_name": "List Name", "text": "Item text", "attachments": [{ "name": "file.pdf", "url": "https://drive.google.com/file/d/..." }] }
   ]
 }`;
 
@@ -266,6 +266,19 @@ function normalizeCustomData(data) {
     data.list_items = data.list_items.map((r, i) => {
       base(r, 'li', i);
       if (r.checked == null) r.checked = 0;
+      // Attachments: keep name+url entries, fill the record fields the
+      // renderer requires (drive_file_id, size — 0 when unknown).
+      if (Array.isArray(r.attachments)) {
+        r.attachments = r.attachments
+          .filter(a => a && typeof a.name === 'string' && typeof a.url === 'string')
+          .map(a => ({
+            drive_file_id: a.drive_file_id || gid('att'),
+            name: a.name,
+            size: Number.isFinite(a.size) && a.size >= 0 ? a.size : 0,
+            url: a.url,
+          }));
+        if (!r.attachments.length) delete r.attachments;
+      }
       // Resolve list_name → list_id
       if (r.list_name && !r.list_id) {
         r.list_id = listNameToId[r.list_name] || null;

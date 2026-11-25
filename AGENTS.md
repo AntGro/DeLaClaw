@@ -1,6 +1,6 @@
 # AGENTS.md — DeLaClaw Operating Manual
 
-For any coding agent (Human, Claude, Cursor, Codex) working in this repo. This is the single source of truth for how DeLaClaw is built. The global `~/AGENTS.md` is also read by agents — keep both in sync (this file is the repo canonical).
+For any coding agent (Human, Claude, Cursor, Codex) working in this repo. This is the canonical copy of the operating manual for how DeLaClaw is built. A mirror lives at `~/AGENTS.md` for agents that read the global file — edit here, mirror there.
 
 ## 0. Purpose
 
@@ -20,7 +20,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - Rule: one-click → disable until fulfilled.
   - Modal saves: use `guard()` in `js/main.js` (adds `disabled` + `saving`/`is-pending` + `aria-busy`).
   - List items (habit DONE / TODO DONE / project task approve/promote): use per-ID pending Sets (`_pendingHabitDones`, `_pendingTodoToggles`, `_pendingTaskStatus`). Allow concurrent different IDs, block same ID double-click.
-  - Always pass `this` from `onclick="fn(id,this)"` and add `data-*-id` attribute for queryability.
+  - Pass ids via `data-*-id` attributes for queryability; handlers read them from the delegated event. Inline `onclick` handlers were removed (none remain in `js/` or `index.html`) — never add one back.
 - Enforced from v1.346. Tests guard existence of debounce/pending logic.
 
 **1.3 Event delegation**
@@ -38,17 +38,17 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 **1.5 AI-native dependency index (CODEMAP) + Feature contracts — mandatory for agents**
 - Generated: `.agents/CODEMAP.json` + `.agents/CODEMAP.md` (human-readable matrix). Source: `scripts/generate-codemap.js`. Do not hand-edit. Sizes and counts live in CODEMAP itself — do not restate them here.
 - Contains per `js/*.js`: `entry`, `loc`, `tables`, `state`, `depends_on`, `dependents` (blast radius), `ui_components` (reusable CSS), `i18n_prefix`, `guards` (`guard`/`pendingSet`), `esc_count`, `window_exposed`.
-- Features, core modules and adapters are enumerated in CODEMAP itself — it is the source of truth, so they are not listed here. `welcome` aggregates all features.
+- Features, core modules and adapters are enumerated in CODEMAP itself — it is the source of truth, so they are not listed here. `welcome` aggregates todos, habits, flashcards and birthdays (birthdays via calendar) — not lists or projects.
 - Feature contracts: `.agents/contracts/*.md` — agent-only, NOT in `docs-site`. Captures invariants CODEMAP can't: single source of truth (`isStructuredRule()`), guard patterns, XSS fields, welcome edges, business rules. BEFORE editing a feature, agents MUST read `CODEMAP.json:features[feature]` + `contracts/<feature>.md` if present.
 - Rule: BEFORE editing any `js/*.js`, agents MUST read `.agents/CODEMAP.json` → `features[feature]` and relevant `core` entries. Reuse `depends_on` + `ui_components`, check `dependents` for impact scope, follow `guards` per AGENTS 1.2, verify `esc_count`/`tables` for XSS/schema impact.
 - Freshness: pre-commit auto-regenerates JSON+MD and stages them. `tests/tests.js` will fail if JSON is out-of-date (CODEMAP freshness test). No manual sync.
-- Impact: `scripts/impact.js` reads staged diff + CODEMAP `dependents` to suggest `Checked:` trailer (e.g. `birthdays` change → `welcome [x]` + `xss [x]`). Pre-commit prints `[impact] Checked: …` hint; commit-msg prints full blast-radius report on failure.
+- Impact: `scripts/impact.js` reads staged diff + CODEMAP `dependents` to suggest `Checked:` trailer (e.g. `todos` change → `welcome [x]` + `xss [x]` — todos' dependents are calendar-sync.js, calendar.js, main.js, welcome.js). Pre-commit prints `[impact] Checked: …` hint; commit-msg prints full blast-radius report on failure.
 - Keep it small: exclude `demo-data.js`, don't index function bodies. If it grows >50KB, trim `window_exposed` to 8.
 
 **1.6 Architecture Decision Records (ADRs) — public context, SHOULD read**
 - Location: `docs-site/adrs/` — numbered `0001-*.md`, `0002-*.md` …
 - Public, NOT agent-only — captures *why* a decision was made, vs contracts which capture *what* must stay true.
-- Agents SHOULD read relevant ADR before major refactor: adapter change → `0002-byob-pluggable-backends.md`, build/tooling/hosting → `0001-no-build-github-pages-byob.md`.
+- Agents SHOULD read relevant ADR before major refactor: adapter change → `0002-byob-pluggable-backends.md`, build/tooling → `0001-no-build-github-pages-byob.md`, hosting → `0009-cloudflare-pages-hosting.md` (0001's hosting part is superseded by 0009).
 - If a change introduces a significant architectural decision (new pattern, trade-off, cost model, security boundary), agents MUST surface a proposal for a new ADR in chat/review rather than silently pushing an ADR alongside the code. ADR creation is a discussion, not an implementation detail.
 - Not enforced on every edit like CODEMAP/contracts, but provides rationale to avoid re-litigating past decisions.
 
@@ -67,16 +67,17 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 
 ## 4. Backend & Data
 
-- Tables: canonical list lives in `server/schema.sql` (Local SQLite). Personal tables, category/deck tables, and cross-backend tables (`daily_visits`, `groups`) exist on all backends; sharing tables (`sharing_groups`, `sharing_members`, `sharing_items`) are used by the Drive sharing adapter.
-- **Category integrity**: each category/deck table has one protected default row (`name=''`, `is_protected=1`). `protect_category_row()` trigger prevents DELETE/UPDATE on protected rows. Item FKs (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
+- Tables: canonical list lives in `server/schema.sql` (Local SQLite). Personal tables, category/deck tables, and the cross-backend table `daily_visits` exist on all backends. Sharing runs on Drive files, not SQL tables: the joined-group list is the Drive adapter's file-backed `groups` table (no Local equivalent), and the `sharing_groups` / `sharing_members` / `sharing_items` names survive only in main.js's backup enumeration — no adapter stores or reads them.
+- **Category integrity**: each category/deck table has one protected default row (`name=''`, `is_protected=1`). per-table triggers (`trg_protect_todo_categories`, `trg_protect_habit_categories`, `trg_protect_flashcard_decks`, each with a `_upd` variant) prevent DELETE/UPDATE on protected rows. Item FKs (`category_id` / `deck_id`) use **CASCADE** on delete — deleting a user category deletes its items. App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members.
 - Schema version in `settings` key `schema_version`, migrations in `migrations/`.
 - Base schema + migrations must be runnable in local SQLite (`server/schema.sql`).
 - Vendor: none since three.js was dropped (Nov 2026) — the `vendor/` directory, `scripts/update-vendor.sh`, and the weekly `vendor-check.yml` action were all removed with it.
+- **Local backend is hidden**: no login option exposes it (his decision, Oct 16, 2026) — keep it hidden without removing it. The code (`js/adapters/rest.js`, `server/`, `server/schema.sql`) stays as maintained plumbing: migrations run on both backends and the suite covers it; no Local-specific feature work.
 
 ## 5. Git, Versioning, Commit
 
 - **Target branch**: `dev` (preview at `dev.delaclaw.pages.dev`). `main` only when stable + user-approved. All PRs (including bot) target `dev`.
-- **Hooks**: ALWAYS `git config core.hooksPath .githooks` on fresh clone/subagent. Pre-commit bumps `VERSION` → updates `sw.js` CACHE_VERSION + ` .agents/CODEMAP.json/.md` (via `scripts/generate-codemap.js`) + prints `[impact] Checked: …` hint + blocks emoji. Commit-msg enforces `Checked:` trailer and on failure runs `scripts/impact.js --staged` to show blast radius from CODEMAP dependents and suggested trailer.
+- **Hooks**: ALWAYS `git config core.hooksPath .githooks` on fresh clone/subagent. Bump `latest` in `VERSION` by hand and stage it — pre-commit rejects the commit if `VERSION` isn't staged, then regenerates `js/version.js`, updates `sw.js` CACHE_VERSION and `.agents/CODEMAP.json/.md` (via `scripts/generate-codemap.js`), prints the `[impact] Checked: …` hint and blocks emoji. Commit-msg enforces `Checked:` trailer and on failure runs `scripts/impact.js --staged` to show blast radius from CODEMAP dependents and suggested trailer.
 - **VERSION file**: `latest` bumped every commit (X.Y.Z — patch per commit, minor on features, major on breaking schema). See `COMMIT_CHECKLIST.md`.
 - **Checked trailer**: Format `Checked: versioning [x], i18n [~], docs [~], readme [~], checklist [~], tests [~], welcome [~], prompts [~], xss [x]` — decide each individually, no batch-marking. `[x]` = diff touches area, `[~]` = does not. Bare item = rejected. Lesson v1.145: tests + xss left unmarked by inertia. Use CODEMAP `dependents` to assess `welcome` impact.
 - **Commit style**: `feat|fix|refactor|chore|ci|docs(scope): message`. Include test result (e.g. `N passed`) when relevant.

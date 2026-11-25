@@ -289,6 +289,21 @@ async function listFolderFiles(token, folderId) {
   return files || [];
 }
 
+// Pure: which files in a folder to trash, and whether the folder itself
+// can go. A file still referenced by another item is spared, and the
+// folder is trashed only when nothing referenced remains inside it —
+// trashing the folder would trash everything in it.
+function folderTrashPlan(contents, referencedIds) {
+  const trashFileIds = [];
+  let referencedRemain = false;
+  for (const f of contents || []) {
+    if (!f || !f.id) continue;
+    if (referencedIds && referencedIds.has(f.id)) { referencedRemain = true; continue; }
+    trashFileIds.push(f.id);
+  }
+  return { trashFileIds, trashFolder: !referencedRemain };
+}
+
 /** Download a file and return { data, etag } */
 async function downloadFile(token, fileId) {
   const resp = await fetch(
@@ -350,6 +365,370 @@ async function uploadFile(token, folderId, fileId, fileName, data, ifMatchEtag, 
   const result = await resp.json();
   const etag = resp.headers.get('ETag');
   return { id: result.id, etag };
+}
+
+// ── List item attachments ─────────────────────────────────────────
+// Multipart upload caps at 5 MB (Drive API limit) — larger files go
+// through the resumable endpoint instead, so there is no user-facing
+// size cap. The two upload functions below return the same record.
+export const ATTACHMENT_MULTIPART_MAX_BYTES = 5 * 1024 * 1024;
+const ATTACHMENTS_FOLDER_NAME = 'attachments';
+
+/** Find the attachments subfolder under the app folder, creating it on first use. */
+/** Find the attachments subfolder without creating it, or null. */
+async function findAttachmentsFolder(token, parentFolderId) {
+  const q = encodeURIComponent(
+    `name='${ATTACHMENTS_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`
+  );
+  const search = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  );
+  if (!search.ok) return null;
+  const { files } = await search.json();
+  return files && files.length > 0 ? files[0].id : null;
+}
+
+async function findOrCreateAttachmentsFolder(token, parentFolderId) {
+  const existing = await findAttachmentsFolder(token, parentFolderId);
+  if (existing) return existing;
+  const create = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: ATTACHMENTS_FOLDER_NAME,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentFolderId],
+    }),
+  });
+  if (!create.ok) throw new Error('Failed to create Drive attachments folder');
+  return (await create.json()).id;
+}
+
+// ── Pure attachment helpers ──
+// (Extracted by tests via new Function slicing, same idiom as the
+// flashcards pure session helpers.)
+function uniqueDriveFileName(name, existingNames) {
+  const taken = new Set(existingNames || []);
+  if (!taken.has(name)) return name;
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  let n = 1;
+  let candidate = `${base} (${n})${ext}`;
+  while (taken.has(candidate)) candidate = `${base} (${++n})${ext}`;
+  return candidate;
+}
+
+/**
+ * Claim a filename for an upload: dedupe against the names already
+ * taken (folder listing + the item's own attachment names) and the
+ * names claimed by uploads still in flight, then hold the chosen name
+ * in `claimed` until the caller releases it. The claim is what makes
+ * the naming correct — deduping against the other files' *raw* names
+ * renamed the first file of a same-name batch for no reason.
+ */
+function claimAttachmentName(fileName, takenNames, claimed) {
+  const name = uniqueDriveFileName(fileName, [...(takenNames || []), ...claimed]);
+  claimed.add(name);
+  return name;
+}
+// ── End pure attachment helpers ──
+
+// ── Attachment upload transport ────────────────────────────────
+// fetch() cannot report upload progress, so the file transfer goes
+// over XMLHttpRequest (upload.onprogress); only the resumable session
+// initiation stays on fetch (its body is a few bytes of JSON).
+// An AbortSignal cancels the in-flight XHR; the promise then rejects
+// with code 'aborted'. onProgress reports a 0..1 fraction of the file
+// (for multipart, of the whole FormData body — metadata included).
+
+/** Promise wrapper around one XHR call. Resolves with status, body and a header reader. */
+function xhrRequest({ method, url, headers = {}, body = null, onUploadProgress = null, signal = null }) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+    const done = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
+      fn(arg);
+    };
+    const abortHandler = () => xhr.abort();
+    xhr.open(method, url);
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    if (signal) {
+      if (signal.aborted) {
+        const err = new Error('Upload aborted');
+        err.code = 'aborted';
+        done(reject, err);
+        return;
+      }
+      signal.addEventListener('abort', abortHandler, { once: true });
+    }
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onUploadProgress) onUploadProgress(e.loaded, e.total);
+    };
+    xhr.onload = () => done(resolve, {
+      status: xhr.status,
+      responseText: xhr.responseText,
+      getResponseHeader: (h) => xhr.getResponseHeader(h),
+    });
+    xhr.onerror = () => {
+      const err = new Error('Drive upload failed: network error');
+      err.code = 'network';
+      done(reject, err);
+    };
+    xhr.onabort = () => {
+      const err = new Error('Upload aborted');
+      err.code = 'aborted';
+      done(reject, err);
+    };
+    xhr.send(body);
+  });
+}
+
+/** Parse a Drive `Range: bytes=0-<last>` header to its last byte, or null. */
+function parseRangeHeader(value) {
+  const m = /^bytes=0-(\d+)$/.exec((value || '').trim());
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * Find the Drive folder for one item's attachments, or null. The folder
+ * is named by folder key — the shared_id for a shared item (the stable
+ * identity across members), the local id otherwise. A personal row
+ * keeps its id forever; a shared item's local id is replaced by a fresh
+ * pointer row when it is shared, so the local id would orphan the
+ * folder at share time.
+ */
+async function findItemAttachmentsFolder(token, folderKey, parentFolderId) {
+  const q = encodeURIComponent(
+    `name='${folderKey}' and mimeType='application/vnd.google-apps.folder' and '${parentFolderId}' in parents and trashed=false`
+  );
+  const search = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  );
+  if (!search.ok) return null;
+  const { files } = await search.json();
+  return files && files.length > 0 ? files[0].id : null;
+}
+
+/** Find one item's attachments folder, creating it when missing. */
+async function findOrCreateItemAttachmentsFolder(token, folderKey, parentFolderId) {
+  const existing = await findItemAttachmentsFolder(token, folderKey, parentFolderId);
+  if (existing) return existing;
+  const create = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: folderKey,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentFolderId],
+    }),
+  });
+  if (!create.ok) throw new Error('Failed to create Drive item attachments folder');
+  return (await create.json()).id;
+}
+
+/**
+ * Upload a user-picked file to the attachments folder via multipart
+ * upload (FormData carries the binary part — the JSON-string body used
+ * for table files cannot). Returns the attachment record stored on the
+ * item: { drive_file_id, name, size, url }.
+ */
+async function uploadAttachmentFile(token, folderId, file, name, { onProgress = null, signal = null, uploadedBy = null } = {}) {
+  const metadata = { name, parents: [folderId] };
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', file);
+  const { status, responseText } = await xhrRequest({
+    method: 'POST',
+    url: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,webViewLink',
+    headers: { 'Authorization': `Bearer ${token}` },
+    body: form,
+    signal,
+    onUploadProgress: (loaded, total) => { if (onProgress && total > 0) onProgress(loaded / total); },
+  });
+  if (status < 200 || status >= 300) {
+    const err = new Error(`Drive upload failed: ${status} ${responseText}`);
+    err.code = status;
+    throw err;
+  }
+  const result = JSON.parse(responseText);
+  const rec = {
+    drive_file_id: result.id,
+    name: result.name,
+    size: Number(result.size) || file.size,
+    url: result.webViewLink,
+  };
+  if (typeof uploadedBy === 'string' && uploadedBy) rec.uploaded_by = uploadedBy;
+  return rec;
+}
+
+// 1 MB chunks — a multiple of Drive's 256 KB chunk quantum.
+const ATTACHMENT_CHUNK_BYTES = 1024 * 1024;
+
+/** One resumable chunk PUT (or an empty status-query PUT when the body is empty). */
+async function putResumableChunk(sessionUri, body, contentRange, contentType, { onProgress = null, signal = null } = {}) {
+  return xhrRequest({
+    method: 'PUT',
+    url: sessionUri,
+    headers: {
+      'Content-Type': contentType,
+      'Content-Range': contentRange,
+    },
+    body,
+    signal,
+    onUploadProgress: (loaded) => { if (onProgress) onProgress(loaded); },
+  });
+}
+
+function resumableContentRange(start, end, total) {
+  return end > start ? `bytes ${start}-${end - 1}/${total}` : `bytes */${total}`;
+}
+
+/**
+ * Ask a resumable session how far it got. Returns { offset } (bytes
+ * confirmed, may be 0), { resource } when the file is already complete,
+ * or null when the session cannot answer.
+ */
+async function queryResumableOffset(sessionUri, total, signal) {
+  let res;
+  try {
+    res = await putResumableChunk(sessionUri, new Blob([]), resumableContentRange(0, 0, total), 'application/octet-stream', { signal });
+  } catch { return null; }
+  if (res.status === 200 || res.status === 201) {
+    try { return { resource: JSON.parse(res.responseText) }; } catch { return null; }
+  }
+  if (res.status === 308) {
+    const last = parseRangeHeader(res.getResponseHeader('Range'));
+    return { offset: last == null ? 0 : last + 1 };
+  }
+  return null;
+}
+
+function attachmentRecordFromUpload(result, file, uploadedBy) {
+  const rec = {
+    drive_file_id: result.id,
+    name: result.name,
+    size: Number(result.size) || file.size,
+    url: result.webViewLink,
+  };
+  if (typeof uploadedBy === 'string' && uploadedBy) rec.uploaded_by = uploadedBy;
+  return rec;
+}
+
+/**
+ * Upload a file above the multipart cap via the resumable endpoint:
+ * a session-initiating POST returns a session URI, then the file goes
+ * up in 1 MB chunks (Content-Range per chunk; 308 advances, 200/201
+ * completes). A failed chunk is retried twice, then the session is
+ * asked how far it got and the upload resumes from there instead of
+ * restarting the file. Returns the same attachment record as
+ * uploadAttachmentFile.
+ */
+async function uploadAttachmentFileResumable(token, folderId, file, name, { onProgress = null, signal = null, uploadedBy = null } = {}) {
+  const metadata = { name, parents: [folderId] };
+  const init = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,webViewLink',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': file.type || 'application/octet-stream',
+        'X-Upload-Content-Length': String(file.size),
+      },
+      body: JSON.stringify(metadata),
+    }
+  );
+  if (!init.ok) {
+    const errText = await init.text().catch(() => '');
+    const err = new Error(`Drive resumable upload failed: ${init.status} ${errText}`);
+    err.code = init.status;
+    throw err;
+  }
+  const sessionUri = init.headers.get('Location');
+  if (!sessionUri) throw new Error('Drive resumable upload: no session URI');
+  const total = file.size;
+  let confirmed = 0; // bytes Drive has acknowledged
+  const report = (sentInChunk) => {
+    if (onProgress && total > 0) onProgress(Math.min(1, (confirmed + sentInChunk) / total));
+  };
+  if (total === 0) {
+    // A zero-byte file has no chunks — the empty PUT completes it.
+    const res = await putResumableChunk(sessionUri, new Blob([]), resumableContentRange(0, 0, 0), file.type || 'application/octet-stream', { signal });
+    if (res.status === 200 || res.status === 201) {
+      if (onProgress) onProgress(1);
+      return attachmentRecordFromUpload(JSON.parse(res.responseText), file, uploadedBy);
+    }
+    const err = new Error(`Drive resumable upload failed: ${res.status} ${res.responseText}`);
+    err.code = res.status;
+    throw err;
+  }
+  while (confirmed < total) {
+    const start = confirmed;
+    const end = Math.min(total, start + ATTACHMENT_CHUNK_BYTES);
+    let attempts = 0;
+    let advanced = false;
+    while (!advanced) {
+      attempts++;
+      try {
+        const res = await putResumableChunk(sessionUri, file.slice(start, end), resumableContentRange(start, end, total), file.type || 'application/octet-stream', {
+          onProgress: (loaded) => report(loaded),
+          signal,
+        });
+        if (res.status === 200 || res.status === 201) {
+          if (onProgress) onProgress(1);
+          return attachmentRecordFromUpload(JSON.parse(res.responseText), file, uploadedBy);
+        }
+        if (res.status === 308) {
+          const last = parseRangeHeader(res.getResponseHeader('Range'));
+          if (last == null) throw new Error('Drive resumable upload: 308 without a Range header');
+          confirmed = last + 1;
+          advanced = true;
+        } else {
+          const err = new Error(`Drive resumable upload failed: ${res.status} ${res.responseText}`);
+          err.code = res.status;
+          throw err;
+        }
+      } catch (e) {
+        if (e?.code === 'aborted') throw e;
+        if (attempts < 3) continue; // retry the same chunk
+        // Retries exhausted — ask the session how far it got and resume there.
+        const q = await queryResumableOffset(sessionUri, total, signal);
+        if (q?.resource) {
+          if (onProgress) onProgress(1);
+          return attachmentRecordFromUpload(q.resource, file);
+        }
+        if (q && q.offset > confirmed) { confirmed = q.offset; advanced = true; }
+        else throw e;
+      }
+    }
+  }
+  // The loop only exits via a 200/201 return; reaching here means the
+  // server never confirmed completion.
+  throw new Error('Drive resumable upload: session ended without a file');
+}
+
+/** Trash an attachment file (recoverable from Drive trash). Best-effort: never throws. */
+async function trashDriveFile(token, fileId) {
+  try {
+    const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashed: true }),
+    });
+    return resp.ok;
+  } catch { return false; }
 }
 
 /** Delete a file from Drive */
@@ -452,6 +831,15 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   emit('loading', t('menu.drive_connecting'));
 
   const folderId = await findOrCreateFolder(token);
+
+  // Attachments subfolder id, resolved lazily on first upload.
+  let attachmentsFolderId = null;
+  // Per-item attachments subfolders, by folder key (shared_id for shared
+  // items, local id otherwise) — resolved lazily, then cached.
+  const itemAttachmentsFolderIds = new Map();
+  // Names claimed by uploads still in flight, by Drive folder id — so
+  // two uploads racing the same folder can't take the same name.
+  const claimedAttachmentNames = new Map();
 
   // Per-table file IDs, ETags, and modified times
   const fileMeta = {}; // { tableName: { fileId, etag, modifiedTime } }
@@ -1367,6 +1755,95 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
 
     /** Expose token getter for sharing module. */
     getToken,
+    /**
+     * List item attachments — upload a user-picked file to the item's own
+     * subfolder <app folder>/attachments/<folderKey>/ and return the
+     * record stored on the item. folderKey is the shared_id for a shared
+     * item, the local id otherwise (see findItemAttachmentsFolder).
+     * Files past the 5 MB multipart cap use the resumable endpoint.
+     * The dedupe scope is one item: a name used on another item never
+     * forces a (1) suffix here, and an item's folder holds a handful of
+     * files, so the 100-file listing cap never blinds the dedupe.
+     * existingItemNames covers files uploaded before per-item folders
+     * (they live in the flat folder, not the item's) and any name the
+     * folder listing missed. opts: { onProgress (0..1 fraction),
+     * signal (AbortSignal), itemId (folder key), existingItemNames }.
+     */
+    async uploadAttachment(file, { onProgress = null, signal = null, itemId = null, existingItemNames = [], uploadedBy = null } = {}) {
+      if (!file) throw new Error('No file');
+      const tok = await getToken();
+      if (!tok) throw new Error('No valid token — please sign in again');
+      if (!attachmentsFolderId) attachmentsFolderId = await findOrCreateAttachmentsFolder(tok, folderId);
+      // Per-item folder (cached); without an item key the upload lands in
+      // the flat folder, as before.
+      let targetFolderId = attachmentsFolderId;
+      if (itemId) {
+        targetFolderId = itemAttachmentsFolderIds.get(itemId);
+        if (!targetFolderId) {
+          targetFolderId = await findOrCreateItemAttachmentsFolder(tok, itemId, attachmentsFolderId);
+          itemAttachmentsFolderIds.set(itemId, targetFolderId);
+        }
+      }
+      // listFolderFiles caps at 100 — past that a duplicate name is
+      // cosmetic only (records key on drive_file_id, never on name).
+      const existing = await listFolderFiles(tok, targetFolderId).catch(() => []);
+      let claimed = claimedAttachmentNames.get(targetFolderId);
+      if (!claimed) { claimed = new Set(); claimedAttachmentNames.set(targetFolderId, claimed); }
+      const name = claimAttachmentName(file.name, [...existing.map(f => f.name), ...existingItemNames], claimed);
+      try {
+        const opts = { onProgress, signal, uploadedBy };
+        if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES) {
+          return uploadAttachmentFileResumable(tok, targetFolderId, file, name, opts);
+        }
+        return uploadAttachmentFile(tok, targetFolderId, file, name, opts);
+      } finally {
+        // Released either way: on success the file is in the folder, so
+        // the next listing sees it; on failure nothing is there to hold.
+        claimed.delete(name);
+      }
+    },
+
+    /**
+     * Trash one item's attachments folder (one call — trashing a folder
+     * trashes everything inside it, including orphans from cancelled
+     * uploads). Best-effort: false when there is no folder or the trash
+     * fails; never throws. The recorded files themselves are trashed
+     * individually by the caller, so legacy flat-folder files are covered
+     * too — this call only cleans the folder and its orphans.
+     * Reference check (v2.32.138): every file in the folder that another
+     * item still references is spared, and the folder itself is trashed
+     * only when nothing referenced remains inside it — otherwise the
+     * folder trash would defeat the caller's reference check.
+     * referencedIds is the Set of drive_file_ids to spare. The listing
+     * caps at 100 files, so a referenced file past that is invisible here.
+     */
+    async trashItemAttachmentsFolder(itemId, referencedIds = new Set()) {
+      try {
+        if (!itemId) return false;
+        const tok = await getToken();
+        if (!tok) return false;
+        // Find-only: never create the parent folder just to look for a child.
+        if (!attachmentsFolderId) attachmentsFolderId = await findAttachmentsFolder(tok, folderId);
+        if (!attachmentsFolderId) return false;
+        let itemFolderId = itemAttachmentsFolderIds.get(itemId);
+        if (!itemFolderId) itemFolderId = await findItemAttachmentsFolder(tok, itemId, attachmentsFolderId);
+        if (!itemFolderId) return false;
+        itemAttachmentsFolderIds.delete(itemId);
+        claimedAttachmentNames.delete(itemFolderId);
+        const { trashFileIds, trashFolder } = folderTrashPlan(await listFolderFiles(tok, itemFolderId).catch(() => []), referencedIds);
+        for (const fid of trashFileIds) {
+          try { await trashDriveFile(tok, fid); } catch {}
+        }
+        if (!trashFolder) return false;
+        return await trashDriveFile(tok, itemFolderId);
+      } catch { return false; }
+    },
+    /** Trash an attachment file from Drive. Best-effort, returns false on failure. */
+    async trashAttachmentFile(driveFileId) {
+      const tok = await getToken();
+      if (!tok || !driveFileId) return false;
+      return trashDriveFile(tok, driveFileId);
+    },
     /** Read-only mode control — main.js drives it from auth state. */
     setReadOnly(v) { readOnlyMode = !!v; },
     get readOnly() { return readOnlyMode; },

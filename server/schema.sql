@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS text_line_progress (
   next_review TEXT,
   review_count INTEGER NOT NULL DEFAULT 0,
   relearning INTEGER NOT NULL DEFAULT 0,
+  recent_scores TEXT,
   owner_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -242,6 +243,7 @@ CREATE TABLE IF NOT EXISTS list_items (
   text TEXT NOT NULL,
   checked INTEGER DEFAULT 0,
   note TEXT,
+  attachments TEXT,
   sort_order INTEGER DEFAULT 0,
   shared_id TEXT,
   shared_group_id TEXT,

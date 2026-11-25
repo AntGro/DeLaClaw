@@ -1,10 +1,10 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, showToast, showConfirmAction, applySectionGrid, fetchAll, isMobileUA, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, onColorFor } from './utils.js';
+import { esc, escQ, showToast, showConfirmAction, applySectionGrid, fetchAll, isMobileUA, isTouchDevice, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, onColorFor } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
-import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneBlockText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap, persistTextEdit, leadingRevealCount, trailingRevealCount, getTextChunks, isChunkDue, chunkReviseMode, applyChunkEdit } from './scene-parse.js';
+import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneBlockText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap, persistTextEdit, leadingRevealCount, trailingRevealCount, getTextChunks, chunkPreviewText, isChunkDue, chunkReviseMode, applyChunkEdit } from './scene-parse.js';
 import { isSectionRow, normalizeSectionFields, buildSectionTree, pathLabelOf, descendantBucketIds, descendantsOf, siblingNameTaken, planNodeMove, resolveSectionPath, parseSectionPath, flattenTree, runDeckToSectionMigration, flashcardDragAllowed } from './sections-pure.js';
 
 // ===================================================================
@@ -140,6 +140,12 @@ let trSessionDeck = null;
 let trSessionTextId = null;
 let trFreePractice = false;      // extra practice: revision without scheduling updates
 let trFreePracticeLastChunk = null; // chunk_index just practiced (excluded from re-sampling)
+let trAllChunks = false;         // this session covers every chunk of the text
+let trAllChunksFrom = 0;       // first chunk index covered by this all-chunks session (0 = from the start)
+let trSessionChunks = [];        // [{ chunk, mode }] in order, for an all-chunks session
+let trSubmitting = false;        // a revision submit is in flight: further Submit/Stop taps are ignored until it lands or fails
+let trPersistedChunkPos = new Set(); // all-chunks positions already saved in this session (a failed save retries after these, never re-scores them)
+let trSessionResults = [];           // all-chunks result rows accumulated across submit attempts, for the summary
 
 // ── Deck table state ──
 // Decks live in the flashcard_decks DB table. Loaded into maps for fast lookup.
@@ -148,8 +154,119 @@ let _deckMap = new Map();     // id → row
 let _deckByName = new Map();  // name → row (backward compat)
 let _defaultDeckId = null;    // protected default row
 let _sharedDeckId = null;     // protected __shared__ row
+let _draftNavIndex = 0;      // position of the Draft chip among the top-level nav roots (0 = first, the historical spot); persisted in settings as flash_draft_nav_index
 let _deckTree = null;         // buildSectionTree over deck rows (sections + buckets)
 const FLASH_SECTION_DEFAULT_COLOR = '#3b82f6';
+
+// ── Pure draft-position helpers ──
+// The Draft deck is not a flashcard_decks row, so its position among
+// the top-level nav roots lives in settings (flash_draft_nav_index),
+// not in sort_order. 0 = first, the historical spot.
+function clampDraftNavIndex(index, rootCount) {
+  const i = Number.isFinite(index) ? index : 0;
+  return Math.min(Math.max(i, 0), rootCount);
+}
+function draftIndexInOrder(orderedIds) {
+  return orderedIds.indexOf('__drafts');
+}
+// ── End pure draft-position helpers ──
+
+// ── Pure chunk-score helpers ──
+// A chunk keeps its last 20 revision scores (ratios 0..1, oldest
+// first) in recent_scores, stored as a JSON string. Both scheduled
+// reviews and free practice append; free practice leaves the FSRS
+// schedule untouched, the score list is not.
+const CHUNK_SCORE_HISTORY = 20;
+function parseRecentScores(value) {
+  if (Array.isArray(value)) return value.filter(n => Number.isFinite(n) && n >= 0 && n <= 1).slice(-CHUNK_SCORE_HISTORY);
+  if (typeof value === 'string') {
+    try { return parseRecentScores(JSON.parse(value)); } catch { return []; }
+  }
+  return [];
+}
+function appendRecentScore(scores, ratio) {
+  if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) return parseRecentScores(scores);
+  return [...parseRecentScores(scores), ratio].slice(-CHUNK_SCORE_HISTORY);
+}
+function latestChunkScore(scores) {
+  const list = parseRecentScores(scores);
+  return list.length ? list[list.length - 1] : null;
+}
+function scorePct(ratio) {
+  return ratio === null || ratio === undefined ? null : Math.round(ratio * 100);
+}
+// Curve of the last scores for the end-of-revision summary: one point
+// per session, oldest first. Returns [] when there is no curve to draw
+// (fewer than two scores). The viewBox is fixed; the SVG scales. The
+// y-axis carries a 0/50/100% scale with faint gridlines.
+const SCORE_CURVE_WIDTH = 300, SCORE_CURVE_HEIGHT = 64;
+const SCORE_CURVE_PLOT = { left: 34, right: 296, top: 8, bottom: 56 };
+function scoreCurvePoints(scores) {
+  const list = parseRecentScores(scores);
+  if (list.length < 2) return [];
+  const p = SCORE_CURVE_PLOT;
+  return list.map((ratio, i) => ({
+    x: p.left + (i * (p.right - p.left)) / (list.length - 1),
+    y: p.bottom - ratio * (p.bottom - p.top),
+    pct: scorePct(ratio),
+  }));
+}
+function scoreCurveSvg(scores) {
+  const pts = scoreCurvePoints(scores);
+  if (pts.length < 2) return '';
+  const p = SCORE_CURVE_PLOT;
+  const ticks = [100, 50, 0].map(v => {
+    const y = p.bottom - (v / 100) * (p.bottom - p.top);
+    return `<line class="tr-score-curve-grid" x1="${p.left}" x2="${p.right}" y1="${y}" y2="${y}" /><text class="tr-score-curve-tick" x="${p.left - 5}" y="${y + 3}" text-anchor="end">${v}%</text>`;
+  }).join('');
+  const line = pts.map(q => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ');
+  const dots = pts.map((q, i) =>
+    `<circle class="tr-score-curve-dot${i === pts.length - 1 ? ' tr-score-curve-dot-last' : ''}" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="${i === pts.length - 1 ? 4.5 : 3}"><title>${q.pct}%</title></circle>`).join('');
+  return `<svg class="tr-score-curve" viewBox="0 0 ${SCORE_CURVE_WIDTH} ${SCORE_CURVE_HEIGHT}" role="img" aria-label="Recent scores">${ticks}<polyline class="tr-score-curve-line" points="${line}" />${dots}</svg>`;
+}
+// ── End pure chunk-score helpers ──
+
+// ── Pure all-chunks session helpers ──
+// Line states in reveal order: { pos, kind, state } where pos is the
+// chunk's position in the session, kind is 'mine' | 'cue' | 'dir', and
+// state is 'known' | 'failed' | 'shown' | 'masked'.
+function lastCompletedChunkPos(lineStates) {
+  // Reveal is strictly in order, so the masked lines form a suffix: every
+  // chunk before the first masked line is complete.
+  for (const s of lineStates) {
+    if (s.state === 'masked') return s.pos - 1;
+  }
+  return lineStates.length ? lineStates[lineStates.length - 1].pos : -1;
+}
+function chunkLineStats(lineStates, pos) {
+  let known = 0, total = 0;
+  for (const s of lineStates) {
+    if (s.pos !== pos || s.kind !== 'mine') continue;
+    total++;
+    if (s.state === 'known') known++;
+  }
+  return { known, total };
+}
+// ── End pure all-chunks session helpers ──
+
+// ── Pure text-practice line helpers ──
+// Click cycle on a revealed line: an own line goes known -> failed ->
+// roll back (hide it and every line after it, so the passage from that
+// point can be revised again in place); cue and direction lines are
+// never evaluated, so a click on one rolls back at once.
+function revealedLineClickAction(kind, isKnown) {
+  if (kind === 'mine') return isKnown ? 'mark-failed' : 'rollback';
+  return 'rollback';
+}
+// Bullets placeholder for a masked line: one bullet per ~6 characters
+// of each part, so the shape hints at the line's length without
+// revealing any of its words.
+function maskedLineBullets(plain) {
+  return (plain || '').split('\n')
+    .map(part => '• '.repeat(Math.max(1, Math.ceil(part.length / 6))))
+    .join('<br>');
+}
+// ── End pure text-practice line helpers ──
 
 async function loadFlashcardDecks() {
   const { data, error } = await state.db.from('flashcard_decks').select('*').order('sort_order', { ascending: true });
@@ -170,6 +287,11 @@ async function loadFlashcardDecks() {
     else if (row.is_protected && row.name !== SHARED_CATEGORY) _defaultDeckId = row.id;
   }
   _deckTree = buildSectionTree([..._deckMap.values()]);
+  // Draft nav position (settings key; default 0 = first).
+  try {
+    const { data } = await state.db.from('settings').select('value').eq('key', 'flash_draft_nav_index');
+    _draftNavIndex = clampDraftNavIndex(parseInt(data?.[0]?.value ?? '0', 10), _deckTree.roots.length);
+  } catch { _draftNavIndex = 0; }
   await backfillCategoryColors('flashcard_decks', _deckMap);
 }
 
@@ -267,6 +389,9 @@ async function refreshFlashcards() {
       } catch (_) { /* silent — will retry next load */ }
     }
   }
+  // Score history arrives as a JSON string (or is missing on rows
+  // written before the column existed); keep one in-memory shape.
+  for (const ch of allChunkProgress) ch.recent_scores = parseRecentScores(ch.recent_scores);
   // Decks already loaded via loadFlashcardDecks() above
   if (state.currentView === 'flashcards') renderFlashcards();
 }
@@ -324,10 +449,13 @@ function renderDeckNavButtons() {
   // while it has items, like before.
   const roots = tree.roots.filter(n => n.kind !== 'bucket' || n.id !== _sharedDeckId || showShared);
 
-  // Draft nav button first
-  let html = `<button class="category-nav-btn" style="--cat-color:${DRAFT_COLOR}" data-action="navigate-to-flash-deck" data-deck="__drafts">${lucideIcon('file-edit', 14, DRAFT_COLOR)} ${t('flashcards.draft')} (${allDrafts.length})</button>`;
+  // Draft button sits at its stored position among the top-level roots
+  // (0 = first, the historical spot). It is a top-level root itself and
+  // can never move into a section (cross-drop refuses it: it is not a
+  // tree node, so canDrop returns false).
+  const draftBtn = `<button class="category-nav-btn" style="--cat-color:${DRAFT_COLOR}" data-action="navigate-to-flash-deck" data-deck="__drafts">${lucideIcon('file-edit', 14, DRAFT_COLOR)} ${t('flashcards.draft')} (${allDrafts.length})</button>`;
 
-  html += roots.map(node => {
+  const rootBtns = roots.map(node => {
     const row = node.row;
     const color = row.color || FLASH_DEFAULT_COLOR;
     if (node.kind === 'section') {
@@ -340,7 +468,9 @@ function renderDeckNavButtons() {
     const type = getDeckType(deckId);
     const icon = type === 'text' ? lucideIcon('book-open', 12, color) : lucideIcon('layers', 12, color);
     return `<button class="category-nav-btn" style="--cat-color:${color}" data-action="navigate-to-flash-deck" data-deck="${esc(deckId)}" title="${esc(getDeckDisplayName(deckId))}">${icon} ${esc(display)} (${deckItemCount(deckId)})</button>`;
-  }).join('');
+  });
+  rootBtns.splice(clampDraftNavIndex(_draftNavIndex, rootBtns.length), 0, draftBtn);
+  const html = rootBtns.join('');
 
   container.innerHTML = html;
 }
@@ -356,9 +486,27 @@ window.navigateToFlashSection = function(sectionId) {
   scrollToAndHighlight(el, color);
 };
 
+// Fire-and-forget upsert of the Draft nav position (mirrors main.js
+// _persistSetting, which flashcards.js cannot import).
+function _persistDraftNavIndex() {
+  if (!state.db?.connected) return;
+  state.db.from('settings').upsert({ key: 'flash_draft_nav_index', value: String(_draftNavIndex), updated_at: new Date().toISOString() }, { onConflict: 'key' }).then(({ error }) => {
+    if (error) console.warn('Could not save draft nav position:', error.message);
+  });
+}
+
 // Renumber exactly the ids passed (top-level roots from the nav, or one
 // section's children from its chips row) — sort_order is per parent.
 async function reorderDeckSiblings(orderedIds) {
+  // The Draft deck has no flashcard_decks row: when the new order
+  // includes it, its position among the top-level roots is stored in
+  // settings instead of sort_order. A reorder from a section's chips
+  // row never contains it, so the stored position is untouched there.
+  const draftAt = draftIndexInOrder(orderedIds);
+  if (draftAt !== -1) {
+    _draftNavIndex = draftAt;
+    _persistDraftNavIndex();
+  }
   const reorderable = orderedIds.filter(id => id !== '__drafts' && id !== _sharedDeckId);
   const deckRows = reorderable.map(id => _deckMap.get(id)).filter(Boolean);
   const updates = [];
@@ -406,7 +554,10 @@ async function moveDeckNodeToParent(dragId, parentId, beforeId) {
 }
 
 function initFlashDeckNavBtnReorder() {
-  const skipIds = new Set(['__drafts']);
+  // Only the shared deck stays frozen; the Draft chip is draggable
+  // among the top-level roots (it can never enter a section: cross-drop
+  // refuses it, see flashDeckCrossDrop).
+  const skipIds = new Set();
   if (_sharedDeckId) skipIds.add(_sharedDeckId);
   initNavBtnReorder('flashcardNavButtons', {
     idAttr: 'deck',
@@ -507,11 +658,12 @@ function renderAllBuckets() {
 
   const q = searchQuery.toLowerCase().trim();
 
-  // Draft bucket first
-  let html = renderDraftsBucket(q);
-
-  // Then the deck tree (sections + top-level buckets)
-  html += renderFlashLevel(getDeckTree().roots, q);
+  // Draft bucket sits at the same stored position as its nav chip.
+  const roots = getDeckTree().roots.filter(n => n.kind !== 'bucket' || n.id !== _sharedDeckId || hasSharedDeckItems());
+  const draftAt = clampDraftNavIndex(_draftNavIndex, roots.length);
+  let html = renderFlashLevel(roots.slice(0, draftAt), q);
+  html += renderDraftsBucket(q);
+  html += renderFlashLevel(roots.slice(draftAt), q);
 
   if (!html.trim()) {
     html = `<div class="fc-empty-state">
@@ -1807,6 +1959,10 @@ function showAllCaughtUp(kind, anchorEl) {
 // Segments shown on the chunk bar before Show more; the rest stay in the
 // DOM (hidden by CSS) so expanding needs no re-render.
 const TR_BAR_COLLAPSED_COUNT = 16;
+// Touch: segments are 28px targets, and the bar is 332px wide on a
+// 390px phone — 10 x 28px + 3px gaps fits (11 would clip), so the
+// collapsed bar shows 10 there, not 16.
+const TR_BAR_COLLAPSED_COUNT_TOUCH = 10;
 function renderTextItem(tx, color) {
   const chunks = allChunkProgress.filter(ch => ch.text_id === tx.id)
     .sort((a, b) => a.chunk_index - b.chunk_index);
@@ -1835,10 +1991,23 @@ function renderTextItem(tx, color) {
       else if (isDue) { cls = 'tr-seg-due'; dueCount++; }
       else if (ch.stability >= 21) { cls = 'tr-seg-mastered'; mastCount++; }
       else { okCount++; }
+      // In-segment fill: the colour carries the scheduling state, the
+      // fill height carries the latest revision score (0..1). No scores
+      // yet → no fill. A latest score of 0 would be invisible as a fill,
+      // so it gets a red bottom border instead — a revised-and-failed
+      // chunk must never look like an unrevised one. The exact value
+      // lives in the tooltip and panel.
+      const latest = latestChunkScore(ch.recent_scores);
       const chunkLabel = t('text_revision.chunk_title', ch.chunk_index + 1, totalChunks);
-      return `<button type="button" class="tr-seg ${cls}" data-action="open-chunk-panel" data-text-id="${esc(tx.id)}" data-chunk-index="${ch.chunk_index}" aria-label="${esc(chunkLabel)}"></button>`;
+      const statusWord = isNew ? t('flashcards.new_card')
+        : isDue ? t('flashcards.due')
+        : (ch.stability >= 21 ? t('flashcards.filter_mastered') : t('text_revision.chunk_status_ok'));
+      const scoreWord = latest === null ? t('text_revision.chunk_never') : `${scorePct(latest)}%`;
+      const title = `${chunkLabel} — ${statusWord} · ${t('text_revision.chunk_last_score')}: ${scoreWord}`;
+      return `<button type="button" class="tr-seg ${cls}${latest === 0 ? ' tr-seg-zero' : ''}" data-action="open-chunk-panel" data-text-id="${esc(tx.id)}" data-chunk-index="${ch.chunk_index}" aria-label="${esc(chunkLabel)}" title="${esc(title)}">${latest === null ? '' : `<span class="tr-seg-fill" style="width:${scorePct(latest)}%"></span>`}</button>`;
     }).join('');
-    const hiddenCount = totalChunks - TR_BAR_COLLAPSED_COUNT;
+    const collapsedCount = isTouchDevice() ? TR_BAR_COLLAPSED_COUNT_TOUCH : TR_BAR_COLLAPSED_COUNT;
+    const hiddenCount = totalChunks - collapsedCount;
     progressBar = `<div class="tr-progress-wrap"><div class="tr-progress-bar">${segments}</div>${hiddenCount > 0 ? `<button type="button" class="tr-bar-toggle" data-action="toggle-chunk-bar" data-text-id="${esc(tx.id)}" data-hidden="${hiddenCount}"><span class="tr-bar-toggle-label">${t('text_revision.chunk_show_more', hiddenCount)}</span> ${lucideIcon('chevron-down', 14)}</button>` : ''}</div>`;
     // Border = majority chunk status color
     const counts = [
@@ -1861,6 +2030,7 @@ function renderTextItem(tx, color) {
       <div class="todo-actions">
         <button data-action="copy-item-link" data-link-type="flashtext" data-id="${esc(tx.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 16)}</button>
         <button data-action="start-text-practice-for-text" data-id="${esc(tx.id)}" title="${t('text_revision.revise_this')}">${lucideIcon('book-open', 16)}</button>
+        <button data-action="start-text-practice-all-chunks" data-id="${esc(tx.id)}" title="${t('text_revision.revise_all_chunks')}">${lucideIcon('layers', 16)}</button>
         <button class="tr-expand-toggle" data-text-id="${tx.id}" title="Expand">${lucideIcon('chevron-down', 16)}</button>
         <button data-action="open-edit-text" data-id="${esc(tx.id)}" title="${t('common.edit')}">${lucideIcon('pencil', 16)}</button>
         <button data-action="delete-text" data-id="${esc(tx.id)}" title="${t('common.delete')}">${lucideIcon('trash-2', 16)}</button>
@@ -1998,6 +2168,13 @@ function chunkPanelStatsHtml(tx, chunk, chunkIndex, chunks) {
       <div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_difficulty')}</span><strong>${isNew ? '—' : (Number(chunk.difficulty) || 0).toFixed(1)}</strong></div>
       ${difficultyDots}
       <div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_reviews')}</span><strong>${String(chunk.review_count || 0)}</strong></div>
+      ${(() => {
+        const scores = parseRecentScores(chunk.recent_scores);
+        if (!scores.length) return '';
+        const latestPct = scorePct(scores[scores.length - 1]);
+        return `<div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_recent_scores')}</span><strong>${latestPct}%</strong></div>
+      <div class="tr-chunk-score-bars" title="${esc(scores.map(s => `${scorePct(s)}%`).join(' · '))}">${scores.map(s => `<span style="height:${Math.max(4, scorePct(s))}%"></span>`).join('')}</div>`;
+      })()}
       <div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_last_review')}</span><strong>${isNew ? t('text_revision.chunk_never') : chunkFmtDate(chunk.last_review)}</strong></div>
       <div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_next_review')}</span><strong>${(isNew || !chunk.next_review) ? t('text_revision.chunk_never') : chunkFmtDate(chunk.next_review)}</strong></div>
     </div>
@@ -2011,16 +2188,17 @@ function chunkPanelOptionsHtml(tx, chunkIndex, chunks) {
       <button type="button" class="tr-chunk-panel-btn" data-action="show-chunk-stats" data-text-id="${esc(tx.id)}" data-chunk-index="${chunkIndex}">${lucideIcon('bar-chart-3', 16)} ${t('text_revision.chunk_show_stats')}</button>
       <button type="button" class="tr-chunk-panel-btn" data-action="open-edit-chunk" data-text-id="${esc(tx.id)}" data-chunk-index="${chunkIndex}">${lucideIcon('pencil', 16)} ${t('text_revision.chunk_edit')}</button>
       <button type="button" class="tr-chunk-panel-btn" data-action="revise-chunk" data-text-id="${esc(tx.id)}" data-chunk-index="${chunkIndex}" ${canRevise ? '' : 'disabled'}>${lucideIcon('book-open', 16)} ${t('text_revision.chunk_revise')}</button>
+      <button type="button" class="tr-chunk-panel-btn" data-action="revise-from-chunk" data-text-id="${esc(tx.id)}" data-chunk-index="${chunkIndex}">${lucideIcon('layers', 16)} ${t('text_revision.chunk_revise_from')}</button>
     </div>
     ${canRevise ? '' : `<p class="tr-chunk-panel-note">${t('text_revision.chunk_no_role_lines')}</p>`}`;
 }
 
-function chunkPanelHeaderHtml(title, withBack) {
+function chunkPanelHeaderHtml(title, withBack, preview) {
   return `<div class="tr-chunk-panel-header">
     ${withBack ? `<button type="button" class="tr-chunk-panel-nav" data-action="back-to-chunk-panel" data-text-id="${esc(_chunkPanelTextId)}" data-chunk-index="${_chunkPanelIndex}">${lucideIcon('chevron-left', 14)} ${t('text_revision.chunk_back')}</button>` : ''}
     <span class="tr-chunk-panel-title">${esc(title)}</span>
     <button type="button" class="tr-chunk-panel-close" data-action="close-chunk-panel" aria-label="${t('common.close')}">${lucideIcon('x', 14)}</button>
-  </div>`;
+  </div>${preview ? `<p class="tr-chunk-panel-preview">${esc(preview)}</p>` : ''}`;
 }
 
 function chunkPanelRender() {
@@ -2030,9 +2208,10 @@ function chunkPanelRender() {
   const { tx, chunk } = found;
   const chunks = getTextChunks(tx);
   const title = `${tx.title} — ${t('text_revision.chunk_title', _chunkPanelIndex + 1, chunks.length)}`;
+  const preview = chunkPreviewText(chunks[_chunkPanelIndex]);
   _chunkPanelEl.innerHTML = _chunkPanelView === 'stats'
-    ? chunkPanelHeaderHtml(title, true) + chunkPanelStatsHtml(tx, chunk, _chunkPanelIndex, chunks)
-    : chunkPanelHeaderHtml(title, false) + chunkPanelOptionsHtml(tx, _chunkPanelIndex, chunks);
+    ? chunkPanelHeaderHtml(title, true, preview) + chunkPanelStatsHtml(tx, chunk, _chunkPanelIndex, chunks)
+    : chunkPanelHeaderHtml(title, false, preview) + chunkPanelOptionsHtml(tx, _chunkPanelIndex, chunks);
   chunkPanelPosition();
 }
 
@@ -2224,6 +2403,12 @@ if (!_chunkPanelHoverBound) {
     }
   });
   document.addEventListener('mouseout', (e) => {
+    // Touch devices have no hovering pointer: the mouseout fired after
+    // a tap is a synthetic artefact (the mouse jumps back to wherever it
+    // was before the touch), and scheduling a close from it would shut
+    // the panel ~150ms after every tap. Touch closes via outside tap,
+    // Escape, or scrolling the segment off-screen instead.
+    if (isTouchDevice()) return;
     // Leaving the bar (to the item body, the panel, or elsewhere)
     // breaks the chain: the next segment hover costs 2s again.
     if (_chunkPanelInSegArea(e.target) && !_chunkPanelInSegArea(e.relatedTarget)) _chunkPanelSegChain = false;
@@ -2364,7 +2549,7 @@ window.saveEditChunk = async function(textId, chunkIndex) {
   if (!result.ok) { showToast(t('text_revision.chunk_edit_boundary'), 'error'); return; }
   if (!result.changed) { closeEditChunkModal(); return; }
   const oldContent = tx.content;
-  const reset = { stability: 0, difficulty: 5, last_review: null, next_review: null, review_count: 0 };
+  const reset = { stability: 0, difficulty: 5, last_review: null, next_review: null, review_count: 0, recent_scores: null };
   if (state.db.connected) {
     const { error: updateError } = await state.db.from('texts').update({ content: result.content }).eq('id', textId);
     if (updateError) { showToast(t('toast.failed_to_save'), 'error'); return; }
@@ -2721,6 +2906,36 @@ function startTextPracticeForText(textId) {
 }
 window.startTextPracticeForText = startTextPracticeForText;
 
+// Revise every chunk of the text in one session, in chunk order, as if
+// each chunk had its own revision session: a chunk that is due or new
+// gets its FSRS update, the rest record the score only. The "no new
+// material while chunks are due" rule of the single-chunk picker does
+// not apply here — the session covers all chunks regardless.
+function startTextPracticeAllChunks(textId, fromChunkIndex = 0) {
+  const tx = allTexts.find(t => t.id === textId);
+  if (!tx) return;
+  const now = new Date();
+  const chunks = allChunkProgress
+    .filter(ch => ch.text_id === textId && ch.chunk_index >= fromChunkIndex && chunkHasRoleLines(tx, ch.chunk_index))
+    .sort((a, b) => a.chunk_index - b.chunk_index);
+  if (chunks.length === 0) { showToast(t('text_revision.no_chunks_due')); return; }
+  trSessionActive = true;
+  trSessionDeck = deckIdForText(tx);
+  trSessionTextId = tx.id;
+  showTextPracticeOverlay(tx, chunks[0], {
+    allChunks: true,
+    fromChunkIndex,
+    chunks: chunks.map(ch => ({ chunk: ch, mode: chunkReviseMode(ch, now) })),
+  });
+}
+window.startTextPracticeAllChunks = startTextPracticeAllChunks;
+
+// From a chunk's panel: revise that chunk and every chunk after it.
+window.reviseFromChunk = function(textId, chunkIndex) {
+  window.closeChunkPanel();
+  startTextPracticeAllChunks(textId, chunkIndex);
+};
+
 let trOverlayLines = []; // parsed line objects for the open revision overlay
 
 // Free practice: nothing is due, so sample a random chunk and let the
@@ -2751,27 +2966,11 @@ window.continueFreePractice = function() {
   startFreePractice(trSessionTextId, trFreePracticeLastChunk);
 };
 
-function showTextPracticeOverlay(text, chunk, opts = {}) {
-  trFreePractice = !!opts.freePractice;
-  let overlay = document.getElementById('practiceOverlay');
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = 'practiceOverlay';
-    overlay.className = 'practice-overlay';
-    document.body.appendChild(overlay);
-  }
-  overlay.style.display = 'flex';
-  document.body.style.overflow = 'hidden';
-
-  const sceneMode = !!text.focus_role;
-  const allChunks = getTextChunks(text);
-  const rawChunk = allChunks[chunk.chunk_index] || [];
-  // Normalize to line objects: scene lines carry speaker/segments, plain
-  // lines behave as the user's own (today's behavior, unchanged).
-  // Didascalies are a single reveal unit: consecutive direction lines merge
-  // into one block, even when spanning several lines.
-  const chunkLines = [];
-  const pushLine = (entry) => { entry.idx = chunkLines.length; chunkLines.push(entry); return entry; };
+// Build one chunk's line objects via pushLine (which stamps the global
+// index and the chunk's session position). Shared by single-chunk and
+// all-chunks sessions; direction blocks never span a chunk boundary.
+function buildChunkLines(text, chunkIndex, allChunks, pushLine, sceneMode) {
+  const rawChunk = allChunks[chunkIndex] || [];
   if (sceneMode) {
     let openDir = null;
     let openDirParts = [];
@@ -2801,6 +3000,77 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
     const rawLines = typeof rawChunk === 'string' ? rawChunk.split('\n') : rawChunk;
     for (const line of rawLines) pushLine({ kind: 'mine', speaker: null, plain: line, html: esc(line || '\u00A0') });
   }
+}
+
+// Inner HTML of the practice lines container: speaker groups, with a
+// dashed separator before each chunk after the first in an all-chunks
+// session. Each line carries its chunk's session position so the stop
+// button and the per-chunk scoring know where it belongs.
+function practiceLinesHtml(lines, roleColorMap, text, multi, totalChunks) {
+  const groupsHtml = (chunkLines) => groupLinesBySpeaker(chunkLines).map(group => {
+    let header = '';
+    if (group.speaker) {
+      const isMine = sceneSpeakersEqual(group.speaker, text.focus_role);
+      const colorCls = isMine ? 'tr-role-mine' : (roleColorMap.get(group.speaker.toLowerCase()) || '');
+      header = `<div class="tr-group-speaker ${colorCls} ${isMine ? 'tr-spk-left' : 'tr-spk-right'}">${esc(group.speaker)}</div>`;
+    } else if (group.lines[0] && group.lines[0].kind === 'dir') {
+      // Didascalies get a header like the roles: centered, muted, localized.
+      // (Plain-text lines have no speaker but kind 'mine', so no header.)
+      header = `<div class="tr-group-speaker tr-role-dir tr-spk-center">${t('text_revision.stage_directions')}</div>`;
+    }
+    return `
+          <div class="tr-line-group"${group.speaker ? ` data-speaker="${esc(group.speaker)}"` : ''}>
+            ${header}
+            ${group.lines.map(line => {
+              const bullets = maskedLineBullets(line.plain);
+              return `<div class="tr-line tr-line-masked${line.idx === 0 ? ' tr-line-next' : ''}" data-line-idx="${line.idx}" data-chunk-pos="${line.chunkPos ?? 0}" data-kind="${line.kind}" data-action="handle-line-click">${bullets}</div>`;
+            }).join('')}
+          </div>`;
+  }).join('');
+  if (!multi) return groupsHtml(lines);
+  const byPos = new Map();
+  for (const line of lines) {
+    if (!byPos.has(line.chunkPos)) byPos.set(line.chunkPos, []);
+    byPos.get(line.chunkPos).push(line);
+  }
+  return [...byPos.entries()].map(([pos, chunkLines]) => {
+    const chunkIndex = trSessionChunks[pos]?.chunk.chunk_index ?? pos;
+    return `${pos > 0 ? `<div class="tr-chunk-separator" data-chunk-pos="${pos}"><span>${esc(t('text_revision.chunk_title', chunkIndex + 1, totalChunks))}</span></div>` : ''}${groupsHtml(chunkLines)}`;
+  }).join('');
+}
+
+function showTextPracticeOverlay(text, chunk, opts = {}) {
+  trAllChunks = !!opts.allChunks;
+  trAllChunksFrom = trAllChunks ? (opts.fromChunkIndex || 0) : 0;
+  trSessionChunks = trAllChunks ? (opts.chunks || []) : [];
+  trSubmitting = false; // a new session starts unsubmitted, even via Continue
+  trPersistedChunkPos = new Set();
+  trSessionResults = [];
+  trFreePractice = trAllChunks ? false : !!opts.freePractice;
+  let overlay = document.getElementById('practiceOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'practiceOverlay';
+    overlay.className = 'practice-overlay';
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  const sceneMode = !!text.focus_role;
+  const allChunks = getTextChunks(text);
+  // Normalize to line objects: scene lines carry speaker/segments, plain
+  // lines behave as the user's own (today's behavior, unchanged).
+  // Didascalies are a single reveal unit: consecutive direction lines merge
+  // into one block, even when spanning several lines.
+  const chunkLines = [];
+  let lineChunkPos = 0;
+  const pushLine = (entry) => { entry.idx = chunkLines.length; entry.chunkPos = lineChunkPos; chunkLines.push(entry); return entry; };
+  const sessionChunks = trAllChunks ? trSessionChunks : [{ chunk, mode: trFreePractice ? 'practice' : 'fsrs' }];
+  sessionChunks.forEach((entry, pos) => {
+    lineChunkPos = pos;
+    buildChunkLines(text, entry.chunk.chunk_index, allChunks, pushLine, sceneMode);
+  });
   trOverlayLines = chunkLines;
   const roleColorMap = sceneMode
     ? buildRoleColorMap(parseSceneContent(text.content).speakers, text.focus_role)
@@ -2834,7 +3104,7 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
     <div class="practice-header">
       ${practiceHeaderLogo()}
       <div class="practice-progress-bar"><div class="practice-progress-fill" style="width:0%;"></div></div>
-      <div class="practice-meta"><span class="practice-meta-text">${esc(text.title)}${authorStr}</span>${trFreePractice ? ` <span class="tr-practice-badge">${t('text_revision.free_practice')}</span>` : ''}</div>
+      <div class="practice-meta"><span class="practice-meta-text">${esc(text.title)}${authorStr}</span>${trFreePractice ? ` <span class="tr-practice-badge">${t('text_revision.free_practice')}</span>` : ''}${trAllChunks ? ` <span class="tr-practice-badge">${trAllChunksFrom > 0 ? t('text_revision.from_chunk', trAllChunksFrom + 1, allChunks.length) : t('text_revision.all_chunks')}</span>` : ''}</div>
       <button class="practice-close" data-action="end-text-practice">X</button>
     </div>
     <div class="tr-practice-area">
@@ -2843,32 +3113,15 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
         ${contextHtml}
       </div>
       <div class="tr-lines-container${sceneMode ? ' tr-scene' : ''}" id="trLinesContainer">
-        ${groupLinesBySpeaker(chunkLines).map(group => {
-          let header = '';
-          if (group.speaker) {
-            const isMine = sceneSpeakersEqual(group.speaker, text.focus_role);
-            const colorCls = isMine ? 'tr-role-mine' : (roleColorMap.get(group.speaker.toLowerCase()) || '');
-            header = `<div class="tr-group-speaker ${colorCls} ${isMine ? 'tr-spk-left' : 'tr-spk-right'}">${esc(group.speaker)}</div>`;
-          } else if (group.lines[0] && group.lines[0].kind === 'dir') {
-            // Didascalies get a header like the roles: centered, muted, localized.
-            // (Plain-text lines have no speaker but kind 'mine', so no header.)
-            header = `<div class="tr-group-speaker tr-role-dir tr-spk-center">${t('text_revision.stage_directions')}</div>`;
-          }
-          return `
-          <div class="tr-line-group"${group.speaker ? ` data-speaker="${esc(group.speaker)}"` : ''}>
-            ${header}
-            ${group.lines.map(line => {
-              const bullets = (line.plain || '').split('\n')
-                .map(part => '• '.repeat(Math.max(1, Math.ceil(part.length / 6))))
-                .join('<br>');
-              return `<div class="tr-line tr-line-masked${line.idx === 0 ? ' tr-line-next' : ''}" data-line-idx="${line.idx}" data-kind="${line.kind}" data-action="handle-line-click">${bullets}</div>`;
-            }).join('')}
-          </div>`; }).join('')}
+        ${practiceLinesHtml(chunkLines, roleColorMap, text, trAllChunks, allChunks.length)}
       </div>
       <div class="tr-hint" id="trHint">${t('text_revision.tap_to_reveal')}</div>
       <div class="tr-submit-section" id="trSubmitSection" style="display:none;">
-        <button class="btn practice-done-btn" data-action="submit-text-review" data-id="${esc(chunk.id)}" data-lines="${myLineCount}">${t('text_revision.submit')}</button>
+        ${trAllChunks
+          ? `<button class="btn practice-done-btn" data-action="submit-all-chunks-review">${t('text_revision.submit')}</button>`
+          : `<button class="btn practice-done-btn" data-action="submit-text-review" data-id="${esc(chunk.id)}" data-lines="${myLineCount}">${t('text_revision.submit')}</button>`}
       </div>
+      ${trAllChunks ? `<div class="tr-stop-section" id="trStopSection" style="display:none;"><button class="btn practice-done-btn" data-action="stop-all-chunks-review">${t('text_revision.stop_here_save')}</button></div>` : ''}
     </div>`;
   initMarquee();
 
@@ -2886,8 +3139,36 @@ function showTextPracticeOverlay(text, chunk, opts = {}) {
       el.innerHTML = lineObj ? lineObj.html : '';
     }
     lines[autoReveal].classList.add('tr-line-next');
+    updateStopButton();
   }
   updateTextPracticeProgress();
+}
+
+// States of the open session's lines, in reveal order, for the stop
+// button and the per-chunk scoring.
+function practiceLineStates() {
+  const els = document.querySelectorAll('#trLinesContainer .tr-line');
+  return [...els].map(el => ({
+    pos: parseInt(el.dataset.chunkPos || '0', 10),
+    kind: el.dataset.kind || 'mine',
+    state: el.classList.contains('tr-line-masked') ? 'masked'
+      : el.classList.contains('tr-line-known') ? 'known'
+      : el.classList.contains('tr-line-failed') ? 'failed' : 'shown',
+  }));
+}
+// The stop button sits just under the dashed separator that ends the
+// last fully revealed chunk; it hides when nothing is complete yet or
+// when every line is revealed (the Submit button covers that case).
+function updateStopButton() {
+  const stop = document.getElementById('trStopSection');
+  if (!stop || !trAllChunks) return;
+  const last = lastCompletedChunkPos(practiceLineStates());
+  const submitShown = document.getElementById('trSubmitSection')?.style.display === 'block';
+  if (last < 0 || submitShown) { stop.style.display = 'none'; return; }
+  const sep = document.querySelector(`.tr-chunk-separator[data-chunk-pos="${last + 1}"]`);
+  if (!sep) { stop.style.display = 'none'; return; }
+  stop.style.display = 'block';
+  sep.after(stop);
 }
 
 // Progress bar for text revision: fills as blocks are revealed.
@@ -2954,57 +3235,190 @@ window.handleLineClick = function(el) {
       document.getElementById('trHint').style.display = 'none';
       document.getElementById('trSubmitSection').style.display = 'block';
     }
+    updateStopButton();
     updateTextPracticeProgress();
   } else {
-    // Toggle between known and failed (own lines only)
-    if (kind !== 'mine') return;
-    el.classList.toggle('tr-line-known');
-    el.classList.toggle('tr-line-failed');
+    // Already revealed: the click cycles the line forward — an own line
+    // goes known -> failed, and a further click rolls back; a cue or
+    // direction line rolls back at once (it is never evaluated).
+    const action = revealedLineClickAction(kind, el.classList.contains('tr-line-known'));
+    if (action === 'mark-failed') {
+      el.classList.remove('tr-line-known');
+      el.classList.add('tr-line-failed');
+      return;
+    }
+    rollbackTextPracticeFrom(idx);
   }
 };
 
+// Roll back a revision to the line at fromIdx: hide that line and every
+// line after it — cues and directions of other characters included — so
+// the passage from that point can be revised again without leaving the
+// chunk. Earlier lines keep whatever state they had.
+function rollbackTextPracticeFrom(fromIdx) {
+  const container = document.getElementById('trLinesContainer');
+  if (!container) return;
+  const lines = container.querySelectorAll('.tr-line');
+  lines.forEach(lineEl => {
+    if (parseInt(lineEl.dataset.lineIdx, 10) < fromIdx) return;
+    lineEl.classList.remove('tr-line-known', 'tr-line-failed', 'tr-line-shown', 'tr-line-next');
+    lineEl.classList.add('tr-line-masked');
+    const lineObj = trOverlayLines[parseInt(lineEl.dataset.lineIdx, 10)];
+    lineEl.innerHTML = lineObj ? maskedLineBullets(lineObj.plain) : '';
+  });
+  lines.forEach(lineEl => lineEl.classList.remove('tr-line-next'));
+  const nextMasked = container.querySelector('.tr-line-masked');
+  if (nextMasked) nextMasked.classList.add('tr-line-next');
+  // The review is no longer complete: the submit button goes away and
+  // the hint comes back.
+  const hint = document.getElementById('trHint');
+  if (hint) hint.style.display = '';
+  const submit = document.getElementById('trSubmitSection');
+  if (submit) submit.style.display = 'none';
+  updateStopButton();
+  updateTextPracticeProgress();
+}
+
+// Shared per-chunk scoring for single and all-chunks sessions: append the
+// ratio to the chunk's score history, then either apply the FSRS update
+// (scheduled chunks) or leave scheduling untouched (free practice). In
+// read-only mode nothing is written, in-memory only — the summary still
+// shows the score and the rating it would have earned. Returns the ratio,
+// the rating (null for free practice) and the new score list.
+// A chunk review is transactional at the application level: the next state
+// is computed first, persisted, and only then written into the in-memory
+// chunk. A failed save therefore leaves the chunk untouched, so a retry
+// recomputes from the true state instead of scoring twice — and a failed
+// database update surfaces as an exception instead of a silent success.
+async function applyChunkReview(chunk, knownCount, totalLines, scheduled) {
+  const ratio = totalLines > 0 ? knownCount / totalLines : 0;
+  const nextScores = appendRecentScore(chunk.recent_scores, ratio);
+  const rating = ratio >= 1 ? 3 : ratio >= 0.5 ? 2 : 1; // Good / Hard / Again
+  if (!scheduled) {
+    // Extra practice only: report the score, leave scheduling untouched.
+    if (!state.readOnlyMode && state.db.connected) {
+      const { error } = await state.db.from('text_line_progress').update({ recent_scores: JSON.stringify(nextScores) }).eq('id', chunk.id);
+      if (error) throw error;
+    }
+    chunk.recent_scores = nextScores;
+    return { ratio, rating: null, nextScores };
+  }
+  if (!state.readOnlyMode) {
+    const now = new Date();
+    const updates = fsrsUpdate(chunk, rating, now);
+    updates.recent_scores = JSON.stringify(nextScores);
+    if (state.db.connected) {
+      const { error } = await state.db.from('text_line_progress').update(updates).eq('id', chunk.id);
+      if (error) throw error;
+    }
+    Object.assign(chunk, updates);
+    chunk.recent_scores = nextScores; // in-memory shape stays an array
+  } else {
+    // Read-only: the score history updates in memory only, like the rest
+    // of the session-local review; scheduling stays untouched.
+    chunk.recent_scores = nextScores;
+  }
+  return { ratio, rating, nextScores };
+}
+
+// While a revision submit is saving, its buttons stay visible but inert,
+// so a second tap cannot launch a second submission of the same session.
+function setPracticeSubmitDisabled(disabled) {
+  document.querySelectorAll('#trSubmitSection [data-action="submit-text-review"], #trSubmitSection [data-action="submit-all-chunks-review"], #trStopSection [data-action="stop-all-chunks-review"]').forEach(b => { b.disabled = disabled; });
+}
+
 window.submitTextReview = async function(chunkId, totalLines) {
+  if (trSubmitting) return;
   const lineEls = document.querySelectorAll('#trLinesContainer .tr-line');
   let knownCount = 0;
   lineEls.forEach(el => { if (el.classList.contains('tr-line-known')) knownCount++; });
 
-  if (trFreePractice) {
-    // Extra practice only: report the score, leave scheduling untouched.
-    showFreePracticeSummary(knownCount, totalLines);
+  // The score history records every review — scheduled and free
+  // practice alike. Free practice leaves the FSRS schedule untouched,
+  // but the score is still history. In read-only mode the list updates
+  // in memory only, like the rest of the session-local review.
+  const chunk = allChunkProgress.find(ch => ch.id === chunkId);
+  if (!chunk) {
+    if (trFreePractice) showFreePracticeSummary(knownCount, totalLines, null);
+    else endTextPractice();
     return;
   }
-
-  const ratio = totalLines > 0 ? knownCount / totalLines : 0;
-  let rating;
-  if (ratio >= 1) rating = 3; // Good (perfect)
-  else if (ratio >= 0.5) rating = 2; // Hard (partial)
-  else rating = 1; // Again (less than half)
-
-  // Apply FSRS update — except in read-only mode, where the review is
-  // session-local like free practice: the summary still shows the
-  // score and the rating it would have earned, but nothing is written
-  // or applied to the in-memory schedule.
-  const chunk = allChunkProgress.find(ch => ch.id === chunkId);
-  if (!chunk) { endTextPractice(); return; }
-
-  if (!state.readOnlyMode) {
-    const now = new Date();
-    const updates = fsrsUpdate(chunk, rating, now);
-    Object.assign(chunk, updates);
-
-    if (state.db.connected) {
-      await state.db.from('text_line_progress').update(updates).eq('id', chunkId);
+  trSubmitting = true;
+  setPracticeSubmitDisabled(true);
+  try {
+    const res = await applyChunkReview(chunk, knownCount, totalLines, !trFreePractice);
+    if (trFreePractice) {
+      showFreePracticeSummary(knownCount, totalLines, res.nextScores);
+      return;
     }
+    showTextPracticeSummary(knownCount, totalLines, res.rating, res.nextScores);
+  } catch (e) {
+    // The save failed without completing: release the guard so the user
+    // can retry — the chunk is untouched, so the retry recomputes from the
+    // true state. On success the session ends at the summary, so the flag
+    // never needs clearing here — the next overlay open resets it. The
+    // failure is shown, not rethrown: the retry is the recovery, and an
+    // unhandled rejection would tell the user nothing.
+    trSubmitting = false;
+    setPracticeSubmitDisabled(false);
+    showToast(t('toast.update_failed'), 'error');
   }
-
-  // Show summary
-  showTextPracticeSummary(knownCount, totalLines, rating);
 };
 
-function showFreePracticeSummary(known, total) {
+// All-chunks submit: score each completed chunk exactly as its own
+// session would (FSRS when scheduled, score only otherwise), then show
+// the aggregate summary. A half-revealed chunk scores nothing.
+window.submitAllChunksReview = async function(uptoPos = trSessionChunks.length - 1) {
+  if (trSubmitting) return;
+  trSubmitting = true;
+  setPracticeSubmitDisabled(true);
+  try {
+    const states = practiceLineStates();
+    for (let pos = 0; pos <= uptoPos && pos < trSessionChunks.length; pos++) {
+      // A retry resumes after the chunks an earlier attempt already saved:
+      // re-scoring them would append a second score and re-apply FSRS.
+      if (trPersistedChunkPos.has(pos)) continue;
+      const entry = trSessionChunks[pos];
+      const { known, total } = chunkLineStats(states, pos);
+      const res = await applyChunkReview(entry.chunk, known, total, entry.mode === 'fsrs');
+      trPersistedChunkPos.add(pos);
+      trSessionResults.push({ chunkIndex: entry.chunk.chunk_index, known, total, pct: Math.round(res.ratio * 100), rating: res.rating, chunk: entry.chunk, scores: res.nextScores });
+    }
+    const tx = allTexts.find(t => t.id === trSessionTextId);
+    const textTotal = tx ? getTextChunks(tx).length : trSessionChunks.length;
+    showMultiChunkPracticeSummary(trSessionResults, trSessionChunks.length, textTotal);
+  } catch (e) {
+    // The save failed part-way: the chunks already saved stay saved and
+    // the rest stay untouched, so the retry resumes instead of restarting.
+    // Tell the user — the guard release alone is no signal to retry.
+    trSubmitting = false;
+    setPracticeSubmitDisabled(false);
+    showToast(t('toast.update_failed'), 'error');
+  }
+};
+
+window.stopAllChunksReview = function() {
+  const last = lastCompletedChunkPos(practiceLineStates());
+  if (last < 0) return;
+  window.submitAllChunksReview(last);
+};
+
+// A multi-chunk summary row expands in place to show that chunk's stats
+// (status, next review, score history) — no redirect to the panel.
+window.toggleChunkSummaryStats = function(el) {
+  const item = el.closest('.tr-multi-chunk-item');
+  const detail = item?.querySelector('.tr-multi-chunk-detail');
+  if (!detail) return;
+  const open = detail.style.display === 'none';
+  detail.style.display = open ? 'block' : 'none';
+  el.classList.toggle('open', open);
+};
+
+function showFreePracticeSummary(known, total, scores = null) {
   const overlay = document.getElementById('practiceOverlay');
   if (!overlay) return;
   const pct = total > 0 ? Math.round((known / total) * 100) : 0;
+  const curve = scoreCurveSvg(scores);
   overlay.innerHTML = `
     <div class="practice-summary">
       ${practiceSummaryLogo()}
@@ -3014,6 +3428,7 @@ function showFreePracticeSummary(known, total) {
         <div class="practice-summary-stat"><span class="practice-stat-val">${known}/${total}</span><span class="practice-stat-lbl">${t('text_revision.lines_known')}</span></div>
         <div class="practice-summary-stat"><span class="practice-stat-val">${pct}%</span><span class="practice-stat-lbl">${t('flashcards.accuracy')}</span></div>
       </div>
+      ${curve ? `<div class="tr-score-curve-wrap"><div class="tr-score-curve-label">${t('text_revision.chunk_recent_scores')}</div>${curve}</div>` : ''}
       <div class="tr-free-note">${t('text_revision.free_practice_note')}</div>
       <div class="practice-summary-actions">
         <button class="btn practice-continue-btn" data-action="continue-free-practice">${t('text_revision.free_practice_another')}</button>
@@ -3022,13 +3437,34 @@ function showFreePracticeSummary(known, total) {
     </div>`;
 }
 
-function showTextPracticeSummary(known, total, rating) {
+function showTextPracticeSummary(known, total, rating, scores = null) {
   const overlay = document.getElementById('practiceOverlay');
   if (!overlay) return;
   const pct = total > 0 ? Math.round((known / total) * 100) : 0;
   const ratingLabels = { 1: t('flashcards.again'), 2: t('flashcards.hard'), 3: t('flashcards.good'), 4: t('flashcards.easy') };
+  const curve = scoreCurveSvg(scores);
+  const actionButtons = practiceSummaryContinueButtons();
+  overlay.innerHTML = `
+    <div class="practice-summary">
+      ${practiceSummaryLogo()}
+      <div class="practice-summary-emoji">${pct >= 80 ? lucideIcon('trophy', 32) : pct >= 50 ? lucideIcon('flame', 32) : lucideIcon('book-open', 32)}</div>
+      <h2>${t('text_revision.session_complete')}</h2>
+      <div class="practice-summary-stats">
+        <div class="practice-summary-stat"><span class="practice-stat-val">${known}/${total}</span><span class="practice-stat-lbl">${t('text_revision.lines_known')}</span></div>
+        <div class="practice-summary-stat"><span class="practice-stat-val">${pct}%</span><span class="practice-stat-lbl">${t('flashcards.accuracy')}</span></div>
+        <div class="practice-summary-stat"><span class="practice-stat-val">${ratingLabels[rating] || rating}</span><span class="practice-stat-lbl">${t('text_revision.rating')}</span></div>
+      </div>
+      ${curve ? `<div class="tr-score-curve-wrap"><div class="tr-score-curve-label">${t('text_revision.chunk_recent_scores')}</div>${curve}</div>` : ''}
+      <div class="practice-summary-actions">
+        ${actionButtons}
+        <button class="btn practice-done-btn" data-action="end-text-practice">${t('common.close')}</button>
+      </div>
+    </div>`;
+}
 
-  // Check for more due chunks from same text
+// Continue buttons shared by the single and multi-chunk summaries:
+// another due chunk from the same text, then any due chunk in the deck.
+function practiceSummaryContinueButtons() {
   const now = new Date();
   let sameTextMore = false;
   let anyMore = false;
@@ -3041,7 +3477,6 @@ function showTextPracticeSummary(known, total, rating) {
     sameTextMore = sameTextChunks.length > 0;
   }
 
-  // Check for any due chunks across the deck
   const deckTexts = trSessionDeck && trSessionDeck !== '__all'
     ? allTexts.filter(tx => deckIdForText(tx) === trSessionDeck)
     : allTexts;
@@ -3056,26 +3491,65 @@ function showTextPracticeSummary(known, total, rating) {
     if (anyMore) break;
   }
 
-  let actionButtons = '';
+  let html = '';
   if (sameTextMore) {
-    actionButtons += `<button class="btn practice-continue-btn" data-action="continue-text-same-text">${t('text_revision.continue_same_text')}</button>`;
+    html += `<button class="btn practice-continue-btn" data-action="continue-text-same-text">${t('text_revision.continue_same_text')}</button>`;
   }
   if (anyMore) {
-    actionButtons += `<button class="btn practice-continue-btn practice-continue-alt" data-action="start-text-practice" data-deck="${esc(trSessionDeck || '')}">${t('text_revision.continue_another')}</button>`;
+    html += `<button class="btn practice-continue-btn practice-continue-alt" data-action="start-text-practice" data-deck="${esc(trSessionDeck || '')}">${t('text_revision.continue_another')}</button>`;
   }
+  return html;
+}
 
+// Multi-chunk summary: the aggregate across the completed chunks, then
+// one row per chunk — tapping a row expands its stats in place (status,
+// next review, score history with its curve). There is no aggregate
+// score curve — a curve is per-chunk, so each chunk's curve lives in
+// its own row.
+function showMultiChunkPracticeSummary(results, sessionTotal, textTotal) {
+  const overlay = document.getElementById('practiceOverlay');
+  if (!overlay) return;
+  const totalKnown = results.reduce((a, r) => a + r.known, 0);
+  const totalLines = results.reduce((a, r) => a + r.total, 0);
+  const pct = totalLines > 0 ? Math.round((totalKnown / totalLines) * 100) : 0;
+  const ratingLabels = { 1: t('flashcards.again'), 2: t('flashcards.hard'), 3: t('flashcards.good'), 4: t('flashcards.easy') };
   overlay.innerHTML = `
     <div class="practice-summary">
       ${practiceSummaryLogo()}
       <div class="practice-summary-emoji">${pct >= 80 ? lucideIcon('trophy', 32) : pct >= 50 ? lucideIcon('flame', 32) : lucideIcon('book-open', 32)}</div>
       <h2>${t('text_revision.session_complete')}</h2>
       <div class="practice-summary-stats">
-        <div class="practice-summary-stat"><span class="practice-stat-val">${known}/${total}</span><span class="practice-stat-lbl">${t('text_revision.lines_known')}</span></div>
+        <div class="practice-summary-stat"><span class="practice-stat-val">${totalKnown}/${totalLines}</span><span class="practice-stat-lbl">${t('text_revision.lines_known')}</span></div>
         <div class="practice-summary-stat"><span class="practice-stat-val">${pct}%</span><span class="practice-stat-lbl">${t('flashcards.accuracy')}</span></div>
-        <div class="practice-summary-stat"><span class="practice-stat-val">${ratingLabels[rating] || rating}</span><span class="practice-stat-lbl">${t('text_revision.rating')}</span></div>
+        <div class="practice-summary-stat"><span class="practice-stat-val">${results.length}/${sessionTotal}</span><span class="practice-stat-lbl">${t('text_revision.chunks_completed')}</span></div>
+      </div>
+      <div class="tr-multi-chunk-rows">
+        ${results.map(r => {
+          const scores = parseRecentScores(r.scores);
+          const curve = scoreCurveSvg(r.scores);
+          const latestPct = scores.length ? scorePct(scores[scores.length - 1]) : null;
+          const isNew = !r.chunk.last_review;
+          const isDue = isChunkDue(r.chunk, new Date());
+          const statusLabel = isNew ? t('flashcards.new_card')
+            : isDue ? t('flashcards.due')
+            : (r.chunk.stability >= 21 ? t('flashcards.filter_mastered') : t('text_revision.chunk_status_ok'));
+          const nextReview = (isNew || !r.chunk.next_review) ? t('text_revision.chunk_never') : chunkFmtDate(r.chunk.next_review);
+          return `<div class="tr-multi-chunk-item">
+        <button class="tr-multi-chunk-row" data-action="toggle-chunk-summary-stats" data-chunk-index="${r.chunkIndex}">
+          <span class="tr-multi-chunk-name">${esc(t('text_revision.chunk_title', r.chunkIndex + 1, textTotal))}</span>
+          <span class="tr-multi-chunk-right"><span class="tr-multi-chunk-score">${r.known}/${r.total} · ${r.pct}%${r.rating ? ` · ${ratingLabels[r.rating]}` : ''}</span><span class="tr-multi-chunk-chevron">${lucideIcon('chevron-down', 16)}</span></span>
+        </button>
+        <div class="tr-multi-chunk-detail" data-chunk-index="${r.chunkIndex}" style="display:none;">
+          <div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_status')}</span><strong>${esc(statusLabel)}</strong></div>
+          <div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_next_review')}</span><strong>${esc(nextReview)}</strong></div>
+          ${scores.length ? `<div class="tr-chunk-stat-row"><span class="tr-chunk-stat-label">${t('text_revision.chunk_recent_scores')}</span><strong>${latestPct}%</strong></div>
+          <div class="tr-chunk-score-bars" title="${esc(scores.map(s => `${scorePct(s)}%`).join(' · '))}">${scores.map(s => `<span style="height:${Math.max(4, scorePct(s))}%"></span>`).join('')}</div>` : ''}
+          ${curve ? `<div class="tr-score-curve-wrap"><div class="tr-score-curve-label">${t('text_revision.chunk_recent_scores')}</div>${curve}</div>` : ''}
+        </div>
+      </div>`; }).join('')}
       </div>
       <div class="practice-summary-actions">
-        ${actionButtons}
+        ${practiceSummaryContinueButtons()}
         <button class="btn practice-done-btn" data-action="end-text-practice">${t('common.close')}</button>
       </div>
     </div>`;
@@ -3123,6 +3597,12 @@ window.continueTextSameText = function() {
 window.endTextPractice = function() {
   trFreePractice = false;
   trFreePracticeLastChunk = null;
+  trAllChunks = false;
+  trAllChunksFrom = 0;
+  trSessionChunks = [];
+  trSubmitting = false;
+  trPersistedChunkPos = new Set();
+  trSessionResults = [];
   const overlay = document.getElementById('practiceOverlay');
   if (overlay) overlay.style.display = 'none';
   document.body.style.overflow = '';

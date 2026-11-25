@@ -8,7 +8,7 @@ This page describes the sharing implementation — built from the 14 design deci
 
 Sharing is **decentralized**: there is no central DeLaClaw server. One user (the **creator**) hosts the shared data in a folder on their own Google Drive, and other users (**members**) connect to it via invite codes. The creator's folder is the single source of truth for all group data.
 
-Groups are managed from the **Group** tab: the sidebar lists your groups with an Add / Join Group button, and selecting a group shows its members, invite field, shared-item count, and delete/leave controls.
+Groups are managed from the **Group** tab: the sidebar lists your groups with an Add / Join Group button, and selecting a group shows its members, invite field, shared-item count, and delete/leave controls. Group management is currently behind a release gate — the Group tab shows a coming-soon placeholder instead of the management UI; the sharing logic and any existing groups are unaffected.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'primaryColor': '#ffffff', 'primaryBorderColor': '#cbd5e1', 'primaryTextColor': '#0f172a', 'lineColor': '#334155'}}}%%
@@ -74,12 +74,12 @@ The Google Drive sharing adapter is the only sharing path. Drive sharing has no 
 flowchart LR
     subgraph CD["Creator's Drive"]
         direction TB
-        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · events.json · groups.json"]
+        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · events.json · groups.json<br/>attachments/{itemId}/ <i>(list-item files)</i>"]
         CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · events.json · extra_1..10.json<br/>messages.json · games.json"]
     end
     subgraph JD["Joiner's Drive"]
         direction TB
-        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json · events.json<br/>groups.json &#9668; <b>pointers + own-group names</b><br/>{id, folderId, fileIds} · {id, name}"]
+        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json · events.json<br/>groups.json &#9668; <b>pointers + own-group names</b><br/>{id, folderId, fileIds} · {id, name}<br/>attachments/{itemId}/ <i>(list-item files)</i>"]
     end
 ```
 
@@ -239,6 +239,7 @@ sequenceDiagram
         end
         end
     end
+    Note over JA,SF: downloaded item files may carry attachment<br/>records — the joiner sees name, size and link<br/>and gets file access through the grant sweep —<br/>each member's client grants its own files<br/>on load and on spotting the fresh join
     Note over JA,SF: Run joinWithFileIds code, errors surface inline in the open modal
     JA->>JD: upsert groups row<br/>(groups.json, DeLaClawDev/ on dev builds)
     Note over JD: pointer only:<br/>{id, folderId, fileIds}
@@ -297,6 +298,14 @@ sequenceDiagram
         MA->>MA: error toast — nothing shared
     end
     end
+    rect rgb(253, 237, 236)
+    opt item carries attachments (share-existing, bulk share)
+        MA->>MD: shareFileWithGroup per file (reader)<br/>grants must land before the payload is published
+        opt a grant fails
+            MA->>MA: error toast — nothing staged<br/>item stays personal (bulk share: item skipped)
+        end
+    end
+    end
     MA->>SF: addItem → markCreated(id) intent<br/>+ stage item in memory<br/>(onStaged hook fires) → debounced flush<br/>(2s per group+type, ETag-guarded write)
     Note over MA,SF: intent cleared only after<br/>a successful upload —<br/>an id created mid-upload stays pending
     rect rgb(253, 237, 236)
@@ -332,6 +341,7 @@ sequenceDiagram
     autonumber
     box rgb(240,253,244) Any member's Google account
     participant MA as Member app
+    participant MD as Member's Drive
     end
     box rgb(255,251,235) Shared — lives in the creator's Drive
     participant SF as DeLaClaw-Shared-{id}
@@ -340,6 +350,14 @@ sequenceDiagram
     participant OA as Other member app
     end
 
+    rect rgb(253, 237, 236)
+    opt mutation adds an attachment (list item)
+        MA->>MD: upload file to the item's folder<br/>then shareFileWithGroup per file (reader)
+        opt a grant fails
+            MA->>MA: attach aborted — error toast<br/>file stays unlinked in the uploader's Drive
+        end
+    end
+    end
     MA->>MA: stage mutation in memory<br/>updateItem: merge changes + updated_at<br/>completeItem: done / done_by=[hashId] / done_at<br/>habit completion: push {id, completed_at,<br/>completed_by} + updateSharedHabit publishes next_due<br/>(onStaged hook fires → view refreshes)
     rect rgb(253, 237, 236)
     opt group not loaded / item not found
@@ -366,6 +384,12 @@ sequenceDiagram
     Note over OA: attribution = stable hashId + timestamp<br/>(done_by / completion entries)
     Note over OA: date fields diffed vs fingerprint →<br/>markCalDirty → calendar event patched<br/>(done → event deleted)
 ```
+
+#### Attachments
+
+List items can carry file attachments — the mechanics (upload, progress, same-name handling, the record-is-truth rule, deletion) are documented in [Lists](lists.md#attachments). This section covers only the group rules.
+
+Attaching a file to a shared list item follows the same modify path for the link itself (the attachment record joins the payload), with one extra step before the payload update: the file lives in the uploader's own Drive, so it is shared with every other joined member as reader (`shareFileWithGroup`). Member emails are read at runtime from the group folder's permission list and never stored. Sharing an existing item with attachments carries its records into the payload the same way, granting each file reader to the group first — a grant failure aborts the share and the item stays personal; the bulk share does the same per item, skipping the ones whose grants fail. Access level is reader by default: readers cannot re-share or delete, and the owner may also disable download/print/copy per file. A member who joins later still sees the attachment (name, size, link — the join downloads the current item files) and gets file access through the grant sweep: every member's client grants its own files reader to the new member, on group load and when the poll spots the fresh join. A failed grant is silent and retried on the next load or fresh join. When the sweep grants your files, you see a toast naming the new member. Until the sweep runs, clicking the link lands on Drive's request-access page. Unsharing an item revokes the group's access to your own files on it (`revokeFileWithGroup`); another member's files keep their grants — only their owner can revoke them. Leaving a group with keep-copies, copying a shared item to personal, and the personal copy made by unsharing all keep the original attachment records, still pointing at the shared files. Deleting a whole list trashes your own attachments on every item in it, the same as deleting each item; deleting a section does the same for its whole subtree.
 
 #### Delete an item
 
@@ -399,6 +423,11 @@ sequenceDiagram
         MA->>MD: restore pointer row,<br/>view refreshed, error toast
     end
     end
+    rect rgb(253, 237, 236)
+    opt item has attachments (list item)
+        MA->>MD: trash my recorded files + my folder<br/>only files whose uploaded_by is mine —<br/>other members' files never attempted
+    end
+    end
     MA->>MA: toast "Deleted", refresh →<br/>item disappears
     OA->>SF: next poll (≤15s): item file modified?
     rect rgb(253, 237, 236)
@@ -416,7 +445,7 @@ sequenceDiagram
 
 #### Member unjoins
 
-`leaveGroup` is removed — `unjoinGroup` is the only leave path. Leaving flips the member row to `status: 'left'` (kept, not deleted) so the creator's next poll can revoke the Drive permission — only the folder owner can revoke it — before clearing the row. `status: 'left'` rows are never displayed, so the member list always reflects who actually has access. Caveat: if the creator never opens the app again, the Drive permission lingers until they do. If the local groups-row delete never reaches Drive, the next load repairs it: a joined group whose own member row is already `'left'` in `group.json` is dropped without surfacing it, and the row delete is retried.
+`leaveGroup` is removed — `unjoinGroup` is the only leave path. Leaving flips the member row to `status: 'left'` (kept, not deleted) so the creator's next poll can revoke the Drive permission — only the folder owner can revoke it — before clearing the row. `status: 'left'` rows are never displayed, so the member list always reflects who actually has access. Caveat: if the creator never opens the app again, the Drive permission lingers until they do. Attachment file grants are not affected: they are per-file grants in each uploader's Drive, not folder grants, so the leaver keeps reader access to files they were granted, and their own files stay shared with the group. If the local groups-row delete never reaches Drive, the next load repairs it: a joined group whose own member row is already `'left'` in `group.json` is dropped without surfacing it, and the row delete is retried.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
@@ -481,6 +510,7 @@ sequenceDiagram
         CA->>CA: "Error logged — the 'left' row is kept<br/>Retried on the next 15s poll<br/>The leaver already lost access, the row is never displayed"
     end
     end
+    Note over CA,SF: attachment file grants survive —<br/>they are per-file grants in each uploader's Drive,<br/>not folder grants, so the leaver keeps reader<br/>access to files they were granted and their own<br/>files stay shared with the group
 ```
 
 #### Creator removes a member
@@ -518,6 +548,7 @@ sequenceDiagram
     end
     CA->>CP: "emit member-removed → success toast,<br/>re-render the sharing pane"
     Note over CA,SF: "the member detects this asynchronously<br/>on their next 15s poll — see Member loses access"
+    Note over CA,SF: attachment file grants survive —<br/>they are per-file grants in each uploader's Drive,<br/>not folder grants, so the removed member keeps<br/>reader access to files they were granted and<br/>their own files stay shared with the group
 ```
 
 #### Member loses access (removed or group deleted)
@@ -563,7 +594,7 @@ sequenceDiagram
 
 #### Creator deletes a group
 
-Deletion revokes every member's folder permission and trashes the subfolder immediately (recoverable from Drive trash). No deletion marker is written — members take the access-loss path of "Member loses access" below. Calendar events follow through the debounced table flush: kept items' events are re-titled (personal, no `[Group]`), deleted pointers' events are removed.
+Deletion revokes every member's folder permission and trashes the subfolder immediately (recoverable from Drive trash). No deletion marker is written — members take the access-loss path of "Member loses access" below. Attachment file grants survive the deletion too — they are per-file grants in each uploader's Drive, not folder grants. Calendar events follow through the debounced table flush: kept items' events are re-titled (personal, no `[Group]`), deleted pointers' events are removed.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'background': '#fbfaf8', 'actorBkg': '#ffffff', 'actorBorder': '#cbd5e1', 'actorTextColor': '#0f172a', 'actorLineColor': '#cbd5e1', 'signalColor': '#334155', 'signalTextColor': '#1e293b', 'noteBkgColor': '#fffbeb', 'noteBorderColor': '#f59e0b', 'noteTextColor': '#78350f', 'labelBoxBkgColor': '#0f172a', 'labelBoxBorderColor': '#0f172a', 'labelTextColor': '#ffffff'}}}%%
@@ -600,6 +631,7 @@ sequenceDiagram
         CA->>CA: error toast — group kept<br/>local item changes already applied
     end
     end
+    Note over CA,SF: attachment file grants survive —<br/>they are per-file grants in each uploader's Drive,<br/>not folder grants, so members keep reader access<br/>to files they were granted
     CA->>CA: _groups: drop group<br/>delete created-group row
     Note over CA: row-delete failure only warns —<br/>group already dropped from memory
     CA->>CA: emit group-deleted → sharing-changed<br/>(via main.js onUpdate)
@@ -724,7 +756,7 @@ If a member deletes their Google account outside DeLaClaw, their Drive permissio
 
 ### Design decisions (decided 2026-09-07)
 
-The flows above surfaced 14 design questions, all decided on 2026-09-07 and recorded in the **DeLaClaw design decisions** space ("Drive sharing" tab). Assumption: sharing is not yet exposed — no groups exist in the wild, so there are no backward-compatibility constraints (greenfield).
+The flows above surfaced 14 design questions, all decided on 2026-09-07 and recorded in the **DeLaClaw design decisions** space ("Drive sharing" tab). Assumption: sharing is not yet exposed — no groups exist in the wild, so there are no backward-compatibility constraints (greenfield). Twelve more were decided with the attachments work in November 2026 (items 15–26).
 
 1. **Join notification** — the creator's poll shows a toast when a pending invitee flips to joined.
 2. **Deletion sync intents** — each group entry keeps per-item-file in-memory `createdIds`/`deletedIds` intent sets; reconciliation retains pending creates, drops remotely-deleted items, and suppresses remotely-stale copies of pending deletes. Each upload acknowledges only the intents its payload represented, so an ID created mid-upload stays pending. The logic is backend-agnostic (`sharing-file-reconcile.js`), shared by all file-based adapters.
@@ -740,6 +772,18 @@ The flows above surfaced 14 design questions, all decided on 2026-09-07 and reco
 12. **Access loss** — a joined group whose folder becomes unreachable (member removed, or the group deleted) is purged: pointers deleted outright, no dialog; a toast says access was lost.
 13. **No removal notice file** — removal is detected as definite access loss on the next poll (404, or 403 with a known access-loss reason). Throttled or unknown-reason 403s never purge.
 14. **Group deletion** — permissions revoked and the folder trashed immediately; no deletion marker, no grace period; members purge on access loss.
+15. **Attachment access level** — reader by default (decided 2026-11-21): readers cannot re-share or delete, and the owner may also disable download/print/copy per file.
+16. **Attachment authorship (`uploaded_by`)** — every attachment record carries the uploader's member id (a hash, never an email), compulsory since v2.32.127; records without it are dropped on read, and an upload with no resolvable id is refused before it starts.
+17. **Sharing an existing item carries its attachments** — the records join the payload and each file is granted reader to the group first; a grant failure aborts the share (the bulk share skips that item). Join-backfill is covered by the membership-change grant sweep (v2.32.131): every member's client grants its own files reader to a new member, on group load and when the poll spots the fresh join; the file owner sees a toast naming the new member when the sweep grants their files (v2.32.133). Revoke on unshare (v2.32.135): unsharing revokes the group's access to the unsharer's own files only; another member's files keep their grants.
+18. **Deleting an item never touches another member's files** (v2.32.132) — only the deleter's own files are trashed, and the per-item folder trash only ever finds the deleter's own folder; removing a single chip trashes the file only when it is the remover's. If the deleter's member id cannot be resolved, nothing is trashed at all.
+19. **Attachment grants survive leave, removal and group deletion** (decided 2026-11-21) — only the file owner can revoke a grant, so leaving or being removed cannot claw files back; the grants stay, and the Unjoin, Remove and Delete-group flows document that.
+20. **Deleting a list trashes each item's attachments** (v2.32.135) — deleting a list is deleting each of its items: the deleter's own files on every item are trashed, plus each item's own folder; deleting a section does the same for its whole subtree.
+21. **Keep-copies and personal copies keep the original attachments** (v2.32.136, decided 2026-11-21) — leaving with keep-copies, copying a shared item to personal, and the personal copy made by unsharing all carry the attachment records as-is, still pointing at the shared files; no file copies are made. The `files.copy` option was considered and set aside for this simple version.
+22. **Deleting never breaks another item's link** (v2.32.138, decided 2026-11-21) — deleting an item or removing a chip trashes a file only when no other visible item still references it; the folder is trashed only when nothing referenced remains inside it. The check covers your own items and the shared payloads; another member's personal copy is invisible to your client and can still dangle.
+23. **Chips show the uploader in the tooltip** (v2.32.139, decided 2026-11-21) — on a shared item, each chip's tooltip names the member who uploaded the file, resolved from the group row; personal items show no uploader.
+24. **The Lists search matches attachment file names** (v2.32.140, decided 2026-11-21) — searching matches item text, note, and attachment names, case-insensitively.
+25. **Revoke and sweep toast read `member_id`, not `id`** (v2.32.141, from the 006c30f commit review, 2026-11-21) — the revoke built its member set from `m.id`, but rosters carry `member_id`, so unsharing revoked nothing and the sweep toast never named anyone; both now go through pure helpers tested with real rosters.
+26. **Failed shares roll back their grants** (v2.32.142, from the 006c30f commit review, 2026-11-21) — a grant failure mid-share, a failed payload upload or pointer insert, a failed record save, and a cancel mid-share all revoke the grants already issued, and only for the members newly granted in that operation; a failed revoke is logged, never thrown.
 
 
 ## Module structure

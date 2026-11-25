@@ -520,4 +520,25 @@ export const DRIVE_MIGRATIONS = {
       }
     }
   },
+
+  '2.32.122': async (store) => {
+    // 2.32.122: list item attachments — canonical storage is a JSON
+    // string (same as the Local TEXT column). A row holding a real array
+    // (e.g. hand-edited store) is stringified so backup/restore and the
+    // read normalizer see one shape everywhere. Missing stays missing.
+    for (const row of (store.list_items || [])) {
+      if (Array.isArray(row.attachments)) row.attachments = JSON.stringify(row.attachments);
+    }
+  },
+
+  '2.32.149': async (store) => {
+    // 2.32.149: chunk revision scores — a JSON array of the last 20
+    // ratios (0..1, oldest first) on text_line_progress.recent_scores.
+    // A row holding a real array (e.g. hand-edited store) is stringified
+    // so backup/restore and the read normalizer see one shape everywhere.
+    // Missing stays missing (= no scores yet).
+    for (const row of (store.text_line_progress || [])) {
+      if (Array.isArray(row.recent_scores)) row.recent_scores = JSON.stringify(row.recent_scores);
+    }
+  },
 };

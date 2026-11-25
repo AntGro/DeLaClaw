@@ -47,6 +47,7 @@ function createDemoSharingStub() {
       else if (isSyncQuery) stub[key] = () => null;
       else if (key === 'getCurrentUser') stub[key] = () => ({ id: 'demo', displayName: 'Demo' });
       else if (key === 'getCurrentMemberId') stub[key] = async () => 'demo';
+      else if (key === 'getCurrentUserMemberId') stub[key] = async () => 'demo';
       else if (key === 'isJoinedViaLink') stub[key] = () => false;
       else if (key === 'poll') stub[key] = async () => false;
       else stub[key] = asyncNoop;
@@ -108,6 +109,9 @@ function createCachedSharing(blob) {
   stub.getAllSharedHabits = () => allItems('habits').filter(i => i.item_type === 'habit' && i.completions !== undefined);
   stub.getCurrentUser = () => blob?.currentUser || { display_name: 'Member', backendUserId: 'googledrive' };
   stub.getCurrentMemberId = async (groupId) => memberIds[groupId] || null;
+  // The member id is a pure hash of the email, so it is the same in
+  // every group — any per-group entry in the snapshot is the user's id.
+  stub.getCurrentUserMemberId = async () => Object.values(memberIds)[0] || null;
   stub.getCurrentMember = (groupId) => {
     const g = groups.find(g => g.id === groupId);
     return g?.members?.find(m => m.member_id === memberIds[groupId]) || null;
@@ -128,6 +132,7 @@ function createCachedSharing(blob) {
     'inviteUser', 'removeUser', 'unjoinGroup', 'tryDirectJoin', 'joinWithFileIds', 'reconnectGroup',
     'addItem', 'updateItem', 'deleteItem', 'completeItem', 'uncompleteItem',
     'addSharedHabit', 'updateSharedHabit', 'deleteSharedHabit', 'addSharedHabitCompletion',
+    'shareFileWithGroup', 'revokeFileWithGroup', 'sweepAttachmentGrants',
   ]) stub[key] = rejectReadOnly;
   return stub;
 }
